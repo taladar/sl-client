@@ -372,6 +372,8 @@ group-notices-from = From
 group-notices-date = Date
 group-notice-hint = Select a notice to read it.
 group-notice-subject = Subject:
+# What the notice body field is called, for a screen reader: it has no caption.
+group-notice-message-name = Message
 group-notice-has-attachment = This notice has an attachment.
 group-notice-compose = Send a notice
 group-notice-send = Send Notice
@@ -623,6 +625,11 @@ about-region-corner-nw-low = NW low
 about-region-corner-nw-high = high
 about-region-corner-ne-low = NE low
 about-region-corner-ne-high = high
+# What each "high" field is called on its own, for a screen reader.
+about-region-corner-sw-high-name = SW high
+about-region-corner-se-high-name = SE high
+about-region-corner-nw-high-name = NW high
+about-region-corner-ne-high-name = NE high
 
 # Estate tab.
 about-region-estate = Estate:
@@ -834,6 +841,105 @@ land-env-region-env = (region environment)
 # The picker window's title bar.
 emoji-picker-title = Emoji
 
+# The category tabs' accessible names: each tab shows only its group's icon,
+# and a screen reader reads these instead.
+emoji-group-smileys-and-emotion = Smileys & Emotion
+emoji-group-people-and-body = People & Body
+emoji-group-animals-and-nature = Animals & Nature
+emoji-group-food-and-drink = Food & Drink
+emoji-group-travel-and-places = Travel & Places
+emoji-group-activities = Activities
+emoji-group-objects = Objects
+emoji-group-symbols = Symbols
+emoji-group-flags = Flags
+
+## Accessible names of icon-only controls (viewer-automation-accesskit-bridge):
+## what a screen reader says for a control that shows only a skin glyph.
+
+# A floater's title-bar buttons.
+floater-chrome-close = Close
+floater-chrome-minimize = Minimize
+floater-chrome-dock = Dock
+
+# A scrollbar's step arrows (shown when the skin draws them).
+scrollbar-arrow-up = Scroll up
+scrollbar-arrow-down = Scroll down
+scrollbar-arrow-back = Scroll back
+scrollbar-arrow-forward = Scroll forward
+
+# The overflow buttons of a tab strip too narrow for its tabs.
+tab-scroll-first = First tab
+tab-scroll-prev = Previous tab
+tab-scroll-next = Next tab
+tab-scroll-last = Last tab
+
+# The Build window's transform fields, each called by its row and its axis.
+build-pos-x-name = Position X
+build-pos-y-name = Position Y
+build-pos-z-name = Position Z
+build-rot-x-name = Rotation X
+build-rot-y-name = Rotation Y
+build-rot-z-name = Rotation Z
+build-size-x-name = Size X
+build-size-y-name = Size Y
+build-size-z-name = Size Z
+
+# A field that is one part of what its row's caption names: "Offset U",
+# "Path Cut Begin". A translation may put the part first.
+labelled-part = { $label } { $part }
+name-part-x = X
+name-part-y = Y
+name-part-z = Z
+name-part-u = U
+name-part-v = V
+name-part-begin = Begin
+name-part-end = End
+name-part-fov = Field of view
+name-part-focus = Focus
+name-part-ambiance = Ambiance
+name-part-red = Red
+name-part-green = Green
+name-part-blue = Blue
+
+# What a screen reader calls the Build captions that abbreviate their parts,
+# so each field reads as a whole name ("Path Cut Begin").
+build-cut-spoken = Path Cut
+build-twist-spoken = Twist
+build-adv-profile-cut-spoken = Profile Cut
+build-adv-dimple-spoken = Dimple
+build-adv-slice-spoken = Slice
+build-flex-force-spoken = Force
+build-spot-spoken = Spot
+build-tex-repeats-spoken = Repeats
+build-tex-offset-spoken = Offset
+build-light-color-spoken = Color
+
+# The chat bar's emoji button and its whisper / say / shout drop-down.
+chat-emoji-button-name = Insert emoji
+chat-volume-name = Chat volume
+
+# A conversation pane's corner buttons.
+conversations-pane-close-name = Close conversation
+conversations-pane-add-participants-name = Add participants
+
+# The media controls bar's glyph buttons.
+media-controls-play-pause-name = Play or pause
+media-controls-back-name = Back
+media-controls-forward-name = Forward
+media-controls-home-name = Home
+media-controls-reload-or-stop-name = Reload or stop
+media-controls-mute-toggle-name = Mute
+media-controls-zoom-toggle-name = Zoom to media
+media-controls-open-external-name = Open in external browser
+
+# The Events search's day steppers.
+search-events-day-prev-name = Previous day
+search-events-day-next-name = Next day
+
+# The inventory window's icon menu buttons.
+inventory-gear-button-name = Inventory options
+inventory-add-button-name = Create new
+
 ## The status area (viewer-ui-status-bar) — the read-outs on the trailing edge
 ## of the top menu bar.
 
@@ -883,6 +989,15 @@ volume-panel-ui = UI
 volume-panel-music = Music
 volume-panel-media = Media
 volume-panel-voice = Voice
+# What the volume controls' glyph buttons are called, for a screen reader.
+volume-panel-toggle-name = Volume controls
+volume-mute-master = Mute all sound
+volume-mute-sfx = Mute sounds
+volume-mute-ambient = Mute ambient sound
+volume-mute-ui = Mute UI sounds
+volume-mute-music = Mute music
+volume-mute-media = Mute media
+volume-mute-voice = Mute voice
 
 ## The Nearby Media window (viewer-streaming-audio): every media source around
 ## the agent — the parcel music stream and the media-on-a-prim faces — with
@@ -1551,6 +1666,9 @@ color-picker-cancel = Cancel
 color-picker-pipette = Pick
 # Dragging the current-colour swatch onto a palette cell below saves it there.
 color-picker-drag-hint = (Drag below to save.)
+# One saved colour of the palette, for a screen reader — the cell shows only
+# its colour.
+color-picker-palette-cell = Saved color
 # Hand the colour to whatever is being tinted while it is still being chosen,
 # rather than only when OK is pressed.
 color-picker-apply-now = Apply now

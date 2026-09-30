@@ -102,6 +102,11 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 publish = false
 
 [workspace.dependencies]
+# The accessibility tree the viewer builds from its semantic model. Bevy no
+# longer re-exports it, so this must be exactly the version Bevy's own
+# `bevy_a11y` / `accesskit_winit` use (0.24 for Bevy 0.19): re-pin on every
+# Bevy upgrade.
+accesskit = { version = "0.24.1" }
 arc-swap = { version = "1.9.2" }
 async-lock = { version = "3.4.2" }
 async-trait = { version = "0.1.89" }
@@ -438,6 +443,17 @@ unescaped_backticks = "deny"
 # comes from the same workspace and must be patched alongside parley, or the two
 # would resolve to different builds and their `FamilyId`s would not match.
 [patch.crates-io]
+# Fork of AccessKit (github.com/taladar/accesskit, branch
+# sl-client-atspi-disabled): `accesskit_atspi_common` 0.18.1 — the version Bevy
+# 0.19's `accesskit_unix` resolves — plus upstream's #788 (6ee0558b63, first
+# released in 0.21.0): a disabled node of a role with no read-only state (a
+# button) was reported Enabled | Sensitive, so Orca read a greyed button as
+# available. Only this crate is patched: the fork's copy depends on the
+# crates.io `accesskit` / `accesskit_consumer` rather than its repository
+# siblings, since each platform adapter pins its own `accesskit_consumer` and a
+# whole-repository patch would split the graph. Drop it once Bevy moves to
+# `accesskit_unix` >= the release carrying 0.21.
+accesskit_atspi_common = { git = "https://github.com/taladar/accesskit.git", rev = "418b444c86c4076d59f0604ec44d2f2f49f0572f" }
 # Fork of Bevy 0.19.0 (github.com/taladar/bevy, branch
 # sl-client-externally-posed-skin) carrying these changes vs the v0.19.0 tag,
 # and otherwise the verbatim release:

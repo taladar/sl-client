@@ -1472,6 +1472,8 @@ fn spawn_palette(commands: &mut Commands, parent: Entity) -> [Entity; PALETTE_SI
                     // and only its rim is chrome — the same split
                     // `.sk-swatch` already makes for the picker's own swatch.
                     ClassList::new_with_classes([SWATCH_CLASS]),
+                    // A swatch that shows only its colour, so it takes a name.
+                    Semantic::new(Role::ColorWell).name_key("color-picker-palette-cell"),
                     PaletteCell(index),
                     Pickable::default(),
                     Name::new(format!("color-picker-palette-cell:{index}")),

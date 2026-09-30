@@ -82,6 +82,7 @@ use crate::ui_spawn::{ButtonKind, ButtonSpec, UiLabel, spawn_button};
 use crate::world_api::{
     EditTool, EditToolState, TerrainState, ViewerCamera, on_hud_layer, pointer_over_blocking_ui,
 };
+use sl_viewer_ui_core::semantic::LabelledBy;
 
 /// The setting the picked land action is persisted under — the reference's
 /// `RadioLandBrushAction`, an index into [`LAND_ACTIONS`].
@@ -1251,7 +1252,9 @@ fn spawn_land_slider(
             ChildOf(parent),
         ))
         .id();
-    spawn_row_label(commands, row_entity, label_key, font_size);
+    let label = spawn_row_label(commands, row_entity, label_key, font_size);
+    // The slider draws no caption: the row's names it.
+    commands.entity(row_entity).insert(LabelledBy(label));
     // A hundred steps across the travel: fine enough that the thumb reads as
     // continuous, coarse enough that a drag does not write the setting (and so
     // re-seed the state) on every sub-pixel move.

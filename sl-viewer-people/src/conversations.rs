@@ -1371,6 +1371,7 @@ fn spawn_conversations_content(
             strip_width: Some(STRIP_WIDTH),
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: false,
+            names: &[],
         },
     );
     strip.fill_parent(commands, Some(STRIP_WIDTH));
@@ -1598,6 +1599,7 @@ fn spawn_pane_close_button(
         panel,
         glyph::CLOSE,
         "conversations-pane-close",
+        "conversations-pane-close-name",
         2.0,
         font_size,
     );
@@ -1617,13 +1619,14 @@ fn spawn_pane_glyph_button(
     panel: Entity,
     slot: &'static str,
     name: &'static str,
+    name_key: &'static str,
     inline_end: f32,
     font_size: f32,
 ) -> Entity {
     let button = ui_spawn::spawn_button(
         commands,
         panel,
-        ButtonSpec::bordered(UiLabel::Glyph(slot), name)
+        ButtonSpec::bordered(UiLabel::glyph(slot, name_key), name)
             .kind(ButtonKind::Headless)
             .compact()
             .padding(6.0, 2.0)
@@ -1666,6 +1669,7 @@ fn spawn_add_participants_button(
         panel,
         glyph::ADD,
         "conversations-pane-add-participants",
+        "conversations-pane-add-participants-name",
         26.0,
         font_size,
     );
@@ -4221,6 +4225,7 @@ mod tests {
                         strip_width: Some(150.0),
                         ellipsis: DEFAULT_ELLIPSIS,
                         translate_labels: false,
+                        names: &[],
                     },
                 )
             });

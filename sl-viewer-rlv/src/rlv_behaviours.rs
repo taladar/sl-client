@@ -555,6 +555,7 @@ fn spawn_behaviours_content(
             strip_width: None,
             ellipsis: sl_viewer_ui_widgets::ui_tab::DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);

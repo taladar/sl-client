@@ -59,7 +59,7 @@ use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
-use sl_viewer_ui_core::semantic::LabelledBy;
+use sl_viewer_ui_core::semantic::{LabelledBy, Role, Semantic};
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
@@ -1086,6 +1086,7 @@ fn spawn_group_profile_scaffold(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
@@ -2701,7 +2702,7 @@ fn spawn_compose_area(commands: &mut Commands, can_send: bool, ui: &mut GroupPro
             ..TextInputSpec::new("group-notice-subject", TextInputKind::Line)
         },
     ));
-    ui.notice_message_field = Some(spawn_text_input(
+    let message_field = spawn_text_input(
         commands,
         area,
         &TextInputSpec {
@@ -2711,7 +2712,12 @@ fn spawn_compose_area(commands: &mut Commands, can_send: bool, ui: &mut GroupPro
             max_characters: Some(511),
             ..TextInputSpec::new("group-notice-message", TextInputKind::Multiline)
         },
-    ));
+    );
+    // It has no caption of its own; the subject row above has.
+    commands
+        .entity(message_field)
+        .insert(Semantic::new(Role::Textbox).name_key("group-notice-message-name"));
+    ui.notice_message_field = Some(message_field);
     let row = spawn_button_row(commands, area);
     spawn_action_button(
         commands,

@@ -54,6 +54,7 @@ use crate::ui_table::{
 use crate::ui_text_input::TextInputKind;
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_specimen_row};
 use sl_settings::SettingValue;
+use sl_viewer_ui_core::semantic::LabelledBy;
 
 /// The stable id of this tab in `PREF_TABS`.
 const TAB_ID: &str = "alerts";
@@ -431,6 +432,8 @@ fn dress_alert_row(
         },
     )
     .checkbox;
+    // Called what the alert's own cell says.
+    commands.entity(checkbox).insert(LabelledBy(label_cell));
     let parts = AlertRowParts {
         checkbox,
         label_cell,

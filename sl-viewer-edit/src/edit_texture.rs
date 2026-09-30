@@ -48,7 +48,9 @@ use sl_client_bevy::{
 };
 
 use crate::edit_params::set_disabled_class;
-use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
+use crate::edit_tool::{
+    BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, name_part, spawn_row_label,
+};
 use crate::face_material::FaceMaterial;
 use crate::i18n::{TransArgs, Translator};
 use crate::intents::TexturePicked;
@@ -67,6 +69,7 @@ use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::EditToolState;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The tab index the Texture-tab widgets start their focus order at (well past
@@ -716,6 +719,7 @@ fn spawn_mode_selectors(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     *tab_index = tab_index.saturating_add(1);
@@ -983,7 +987,9 @@ pub(crate) fn spawn_row(
             ChildOf(parent),
         ))
         .id();
-    spawn_row_label(commands, row_entity, label_key, font_size);
+    let label = spawn_row_label(commands, row_entity, label_key, font_size);
+    // The caption names the controls in the row that name nothing themselves.
+    commands.entity(row_entity).insert(LabelledBy(label));
     row_entity
 }
 
@@ -1008,6 +1014,10 @@ fn spawn_tex_field(
         },
     );
     commands.entity(entity).insert((field, TexControl));
+    // One of a row's fields: named by the caption and its part.
+    if let Some(part) = name_part(field.element()) {
+        commands.entity(entity).insert(part);
+    }
 }
 
 /// Spawn one Texture-tab toggle — the shared checkbox widget; returns it so the

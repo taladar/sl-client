@@ -77,6 +77,7 @@ use crate::ui_tab::{
     spawn_tab_container,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_core::semantic::LabelledBy;
 
 /// The floater's stable id (geometry persistence, menu toggle, tests).
 pub const PREFERENCES_FLOATER_ID: &str = "preferences";
@@ -455,7 +456,10 @@ pub(crate) fn spawn_pref_slider(
         0.0,
         bound_slider(binding, range, step),
     );
-    commands.entity(row).insert(PrefSearchRow { label });
+    // The slider draws no caption: the row's label names it.
+    commands
+        .entity(row)
+        .insert((PrefSearchRow { label }, LabelledBy(label)));
     row
 }
 
@@ -511,7 +515,10 @@ pub(crate) fn spawn_pref_combo_with_anchor(
         binding,
         ComboBindingValues(options.iter().map(|(_, value)| value.clone()).collect()),
     ));
-    commands.entity(row).insert(PrefSearchRow { label });
+    // A control that draws no caption of its own is called what the row says.
+    commands
+        .entity(row)
+        .insert((PrefSearchRow { label }, LabelledBy(label)));
     (row, anchor)
 }
 
@@ -548,7 +555,10 @@ pub(crate) fn spawn_pref_text(
         },
     );
     commands.entity(field).insert(binding);
-    commands.entity(row).insert(PrefSearchRow { label });
+    // A control that draws no caption of its own is called what the row says.
+    commands
+        .entity(row)
+        .insert((PrefSearchRow { label }, LabelledBy(label)));
     row
 }
 
@@ -576,7 +586,10 @@ pub(crate) fn spawn_pref_color(
     let swatch = spawn_color_swatch(commands, row, label_key, 0, Color::BLACK);
     commands.entity(swatch).insert(binding);
     let label = spawn_row_label(commands, row, label_key);
-    commands.entity(row).insert(PrefSearchRow { label });
+    // A control that draws no caption of its own is called what the row says.
+    commands
+        .entity(row)
+        .insert((PrefSearchRow { label }, LabelledBy(label)));
     row
 }
 
@@ -598,7 +611,10 @@ pub(crate) fn spawn_pref_action(
         .id();
     let label = spawn_row_label(commands, row, label_key);
     let button = spawn_footer_button(commands, row, button_key, 0);
-    commands.entity(row).insert(PrefSearchRow { label });
+    // A control that draws no caption of its own is called what the row says.
+    commands
+        .entity(row)
+        .insert((PrefSearchRow { label }, LabelledBy(label)));
     button
 }
 
@@ -841,6 +857,7 @@ fn spawn_preferences_body(commands: &mut Commands, slot: Entity) -> PreferencesP
             strip_width: Some(STRIP_WIDTH),
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::InlineStart, &tabs);

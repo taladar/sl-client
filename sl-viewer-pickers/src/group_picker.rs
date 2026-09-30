@@ -361,6 +361,7 @@ fn build_picker_content(commands: &mut Commands, content: Entity, font_size: f32
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
 

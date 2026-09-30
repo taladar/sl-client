@@ -389,14 +389,13 @@ fn spawn_nav_button(
         commands,
         parent,
         ButtonSpec::bordered(
-            UiLabel::Glyph(slot),
+            UiLabel::glyph(slot, name_key),
             format!("inventory-gallery-nav:{name}"),
         )
         .tab_index(tab_index)
         .colors(BUTTON_BACKGROUND, BUTTON_BORDER)
         .label_color(LABEL_COLOR)
-        .font_size(font_size)
-        .name_key(name_key),
+        .font_size(font_size),
     )
     .button
 }

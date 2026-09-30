@@ -649,6 +649,7 @@ fn spawn_destination_tabs(commands: &mut Commands, parent: Entity, font_size: f3
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);

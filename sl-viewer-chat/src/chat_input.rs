@@ -57,6 +57,7 @@ use crate::ui::row;
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 
 /// The box's border colour — the unskinned fallback; [`FIELD_BOX_CLASS`]
 /// repaints it from the live skin.
@@ -337,6 +338,8 @@ fn spawn_emoji_button(
             },
             BackgroundColor(EMOJI_BUTTON_BACKGROUND),
             Pickable::default(),
+            // A button showing only the skin's face glyph, which names nothing.
+            Semantic::new(Role::Button).name_key("chat-emoji-button-name"),
             Name::new(format!("{}:chat-emoji-button", spec.element)),
             ChildOf(container),
         ))

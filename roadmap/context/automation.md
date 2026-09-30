@@ -509,6 +509,56 @@ replaces that person.
   (`a_greyed_group_set_button_does_nothing`) found the Build floater's
   parameter tabs enabled with nothing ever selected: the gate redrew only on a
   changed snapshot, and "nothing selected" is `None` before and after.
+- **The screen-reader tree is the model**
+  ([[viewer-automation-accesskit-bridge]]): `AccessKitBridgePlugin`
+  (`sl-viewer-automation/src/screen_reader.rs`, installed only for
+  `WindowMode::Windowed`) switches off Bevy's own per-frame
+  push (`ManageAccessibilityUpdates`) and sends AccessKit a tree built from the
+  snapshot: the model's children are the tree's children (Bevy's own would hang
+  a button off the window when its `ChildOf` parent has no `AccessibilityNode`),
+  a hidden node is left out, a floater is a `Dialog`, text is a `Label` read as
+  its value, an unnamed group a `GenericContainer`. Only what differs from what
+  was last sent goes out; the model is read at most every
+  `ACCESSKIT_REFRESH` (200 ms) and at once on a focus change, and only while
+  `AccessibilityRequested` holds. An inactive adapter (the closure of
+  `update_if_active` never ran) forgets what was sent, so the next listener
+  gets the whole tree. A slider's range comes from the `AccessibilityNode`
+  `bevy_ui_widgets` keeps on it.
+- **The Linux adapter keys on `ScreenReaderEnabled`**, not `IsEnabled`
+  (`accesskit_unix` watches only that property of `org.a11y.Status`). Without
+  Orca, `busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status
+  ScreenReaderEnabled b true` makes the viewer register, and the `Atspi` GI
+  bindings read the tree a screen reader sees; set it back to `false` after.
+- **What a stylesheet writes into `::before` / `::after` names nothing.** The
+  skin draws icons that way (a glyph host's whole content, a tab arrow, a
+  tick), and bevy_flair keeps a text node's two pseudo-element spans as its
+  first and last children, so the model skips them. A control that shows only
+  an icon takes a name of its own (`Semantic::name_key`,
+  `menu::spawn_icon_menu_button`, `TabSpec::names`), and
+  `automation_screen_reader::every_control_has_a_speakable_name` fails any
+  control of any registered floater or element with no letter or digit in its
+  name — **hidden ones included** (a control on an unopened tab or in a closed
+  popup is named when it shows or never); only a hidden, unnamed list or tree
+  row (a pooled row no item is bound to) is skipped.
+- **A glyph button's name is part of its label's type**:
+  `UiLabel::glyph(slot, name_key)` — there is no glyph label without one, so
+  a glyph button on a panel no fixture ever builds (a conversation pane, a
+  media bar) is named too.
+- **Fields under one caption are named by their part**: a `NamePart(key)` on
+  a field ("U", "Begin") makes the model call it `labelled-part = { $label }
+  { $part }` from the caption its `LabelledBy` finds — "Offset U", "Path Cut
+  Begin" — and a `SpokenLabel(key)` on a caption that abbreviates ("Path Cut
+  (B/E)") gives the form that joins ("Path Cut"). The Build window derives
+  both (`edit_tool::name_part` from the element's last segment,
+  `spoken_label` by caption key). A harness's flat string table has no
+  message with arguments, so there the pattern misses and the model joins the
+  two in English order. `no_two_fields_of_a_floater_share_a_name` (every
+  floater, shown fields) and `no_two_fields_a_tab_shows_share_a_name` (each
+  Build tab opened in turn) guard it; fields on rows that swap by mode may
+  reuse a caption, since they never show together.
+- **A caption with `display: none` names nothing** in the model — a row that
+  swaps its caption (the Build Object tab's Taper / Hole Size) can be
+  `LabelledBy` itself and is called by whichever one shows.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).

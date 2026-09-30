@@ -91,7 +91,16 @@ pub enum UiLabel {
     /// skin's `content`. The label is an empty text host carrying
     /// [`GLYPH_CLASS`] and this slot class beside its colour class, so a
     /// refused button's glyph greys with it.
-    Glyph(&'static str),
+    ///
+    /// A glyph names nothing a screen reader or a test could say, so it comes
+    /// with the Fluent key of what its button is called: a glyph button with
+    /// no name cannot be written, whether or not any test ever shows it.
+    Glyph {
+        /// The glyph slot class.
+        slot: &'static str,
+        /// The Fluent key of what the button is called.
+        name_key: Cow<'static, str>,
+    },
 }
 
 impl UiLabel {
@@ -105,6 +114,16 @@ impl UiLabel {
     #[must_use]
     pub fn literal(text: impl Into<String>) -> Self {
         Self::Literal(text.into())
+    }
+
+    /// A glyph slot's mark, and the Fluent key of what the button wearing it
+    /// is called.
+    #[must_use]
+    pub fn glyph(slot: &'static str, name_key: impl Into<Cow<'static, str>>) -> Self {
+        Self::Glyph {
+            slot,
+            name_key: name_key.into(),
+        }
     }
 }
 
@@ -181,7 +200,8 @@ pub struct ButtonSpec {
     /// `:disabled` rather than the panel choosing a dim colour.
     pub disabled: bool,
     /// The Fluent key of what the button is called, for a button whose label
-    /// says nothing in words — a glyph, an arrow, a `×`. Set by
+    /// says nothing in words — a literal `×`, a symbol. A glyph label carries
+    /// its own ([`UiLabel::glyph`]); this one wins over it. Set by
     /// [`Self::name_key`].
     pub name_key: Option<Cow<'static, str>>,
 }
@@ -428,7 +448,11 @@ pub fn spawn_button(commands: &mut Commands, parent: Entity, spec: ButtonSpec) -
     }
     // Whichever component it presses through — or none, for a button driven
     // by its own observer — this is a button to its user.
-    button.insert(match spec.name_key.clone() {
+    let name_key = spec.name_key.clone().or_else(|| match &spec.label {
+        UiLabel::Glyph { name_key, .. } => Some(name_key.clone()),
+        UiLabel::Key(_) | UiLabel::Literal(_) => None,
+    });
+    button.insert(match name_key {
         Some(key) => Semantic::new(Role::Button).name_key(key),
         None => Semantic::new(Role::Button),
     });
@@ -679,13 +703,13 @@ fn spawn_text(
         UiLabel::Literal(literal) => {
             text.insert(Text::new(literal.clone()));
         }
-        UiLabel::Glyph(_) => {
+        UiLabel::Glyph { .. } => {
             text.insert((Text::default(), PseudoElementsSupport));
         }
     }
     let class = class.or_else(|| role_class(color));
     match (label, class) {
-        (UiLabel::Glyph(slot), class) => {
+        (UiLabel::Glyph { slot, .. }, class) => {
             // The colour class, when there is one, is what the glyph inherits;
             // without it the mark keeps the colour it was spawned with.
             text.insert(ClassList::new_with_classes(

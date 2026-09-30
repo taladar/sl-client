@@ -800,12 +800,10 @@ fn spawn_glyph_button(
         commands,
         parent,
         ButtonSpec::bordered(
-            UiLabel::Glyph(slot),
+            UiLabel::glyph(slot, glyph_button_name_key(action)),
             format!("nearby-media-button:{action}"),
         )
         .kind(ButtonKind::Headless)
-        // The glyph says nothing in words.
-        .name_key(glyph_button_name_key(action))
         .tab_index(tab_index)
         .compact()
         .label_color(LABEL_COLOR)

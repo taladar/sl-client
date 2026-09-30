@@ -21,6 +21,7 @@ use bevy::ui_widgets::{Activate, SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, set_state_class, text_role};
 
 use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer};
@@ -136,6 +137,20 @@ const fn label_key(bus: Bus) -> &'static str {
         Bus::Music => "volume-panel-music",
         Bus::Media => "volume-panel-media",
         Bus::Voice => "volume-panel-voice",
+    }
+}
+
+/// The Fluent key of what `bus`'s mute button is called: it shows only a
+/// speaker glyph.
+const fn mute_name_key(bus: Bus) -> &'static str {
+    match bus {
+        Bus::Master => "volume-mute-master",
+        Bus::Sfx => "volume-mute-sfx",
+        Bus::Ambient => "volume-mute-ambient",
+        Bus::Ui => "volume-mute-ui",
+        Bus::Music => "volume-mute-music",
+        Bus::Media => "volume-mute-media",
+        Bus::Voice => "volume-mute-voice",
     }
 }
 
@@ -364,6 +379,9 @@ fn spawn_bound_slider(commands: &mut Commands, parent: Entity, bus: Bus, tab_ind
                 SliderStep(0.05),
             ),
             Name::new(format!("volume-slider:{}", bus.key())),
+            // Called by its bus: the master slider on the bar has no caption,
+            // and a row's caption sits beside it.
+            Semantic::new(Role::Slider).name_key(label_key(bus)),
         ),
     );
 }
@@ -376,7 +394,7 @@ fn spawn_mute_button(commands: &mut Commands, parent: Entity, bus: Bus, tab_inde
         // The caption is the skin's speaker mark; `sync_mute_glyphs` says
         // whether it is muted.
         ButtonSpec::bordered(
-            UiLabel::Glyph(glyph::SPEAKER),
+            UiLabel::glyph(glyph::SPEAKER, mute_name_key(bus)),
             format!("volume-mute:{}", bus.key()),
         )
         .kind(ButtonKind::Headless)
@@ -399,13 +417,16 @@ fn spawn_toggle_button(commands: &mut Commands, parent: Entity, tab_index: i32) 
     let spawned = ui_spawn::spawn_button(
         commands,
         parent,
-        ButtonSpec::bordered(UiLabel::Glyph(glyph::EXPAND_UP), "volume-panel-toggle")
-            .kind(ButtonKind::Headless)
-            .tab_index(tab_index)
-            .compact()
-            .colors(BUTTON_FILL, BUTTON_BORDER)
-            .label_color(LABEL_COLOR)
-            .font_size(FONT_SIZE),
+        ButtonSpec::bordered(
+            UiLabel::glyph(glyph::EXPAND_UP, "volume-panel-toggle-name"),
+            "volume-panel-toggle",
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(tab_index)
+        .compact()
+        .colors(BUTTON_FILL, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(FONT_SIZE),
     );
     commands
         .entity(spawned.button)

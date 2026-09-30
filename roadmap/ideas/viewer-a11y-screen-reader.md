@@ -168,7 +168,9 @@ query key, and a learn/preview mode for every cue. Interacts with
 
 Items 1–3 below are now taken by [[viewer-automation-accesskit-bridge]]
 (2026-09-28), which builds the tree from the automation semantic model so
-one name/role audit serves both tests and screen readers.
+one name/role audit serves both tests and screen readers — done 2026-09-30
+(adapter enabled, tree fed from the model, icon-only controls named), except
+for the spoken Orca pass, which needs Orca installed.
 
 1. Enable the Linux AT-SPI adapter (cfg-guarded stanza above; Windows and
    macOS adapters are always compiled in), emit the first nodes, and

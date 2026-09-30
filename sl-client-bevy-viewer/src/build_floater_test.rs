@@ -927,6 +927,42 @@ mod tests {
         Ok(())
     }
 
+    /// **No two fields a tab shows share a name** — the pairs under one
+    /// caption ("Path Cut (B/E)", "Offset (U/V)") read as "Path Cut Begin" and
+    /// "Offset U", so a screen reader user knows which one they are in.
+    ///
+    /// Tab by tab, with a prim selected so the shape rows it has are shown: a
+    /// field on an unshown tab is not compared, since rows that swap by mode
+    /// may reuse a caption and never show together.
+    #[test]
+    fn no_two_fields_a_tab_shows_share_a_name() -> Result<(), TestError> {
+        use crate::automation_screen_reader::tests::{shared_names, value_controls};
+
+        let mut app = build_tools_app()?;
+        let (_scoped, _at) = select_a_fixture_prim(&mut app)?;
+        let mut found = Vec::new();
+        let mut compared = 0_usize;
+        for index in 0..5 {
+            show_tab(&mut app, index)?;
+            let roots = sl_viewer_automation::snapshot(app.world_mut())?;
+            let mut fields = Vec::new();
+            value_controls(&roots, &mut fields);
+            compared = compared.saturating_add(fields.len());
+            found.extend(
+                shared_names(&fields)
+                    .into_iter()
+                    .map(|shared| format!("tab {index}: {shared}")),
+            );
+        }
+        assert!(compared > 20, "only {compared} fields were compared");
+        assert!(
+            found.is_empty(),
+            "fields sharing a name:\n{}",
+            found.join("\n")
+        );
+        Ok(())
+    }
+
     /// **The linked-part buttons walk the linkset, and only in the mode that
     /// has parts.**
     ///

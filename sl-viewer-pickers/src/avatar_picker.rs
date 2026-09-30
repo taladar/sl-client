@@ -331,6 +331,7 @@ fn build_picker_content(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
 

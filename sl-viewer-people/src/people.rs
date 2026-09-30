@@ -1294,6 +1294,7 @@ fn spawn_people_pane(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
 

@@ -62,6 +62,7 @@ use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, spawn_slider};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::glyph;
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_widgets::floater_persist::FloaterOpenExempt;
 
 /// The stable floater id (its geometry-persistence key and lookup handle).
@@ -930,7 +931,7 @@ fn entry_binding(entry: &QuickPrefEntry) -> SettingBinding {
 }
 
 /// Spawn an entry's label node (translated key or literal text).
-fn spawn_entry_label(commands: &mut Commands, parent: Entity, entry: &QuickPrefEntry) {
+fn spawn_entry_label(commands: &mut Commands, parent: Entity, entry: &QuickPrefEntry) -> Entity {
     let mut label = commands.spawn((
         Text::default(),
         UiFont::Sans.at(FONT),
@@ -946,6 +947,7 @@ fn spawn_entry_label(commands: &mut Commands, parent: Entity, entry: &QuickPrefE
             label.insert(Text::new(text.clone()));
         }
     }
+    label.id()
 }
 
 /// Spawn a checkbox row bound to a boolean setting.
@@ -991,7 +993,9 @@ fn spawn_slider_row(commands: &mut Commands, parent: Entity, entry: &QuickPrefEn
             ChildOf(parent),
         ))
         .id();
-    spawn_entry_label(commands, row_entity, entry);
+    let label = spawn_entry_label(commands, row_entity, entry);
+    // The slider draws no caption: the row's label names it.
+    commands.entity(row_entity).insert(LabelledBy(label));
     // A trailing group holds the slider and its numeric readout together, so the
     // label sits at the leading edge and the control at the trailing edge.
     let group = commands
@@ -1079,18 +1083,21 @@ pub(crate) fn spawn_quick_prefs_button(
     let button = ui_spawn::spawn_button(
         &mut commands,
         wrapper,
-        ButtonSpec::bordered(UiLabel::Glyph(glyph::SETTINGS), "quick-prefs-button")
-            .kind(ButtonKind::Headless)
-            .tab_index(0)
-            .padding(7.0, 3.0)
-            .colors(BUTTON_FILL, BUTTON_BORDER)
-            .label_color(LABEL_COLOR)
-            .font_size(BUTTON_FONT)
-            .layout(|node| {
-                node.align_items = AlignItems::Center;
-                node.justify_content = JustifyContent::Center;
-                node.flex_shrink = 0.0;
-            }),
+        ButtonSpec::bordered(
+            UiLabel::glyph(glyph::SETTINGS, "quick-prefs-title"),
+            "quick-prefs-button",
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(0)
+        .padding(7.0, 3.0)
+        .colors(BUTTON_FILL, BUTTON_BORDER)
+        .label_color(LABEL_COLOR)
+        .font_size(BUTTON_FONT)
+        .layout(|node| {
+            node.align_items = AlignItems::Center;
+            node.justify_content = JustifyContent::Center;
+            node.flex_shrink = 0.0;
+        }),
     )
     .button;
     commands.entity(button).observe(on_quick_prefs_button);

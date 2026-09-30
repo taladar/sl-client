@@ -337,6 +337,7 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # bevy_flair release carries the fix — see
 # roadmap/done/viewer-flair-style-panic-on-caps-failure-notification.
 allow-git = [
+  "https://github.com/taladar/accesskit.git",
   "https://github.com/taladar/parley.git",
   "https://github.com/taladar/bevy_flair.git",
   "https://github.com/taladar/bevy.git",

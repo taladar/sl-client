@@ -438,6 +438,11 @@ pub struct TabSpec<'labels> {
     /// and fill once the bundle loads. Use it for real UI; `false` for the
     /// gallery and tests, whose labels are fixed sample text.
     pub translate_labels: bool,
+    /// What a screen reader calls each tab, as Fluent keys, by index — for a
+    /// strip whose captions are icons (the emoji picker's categories), which
+    /// name nothing. A tab past the end of it, and every tab when it is empty,
+    /// is called what its caption says.
+    pub names: &'labels [&'static str],
 }
 
 impl TabSpec<'_> {
@@ -630,6 +635,16 @@ impl TabStep {
             Self::Prev => ("prev", "sk-tab-scroll-prev"),
             Self::Next => ("next", "sk-tab-scroll-next"),
             Self::Last => ("last", "sk-tab-scroll-last"),
+        }
+    }
+
+    /// The Fluent key of what a screen reader calls its button.
+    const fn name_key(self) -> &'static str {
+        match self {
+            Self::First => "tab-scroll-first",
+            Self::Prev => "tab-scroll-prev",
+            Self::Next => "tab-scroll-next",
+            Self::Last => "tab-scroll-last",
         }
     }
 
@@ -980,6 +995,11 @@ pub fn spawn_dynamic_tab_strip(
             Some(index),
             spec.caption(label),
         );
+        if let Some(key) = spec.names.get(index) {
+            commands
+                .entity(tab.button)
+                .insert(Semantic::new(Role::Tab).name_key(*key));
+        }
         if index == active {
             // The selected tab is `Checked` from its first frame, so the skin's
             // `:checked` rule dresses it before the reconcile runs. The
@@ -1073,6 +1093,8 @@ fn spawn_tab_scroll_button(
         ClassList::new_with_classes([TAB_SCROLL_BUTTON_CLASS, class]),
         Pickable::default(),
         Name::new(format!("{}:tab-arrow:{suffix}", spec.element)),
+        // Only a skin glyph shows on it, which names nothing.
+        Semantic::new(Role::Button).name_key(step.name_key()),
         ChildOf(parent),
     ));
     if step.is_step() {
@@ -1940,6 +1962,7 @@ fn spawn_tabs_element(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: false,
+            names: &[],
         },
     );
     fill_sample_panels(commands, &handle.panels, cx);
@@ -2036,6 +2059,7 @@ pub fn spawn_tabs_resizable_demo(commands: &mut Commands, parent: Entity, cx: El
             strip_width: Some(110.0),
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: false,
+            names: &[],
         },
     );
     fill_sample_panels(commands, &handle.panels, cx);
@@ -2073,6 +2097,7 @@ pub fn spawn_tabs_scroll_demo(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: false,
+            names: &[],
         },
     );
     // Distinct per-widget content (the element id + tab number), so a switch in
@@ -2223,6 +2248,7 @@ mod tests {
             strip_width,
             ellipsis: super::DEFAULT_ELLIPSIS,
             translate_labels: false,
+            names: &[],
         }
     }
 
@@ -2700,6 +2726,7 @@ mod tests {
                             strip_width: None,
                             ellipsis: super::DEFAULT_ELLIPSIS,
                             translate_labels: false,
+                            names: &[],
                         },
                     );
                     for panel in &tabs.panels {
@@ -2783,6 +2810,7 @@ mod tests {
                         strip_width: Some(NARROW),
                         ellipsis: super::DEFAULT_ELLIPSIS,
                         translate_labels: false,
+                        names: &[],
                     },
                 );
             })
@@ -2921,6 +2949,7 @@ mod tests {
                             strip_width: None,
                             ellipsis: super::DEFAULT_ELLIPSIS,
                             translate_labels: false,
+                            names: &[],
                         },
                     );
                 })
@@ -3537,6 +3566,7 @@ mod tests {
                             strip_width,
                             ellipsis: super::super::DEFAULT_ELLIPSIS,
                             translate_labels: false,
+                            names: &[],
                         },
                     );
                 })
@@ -3718,6 +3748,7 @@ mod tests {
                             strip_width: None,
                             ellipsis: super::super::DEFAULT_ELLIPSIS,
                             translate_labels: false,
+                            names: &[],
                         },
                     );
                 })

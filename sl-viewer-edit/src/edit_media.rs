@@ -1250,6 +1250,7 @@ fn spawn_media_settings_content(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     tab_index = tab_index.saturating_add(1);

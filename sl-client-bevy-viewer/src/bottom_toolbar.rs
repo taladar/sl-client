@@ -69,6 +69,7 @@ use bevy::prelude::*;
 use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 
 use crate::conversations::{CONVERSATIONS_FLOATER_ID, ConversationModel};
 use crate::edit_tool::BUILD_TOOLS_FLOATER_ID;
@@ -626,6 +627,9 @@ fn build_button_box(
             BorderColor::all(BUTTON_BORDER),
             ClassList::new_with_classes([TOOLBAR_BUTTON_CLASS]),
             Pickable::default(),
+            // A button to its user whether or not its floater has landed: an
+            // unlanded one is a greyed button, not a label.
+            Semantic::new(Role::Button),
             Name::new(format!("bottom-toolbar-button:{name}")),
             ChildOf(parent),
         ))

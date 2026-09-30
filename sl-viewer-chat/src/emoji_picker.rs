@@ -481,6 +481,21 @@ fn bridge_group_tab(
     }
 }
 
+/// The Fluent key of a group's name, which its tab is called by.
+const fn group_name_key(group: Group) -> &'static str {
+    match group {
+        Group::SmileysAndEmotion => "emoji-group-smileys-and-emotion",
+        Group::PeopleAndBody => "emoji-group-people-and-body",
+        Group::AnimalsAndNature => "emoji-group-animals-and-nature",
+        Group::FoodAndDrink => "emoji-group-food-and-drink",
+        Group::TravelAndPlaces => "emoji-group-travel-and-places",
+        Group::Activities => "emoji-group-activities",
+        Group::Objects => "emoji-group-objects",
+        Group::Symbols => "emoji-group-symbols",
+        Group::Flags => "emoji-group-flags",
+    }
+}
+
 /// Recompute a grid's flattened list when its **content** (group or query)
 /// changes, and keep the list's row count in step, resetting the scroll so a
 /// shorter new list is not left scrolled past its end. A tone-only change does not
@@ -1000,6 +1015,8 @@ fn build_emoji_picker_content(
         .into_iter()
         .map(|group| group_icon(group).to_owned())
         .collect();
+    // An icon is no name: a screen reader calls each tab by its group.
+    let names: Vec<&'static str> = Group::ALL.into_iter().map(group_name_key).collect();
     let tab_strip = spawn_tab_strip(
         commands,
         content,
@@ -1013,6 +1030,7 @@ fn build_emoji_picker_content(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: false,
+            names: &names,
         },
     );
 

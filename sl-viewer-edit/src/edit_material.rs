@@ -52,7 +52,7 @@ use crate::edit_texture::{
     PrimFaceLookup, ShowWhen, node_face_indices, parse_tex_value, primary_face_index,
     representative_face, spawn_row,
 };
-use crate::edit_tool::VALUE_CLASS;
+use crate::edit_tool::{VALUE_CLASS, name_part};
 use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
 use crate::gizmos::{EditPerm, perm_notice};
 use crate::intents::LocalChatNotice;
@@ -1035,6 +1035,10 @@ fn spawn_legacy_field_row(
             },
         );
         commands.entity(entity).insert((field, MatControl));
+        // One of a row's fields: named by the caption and its part.
+        if let Some(part) = name_part(field.element()) {
+            commands.entity(entity).insert(part);
+        }
     }
 }
 
@@ -1063,6 +1067,10 @@ fn spawn_pbr_field_row(
             },
         );
         commands.entity(entity).insert((field, MatControl));
+        // One of a row's fields: named by the caption and its part.
+        if let Some(part) = name_part(field.element()) {
+            commands.entity(entity).insert(part);
+        }
     }
 }
 

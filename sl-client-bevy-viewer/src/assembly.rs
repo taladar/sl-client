@@ -614,6 +614,10 @@ impl ViewerAppBuilder {
                     close_when_requested: false,
                     ..default()
                 }));
+                // The screen-reader tree, built from the automation's semantic
+                // model while an assistive technology listens. Only a winit
+                // window has an AccessKit adapter, so only this mode.
+                app.add_plugins(sl_viewer_automation::AccessKitBridgePlugin);
             }
             WindowMode::Windowless => {
                 app.add_plugins(

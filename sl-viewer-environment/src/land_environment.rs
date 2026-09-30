@@ -91,6 +91,7 @@ use sl_viewer_intents::{OpenSettingsPicker, SettingsPicked};
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_notifications::{NotificationResponse, ShowNotification};
 use sl_viewer_ui_core::i18n::{Translated, Translator};
+use sl_viewer_ui_core::semantic::{LabelledBy, Role, Semantic};
 use sl_viewer_ui_core::ui::{column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_text::set_node_text;
@@ -689,7 +690,9 @@ pub fn spawn_land_environment_panel(
             &mut tab,
         );
         if let Some(index) = row_spec.altitude {
-            spawn_altitude_field(commands, track_row, panel, index, &mut tab);
+            let field = spawn_altitude_field(commands, track_row, panel, index, &mut tab);
+            // Called by the track whose altitude it sets.
+            commands.entity(field).insert(LabelledBy(track_row));
         }
     }
     if kind.owns_altitudes() {
@@ -928,6 +931,8 @@ fn spawn_day_slider(
             },
             PanelOf(panel),
             which,
+            // Called what its row says: the slider draws no caption.
+            Semantic::new(Role::Slider).name_key(label_key),
             Name::new(format!("{ELEMENT}-{slug}:slider")),
         ),
     );

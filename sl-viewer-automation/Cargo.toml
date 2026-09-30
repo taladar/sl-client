@@ -14,6 +14,8 @@ exclude.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The screen-reader tree fed from the semantic model (`screen_reader`).
+accesskit = { workspace = true }
 # Not a workspace dependency: members disagree about `default-features`, so the
 # spec stays per-crate (see the root manifest). The feature matches the UI
 # crates this one reads, so the two unify on one Bevy build.

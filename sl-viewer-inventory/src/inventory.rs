@@ -3441,7 +3441,11 @@ fn bind_row(
     } = paint;
     if let Ok((mut semantic, expanded)) = semantics.get_mut(row) {
         let level = u32::try_from(display.depth.saturating_add(1)).unwrap_or(u32::MAX);
-        let wanted = Semantic::new(Role::TreeItem).level(level);
+        // Called by its name alone: the row also draws the item's type icon
+        // (an emoji) and the `…` clip marker, neither of which is its name.
+        let wanted = Semantic::new(Role::TreeItem)
+            .level(level)
+            .labelled_by(parts.label);
         if *semantic != wanted {
             *semantic = wanted;
         }
@@ -3940,6 +3944,7 @@ fn spawn_inventory_content(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
 
@@ -3978,12 +3983,13 @@ fn spawn_inventory_content(
     // panel. Wired today to the expand / collapse actions the window already has;
     // the rest of the reference's gear entries (sort, filters, new window) are a
     // placeholder for future tasks.
-    let gear_host = crate::menu::spawn_menu_button(
+    let gear_host = crate::menu::spawn_icon_menu_button(
         commands,
         expand_row,
         ElementCx::new(),
         &INVENTORY_GEAR_MENU,
         INVENTORY_GEAR_ELEMENT,
+        "inventory-gear-button-name",
     );
     // The gear entries' check marks (sort mode, filters open) read live
     // conditions off the host, the menu-bar pattern.
@@ -3993,12 +3999,13 @@ fn spawn_inventory_content(
     // The reference's **+** (create) menu sits beside the gear: the Upload /
     // New-item entries (`menu_inventory_add.xml`), targeting the selected
     // folder. Its defs and routing live in [`crate::inventory_actions`].
-    let add_host = crate::menu::spawn_menu_button(
+    let add_host = crate::menu::spawn_icon_menu_button(
         commands,
         expand_row,
         ElementCx::new(),
         &crate::inventory_actions::INVENTORY_ADD_MENU,
         crate::inventory_actions::INVENTORY_ADD_ELEMENT,
+        "inventory-add-button-name",
     );
     // The New Settings entries are greyed on a grid that cannot store one, the
     // menu-bar pattern again — read off the host by `update_add_conditions`.

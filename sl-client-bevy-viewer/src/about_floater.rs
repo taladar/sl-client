@@ -487,6 +487,7 @@ fn spawn_about_tabs(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);

@@ -160,6 +160,22 @@ impl Semantic {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LabelledBy(pub Entity);
 
+/// Which part of what its caption names a control is — for two or more
+/// fields under one caption ("Offset (U/V)", "Path Cut (B/E)"), which would
+/// otherwise share the caption as their name. The Fluent key of the part
+/// ("U", "Begin"); the automation model calls the control
+/// `labelled-part = { $label } { $part }` from the caption its
+/// [`LabelledBy`] finds, so a translation may order the two as its language
+/// does.
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct NamePart(pub Cow<'static, str>);
+
+/// What a screen reader calls a caption whose visible text abbreviates — the
+/// Fluent key of the spoken form ("Path Cut" for "Path Cut (B/E)"). Read by
+/// the automation model wherever the caption names a control.
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct SpokenLabel(pub Cow<'static, str>);
+
 /// An open combo box, an open menu, an unfolded tree row.
 ///
 /// The widget that owns the open state keeps this in step with it, through

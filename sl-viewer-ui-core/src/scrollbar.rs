@@ -86,6 +86,7 @@ use bevy::ui_widgets::{
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport, Styled};
 
 use crate::hold_repeat::{HoldToRepeat, ensure_hold_repeat};
+use crate::semantic::{Role, Semantic};
 use crate::skin::{
     SCROLLBAR_ARROW_CLASS, SCROLLBAR_ARROW_DOWN_CLASS, SCROLLBAR_ARROW_GLYPH_CLASS,
     SCROLLBAR_ARROW_LEFT_CLASS, SCROLLBAR_ARROW_RIGHT_CLASS, SCROLLBAR_ARROW_UP_CLASS,
@@ -417,6 +418,8 @@ fn spawn_scroll_arrow(
             Button,
             ActivateOnPress,
             HoldToRepeat::default(),
+            // Only a skin glyph shows on it, which names nothing.
+            Semantic::new(Role::Button).name_key(arrow_name_key(arrow)),
             arrow,
             Name::new(name.to_owned()),
             ChildOf(frame),
@@ -431,6 +434,16 @@ fn spawn_scroll_arrow(
         Pickable::IGNORE,
         ChildOf(entity),
     ));
+}
+
+/// The Fluent key of what an arrow is called: which way it scrolls.
+const fn arrow_name_key(arrow: ScrollArrow) -> &'static str {
+    match (arrow.orientation, arrow.toward_end) {
+        (ControlOrientation::Vertical, false) => "scrollbar-arrow-up",
+        (ControlOrientation::Vertical, true) => "scrollbar-arrow-down",
+        (ControlOrientation::Horizontal, false) => "scrollbar-arrow-back",
+        (ControlOrientation::Horizontal, true) => "scrollbar-arrow-forward",
+    }
 }
 
 /// The two kinds of thing an arrow can move, as one parameter.

@@ -136,6 +136,8 @@ mod automation_locator;
 mod automation_model;
 #[cfg(test)]
 mod automation_probes;
+#[cfg(test)]
+mod automation_screen_reader;
 mod automation_sources;
 #[cfg(test)]
 mod automation_world;

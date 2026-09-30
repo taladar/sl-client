@@ -456,7 +456,7 @@ fn spawn_bar_button(
         commands,
         parent,
         ButtonSpec::bordered(
-            UiLabel::Glyph(slot),
+            UiLabel::glyph(slot, format!("media-controls-{action}-name")),
             format!("media-controls-button:{action}"),
         )
         .kind(ButtonKind::Headless)

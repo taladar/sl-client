@@ -610,6 +610,7 @@ fn spawn_editor_content(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     // The window is resizable, so the panels take the room the floater gives

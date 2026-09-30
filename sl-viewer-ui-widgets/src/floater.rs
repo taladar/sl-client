@@ -1873,6 +1873,9 @@ fn chrome_button(
                 is_hoverable: true,
             },
             Name::new(format!("floater-button:{name}")),
+            // It shows only a glyph, which names nothing: a screen reader
+            // says "Close", not "✕".
+            Semantic::new(Role::Button).name_key(format!("floater-chrome-{name}")),
             ChildOf(parent),
         ))
         .id();

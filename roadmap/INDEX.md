@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 122 |
-| ready | 307 |
+| ready | 306 |
 | blocked | 53 |
 | in-progress | 21 |
 | bugs | 16 |
-| done | 1285 |
+| done | 1286 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -310,7 +310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (306)
 
 ### protocol
 
@@ -386,9 +386,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
-- [`viewer-automation-accesskit-bridge`](ready/viewer-automation-accesskit-bridge.md)
-  — Feed AccessKit from the semantic UI model (blocked by
-  `viewer-automation-semantic-custom-widgets` (done))
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1320,7 +1317,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1285)
+## done (1286)
 
 ### protocol
 
@@ -1765,6 +1762,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-auto-reject-offers`](done/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites` (done))
+- [`viewer-automation-accesskit-bridge`](done/viewer-automation-accesskit-bridge.md)
+  — Feed AccessKit from the semantic UI model (blocked by
+  `viewer-automation-semantic-custom-widgets` (done))
 - [`viewer-automation-app-builder`](done/viewer-automation-app-builder.md) — A
   public ViewerAppBuilder — one assembly for the binary, the harness and tests
 - [`viewer-automation-ctl-cli`](done/viewer-automation-ctl-cli.md) —

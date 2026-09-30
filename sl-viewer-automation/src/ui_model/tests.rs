@@ -741,3 +741,94 @@ fn a_semantic_names_by_another_node_or_by_a_key() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// **A skin's icon is decoration**: what a stylesheet writes into a
+/// pseudo-element — a glyph host's only content, or a mark beside a caption —
+/// is neither a text node of its own nor part of the name of the control it
+/// sits in: a close box is not called "✕", a folder row not "📂 Textures".
+#[test]
+fn a_skin_glyph_names_nothing() -> Result<(), String> {
+    let mut app = app();
+    let row = spawn_under_root(
+        &mut app,
+        (Name::new("row"), Button, placed(100.0, 100.0, 200.0, 30.0)),
+    );
+    let glyph = app
+        .world_mut()
+        .spawn((
+            sl_viewer_ui_core::glyph::glyph_host(
+                sl_viewer_ui_core::glyph::CLOSE,
+                TextFont::default(),
+                [],
+            ),
+            ChildOf(row),
+        ))
+        .id();
+    // The caption carries pseudo-elements too, as a checkbox's does.
+    app.world_mut().spawn((
+        Text::new("Textures"),
+        bevy_flair::style::components::PseudoElementsSupport,
+        ChildOf(row),
+    ));
+    settle(&mut app);
+    // What the stylesheet's `content` would write into every pseudo-element.
+    let mut spans = app.world_mut().query::<(&ChildOf, &mut TextSpan)>();
+    for (_parent, mut span) in spans.iter_mut(app.world_mut()) {
+        span.0 = "📂".to_owned();
+    }
+    let row_node = node(&mut app, "row")?;
+    assert_eq!(row_node.name.as_deref(), Some("Textures"));
+    let nodes = snap(&mut app)?;
+    assert!(
+        !contains_id(&nodes, node_id(glyph)),
+        "the glyph is no node of its own: {nodes:#?}"
+    );
+    Ok(())
+}
+
+/// Whether `id` is anywhere in `nodes`.
+fn contains_id(nodes: &[UiNode], id: sl_automation_proto::NodeId) -> bool {
+    nodes
+        .iter()
+        .any(|node| node.id == id || contains_id(&node.children, id))
+}
+
+/// **Two fields under one caption are told apart by their part**, and a
+/// caption that abbreviates is read as its spoken form. With no locale loaded
+/// a key names itself, so the keys here are the words.
+#[test]
+fn paired_fields_are_named_by_caption_and_part() -> Result<(), String> {
+    use sl_viewer_ui_core::semantic::{LabelledBy, NamePart, SpokenLabel};
+
+    let mut app = app();
+    let row = spawn_under_root(
+        &mut app,
+        (Name::new("row"), placed(100.0, 100.0, 400.0, 30.0)),
+    );
+    let caption = app
+        .world_mut()
+        .spawn((
+            Text::new("Offset (U/V)"),
+            Translated::new("Offset (U/V)"),
+            SpokenLabel("Offset".into()),
+            ChildOf(row),
+        ))
+        .id();
+    app.world_mut().entity_mut(row).insert(LabelledBy(caption));
+    for (name, part) in [("u", "U"), ("v", "V")] {
+        app.world_mut().spawn((
+            Name::new(name),
+            EditableText::new(""),
+            NamePart(part.into()),
+            ChildOf(row),
+        ));
+    }
+    assert_eq!(node(&mut app, "u")?.name.as_deref(), Some("Offset U"));
+    assert_eq!(node(&mut app, "v")?.name.as_deref(), Some("Offset V"));
+
+    // A field with no part is called what the caption says.
+    app.world_mut()
+        .spawn((Name::new("whole"), EditableText::new(""), ChildOf(row)));
+    assert_eq!(node(&mut app, "whole")?.name.as_deref(), Some("Offset"));
+    Ok(())
+}

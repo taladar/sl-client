@@ -1197,6 +1197,7 @@ fn build_land_content(commands: &mut Commands, content: Entity, font_size: f32) 
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);

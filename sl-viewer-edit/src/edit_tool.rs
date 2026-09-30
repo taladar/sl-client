@@ -60,7 +60,7 @@ use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 use sl_viewer_ui_core::glyph;
-use sl_viewer_ui_core::semantic::LabelledBy;
+use sl_viewer_ui_core::semantic::{LabelledBy, NamePart, Role, Semantic, SpokenLabel};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The floater's font size, in logical pixels.
@@ -627,6 +627,7 @@ fn spawn_build_tools_content(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     // The floater is resizable (a definite content area), so the widget must
@@ -745,9 +746,11 @@ fn spawn_build_tools_content(
                     ..TextInputSpec::new(element, TextInputKind::Float)
                 },
             );
-            commands
-                .entity(field)
-                .insert(BuildNumericField { group, axis });
+            // "Position X", not the row's "Position" three times over.
+            commands.entity(field).insert((
+                BuildNumericField { group, axis },
+                Semantic::new(Role::Textbox).name_key(format!("{element}-name")),
+            ));
             if let Some(slot) = fields.get_mut(slot_index) {
                 *slot = field;
             }
@@ -869,12 +872,10 @@ fn spawn_link_part_nav(commands: &mut Commands, parent: Entity, font_size: f32) 
             commands,
             nav_row,
             ButtonSpec::flat(
-                UiLabel::Glyph(slot),
+                UiLabel::glyph(slot, name_key),
                 format!("build-tools:link-part-{name}"),
             )
             .kind(ButtonKind::Headless)
-            // The arrow glyph says nothing in words.
-            .name_key(name_key)
             .tab_index(tab_index)
             .padding(8.0, 2.0)
             .colors(Color::NONE, Color::NONE)
@@ -1004,7 +1005,7 @@ pub(crate) fn spawn_row_label(
     key: &'static str,
     font_size: f32,
 ) -> Entity {
-    commands
+    let label = commands
         .spawn((
             Text::default(),
             Translated::new(key),
@@ -1028,7 +1029,54 @@ pub(crate) fn spawn_row_label(
             },
             ChildOf(parent),
         ))
-        .id()
+        .id();
+    if let Some(spoken) = spoken_label(key) {
+        commands.entity(label).insert(spoken);
+    }
+    label
+}
+
+/// What a screen reader calls a caption whose visible text abbreviates the
+/// parts of its row — "Path Cut", not "Path Cut (B/E)" — so its fields read
+/// "Path Cut Begin" and "Path Cut End" ([`name_part`]).
+pub(crate) fn spoken_label(caption_key: &str) -> Option<SpokenLabel> {
+    let spoken = match caption_key {
+        "build-cut-label" => "build-cut-spoken",
+        "build-twist-label" => "build-twist-spoken",
+        "build-adv-profile-cut-label" => "build-adv-profile-cut-spoken",
+        "build-adv-dimple-label" => "build-adv-dimple-spoken",
+        "build-adv-slice-label" => "build-adv-slice-spoken",
+        "build-flex-force-label" => "build-flex-force-spoken",
+        "build-spot-label" => "build-spot-spoken",
+        "build-tex-repeats-label" => "build-tex-repeats-spoken",
+        "build-tex-offset-label" => "build-tex-offset-spoken",
+        "build-light-color-label" => "build-light-color-spoken",
+        _whole => return None,
+    };
+    Some(SpokenLabel(spoken.into()))
+}
+
+/// Which part of its row's caption a field is, read off its element's last
+/// segment (`build-tex-offset-u`, `build-cut-begin`): the fields of one row
+/// share the caption, and this is what tells a screen reader them apart.
+pub(crate) fn name_part(element: &str) -> Option<NamePart> {
+    let part = match element.rsplit('-').next()? {
+        "x" => "name-part-x",
+        "y" => "name-part-y",
+        "z" => "name-part-z",
+        "u" => "name-part-u",
+        "v" => "name-part-v",
+        "begin" => "name-part-begin",
+        "end" => "name-part-end",
+        "fov" => "name-part-fov",
+        "focus" => "name-part-focus",
+        "ambiance" => "name-part-ambiance",
+        "red" => "name-part-red",
+        "green" => "name-part-green",
+        "blue" => "name-part-blue",
+        _whole => return None,
+    };
+    Some(NamePart(part.into()))
 }
 
 /// Mirror the floater's visibility into [`EditToolState::active`] — an open

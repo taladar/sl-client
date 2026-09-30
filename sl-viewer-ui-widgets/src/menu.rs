@@ -866,6 +866,47 @@ pub fn spawn_menu_button(
     def: &'static MenuDef,
     element: &'static str,
 ) -> Entity {
+    // Named by its bound label, which carries the key too.
+    spawn_menu_button_as(
+        commands,
+        parent,
+        cx,
+        def,
+        element,
+        Semantic::new(Role::MenuItem),
+    )
+}
+
+/// [`spawn_menu_button`] for a button whose label is an icon (the inventory's
+/// `⚙` and `+`): a screen reader calls it what `name_key` says, since the
+/// icon names nothing it could say.
+pub fn spawn_icon_menu_button(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: ElementCx,
+    def: &'static MenuDef,
+    element: &'static str,
+    name_key: &'static str,
+) -> Entity {
+    spawn_menu_button_as(
+        commands,
+        parent,
+        cx,
+        def,
+        element,
+        Semantic::new(Role::MenuItem).name_key(name_key),
+    )
+}
+
+/// Spawn a menu button that the semantic model reads as `semantic`.
+fn spawn_menu_button_as(
+    commands: &mut Commands,
+    parent: Entity,
+    cx: ElementCx,
+    def: &'static MenuDef,
+    element: &'static str,
+    semantic: Semantic,
+) -> Entity {
     let host = commands
         .spawn((
             Node::default(),
@@ -889,8 +930,7 @@ pub fn spawn_menu_button(
             },
             BackgroundColor(ENTRY_BACKGROUND),
             ClassList::new_with_classes(["sk-menu-bar-item"]),
-            // Named by its bound label, which carries the key too.
-            Semantic::new(Role::MenuItem),
+            semantic,
             Name::new(format!("menu-button:{}", def.label_key)),
             ChildOf(host),
         ))

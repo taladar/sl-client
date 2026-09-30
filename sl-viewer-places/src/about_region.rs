@@ -106,6 +106,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::{TEXT_CLASS, text_role};
 
 use crate::skin_palette::SkinPalette;
@@ -1529,6 +1530,7 @@ fn build_region_content(commands: &mut Commands, content: Entity, font_size: f32
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
@@ -1927,6 +1929,13 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
             6,
             font_size,
         );
+        // Each field is called what the caption before it says.
+        commands
+            .entity(low)
+            .insert(Semantic::new(Role::Textbox).name_key(low_key));
+        commands
+            .entity(high)
+            .insert(Semantic::new(Role::Textbox).name_key(format!("{high_key}-name")));
         if let Some(slot) = handles.start_fields.get_mut(index) {
             *slot = Some(low);
         }
@@ -2031,7 +2040,7 @@ fn build_estate_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> E
     );
 
     spawn_section_label(commands, panel, "about-region-estate-message", font_size);
-    handles.message_field = Some(spawn_edit_field(
+    let message_field = spawn_edit_field(
         commands,
         panel,
         EditFieldShape {
@@ -2042,7 +2051,12 @@ fn build_estate_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> E
             max_characters: 255,
         },
         font_size,
-    ));
+    );
+    // Called what the section label above it says.
+    commands
+        .entity(message_field)
+        .insert(Semantic::new(Role::Textbox).name_key("about-region-estate-message"));
+    handles.message_field = Some(message_field);
     let actions = spawn_row(commands, panel);
     spawn_action_button(
         commands,

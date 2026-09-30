@@ -62,6 +62,7 @@ use sl_client_bevy::{
     SlSessionEvent, TextureKey, Uuid, Vector,
 };
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 
 use crate::floater::{
     Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
@@ -633,6 +634,7 @@ fn spawn_profile_tabs(commands: &mut Commands, content: Entity, font_size: f32) 
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     // The floater is resizable (a definite content area), so the widget must
@@ -1760,6 +1762,7 @@ fn build_picks_tab(
             strip_width: Some(LIST_STRIP_WIDTH),
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: false,
+            names: &[],
         },
     );
     // Only the selected pick's panel gets detail content; the others fill in
@@ -1921,6 +1924,7 @@ fn build_classifieds_tab(
             strip_width: Some(LIST_STRIP_WIDTH),
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: false,
+            names: &[],
         },
     );
     let Some(detail_panel) = tabs.panels.get(state.selected_classified).copied() else {
@@ -2192,7 +2196,7 @@ fn build_notes_tab(
 ) {
     ui.notes_field = None;
     spawn_key_label(commands, panel, "profile-notes-hint", DIM_LABEL_COLOR);
-    ui.notes_field = Some(spawn_text_input(
+    let notes_field = spawn_text_input(
         commands,
         panel,
         &TextInputSpec {
@@ -2203,7 +2207,12 @@ fn build_notes_tab(
             max_characters: Some(1023),
             ..TextInputSpec::new("profile-notes", TextInputKind::Multiline)
         },
-    ));
+    );
+    // The hint above it is a sentence; the field is the tab's notes.
+    commands
+        .entity(notes_field)
+        .insert(Semantic::new(Role::Textbox).name_key("profile-tab-notes"));
+    ui.notes_field = Some(notes_field);
     let buttons = spawn_button_row(commands, panel);
     spawn_action_button(
         commands,

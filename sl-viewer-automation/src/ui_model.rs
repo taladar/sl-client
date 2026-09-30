@@ -13,10 +13,12 @@ use bevy::ui::{
 };
 use bevy::ui_widgets::{Button, Checkbox, RadioButton, RadioGroup, Slider, SliderValue};
 use bevy_flair::prelude::ClassList;
+use bevy_flair::style::components::PseudoElementsSupport;
 use sl_automation_proto::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
-use sl_viewer_ui_core::i18n::{Translated, Translator};
+use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::semantic::{
-    Expanded, LabelledBy, Semantic, SemanticName, role_from_classes, selected_by_class,
+    Expanded, LabelledBy, NamePart, Semantic, SemanticName, SpokenLabel, role_from_classes,
+    selected_by_class,
 };
 use sl_viewer_ui_widgets::ui_text_input::ReadOnlyField;
 
@@ -85,6 +87,10 @@ struct NodeFacts {
     stack_index: Option<&'static ComputedStackIndex>,
     /// What a custom widget says it is.
     semantic: Option<&'static Semantic>,
+    /// Which part of its caption's name a control is.
+    name_part: Option<&'static NamePart>,
+    /// What a screen reader calls a caption that abbreviates.
+    spoken: Option<&'static SpokenLabel>,
     /// Its skin classes, which mark list rows and the selected one.
     classes: Option<&'static ClassList>,
     /// The marker components the role and states are read from.
@@ -94,6 +100,8 @@ struct NodeFacts {
 /// The marker components a node's role and states are read from.
 #[derive(QueryData)]
 struct NodeMarkers {
+    /// Whether a stylesheet may fill its `::before` / `::after`.
+    pseudo_elements: Has<PseudoElementsSupport>,
     /// `bevy_ui_widgets`' headless button.
     button: Has<Button>,
     /// `bevy_ui`'s own button, pressed through `Interaction`.
@@ -476,12 +484,47 @@ impl UiModel<'_, '_> {
                 let (text, key) = self.label_text(facts.entity);
                 match non_empty(text) {
                     Some(text) => (Some(text), key),
-                    None => self.labelled_by_of(facts.entity),
+                    None => self.part_of(facts, self.labelled_by_of(facts.entity)),
                 }
             }
             // A radio group is named by the row it sits in, when it has one.
             Role::RadioGroup => self.labelled_by_of(facts.entity),
         }
+    }
+
+    /// `caption` — what a [`LabelledBy`] calls a control — narrowed to the
+    /// part of it the control is, when it carries a [`NamePart`]: "Offset U",
+    /// not "Offset" for both of a pair.
+    fn part_of(
+        &self,
+        facts: &NodeFactsItem<'_, '_>,
+        caption: (Option<String>, Option<String>),
+    ) -> (Option<String>, Option<String>) {
+        /// The Fluent pattern that joins a caption and a part.
+        const PATTERN: &str = "labelled-part";
+        let (Some(label), Some(part)) = (&caption.0, facts.name_part) else {
+            return caption;
+        };
+        let (part, joined) = match &self.translator {
+            Some(translator) => {
+                let part = translator.get(&part.0);
+                let joined = translator.format(
+                    PATTERN,
+                    &TransArgs::new().text("label", label).text("part", &part),
+                );
+                (part, joined)
+            }
+            None => (part.0.to_string(), PATTERN.to_owned()),
+        };
+        // A miss answers with the key — a harness without a real bundle, whose
+        // flat table carries no message with arguments — and the caption then
+        // comes first, as it does in English.
+        let name = if joined == PATTERN {
+            format!("{label} {part}")
+        } else {
+            joined
+        };
+        (non_empty(name), caption.1)
     }
 
     /// The name a [`LabelledBy`] gives `entity` — its own, else its nearest
@@ -519,13 +562,21 @@ impl UiModel<'_, '_> {
         if let Ok(facts) = self.nodes.get(entity)
             && let (Some(key), Some(_text)) = (facts.translated, facts.text)
         {
+            // A caption that abbreviates is read as its spoken form.
+            if let Some(spoken) = facts.spoken {
+                let text = self.translator.as_ref().map_or_else(
+                    || spoken.0.to_string(),
+                    |translator| translator.get(&spoken.0),
+                );
+                return Some((text, spoken.0.to_string()));
+            }
             return Some((self.text_content(entity), key.key().to_owned()));
         }
         self.children
             .get(entity)
             .ok()?
             .iter()
-            .filter(|&child| !self.is_owned_popup(child))
+            .filter(|&child| !self.is_owned_popup(child) && !self.is_undisplayed(child))
             .find_map(|child| self.translated_label(child))
     }
 
@@ -554,24 +605,43 @@ impl UiModel<'_, '_> {
         }
         if let Ok(children) = self.children.get(entity) {
             for &child in children {
-                if !self.is_owned_popup(child) {
+                if !self.is_owned_popup(child) && !self.is_undisplayed(child) {
                     self.descendant_texts(child, out);
                 }
             }
         }
     }
 
-    /// A text node's whole content: its own text and its spans'.
-    fn text_content(&self, entity: Entity) -> String {
-        let mut content = self
-            .nodes
+    /// Whether `entity` is laid out of the tree (`display: none`) — a caption
+    /// that is not shown, such as the one a row swaps out, names nothing.
+    fn is_undisplayed(&self, entity: Entity) -> bool {
+        self.nodes
             .get(entity)
-            .ok()
+            .is_ok_and(|facts| facts.node.display == Display::None)
+    }
+
+    /// A text node's whole content: its own text and its spans' — but not
+    /// what a stylesheet puts in its `::before` / `::after`. That is how a
+    /// skin draws an icon (a close box's cross, a folder row's folder, a
+    /// tick), and an icon is how a control looks, never what it is called.
+    /// bevy_flair keeps a text node's two pseudo-element spans as its first
+    /// and last children.
+    fn text_content(&self, entity: Entity) -> String {
+        let facts = self.nodes.get(entity).ok();
+        let mut content = facts
+            .as_ref()
             .and_then(|facts| facts.text.map(|text| text.0.clone()))
             .unwrap_or_default();
+        let pseudo = facts.is_some_and(|facts| facts.markers.pseudo_elements);
         if let Ok(children) = self.children.get(entity) {
-            for span in self.spans.iter_many(children) {
-                content.push_str(&span.0);
+            let last = children.len().saturating_sub(1);
+            for (index, child) in children.iter().enumerate() {
+                if pseudo && (index == 0 || index == last) {
+                    continue;
+                }
+                if let Ok(span) = self.spans.get(child) {
+                    content.push_str(&span.0);
+                }
             }
         }
         content

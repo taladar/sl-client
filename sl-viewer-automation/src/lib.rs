@@ -107,6 +107,10 @@
 //! answered, so a fixture test clicks, fills and expects through locators and
 //! fails with the driver's own error, printed as the end-to-end tier prints
 //! it.
+//!
+//! The same model feeds **screen readers**: [`AccessKitBridgePlugin`] builds
+//! the viewer's AccessKit tree from it while an assistive technology listens,
+//! sending only what changed, so one audit of roles and names serves both.
 
 mod diagnostics;
 mod event_log;
@@ -124,6 +128,7 @@ mod remote;
 mod render_settle;
 mod reveal;
 mod route;
+mod screen_reader;
 mod screenshot;
 mod ui_model;
 mod world_aim;
@@ -160,6 +165,10 @@ pub use crate::remote::{
 pub use crate::render_settle::{PipelineStatus, PipelineStatusPlugin};
 pub use crate::reveal::{open_floater, scroll_into_view};
 pub use crate::route::{Gesture, Route, RouteProgress};
+pub use crate::screen_reader::{
+    ACCESSKIT_REFRESH, AccessKitBridgePlugin, AccessKitTree, accesskit_node, accesskit_role,
+    tree_nodes,
+};
 pub use crate::screenshot::{
     CapturedFrame, OVERLAY_COLOUR, OVERLAY_THICKNESS, ScreenshotError, ScreenshotProbePlugin,
     ScreenshotTicket, Screenshots, request_screenshot, take_screenshot,

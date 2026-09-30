@@ -460,16 +460,17 @@ fn spawn_step_button(
         parent,
         ButtonSpec::bordered(
             // The skin's step marks, which mirror under right-to-left.
-            UiLabel::Glyph(if forward {
-                glyph::NEXT
-            } else {
-                glyph::PREVIOUS
-            }),
+            UiLabel::glyph(
+                if forward {
+                    glyph::NEXT
+                } else {
+                    glyph::PREVIOUS
+                },
+                step_name_key_of(kind, forward),
+            ),
             format!("{element}:{side}"),
         )
         .kind(ButtonKind::Headless)
-        // The arrow says nothing in words; the name says which preset it steps.
-        .name_key(step_name_key_of(kind, forward))
         .tab_index(0)
         .compact()
         .padding(5.0, 1.0)

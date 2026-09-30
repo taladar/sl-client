@@ -48,6 +48,7 @@ use crate::skin::{COMBO_OPTION_CLASS, LIST_ROW_CLASS, SELECTED_CLASS, set_state_
 use crate::skin_palette::SkinPalette;
 use crate::ui::column;
 use crate::ui_font::UiFont;
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 
 /// The public local-chat channel (`0`).
 const PUBLIC_CHANNEL: ChatChannel = ChatChannel(0);
@@ -404,6 +405,10 @@ fn build_volume_select(commands: &mut Commands, container: Entity, field: Entity
             BackgroundColor(OPTION_BACKGROUND),
             ClassList::new_with_classes([COMBO_CLASS]),
             Pickable::default(),
+            // A drop-down whose value is the volume it shows.
+            Semantic::new(Role::Combobox)
+                .name_key("chat-volume-name")
+                .value_from(label),
             VolumeButton { field, label },
             Name::new("local-chat-volume-button"),
             ChildOf(container),

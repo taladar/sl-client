@@ -891,6 +891,7 @@ fn spawn_experiences_content(
             strip_width: Some(STRIP_WIDTH),
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::InlineStart, &tabs);

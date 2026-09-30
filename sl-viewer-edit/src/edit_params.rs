@@ -58,7 +58,10 @@ use sl_client_bevy::{
     ScopedObjectId, SlCommand, Uuid, Vector, pcode,
 };
 
-use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
+use crate::edit_tool::{
+    BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, name_part, spawn_row_label,
+    spoken_label,
+};
 use crate::i18n::{Translated, Translator};
 use crate::intents::{GroupPicked, OpenGroupPicker};
 use crate::social::GroupsModel;
@@ -926,6 +929,10 @@ fn spawn_param_field(
         },
     );
     commands.entity(entity).insert((field, field.gate()));
+    // One of a row's fields: named by the caption and its part.
+    if let Some(part) = name_part(element) {
+        commands.entity(entity).insert(part);
+    }
     entity
 }
 
@@ -1144,14 +1151,19 @@ fn spawn_swap_label(
             ChildOf(parent),
         ))
         .id();
-    commands.spawn((
-        Text::default(),
-        Translated::new(label_key),
-        UiFont::Sans.at(font_size),
-        TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
-        ClassList::new_with_classes([LABEL_CLASS]),
-        ChildOf(holder),
-    ));
+    let caption = commands
+        .spawn((
+            Text::default(),
+            Translated::new(label_key),
+            UiFont::Sans.at(font_size),
+            TextColor(Color::srgba(0.85, 0.85, 0.85, 1.0)),
+            ClassList::new_with_classes([LABEL_CLASS]),
+            ChildOf(holder),
+        ))
+        .id();
+    if let Some(spoken) = spoken_label(label_key) {
+        commands.entity(caption).insert(spoken);
+    }
 }
 
 /// Spawn the General-, Object- and Features-tab parameter editors into the
@@ -1390,6 +1402,8 @@ pub(crate) fn spawn_param_tabs_into(
             ChildOf(object),
         ))
         .id();
+    // Its fields are called what the shown one of its captions says.
+    commands.entity(scale_row).insert(LabelledBy(scale_row));
     spawn_swap_label(
         commands,
         scale_row,
@@ -1462,6 +1476,8 @@ pub(crate) fn spawn_param_tabs_into(
             ChildOf(object),
         ))
         .id();
+    // Its fields are called what the shown one of its captions says.
+    commands.entity(adv_row).insert(LabelledBy(adv_row));
     spawn_swap_label(
         commands,
         adv_row,
@@ -1564,7 +1580,8 @@ pub(crate) fn spawn_param_tabs_into(
                 ChildOf(circular_row),
             ))
             .id();
-        spawn_row_label(commands, pair, key, font_size);
+        let label = spawn_row_label(commands, pair, key, font_size);
+        commands.entity(pair).insert(LabelledBy(label));
         spawn_param_field(
             commands,
             pair,

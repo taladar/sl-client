@@ -62,6 +62,7 @@ use sl_viewer_environment::rows::{
     AimTrackball, RowsPlugin, spawn_slider_row as spawn_env_slider_row, spawn_trackball_row,
     tag_aim_slider,
 };
+use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
 
 use crate::environment::{EnvironmentState, FixedEnvironment};
@@ -644,7 +645,7 @@ fn build_environment_prologue(commands: &mut Commands, panel: Entity, seed: &str
             ChildOf(panel),
         ))
         .id();
-    spawn_label(commands, group_row, "phototools-env-group");
+    let _caption = spawn_label(commands, group_row, "phototools-env-group");
     let labels: Vec<String> = ENV_GROUP_KEYS.iter().map(|key| (*key).to_owned()).collect();
     let group = spawn_combo(
         commands,
@@ -1225,6 +1226,7 @@ fn spawn_phototools_body(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
@@ -1339,8 +1341,8 @@ fn spawn_section(commands: &mut Commands, parent: Entity, key: &'static str) {
 }
 
 /// Spawn a row's translated label.
-fn spawn_label(commands: &mut Commands, parent: Entity, key: &'static str) {
-    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), LABEL_COLOR, FONT);
+fn spawn_label(commands: &mut Commands, parent: Entity, key: &'static str) -> Entity {
+    ui_spawn::spawn_label(commands, parent, UiLabel::key(key), LABEL_COLOR, FONT)
 }
 
 /// Spawn a checkbox row.
@@ -1482,7 +1484,9 @@ fn spawn_row_node(commands: &mut Commands, parent: Entity, row_def: &PhotoRow) -
 /// The row node and its leading label, shared by the slider and combo rows.
 fn spawn_row_shell(commands: &mut Commands, parent: Entity, row_def: &PhotoRow) -> Entity {
     let row_entity = spawn_row_node(commands, parent, row_def);
-    spawn_label(commands, row_entity, row_def.label);
+    let label = spawn_label(commands, row_entity, row_def.label);
+    // The slider or combo draws no caption of its own: the row's names it.
+    commands.entity(row_entity).insert(LabelledBy(label));
     row_entity
 }
 

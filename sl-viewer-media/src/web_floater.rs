@@ -314,13 +314,14 @@ fn spawn_toolbar_button(
     let spawned = ui_spawn::spawn_button(
         commands,
         parent,
-        ButtonSpec::bordered(UiLabel::Glyph(slot), format!("web-browser-button:{action}"))
-            .kind(ButtonKind::Headless)
-            // The glyph says nothing in words.
-            .name_key(toolbar_button_name_key(action))
-            .tab_index(tab_index)
-            .padding(7.0, 3.0)
-            .font_size(font_size),
+        ButtonSpec::bordered(
+            UiLabel::glyph(slot, toolbar_button_name_key(action)),
+            format!("web-browser-button:{action}"),
+        )
+        .kind(ButtonKind::Headless)
+        .tab_index(tab_index)
+        .padding(7.0, 3.0)
+        .font_size(font_size),
     );
     commands.entity(spawned.button).observe(
         move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {

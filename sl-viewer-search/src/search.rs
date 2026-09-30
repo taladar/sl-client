@@ -80,7 +80,7 @@ use crate::world_api::ui_texture::{PendingUiTexture, UiTexturePlugin};
 use crate::world_map::OpenWorldMap;
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
-use sl_viewer_ui_core::semantic::LabelledBy;
+use sl_viewer_ui_core::semantic::{LabelledBy, Role, Semantic};
 use sl_viewer_ui_core::skin::{SELECTED_CLASS, set_state_class, text_role};
 
 // ---------------------------------------------------------------------------
@@ -1370,6 +1370,7 @@ fn spawn_search_content(
             strip_width: None,
             ellipsis: DEFAULT_ELLIPSIS,
             translate_labels: true,
+            names: &[],
         },
     );
     fill_tab_container(commands, TabPlacement::BlockStart, &tabs);
@@ -1672,8 +1673,13 @@ fn spawn_category_panels(
                     SECONDARY_COLOR,
                     font_size,
                 );
-                land_price_field =
-                    spawn_limit_field(commands, limits, "search-land-price", font_size);
+                land_price_field = spawn_limit_field(
+                    commands,
+                    limits,
+                    "search-land-price",
+                    "search-label-price-max",
+                    font_size,
+                );
                 spawn_label(
                     commands,
                     limits,
@@ -1681,8 +1687,13 @@ fn spawn_category_panels(
                     SECONDARY_COLOR,
                     font_size,
                 );
-                land_area_field =
-                    spawn_limit_field(commands, limits, "search-land-area", font_size);
+                land_area_field = spawn_limit_field(
+                    commands,
+                    limits,
+                    "search-land-area",
+                    "search-label-area-min",
+                    font_size,
+                );
             }
             SearchCategory::Events => {
                 let events = spawn_events_filters(commands, panel, font_size);
@@ -1956,11 +1967,18 @@ fn spawn_events_day_button(commands: &mut Commands, parent: Entity, forward: boo
         commands,
         parent,
         ButtonSpec::bordered(
-            UiLabel::Glyph(if forward {
-                glyph::NEXT
-            } else {
-                glyph::PREVIOUS
-            }),
+            UiLabel::glyph(
+                if forward {
+                    glyph::NEXT
+                } else {
+                    glyph::PREVIOUS
+                },
+                if forward {
+                    "search-events-day-next-name"
+                } else {
+                    "search-events-day-prev-name"
+                },
+            ),
             format!(
                 "search-events-day:{}",
                 if forward { "next" } else { "prev" }
@@ -2195,9 +2213,10 @@ fn spawn_limit_field(
     commands: &mut Commands,
     parent: Entity,
     element: &'static str,
+    name_key: &'static str,
     font_size: f32,
 ) -> Entity {
-    spawn_text_input(
+    let field = spawn_text_input(
         commands,
         parent,
         &TextInputSpec {
@@ -2206,7 +2225,12 @@ fn spawn_limit_field(
             tab_index: 0,
             ..TextInputSpec::new(element, TextInputKind::NonNegativeInteger)
         },
-    )
+    );
+    // Called what the caption before it says.
+    commands
+        .entity(field)
+        .insert(Semantic::new(Role::Textbox).name_key(name_key));
+    field
 }
 
 /// Spawn a filter combo over literal English labels, returning the anchor.

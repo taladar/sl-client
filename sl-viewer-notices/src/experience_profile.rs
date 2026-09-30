@@ -1039,7 +1039,10 @@ fn spawn_caption_row(
             ChildOf(parent),
         ))
         .id();
-    spawn_caption(commands, row_entity, caption_key, font_size);
+    let caption = spawn_caption(commands, row_entity, caption_key, font_size);
+    // The value side (a name link) is called what the caption says while it
+    // shows nothing of its own.
+    commands.entity(row_entity).insert(LabelledBy(caption));
     row_entity
 }
 

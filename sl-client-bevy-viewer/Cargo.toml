@@ -234,10 +234,18 @@ tracing-tracy = { version = "0.11.4", optional = true }
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = { workspace = true }
 
+# The Linux screen-reader adapter (AT-SPI over D-Bus, for Orca), which Bevy
+# leaves off by default; the Windows and macOS adapters are always compiled in.
+# Merged with the `bevy` dependency above.
+[target.'cfg(target_os = "linux")'.dependencies]
+bevy = { version = "0.19.0", features = ["accesskit_unix"] }
+
 [build-dependencies]
 fs-err = { workspace = true }
 
 [dev-dependencies]
+# The screen-reader tree the floater sweep checks against the model.
+accesskit = { workspace = true }
 pretty_assertions = { workspace = true }
 # The JSON values the executor's state waits test a readout against.
 serde_json = { workspace = true }
