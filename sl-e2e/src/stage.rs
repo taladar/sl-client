@@ -14,12 +14,13 @@ use serde_json::json;
 use sl_automation_proto::Probe;
 use sl_client_bevy::{LoginParams, LoginRequest, StartLocation};
 use sl_client_bevy_viewer::assembly::{
-    Automation, MediaRuntime, Storage, ViewerApp, ViewerAppBuilder, ViewerAppOptions, ViewerPaths,
-    WindowMode,
+    Automation, LoginOutcome, MediaRuntime, Storage, ViewerApp, ViewerAppBuilder, ViewerAppOptions,
+    ViewerPaths, WindowMode,
 };
 use sl_fake_grid::fixtures::scenarios;
 use sl_fake_grid::{AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig};
 use sl_proto::{AgentKey, RegionCoordinates};
+use sl_repl::LoginCooldown;
 use sl_viewer_automation::{BuildError, InProcessHost, ViewerHandle};
 use sl_viewer_driver::{Viewer, ViewerOptions};
 use sl_viewer_launch::{Ending, LOGOUT_GRACE, Launch, RunningViewer, ViewerDir};
@@ -29,23 +30,33 @@ use sl_viewer_world_view::session::TerminationFlag;
 
 use crate::backend::Backend;
 use crate::error::{BodyError, StageError};
+use crate::grid::Grid;
+use crate::live::{LiveAccount, LiveAccounts};
 use crate::logs::RouteGuard;
+use crate::need::{Need, unmet};
 
 /// Every stage account's first name; a viewer's label is its last name.
 pub const FIRST_NAME: &str = "Stage";
 
-/// The password every stage account shares on the loopback grid.
+/// The password every stage account shares on the fake grid.
 const PASSWORD: &str = "password";
 
-/// The `[avatars.<key>]` a process viewer's credentials file names.
+/// The `[avatars.<key>]` the credentials file a process viewer on the fake
+/// grid is handed names.
 const AVATAR_KEY: &str = "stage";
 
 /// The off-screen window every stage viewer renders into, on both backends.
 const WINDOW: UVec2 = UVec2::new(1280, 720);
 
 /// How long a viewer may take to log in and settle: a cold shader cache in a
-/// debug build, beside other viewers.
+/// debug build, beside other viewers, or a live region's content arriving.
 const LOGIN: Duration = Duration::from_secs(240);
+
+/// How long a viewer on a live grid may take to settle once it has arrived:
+/// a live asset service answers some fetches 503 for minutes, and each such
+/// texture walks its whole retry chain — six attempts, each retried inside the
+/// store — before the scene is quiet (seen on aditi, 2026-09-30).
+const LIVE_SETTLE: Duration = Duration::from_secs(600);
 
 /// How long a viewer process may take to open its automation socket.
 const CONNECT: Duration = Duration::from_secs(120);
@@ -95,6 +106,10 @@ pub struct StageBuilder {
     backends: Option<Vec<Backend>>,
     /// The artifact root, when not the target directory's `e2e/`.
     artifacts: Option<PathBuf>,
+    /// What the test needs of the grid.
+    needs: Vec<Need>,
+    /// The grid, when not `SL_E2E_GRID`'s.
+    on: Option<Grid>,
 }
 
 impl core::fmt::Debug for StageBuilder {
@@ -106,6 +121,8 @@ impl core::fmt::Debug for StageBuilder {
             .field("regions", &self.regions.len())
             .field("backends", &self.backends)
             .field("artifacts", &self.artifacts)
+            .field("needs", &self.needs)
+            .field("on", &self.on)
             .finish_non_exhaustive()
     }
 }
@@ -129,6 +146,8 @@ impl StageBuilder {
             grid: None,
             backends: None,
             artifacts: None,
+            needs: Vec::new(),
+            on: None,
         }
     }
 
@@ -149,29 +168,101 @@ impl StageBuilder {
     }
 
     /// One more region; the first one named replaces the stock scene's. The
-    /// viewers start in the first region.
+    /// viewers start in the first region. Only a fake grid can be told its
+    /// regions, so the stage skips a live one.
     #[must_use]
     pub fn region(mut self, region: RegionConfig) -> Self {
         self.regions.push(region);
-        self
+        self.dictates("it names its regions")
     }
 
-    /// Where in the first region the viewers start.
+    /// Where in the first region the viewers start. The stage skips a live
+    /// grid.
     #[must_use]
-    pub const fn start_position(mut self, position: RegionCoordinates) -> Self {
+    pub fn start_position(mut self, position: RegionCoordinates) -> Self {
         self.start = position;
-        self
+        self.dictates("it sets where its viewers start")
     }
 
     /// Configure the grid further — a scenario, a timeline, a deterministic
-    /// seed, login gates. Called on each backend's fresh grid.
+    /// seed, login gates. Called on each backend's fresh grid; the stage skips
+    /// a live one.
     #[must_use]
     pub fn configure_grid(
         mut self,
         hook: impl Fn(FakeGridBuilder) -> FakeGridBuilder + Send + Sync + 'static,
     ) -> Self {
         self.grid = Some(Arc::new(hook));
+        self.dictates("it configures the grid")
+    }
+
+    /// Record that the stage dictates the grid, `how` — once.
+    fn dictates(self, how: &'static str) -> Self {
+        if self
+            .needs
+            .iter()
+            .any(|need| matches!(need, Need::DictatedGrid(_)))
+        {
+            self
+        } else {
+            self.needs(Need::DictatedGrid(how))
+        }
+    }
+
+    /// The test needs `need`; on a grid that cannot provide it, the stage
+    /// skips, saying why.
+    #[must_use]
+    pub fn needs(mut self, need: Need) -> Self {
+        if !self.needs.contains(&need) {
+            self.needs.push(need);
+        }
         self
+    }
+
+    /// Run on `grid`, whatever `SL_E2E_GRID` says.
+    #[must_use]
+    pub const fn on_grid(mut self, grid: Grid) -> Self {
+        self.on = Some(grid);
+        self
+    }
+
+    /// The grid the stage runs on: the one given, else `SL_E2E_GRID`'s.
+    fn chosen_grid(&self) -> Result<Grid, StageError> {
+        self.on.map_or_else(Grid::from_env, Ok)
+    }
+
+    /// Why the stage would skip on its grid, or `None` when it would run: a
+    /// need the grid cannot provide, or — on a live grid — fewer accounts
+    /// than viewers. A need is judged before the credentials file is read,
+    /// so a test the grid cannot serve skips without one.
+    ///
+    /// # Errors
+    ///
+    /// [`StageError::GridVariable`] for a bad `SL_E2E_GRID`, and on a live
+    /// grid whose needs it meets, as reading its accounts
+    /// ([`StageError::Credentials`]).
+    pub fn skip_reason(&self) -> Result<Option<String>, StageError> {
+        let grid = self.chosen_grid()?;
+        Ok(self.plan(grid)?.err())
+    }
+
+    /// The accounts of `grid` (none on the fake grid), or why the stage
+    /// skips there.
+    fn plan(&self, grid: Grid) -> Result<Result<Option<LiveAccounts>, String>, StageError> {
+        let viewers = self.labels.len();
+        if let Some(reason) = unmet(&self.needs, viewers, grid, None) {
+            return Ok(Err(reason));
+        }
+        if !grid.is_live() {
+            return Ok(Ok(None));
+        }
+        let live = LiveAccounts::from_env(grid)?;
+        Ok(
+            match unmet(&self.needs, viewers, grid, Some(live.accounts.len())) {
+                Some(reason) => Err(reason),
+                None => Ok(Some(live)),
+            },
+        )
     }
 
     /// Run on these backends, whatever `SL_E2E_BACKEND` says.
@@ -192,8 +283,11 @@ impl StageBuilder {
     /// Run `body` on a fresh stage once per backend, one after the other, and
     /// take each stage down afterwards — also when the body fails or panics.
     ///
-    /// A machine with no GPU adapter skips: it logs a warning, says so on
-    /// standard error, and returns `Ok`.
+    /// The grid is `SL_E2E_GRID`'s (unset: a fresh fake grid per backend).
+    /// A grid that cannot meet the test's needs ([`skip_reason`](Self::skip_reason))
+    /// and a machine with no GPU adapter skip: the stage logs a warning, which
+    /// the stage's subscriber also prints on standard error, and returns
+    /// `Ok`.
     ///
     /// # Errors
     ///
@@ -215,13 +309,27 @@ impl StageBuilder {
             None => Backend::from_env()?,
         };
         crate::logs::install();
+        let grid = self.chosen_grid()?;
+        let live = match self.plan(grid)? {
+            Ok(live) => live,
+            Err(reason) => {
+                tracing::warn!("skipping {} on the {grid} grid: {reason}", self.name);
+                return Ok(());
+            }
+        };
         if !crate::gpu::adapter_available() {
             tracing::warn!("skipping {}: this machine has no GPU adapter", self.name);
             return Ok(());
         }
-        let root = self.artifact_root()?.join(&self.name);
+        let root = self.artifact_root()?.join(&self.name).join(grid.name());
         for backend in backends {
-            self.run_on(backend, &root.join(backend.name()), &body)?;
+            self.run_on(
+                grid,
+                live.as_ref(),
+                backend,
+                &root.join(backend.name()),
+                &body,
+            )?;
         }
         Ok(())
     }
@@ -232,7 +340,14 @@ impl StageBuilder {
         reason = "a test body that panicked is resumed as a panic; when the teardown failed too, \
                   the panic has to carry both"
     )]
-    fn run_on<F>(&self, backend: Backend, dir: &Path, body: &F) -> Result<(), StageError>
+    fn run_on<F>(
+        &self,
+        grid: Grid,
+        live: Option<&LiveAccounts>,
+        backend: Backend,
+        dir: &Path,
+        body: &F,
+    ) -> Result<(), StageError>
     where
         F: AsyncFn(&Stage) -> Result<(), BodyError>,
     {
@@ -265,11 +380,11 @@ impl StageBuilder {
             .build()
             .map_err(StageError::Runtime)?;
         tracing::info!(
-            "stage {} on the {backend} backend in {}",
+            "stage {} on the {grid} grid, {backend} backend, in {}",
             self.name,
             dir.display()
         );
-        let stage = runtime.block_on(Stage::start(self, backend, dir))?;
+        let stage = runtime.block_on(Stage::start(self, grid, live, backend, dir))?;
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| runtime.block_on(body(&stage))));
         let teardown = runtime.block_on(stage.shutdown());
         match outcome {
@@ -381,11 +496,94 @@ fn panic_message(panic: &(dyn core::any::Any + Send)) -> String {
         .unwrap_or_else(|| "no message".to_owned())
 }
 
+/// Start a fresh fake grid for `builder`: its regions, an account per
+/// viewer, and its further configuration. Answers the grid and the region
+/// the viewers start in.
+async fn start_fake_grid(builder: &StageBuilder) -> Result<(FakeGrid, String), StageError> {
+    let regions = builder.regions();
+    let home = regions
+        .first()
+        .map(|region| region.name.clone())
+        .unwrap_or_default();
+    let mut grid = FakeGridBuilder::new()
+        // A long hold, so the CAPS long-poll does not compete with the
+        // renders for the cores.
+        .event_queue_hold(Duration::from_secs(2));
+    for region in regions {
+        grid = grid.region(region);
+    }
+    for label in &builder.labels {
+        grid = grid.account(AccountConfig::new(FIRST_NAME, label, PASSWORD));
+    }
+    if let Some(hook) = &builder.grid {
+        grid = hook(grid);
+    }
+    let grid = grid.start().await?;
+    tracing::info!("stage grid at {}", grid.login_uri());
+    Ok((grid, home))
+}
+
+/// Write the credentials file a process viewer on the fake grid logs in
+/// with, into its directory, and answer its path.
+fn write_stage_credentials(
+    dir: &ViewerDir,
+    label: &str,
+    login_uri: &str,
+) -> Result<PathBuf, StageError> {
+    let credentials = dir.root.join("credentials.toml");
+    fs_err::write(
+        &credentials,
+        format!(
+            "# Written by sl-e2e for one stage against a fake grid.\n\
+             default_avatar = \"{AVATAR_KEY}\"\n\n[avatars.{AVATAR_KEY}]\nfirst = \
+             \"{FIRST_NAME}\"\nlast = \"{label}\"\npassword = \"{PASSWORD}\"\nlogin_uri = \
+             \"{login_uri}\"\n"
+        ),
+    )
+    .map_err(|source| StageError::Artifacts {
+        path: credentials.clone(),
+        source,
+    })?;
+    Ok(credentials)
+}
+
+/// Who a stage viewer logs in as.
+#[derive(Debug, Clone)]
+enum Login {
+    /// The fake grid's account `Stage <label>`.
+    Stage {
+        /// Its agent.
+        agent: AgentKey,
+        /// The grid's login URI.
+        login_uri: String,
+    },
+    /// A live grid's account.
+    Live(LiveAccount),
+}
+
+impl Login {
+    /// The account's `First Last` name, for the viewer `label`.
+    fn account_name(&self, label: &str) -> String {
+        match self {
+            Self::Stage { .. } => format!("{FIRST_NAME} {label}"),
+            Self::Live(account) => account.name(),
+        }
+    }
+
+    /// The account's agent, when it is known before the login.
+    const fn agent(&self) -> Option<AgentKey> {
+        match self {
+            Self::Stage { agent, .. } => Some(*agent),
+            Self::Live(_) => None,
+        }
+    }
+}
+
 /// How one stage viewer runs.
 #[derive(Debug)]
 enum ViewerRun {
-    /// An App on the stage's in-process host.
-    InProcess(ViewerHandle),
+    /// An App on the stage's in-process host; `None` before it is hosted.
+    InProcess(Option<ViewerHandle>),
     /// A process; `None` once it has been stopped.
     Process(Option<RunningViewer>),
 }
@@ -395,8 +593,11 @@ enum ViewerRun {
 struct StageViewer {
     /// Its label.
     label: String,
-    /// Its account's agent.
-    agent: AgentKey,
+    /// Its account's `First Last` name.
+    account: String,
+    /// Its account's agent: on the fake grid from the start, on a live grid
+    /// once it has logged in.
+    agent: Option<AgentKey>,
     /// Its artifact directory.
     dir: PathBuf,
     /// The driver's handle, once connected.
@@ -412,10 +613,14 @@ pub struct Stage {
     name: String,
     /// The backend.
     backend: Backend,
+    /// The grid the viewers are on.
+    on: Grid,
     /// The stage's artifact directory.
     dir: PathBuf,
-    /// The grid.
-    grid: FakeGrid,
+    /// The fake grid, when the stage started one.
+    grid: Option<FakeGrid>,
+    /// A live grid's accounts, in the order the viewers take them.
+    live: Option<LiveAccounts>,
     /// The region the viewers start in.
     home: String,
     /// The viewers, in the order they were named.
@@ -427,38 +632,30 @@ pub struct Stage {
 }
 
 impl Stage {
-    /// Start the grid and every viewer, and wait until each has logged in
-    /// and settled. What was started is taken down again when a step fails.
+    /// Start the grid (unless it is live) and every viewer, and wait until
+    /// each has logged in and settled. What was started is taken down again
+    /// when a step fails.
     async fn start(
         builder: &StageBuilder,
+        on: Grid,
+        live: Option<&LiveAccounts>,
         backend: Backend,
         dir: &Path,
     ) -> Result<Self, StageError> {
-        let regions = builder.regions();
-        let home = regions
-            .first()
-            .map(|region| region.name.clone())
-            .unwrap_or_default();
-        let mut grid = FakeGridBuilder::new()
-            // A long hold, so the CAPS long-poll does not compete with the
-            // renders for the cores.
-            .event_queue_hold(Duration::from_secs(2));
-        for region in regions {
-            grid = grid.region(region);
-        }
-        for label in &builder.labels {
-            grid = grid.account(AccountConfig::new(FIRST_NAME, label, PASSWORD));
-        }
-        if let Some(hook) = &builder.grid {
-            grid = hook(grid);
-        }
-        let grid = grid.start().await?;
-        tracing::info!("stage grid at {}", grid.login_uri());
+        let (grid, home) = match live {
+            Some(_) => (None, String::new()),
+            None => {
+                let (grid, home) = start_fake_grid(builder).await?;
+                (Some(grid), home)
+            }
+        };
         let mut stage = Self {
             name: builder.name.clone(),
             backend,
+            on,
             dir: dir.to_path_buf(),
             grid,
+            live: live.cloned(),
             home,
             viewers: Vec::new(),
             host: None,
@@ -476,9 +673,13 @@ impl Stage {
     }
 
     /// Launch every viewer on the stage's backend, connect the driver to
-    /// each, and wait until all have logged in and settled.
+    /// each, and wait until all have logged in and settled — on the fake
+    /// grid in its home region, on a live grid wherever the grid put them.
     async fn launch(&mut self, builder: &StageBuilder) -> Result<(), StageError> {
-        let start = StartLocation::region(self.home.clone(), builder.start);
+        let start = match &self.live {
+            Some(live) => live.start.clone(),
+            None => StartLocation::region(self.home.clone(), builder.start),
+        };
         match self.backend {
             Backend::InProcess => self.launch_in_process(builder, &start).await?,
             Backend::Process => self.launch_processes(builder, &start).await?,
@@ -489,16 +690,23 @@ impl Stage {
                 .driver
                 .clone()
                 .ok_or_else(|| StageError::UnknownViewer(viewer.label.clone()))?;
-            let home = self.home.clone();
+            let home = (!self.home.is_empty()).then(|| self.home.clone());
+            let settle = if self.on.is_live() {
+                LIVE_SETTLE
+            } else {
+                LOGIN
+            };
             let _task = arrivals.spawn(async move {
                 let arrived = async {
-                    let _held = driver
+                    let region = driver
                         .expect_state(Probe::Agent)
                         .at("/region/name")
-                        .timeout(LOGIN)
-                        .to_equal(json!(home))
-                        .await?;
-                    driver.wait_until_quiet(LOGIN).await
+                        .timeout(LOGIN);
+                    let _held = match home {
+                        Some(home) => region.to_equal(json!(home)).await?,
+                        None => region.to_be_present().await?,
+                    };
+                    driver.wait_until_quiet(settle).await
                 };
                 arrived.await.map_err(|source| StageError::Driver {
                     viewer: driver.label().to_owned(),
@@ -512,6 +720,70 @@ impl Stage {
                 Err(join) => std::panic::resume_unwind(join.into_panic()),
             }
         }
+        // A live grid's agents and region are known only now.
+        for viewer in &mut self.viewers {
+            if viewer.agent.is_some() && !self.home.is_empty() {
+                continue;
+            }
+            let Some(driver) = &viewer.driver else {
+                continue;
+            };
+            let readout = driver.agent().await.map_err(|source| StageError::Driver {
+                viewer: viewer.label.clone(),
+                source,
+            })?;
+            if viewer.agent.is_none() {
+                viewer.agent = readout.agent_id.map(AgentKey::from);
+            }
+            if self.home.is_empty()
+                && let Some(region) = readout.region.and_then(|region| region.name)
+            {
+                self.home = region;
+            }
+        }
+        Ok(())
+    }
+
+    /// Who viewer `index` (labelled `label`) logs in as: its account on a
+    /// live grid, else the stage account `Stage <label>`.
+    fn login_of(&self, index: usize, label: &str) -> Result<Login, StageError> {
+        match &self.live {
+            Some(live) => {
+                let account = live
+                    .accounts
+                    .get(index)
+                    .ok_or_else(|| StageError::NoAccount(label.to_owned()))?;
+                Ok(Login::Live(account.clone()))
+            }
+            None => Ok(Login::Stage {
+                agent: self.agent_of(label)?,
+                login_uri: self.fake()?.login_uri().to_string(),
+            }),
+        }
+    }
+
+    /// Wait out, then take, `login`'s turn under the shared login cooldown,
+    /// on a grid that has one.
+    async fn take_login_turn(&self, login: &Login) -> Result<(), StageError> {
+        let Login::Live(account) = login else {
+            return Ok(());
+        };
+        if !self.on.needs_cooldown() {
+            return Ok(());
+        }
+        let cooldown = LoginCooldown::shared()?;
+        let name = account.name();
+        let wait = cooldown.wait_time(&name);
+        if !wait.is_zero() {
+            tracing::info!(
+                "waiting {} s out the {} login cooldown of avatar {}",
+                wait.as_secs(),
+                self.on,
+                account.key
+            );
+            tokio::time::sleep(wait).await;
+        }
+        cooldown.stamp(&name)?;
         Ok(())
     }
 
@@ -522,47 +794,128 @@ impl Stage {
         start: &StartLocation,
     ) -> Result<(), StageError> {
         self.host = Some(InProcessHost::<ViewerApp>::start()?);
-        for label in &builder.labels {
-            let agent = self.agent_of(label)?;
-            let dir = self.dir.join(label);
-            let params = LoginParams {
-                login_uri: self.grid.login_uri(),
-                request: LoginRequest::new(
-                    FIRST_NAME,
-                    label,
-                    PASSWORD,
-                    start.clone(),
-                    "sl-e2e",
-                    "0.0",
+        for (index, label) in builder.labels.iter().enumerate() {
+            let login = self.login_of(index, label)?;
+            self.take_login_turn(&login).await?;
+            let (first, last, password, login_uri) = match &login {
+                Login::Live(account) => (
+                    account.avatar.first().to_owned(),
+                    account.avatar.last().to_owned(),
+                    account.avatar.password().expose().to_owned(),
+                    account.login_uri.clone(),
+                ),
+                Login::Stage { login_uri, .. } => (
+                    FIRST_NAME.to_owned(),
+                    label.clone(),
+                    PASSWORD.to_owned(),
+                    login_uri.clone(),
                 ),
             };
-            let log_label = builder.log_label(self.backend, label);
-            let state = dir.join("state");
-            let host = self
-                .host
-                .as_ref()
-                .ok_or(sl_viewer_automation::HostError::Stopped)?;
-            let (handle, link) = host
-                .host(label.clone(), move || {
-                    in_process_viewer(params, log_label, &state)
-                })
-                .await?;
+            let mut request =
+                LoginRequest::new(first, last, password, start.clone(), "sl-e2e", "0.0");
+            let dir = self.dir.join(label);
             self.viewers.push(StageViewer {
                 label: label.clone(),
-                agent,
+                account: login.account_name(label),
+                agent: login.agent(),
                 dir: dir.clone(),
                 driver: None,
-                run: ViewerRun::InProcess(handle),
+                run: ViewerRun::InProcess(None),
             });
-            let driver =
-                Viewer::over_link(link.requests, link.messages, driver_options(label, &dir))
-                    .await
-                    .map_err(|source| StageError::Driver {
+            // A grid that asks for a second factor ends the App with the
+            // challenge: answer it, and log in again with a new App.
+            loop {
+                let params = LoginParams {
+                    login_uri: login_uri.parse().map_err(|error| StageError::Login {
                         viewer: label.clone(),
-                        source,
+                        reason: format!("the login URI {login_uri}: {error}"),
+                    })?,
+                    request: request.clone(),
+                };
+                let log_label = builder.log_label(self.backend, label);
+                let state = dir.join("state");
+                let host = self
+                    .host
+                    .as_ref()
+                    .ok_or(sl_viewer_automation::HostError::Stopped)?;
+                let (handle, link) = host
+                    .host(label.clone(), move || {
+                        in_process_viewer(params, log_label, &state)
+                    })
+                    .await?;
+                let driver =
+                    Viewer::over_link(link.requests, link.messages, driver_options(label, &dir))
+                        .await
+                        .map_err(|source| StageError::Driver {
+                            viewer: label.clone(),
+                            source,
+                        })?;
+                if let Some(viewer) = self.viewers.last_mut() {
+                    viewer.run = ViewerRun::InProcess(Some(handle));
+                    viewer.driver = Some(driver.clone());
+                }
+                let logged_in = driver
+                    .expect_state(Probe::Agent)
+                    .at("/agent_id")
+                    .timeout(LOGIN)
+                    .to_be_present();
+                tokio::select! {
+                    logged_in = logged_in => {
+                        let _held = logged_in.map_err(|source| StageError::Driver {
+                            viewer: label.clone(),
+                            source,
+                        })?;
+                        break;
+                    }
+                    exited = host.exited(handle) => exited?,
+                }
+                let outcome = host
+                    .with_app(handle, |viewer| {
+                        viewer
+                            .app_mut()
+                            .world_mut()
+                            .remove_resource::<LoginOutcome>()
+                    })
+                    .await?
+                    .unwrap_or_default();
+                let challenge = match (outcome.challenge, outcome.rejected) {
+                    (Some(challenge), _) => challenge,
+                    (None, Some(rejected)) => {
+                        return Err(StageError::Login {
+                            viewer: label.clone(),
+                            reason: format!("{} ({})", rejected.reason, rejected.message),
+                        });
+                    }
+                    (None, None) => {
+                        return Err(StageError::Login {
+                            viewer: label.clone(),
+                            reason: "it exited before it logged in".to_owned(),
+                        });
+                    }
+                };
+                let Login::Live(account) = &login else {
+                    return Err(StageError::Login {
+                        viewer: label.clone(),
+                        reason: "the fake grid asked for a second factor".to_owned(),
+                    });
+                };
+                tracing::info!("viewer {label}: the grid asks for a second factor");
+                let avatar = account.avatar.clone();
+                let token = tokio::task::spawn_blocking(move || avatar.acquire_mfa())
+                    .await
+                    .unwrap_or_else(|join| std::panic::resume_unwind(join.into_panic()))
+                    .map_err(|error| StageError::Login {
+                        viewer: label.clone(),
+                        reason: error.to_string(),
+                    })?
+                    .ok_or_else(|| StageError::Login {
+                        viewer: label.clone(),
+                        reason: format!(
+                            "the grid asks for a second factor and avatar {} has no mfa_command",
+                            account.key
+                        ),
                     })?;
-            if let Some(viewer) = self.viewers.last_mut() {
-                viewer.driver = Some(driver);
+                request = request.with_mfa(token.expose(), challenge.mfa_hash);
             }
         }
         Ok(())
@@ -589,31 +942,34 @@ impl Stage {
         })?;
         let sockets = self.sockets.insert(sockets).clone();
         for (index, label) in builder.labels.iter().enumerate() {
-            let agent = self.agent_of(label)?;
+            let login = self.login_of(index, label)?;
             let dir = viewer_dir(&self.dir, label);
-            let credentials = dir.root.join("credentials.toml");
-            fs_err::write(
-                &credentials,
-                format!(
-                    "# Written by sl-e2e for one stage against a fake grid.\n\
-                     default_avatar = \"{AVATAR_KEY}\"\n\n[avatars.{AVATAR_KEY}]\nfirst = \
-                     \"{FIRST_NAME}\"\nlast = \"{label}\"\npassword = \"{PASSWORD}\"\nlogin_uri = \
-                     \"{uri}\"\n",
-                    uri = self.grid.login_uri()
+            // A live account's own file and key; a stage account's written
+            // here. The viewer answers a second-factor challenge itself.
+            let (credentials, avatar_key, login_uri) = match &login {
+                Login::Live(account) => (
+                    self.live
+                        .as_ref()
+                        .map(|live| live.file.clone())
+                        .ok_or_else(|| StageError::NoAccount(label.clone()))?,
+                    account.key.clone(),
+                    account.login_uri.clone(),
                 ),
-            )
-            .map_err(|source| StageError::Artifacts {
-                path: credentials.clone(),
-                source,
-            })?;
+                Login::Stage { login_uri, .. } => (
+                    write_stage_credentials(&dir, label, login_uri)?,
+                    AVATAR_KEY.to_owned(),
+                    login_uri.clone(),
+                ),
+            };
+            self.take_login_turn(&login).await?;
             let socket = sockets.join(format!("{index}.sock"));
             let launch = Launch::in_dir(label.clone(), &binary, &dir).args([
                 "--credentials".to_owned(),
                 credentials.display().to_string(),
                 "--avatar".to_owned(),
-                AVATAR_KEY.to_owned(),
+                avatar_key,
                 "--login-uri".to_owned(),
-                self.grid.login_uri().to_string(),
+                login_uri,
                 "--start".to_owned(),
                 start.to_wire_string(),
                 "--headless".to_owned(),
@@ -629,7 +985,8 @@ impl Stage {
             })?;
             self.viewers.push(StageViewer {
                 label: label.clone(),
-                agent,
+                account: login.account_name(label),
+                agent: login.agent(),
                 dir: dir.root.clone(),
                 driver: None,
                 run: ViewerRun::Process(Some(running)),
@@ -680,11 +1037,16 @@ impl Stage {
         }
     }
 
-    /// The agent of the account `Stage <label>`.
+    /// The agent of the fake grid's account `Stage <label>`.
     fn agent_of(&self, label: &str) -> Result<AgentKey, StageError> {
-        self.grid
+        self.fake()?
             .account_agent_id(FIRST_NAME, label)
             .ok_or_else(|| StageError::NoAccount(label.to_owned()))
+    }
+
+    /// The fake grid, or [`StageError::NoGridControl`] on a live one.
+    fn fake(&self) -> Result<&FakeGrid, StageError> {
+        self.grid.as_ref().ok_or(StageError::NoGridControl(self.on))
     }
 
     /// The test's name.
@@ -699,14 +1061,25 @@ impl Stage {
         self.backend
     }
 
-    /// The grid, to drive from the grid side: teleports, crossings, the
-    /// sessions in a region.
+    /// The grid the viewers are on.
     #[must_use]
-    pub const fn grid(&self) -> &FakeGrid {
-        &self.grid
+    pub const fn on_grid(&self) -> Grid {
+        self.on
     }
 
-    /// The region the viewers started in.
+    /// The grid, to drive from the grid side: teleports, crossings, the
+    /// sessions in a region — grid control, which a test that uses it
+    /// declares ([`Need::GridControl`]).
+    ///
+    /// # Errors
+    ///
+    /// [`StageError::NoGridControl`] on a live grid.
+    pub fn grid(&self) -> Result<&FakeGrid, StageError> {
+        self.fake()
+    }
+
+    /// The region the viewers started in: on a live grid, the one the first
+    /// viewer arrived in.
     #[must_use]
     pub fn home_region(&self) -> &str {
         &self.home
@@ -741,9 +1114,23 @@ impl Stage {
     ///
     /// # Errors
     ///
-    /// [`StageError::UnknownViewer`] for a label the stage was not given.
+    /// [`StageError::UnknownViewer`] for a label the stage was not given, and
+    /// [`StageError::NoAccount`] when its agent is not known.
     pub fn agent_id(&self, label: &str) -> Result<AgentKey, StageError> {
-        Ok(self.stage_viewer(label)?.agent)
+        self.stage_viewer(label)?
+            .agent
+            .ok_or_else(|| StageError::NoAccount(label.to_owned()))
+    }
+
+    /// The `First Last` name of the account viewer `label` is logged in as:
+    /// `Stage <label>` on the fake grid, the credentials file's avatar on a
+    /// live one — who other viewers hear it as.
+    ///
+    /// # Errors
+    ///
+    /// [`StageError::UnknownViewer`] for a label the stage was not given.
+    pub fn account_name(&self, label: &str) -> Result<&str, StageError> {
+        Ok(&self.stage_viewer(label)?.account)
     }
 
     /// Viewer `label`'s artifact directory: its log, its failure artifacts,
@@ -773,10 +1160,12 @@ impl Stage {
     ///
     /// # Errors
     ///
+    /// [`StageError::NoGridControl`] on a live grid,
     /// [`StageError::UnknownViewer`] for a label the stage was not given,
     /// [`StageError::Driver`] when its region cannot be read, and
     /// [`StageError::NoAccount`] when the grid holds no session of it there.
     pub async fn agent(&self, label: &str) -> Result<FakeAgent, StageError> {
+        let grid = self.fake()?;
         let viewer = self.viewer(label)?;
         let agent = self.agent_id(label)?;
         let readout = viewer.agent().await.map_err(|source| StageError::Driver {
@@ -787,8 +1176,7 @@ impl Stage {
             .region
             .and_then(|region| region.name)
             .unwrap_or_else(|| self.home.clone());
-        self.grid
-            .sessions_in(&region)
+        grid.sessions_in(&region)
             .await
             .into_iter()
             .find(|session| session.agent_id() == agent)
@@ -819,6 +1207,7 @@ impl Stage {
     ///
     /// # Errors
     ///
+    /// [`StageError::NoGridControl`] on a live grid, which sends no markers;
     /// [`StageError::UnknownViewer`], or [`StageError::Driver`] when it does
     /// not arrive.
     pub async fn wait_marker(
@@ -827,6 +1216,7 @@ impl Stage {
         name: &str,
         timeout: Duration,
     ) -> Result<(), StageError> {
+        let _grid = self.fake()?;
         let viewer = self.viewer(label)?;
         let part = format!(
             "method: {:?}, params: [{name:?}]",
@@ -844,8 +1234,8 @@ impl Stage {
     }
 
     /// Take the stage down: ask every viewer to log out and wait until each
-    /// has exited, then check that the grid holds no session, then stop the
-    /// grid. Each step runs even when an earlier one failed; the first
+    /// has exited, then — on the fake grid — check that the grid holds no
+    /// session, and stop it. Each step runs even when an earlier one failed; the first
     /// failure is returned and the others logged.
     async fn shutdown(mut self) -> Result<(), StageError> {
         let mut problems = Vec::new();
@@ -857,8 +1247,8 @@ impl Stage {
                 .viewers
                 .iter()
                 .filter_map(|viewer| match viewer.run {
-                    ViewerRun::InProcess(handle) => Some((viewer.label.clone(), handle)),
-                    ViewerRun::Process(_) => None,
+                    ViewerRun::InProcess(Some(handle)) => Some((viewer.label.clone(), handle)),
+                    ViewerRun::InProcess(None) | ViewerRun::Process(_) => None,
                 })
                 .collect();
             for (label, handle) in &handles {
@@ -936,22 +1326,24 @@ impl Stage {
                 }
             }
         }
-        let mut stranded = Vec::new();
-        for region in self.grid.region_names() {
-            for session in self.grid.sessions_in(&region).await {
-                let agent = session.agent_id();
-                let who = self
-                    .viewers
-                    .iter()
-                    .find(|viewer| viewer.agent == agent)
-                    .map_or_else(|| format!("{agent:?}"), |viewer| viewer.label.clone());
-                stranded.push(format!("{who} in {region}"));
+        if let Some(grid) = &self.grid {
+            let mut stranded = Vec::new();
+            for region in grid.region_names() {
+                for session in grid.sessions_in(&region).await {
+                    let agent = session.agent_id();
+                    let who = self
+                        .viewers
+                        .iter()
+                        .find(|viewer| viewer.agent == Some(agent))
+                        .map_or_else(|| format!("{agent:?}"), |viewer| viewer.label.clone());
+                    stranded.push(format!("{who} in {region}"));
+                }
             }
+            if !stranded.is_empty() {
+                problems.push(StageError::Stranded(stranded));
+            }
+            grid.shutdown();
         }
-        if !stranded.is_empty() {
-            problems.push(StageError::Stranded(stranded));
-        }
-        self.grid.shutdown();
         if let Some(sockets) = &self.sockets
             && let Err(error) = fs_err::remove_dir_all(sockets)
         {
@@ -1000,4 +1392,58 @@ fn in_process_viewer(
     viewer.app_mut().insert_resource(TerminationFlag::own());
     viewer.finish();
     Ok(viewer)
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use sl_fake_grid::RegionConfig;
+
+    use super::StageBuilder;
+    use crate::error::{BodyError, StageError};
+    use crate::grid::Grid;
+    use crate::need::Need;
+
+    /// A test that needs grid control skips on a live grid, saying why,
+    /// before it reads a credentials file or logs anything in: its body never
+    /// runs. On the fake grid it would run.
+    #[test]
+    fn a_test_needing_grid_control_skips_on_a_live_grid() -> Result<(), StageError> {
+        let builder = StageBuilder::new("needs_grid_control")
+            .viewer("Alpha")
+            .needs(Need::GridControl);
+        for live in [Grid::OpenSim, Grid::Aditi] {
+            let on_live = builder.clone().on_grid(live);
+            assert_eq!(
+                on_live.skip_reason()?.as_deref(),
+                Some("it needs grid control (the fake grid's handle)")
+            );
+            on_live.run(async |_stage: &super::Stage| -> Result<(), BodyError> {
+                Err("the body ran on a live grid".into())
+            })?;
+        }
+        assert_eq!(builder.on_grid(Grid::Fake).skip_reason()?, None);
+        Ok(())
+    }
+
+    /// Naming a region dictates the grid, which only the fake grid obeys; the
+    /// skip names it once however many regions are named.
+    #[test]
+    fn naming_regions_dictates_the_grid() -> Result<(), StageError> {
+        let builder = StageBuilder::new("names_regions")
+            .viewer("Alpha")
+            .region(RegionConfig::default())
+            .region(RegionConfig::default())
+            .configure_grid(|grid| grid);
+        assert_eq!(
+            builder
+                .clone()
+                .on_grid(Grid::OpenSim)
+                .skip_reason()?
+                .as_deref(),
+            Some("it needs a grid it configures itself (it names its regions)")
+        );
+        assert_eq!(builder.on_grid(Grid::Fake).skip_reason()?, None);
+        Ok(())
+    }
 }

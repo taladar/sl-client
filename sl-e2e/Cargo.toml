@@ -28,6 +28,9 @@ sl-client-bevy = { workspace = true }
 sl-client-bevy-viewer = { path = "../sl-client-bevy-viewer", version = "0.1.0" }
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
 sl-proto = { workspace = true }
+# A live grid's accounts (its credentials file), their second factor, and the
+# login cooldown every unattended harness shares.
+sl-repl = { workspace = true }
 # The in-process host the in-process backend steps its viewers on.
 sl-viewer-automation = { workspace = true }
 sl-viewer-driver = { workspace = true }

@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::backend::Backend;
+use crate::grid::Grid;
 
 /// What a test body returns when it fails: any error, boxed.
 pub type BodyError = Box<dyn core::error::Error + Send + Sync>;
@@ -14,6 +15,28 @@ pub enum StageError {
     /// `SL_E2E_BACKEND` names no backend.
     #[error("SL_E2E_BACKEND={0:?} is not one of process, in-process, both")]
     BackendVariable(String),
+    /// `SL_E2E_GRID` names no grid.
+    #[error("SL_E2E_GRID={0:?} is not one of fake, opensim, aditi")]
+    GridVariable(String),
+    /// A live grid's accounts could not be read from its credentials file.
+    #[error("the live grid's accounts: {0}")]
+    Credentials(String),
+    /// The shared login cooldown could not be kept.
+    #[error("the login cooldown: {0}")]
+    Cooldown(#[from] sl_repl::CooldownError),
+    /// The body asked for the grid-control handle on a live grid — which a
+    /// test that needs it declares, and is skipped for.
+    #[error("the {0} grid gives no grid control: declare Need::GridControl to skip there")]
+    NoGridControl(Grid),
+    /// A live grid refused an in-process viewer's login, or asked it for a
+    /// second factor it could not give.
+    #[error("viewer {viewer} could not log in: {reason}")]
+    Login {
+        /// The viewer.
+        viewer: String,
+        /// Why.
+        reason: String,
+    },
     /// A viewer label is not usable as an account's last name.
     #[error("viewer label {0:?} must be non-empty ASCII letters and digits, and unique")]
     Label(String),

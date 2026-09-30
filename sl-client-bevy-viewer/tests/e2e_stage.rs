@@ -11,7 +11,7 @@ mod test {
     use std::sync::{Arc, Mutex, PoisonError};
 
     use pretty_assertions::assert_eq;
-    use sl_e2e::{Backend, BodyError, Stage, StageBuilder, StageError};
+    use sl_e2e::{Backend, BodyError, Need, Stage, StageBuilder, StageError};
 
     /// How long a marker or a floater may take once both viewers are in.
     const WAIT: Duration = Duration::from_secs(60);
@@ -33,32 +33,34 @@ mod test {
     /// shut: the viewers are two, not one seen twice.
     #[test]
     fn one_viewer_opens_a_floater_while_the_other_waits_for_a_marker() -> Result<(), StageError> {
-        stage("floater_and_marker", &["Alpha", "Beta"]).run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
-            let beta = stage.viewer("Beta")?;
-            let waiting = stage.wait_marker("Beta", "inventory-open", WAIT);
-            let opening = async {
-                let ui = alpha.ui();
-                let _clicked = ui
-                    .test_id("bottom-toolbar-button:toggle-inventory")
-                    .click()
-                    .await?;
-                let _shown = alpha
-                    .expect(&ui.window("inventory"))
-                    .to_be_visible()
-                    .await?;
-                stage.mark("Beta", "inventory-open").await?;
-                Ok::<_, BodyError>(())
-            };
-            let (waited, opened) = tokio::join!(waiting, opening);
-            opened?;
-            waited?;
-            assert!(
-                !beta.ui().window("inventory").is_visible().await?,
-                "Beta's inventory opened with Alpha's"
-            );
-            Ok(())
-        })
+        stage("floater_and_marker", &["Alpha", "Beta"])
+            .needs(Need::GridControl)
+            .run(async |stage: &Stage| {
+                let alpha = stage.viewer("Alpha")?;
+                let beta = stage.viewer("Beta")?;
+                let waiting = stage.wait_marker("Beta", "inventory-open", WAIT);
+                let opening = async {
+                    let ui = alpha.ui();
+                    let _clicked = ui
+                        .test_id("bottom-toolbar-button:toggle-inventory")
+                        .click()
+                        .await?;
+                    let _shown = alpha
+                        .expect(&ui.window("inventory"))
+                        .to_be_visible()
+                        .await?;
+                    stage.mark("Beta", "inventory-open").await?;
+                    Ok::<_, BodyError>(())
+                };
+                let (waited, opened) = tokio::join!(waiting, opening);
+                opened?;
+                waited?;
+                assert!(
+                    !beta.ui().window("inventory").is_visible().await?,
+                    "Beta's inventory opened with Alpha's"
+                );
+                Ok(())
+            })
     }
 
     /// The artifact root of a test that reads its own artifacts.
@@ -124,12 +126,14 @@ mod test {
 
     /// The teardown has teeth: a viewer process killed outright never logs
     /// out, and the stage says so — the viewer did not quit when asked, and
-    /// the grid still holds its session.
+    /// the grid still holds its session. Only the fake grid's sessions can be
+    /// read, and a live grid's must never be stranded on purpose.
     #[test]
     fn a_killed_viewer_fails_the_teardown() -> Result<(), BodyError> {
         let root = scratch("killed");
         let outcome = stage("killed_viewer", &["Delta"])
             .backends([Backend::Process])
+            .needs(Need::GridControl)
             .artifacts(&root)
             .run(async |stage: &Stage| {
                 let pid = stage.pid("Delta")?.ok_or("no process")?;
@@ -139,7 +143,7 @@ mod test {
                 assert!(killed.success(), "kill -KILL {pid} failed");
                 Ok(())
             });
-        let grid_log = root.join("killed_viewer/process/grid.log");
+        let grid_log = root.join("killed_viewer/fake/process/grid.log");
         match outcome {
             Err(StageError::NoLogout { viewer, reason }) => {
                 assert_eq!(viewer, "Delta");
@@ -151,11 +155,14 @@ mod test {
                     grid_log.display()
                 );
             }
-            // No GPU adapter: the stage skipped.
+            // No GPU adapter, or a live grid: the stage skipped.
             Ok(()) if !Path::new(&grid_log).exists() => {}
             other => return Err(format!("the killed viewer passed the teardown: {other:?}").into()),
         }
-        fs_err::remove_dir_all(&root)?;
+        // A skipped stage made no artifact directory.
+        if root.exists() {
+            fs_err::remove_dir_all(&root)?;
+        }
         Ok(())
     }
 }

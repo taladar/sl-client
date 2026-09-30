@@ -822,8 +822,11 @@ fn parse_sl_vec3(value: &str) -> Result<Vec3, String> {
     Ok(Vec3::new(x, z, -y))
 }
 
-/// Map a grid nickname to its XML-RPC login URI, or `None` if unknown.
-fn grid_login_uri(grid: &str) -> Option<&'static str> {
+/// Map a grid nickname to its XML-RPC login URI, or `None` if unknown: what
+/// `--grid` and a credentials entry's `grid` resolve through, and what the
+/// end-to-end stage resolves a live grid's avatars through.
+#[must_use]
+pub fn grid_login_uri(grid: &str) -> Option<&'static str> {
     match grid.to_ascii_lowercase().as_str() {
         "agni" | "secondlife" | "sl" => Some("https://login.agni.lindenlab.com/cgi-bin/login.cgi"),
         "aditi" | "beta" => Some("https://login.aditi.lindenlab.com/cgi-bin/login.cgi"),

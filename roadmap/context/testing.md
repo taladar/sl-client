@@ -30,18 +30,22 @@ fake grid where content must be repeatable.
 | B — baselines | recorded derived facts, opt-in | "has this moved by accident" | ms |
 | E — end-to-end | `sl-e2e` `Stage`: fake grid + N whole viewers (process or in-process), driven by `sl-viewer-driver` | what only the whole app, or several of them, can break | tens of seconds per backend |
 
-Tier I is the `SlEvent`-in / `SlCommand`-out seam: everything downstream
-of the network reads `SlEvent(SessionEvent)` messages and everything
-outbound is a `SlCommand`, so a fixture world needs no socket. Tier F is
-for what only grid *sequencing* can break: arrival ordering, the CAPS
-fetch paths, teleport / crossing hand-overs, `KillObject` timing,
-multi-region offsets, in-flight asset leaks, NPC appearance delivery.
-Tier E is for what needs the whole assembled viewer — its real input path,
-its binary's signal handling and command line, its automation endpoint — or
-two viewers watching each other. Its tests live in
+Tier I is the `SlEvent`-in / `SlCommand`-out seam: everything downstream of the
+network reads `SlEvent(SessionEvent)` messages and everything outbound is a
+`SlCommand`, so a fixture world needs no socket. Tier F is for what only grid
+*sequencing* can break: arrival ordering, the CAPS fetch paths, teleport /
+crossing hand-overs, `KillObject` timing, multi-region offsets, in-flight asset
+leaks, NPC appearance delivery. Tier E is for what needs the whole assembled
+viewer — its real input path, its binary's signal handling and command line, its
+automation endpoint — or two viewers watching each other. Its tests live in
 `sl-client-bevy-viewer/tests/e2e_*.rs` and run once per backend
 (`SL_E2E_BACKEND=process|in-process|both`, default both) in nextest's `e2e`
-group, one at a time.
+group, one at a time. The same tests run against a live grid with
+`SL_E2E_GRID=opensim|aditi` under `cargo nextest run --profile live`, which
+never kills a slow test (a killed test strands its avatars on the grid) — never
+in the commit hook, which leaves it unset: the fake grid; a test that needs the
+fake grid's control handle or scene says so (`Need`) and skips there with its
+reason.
 
 ## Shared foundations
 

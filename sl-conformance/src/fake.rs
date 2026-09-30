@@ -366,7 +366,8 @@ impl FakeGridHarness {
                 ACCOUNTS.len()
             )));
         }
-        let state_dir = std::env::temp_dir();
+        // Never consulted: the fake grid needs no cooldown.
+        let cooldown = sl_repl::LoginCooldown::under(std::env::temp_dir());
         let mut sessions: Vec<Session> = Vec::new();
         let mut control: Option<FakeControl> = None;
         for (label, _first_name, _agent_id) in ACCOUNTS.iter().take(wanted) {
@@ -378,7 +379,7 @@ impl FakeGridHarness {
                     channel: CHANNEL,
                     version: clap::crate_version!(),
                     start_location: test.start_location(self.flavour),
-                    state_dir: &state_dir,
+                    cooldown: &cooldown,
                     // Nothing to force: the fake grid rate-limits nothing.
                     force: false,
                     cache_dir: None,

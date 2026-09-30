@@ -421,6 +421,11 @@ mod tests {
             Some(0),
             "the scene source is registered, and the fixture has nothing in flight"
         );
+        assert!(
+            before.outstanding_by.is_empty(),
+            "no bucket has work: {:?}",
+            before.outstanding_by
+        );
         assert_eq!(
             before.waiting_pipelines,
             Some(0),

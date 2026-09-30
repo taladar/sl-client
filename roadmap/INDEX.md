@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 122 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 53 |
 | in-progress | 21 |
 | bugs | 16 |
-| done | 1282 |
+| done | 1283 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -310,7 +310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -1019,8 +1019,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-e2e-live-grids`](ready/test-e2e-live-grids.md) — Run end-to-end tests
-  against the local OpenSim and aditi (blocked by `test-e2e-stage` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1329,7 +1327,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1282)
+## done (1283)
 
 ### protocol
 
@@ -3753,6 +3751,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GetDisplayNames
 - [`test-draw-distance`](done/test-draw-distance-set-draw-distance-confirm-no-error-and-any-echoed-state.md)
   — set draw distance; confirm no error and any echoed state
+- [`test-e2e-live-grids`](done/test-e2e-live-grids.md) — Run end-to-end tests
+  against the local OpenSim and aditi (blocked by `test-e2e-stage` (done))
 - [`test-e2e-pilot-suite`](done/test-e2e-pilot-suite.md) — The first end-to-end
   tests — one viewer, two viewers, two regions (blocked by `test-e2e-stage`
   (done))

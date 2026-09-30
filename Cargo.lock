@@ -8735,6 +8735,7 @@ dependencies = [
  "sl-client-bevy-viewer",
  "sl-fake-grid",
  "sl-proto",
+ "sl-repl",
  "sl-viewer-automation",
  "sl-viewer-driver",
  "sl-viewer-launch",
@@ -9022,11 +9023,13 @@ name = "sl-repl"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "directories",
  "fs-err",
  "pretty_assertions",
  "serde",
  "sl-proto",
  "thiserror 2.0.19",
+ "time",
  "toml",
  "tracing",
  "url",

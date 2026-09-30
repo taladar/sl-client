@@ -72,40 +72,89 @@ impl SceneQuiescence<'_, '_> {
     /// Everything still in flight or queued, summed across the stores.
     #[must_use]
     pub fn outstanding(&self) -> usize {
+        self.breakdown()
+            .into_iter()
+            .map(|(_bucket, count)| count)
+            .fold(0_usize, usize::saturating_add)
+    }
+
+    /// The outstanding work bucket by bucket — `<store>.<stage>` for an asset
+    /// store (`textures.downloading`, `meshes.gate_waiting`, …) and the
+    /// queue's name for a build queue — leaving out the empty ones: what a
+    /// wait that never goes quiet reports, so it says what is stuck.
+    #[must_use]
+    pub fn breakdown(&self) -> Vec<(String, usize)> {
         let stores = [
-            self.textures.as_deref().map(|store| {
-                store_outstanding(&store.stats(), &store.gate_stats(), store.deferred_count())
-            }),
-            self.meshes.as_deref().map(|store| {
-                store_outstanding(&store.stats(), &store.gate_stats(), store.deferred_count())
-            }),
-            self.wearables.as_deref().map(|store| {
-                store_outstanding(&store.stats(), &store.gate_stats(), store.deferred_count())
-            }),
-            self.animations.as_deref().map(|store| {
-                store_outstanding(&store.stats(), &store.gate_stats(), store.deferred_count())
-            }),
-            self.environment_assets.as_deref().map(|store| {
-                store_outstanding(&store.stats(), &store.gate_stats(), store.deferred_count())
-            }),
+            (
+                "textures",
+                self.textures.as_deref().map(|store| {
+                    store_buckets(&store.stats(), &store.gate_stats(), store.deferred_count())
+                }),
+            ),
+            (
+                "meshes",
+                self.meshes.as_deref().map(|store| {
+                    store_buckets(&store.stats(), &store.gate_stats(), store.deferred_count())
+                }),
+            ),
+            (
+                "wearables",
+                self.wearables.as_deref().map(|store| {
+                    store_buckets(&store.stats(), &store.gate_stats(), store.deferred_count())
+                }),
+            ),
+            (
+                "animations",
+                self.animations.as_deref().map(|store| {
+                    store_buckets(&store.stats(), &store.gate_stats(), store.deferred_count())
+                }),
+            ),
+            (
+                "environment_assets",
+                self.environment_assets.as_deref().map(|store| {
+                    store_buckets(&store.stats(), &store.gate_stats(), store.deferred_count())
+                }),
+            ),
         ];
         let queues = [
-            self.patches.as_deref().map(PendingPatchRebuilds::len),
-            self.pending_meshes
-                .as_deref()
-                .map(PendingDecodedMeshes::len),
-            self.pending_sculpts
-                .as_deref()
-                .map(PendingDecodedSculpts::len),
-            self.pending_objects
-                .as_deref()
-                .map(PendingObjectEvents::len),
+            (
+                "terrain_patches",
+                self.patches.as_deref().map(PendingPatchRebuilds::len),
+            ),
+            (
+                "decoded_meshes",
+                self.pending_meshes
+                    .as_deref()
+                    .map(PendingDecodedMeshes::len),
+            ),
+            (
+                "decoded_sculpts",
+                self.pending_sculpts
+                    .as_deref()
+                    .map(PendingDecodedSculpts::len),
+            ),
+            (
+                "object_events",
+                self.pending_objects
+                    .as_deref()
+                    .map(PendingObjectEvents::len),
+            ),
         ];
         stores
             .into_iter()
-            .chain(queues)
-            .flatten()
-            .fold(0_usize, usize::saturating_add)
+            .flat_map(|(store, buckets)| {
+                buckets
+                    .into_iter()
+                    .flatten()
+                    .map(move |(stage, count)| (format!("{store}.{stage}"), count))
+            })
+            .chain(
+                queues
+                    .into_iter()
+                    .filter_map(|(queue, count)| count.map(|count| (queue.to_owned(), count))),
+            )
+            .filter(|(_bucket, count)| *count > 0)
+            .collect()
     }
 
     /// Whether the region is up and nothing is outstanding.
@@ -115,20 +164,23 @@ impl SceneQuiescence<'_, '_> {
     }
 }
 
-/// One store's outstanding work: every entry not yet ready or failed, every
-/// gate slot in use or waiting, and the fetches parked outside its accounting.
-fn store_outstanding(stats: &StoreStats, gate: &GateStats, deferred: usize) -> usize {
+/// One store's outstanding work by stage: every entry not yet ready or
+/// failed, every gate slot in use or waiting, and the fetches parked outside
+/// its accounting.
+const fn store_buckets(
+    stats: &StoreStats,
+    gate: &GateStats,
+    deferred: usize,
+) -> [(&'static str, usize); 7] {
     [
-        stats.queued,
-        stats.reading_disk,
-        stats.downloading,
-        stats.decoding,
-        gate.in_flight,
-        gate.waiting,
-        deferred,
+        ("queued", stats.queued),
+        ("reading_disk", stats.reading_disk),
+        ("downloading", stats.downloading),
+        ("decoding", stats.decoding),
+        ("gate_in_flight", gate.in_flight),
+        ("gate_waiting", gate.waiting),
+        ("deferred", deferred),
     ]
-    .into_iter()
-    .fold(0_usize, usize::saturating_add)
 }
 
 #[cfg(test)]
@@ -172,11 +224,18 @@ mod tests {
         Ok(())
     }
 
-    /// Every in-flight bucket counts as outstanding work, and the finished
-    /// ones do not.
+    /// Every in-flight bucket counts as outstanding work, under its own
+    /// name, and the finished ones do not.
     #[test]
     fn only_unfinished_work_counts_as_outstanding() {
         use sl_client_bevy::{GateStats, StoreStats};
+
+        let outstanding = |stats: &StoreStats, gate: &GateStats, deferred: usize| {
+            super::store_buckets(stats, gate, deferred)
+                .into_iter()
+                .filter(|(_stage, count)| *count > 0)
+                .collect::<Vec<_>>()
+        };
 
         let mut stats = StoreStats {
             ready: 100,
@@ -189,12 +248,22 @@ mod tests {
             capacity: 8,
             ..GateStats::default()
         };
-        assert_eq!(super::store_outstanding(&stats, &gate, 0), 0);
+        assert_eq!(outstanding(&stats, &gate, 0), []);
         stats.queued = 2;
         stats.downloading = 1;
         stats.decoding = 1;
         gate.in_flight = 1;
         gate.waiting = 4;
-        assert_eq!(super::store_outstanding(&stats, &gate, 3), 12);
+        assert_eq!(
+            outstanding(&stats, &gate, 3),
+            [
+                ("queued", 2),
+                ("downloading", 1),
+                ("decoding", 1),
+                ("gate_in_flight", 1),
+                ("gate_waiting", 4),
+                ("deferred", 3)
+            ]
+        );
     }
 }

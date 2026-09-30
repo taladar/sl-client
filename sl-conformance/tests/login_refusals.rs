@@ -446,7 +446,7 @@ mod test {
             channel: CHANNEL,
             version: "0.0",
             start_location: "last",
-            state_dir: &std::env::temp_dir(),
+            cooldown: &sl_repl::LoginCooldown::under(std::env::temp_dir()),
             force: false,
             cache_dir: None,
         })

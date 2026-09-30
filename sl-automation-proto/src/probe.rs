@@ -6,6 +6,7 @@
 //! Every readout is read from a model the viewer already keeps, never scraped
 //! from the widgets that draw it.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -422,7 +423,7 @@ pub struct DiagnosticsReadout {
 
 /// Whether the viewer has settled: everything the scene asked for has arrived
 /// and every render pipeline is ready.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct QuiescenceReadout {
     /// Whether a region handshake completed — quiet means nothing before it.
     pub region_up: bool,
@@ -430,6 +431,11 @@ pub struct QuiescenceReadout {
     /// store; absent in a viewer with no asset stores.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outstanding: Option<u64>,
+    /// The outstanding work by bucket — `<store>.<stage>` for an asset store
+    /// (`textures.downloading`), the queue's name for a build queue — the
+    /// empty ones left out: what a wait that never goes quiet reports.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub outstanding_by: BTreeMap<String, u64>,
     /// Render pipelines queued or compiling; absent in a viewer that does not
     /// render.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -666,5 +672,29 @@ mod tests {
         assert!(!readout.is_quiet());
         readout.waiting_pipelines = Some(0);
         assert!(readout.is_quiet());
+    }
+
+    /// The breakdown travels with the total, and an empty one is left out of
+    /// the JSON.
+    #[test]
+    fn the_outstanding_breakdown_round_trips() -> Result<(), serde_json::Error> {
+        let quiet = QuiescenceReadout {
+            region_up: true,
+            ..QuiescenceReadout::default()
+        };
+        assert_eq!(serde_json::to_string(&quiet)?, r#"{"region_up":true}"#);
+        let busy = QuiescenceReadout {
+            region_up: true,
+            outstanding: Some(3),
+            outstanding_by: [("textures.downloading".to_owned(), 3)].into(),
+            waiting_pipelines: Some(0),
+        };
+        let json = serde_json::to_string(&busy)?;
+        assert!(
+            json.contains(r#""outstanding_by":{"textures.downloading":3}"#),
+            "{json}"
+        );
+        assert_eq!(serde_json::from_str::<QuiescenceReadout>(&json)?, busy);
+        Ok(())
     }
 }

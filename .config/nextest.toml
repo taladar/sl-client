@@ -30,3 +30,14 @@ slow-timeout = { period = "120s", terminate-after = 3 }
 filter = "binary(/^e2e_/)"
 test-group = "e2e"
 slow-timeout = { period = "180s", terminate-after = 4 }
+
+# The end-to-end tier against a live grid (`SL_E2E_GRID=opensim|aditi`): run
+# with `--profile live`. A live login, a settle behind a flaky asset service
+# and aditi's two-minute login cooldown between the backends outlast the
+# default profile's kill, and a killed test strands its avatars' sessions on
+# the grid — so nothing here is terminated, only reported slow.
+[profile.live]
+[[profile.live.overrides]]
+filter = "binary(/^e2e_/)"
+test-group = "e2e"
+slow-timeout = { period = "300s" }

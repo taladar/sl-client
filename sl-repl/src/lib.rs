@@ -11,6 +11,8 @@
 //! - [`auth`] — TOML credentials, the redacting [`Secret`] newtype, and
 //!   wall-clock-aligned MFA-token acquisition ([`Credentials`],
 //!   [`acquire_mfa_token`]).
+//! - [`cooldown`] — the per-avatar login cooldown every unattended harness
+//!   shares on a rate-limited grid ([`LoginCooldown`]).
 //! - [`parse`] — the line classifier ([`parse_line`]).
 //! - [`args`] — the tokenizer and typed argument accessors ([`Args`]).
 //! - [`meta`] — REPL control lines ([`MetaCommand`]).
@@ -28,6 +30,7 @@ pub mod args;
 pub mod auth;
 pub mod chat_log_args;
 pub mod context;
+pub mod cooldown;
 pub mod error;
 pub mod format;
 pub mod meta;
@@ -40,6 +43,7 @@ pub use args::Args;
 pub use auth::{AuthError, Avatar, Credentials, Secret, acquire_mfa_token};
 pub use chat_log_args::ChatLogArgs;
 pub use context::{NoContext, ReplContext, SessionContext};
+pub use cooldown::{ADITI_LOGIN_COOLDOWN, CooldownError, LoginCooldown};
 pub use error::ReplError;
 pub use format::{format_command, format_diagnostic, format_event, hexdump};
 pub use meta::MetaCommand;

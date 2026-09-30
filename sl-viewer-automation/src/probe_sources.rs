@@ -13,6 +13,8 @@
 //! A reader is a plain function over the world, called only when a probe is
 //! asked for, so a registered source costs nothing while idle.
 
+use std::collections::BTreeMap;
+
 use bevy::prelude::*;
 use sl_automation_proto::{ConversationReadout, TeleportReadout};
 use sl_viewer_notifications::{NotificationId, ToastButton};
@@ -36,10 +38,14 @@ pub struct ProbeSources {
     pub teleport: Option<fn(&mut World) -> Option<TeleportReadout>>,
     /// The own L$ balance, once the grid said it.
     pub balance: Option<fn(&mut World) -> Option<i64>>,
-    /// The scene's outstanding work: assets in flight or queued, and decoded
-    /// work not yet built, across every store.
-    pub scene_work: Option<fn(&mut World) -> u64>,
+    /// The scene's outstanding work by bucket: assets in flight or queued,
+    /// and decoded work not yet built, across every store — the empty
+    /// buckets left out.
+    pub scene_work: Option<SceneWorkReader>,
 }
+
+/// Reads the scene's outstanding work by bucket.
+pub type SceneWorkReader = fn(&mut World) -> BTreeMap<String, u64>;
 
 impl ProbeSources {
     /// The registered sources of `world`, or none when nothing registered any.

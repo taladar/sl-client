@@ -230,8 +230,9 @@ impl StateWait {
         match &self.condition {
             StateCondition::Quiet => {
                 let readout = read_quiescence(world);
+                let quiet = readout.is_quiet();
                 let observed = StateObservation::Quiet { readout };
-                Ok(self.judge(observed, readout.is_quiet()))
+                Ok(self.judge(observed, quiet))
             }
             StateCondition::Probe {
                 probe,

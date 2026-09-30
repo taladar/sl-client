@@ -311,11 +311,15 @@ pub fn read_quiescence(world: &mut World) -> QuiescenceReadout {
         .iter(world)
         .next()
         .is_some();
+    let outstanding_by = ProbeSources::of(world)
+        .scene_work
+        .map(|reader| reader(world));
     QuiescenceReadout {
         region_up,
-        outstanding: ProbeSources::of(world)
-            .scene_work
-            .map(|reader| reader(world)),
+        outstanding: outstanding_by
+            .as_ref()
+            .map(|buckets| buckets.values().copied().fold(0_u64, u64::saturating_add)),
+        outstanding_by: outstanding_by.unwrap_or_default(),
         waiting_pipelines: world
             .get_resource::<PipelineStatus>()
             .map(PipelineStatus::waiting),

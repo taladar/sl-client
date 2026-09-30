@@ -16,7 +16,7 @@ use sl_conformance::grid::Grid;
 use sl_conformance::record::{Outcome, Record, Run};
 use sl_conformance::registry::{GridTest, find, registry};
 use sl_conformance::{gitinfo, isolate, record};
-use sl_repl::{Avatar, Credentials};
+use sl_repl::{Avatar, Credentials, LoginCooldown};
 use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
@@ -261,16 +261,18 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     let records_dir = repo_root.join("records");
     let version = clap::crate_version!();
 
-    // Per-avatar aditi cooldown (no guard on the local OpenSim grid).
+    // Per-avatar aditi cooldown (no guard on the local OpenSim grid), shared
+    // with every other unattended harness.
+    let cooldown = LoginCooldown::shared().map_err(|error| Error::Test(error.to_string()))?;
     if args.grid.needs_cooldown() {
-        context::enforce_cooldown(&state_dir, &avatar_label(primary), args.force)
+        context::enforce_cooldown(&cooldown, &avatar_label(primary), args.force)
             .map_err(|error| Error::Test(error.to_string()))?;
         if let Some(secondary) = secondary {
-            context::enforce_cooldown(&state_dir, &avatar_label(secondary), args.force)
+            context::enforce_cooldown(&cooldown, &avatar_label(secondary), args.force)
                 .map_err(|error| Error::Test(error.to_string()))?;
         }
         if let Some(tertiary) = tertiary {
-            context::enforce_cooldown(&state_dir, &avatar_label(tertiary), args.force)
+            context::enforce_cooldown(&cooldown, &avatar_label(tertiary), args.force)
                 .map_err(|error| Error::Test(error.to_string()))?;
         }
     }
@@ -311,7 +313,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         channel: CHANNEL,
         version,
         start_location,
-        state_dir: &state_dir,
+        cooldown: &cooldown,
         force: args.force,
         cache_dir: primary_cache_dir,
     })
@@ -325,7 +327,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 channel: CHANNEL,
                 version,
                 start_location,
-                state_dir: &state_dir,
+                cooldown: &cooldown,
                 force: args.force,
                 cache_dir: None,
             })
@@ -342,7 +344,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 channel: CHANNEL,
                 version,
                 start_location,
-                state_dir: &state_dir,
+                cooldown: &cooldown,
                 force: args.force,
                 cache_dir: None,
             })

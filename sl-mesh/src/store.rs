@@ -258,16 +258,23 @@ impl MeshStore {
         }
         let guard = entry.write_lock.lock().await;
         if entry.skin().is_none() {
-            self.ensure_header(&entry).await?;
-            let header = entry.header().ok_or(MeshError::NotAMesh)?;
-            if let Some(block) = header.skin {
-                let (start, end) = block_range(&entry, block);
-                let compressed = self.fetch_block(&entry, start, end, FLAG_SKIN).await?;
-                let skin = self
-                    .run_decode(move || decode::decode_skin(&compressed))
-                    .await?;
-                entry.skin.store(Some(Arc::new(skin)));
+            let before = entry.progress();
+            let loaded = async {
+                self.ensure_header(&entry).await?;
+                let header = entry.header().ok_or(MeshError::NotAMesh)?;
+                if let Some(block) = header.skin {
+                    let (start, end) = block_range(&entry, block);
+                    let compressed = self.fetch_block(&entry, start, end, FLAG_SKIN).await?;
+                    let skin = self
+                        .run_decode(move || decode::decode_skin(&compressed))
+                        .await?;
+                    entry.skin.store(Some(Arc::new(skin)));
+                }
+                Ok::<(), MeshError>(())
             }
+            .await;
+            settle(&entry, before);
+            loaded?;
         }
         drop(guard);
         Ok(entry)
@@ -287,15 +294,22 @@ impl MeshStore {
         }
         let guard = entry.write_lock.lock().await;
         if entry.physics().is_none() {
-            self.ensure_header(&entry).await?;
-            let header = entry.header().ok_or(MeshError::NotAMesh)?;
-            let convex = self.decode_physics_convex(&entry, header).await?;
-            let mesh = self.decode_physics_mesh(&entry, header).await?;
-            if convex.is_some() || mesh.is_some() {
-                entry
-                    .physics
-                    .store(Some(Arc::new(MeshPhysics { convex, mesh })));
+            let before = entry.progress();
+            let loaded = async {
+                self.ensure_header(&entry).await?;
+                let header = entry.header().ok_or(MeshError::NotAMesh)?;
+                let convex = self.decode_physics_convex(&entry, header).await?;
+                let mesh = self.decode_physics_mesh(&entry, header).await?;
+                if convex.is_some() || mesh.is_some() {
+                    entry
+                        .physics
+                        .store(Some(Arc::new(MeshPhysics { convex, mesh })));
+                }
+                Ok::<(), MeshError>(())
             }
+            .await;
+            settle(&entry, before);
+            loaded?;
         }
         drop(guard);
         Ok(entry)
@@ -574,6 +588,18 @@ fn publish(
             Err(error)
         }
     }
+}
+
+/// Puts back the progress a skin or physics load found, once it is done —
+/// the geometry level in hand if there is one, else what the entry showed
+/// before. Those loads pass through `ReadingDisk` / `Downloading` / `Decoding`
+/// for blocks that are not geometry, and without this the entry was left at
+/// the last of them for good: counted as a download in flight by every
+/// store-stats reader (the pipeline overlay, the scene-quiet wait) although
+/// nothing was. The load's own failure is its caller's; the geometry is as it
+/// was.
+fn settle(entry: &Arc<MeshEntry>, before: MeshProgress) {
+    entry.set_progress(entry.current_lod().map_or(before, MeshProgress::Ready));
 }
 
 /// The finer (higher-detail) of an explicit target and an optional cached
@@ -863,6 +889,34 @@ mod tests {
         );
         let _removed = fs_err::remove_dir_all(&dir);
         Ok(())
+    }
+
+    /// A skin or physics load leaves no transient progress behind: before
+    /// any geometry, the entry shows what it showed before; after it, the
+    /// level in hand. Both loads fetch the header (a download) first.
+    #[test]
+    fn skin_and_physics_loads_leave_no_download_in_flight() -> Result<(), TestError> {
+        use crate::progress::MeshProgress;
+        let asset = Bytes::from(synth_mesh()?);
+        let (store, _calls) = store_with(asset)?;
+        pollster::block_on(async {
+            let skinned = store.get_skin(MeshKey::from(Uuid::from_u128(8))).await?;
+            assert_eq!(skinned.progress(), MeshProgress::Queued, "no geometry yet");
+            let physical = store.get_physics(MeshKey::from(Uuid::from_u128(9))).await?;
+            assert_eq!(physical.progress(), MeshProgress::Queued, "no geometry yet");
+            let stats = store.stats();
+            assert_eq!(
+                (stats.downloading, stats.reading_disk, stats.decoding),
+                (0, 0, 0),
+                "nothing is in flight"
+            );
+            let _entry = store
+                .get(MeshKey::from(Uuid::from_u128(8)), MeshLod::High)
+                .await?;
+            let _skinned = store.get_skin(MeshKey::from(Uuid::from_u128(8))).await?;
+            assert_eq!(skinned.progress(), MeshProgress::Ready(MeshLod::High));
+            Ok::<(), TestError>(())
+        })
     }
 
     #[test]

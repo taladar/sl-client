@@ -10,6 +10,10 @@
 //! - an object's pie offers its slices, and Touch reaches the grid;
 //! - the world map teleports a viewer to the neighbouring region;
 //! - a line said in one viewer's chat bar is heard in the other's transcript.
+//!
+//! The chrome and the chat test need nothing of the grid but its accounts,
+//! so they also run on a live one (`SL_E2E_GRID=opensim|aditi`); the others
+//! need the fake grid's scene or its control handle, and skip there.
 
 #[cfg(test)]
 mod test {
@@ -18,7 +22,7 @@ mod test {
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use sl_automation_proto::{Locator, Probe, Role};
-    use sl_e2e::{BodyError, FIRST_NAME, Stage, StageBuilder};
+    use sl_e2e::{BodyError, Need, Stage, StageBuilder};
     use sl_fake_grid::RegionConfig;
     use sl_fake_grid::fixtures::scenarios;
     use sl_proto::{AgentKey, AnyMessage, ObjectKey, RegionLocalObjectId, ServerEvent, prim_flags};
@@ -94,60 +98,62 @@ mod test {
     #[test]
     fn a_prim_rezzed_by_one_viewer_is_selected_but_not_editable_in_another() -> Result<(), TestError>
     {
-        stage("one_prim_two_viewers", &["Alpha", "Beta"]).run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
-            let beta = stage.viewer("Beta")?;
+        stage("one_prim_two_viewers", &["Alpha", "Beta"])
+            .needs(Need::Content("the stock scene's unnamed box, to rez on"))
+            .run(async |stage: &Stage| {
+                let alpha = stage.viewer("Alpha")?;
+                let beta = stage.viewer("Beta")?;
 
-            let _opened = alpha.menu_path(&BUILD_TOOLS).await?;
-            let build = alpha.ui().window(BUILD_WINDOW);
-            let _create = alpha
-                .expect(&build.get(tool("build-tool-create")))
-                .to_be_checked()
-                .await?;
-            // The stock box is the region's one object, and nobody has named
-            // it.
-            let _placed = alpha.world().object_named("Object").place().await?;
-            // A plain rez drops into edit on the new prim, on the Move tool.
-            let _moving = alpha
-                .expect(&build.get(tool("build-tool-move")))
-                .to_be_checked()
-                .await?;
-            let _general = build
-                .get(Locator::role(Role::Tab).name_key("build-tab-general"))
-                .click()
-                .await?;
-            let name = build.test_id("build-name:field");
-            let _filled = name.fill(PRIM).await?;
-            name.press("Enter").await?;
-            let _editable = alpha
-                .expect(&build.test_id("build-size-x:field"))
-                .to_be_enabled()
-                .await?;
-
-            let prim = beta.world().object_named(PRIM).timeout(WAIT);
-            let seen = prim.node().await?;
-            let _opened = beta.menu_path(&BUILD_TOOLS).await?;
-            let beta_build = beta.ui().window(BUILD_WINDOW);
-            // The Build window opens on the Create tool, where a click rezzes.
-            let _moving = beta_build.get(tool("build-tool-move")).click().await?;
-            let _selected = prim.select().await?;
-            let selection = beta.selection().await?;
-            assert_eq!(
-                selection
-                    .iter()
-                    .map(|selected| selected.full_id)
-                    .collect::<Vec<_>>(),
-                vec![seen.full_id],
-                "Beta's selection is Alpha's prim"
-            );
-            for field in ["build-pos-x:field", "build-size-x:field"] {
-                let _refused = beta
-                    .expect(&beta_build.test_id(field))
-                    .to_be_disabled()
+                let _opened = alpha.menu_path(&BUILD_TOOLS).await?;
+                let build = alpha.ui().window(BUILD_WINDOW);
+                let _create = alpha
+                    .expect(&build.get(tool("build-tool-create")))
+                    .to_be_checked()
                     .await?;
-            }
-            Ok(())
-        })?;
+                // The stock box is the region's one object, and nobody has named
+                // it.
+                let _placed = alpha.world().object_named("Object").place().await?;
+                // A plain rez drops into edit on the new prim, on the Move tool.
+                let _moving = alpha
+                    .expect(&build.get(tool("build-tool-move")))
+                    .to_be_checked()
+                    .await?;
+                let _general = build
+                    .get(Locator::role(Role::Tab).name_key("build-tab-general"))
+                    .click()
+                    .await?;
+                let name = build.test_id("build-name:field");
+                let _filled = name.fill(PRIM).await?;
+                name.press("Enter").await?;
+                let _editable = alpha
+                    .expect(&build.test_id("build-size-x:field"))
+                    .to_be_enabled()
+                    .await?;
+
+                let prim = beta.world().object_named(PRIM).timeout(WAIT);
+                let seen = prim.node().await?;
+                let _opened = beta.menu_path(&BUILD_TOOLS).await?;
+                let beta_build = beta.ui().window(BUILD_WINDOW);
+                // The Build window opens on the Create tool, where a click rezzes.
+                let _moving = beta_build.get(tool("build-tool-move")).click().await?;
+                let _selected = prim.select().await?;
+                let selection = beta.selection().await?;
+                assert_eq!(
+                    selection
+                        .iter()
+                        .map(|selected| selected.full_id)
+                        .collect::<Vec<_>>(),
+                    vec![seen.full_id],
+                    "Beta's selection is Alpha's prim"
+                );
+                for field in ["build-pos-x:field", "build-size-x:field"] {
+                    let _refused = beta
+                        .expect(&beta_build.test_id(field))
+                        .to_be_disabled()
+                        .await?;
+                }
+                Ok(())
+            })?;
         Ok(())
     }
 
@@ -197,61 +203,63 @@ mod test {
     /// to the grid.
     #[test]
     fn the_object_pie_offers_its_slices_and_touch_reaches_the_grid() -> Result<(), TestError> {
-        stage("object_pie", &["Alpha"]).run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
-            rez_touch_box(stage, "Alpha").await?;
-            let mut heard = stage.agent("Alpha").await?.events();
+        stage("object_pie", &["Alpha"])
+            .needs(Need::GridControl)
+            .run(async |stage: &Stage| {
+                let alpha = stage.viewer("Alpha")?;
+                rez_touch_box(stage, "Alpha").await?;
+                let mut heard = stage.agent("Alpha").await?.events();
 
-            let _pie = alpha
-                .world()
-                .object_named(TOUCH_BOX)
-                .timeout(WAIT)
-                .open_pie()
-                .await?;
-            let pie = alpha.ui().role(Role::Menu);
-            for enabled in [
-                "pie-object-open",
-                "pie-object-create",
-                "pie-object-touch",
-                "pie-object-sit-here",
-                "pie-object-edit",
-            ] {
-                let _slice = alpha
-                    .expect(&pie.get(Locator::role(Role::MenuItem).name_key(enabled)))
-                    .to_be_enabled()
+                let _pie = alpha
+                    .world()
+                    .object_named(TOUCH_BOX)
+                    .timeout(WAIT)
+                    .open_pie()
                     .await?;
-            }
-            // The viewer has no payment floater yet.
-            let _pay = alpha
-                .expect(&pie.get(Locator::role(Role::MenuItem).name_key("pie-object-pay")))
-                .to_be_disabled()
-                .await?;
-            let _touched = alpha
-                .pie_slice(Locator::role(Role::MenuItem).name_key("pie-object-touch"))
-                .await?;
-
-            let grabbed = tokio::time::timeout(WAIT, async {
-                loop {
-                    match heard.recv().await {
-                        Ok(ServerEvent::ClientMessage(message)) => {
-                            if let AnyMessage::ObjectGrab(grab) = *message
-                                && grab.object_data.local_id == TOUCH_BOX_LOCAL_ID
-                            {
-                                return Ok(());
-                            }
-                        }
-                        Ok(_other) => {}
-                        Err(error) => return Err(error),
-                    }
+                let pie = alpha.ui().role(Role::Menu);
+                for enabled in [
+                    "pie-object-open",
+                    "pie-object-create",
+                    "pie-object-touch",
+                    "pie-object-sit-here",
+                    "pie-object-edit",
+                ] {
+                    let _slice = alpha
+                        .expect(&pie.get(Locator::role(Role::MenuItem).name_key(enabled)))
+                        .to_be_enabled()
+                        .await?;
                 }
-            })
-            .await;
-            match grabbed {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(error)) => Err(format!("the grid's event stream: {error}").into()),
-                Err(_elapsed) => Err("the touch never reached the grid".into()),
-            }
-        })?;
+                // The viewer has no payment floater yet.
+                let _pay = alpha
+                    .expect(&pie.get(Locator::role(Role::MenuItem).name_key("pie-object-pay")))
+                    .to_be_disabled()
+                    .await?;
+                let _touched = alpha
+                    .pie_slice(Locator::role(Role::MenuItem).name_key("pie-object-touch"))
+                    .await?;
+
+                let grabbed = tokio::time::timeout(WAIT, async {
+                    loop {
+                        match heard.recv().await {
+                            Ok(ServerEvent::ClientMessage(message)) => {
+                                if let AnyMessage::ObjectGrab(grab) = *message
+                                    && grab.object_data.local_id == TOUCH_BOX_LOCAL_ID
+                                {
+                                    return Ok(());
+                                }
+                            }
+                            Ok(_other) => {}
+                            Err(error) => return Err(error),
+                        }
+                    }
+                })
+                .await;
+                match grabbed {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(error)) => Err(format!("the grid's event stream: {error}").into()),
+                    Err(_elapsed) => Err("the touch never reached the grid".into()),
+                }
+            })?;
         Ok(())
     }
 
@@ -260,7 +268,8 @@ mod test {
 
     /// **Two-viewer chat**: Alpha says a line in its nearby-chat bar; Beta's
     /// transcript shows it from Alpha, and so does Alpha's own — the echo a
-    /// viewer shows its own line by.
+    /// viewer shows its own line by. On a live grid the two avatars must be
+    /// within chat range of each other where they log in.
     #[test]
     fn a_line_said_in_one_viewer_is_heard_in_the_other() -> Result<(), TestError> {
         stage("two_viewer_chat", &["Alpha", "Beta"]).run(async |stage: &Stage| {
@@ -269,11 +278,11 @@ mod test {
             let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
             let _typed = bar.fill(LINE).await?;
             bar.press("Enter").await?;
-            let speaker = format!("{FIRST_NAME} Alpha");
+            let speaker = stage.account_name("Alpha")?;
             for viewer in [alpha, beta] {
                 let _heard = viewer
                     .expect_chat()
-                    .from(&speaker)
+                    .from(speaker)
                     .timeout(WAIT)
                     .to_contain(LINE)
                     .await?;

@@ -17,12 +17,16 @@ exclude = { workspace = true }
 
 [dependencies]
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
+# The login-cooldown stamps live in the user's state directory.
+directories = { version = "6.0.0" }
 # `clippy.toml` disallows `std::fs` so a read error names the file it failed on
 # — which for the credentials file is the whole diagnostic.
 fs-err = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 sl-proto = { workspace = true }
 thiserror = { workspace = true }
+# The login-cooldown stamps are RFC 3339 times.
+time = { workspace = true, features = ["formatting", "parsing"] }
 toml = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }

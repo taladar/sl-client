@@ -5,6 +5,8 @@
 //!
 //! Registering them costs nothing: a reader runs only when a probe asks.
 
+use std::collections::BTreeMap;
+
 use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
 use sl_viewer_automation::ProbeSources;
@@ -30,11 +32,18 @@ fn balance(world: &mut World) -> Option<i64> {
         .and_then(AgentBalance::linden_dollars)
 }
 
-/// The scene's outstanding work, summed across every asset store and queue —
-/// what the screenshot mode and the full-stack harness wait on.
-fn scene_work(world: &mut World) -> u64 {
+/// The scene's outstanding work by bucket, across every asset store and
+/// queue — what the screenshot mode and the full-stack harness wait on.
+fn scene_work(world: &mut World) -> BTreeMap<String, u64> {
     let mut state = SystemState::<SceneQuiescence<'_, '_>>::new(world);
-    state.get(world).map_or(0, |scene| {
-        u64::try_from(scene.outstanding()).unwrap_or(u64::MAX)
-    })
+    state.get(world).map_or_else(
+        |_error| BTreeMap::new(),
+        |scene| {
+            scene
+                .breakdown()
+                .into_iter()
+                .map(|(bucket, count)| (bucket, u64::try_from(count).unwrap_or(u64::MAX)))
+                .collect()
+        },
+    )
 }

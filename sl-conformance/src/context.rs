@@ -5,7 +5,7 @@
 //! avatar's `mfa_command`, and spawns the client run loop. [`TestContext`] hands
 //! the live session(s) and a [`Metrics`] collector to the test body.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,9 +14,9 @@ use sl_client_tokio::{
     GroupKey, InventoryCacheConfig, LoginAccount, LoginParams, LoginRejectKind, LoginRequest,
     MeshKey, RegionHandle, StartLocation, Uuid,
 };
-use sl_repl::Avatar;
+use sl_repl::{Avatar, CooldownError, LoginCooldown};
+use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use time::{Duration as TimeDuration, OffsetDateTime};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -24,9 +24,6 @@ use crate::fixtures::Fixtures;
 use crate::grid::Grid;
 use crate::metrics::Metrics;
 use crate::record::Completeness;
-
-/// How long an aditi avatar must wait between logins, to avoid rate-limiting.
-const ADITI_LOGIN_COOLDOWN: TimeDuration = TimeDuration::seconds(120);
 
 /// How many times to retry an OpenSim login that was rejected as
 /// "already logged in" before giving up. A prior session that did not log out
@@ -132,10 +129,10 @@ pub struct Session {
     /// an in-world resource). Retained so [`Session::relogin`] lands the same
     /// place the initial login did.
     start_location: String,
-    /// The harness state directory holding the per-avatar login-cooldown stamps,
-    /// so [`Session::relogin`] can honour the aditi cooldown rather than bypass
-    /// it (the initial logins are gated by the runner).
-    state_dir: PathBuf,
+    /// The per-avatar login-cooldown stamps, so [`Session::relogin`] can honour
+    /// the aditi cooldown rather than bypass it (the initial logins are gated
+    /// by the runner).
+    cooldown: LoginCooldown,
     /// Whether to bypass the login cooldown (the runner's `--force`), threaded so
     /// [`Session::relogin`] makes the same choice as the initial login.
     force: bool,
@@ -438,12 +435,12 @@ impl Session {
         let channel = self.channel.clone();
         let version = self.version.clone();
         let start_location = self.start_location.clone();
-        let state_dir = self.state_dir.clone();
+        let cooldown = self.cooldown.clone();
         let force = self.force;
         let cache_dir = self.cache_dir.clone();
         if grid.needs_cooldown() {
             let label = avatar_label(&avatar);
-            wait_out_cooldown(&state_dir, &label, force).await?;
+            wait_out_cooldown(&cooldown, &label, force).await?;
         }
         *self = connect_and_spawn(LoginSpec {
             grid,
@@ -451,7 +448,7 @@ impl Session {
             channel: &channel,
             version: &version,
             start_location: &start_location,
-            state_dir: &state_dir,
+            cooldown: &cooldown,
             force,
             cache_dir,
         })
@@ -467,7 +464,7 @@ fn avatar_label(avatar: &Avatar) -> String {
 }
 
 /// One conformance login, named rather than passed positionally: at the call
-/// sites the tail is `&state_dir, args.force, None` — three values whose types
+/// sites the tail is `&cooldown, args.force, None` — three values whose types
 /// say nothing about which is which.
 #[derive(Debug, Clone)]
 pub struct LoginSpec<'a> {
@@ -483,9 +480,9 @@ pub struct LoginSpec<'a> {
     /// case; a fixed `"uri:Region&x&y&z"` for a case that must be co-located
     /// with an in-world resource).
     pub start_location: &'a str,
-    /// Where the per-avatar cooldown stamps live; retained on the session so a
+    /// The per-avatar login-cooldown stamps; retained on the session so a
     /// later [`Session::relogin`] can honour the aditi login cooldown.
-    pub state_dir: &'a Path,
+    pub cooldown: &'a LoginCooldown,
     /// Whether to log in despite an unexpired cooldown stamp; likewise
     /// retained.
     pub force: bool,
@@ -512,7 +509,7 @@ pub async fn login(spec: LoginSpec<'_>) -> Result<Session, TestFailure> {
 /// live [`Session`]. This is the shared core of [`login`] and
 /// [`Session::relogin`].
 ///
-/// [`LoginSpec::state_dir`] and [`LoginSpec::force`] are retained on the
+/// [`LoginSpec::cooldown`] and [`LoginSpec::force`] are retained on the
 /// returned session so a later [`Session::relogin`] can honour the aditi login
 /// cooldown. This function does not itself enforce the cooldown — the runner
 /// gates the initial logins and [`Session::relogin`] waits it out for
@@ -529,7 +526,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         channel,
         version,
         start_location,
-        state_dir,
+        cooldown,
         force,
         cache_dir,
     } = spec;
@@ -696,7 +693,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         channel: channel.to_owned(),
         version: version.to_owned(),
         start_location: start_location.to_owned(),
-        state_dir: state_dir.to_path_buf(),
+        cooldown: cooldown.clone(),
         force,
         cache_dir,
         connected: true,
@@ -867,62 +864,35 @@ impl TestContext {
     }
 }
 
-/// Sanitize an avatar label into a filesystem-safe stem for its cooldown file.
-fn sanitize_label(label: &str) -> String {
-    label
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// The cooldown timestamp file for an avatar under the state directory.
-#[must_use]
-pub fn cooldown_path(state_dir: &Path, avatar_label: &str) -> PathBuf {
-    state_dir
-        .join("aditi-last-login")
-        .join(format!("{}.timestamp", sanitize_label(avatar_label)))
-}
-
 /// Enforce, then refresh, the aditi login cooldown for `avatar_label`.
 ///
 /// When `force` is false and the last login for this avatar was within the
-/// `ADITI_LOGIN_COOLDOWN` window, returns [`TestFailure::Cooldown`]. Otherwise
-/// stamps the current time and returns `Ok(())`.
+/// [`ADITI_LOGIN_COOLDOWN`](sl_repl::ADITI_LOGIN_COOLDOWN) window, returns
+/// [`TestFailure::Cooldown`]. Otherwise stamps the current time and returns
+/// `Ok(())`. The stamps are the shared [`LoginCooldown`]'s, so a conformance
+/// run and an end-to-end stage hold each other to the window too.
 ///
 /// # Errors
 ///
 /// Returns [`TestFailure::Cooldown`] if the cooldown is active, or
 /// [`TestFailure::State`] if the timestamp cannot be written.
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "wall-clock instant/duration subtraction here cannot overflow in practice"
-)]
 pub fn enforce_cooldown(
-    state_dir: &Path,
+    cooldown: &LoginCooldown,
     avatar_label: &str,
     force: bool,
 ) -> Result<(), TestFailure> {
-    let path = cooldown_path(state_dir, avatar_label);
-    if !force
-        && let Ok(text) = fs_err::read_to_string(&path)
-        && let Ok(previous) = OffsetDateTime::parse(text.trim(), &Rfc3339)
-    {
-        let elapsed = OffsetDateTime::now_utc() - previous;
-        if elapsed < ADITI_LOGIN_COOLDOWN {
-            let remaining = (ADITI_LOGIN_COOLDOWN - elapsed).whole_seconds().max(0);
-            return Err(TestFailure::Cooldown {
-                avatar: avatar_label.to_owned(),
-                remaining_secs: remaining,
-            });
-        }
-    }
-    stamp_login(&path)
+    let claimed = if force {
+        cooldown.stamp(avatar_label)
+    } else {
+        cooldown.claim(avatar_label)
+    };
+    claimed.map_err(|error| match error {
+        CooldownError::Active { avatar, remaining } => TestFailure::Cooldown {
+            avatar,
+            remaining_secs: remaining.as_secs().saturating_add(1),
+        },
+        other => TestFailure::State(other.to_string()),
+    })
 }
 
 /// Wait out, then refresh, the aditi login cooldown for `avatar_label`.
@@ -936,46 +906,22 @@ pub fn enforce_cooldown(
 /// # Errors
 ///
 /// Returns [`TestFailure::State`] if the timestamp cannot be written.
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "wall-clock instant/duration subtraction here cannot overflow in practice"
-)]
 pub async fn wait_out_cooldown(
-    state_dir: &Path,
+    cooldown: &LoginCooldown,
     avatar_label: &str,
     force: bool,
 ) -> Result<(), TestFailure> {
-    let path = cooldown_path(state_dir, avatar_label);
-    if !force
-        && let Ok(text) = fs_err::read_to_string(&path)
-        && let Ok(previous) = OffsetDateTime::parse(text.trim(), &Rfc3339)
-    {
-        let elapsed = OffsetDateTime::now_utc() - previous;
-        if elapsed < ADITI_LOGIN_COOLDOWN {
-            // Add a one-second margin so the next stamp is unambiguously past the
-            // window, then sleep.
-            let remaining = (ADITI_LOGIN_COOLDOWN - elapsed).whole_seconds().max(0);
-            let secs = u64::try_from(remaining).unwrap_or(0).saturating_add(1);
-            tracing::info!("waiting out aditi login cooldown for {avatar_label}: {secs}s");
-            tokio::time::sleep(Duration::from_secs(secs)).await;
-        }
+    let wait = cooldown.wait_time(avatar_label);
+    if !force && !wait.is_zero() {
+        tracing::info!(
+            "waiting out aditi login cooldown for {avatar_label}: {}s",
+            wait.as_secs()
+        );
+        tokio::time::sleep(wait).await;
     }
-    stamp_login(&path)
-}
-
-/// Write the current time as the last-login stamp at `path`, creating the parent
-/// directory if needed. Shared by [`enforce_cooldown`] and [`wait_out_cooldown`].
-///
-/// # Errors
-///
-/// Returns [`TestFailure::State`] if the directory or file cannot be written.
-fn stamp_login(path: &Path) -> Result<(), TestFailure> {
-    if let Some(parent) = path.parent() {
-        fs_err::create_dir_all(parent).map_err(|error| TestFailure::State(error.to_string()))?;
-    }
-    let stamp = now_rfc3339()?;
-    fs_err::write(path, stamp).map_err(|error| TestFailure::State(error.to_string()))?;
-    Ok(())
+    cooldown
+        .stamp(avatar_label)
+        .map_err(|error| TestFailure::State(error.to_string()))
 }
 
 /// The current UTC time as an RFC 3339 string.
@@ -1029,7 +975,7 @@ pub enum TestFailure {
         /// The avatar still cooling down.
         avatar: String,
         /// Seconds remaining before another login is allowed.
-        remaining_secs: i64,
+        remaining_secs: u64,
     },
     /// Local harness state (cooldown stamp) could not be read or written.
     #[error("harness state error: {0}")]
@@ -1038,9 +984,9 @@ pub enum TestFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::{cooldown_path, enforce_cooldown, sanitize_label, wait_out_cooldown};
-    use pretty_assertions::assert_eq;
-    use std::path::{Path, PathBuf};
+    use super::{enforce_cooldown, wait_out_cooldown};
+    use sl_repl::LoginCooldown;
+    use std::path::PathBuf;
     use std::time::Duration;
 
     /// A process-unique scratch directory for a cooldown test, removed on drop.
@@ -1062,50 +1008,42 @@ mod tests {
         }
     }
 
-    /// Labels are sanitised into filesystem-safe stems.
-    #[test]
-    fn label_sanitisation() {
-        assert_eq!(sanitize_label("primary"), "primary");
-        assert_eq!(sanitize_label("Alice Resident"), "Alice_Resident");
-        assert_eq!(sanitize_label("a/b:c"), "a_b_c");
-    }
-
-    /// The cooldown path nests under the state dir by avatar.
-    #[test]
-    fn cooldown_path_layout() {
-        let path = cooldown_path(Path::new("/state"), "primary");
-        assert!(path.ends_with("aditi-last-login/primary.timestamp"));
-    }
-
     /// With no prior stamp there is nothing to wait for: `wait_out_cooldown`
     /// returns promptly and records a fresh stamp.
     #[tokio::test]
     async fn wait_out_cooldown_is_immediate_without_a_prior_stamp() {
         let scratch = ScratchDir::new("wait-noprior");
+        let cooldown = LoginCooldown::under(&scratch.0);
         let result = tokio::time::timeout(
             Duration::from_secs(5),
-            wait_out_cooldown(&scratch.0, "primary", false),
+            wait_out_cooldown(&cooldown, "primary", false),
         )
         .await;
         assert!(matches!(result, Ok(Ok(()))), "should not wait or error");
         assert!(
-            cooldown_path(&scratch.0, "primary").exists(),
+            cooldown.stamp_path("primary").exists(),
             "a fresh login stamp should be written"
         );
     }
 
     /// `force` skips the wait even when a stamp was just written (an un-forced
-    /// call would otherwise block for the full cooldown window).
+    /// call would otherwise block for the full cooldown window), and an
+    /// un-forced second claim is refused.
     #[tokio::test]
     async fn wait_out_cooldown_force_skips_the_wait() {
         let scratch = ScratchDir::new("wait-force");
+        let cooldown = LoginCooldown::under(&scratch.0);
         assert!(
-            enforce_cooldown(&scratch.0, "primary", false).is_ok(),
+            enforce_cooldown(&cooldown, "primary", false).is_ok(),
             "initial stamp should be written"
+        );
+        assert!(
+            enforce_cooldown(&cooldown, "primary", false).is_err(),
+            "a second login within the window is refused"
         );
         let result = tokio::time::timeout(
             Duration::from_secs(5),
-            wait_out_cooldown(&scratch.0, "primary", true),
+            wait_out_cooldown(&cooldown, "primary", true),
         )
         .await;
         assert!(

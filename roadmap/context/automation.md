@@ -405,6 +405,42 @@ replaces that person.
   `<test>/<backend>/<label>`, and a process-wide tracing layer (`logs.rs`)
   files every line in that span into the viewer's `viewer.log`; lines
   outside any viewer span go to `grid.log`.
+- **A stage runs on a live grid by environment**
+  ([[test-e2e-live-grids]]): `SL_E2E_GRID=fake|opensim|aditi`, unset being
+  the fake grid, so the commit hook never logs into a live one. On a live grid
+  there is no `FakeGrid`: `Stage::grid`, `agent`, `mark` and `wait_marker`
+  answer `NoGridControl`, the accounts come from the grid's credentials file
+  in `SL_E2E_AVATARS` order (default `primary`, `secondary`, `tertiary`, then
+  the rest), and the home region and agent ids are read from the agent probe
+  once each viewer has arrived. A test declares what it needs
+  (`StageBuilder::needs`: `Need::GridControl`, `Need::Content`; `region`,
+  `configure_grid` and `start_position` imply `Need::DictatedGrid`), and the
+  stage skips a grid that cannot provide it — or has fewer accounts than
+  viewers — with a warning naming why, before it reads a credentials file or
+  logs anything in. The default live start is OpenSim's `Default Region`
+  centre (conformance's, and one spot for every viewer, so they can hear each
+  other) and aditi's `last`; `SL_E2E_START` overrides it. Who a viewer is
+  heard as is `Stage::account_name`, never a hard-coded `Stage <label>`. A
+  live viewer gets ten minutes to settle (`LIVE_SETTLE`: aditi's asset service
+  answers some textures 503 for minutes, each walking its retry chain), and a
+  live run goes under nextest's `live` profile, which never kills a test — a
+  killed test strands its avatars on the grid.
+- **One login cooldown for every unattended harness**: `sl_repl::LoginCooldown`
+  keeps a per-avatar stamp under `$XDG_STATE_HOME/sl-client/login-cooldown/`,
+  shared by `sl-conformance` (which refuses) and the stage (which waits the
+  window out) and by every worktree. A stage on aditi therefore waits two
+  minutes between its two backends.
+- **A wait for quiet names what is not**: the `Quiescence` readout carries
+  `outstanding_by`, the outstanding work bucket by bucket (`<store>.<stage>`
+  such as `meshes.downloading`, `textures.deferred`, or a build queue's name),
+  empty buckets left out — read from `SceneQuiescence::breakdown`. The first
+  aditi run found the mesh store's skin and physics loads leaving their
+  entries at `Downloading` for good (63 on a busy region), which only the
+  breakdown could tell from a slow region.
+- **An aditi second factor in process**: the App ends on the MFA challenge
+  (`LoginOutcome`), which the stage reads from the exited App, answers with
+  the avatar's `mfa_command` and logs in again with a new App — the loop the
+  binary's `run_viewer` runs. A process viewer answers it itself.
 - **A marker is found in the event log by its printed detail**:
   `GenericMessage`'s `Debug` prints UTF-8 parameters as strings in the order
   method, params, invoice, so `Stage::wait_marker` waits for a

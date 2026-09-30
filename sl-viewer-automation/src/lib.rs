@@ -139,7 +139,7 @@ pub use crate::in_process::{
 pub use crate::in_process_host::{BuildError, HostError, InProcessHost, ViewerLink};
 pub use crate::locate::{find_all, find_one, shallow};
 pub use crate::manipulator_drag::{DragProgress, DragStage, HeldKeys, ManipulatorDrag};
-pub use crate::probe_sources::{LiveNotifications, ProbeSources};
+pub use crate::probe_sources::{LiveNotifications, ProbeSources, SceneWorkReader};
 pub use crate::probes::{
     ProbeError, read_agent, read_conversations, read_inventory, read_notifications,
     read_quiescence, read_selection, read_status,

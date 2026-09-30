@@ -187,11 +187,17 @@ grid's own docs](../tools/fake-grid.md#which-grid-the-fake-one-is).
 ## The aditi cooldown
 
 aditi rate-limits per account, so the runner keeps a per-avatar login cooldown
-under the gitignored `.sl-conformance/aditi-last-login/<avatar>.timestamp`.
-Before an aditi login, if the same avatar logged in within the last two minutes,
-the run is refused (naming the seconds remaining) unless you pass `--force`. The
-local OpenSim grid has no cooldown. A two-account test guards each avatar
+(`sl_repl::LoginCooldown`) under the user's state directory,
+`$XDG_STATE_HOME/sl-client/login-cooldown/<avatar>.timestamp`. Before an aditi
+login, if the same avatar logged in within the last two minutes, the run is
+refused (naming the seconds remaining) unless you pass `--force`. The local
+OpenSim grid has no cooldown. A two-account test guards each avatar
 independently.
+
+The stamps are shared: the end-to-end stage (`sl-e2e`, `SL_E2E_GRID=aditi`)
+reads and writes the same ones — it waits the window out rather than refusing —
+and so does every worktree of the workspace, so no harness can log an avatar in
+right after another one did.
 
 ## Case isolation: panics, hangs, and grid state
 
