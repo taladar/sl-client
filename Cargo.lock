@@ -9313,6 +9313,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-ctl"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "fs-err",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "shlex",
+ "sl-automation-proto",
+ "sl-fake-grid",
+ "sl-repl",
+ "sl-viewer-driver",
+ "sl-viewer-launch",
+ "thiserror 2.0.19",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sl-viewer-driver"
 version = "0.1.0"
 dependencies = [

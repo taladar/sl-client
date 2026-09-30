@@ -654,12 +654,37 @@ impl Viewer {
     ///
     /// As any request.
     pub async fn subscribe(&self, streams: &[LogStream]) -> Result<EventStream, DriverError> {
+        self.subscribe_at(None, streams).await
+    }
+
+    /// Stream the event log's entries of `streams` (every stream when empty)
+    /// from `cursor` on (`0` for everything kept): what was recorded before
+    /// the subscription first, then what is recorded after, with no gap
+    /// between.
+    ///
+    /// # Errors
+    ///
+    /// As any request.
+    pub async fn subscribe_from(
+        &self,
+        cursor: u64,
+        streams: &[LogStream],
+    ) -> Result<EventStream, DriverError> {
+        self.subscribe_at(Some(cursor), streams).await
+    }
+
+    /// The subscription both of the above are.
+    async fn subscribe_at(
+        &self,
+        cursor: Option<u64>,
+        streams: &[LogStream],
+    ) -> Result<EventStream, DriverError> {
         let (id, response, pages) = self
             .inner
             .connection
             .subscribe(
                 RequestBody::Subscribe {
-                    cursor: None,
+                    cursor,
                     streams: streams.to_vec(),
                 },
                 self.inner.options.grace,

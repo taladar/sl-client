@@ -1,0 +1,57 @@
+[package]
+name = "sl-viewer-ctl"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Drive a running Second Life viewer from the shell through its automation socket: launch one or a fake-grid stage of several, then find, click, fill, wait on and read UI nodes and in-world things by selector"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["automation", "cli", "opensim", "secondlife", "viewer"]
+categories = ["command-line-utilities", "development-tools::testing"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[[bin]]
+name = "sl-viewer-ctl"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
+fs-err = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# An `attach` line split the way a shell splits a command line.
+shlex = { version = "2.0.1" }
+# Selectors, and the readouts printed.
+sl-automation-proto = { workspace = true }
+# The grid a `stage` stands its viewers up in.
+sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
+# A live grid's credentials file, and the aditi login cooldown every
+# unattended harness shares.
+sl-repl = { workspace = true }
+sl-viewer-driver = { workspace = true }
+# Each viewer confined to its directory, and stopped by a logout, not a kill.
+sl-viewer-launch = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+  "io-std",
+  "io-util",
+  "macros",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

@@ -24,6 +24,9 @@ pub enum WorldKind {
 }
 
 impl WorldKind {
+    /// Every kind, in declaration order.
+    pub const ALL: [Self; 3] = [Self::Avatar, Self::Object, Self::Attachment];
+
     /// The kind's serialized spelling, used for display too.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -246,61 +249,6 @@ fn matcher_holds(matcher: Option<&NameMatcher>, text: Option<&str>) -> bool {
     matcher.is_none_or(|matcher| text.is_some_and(|text| matcher.matches(text)))
 }
 
-/// Prints a selector-like description for error messages and logs —
-/// `avatar own=true`, `object name="Door" near=own_avatar nth=0`. It is a
-/// description, not a grammar: nothing parses it.
-impl fmt::Display for WorldLocator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(kind) = self.kind {
-            parts.push(kind.as_str().to_owned());
-        }
-        if let Some(own) = self.own {
-            parts.push(format!("own={own}"));
-        }
-        match &self.name {
-            Some(NameMatcher::Exact(name)) => parts.push(format!("name={name:?}")),
-            Some(NameMatcher::Contains(part)) => parts.push(format!("name~={part:?}")),
-            None => {}
-        }
-        if let Some(id) = self.full_id {
-            parts.push(format!("#{id}"));
-        }
-        if let Some(id) = self.local_id {
-            parts.push(format!("local={id}"));
-        }
-        if let Some(owner) = self.owner {
-            parts.push(format!("owner={owner}"));
-        }
-        if let Some(pcode) = self.pcode {
-            parts.push(format!("pcode={pcode}"));
-        }
-        match &self.hover_text {
-            Some(NameMatcher::Exact(text)) => parts.push(format!("text={text:?}")),
-            Some(NameMatcher::Contains(part)) => parts.push(format!("text~={part:?}")),
-            None => {}
-        }
-        if let Some(near) = self.near {
-            let to = match near.to {
-                Anchor::Point([x, y, z]) => format!("<{x},{y},{z}>"),
-                Anchor::OwnAvatar => "own_avatar".to_owned(),
-            };
-            match near.radius {
-                Some(radius) => parts.push(format!("near={to} radius={radius}")),
-                None => parts.push(format!("near={to}")),
-            }
-        }
-        if let Some(index) = self.nth {
-            parts.push(format!("nth={index}"));
-        }
-        if parts.is_empty() {
-            f.write_str("*")
-        } else {
-            f.write_str(&parts.join(" "))
-        }
-    }
-}
-
 /// One in-world thing as a viewer tracks it.
 ///
 /// Positions are **region-local** metres of the agent's current region, on
@@ -511,16 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn display_reads_like_a_selector() {
-        let locator = WorldLocator::kind(WorldKind::Object)
-            .named("Door")
-            .near(Anchor::OwnAvatar, Some(5.0))
-            .nth(0);
-        assert_eq!(
-            locator.to_string(),
-            r#"object name="Door" near=own_avatar radius=5 nth=0"#
-        );
-        assert_eq!(WorldLocator::default().to_string(), "*");
+    fn a_node_displays_on_one_line() {
         assert_eq!(
             door().to_string(),
             r#"object "Door" #00000000-0000-0000-0000-000000000001 local=1 at <10,20,30>"#

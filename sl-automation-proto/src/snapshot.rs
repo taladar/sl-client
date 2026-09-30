@@ -64,6 +64,32 @@ pub enum Role {
 }
 
 impl Role {
+    /// Every role, in declaration order.
+    pub const ALL: [Self; 22] = [
+        Self::Button,
+        Self::Checkbox,
+        Self::Radio,
+        Self::RadioGroup,
+        Self::Textbox,
+        Self::Combobox,
+        Self::Slider,
+        Self::ColorWell,
+        Self::Trackball,
+        Self::TabList,
+        Self::Tab,
+        Self::MenuBar,
+        Self::Menu,
+        Self::MenuItem,
+        Self::List,
+        Self::ListItem,
+        Self::Tree,
+        Self::TreeItem,
+        Self::Window,
+        Self::Text,
+        Self::Image,
+        Self::Group,
+    ];
+
     /// The role's serialized spelling, used for display too.
     #[must_use]
     pub const fn as_str(self) -> &'static str {

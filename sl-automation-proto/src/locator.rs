@@ -1,7 +1,5 @@
 //! Locators: the semantic query that names which UI node a test means.
 
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 use crate::snapshot::{NodeState, Role, UiNode};
@@ -198,63 +196,12 @@ impl Locator {
             && state_filter_holds(self.expanded, node, NodeState::Expanded)
             && state_filter_holds(self.focused, node, NodeState::Focused)
     }
-
-    /// The criteria of this locator alone, without its scope, in the
-    /// selector-like form [`Display`](fmt::Display) prints.
-    fn fmt_own(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(role) = self.role {
-            parts.push(role.as_str().to_owned());
-        }
-        if let Some(id) = &self.test_id {
-            parts.push(format!("#{id}"));
-        }
-        if let Some(key) = &self.name_key {
-            parts.push(format!("key={key}"));
-        }
-        match &self.name {
-            Some(NameMatcher::Exact(name)) => parts.push(format!("name={name:?}")),
-            Some(NameMatcher::Contains(part)) => parts.push(format!("name~={part:?}")),
-            None => {}
-        }
-        for (label, filter) in [
-            ("enabled", self.enabled),
-            ("checked", self.checked),
-            ("selected", self.selected),
-            ("expanded", self.expanded),
-            ("focused", self.focused),
-        ] {
-            if let Some(wanted) = filter {
-                parts.push(format!("{label}={wanted}"));
-            }
-        }
-        if let Some(index) = self.nth {
-            parts.push(format!("nth={index}"));
-        }
-        if parts.is_empty() {
-            f.write_str("*")
-        } else {
-            f.write_str(&parts.join(" "))
-        }
-    }
 }
 
 /// Whether a node satisfies one tri-state filter over `state`: an unset
 /// filter always holds, a set one must agree with the node.
 fn state_filter_holds(filter: Option<bool>, node: &UiNode, state: NodeState) -> bool {
     filter.is_none_or(|wanted| wanted == node.has_state(state))
-}
-
-/// Prints a selector-like description for error messages and logs —
-/// `window #floater.preferences >> button key=button-ok` — the scope first,
-/// joined by `>>`. It is a description, not a grammar: nothing parses it.
-impl fmt::Display for Locator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(scope) = &self.within {
-            write!(f, "{scope} >> ")?;
-        }
-        self.fmt_own(f)
-    }
 }
 
 #[cfg(test)]
@@ -372,21 +319,5 @@ mod tests {
             NameMatcher::Contains("Apply".to_owned()).matches("Apply all"),
             "substring"
         );
-    }
-
-    #[test]
-    fn display_reads_scope_first() {
-        let locator = Locator::role(Role::Button)
-            .name_key("button-ok")
-            .named("OK")
-            .enabled(true)
-            .nth(1)
-            .within(Locator::role(Role::Window).name_containing("Pref"));
-        assert_eq!(
-            locator.to_string(),
-            r#"window name~="Pref" >> button key=button-ok name="OK" enabled=true nth=1"#
-        );
-        assert_eq!(Locator::default().to_string(), "*");
-        assert_eq!(Locator::test_id("a.b").to_string(), "#a.b");
     }
 }

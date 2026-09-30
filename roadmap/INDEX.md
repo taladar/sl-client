@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 122 |
-| ready | 309 |
+| ready | 308 |
 | blocked | 53 |
 | in-progress | 21 |
 | bugs | 16 |
-| done | 1283 |
+| done | 1284 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1851** |
@@ -37,7 +37,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   alpha-mask promotion (RenderAutoMaskAlphaDeferred)
 - [`viewer-automation-mcp-server`](ideas/viewer-automation-mcp-server.md) — The
   automation verbs as an MCP server for agent sessions (blocked by
-  `viewer-automation-ctl-cli`)
+  `viewer-automation-ctl-cli` (done))
 - [`viewer-avatar-client-collision-capsule`](ideas/viewer-avatar-client-collision-capsule.md)
   — Client-side avatar collision capsule (if client physics ever needs avatars)
 - [`viewer-avatar-welcome-pack`](ideas/viewer-avatar-welcome-pack.md) — Avatar
@@ -310,7 +310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (308)
 
 ### protocol
 
@@ -389,9 +389,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-accesskit-bridge`](ready/viewer-automation-accesskit-bridge.md)
   — Feed AccessKit from the semantic UI model (blocked by
   `viewer-automation-semantic-custom-widgets` (done))
-- [`viewer-automation-ctl-cli`](ready/viewer-automation-ctl-cli.md) —
-  sl-viewer-ctl — drive a running viewer from the shell (blocked by
-  `viewer-automation-driver` (done))
 - [`viewer-automation-testkit-locators`](ready/viewer-automation-testkit-locators.md)
   — The in-process tiers speak locators too (blocked by
   `viewer-automation-locator-engine` (done), `viewer-automation-app-builder`
@@ -1327,7 +1324,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1283)
+## done (1284)
 
 ### protocol
 
@@ -1774,6 +1771,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-dialog-offers-invites` (done))
 - [`viewer-automation-app-builder`](done/viewer-automation-app-builder.md) — A
   public ViewerAppBuilder — one assembly for the binary, the harness and tests
+- [`viewer-automation-ctl-cli`](done/viewer-automation-ctl-cli.md) —
+  sl-viewer-ctl — drive a running viewer from the shell (blocked by
+  `viewer-automation-driver` (done))
 - [`viewer-automation-driver`](done/viewer-automation-driver.md) —
   sl-viewer-driver — the async test API over both transports (blocked by
   `viewer-automation-remote-transport` (done),

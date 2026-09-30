@@ -51,6 +51,7 @@ members = [
   "sl-viewer-audio",
   "sl-viewer-automation",
   "sl-viewer-chat",
+  "sl-viewer-ctl",
   "sl-viewer-driver",
   "sl-viewer-edit",
   "sl-viewer-environment",

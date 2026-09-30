@@ -408,8 +408,8 @@ async fn a_failed_expectation_saves_its_artifacts_and_names_them() -> Result<(),
     assert!(events.contains("toolbar.inventory"), "{events}");
     assert!(
         message.starts_with(
-            "viewer one: expect window #floater:preferences >> button key=button-ok to be \
-             disabled failed: timed out"
+            "viewer one: expect window[test_id=floater:preferences] >> \
+             button[name_key=button-ok] to be disabled failed: timed out"
         ),
         "{message}"
     );

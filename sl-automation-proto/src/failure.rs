@@ -416,7 +416,7 @@ mod tests {
         };
         assert_eq!(
             error.to_string(),
-            r#"button name="OK" matches 2 UI nodes, an action needs exactly one: button "OK" key=button-ok #prefs.ok at 10,20 120x30; button "OK" key=button-ok #profile.ok at 200.5,20 120x30"#
+            r#"button[name=OK] matches 2 UI nodes, an action needs exactly one: button "OK" key=button-ok #prefs.ok at 10,20 120x30; button "OK" key=button-ok #profile.ok at 200.5,20 120x30"#
         );
     }
 
@@ -453,7 +453,7 @@ mod tests {
         };
         assert_eq!(
             error.to_string(),
-            r#"timed out after 60 frames (1000 ms) on object name="Door", still waiting for the name or owner of object #00000000-0000-0000-0000-000000000002 local=2 at <1,2,3> (0 matching things at the end)"#
+            r"timed out after 60 frames (1000 ms) on object[name=Door], still waiting for the name or owner of object #00000000-0000-0000-0000-000000000002 local=2 at <1,2,3> (0 matching things at the end)"
         );
         let covered = AutomationError::WorldNotActionable {
             locator: WorldLocator::kind(WorldKind::Object).named("Door"),
@@ -463,7 +463,7 @@ mod tests {
         };
         assert_eq!(
             covered.to_string(),
-            r#"object name="Door" is not actionable: object #00000000-0000-0000-0000-000000000002 local=2 at <1,2,3> fails the receives_events check (a click there hits #00000000-0000-0000-0000-000000000003)"#
+            r"object[name=Door] is not actionable: object #00000000-0000-0000-0000-000000000002 local=2 at <1,2,3> fails the receives_events check (a click there hits #00000000-0000-0000-0000-000000000003)"
         );
     }
 
@@ -480,7 +480,7 @@ mod tests {
         };
         assert_eq!(
             wait.to_string(),
-            r#"timed out after 120 frames (2000 ms) on button name="OK", waiting for it to be visible (0 matching nodes at the end)"#
+            r"timed out after 120 frames (2000 ms) on button[name=OK], waiting for it to be visible (0 matching nodes at the end)"
         );
         let action = AutomationError::TimedOut {
             locator,
@@ -492,7 +492,7 @@ mod tests {
         };
         assert_eq!(
             action.to_string(),
-            r#"timed out after 3 frames (50 ms) on button name="OK", still failing the receives_events check (0 matching nodes at the end)"#
+            r"timed out after 3 frames (50 ms) on button[name=OK], still failing the receives_events check (0 matching nodes at the end)"
         );
     }
 }

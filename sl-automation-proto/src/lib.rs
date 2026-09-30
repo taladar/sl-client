@@ -47,6 +47,12 @@
 //!   every error response also carries a [`FailureReport`] — the tree around
 //!   the scope, the event tail and the warnings logged meanwhile.
 //!
+//! Both locators also have a **string form** for a command line and an error
+//! message — `window[test_id=floater:build] >> button[name_key=build-apply]`,
+//! `object[name=Door][near=own_avatar]` — which they print as (`Display`)
+//! and parse from (`FromStr`, refusing a mistake with a [`SelectorError`]
+//! naming the column); printing and parsing agree on every locator.
+//!
 //! The *types* are shared between viewers, but a Fluent key or a test id means
 //! something only to the viewer that owns it: selectors are a per-viewer
 //! namespace.
@@ -76,6 +82,7 @@ mod locator;
 mod message;
 mod probe;
 mod report;
+mod selector;
 mod snapshot;
 mod state;
 mod world;
@@ -95,6 +102,7 @@ pub use crate::probe::{
     TranscriptLine,
 };
 pub use crate::report::FailureReport;
+pub use crate::selector::SelectorError;
 pub use crate::snapshot::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
 pub use crate::state::{
     Probe, ProbeReadout, StateCondition, StateObservation, ValueTest, includes,

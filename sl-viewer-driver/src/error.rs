@@ -103,8 +103,8 @@ impl DriverError {
 pub struct Failure {
     /// The viewer, by its label.
     pub viewer: String,
-    /// What was being done: `click on button key=build-apply`,
-    /// `expect #floater:inventory to be visible`.
+    /// What was being done: `click button[name_key=build-apply]`,
+    /// `expect [test_id=floater:inventory] to be visible`.
     pub action: String,
     /// The viewer's error.
     pub error: AutomationError,

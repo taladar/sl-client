@@ -462,6 +462,32 @@ replaces that person.
   otherwise). A fixture field needs a `TabIndex`, as every viewer field
   has: a click on an unfocusable field bubbles its focus request to the
   window, which clears it.
+- **Selectors have a string grammar** ([[viewer-automation-ctl-cli]],
+  `sl-automation-proto/src/selector.rs`): `Locator` and `WorldLocator` parse
+  from and print as `window[test_id=floater:build] >>
+  button[name_key=build-apply][enabled=false]` and
+  `object[name=Door][near=own_avatar][radius=5][nth=0]` — a role or kind
+  (or `*`), then `[field=value]` attributes named after the JSON fields,
+  `~=` for a name's "contains", a value bare when it is plain
+  (`[A-Za-z0-9_.:-]`) and quoted otherwise. `Display` *is* the grammar, so
+  every failure message prints a locator a person can paste back; a test
+  that asserts on an error's text asserts on it. A world selector is one
+  step.
+- **`sl-viewer-ctl`** ([[viewer-automation-ctl-cli]]) is the driver from a
+  shell. `launch` (one viewer on a live or local grid, via its credentials
+  file) and `stage <toml>` (a fresh fake grid plus N viewers, accounts
+  `Stage <label>`) start real viewer processes `--headless` through
+  `sl-viewer-launch`, wait until each has logged in and gone quiet, print
+  each socket, and hold them until Ctrl-C / `SIGTERM`, then log them out.
+  Their sockets go in the viewer's default socket directory
+  (`$XDG_RUNTIME_DIR/sl-client-bevy-viewer/`), so a verb with no `--socket`
+  finds the one viewer that answers there. Verbs (`tree`, `find`, `click`,
+  `fill`, `press`, `wait --for`, `open`, `menu`, `world find|touch`, `chat`,
+  `notifications`, `agent`, `screenshot`, `events --follow`) are one driver
+  call each; `attach` runs them line by line over one connection. It
+  depends on the fake grid but not on the viewer's library, so it builds in
+  seconds; it runs the release viewer beside itself. A `launch` onto aditi
+  takes its turn under the shared login cooldown.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).
@@ -512,7 +538,13 @@ replaces that person.
   through `Viewer::ask` with a `Subject` (what a failure's screenshot
   outlines) and matches the one answer it expects; an expectation in
   `expect.rs` is a wait request, never a read in a loop. A verb that needs a
-  new request adds it first (see *a request*).
+  new request adds it first (see *a request*). If a person or an agent would
+  use it from a shell, give it a `Verb` in `sl-viewer-ctl/src/cli.rs`, its
+  arm in `verbs.rs` and an `Outcome` it prints as text and JSON, with a
+  scripted-viewer test in `sl-viewer-ctl/src/tests.rs`.
+- **a locator field**: its attribute in the grammar too (`selector.rs`,
+  parse and print), and the field in the round-trip shapes of
+  `selector/tests.rs`.
 - **a request**: a `RequestBody` variant and, when it answers with
   something new, a `ResponseBody` one (`sl-automation-proto/src/message.rs`,
   with round-trip tests), any new failure as an `AutomationError` kind (and
