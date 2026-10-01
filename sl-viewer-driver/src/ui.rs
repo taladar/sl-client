@@ -483,7 +483,7 @@ impl UiLocator {
     pub async fn text(&self) -> Result<Option<String>, DriverError> {
         let node = self.node().await?;
         Ok(match node.value {
-            Some(NodeValue::Text(text)) => Some(text),
+            Some(NodeValue::Text(text) | NodeValue::Color(text)) => Some(text),
             Some(NodeValue::Number(_)) | None => node.name,
         })
     }

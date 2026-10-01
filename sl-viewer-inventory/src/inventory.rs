@@ -258,6 +258,7 @@ impl Plugin for InventoryPlugin {
                         .run_if(crate::floater::floater_shown(INVENTORY_FLOATER_ID)),
                     apply_ui_actions,
                     read_search_field,
+                    fetch_everything_while_searching,
                     rebuild_view.run_if(crate::floater::floater_shown(INVENTORY_FLOATER_ID)),
                     apply_pending_reveal,
                 )
@@ -2922,6 +2923,39 @@ fn read_search_field(
     }
 }
 
+/// While the search field holds a query, ask for the contents of every folder
+/// the window has not paged yet — the reference's background fetch on a filter
+/// (`LLInventoryModelBackgroundFetch::start` from the filter edit). Folders
+/// are paged only as they are opened, so without it a search finds nothing in
+/// a folder the resident never opened, whatever the inventory holds. Swept
+/// once per set of known folders: again only when the skeleton grows, and
+/// afresh after the query is cleared.
+fn fetch_everything_while_searching(
+    state: Res<InventoryState>,
+    mut model: ResMut<InventoryModel>,
+    mut commands: MessageWriter<SlCommand>,
+    mut swept: Local<Option<usize>>,
+) {
+    if state.query.trim().is_empty() {
+        *swept = None;
+        return;
+    }
+    let known = model.folders.len();
+    if *swept == Some(known) {
+        return;
+    }
+    *swept = Some(known);
+    let wanted: Vec<InventoryFolderKey> = model
+        .folders
+        .keys()
+        .copied()
+        .filter(|folder| model.needs_fetch(*folder))
+        .collect();
+    for folder in wanted {
+        request_folder(&mut model, folder, &mut commands);
+    }
+}
+
 /// Seconds of typing quiet before a search-query edit re-flattens the view:
 /// `InventoryModel::build_rows` walks the **whole** inventory (O(total
 /// items)), so re-running it per keystroke on a large inventory is a
@@ -5364,6 +5398,42 @@ mod tests {
         cursor
             .read(messages)
             .any(|command| matches!(command.0, sl_client_bevy::Command::QueryInventoryFolders))
+    }
+
+    /// A query typed into the search field asks for every folder the window
+    /// has not paged — once, not again on the next frame — and nothing more
+    /// while the field is empty; a folder already paged is not asked again.
+    #[test]
+    fn a_search_asks_for_every_unpaged_folder_once() {
+        use bevy::prelude::*;
+        let key = |id: u128| {
+            sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(id))
+        };
+        let mut app = App::new();
+        app.add_message::<SlCommand>();
+        app.insert_resource(sample_model());
+        app.init_resource::<super::InventoryState>();
+        app.add_systems(Update, super::fetch_everything_while_searching);
+        let asked = |app: &mut App| -> Vec<sl_client_bevy::InventoryFolderKey> {
+            app.update();
+            app.world_mut()
+                .resource_mut::<Messages<SlCommand>>()
+                .drain()
+                .filter_map(|command| match command.0 {
+                    sl_client_bevy::Command::QueryInventoryFolder { folder, .. } => Some(folder),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(asked(&mut app), Vec::new(), "no query, no fetch");
+        app.world_mut()
+            .resource_mut::<super::InventoryState>()
+            .query = "shirt".to_owned();
+        let mut first = asked(&mut app);
+        first.sort();
+        // Clothing (2) is paged already; the root and Objects are not.
+        assert_eq!(first, vec![key(1), key(3)]);
+        assert_eq!(asked(&mut app), Vec::new(), "swept once");
     }
 
     /// The login inventory skeleton triggers a one-shot folder snapshot, so the

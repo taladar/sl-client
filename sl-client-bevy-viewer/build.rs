@@ -1,7 +1,8 @@
-//! Build script: gives the viewer's binaries (viewer, gallery, scenes) an
-//! `$ORIGIN` rpath so they find `libcef.so` and the other CEF runtime files,
-//! and embeds build-time metadata for the About floater — the `git describe`
-//! version string and the Bevy / wgpu dependency versions from `Cargo.lock`.
+//! Build script: gives the viewer's binaries (viewer, gallery, scenes, the CEF
+//! subprocess helper) an `$ORIGIN` rpath so they find `libcef.so` and the
+//! other CEF runtime files, and embeds build-time metadata for the About
+//! floater — the `git describe` version string and the Bevy / wgpu dependency
+//! versions from `Cargo.lock`.
 
 /// Emits the rpath link argument and the build-metadata `rustc-env`s.
 ///

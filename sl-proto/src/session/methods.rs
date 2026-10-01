@@ -1434,7 +1434,13 @@ impl Session {
     /// out with the [`Event::AgentArrived`] this pushes after the
     /// [`Event::RegionChanged`], so a viewer can apply the arrival facing at once
     /// instead of waiting for the destination's first object update.
-    fn commit_handover(&mut self, dest: SocketAddr, pose: ArrivalPose, now: Instant) {
+    fn commit_handover(
+        &mut self,
+        dest: SocketAddr,
+        pose: ArrivalPose,
+        simulator_version: String,
+        now: Instant,
+    ) {
         let arrival = pose.region_handle;
         let Some(pending) = self.pending_handover.take() else {
             return;
@@ -1543,6 +1549,10 @@ impl Session {
                 Arrival::NearTeleport
             },
         });
+        // The destination's version, as the root arm surfaces its own: the
+        // About window's line would otherwise go on naming the region left.
+        self.events
+            .push_back(Event::SimulatorVersion(simulator_version));
     }
 
     /// Drop an in-flight teleport handover, leaving the session in its **source**
@@ -2450,7 +2460,8 @@ impl Session {
                 // in the lure id, but Second Life's lure id is opaque, so the
                 // parsed value is garbage there).
                 let pose = ArrivalPose::from_movement_complete(&complete.data);
-                self.commit_handover(from, pose, now);
+                let version = trimmed_string(&complete.sim_data.channel_version);
+                self.commit_handover(from, pose, version, now);
             }
             AnyMessage::DisableSimulator(_) => {
                 // The simulator is retiring this child circuit. Resolve its

@@ -640,8 +640,9 @@ impl WorldAim {
     /// The resolution's errors ([`AutomationError::WorldAmbiguous`], and
     /// [`AutomationError::WorldTimedOut`] while nothing resolves);
     /// [`AutomationError::WorldNotActionable`] when no point of the target
-    /// takes a click even after a reveal; [`AutomationError::WorldTimedOut`] with the failing check when
-    /// the deadline passes; and [`PursuitError::Model`] when the models
+    /// takes a click and no reveal was allowed; [`AutomationError::WorldTimedOut`] with the failing
+    /// check when the deadline passes — also for a target a reveal never
+    /// brings to a point that takes a click; and [`PursuitError::Model`] when the models
     /// cannot be read.
     pub fn poll(&mut self, world: &mut World) -> Result<AimProgress, PursuitError> {
         let started = *self.started.get_or_insert_with(Instant::now);
@@ -877,6 +878,16 @@ impl WorldAim {
             });
             self.revealed = true;
             self.settle_from = self.frames.saturating_add(REVEAL_SETTLE_FRAMES);
+            self.stability = None;
+            self.stage = Stage::Settle;
+            return Ok(AimProgress::Waiting(AimStage::Revealing(check)));
+        }
+        if self.reveal && self.revealed {
+            // The camera eases into a framing, and a glide's last stretch is
+            // slow enough to pass for still: a target the reveal is still
+            // bringing on screen is looked at again until the deadline, which
+            // reports the check if it never passes. (A viewer process at ten
+            // frames a second found its prim off screen at the first look.)
             self.stability = None;
             self.stage = Stage::Settle;
             return Ok(AimProgress::Waiting(AimStage::Revealing(check)));

@@ -60,6 +60,7 @@
 - [Avatar state capture & replay](tools/avatar-replay.md)
 - [The fake grid](tools/fake-grid.md)
 - [The viewer test harness](tools/test-harness.md)
+- [Driving the viewer: automation & end-to-end tests](tools/viewer-automation.md)
 
 ## Conformance Testing
 

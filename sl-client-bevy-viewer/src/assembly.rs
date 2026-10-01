@@ -80,6 +80,8 @@ use sl_client_bevy::{
 use tracing::warn;
 
 pub use sl_viewer_platform::paths::{StartupOverrides, ViewerPaths};
+/// The skin and theme a viewer starts in ([`SkinRuntime::selection`]).
+pub use sl_viewer_ui_core::skin::SkinSelection;
 
 use crate::Error;
 use crate::animations::AnimationManager;
@@ -292,7 +294,8 @@ pub struct MediaRuntime {
 
 impl MediaRuntime {
     /// Every engine off, and no website login: an offline run, or a test
-    /// binary, which has no `sl-cef-helper` beside it to start Chromium with.
+    /// that has no use for a Chromium process tree and a media pipeline per
+    /// viewer.
     pub const OFF: Self = Self {
         web: false,
         video: false,

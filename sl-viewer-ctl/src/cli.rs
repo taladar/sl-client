@@ -183,6 +183,10 @@ pub enum Verb {
         /// Click into this node first.
         #[arg(long, value_parser = ui_selector, value_name = "SELECTOR")]
         on: Option<Locator>,
+        /// Hold the key down this many frames before letting go — what walks
+        /// the avatar or flies the flycam.
+        #[arg(long, value_name = "FRAMES")]
+        hold: Option<u32>,
     },
     /// Wait for the nodes a selector names to be in a state, and print them.
     Wait {

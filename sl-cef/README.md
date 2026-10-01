@@ -19,9 +19,10 @@ Input crosses the boundary as *Windows virtual-key code + committed text*
 isolated in-memory request context so hostile in-world pages cannot read
 another surface's cookies.
 
-The crate also ships the `sl-cef-helper` binary — CEF's subprocess
-executable, which must be installed next to the embedding binary (cargo
-places both in the same target directory).
+CEF's subprocess executable runs `chromium::execute_child_process`, and must
+be installed next to the embedding binary. The viewer ships it as its own
+`sl-cef-helper` target (`sl-client-bevy-viewer/src/bin/sl-cef-helper.rs`), so
+every build of the viewer puts both in the same target directory.
 
 Build note: the `cef-dll-sys` build script downloads the CEF binary
 distribution on first build (respects `CEF_PATH`; this workspace pins it to

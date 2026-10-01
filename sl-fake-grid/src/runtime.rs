@@ -108,6 +108,11 @@ pub struct RegionConfig {
     /// only way a viewer learns a region cannot do something. Empty: every
     /// capability the session serves.
     pub withheld_caps: Vec<String>,
+    /// The channel and version the region's simulator reports in
+    /// `AgentMovementComplete` (the About window's simulator line), or `None`
+    /// for the fake grid's own name and version. Two regions given two
+    /// versions are how a test sees the line follow a teleport.
+    pub simulator_version: Option<String>,
 }
 
 impl RegionConfig {
@@ -162,6 +167,7 @@ impl Default for RegionConfig {
             scenario: None,
             neighbours: NeighbourPolicy::default(),
             withheld_caps: Vec::new(),
+            simulator_version: None,
         }
     }
 }
@@ -696,7 +702,14 @@ impl GridCore {
 
         let now = (self.clock)();
         let mut sim = SimSession::new(region.handle(), now);
-        sim.set_channel_version(SERVER_CHANNEL_VERSION.as_bytes());
+        sim.set_channel_version(
+            region
+                .config
+                .simulator_version
+                .as_deref()
+                .unwrap_or(SERVER_CHANNEL_VERSION)
+                .as_bytes(),
+        );
         sim.set_secure_session_id(ids.secure_session_id);
         sim.set_region_id(region.region_id);
         sim.set_update_completion_names_item(self.update_completion_item.names_item());

@@ -45,7 +45,8 @@ const FUNCTION: [(KeyCode, Key); 12] = [
 type Pressed = (KeyCode, Key, Option<String>);
 
 /// The keys `spec` names, as an action: each modifier down in order, the key
-/// down and up, the modifiers up in reverse.
+/// down, held for `hold_frames` frames (one at least), and up, the modifiers up
+/// in reverse.
 ///
 /// A character or `Space` pressed with no modifier but `Shift` carries its
 /// text, so a focused text field inserts it; under `Ctrl`, `Alt` or `Super` it
@@ -55,7 +56,7 @@ type Pressed = (KeyCode, Key, Option<String>);
 ///
 /// A sentence naming what is wrong: an empty spec, an unknown modifier, or a
 /// key that is neither named nor one character.
-pub(crate) fn parse_keys(spec: &str) -> Result<InputAction, String> {
+pub(crate) fn parse_keys(spec: &str, hold_frames: u32) -> Result<InputAction, String> {
     // A trailing `++` is the plus key under modifiers; `+` alone is the key.
     let (modifier_part, key_part) = if spec == "+" {
         ("", "+")
@@ -92,6 +93,8 @@ pub(crate) fn parse_keys(spec: &str) -> Result<InputAction, String> {
         logical: logical.clone(),
         text,
     });
+    let held = usize::try_from(hold_frames.saturating_sub(1)).unwrap_or(usize::MAX);
+    steps.extend(core::iter::repeat_n(InputStep::Idle, held));
     steps.push(InputStep::KeyUp { key_code, logical });
     steps.extend(
         modifiers
@@ -158,7 +161,43 @@ mod tests {
 
     /// The steps `spec` parses to.
     fn steps(spec: &str) -> Result<Vec<InputStep>, String> {
-        Ok(parse_keys(spec)?.steps().to_vec())
+        Ok(parse_keys(spec, 0)?.steps().to_vec())
+    }
+
+    #[test]
+    fn a_held_key_stays_down_for_its_frames_with_the_modifiers_around_it() -> Result<(), String> {
+        let held = parse_keys("Shift+w", 4)?.steps().to_vec();
+        let shift_down = InputStep::KeyDown {
+            key_code: KeyCode::ShiftLeft,
+            logical: Key::Shift,
+            text: None,
+        };
+        let w_down = InputStep::KeyDown {
+            key_code: KeyCode::KeyW,
+            logical: Key::Character("w".into()),
+            text: Some("w".to_owned()),
+        };
+        assert_eq!(
+            held,
+            vec![
+                shift_down,
+                w_down,
+                InputStep::Idle,
+                InputStep::Idle,
+                InputStep::Idle,
+                InputStep::KeyUp {
+                    key_code: KeyCode::KeyW,
+                    logical: Key::Character("w".into()),
+                },
+                InputStep::KeyUp {
+                    key_code: KeyCode::ShiftLeft,
+                    logical: Key::Shift,
+                },
+            ]
+        );
+        // A hold of one frame is a tap.
+        assert_eq!(parse_keys("w", 1)?.steps(), parse_keys("w", 0)?.steps());
+        Ok(())
     }
 
     #[test]
@@ -254,7 +293,7 @@ mod tests {
     #[test]
     fn malformed_keys_are_refused_with_a_reason() {
         for spec in ["", "Ctrl+", "Hyper+a", "Enterr", "F13", "Ctrl++a"] {
-            assert!(parse_keys(spec).is_err(), "accepted {spec:?}");
+            assert!(parse_keys(spec, 0).is_err(), "accepted {spec:?}");
         }
     }
 }

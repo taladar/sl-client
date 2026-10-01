@@ -411,6 +411,7 @@ fn a_key_press_reaches_the_focused_field() -> Result<(), String> {
             &mut app,
             RequestBody::Press {
                 keys: keys.to_owned(),
+                hold_frames: 0,
             },
         )?)?;
         assert_eq!(body, ResponseBody::Pressed);
@@ -428,6 +429,7 @@ fn a_key_press_reaches_the_focused_field() -> Result<(), String> {
         &mut app,
         RequestBody::Press {
             keys: "Hyper+a".to_owned(),
+            hold_frames: 0,
         },
     )?)?;
     assert!(

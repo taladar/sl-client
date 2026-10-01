@@ -29,6 +29,7 @@ use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
 use bevy::prelude::*;
 use bevy::ui::RelativeCursorPosition;
+use sl_viewer_ui_core::semantic::{Role, Semantic, SemanticValue};
 
 use crate::media_engine::{MediaEngine, MediaEngineSystems, MediaSurfaceId, MediaSurfaces};
 use crate::media_ime::{MediaIme, MediaImePlugin, MediaImeSystems};
@@ -103,6 +104,7 @@ impl Plugin for BrowserWidgetPlugin {
                     resize_browser_surfaces,
                     sync_browser_focus,
                     close_removed_browser_views,
+                    describe_browser_views,
                 )
                     .chain()
                     .after(MediaEngineSystems::Pump),
@@ -147,6 +149,10 @@ pub fn spawn_browser_view(
             RelativeCursorPosition::default(),
             bevy::input_focus::tab_navigation::TabIndex(spec.tab_index),
             Pickable::default(),
+            // A page, named by its title once it has one and by what it is
+            // until then; its address is its value.
+            Semantic::new(Role::Document).name_key("browser-view-name"),
+            SemanticValue::default(),
             Name::new("browser-view"),
             ChildOf(parent),
         ))
@@ -157,6 +163,41 @@ pub fn spawn_browser_view(
         .observe(on_browser_scroll)
         .observe(on_browser_key)
         .id()
+}
+
+/// Keep what each view reports to the automation and screen-reader model in
+/// step with its page: the title as its name (none until the page states one)
+/// and the address as its value. Written only on a change, so an idle page
+/// marks nothing changed.
+fn describe_browser_views(
+    mut commands: Commands,
+    mut views: Query<(
+        Entity,
+        &BrowserView,
+        &mut SemanticValue,
+        Option<&AccessibleLabel>,
+    )>,
+    surfaces: NonSend<MediaSurfaces>,
+) {
+    for (entity, view, mut value, label) in &mut views {
+        let Some(slot) = view.surface.and_then(|id| surfaces.get(id)) else {
+            continue;
+        };
+        let status = &slot.status;
+        value.set_if_neq(SemanticValue(status.url.clone()));
+        let named = label.map(|label| label.0.as_str());
+        match (status.title.is_empty(), named) {
+            (true, Some(_)) => {
+                commands.entity(entity).remove::<AccessibleLabel>();
+            }
+            (false, current) if current != Some(status.title.as_str()) => {
+                commands
+                    .entity(entity)
+                    .insert(AccessibleLabel(status.title.clone()));
+            }
+            _ => {}
+        }
+    }
 }
 
 /// The pointer position of `relative` in surface pixels, given the surface

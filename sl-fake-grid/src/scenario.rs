@@ -309,7 +309,8 @@ pub fn fixture_item_id(asset_type: AssetType) -> InventoryKey {
 /// is the class's own code for every class that has a folder — LL uses one
 /// numbering for both — and a class with no folder of its own (a wearable
 /// layer, a material) falls back to the agent root, as it does on a real grid.
-fn class_folder(asset_type: AssetType) -> InventoryFolderKey {
+#[must_use]
+pub fn class_folder(asset_type: AssetType) -> InventoryFolderKey {
     let code = asset_type.to_code();
     if AGENT_SYSTEM_FOLDERS
         .iter()

@@ -17,8 +17,8 @@ use bevy_flair::style::components::PseudoElementsSupport;
 use sl_automation_proto::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::semantic::{
-    Expanded, LabelledBy, NamePart, Semantic, SemanticName, SpokenLabel, role_from_classes,
-    selected_by_class,
+    Expanded, LabelledBy, NamePart, Semantic, SemanticName, SemanticValue, SpokenLabel,
+    role_from_classes, selected_by_class,
 };
 use sl_viewer_ui_core::virtual_list::VirtualRow;
 use sl_viewer_ui_widgets::ui_text_input::ReadOnlyField;
@@ -35,6 +35,17 @@ pub const fn node_id(entity: Entity) -> NodeId {
 #[must_use]
 pub const fn entity_of(id: NodeId) -> Option<Entity> {
     Entity::try_from_bits(id.0)
+}
+
+/// `color` as the snapshot writes one: `#rrggbb` in sRGB, with the alpha
+/// appended only when the colour is not opaque.
+fn color_hex(color: Color) -> String {
+    let [red, green, blue, alpha] = color.to_srgba().to_u8_array();
+    if alpha == u8::MAX {
+        format!("#{red:02x}{green:02x}{blue:02x}")
+    } else {
+        format!("#{red:02x}{green:02x}{blue:02x}{alpha:02x}")
+    }
 }
 
 /// Take a snapshot of the whole UI of `world`: every root's semantic tree, in
@@ -80,6 +91,12 @@ struct NodeFacts {
     editable: Option<&'static EditableText>,
     /// Its value, when it is a slider.
     slider_value: Option<&'static SliderValue>,
+    /// The value a widget reports that no node of it shows.
+    reported_value: Option<&'static SemanticValue>,
+    /// Its fill: a colour well's value.
+    background: Option<&'static BackgroundColor>,
+    /// The colour its text is drawn in, when it is a text node.
+    text_color: Option<&'static TextColor>,
     /// The clip rectangle its scroll ancestors impose, in physical pixels.
     clip: Option<&'static CalculatedClip>,
     /// The render target it lays out into.
@@ -412,8 +429,19 @@ impl UiModel<'_, '_> {
             Some(NodeValue::Text(editable.editor.text().to_string()))
         } else if let Some(shown) = semantic.and_then(Semantic::value_node) {
             Some(NodeValue::Text(self.label_text(shown).0))
+        } else if let Some(reported) = facts.reported_value {
+            Some(NodeValue::Text(reported.0.clone()))
+        } else if role == Role::ColorWell {
+            facts
+                .background
+                .map(|fill| NodeValue::Color(color_hex(fill.0)))
         } else {
             facts.slider_value.map(|value| NodeValue::Number(value.0))
+        };
+        let color = if role == Role::Text {
+            facts.text_color.map(|color| color_hex(color.0))
+        } else {
+            None
         };
         UiNode {
             id: node_id(facts.entity),
@@ -423,6 +451,7 @@ impl UiModel<'_, '_> {
             test_id: facts.name.map(|name| name.as_str().to_owned()),
             states,
             value,
+            color,
             level: semantic.and_then(Semantic::tree_level),
             accelerator: semantic.and_then(|semantic| semantic.shortcut().map(str::to_owned)),
             bounds: logical_bounds(facts.computed, facts.transform),
@@ -472,6 +501,7 @@ impl UiModel<'_, '_> {
             ),
             Role::Group
             | Role::Image
+            | Role::Document
             | Role::Window
             | Role::TabList
             | Role::MenuBar
@@ -490,7 +520,11 @@ impl UiModel<'_, '_> {
             | Role::MenuItem
             | Role::ListItem
             | Role::TreeItem => {
-                let (text, key) = self.label_text(facts.entity);
+                // A row holds controls of its own — a Remove, a Profile — and
+                // is called what its cells say, not what its first button
+                // does.
+                let row = matches!(role, Role::ListItem | Role::TreeItem);
+                let (text, key) = self.label_text_within(facts.entity, row);
                 match non_empty(text) {
                     Some(text) => (Some(text), key),
                     None => self.part_of(facts, self.labelled_by_of(facts.entity)),
@@ -556,18 +590,37 @@ impl UiModel<'_, '_> {
     /// The text `entity` shows as a label: its first translated text, with
     /// the key, else all its text joined.
     fn label_text(&self, entity: Entity) -> (String, Option<String>) {
-        if let Some((text, key)) = self.translated_label(entity) {
+        self.label_text_within(entity, false)
+    }
+
+    /// [`Self::label_text`], passing over the subtrees of the controls inside
+    /// `entity` when `past_controls` — a row's own text, not its buttons'.
+    fn label_text_within(&self, entity: Entity, past_controls: bool) -> (String, Option<String>) {
+        if let Some((text, key)) = self.translated_label(entity, past_controls) {
             (text, Some(key))
         } else {
             let mut texts = Vec::new();
-            self.descendant_texts(entity, &mut texts);
+            self.descendant_texts(entity, past_controls, &mut texts);
             (texts.join(" "), None)
         }
     }
 
+    /// Whether a name read under some node leaves `child` out: a popup its
+    /// leaf owns, a node laid out away, and — `past_controls` — a control of
+    /// its own, which names itself.
+    fn names_nothing(&self, child: Entity, past_controls: bool) -> bool {
+        self.is_owned_popup(child)
+            || self.is_undisplayed(child)
+            || (past_controls
+                && self.nodes.get(child).is_ok_and(|facts| {
+                    self.role_of(&facts)
+                        .is_some_and(|role| !matches!(role, Role::Text | Role::Image | Role::Group))
+                }))
+    }
+
     /// The first `Translated` text node in `entity`'s subtree, itself first,
     /// depth first: its resolved text and its key.
-    fn translated_label(&self, entity: Entity) -> Option<(String, String)> {
+    fn translated_label(&self, entity: Entity, past_controls: bool) -> Option<(String, String)> {
         if let Ok(facts) = self.nodes.get(entity)
             && let (Some(key), Some(_text)) = (facts.translated, facts.text)
         {
@@ -585,8 +638,8 @@ impl UiModel<'_, '_> {
             .get(entity)
             .ok()?
             .iter()
-            .filter(|&child| !self.is_owned_popup(child) && !self.is_undisplayed(child))
-            .find_map(|child| self.translated_label(child))
+            .filter(|&child| !self.names_nothing(child, past_controls))
+            .find_map(|child| self.translated_label(child, past_controls))
     }
 
     /// Whether `entity` is a popup its leaf ancestor owns — a node of its own
@@ -600,7 +653,7 @@ impl UiModel<'_, '_> {
     }
 
     /// Every non-empty text in `entity`'s subtree, itself first, depth first.
-    fn descendant_texts(&self, entity: Entity, out: &mut Vec<String>) {
+    fn descendant_texts(&self, entity: Entity, past_controls: bool, out: &mut Vec<String>) {
         if self
             .nodes
             .get(entity)
@@ -614,8 +667,8 @@ impl UiModel<'_, '_> {
         }
         if let Ok(children) = self.children.get(entity) {
             for &child in children {
-                if !self.is_owned_popup(child) && !self.is_undisplayed(child) {
-                    self.descendant_texts(child, out);
+                if !self.names_nothing(child, past_controls) {
+                    self.descendant_texts(child, past_controls, out);
                 }
             }
         }

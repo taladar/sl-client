@@ -243,7 +243,10 @@ replaces that person.
   the rest queued; never fold requests at different pixels into one pick.
   A target no point reaches is framed once with `FrameObject` (the camera
   keeps colliding, except with the framed object's own prims) and the camera
-  stays where that left it.
+  stays where that left it. After that reveal a target still off screen or
+  covered is looked at again until the deadline (`WorldTimedOut` names the
+  check): the camera eases into a framing, and the last stretch of the glide
+  is slow enough to pass the stability rule.
 - **State probes read models, and some models live in heavy crates**
   ([[viewer-automation-state-probes]]). `sl-viewer-automation` reads the
   light ones itself (identity, region entity, parcel, `CameraMode`,
@@ -497,7 +500,8 @@ replaces that person.
   finds the one viewer that answers there. Verbs (`tree`, `find`, `click`,
   `drag --onto|--by`, `fill`, `press`, `wait --for`, `open`, `menu`,
   `world find|touch`, `chat`, `notifications`, `agent`, `environment`,
-  `file-dialog`, `screenshot`, `events --follow`)
+  `file-dialog`, `screenshot`, `events --follow`; `press --hold N` holds a
+  key N frames)
   are one driver call each; `attach` runs them line by line over one
   connection. It depends on the fake grid but not on the viewer's library, so
   it builds in seconds; it runs the release viewer beside itself. A `launch`
@@ -675,6 +679,58 @@ replaces that person.
   parcel's properties only on arrival, and the driver cannot hold a movement
   key, so walking over a parcel line changes nothing a test can see
   ([[test-e2e-environment-parcel-layer]]).
+- **A key is held by frames** (`RequestBody::Press::hold_frames`, the
+  driver's `hold`): down, N frames of nothing, up — what flies the flycam or
+  walks the avatar. A tap is `0`.
+- **The agent readout carries the camera's eye** (`camera_eye`), region-local
+  to the agent's region in Second Life axes, read off the `ViewerCamera`'s
+  drawn transform as the world model places an object.
+- **Colours are in the model**: a colour well's value is `NodeValue::Color`
+  (`#rrggbb`, alpha appended only when not opaque) and reads as its text, so
+  `to_have_text("#ffffff")` waits on a swatch; a text node carries `color`,
+  its `TextColor`. A fading line's alpha rides along, so compare the
+  `#rrggbb` prefix. Both reach AccessKit (`color_value`, `foreground_color`).
+- **A web page is a `Document`**: the browser view is named by its page's title
+  (none until the page states one, `browser-view-name` meanwhile) and valued by
+  its address (`SemanticValue`, the generic "a value no node shows"). A stage
+  viewer starts web media only with `StageBuilder::web_media()`; in process it
+  finds `sl-cef-helper` beside the binaries above cargo's `deps/`. The helper is
+  a target of the viewer's own package, so every viewer build (the commit hook's
+  included) has it. A test serves its own page from a loopback listener: the
+  media scheme allowlist refuses `data:`.
+- **A list row is named by its cells**: the model's name for a `ListItem` /
+  `TreeItem` skips the controls inside it, so a row holding a Profile button
+  is not called "Profile".
+- **Stage options beyond the login**: `estate_manager(label)` (the Region /
+  Estate window's write controls; dictates the grid), `skin(id)` (as
+  `--skin`, worn and not stored) and `web_media()`. A test that reads a
+  settings file the viewer writes in its own time polls it (the one file
+  wait); the paths differ by backend, so find it under the viewer's
+  directory.
+- **A chord goes to the focus**: with a text field focused (the chat bar
+  after a fill, the web address bar), Ctrl+T or Ctrl+F is the field's. Open
+  a window with `open_floater` there.
+- **The inventory window pages a folder only when it is opened**; a search
+  asks for every unpaged folder (the reference's background fetch on a
+  filter), so a test finds an item by typing its name into the window's
+  search. The pages arrive over several frames and each re-flows the rows,
+  so a row found the first moment can move under a click: wait for the
+  inventory probe (it reads the window's model) to list the item first. Until
+  something pages it, the probe sees an unopened folder as loaded and
+  empty.
+- **Seed an account's own items** through the region scenario's
+  `setup_for_agent`, wrapping the stock hook, filed by
+  `sl_fake_grid::scenario::class_folder` — the stock fixtures are somebody
+  else's and read-only. A landmark onto a stage region needs the region's id
+  pinned (`RegionConfig::region_id`) and its asset in `Scenario::assets`.
+- **A region names its simulator** (`RegionConfig::simulator_version`);
+  the About window's line follows a teleport.
+- **The fake grid lands a teleport below the ground on it** (the map asks
+  for height 0), as OpenSim's `ScenePresence` does; a place at or above the
+  ground is kept exactly.
+- **Experience pickers filter by scope**: Allowed offers land-scoped
+  experiences, Blocked grid-scoped ones; the fake grid's land-scoped Arena is
+  rated Moderate, so the rating filter must admit it.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).

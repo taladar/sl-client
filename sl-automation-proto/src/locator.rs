@@ -223,6 +223,7 @@ mod tests {
             test_id: Some("prefs.ok".to_owned()),
             states: states.iter().copied().collect::<BTreeSet<_>>(),
             value: None,
+            color: None,
             level: None,
             accelerator: None,
             bounds: Bounds::default(),

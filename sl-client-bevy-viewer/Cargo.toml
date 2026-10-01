@@ -180,6 +180,10 @@ sl-account-dirs = { workspace = true }
 # The static-asset library the viewer ships (built-in animations, library
 # wearables and gestures) is installed process-wide before any asset store.
 sl-asset = { workspace = true }
+# The CEF subprocess helper (`src/bin/sl-cef-helper.rs`) runs sl-cef's child
+# entry; it is this package's target so every viewer build has it beside the
+# viewer binary.
+sl-cef = { path = "../sl-cef", version = "0.1.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }

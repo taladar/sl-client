@@ -34,8 +34,8 @@ pub(super) fn open(world: &mut World, floater: &str) -> Answer {
 }
 
 /// A key press: `keys` parsed, or why it cannot be.
-pub(super) fn press(keys: &str) -> Started {
-    match parse_keys(keys) {
+pub(super) fn press(keys: &str, hold_frames: u32) -> Started {
+    match parse_keys(keys, hold_frames) {
         Ok(action) => Started::Running(super::Task::ui(UiTask::Press(Play::Ready(action)))),
         Err(reason) => Started::answered(Err(Box::new(AutomationError::InvalidRequest {
             reason: format!("the keys {keys:?}: {reason}"),
@@ -518,7 +518,7 @@ fn holds(condition: &WaitCondition, matches: &[UiNode]) -> bool {
         WaitCondition::Disabled => !matches.is_empty() && matches.iter().all(disabled),
         WaitCondition::Text(matcher) => matches.iter().any(|node| {
             let text = match &node.value {
-                Some(NodeValue::Text(text)) => Some(text.as_str()),
+                Some(NodeValue::Text(text) | NodeValue::Color(text)) => Some(text.as_str()),
                 Some(NodeValue::Number(_)) | None => node.name.as_deref(),
             };
             text.is_some_and(|text| matcher.matches(text))

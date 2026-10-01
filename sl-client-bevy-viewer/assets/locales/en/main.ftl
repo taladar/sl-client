@@ -5524,6 +5524,7 @@ parcel-audio-volume-name = Parcel audio volume
 
 # What the web browser's address field and toolbar buttons are called.
 web-browser-address-name = Address
+browser-view-name = Web page
 web-browser-back-name = Back
 web-browser-forward-name = Forward
 web-browser-reload-or-stop-name = Reload or stop

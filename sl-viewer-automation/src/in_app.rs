@@ -156,7 +156,7 @@ pub fn find(app: &mut App, locator: &Locator) -> Result<Vec<UiNode>, DriverError
 pub fn text(app: &mut App, locator: &Locator) -> Result<Option<String>, DriverError> {
     let node = locate(app, locator)?;
     Ok(match node.value {
-        Some(NodeValue::Text(text)) => Some(text),
+        Some(NodeValue::Text(text) | NodeValue::Color(text)) => Some(text),
         Some(NodeValue::Number(_)) | None => node.name,
     })
 }
@@ -283,6 +283,7 @@ pub fn press(app: &mut App, keys: &str) -> Result<(), DriverError> {
         app,
         RequestBody::Press {
             keys: keys.to_owned(),
+            hold_frames: 0,
         },
         &action,
     )? {

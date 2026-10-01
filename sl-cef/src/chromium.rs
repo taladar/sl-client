@@ -964,6 +964,86 @@ impl std::fmt::Debug for CefMediaBackend {
     }
 }
 
+/// How the embedding process handles the signals that ask it to quit, saved
+/// before CEF starts and put back after it.
+///
+/// Chromium's browser start-up installs a graceful-shutdown handler of its own
+/// for `SIGTERM` and `SIGINT` — `CefSettings::disable_signal_handlers` does not
+/// stop it — which replaced the viewer's: a viewer with web media on exited at
+/// once on a `SIGTERM` instead of logging out, and left its session on the grid
+/// (found by the end-to-end tier's process backend, 2026-10-01). How the
+/// process quits is the embedder's to decide, so whatever it had installed is
+/// restored, and the embedder shuts CEF down itself on the way out.
+struct EmbedderSignals {
+    /// Each signal and the action it had, as `sigaction` reported it.
+    saved: Vec<(libc::c_int, libc::sigaction)>,
+}
+
+impl EmbedderSignals {
+    /// The signals whose handling stays the embedder's.
+    const SIGNALS: [libc::c_int; 2] = [libc::SIGTERM, libc::SIGINT];
+
+    /// Read the current action of each of [`Self::SIGNALS`]; one that cannot
+    /// be read is left out, and so left as CEF sets it.
+    fn save() -> Self {
+        let saved = Self::SIGNALS
+            .into_iter()
+            .filter_map(|signal| {
+                // SAFETY: `sigaction` is plain old data, for which all-zero
+                // bytes are a valid (empty) value; it is only a buffer here.
+                let mut action: libc::sigaction = unsafe { core::mem::zeroed() };
+                // SAFETY: a null new action makes `sigaction` only report the
+                // current one, into `action`, a valid writable `sigaction`.
+                let read = unsafe { libc::sigaction(signal, core::ptr::null(), &raw mut action) };
+                (read == 0).then_some((signal, action))
+            })
+            .collect();
+        Self { saved }
+    }
+
+    /// Put back each saved action.
+    fn restore(&self) {
+        for (signal, action) in &self.saved {
+            // SAFETY: `action` is exactly what `sigaction` reported for this
+            // signal before CEF started — a handler the process installed and
+            // still has, or a default — so installing it again is installing a
+            // valid action; a null old-action pointer asks for nothing back.
+            let restored = unsafe { libc::sigaction(*signal, action, core::ptr::null_mut()) };
+            if restored != 0 {
+                tracing::warn!(
+                    "could not give signal {signal} its handler back after CEF started: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+    }
+}
+
+/// The runtime settings [`CefMediaBackend::initialize`] starts CEF with.
+fn cef_settings(config: &BackendConfig) -> Settings {
+    let mut settings = Settings {
+        windowless_rendering_enabled: 1,
+        external_message_pump: 1,
+        no_sandbox: 1,
+        cache_path: path_string(&config.cache_dir),
+        root_cache_path: path_string(&config.cache_dir),
+        log_file: path_string(&config.cache_dir.join("cef.log")),
+        log_severity: LogSeverity::from(cef::sys::cef_log_severity_t::LOGSEVERITY_WARNING),
+        ..Settings::default()
+    };
+    if let Some(subprocess) = &config.subprocess_path {
+        settings.browser_subprocess_path = path_string(subprocess);
+    }
+    if let Some(locale) = &config.locale {
+        settings.locale = CefString::from(locale.as_str());
+        settings.accept_language_list = CefString::from(locale.as_str());
+    }
+    if let Some(product) = &config.user_agent_product {
+        settings.user_agent_product = CefString::from(product.as_str());
+    }
+    settings
+}
+
 impl CefMediaBackend {
     /// Initialises the global CEF runtime and returns the backend.
     ///
@@ -986,34 +1066,16 @@ impl CefMediaBackend {
         let _hash = cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
         let args = Args::new();
 
-        let mut settings = Settings {
-            windowless_rendering_enabled: 1,
-            external_message_pump: 1,
-            no_sandbox: 1,
-            cache_path: path_string(&config.cache_dir),
-            root_cache_path: path_string(&config.cache_dir),
-            log_file: path_string(&config.cache_dir.join("cef.log")),
-            log_severity: LogSeverity::from(cef::sys::cef_log_severity_t::LOGSEVERITY_WARNING),
-            ..Settings::default()
-        };
-        if let Some(subprocess) = &config.subprocess_path {
-            settings.browser_subprocess_path = path_string(subprocess);
-        }
-        if let Some(locale) = &config.locale {
-            settings.locale = CefString::from(locale.as_str());
-            settings.accept_language_list = CefString::from(locale.as_str());
-        }
-        if let Some(product) = &config.user_agent_product {
-            settings.user_agent_product = CefString::from(product.as_str());
-        }
-
+        let settings = cef_settings(config);
         let mut app = OsrApp::new(config.headless);
+        let embedder_signals = EmbedderSignals::save();
         let ok = cef::initialize(
             Some(args.as_main_args()),
             Some(&settings),
             Some(&mut app),
             std::ptr::null_mut(),
         );
+        embedder_signals.restore();
         if ok != 1 {
             return Err(MediaError::Init(format!(
                 "cef::initialize returned {ok} (exit code {})",

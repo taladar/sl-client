@@ -58,6 +58,9 @@ pub enum Role {
     Text,
     /// An image with no interaction of its own.
     Image,
+    /// A web page the viewer shows: named by the page's title, its value the
+    /// address it is at.
+    Document,
     /// A container with no widget role of its own — a panel, a list body, a
     /// scroll area — kept in the tree so a locator can scope to it.
     Group,
@@ -65,7 +68,7 @@ pub enum Role {
 
 impl Role {
     /// Every role, in declaration order.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Button,
         Self::Checkbox,
         Self::Radio,
@@ -87,6 +90,7 @@ impl Role {
         Self::Window,
         Self::Text,
         Self::Image,
+        Self::Document,
         Self::Group,
     ];
 
@@ -115,6 +119,7 @@ impl Role {
             Self::Window => "window",
             Self::Text => "text",
             Self::Image => "image",
+            Self::Document => "document",
             Self::Group => "group",
         }
     }
@@ -157,6 +162,9 @@ pub enum NodeValue {
     Text(String),
     /// The position of a slider or a spinner.
     Number(f32),
+    /// The colour a colour well holds, as `#rrggbb` in sRGB — `#rrggbbaa`
+    /// when it is not opaque.
+    Color(String),
 }
 
 /// Whether, and why not, a node can be seen.
@@ -225,9 +233,15 @@ pub struct UiNode {
     /// The states the node is in.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub states: BTreeSet<NodeState>,
-    /// The value the node shows, for text fields, combo boxes and sliders.
+    /// The value the node shows, for text fields, combo boxes, sliders and
+    /// colour wells.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<NodeValue>,
+    /// The colour a text node is drawn in, as `#rrggbb` in sRGB —
+    /// `#rrggbbaa` when it is not opaque. What a skin or a colour preference
+    /// changes; absent for every other role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     /// How deep a tree row sits, the top level being 1 (as ARIA counts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<u32>,

@@ -112,11 +112,24 @@ pub(crate) enum TeleportOutcome {
 pub(crate) async fn teleport_session(
     core: &Arc<GridCore>,
     source: &SharedSim,
-    request: TeleportRequest,
+    mut request: TeleportRequest,
 ) -> Result<TeleportOutcome, Error> {
     let dest_region = core.region(request.region).ok_or(Error::UnknownRegion {
         region: request.region.to_string(),
     })?;
+    // A simulator never leaves an avatar under its ground: a place below the
+    // terrain — a map teleport asks for height 0 — lands on it (OpenSim's
+    // `ScenePresence` lifts it to the ground), with the avatar's centre half
+    // its height above. The fake grid runs no physics, so nothing else would.
+    let wanted = request.arrival.position;
+    let ground = dest_region.config.terrain.height_at(wanted.x(), wanted.y());
+    if wanted.z() < ground {
+        request.arrival.position = RegionCoordinates::new(
+            wanted.x(),
+            wanted.y(),
+            ground + crate::AVATAR_CENTRE_ABOVE_GROUND_M,
+        );
+    }
     let dest_handle = dest_region.handle();
     let dest_name = dest_region.config.name.clone();
     let sim_access = dest_region.config.maturity.to_sim_access();

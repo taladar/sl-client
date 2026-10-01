@@ -149,6 +149,12 @@ impl Semantic {
     }
 }
 
+/// The value a widget reports when no node of it shows one — the address of
+/// the page a browser view is at. The widget keeps it current; the automation
+/// model reads it as the node's text value.
+#[derive(Component, Debug, Clone, PartialEq, Eq, Default)]
+pub struct SemanticValue(pub String);
+
 /// A label naming this node, or the controls inside it — the `<label>` of a
 /// form row, for a field, a slider or a swatch that draws no text of its own.
 ///

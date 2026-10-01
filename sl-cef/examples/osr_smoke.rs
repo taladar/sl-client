@@ -6,7 +6,7 @@
 //! Run with the helper built and the CEF runtime files on the library path:
 //!
 //! ```console
-//! cargo build -p sl-cef
+//! cargo build -p sl-client-bevy-viewer --bin sl-cef-helper
 //! LD_LIBRARY_PATH=target/debug cargo run -p sl-cef --example osr_smoke
 //! ```
 

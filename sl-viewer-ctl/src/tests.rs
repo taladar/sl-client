@@ -39,6 +39,7 @@ fn apply_button() -> UiNode {
         test_id: Some("build.apply".to_owned()),
         states: BTreeSet::from([NodeState::Disabled]),
         value: None,
+        color: None,
         level: None,
         accelerator: None,
         bounds: Bounds {
@@ -62,6 +63,7 @@ fn build_window() -> UiNode {
         test_id: Some("floater:build".to_owned()),
         states: BTreeSet::new(),
         value: None,
+        color: None,
         level: None,
         accelerator: None,
         bounds: Bounds {
@@ -273,6 +275,21 @@ async fn drag_by_takes_a_negative_offset_and_prints_the_pressed_node() -> Result
         Some(&json!("build.apply")),
         "{json}"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn press_hold_asks_for_the_key_held_that_many_frames() -> Result<(), TestError> {
+    let script: Arc<Script> = Arc::new(|_body| Ok(ResponseBody::Pressed));
+    let (printed, asked) = run_verb(script, &["press", "w", "--hold", "90"], false).await?;
+    assert_eq!(printed, "pressed w\n");
+    match asked.as_slice() {
+        [RequestBody::Press { keys, hold_frames }] => {
+            assert_eq!(keys, "w");
+            assert_eq!(*hold_frames, 90);
+        }
+        other => return Err(format!("asked {other:?}").into()),
+    }
     Ok(())
 }
 

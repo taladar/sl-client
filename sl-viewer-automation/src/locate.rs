@@ -104,6 +104,7 @@ mod tests {
             test_id: Some(format!("node-{id}")),
             states: BTreeSet::new(),
             value: None,
+            color: None,
             level: None,
             accelerator: None,
             bounds: Bounds::default(),

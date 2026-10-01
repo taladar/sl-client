@@ -359,6 +359,27 @@ impl Viewer {
         self.ask_now(
             RequestBody::Press {
                 keys: keys.to_owned(),
+                hold_frames: 0,
+            },
+            &action,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Hold `keys` down for `frames` frames, then let go — what walks an
+    /// avatar or flies the flycam, which move for as long as a key is down.
+    /// Answers once the key is up again.
+    ///
+    /// # Errors
+    ///
+    /// As [`press`](Self::press).
+    pub async fn hold(&self, keys: &str, frames: u32) -> Result<(), DriverError> {
+        let action = format!("hold {keys} for {frames} frames");
+        self.ask_now(
+            RequestBody::Press {
+                keys: keys.to_owned(),
+                hold_frames: frames,
             },
             &action,
         )

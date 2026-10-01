@@ -1432,10 +1432,12 @@ pub fn about_region_floater_spec() -> FloaterSpec {
         title: "Region / Estate".to_owned(),
         position: Vec2::new(400.0, 80.0),
         // Wide enough that the whole eight-tab strip shows rather than
-        // scrolling, and tall enough for the tallest tab (Terrain) without a
-        // scrollbar — at the default font, in English. The Access and
-        // Experiences tabs lay their lists out side by side to fit it.
-        default_size: Some(Vec2::new(800.0, 600.0)),
+        // scrolling, and tall enough for the tallest tab without a scrollbar
+        // — at the default font, in English. That is now Experiences: its
+        // three lists need room for a name beside the rating and the
+        // buttons, so two share a row and the third wraps under them. The
+        // Access tab lays its lists out side by side.
+        default_size: Some(Vec2::new(800.0, 670.0)),
         min_size: Some(Vec2::new(430.0, 340.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -2120,7 +2122,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> A
     let mut handles = AccessHandles::default();
     let grid = spawn_list_grid(commands, panel, "about-region-access:grid");
 
-    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS);
+    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS, LIST_COLUMN_MIN_WIDTH);
     spawn_section_label(commands, cell, "about-region-managers", font_size);
     let managers = spawn_bounded_table(commands, cell, &MANAGERS_TABLE);
     handles.managers_viewport = Some(managers.viewport);
@@ -2134,7 +2136,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> A
         font_size,
     );
 
-    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS);
+    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS, LIST_COLUMN_MIN_WIDTH);
     spawn_section_label(commands, cell, "about-region-allowed", font_size);
     let allowed = spawn_bounded_table(commands, cell, &ALLOWED_TABLE);
     handles.allowed_viewport = Some(allowed.viewport);
@@ -2148,7 +2150,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> A
         font_size,
     );
 
-    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS);
+    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS, LIST_COLUMN_MIN_WIDTH);
     spawn_section_label(commands, cell, "about-region-allowed-groups", font_size);
     let groups = spawn_bounded_table(commands, cell, &ALLOWED_GROUPS_TABLE);
     handles.allowed_groups_viewport = Some(groups.viewport);
@@ -2162,7 +2164,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> A
         font_size,
     );
 
-    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS);
+    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS, LIST_COLUMN_MIN_WIDTH);
     spawn_section_label(commands, cell, "about-region-banned", font_size);
     let banned = spawn_bounded_table(commands, cell, &BANNED_TABLE);
     handles.banned_viewport = Some(banned.viewport);
@@ -2191,6 +2193,14 @@ const ACCESS_COLUMN_BASIS: f32 = 40.0;
 /// The Experiences tab's lists sit three to a row, likewise.
 const EXPERIENCE_COLUMN_BASIS: f32 = 30.0;
 
+/// The narrowest an Experiences list's column may get before the grid wraps
+/// it, logical px. An experience row is three columns, two of them fixed — the
+/// rating (76) and the Profile / Remove buttons (138) — so on top of their
+/// gaps, the row padding and the scrollbar the name needs room of its own: at
+/// the Access lists' [`LIST_COLUMN_MIN_WIDTH`] it was squeezed to an
+/// ellipsis, and every row read "…".
+const EXPERIENCE_COLUMN_MIN_WIDTH: f32 = 380.0;
+
 /// A tab's wrapping grid of lists, under `panel`, named `name`.
 fn spawn_list_grid(commands: &mut Commands, panel: Entity, name: &'static str) -> Entity {
     commands
@@ -2211,15 +2221,15 @@ fn spawn_list_grid(commands: &mut Commands, panel: Entity, name: &'static str) -
 }
 
 /// One list's column in a list grid: `basis` percent of the row, growing into
-/// what is left, and never narrower than [`LIST_COLUMN_MIN_WIDTH`] — below
-/// which it takes the row alone.
-fn spawn_list_cell(commands: &mut Commands, grid: Entity, basis: f32) -> Entity {
+/// what is left, and never narrower than `min_width` — below which it takes
+/// the row alone.
+fn spawn_list_cell(commands: &mut Commands, grid: Entity, basis: f32, min_width: f32) -> Entity {
     commands
         .spawn((
             Node {
                 flex_grow: 1.0,
                 flex_basis: Val::Percent(basis),
-                min_width: Val::Px(LIST_COLUMN_MIN_WIDTH),
+                min_width: Val::Px(min_width),
                 ..column(Val::Px(6.0))
             },
             ChildOf(grid),
@@ -2246,7 +2256,12 @@ fn build_experiences_tab(
     );
     let grid = spawn_list_grid(commands, panel, "about-region-experiences:grid");
     for (offset, list) in ExperienceList::ALL.into_iter().enumerate() {
-        let cell = spawn_list_cell(commands, grid, EXPERIENCE_COLUMN_BASIS);
+        let cell = spawn_list_cell(
+            commands,
+            grid,
+            EXPERIENCE_COLUMN_BASIS,
+            EXPERIENCE_COLUMN_MIN_WIDTH,
+        );
         spawn_section_label(commands, cell, list.label_key(), font_size);
         spawn_note(commands, cell, list.help_key(), font_size);
         let table = spawn_experience_table(commands, cell, list);

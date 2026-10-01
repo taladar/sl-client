@@ -1910,9 +1910,14 @@ mod test {
             name: "Fake Region East".to_owned(),
             grid_x: 1010,
             grid_y: 1000,
+            simulator_version: Some(EAST_VERSION.to_owned()),
             ..RegionConfig::default()
         }
     }
+
+    /// The simulator version the distant region reports, unlike the home
+    /// region's stock one.
+    const EAST_VERSION: &str = "Fake East Simulator 2.0";
 
     /// The full inter-region teleport over the loopback: the client's own
     /// `TeleportLocationRequest` is answered with the teleport screen, the
@@ -2032,6 +2037,24 @@ mod test {
             arrival,
             Arrival::DistantTeleport,
             "a teleport that threw the world away arrives as the distant reach"
+        );
+        // The destination's simulator names itself on the confirmation the
+        // teleport commits on, as a login's root circuit does.
+        // One deadline: the session chatters on, so a wait that restarts per
+        // event would never give up on a version that is not coming.
+        let mut version = None;
+        running
+            .wait_until("the destination's simulator version", |event| {
+                if let Event::SimulatorVersion(named) = event {
+                    version = Some(named.clone());
+                }
+                version.is_some()
+            })
+            .await?;
+        assert_eq!(
+            version.as_deref(),
+            Some(EAST_VERSION),
+            "the destination's simulator version"
         );
 
         // The destination greeted the circuit the client opened for the
@@ -3336,6 +3359,47 @@ mod test {
             "the requested look-at reaches the client's TeleportLocal event"
         );
         assert!(!running.agent.is_closed());
+        Ok(())
+    }
+
+    /// A teleport asking for a place under the ground — a map teleport asks
+    /// for height 0 — lands on it, as a simulator lands it: the avatar's
+    /// centre half its height above the terrain, where the request's x and y
+    /// are kept.
+    #[tokio::test]
+    async fn a_teleport_below_the_ground_lands_on_it() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let handle = running
+            ._grid
+            .region_handle("Fake Region")
+            .ok_or("no region")?;
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: handle,
+                position: RegionCoordinates::new(10.0, 20.0, 0.0),
+                look_at: Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        let position = running
+            .wait_for(|event| match event {
+                Event::TeleportLocal { position, .. } => Some(*position),
+                _ => None,
+            })
+            .await?;
+        let ground = f32::from(sl_fake_grid::scenario::STOCK_TERRAIN_HEIGHT_M);
+        assert_eq!(
+            position,
+            RegionCoordinates::new(
+                10.0,
+                20.0,
+                ground + sl_fake_grid::AVATAR_CENTRE_ABOVE_GROUND_M
+            )
+        );
         Ok(())
     }
 

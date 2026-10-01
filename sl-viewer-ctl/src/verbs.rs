@@ -71,10 +71,16 @@ pub(crate) async fn run<W: Write>(
             verb: "filled",
             node: ui.locator(selector.clone()).fill(text).await?,
         },
-        Verb::Press { keys, on } => {
-            match on {
-                Some(field) => ui.locator(field.clone()).press(keys).await?,
-                None => viewer.press(keys).await?,
+        Verb::Press { keys, on, hold } => {
+            match (on, hold) {
+                (Some(field), None) => ui.locator(field.clone()).press(keys).await?,
+                (None, None) => viewer.press(keys).await?,
+                (on, Some(frames)) => {
+                    if let Some(field) = on {
+                        let _focused = ui.locator(field.clone()).click().await?;
+                    }
+                    viewer.hold(keys, *frames).await?;
+                }
             }
             Outcome::Pressed(keys.clone())
         }

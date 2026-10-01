@@ -403,6 +403,7 @@ mod tests {
             test_id: Some(test_id.to_owned()),
             states: BTreeSet::new(),
             value: None,
+            color: None,
             level: None,
             accelerator: None,
             bounds: Bounds {

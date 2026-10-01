@@ -70,6 +70,55 @@ fn placed(left: f32, top: f32, width: f32, height: f32) -> Node {
     }
 }
 
+/// A colour well shows its fill as its value, and a text node the colour it is
+/// drawn in; each follows a change, and no other role reports a colour.
+#[test]
+fn a_colour_well_and_a_text_node_report_their_colours() -> Result<(), String> {
+    let mut app = app();
+    let well = spawn_under_root(
+        &mut app,
+        (
+            Name::new("well"),
+            Semantic::new(Role::ColorWell),
+            BackgroundColor(Color::srgb_u8(0xff, 0x80, 0x00)),
+            placed(0.0, 0.0, 16.0, 16.0),
+        ),
+    );
+    let ink = spawn_under_root(
+        &mut app,
+        (
+            Name::new("ink"),
+            Text::new("Hello"),
+            TextColor(Color::srgba_u8(0x00, 0xff, 0x00, 0x80)),
+        ),
+    );
+    let _button = spawn_button(&mut app, "button", "OK");
+    let well_node = node(&mut app, "well")?;
+    assert_eq!(
+        (well_node.value, well_node.color),
+        (Some(NodeValue::Color("#ff8000".to_owned())), None)
+    );
+    assert_eq!(
+        node(&mut app, "ink")?.color.as_deref(),
+        Some("#00ff0080"),
+        "a translucent ink keeps its alpha"
+    );
+    assert_eq!(node(&mut app, "button")?.color, None, "a button has no ink");
+
+    app.world_mut()
+        .entity_mut(well)
+        .insert(BackgroundColor(Color::WHITE));
+    app.world_mut()
+        .entity_mut(ink)
+        .insert(TextColor(Color::BLACK));
+    assert_eq!(
+        node(&mut app, "well")?.value,
+        Some(NodeValue::Color("#ffffff".to_owned()))
+    );
+    assert_eq!(node(&mut app, "ink")?.color.as_deref(), Some("#000000"));
+    Ok(())
+}
+
 /// Spawn a named `bevy_ui_widgets` button labelled `label` at a fixed place,
 /// returning the button.
 fn spawn_button(app: &mut App, name: &str, label: &str) -> Entity {
@@ -528,6 +577,45 @@ fn set_class(app: &mut App, entity: Entity, class: &'static str, on: bool) -> Re
     } else {
         classes.remove(class);
     }
+    Ok(())
+}
+
+/// A row holding a button of its own is called what its cells say: the
+/// button's translated caption names the button, not the row.
+#[test]
+fn a_row_is_named_by_its_cells_not_by_its_buttons() -> Result<(), String> {
+    let mut app = app();
+    let row = spawn_under_root(
+        &mut app,
+        (
+            Name::new("row"),
+            ClassList::new_with_classes([LIST_ROW_CLASS]),
+            Node::default(),
+        ),
+    );
+    let button = app
+        .world_mut()
+        .spawn((Name::new("remove"), Button, Node::default(), ChildOf(row)))
+        .id();
+    app.world_mut().spawn((
+        Text::new("Remove"),
+        Translated::new("row-remove"),
+        ChildOf(button),
+    ));
+    app.world_mut()
+        .spawn((Text::new("Estate Default"), ChildOf(row)));
+    let nodes = snap(&mut app)?;
+    let row = find(&nodes, "row").ok_or("no row")?;
+    assert_eq!(
+        (row.role, row.name.as_deref(), row.name_key.as_deref()),
+        (Role::ListItem, Some("Estate Default"), None)
+    );
+    let button = find(&nodes, "remove").ok_or("no button")?;
+    assert_eq!(
+        (button.name.as_deref(), button.name_key.as_deref()),
+        (Some("Remove"), Some("row-remove")),
+        "the button keeps its own name"
+    );
     Ok(())
 }
 

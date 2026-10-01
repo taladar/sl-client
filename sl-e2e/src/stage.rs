@@ -14,8 +14,8 @@ use serde_json::json;
 use sl_automation_proto::Probe;
 use sl_client_bevy::{LoginParams, LoginRequest, StartLocation};
 use sl_client_bevy_viewer::assembly::{
-    Automation, LoginOutcome, MediaRuntime, Storage, ViewerApp, ViewerAppBuilder, ViewerAppOptions,
-    ViewerPaths, WindowMode,
+    Automation, LoginOutcome, MediaRuntime, SkinSelection, Storage, ViewerApp, ViewerAppBuilder,
+    ViewerAppOptions, ViewerPaths, WindowMode,
 };
 use sl_fake_grid::fixtures::scenarios;
 use sl_fake_grid::{AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig};
@@ -110,6 +110,22 @@ pub struct StageBuilder {
     needs: Vec<Need>,
     /// The grid, when not `SL_E2E_GRID`'s.
     on: Option<Grid>,
+    /// The labels whose accounts hold estate powers on the fake grid.
+    estate_managers: Vec<String>,
+    /// How every viewer is set up beyond its login.
+    setup: ViewerSetup,
+}
+
+/// How a stage viewer is set up beyond its login, on either backend — the
+/// command-line switches a test may turn, and nothing it may not.
+#[derive(Debug, Clone, Default)]
+struct ViewerSetup {
+    /// Whether the web (CEF) engine may start: off unless a test asks, since
+    /// Chromium is a second process tree per viewer.
+    web_media: bool,
+    /// The skin to wear for the run, overriding the stored choice as
+    /// `--skin` does.
+    skin: Option<String>,
 }
 
 impl core::fmt::Debug for StageBuilder {
@@ -123,6 +139,8 @@ impl core::fmt::Debug for StageBuilder {
             .field("artifacts", &self.artifacts)
             .field("needs", &self.needs)
             .field("on", &self.on)
+            .field("estate_managers", &self.estate_managers)
+            .field("setup", &self.setup)
             .finish_non_exhaustive()
     }
 }
@@ -148,6 +166,8 @@ impl StageBuilder {
             artifacts: None,
             needs: Vec::new(),
             on: None,
+            estate_managers: Vec::new(),
+            setup: ViewerSetup::default(),
         }
     }
 
@@ -194,6 +214,33 @@ impl StageBuilder {
     ) -> Self {
         self.grid = Some(Arc::new(hook));
         self.dictates("it configures the grid")
+    }
+
+    /// Viewer `label`'s account holds estate powers over the grid's regions —
+    /// what the Region / Estate window's write controls ask for. The stage
+    /// skips a live grid.
+    #[must_use]
+    pub fn estate_manager(mut self, label: impl Into<String>) -> Self {
+        self.estate_managers.push(label.into());
+        self.dictates("it makes an account an estate manager")
+    }
+
+    /// Let every viewer start the web (CEF) engine, which a stage viewer
+    /// otherwise runs without: the search window's web tab, the web browser
+    /// window and media on a prim load nothing until a test asks for it.
+    #[must_use]
+    pub const fn web_media(mut self) -> Self {
+        self.setup.web_media = true;
+        self
+    }
+
+    /// Start every viewer wearing the skin `skin` (`graphite`, `azure`,
+    /// `vintage`) for the run, as `--skin` does — over whatever the viewer has
+    /// stored, and without storing it.
+    #[must_use]
+    pub fn skin(mut self, skin: impl Into<String>) -> Self {
+        self.setup.skin = Some(skin.into());
+        self
     }
 
     /// Record that the stage dictates the grid, `how` — once.
@@ -513,7 +560,12 @@ async fn start_fake_grid(builder: &StageBuilder) -> Result<(FakeGrid, String), S
         grid = grid.region(region);
     }
     for label in &builder.labels {
-        grid = grid.account(AccountConfig::new(FIRST_NAME, label, PASSWORD));
+        let account = AccountConfig::new(FIRST_NAME, label, PASSWORD);
+        grid = grid.account(if builder.estate_managers.contains(label) {
+            account.estate_manager()
+        } else {
+            account
+        });
     }
     if let Some(hook) = &builder.grid {
         grid = hook(grid);
@@ -676,6 +728,8 @@ pub struct Stage {
     start: StartLocation,
     /// The viewer binary, for the process backend.
     binary: Option<PathBuf>,
+    /// How every viewer is set up beyond its login.
+    setup: ViewerSetup,
     /// The viewers, in the order they were named.
     viewers: Vec<StageViewer>,
     /// The in-process host, on that backend.
@@ -716,6 +770,7 @@ impl Stage {
             home,
             start,
             binary: builder.binary.clone(),
+            setup: builder.setup.clone(),
             viewers: Vec::new(),
             host: None,
             sockets: OnceLock::new(),
@@ -903,13 +958,14 @@ impl Stage {
             };
             let log_label = self.log_label(label);
             let state = dir.join("state");
+            let setup = self.setup.clone();
             let host = self
                 .host
                 .as_ref()
                 .ok_or(sl_viewer_automation::HostError::Stopped)?;
             let (handle, link) = host
                 .host(label.clone(), move || {
-                    in_process_viewer(params, log_label, &state)
+                    in_process_viewer(params, log_label, &state, &setup)
                 })
                 .await?;
             viewer.running(ViewerRun::InProcess(Some(handle)));
@@ -1034,10 +1090,15 @@ impl Stage {
             "--headless".to_owned(),
             "--capture-size".to_owned(),
             format!("{}x{}", WINDOW.x, WINDOW.y),
-            "--disable-web-media".to_owned(),
             "--automation-socket".to_owned(),
             socket.display().to_string(),
         ]);
+        if !self.setup.web_media {
+            launch = launch.args(["--disable-web-media".to_owned()]);
+        }
+        if let Some(skin) = &self.setup.skin {
+            launch = launch.args(["--skin".to_owned(), skin.clone()]);
+        }
         if session > 0 {
             launch.log = dir.root.join(format!("viewer.{session}.log"));
         }
@@ -1148,27 +1209,37 @@ impl Stage {
         let (Some(grid), Some(agent)) = (&self.grid, viewer.agent) else {
             return Ok(());
         };
-        let since = Instant::now();
-        loop {
-            let mut left = Vec::new();
-            for region in grid.region_names() {
-                if grid
-                    .sessions_in(&region)
-                    .await
-                    .iter()
-                    .any(|session| session.agent_id() == agent)
-                {
-                    left.push(format!("{label} in {region}"));
-                }
-            }
-            if left.is_empty() {
-                return Ok(());
-            }
-            if since.elapsed() > LOGOUT {
-                return Err(StageError::Stranded(left));
-            }
-            tokio::time::sleep(POLL).await;
+        let left = self.sessions_left(grid, Some(agent)).await;
+        if left.is_empty() {
+            Ok(())
+        } else {
+            Err(StageError::Stranded(left))
         }
+    }
+
+    /// The sessions `grid` still holds open — `agent`'s, or everybody's — as
+    /// `<viewer> in <region>`. A session the logout closed is not one of them,
+    /// though it stays in the grid's table a moment longer, until its tasks
+    /// have wound down; one that is open has had no logout. Looked at once,
+    /// never waited on: a killed viewer's session closes by itself when the
+    /// grid's inactivity timer runs out, and a wait would let it.
+    async fn sessions_left(&self, grid: &FakeGrid, agent: Option<AgentKey>) -> Vec<String> {
+        let mut left = Vec::new();
+        for region in grid.region_names() {
+            for session in grid.sessions_in(&region).await {
+                let held = session.agent_id();
+                if session.is_closed() || agent.is_some_and(|agent| agent != held) {
+                    continue;
+                }
+                let who = self
+                    .viewers
+                    .iter()
+                    .find(|viewer| viewer.agent == Some(held))
+                    .map_or_else(|| format!("{held:?}"), |viewer| viewer.label.clone());
+                left.push(format!("{who} in {region}"));
+            }
+        }
+        left
     }
 
     /// The agent of the fake grid's account `Stage <label>`.
@@ -1473,18 +1544,7 @@ impl Stage {
             }
         }
         if let Some(grid) = &self.grid {
-            let mut stranded = Vec::new();
-            for region in grid.region_names() {
-                for session in grid.sessions_in(&region).await {
-                    let agent = session.agent_id();
-                    let who = self
-                        .viewers
-                        .iter()
-                        .find(|viewer| viewer.agent == Some(agent))
-                        .map_or_else(|| format!("{agent:?}"), |viewer| viewer.label.clone());
-                    stranded.push(format!("{who} in {region}"));
-                }
-            }
+            let stranded = self.sessions_left(grid, None).await;
             if !stranded.is_empty() {
                 problems.push(StageError::Stranded(stranded));
             }
@@ -1598,12 +1658,13 @@ fn driver_options(label: &str, dir: &Path) -> ViewerOptions {
 }
 
 /// An in-process stage viewer: the viewer's own builder's App, headless,
-/// storing under `state`, reached through the in-process transport and
-/// logging inside a span named `log_label`.
+/// storing under `state`, set up as `setup` says, reached through the
+/// in-process transport and logging inside a span named `log_label`.
 fn in_process_viewer(
     params: LoginParams,
     log_label: String,
     state: &Path,
+    setup: &ViewerSetup,
 ) -> Result<ViewerApp, BuildError> {
     let mut options = ViewerAppOptions::new(params);
     options.window = WindowMode::Headless {
@@ -1612,7 +1673,20 @@ fn in_process_viewer(
     };
     options.storage = Storage::Directories(ViewerPaths::under(state));
     options.audio_device = false;
-    options.media = MediaRuntime::OFF;
+    options.media = if setup.web_media {
+        MediaRuntime {
+            web: true,
+            ..MediaRuntime::OFF
+        }
+    } else {
+        MediaRuntime::OFF
+    };
+    if let Some(skin) = &setup.skin {
+        options.skin.selection = SkinSelection {
+            skin: skin.clone(),
+            theme: None,
+        };
+    }
     options.render_overrides = Some(RenderOverrides::default());
     options.avatar_overrides = Some(AvatarOverrides::default());
     options.content.fetch_server_chat_history = false;

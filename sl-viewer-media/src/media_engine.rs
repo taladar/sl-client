@@ -405,11 +405,22 @@ fn initialize_media_engine(
 }
 
 /// The expected path of the CEF subprocess helper: `sl-cef-helper` next to
-/// the running executable. `None` when it does not exist there.
+/// the running executable — or, for a test binary cargo built into
+/// `<profile>/deps/`, next to the binaries in `<profile>/`, where cargo put the
+/// helper. `None` when it is in neither place.
 fn helper_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    let helper = dir.join("sl-cef-helper");
+    let beside = dir.join("sl-cef-helper");
+    if beside.is_file() {
+        return Some(beside);
+    }
+    let profile = dir
+        .file_name()
+        .is_some_and(|name| name == "deps")
+        .then(|| dir.parent())
+        .flatten()?;
+    let helper = profile.join("sl-cef-helper");
     helper.is_file().then_some(helper)
 }
 

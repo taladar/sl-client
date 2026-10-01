@@ -20,11 +20,14 @@ use sl_client_bevy::{
     SlRegionIdentity, rotation_to_azimuth_altitude,
 };
 use sl_viewer_inventory::inventory::InventoryModel;
+use sl_viewer_kit::coords::{bevy_to_sl_vec, region_offset_bevy};
 use sl_viewer_kit::slt;
 use sl_viewer_notifications::{NotificationManager, NotificationRecord, ToastButton, template};
 use sl_viewer_ui_core::i18n::Translator;
 use sl_viewer_world_api::rlv::RlvEnvironmentSlot;
-use sl_viewer_world_api::{AgentRegionPosition, AvatarControls, CameraMode, SelectionSet};
+use sl_viewer_world_api::{
+    AgentRegionPosition, AvatarControls, CameraMode, ObjectState, SelectionSet, ViewerCamera,
+};
 
 use crate::probe_sources::ProbeSources;
 use crate::render_settle::PipelineStatus;
@@ -191,7 +194,30 @@ pub fn read_agent(world: &mut World) -> AgentReadout {
         heading: world
             .get_resource::<AvatarControls>()
             .and_then(AvatarControls::held_heading),
+        camera_eye: camera_eye(world),
     }
+}
+
+/// Where the viewer camera's eye is, region-local to the agent's region: its
+/// drawn position less the region's offset from the scene origin, in Second
+/// Life axes — as the world model places an object. `None` before the camera
+/// exists or the region is known.
+fn camera_eye(world: &mut World) -> Option<[f32; 3]> {
+    let handle = world
+        .get_resource::<SlIdentity>()
+        .and_then(|identity| identity.region_handle)?;
+    let origin = world
+        .get_resource::<ObjectState>()
+        .and_then(|objects| objects.origin);
+    let mut cameras = world.query_filtered::<&GlobalTransform, With<ViewerCamera>>();
+    let eye = cameras.iter(world).next()?.translation();
+    let offset = region_offset_bevy(handle, origin);
+    let local = bevy_to_sl_vec(Vec3::new(
+        eye.x - offset.x,
+        eye.y - offset.y,
+        eye.z - offset.z,
+    ));
+    Some([local.x, local.y, local.z])
 }
 
 /// The environment being drawn: the sky the scene publishes for RLV's

@@ -24,6 +24,7 @@ fn node(id: u64, role: Role, name: Option<&str>, children: Vec<UiNode>) -> UiNod
         test_id: None,
         states: BTreeSet::new(),
         value: None,
+        color: None,
         level: None,
         accelerator: None,
         bounds: Bounds {
@@ -146,6 +147,33 @@ fn a_snapshot_maps_to_roles_names_states_and_structure() -> Result<(), String> {
         (15.0, 30.0, 60.0, 90.0),
         "physical pixels"
     );
+    Ok(())
+}
+
+#[test]
+fn a_colour_well_tells_its_colour_and_text_its_ink() -> Result<(), String> {
+    let mut well = node(1, Role::ColorWell, Some("Chat"), Vec::new());
+    well.value = Some(NodeValue::Color("#ff8000".to_owned()));
+    let mut text = node(2, Role::Text, Some("Hello"), Vec::new());
+    text.color = Some("#00ff0080".to_owned());
+    let mut garbled = node(3, Role::Text, Some("Odd"), Vec::new());
+    garbled.color = Some("green".to_owned());
+    let nodes = tree_nodes(&[well, text, garbled], ROOT, "", 1.0, &|_entity| None);
+    let colour = |red, green, blue, alpha| accesskit::Color {
+        red,
+        green,
+        blue,
+        alpha,
+    };
+    assert_eq!(
+        get(&nodes, 1)?.color_value(),
+        Some(colour(0xff, 0x80, 0x00, 0xff))
+    );
+    assert_eq!(
+        get(&nodes, 2)?.foreground_color(),
+        Some(colour(0x00, 0xff, 0x00, 0x80))
+    );
+    assert_eq!(get(&nodes, 3)?.foreground_color(), None, "not a colour");
     Ok(())
 }
 

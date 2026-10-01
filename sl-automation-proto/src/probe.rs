@@ -259,6 +259,11 @@ pub struct AgentReadout {
     /// the viewer's own heading, once it is known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heading: Option<f32>,
+    /// Where the camera's eye is, in region-local metres (Second Life axes)
+    /// of the agent's region, once the viewer draws one — what a test reads
+    /// to see the camera framed somewhere, or brought back behind the avatar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_eye: Option<[f32; 3]>,
 }
 
 /// The environment the viewer draws.
@@ -636,6 +641,7 @@ mod tests {
                 }),
                 camera: Some(CameraView::Mouselook),
                 heading: Some(1.5),
+                camera_eye: Some([120.0, 128.0, 27.0]),
             })?;
         }
         let json = serde_json::to_string(&TeleportReadout {

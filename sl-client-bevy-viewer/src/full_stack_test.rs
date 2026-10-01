@@ -1100,8 +1100,8 @@ fn build_viewer_app(
     // what a test has no business touching turned off: no window (this harness
     // steps `update` itself and renders into its readback target), nothing read
     // from or written to the developer's directories, no speakers, no Chromium
-    // or GStreamer (a test binary has no `sl-cef-helper` beside it to start one
-    // with) — and the render overrides **stated** rather than read from the
+    // or GStreamer (a process tree and a pipeline nothing here looks at) — and
+    // the render overrides **stated** rather than read from the
     // environment: a developer with `SL_VIEWER_DISABLE_GLOW` exported in their
     // shell must not get a different answer from CI. The day is pinned so the
     // sky is the same one in every run.
@@ -4123,8 +4123,7 @@ mod tests {
     /// itself.
     ///
     /// What is **not** here is the surface: this harness gives
-    /// `MediaEnginePlugin` `enabled: false`, and a test binary has no
-    /// `sl-cef-helper` beside it to start a browser with anyway. So the
+    /// `MediaEnginePlugin` `enabled: false`, so no browser starts. So the
     /// placeholder a live surface shows before its first paint is a rig with a
     /// browser process's question, and this asserts the pixel claim that
     /// *does* belong here: a face whose `TextureEntry` carries the media flag

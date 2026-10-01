@@ -103,8 +103,10 @@ const OFFSET_AGENT_DRAFTS: u128 = 0x21;
 /// [`ExperienceInfo::maturity`] states a rating.
 const MATURITY_PG: i32 = 13;
 
-/// The `Moderate` content rating, as a `sim_access` code.
-const MATURITY_MATURE: i32 = 34;
+/// The `Moderate` content rating, as a `sim_access` code
+/// (`SIM_ACCESS_MATURE`, `indra_constants.h`). It was 34 — no code at all,
+/// which a viewer files with the codes above Moderate and shows as Adult.
+const MATURITY_MATURE: i32 = 21;
 
 /// The [`ExperienceKey`] for a catalogue offset.
 fn experience_key(offset: u128) -> ExperienceKey {

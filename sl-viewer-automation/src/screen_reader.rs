@@ -194,7 +194,15 @@ pub fn accesskit_node(node: &UiNode, scale: f64) -> Node {
     match &node.value {
         Some(NodeValue::Text(text)) => ak.set_value(text.as_str()),
         Some(NodeValue::Number(number)) => ak.set_numeric_value(f64::from(*number)),
+        Some(NodeValue::Color(color)) => {
+            if let Some(color) = accesskit_color(color) {
+                ak.set_color_value(color);
+            }
+        }
         None => {}
+    }
+    if let Some(color) = node.color.as_deref().and_then(accesskit_color) {
+        ak.set_foreground_color(color);
     }
     if node.has_state(NodeState::Disabled) {
         ak.set_disabled();
@@ -229,6 +237,28 @@ pub fn accesskit_node(node: &UiNode, scale: f64) -> Node {
     ak
 }
 
+/// A snapshot colour — `#rrggbb`, or `#rrggbbaa` — as AccessKit's; `None` for
+/// anything else.
+fn accesskit_color(hex: &str) -> Option<accesskit::Color> {
+    let digits = hex.strip_prefix('#')?;
+    let channel = |at: usize| {
+        digits
+            .get(at..at.saturating_add(2))
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+    };
+    let alpha = match digits.len() {
+        6 => u8::MAX,
+        8 => channel(6)?,
+        _ => return None,
+    };
+    Some(accesskit::Color {
+        red: channel(0)?,
+        green: channel(2)?,
+        blue: channel(4)?,
+        alpha,
+    })
+}
+
 /// The AccessKit role of a semantic role. A group with no name is a
 /// generic container, which a screen reader passes over.
 #[must_use]
@@ -256,6 +286,7 @@ pub const fn accesskit_role(role: Role, named: bool) -> AkRole {
         Role::Window => AkRole::Dialog,
         Role::Text => AkRole::Label,
         Role::Image => AkRole::Image,
+        Role::Document => AkRole::Document,
         Role::Trackball | Role::Group if named => AkRole::Group,
         Role::Trackball | Role::Group => AkRole::GenericContainer,
     }

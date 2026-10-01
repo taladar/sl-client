@@ -35,7 +35,8 @@ mod tests {
     use sl_viewer_world_api::{AgentRegionPosition, AvatarControls, CameraMode, SelectionSet};
 
     use crate::status_bar::AgentBalance;
-    use crate::world_test::{entity_of, seed_prim_numbered, settle, world_app};
+    use crate::world_api::ObjectState;
+    use crate::world_test::{entity_of, install_camera, seed_prim_numbered, settle, world_app};
 
     /// A failed setup step.
     type TestError = Box<dyn core::error::Error>;
@@ -121,6 +122,42 @@ mod tests {
             controls.yaw = -0.5;
         }
         assert_eq!(read_agent(app.world_mut()).heading, Some(-0.5));
+    }
+
+    /// The camera's eye is region-local to the agent's region in Second Life
+    /// axes: unknown until the region is, the same Bevy point read in the
+    /// origin region, and — once the agent stands in the region east of the
+    /// scene origin — that region's width further west.
+    #[test]
+    fn the_agent_probe_places_the_camera_eye_in_the_agents_region() {
+        let mut app = probe_world();
+        let at = Vector {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+        };
+        let eye = crate::coords::sl_to_bevy_vec(&at);
+        install_camera(&mut app, eye, eye + Vec3::X);
+        assert_eq!(
+            read_agent(app.world_mut()).camera_eye,
+            None,
+            "no region, no region-local eye"
+        );
+        let origin = RegionHandle::new((256_000_u64 << 32) | 256_000);
+        app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(origin);
+        app.world_mut().resource_mut::<ObjectState>().origin = Some(origin);
+        let [x, y, z] = read_agent(app.world_mut()).camera_eye.unwrap_or_default();
+        assert!(
+            (x - 10.0).abs() < 1e-3 && (y - 20.0).abs() < 1e-3 && (z - 30.0).abs() < 1e-3,
+            "the eye in the origin region: {x}, {y}, {z}"
+        );
+        let east = RegionHandle::new((256_256_u64 << 32) | 256_000);
+        app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(east);
+        let [x, y, _z] = read_agent(app.world_mut()).camera_eye.unwrap_or_default();
+        assert!(
+            (x - (10.0 - 256.0)).abs() < 1e-3 && (y - 20.0).abs() < 1e-3,
+            "the same point, seen from the region east of the origin: {x}, {y}"
+        );
     }
 
     /// The environment probe reads the sky the scene publishes and whether

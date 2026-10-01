@@ -135,6 +135,11 @@ pub enum RequestBody {
         /// `ArrowRight` and `F1` … `F12`; the modifiers `Ctrl`, `Shift`,
         /// `Alt` and `Super`; any other key is one character.
         keys: String,
+        /// How many frames the key stays down before it is let go — what
+        /// moves an avatar or a flycam, which act for as long as a key is
+        /// held. `0` (and `1`) is a tap: down one frame, up the next.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        hold_frames: u32,
     },
     /// Walk a menu path from the menu bar by the entries' Fluent keys: click
     /// the bar menu open, hover each submenu open, click the last entry.
@@ -392,6 +397,15 @@ const fn is_true(flag: &bool) -> bool {
 )]
 const fn is_false(flag: &bool) -> bool {
     !*flag
+}
+
+/// Whether a frame count is zero, to leave the default out of the JSON.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+const fn is_zero(count: &u32) -> bool {
+    *count == 0
 }
 
 /// The mouse button a [`RequestBody::Click`] clicks with.
@@ -785,6 +799,7 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeSet<_>>(),
             value: Some(NodeValue::Text("Avatar".to_owned())),
+            color: None,
             level: Some(2),
             accelerator: Some("Ctrl+P".to_owned()),
             bounds: Bounds {
@@ -808,6 +823,7 @@ mod tests {
             test_id: None,
             states: BTreeSet::new(),
             value: Some(NodeValue::Number(0.3)),
+            color: None,
             level: None,
             accelerator: None,
             bounds: Bounds::default(),
@@ -911,6 +927,11 @@ mod tests {
             },
             RequestBody::Press {
                 keys: "Ctrl+Shift+S".to_owned(),
+                hold_frames: 0,
+            },
+            RequestBody::Press {
+                keys: "w".to_owned(),
+                hold_frames: 60,
             },
             RequestBody::MenuPath {
                 path: vec!["menu-world".to_owned(), "menu-world-midday".to_owned()],
@@ -1244,6 +1265,7 @@ mod tests {
             Role::Window,
             Role::Text,
             Role::Image,
+            Role::Document,
             Role::Group,
         ] {
             let json = round_trip(&role)?;

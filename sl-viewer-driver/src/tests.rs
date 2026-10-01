@@ -48,6 +48,7 @@ fn button() -> UiNode {
         test_id: Some("ok".to_owned()),
         states: BTreeSet::new(),
         value: None,
+        color: None,
         level: None,
         accelerator: None,
         bounds: Bounds::default(),

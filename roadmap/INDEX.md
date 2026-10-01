@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 124 |
-| ready | 311 |
+| ready | 312 |
 | blocked | 54 |
 | in-progress | 20 |
 | bugs | 16 |
-| done | 1292 |
+| done | 1293 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1864** |
+| **total** | **1866** |
 
 ## ideas (124)
 
@@ -313,7 +313,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (312)
 
 ### protocol
 
@@ -389,6 +389,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
+- [`viewer-automation-ground-aim`](ready/viewer-automation-ground-aim.md) —
+  Double-click teleport on every surface, and the world actions it needs
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1014,10 +1016,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-e2e-skin-sheet-watch`](ready/test-e2e-skin-sheet-watch.md) — End-to-end
+  check that --watch-skins picks up an edited sheet
 - [`test-e2e-sweep-live-grid`](ready/test-e2e-sweep-live-grid.md) — End-to-end
   tests for what only a live grid has
-- [`test-e2e-sweep-single-viewer-ui`](ready/test-e2e-sweep-single-viewer-ui.md)
-  — End-to-end tests for the remaining single-viewer UI checks
 - [`test-e2e-sweep-two-avatars`](ready/test-e2e-sweep-two-avatars.md) —
   End-to-end tests for what two avatars see of each other
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
@@ -1331,7 +1333,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1292)
+## done (1293)
 
 ### protocol
 
@@ -3787,6 +3789,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   what must survive a relog
 - [`test-e2e-sweep-rlv`](done/test-e2e-sweep-rlv.md) — End-to-end tests for the
   RLVa console and windows
+- [`test-e2e-sweep-single-viewer-ui`](done/test-e2e-sweep-single-viewer-ui.md) —
+  End-to-end tests for the remaining single-viewer UI checks
 - [`test-e2e-viewer-process-launch`](done/test-e2e-viewer-process-launch.md) —
   Extract viewer process launch and graceful stop from sl-crosscheck
 - [`test-economy-data`](done/test-economy-data-request-economy-data.md) —

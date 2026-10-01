@@ -8690,6 +8690,7 @@ version = "0.1.0"
 dependencies = [
  "cef",
  "fs-err",
+ "libc",
  "pretty_assertions",
  "sl-media",
  "tracing",
@@ -8749,6 +8750,7 @@ dependencies = [
  "sl-account-dirs",
  "sl-asset",
  "sl-automation-proto",
+ "sl-cef",
  "sl-client-bevy",
  "sl-e2e",
  "sl-fake-grid",

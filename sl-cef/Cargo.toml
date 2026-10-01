@@ -15,13 +15,12 @@ publish = { workspace = true }
 
 exclude = { workspace = true }
 
-[[bin]]
-name = "sl-cef-helper"
-path = "src/bin/sl-cef-helper.rs"
-
 [dependencies]
 cef = { version = "150.2.1" }
 fs-err = { workspace = true }
+# The embedder's quit signals, saved before CEF starts and restored after
+# (`EmbedderSignals`): Chromium installs handlers of its own.
+libc = { version = "0.2.186" }
 sl-media = { workspace = true }
 tracing = { workspace = true }
 

@@ -600,11 +600,24 @@ impl ConversationModel {
     /// (from the chat message's [`ChatSource`]) — so the sender name links to the
     /// right profile / inspector. It clears no typing flag (a nearby speaker's
     /// typed id is not always held).
-    fn push_nearby(&mut self, speaker: &str, source: &ChatSource, chat_type: ChatType, body: &str) {
+    ///
+    /// A line from `own_agent` is the grid's echo of what the agent itself
+    /// said: it stays linked to the agent's profile and keeps its name, but is
+    /// an own line — drawn in the self colour, as the reference colours any
+    /// line from the agent (`LLViewerChat::getChatColor`).
+    fn push_nearby(
+        &mut self,
+        speaker: &str,
+        source: &ChatSource,
+        chat_type: ChatType,
+        body: &str,
+        own_agent: Option<AgentKey>,
+    ) {
+        let own = matches!(source, ChatSource::Agent(agent) if Some(*agent) == own_agent);
         self.push_line(
             ConversationKey::Nearby,
             TranscriptLine {
-                own: false,
+                own,
                 speaker: speaker.to_owned(),
                 speaker_link: match source {
                     ChatSource::Agent(agent) => SpeakerLink::Agent(*agent),
@@ -2073,6 +2086,7 @@ pub(crate) fn ingest_conversation_events(
                         &message.source,
                         message.chat_type,
                         &message.message,
+                        facts.identity.agent_id,
                     );
                 }
             }
@@ -3013,8 +3027,15 @@ fn spawn_transcript_line(
     alias: Option<&str>,
 ) {
     let mut style = LinkTextStyle::at(render.font_size);
-    style.plain_color = band
-        .unwrap_or_else(|| transcript_line_color(render.key, line.speaker_link, render.settings));
+    // An own line keeps its speaker link (the echo links to the agent's
+    // profile) but takes the self colour.
+    let colour_of = if line.own {
+        SpeakerLink::Own
+    } else {
+        line.speaker_link
+    };
+    style.plain_color =
+        band.unwrap_or_else(|| transcript_line_color(render.key, colour_of, render.settings));
     spawn_linkified_text(commands, column, &line_text(line, render.you, alias), style);
 }
 
@@ -3240,14 +3261,27 @@ mod tests {
             ..SlIdentity::default()
         });
         let mut model = ConversationModel::default();
-        model.push_nearby("Door", &ChatSource::Object(door), ChatType::Shout, "Locked");
+        model.push_nearby(
+            "Door",
+            &ChatSource::Object(door),
+            ChatType::Shout,
+            "Locked",
+            None,
+        );
         model.push_nearby(
             "Own Resident",
             &ChatSource::Agent(own),
             ChatType::Normal,
             "hi",
+            Some(own),
         );
-        model.push_nearby("Region", &ChatSource::System, ChatType::Region, "Restart");
+        model.push_nearby(
+            "Region",
+            &ChatSource::System,
+            ChatType::Region,
+            "Restart",
+            None,
+        );
         model.push_remote(
             ConversationKey::Direct(other),
             other,
@@ -3422,6 +3456,52 @@ mod tests {
         assert_eq!(model.entries.get(1).map(|entry| entry.unread), Some(0));
     }
 
+    /// The grid's echo of the agent's own nearby chat is an own line — the
+    /// self colour — that keeps its speaker's name and profile link; another
+    /// avatar's line is not.
+    #[test]
+    fn the_echo_of_own_nearby_chat_is_an_own_line() {
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let other = AgentKey::from(Uuid::from_u128(2));
+        let mut model = ConversationModel::default();
+        model.push_nearby(
+            "Own Resident",
+            &ChatSource::Agent(own),
+            ChatType::Normal,
+            "mine",
+            Some(own),
+        );
+        model.push_nearby(
+            "Other Resident",
+            &ChatSource::Agent(other),
+            ChatType::Normal,
+            "theirs",
+            Some(own),
+        );
+        let lines: Vec<(bool, String, SpeakerLink)> = model
+            .entries
+            .first()
+            .map(|entry| {
+                entry
+                    .lines
+                    .iter()
+                    .map(|line| (line.own, line.speaker.clone(), line.speaker_link))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(
+            lines,
+            vec![
+                (true, "Own Resident".to_owned(), SpeakerLink::Agent(own)),
+                (
+                    false,
+                    "Other Resident".to_owned(),
+                    SpeakerLink::Agent(other)
+                ),
+            ]
+        );
+    }
+
     /// A line to the active tab never counts as unread.
     #[test]
     fn active_tab_has_no_unread() {
@@ -3431,6 +3511,7 @@ mod tests {
             &ChatSource::System,
             ChatType::Normal,
             "hello",
+            None,
         );
         assert_eq!(model.entries.first().map(|entry| entry.unread), Some(0));
     }
@@ -3546,7 +3627,13 @@ mod tests {
         // Nearby unread (arrives while another tab is active) is not attention.
         model.select(ConversationKey::Direct(peer));
         model.ensure(ConversationKey::Direct(peer));
-        model.push_nearby("Avatar Ten", &ChatSource::System, ChatType::Normal, "hello");
+        model.push_nearby(
+            "Avatar Ten",
+            &ChatSource::System,
+            ChatType::Normal,
+            "hello",
+            None,
+        );
         assert_eq!(model.has_im_attention(), false);
         // A direct IM to a non-active tab is.
         model.select(ConversationKey::Nearby);
@@ -3687,6 +3774,7 @@ mod tests {
             &ChatSource::System,
             ChatType::Normal,
             "live line",
+            None,
         );
         assert_eq!(model.nearby_live_len(), 1);
         // …then persisted history is recalled (oldest-first, as the ingest builds).

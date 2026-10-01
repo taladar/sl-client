@@ -459,7 +459,7 @@ fn start(
             text,
             deadline,
         } => ui::act(locator, ui::UiActKind::Fill(text), deadline),
-        RequestBody::Press { keys } => ui::press(&keys),
+        RequestBody::Press { keys, hold_frames } => ui::press(&keys, hold_frames),
         RequestBody::MenuPath { path, deadline } => ui::menu_path(&path, deadline),
         RequestBody::SelectOption {
             combo,
