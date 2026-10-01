@@ -187,6 +187,17 @@ impl WorldHandle {
         self.act(WorldAction::Select).await
     }
 
+    /// Toggle the one thing this names in the selection with a `Shift`-click
+    /// in build mode, keeping the rest selected — how a second object joins
+    /// the selection. Waits as [`select`](Self::select) does.
+    ///
+    /// # Errors
+    ///
+    /// As [`select`](Self::select).
+    pub async fn shift_select(&self) -> Result<WorldNode, DriverError> {
+        self.act(WorldAction::ShiftSelect).await
+    }
+
     /// Rez the Build window's picked shape on the one thing this names: a
     /// click with the Create tool, which the action waits for.
     ///

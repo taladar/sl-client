@@ -27,8 +27,18 @@
 //! linksets (`SEND_INDIVIDUALS`), not just the roots — a root-only delink would
 //! leave the simulator re-linking the orphaned children into a fresh set rather
 //! than breaking the linkset fully apart. [`ObjectState::linkset_members`]
-//! gathers them. Unlink leaves the selection in place, so a wrongly ordered
-//! link is immediately re-linkable the other way around.
+//! gathers them.
+//!
+//! # Unlink keeps every prim selected
+//!
+//! In the reference, selecting a linkset selects every prim of it, so after a
+//! delink every former member is still selected, now as a linkset of its own —
+//! a wrongly ordered link is immediately re-linkable the other way around. Our
+//! whole-linkset selection holds only roots (and folds a selected child into its
+//! root whenever the tool state changes), so the delinked children would drop
+//! out. [`PendingDelink`] remembers them: as each lands from the grid as a root
+//! of its own, `reselect_delinked` adds it to the selection, provided the
+//! linkset it left is still selected.
 //!
 //! # Enablement
 //!
@@ -75,12 +85,29 @@ fn node_modifiable(node: &SelectedNode) -> bool {
         .is_none_or(|properties| properties.permissions.owner.contains(Permissions::MODIFY))
 }
 
-/// The link order for the current selection: the selection **reversed**, so the
-/// primary (last-selected) object leads and becomes the linkset root. See the
-/// [module documentation](self) — this must preserve the set's insertion order,
-/// never re-sort it.
-pub(crate) fn link_order(selection: &SelectionSet) -> Vec<ScopedObjectId> {
-    let mut local_ids: Vec<ScopedObjectId> = selection.iter().map(SelectedNode::scoped).collect();
+/// Whether `node` is a linkset root — the only kind of node a whole-linkset
+/// link counts and names, the reference's `root_iterator`. A selected prim
+/// becomes a child when a link it was in lands from the grid, and stays in the
+/// selection as one (unlink leaves the selection in place); one the viewer
+/// does not track counts as a root, optimistically, like a missing
+/// permissions reply.
+fn is_linkset_root(node: &SelectedNode, objects: &ObjectState) -> bool {
+    objects
+        .linkset_root_of(&node.scoped())
+        .is_none_or(|root| root == node.scoped())
+}
+
+/// The link order for the current selection: its linkset roots **reversed**,
+/// so the primary (last-selected) object leads and becomes the linkset root —
+/// the reference's `SEND_ONLY_ROOTS`. See the [module documentation](self) —
+/// this must preserve the set's insertion order, never re-sort it.
+#[must_use]
+pub fn link_order(selection: &SelectionSet, objects: &ObjectState) -> Vec<ScopedObjectId> {
+    let mut local_ids: Vec<ScopedObjectId> = selection
+        .iter()
+        .filter(|node| is_linkset_root(node, objects))
+        .map(SelectedNode::scoped)
+        .collect();
     // Insertion order keeps the primary (last-selected) last; reverse so it
     // leads and becomes the linkset root.
     local_ids.reverse();
@@ -89,9 +116,15 @@ pub(crate) fn link_order(selection: &SelectionSet) -> Vec<ScopedObjectId> {
 
 /// Whether the current selection can be **linked** — the reference's
 /// `enableLinkObjects`: whole-linkset (not edit-linked-parts) mode, at least two
-/// selected roots, and at least one modifiable object.
-pub fn can_link(selection: &SelectionSet, tool: &EditToolState) -> bool {
-    !tool.edit_linked && selection.len() >= 2 && selection.iter().any(node_modifiable)
+/// selected **roots** (`getRootObjectCount`, so the two halves of a link that
+/// just landed are one linkset, not two), and at least one modifiable root.
+#[must_use]
+pub fn can_link(selection: &SelectionSet, tool: &EditToolState, objects: &ObjectState) -> bool {
+    let roots: Vec<&SelectedNode> = selection
+        .iter()
+        .filter(|node| is_linkset_root(node, objects))
+        .collect();
+    !tool.edit_linked && roots.len() >= 2 && roots.into_iter().any(node_modifiable)
 }
 
 /// Whether the current selection can be **unlinked** — the reference's
@@ -110,10 +143,10 @@ fn link_selection(
     objects: &ObjectState,
     commands: &mut MessageWriter<SlCommand>,
 ) -> bool {
-    if !can_link(selection, tool) {
+    if !can_link(selection, tool, objects) {
         return false;
     }
-    let local_ids = link_order(selection);
+    let local_ids = link_order(selection, objects);
     // The reference refuses a link whose combined prim count would overflow one
     // linkset (`linkObjects`' `UnableToLinkObjects`). Each selected root brings
     // its whole family.
@@ -168,12 +201,23 @@ fn delink_ids(
     local_ids
 }
 
-/// Send the `ObjectDelink` for the current selection, if it can be unlinked.
-/// Leaves the selection in place. Returns whether a delink was sent.
+/// The prims a whole-linkset delink is taking out of a selected linkset, each
+/// with the root it had: added to the selection as they land from the grid as
+/// roots of their own ([module documentation](self)).
+#[derive(Resource, Debug, Default)]
+pub struct PendingDelink {
+    /// `(prim, the root it was linked under)`, in link order.
+    members: Vec<(ScopedObjectId, ScopedObjectId)>,
+}
+
+/// Send the `ObjectDelink` for the current selection, if it can be unlinked,
+/// and remember the children leaving a selected linkset in `pending`. Leaves
+/// the selection in place. Returns whether a delink was sent.
 fn unlink_selection(
     selection: &SelectionSet,
     tool: &EditToolState,
     objects: &ObjectState,
+    pending: &mut PendingDelink,
     commands: &mut MessageWriter<SlCommand>,
 ) -> bool {
     if !can_unlink(selection) {
@@ -184,8 +228,66 @@ fn unlink_selection(
         return false;
     }
     debug!("build-tools: unlink {} prims", local_ids.len());
+    // In edit-linked-parts mode the selection already names every prim it
+    // unlinks, so there is nothing to add back.
+    pending.members = if tool.edit_linked {
+        Vec::new()
+    } else {
+        local_ids
+            .iter()
+            .filter_map(|member| {
+                let root = objects.linkset_root_of(member)?;
+                (root != *member && !selection.is_selected(*member)).then_some((*member, root))
+            })
+            .collect()
+    };
     commands.write(SlCommand(Command::DelinkObjects { local_ids }));
     true
+}
+
+/// Add each prim a delink took out of a selected linkset to the selection once
+/// the grid says it is a root of its own, ahead of the nodes already there so
+/// the primary stays primary. A prim whose former root is no longer selected
+/// (the user moved on), or that is gone, is dropped.
+fn reselect_delinked(
+    objects: Res<ObjectState>,
+    mut pending: ResMut<PendingDelink>,
+    mut selection: ResMut<SelectionSet>,
+) {
+    if pending.members.is_empty() || !objects.is_changed() {
+        return;
+    }
+    let mut landed: Vec<SelectedNode> = Vec::new();
+    let members = core::mem::take(&mut pending.members);
+    for (member, root) in members {
+        if !selection.is_selected(root) {
+            continue;
+        }
+        match objects.linkset_root_of(&member) {
+            Some(now) if now == member => {
+                if let (Some(full), Some(entity)) =
+                    (objects.full_key(&member), objects.entity_by_scoped(&member))
+                    && !selection.is_selected(member)
+                {
+                    landed.push(SelectedNode {
+                        scoped: member,
+                        full,
+                        entity,
+                        properties: None,
+                        faces: None,
+                        last_face: crate::world_api::FIRST_FACE,
+                    });
+                }
+            }
+            // Still linked: the delink has not landed yet.
+            Some(_linked) => pending.members.push((member, root)),
+            None => {}
+        }
+    }
+    if !landed.is_empty() {
+        landed.extend(selection.nodes().iter().cloned());
+        selection.replace_nodes(landed);
+    }
 }
 
 /// The plugin wiring linking / unlinking into the viewer.
@@ -197,9 +299,10 @@ impl Plugin for EditLinkPlugin {
     fn build(&self, app: &mut App) {
         // Link / unlink only fires while the build tool is active (it already
         // bailed otherwise), so gate it out of the scheduler outside build mode.
-        app.add_systems(
+        app.init_resource::<PendingDelink>().add_systems(
             Update,
-            drive_link_unlink.run_if(crate::edit_tool::edit_tool_active_or_settling),
+            (drive_link_unlink, reselect_delinked)
+                .run_if(crate::edit_tool::edit_tool_active_or_settling),
         );
     }
 }
@@ -217,6 +320,7 @@ fn drive_link_unlink(
     tool: Res<EditToolState>,
     selection: Res<SelectionSet>,
     objects: Res<ObjectState>,
+    mut pending: ResMut<PendingDelink>,
     mut actions: MessageReader<UiAction>,
     mut commands: MessageWriter<SlCommand>,
 ) {
@@ -240,7 +344,7 @@ fn drive_link_unlink(
         link_selection(&selection, &tool, &objects, &mut commands);
     }
     if do_unlink {
-        unlink_selection(&selection, &tool, &objects, &mut commands);
+        unlink_selection(&selection, &tool, &objects, &mut pending, &mut commands);
     }
 }
 
@@ -277,7 +381,10 @@ mod tests {
         set.insert(scoped(11), full(11), Entity::PLACEHOLDER);
         set.insert(scoped(12), full(12), Entity::PLACEHOLDER);
         // Selected 10, 11, 12 (12 last / primary); root must be 12.
-        assert_eq!(link_order(&set), vec![scoped(12), scoped(11), scoped(10)]);
+        assert_eq!(
+            link_order(&set, &ObjectState::default()),
+            vec![scoped(12), scoped(11), scoped(10)]
+        );
     }
 
     /// Re-selecting an object promotes it to primary, so it leads the next
@@ -290,7 +397,10 @@ mod tests {
         set.insert(scoped(3), full(3), Entity::PLACEHOLDER);
         // Click 1 again to make it the intended root.
         set.insert(scoped(1), full(1), Entity::PLACEHOLDER);
-        assert_eq!(link_order(&set).first(), Some(&scoped(1)));
+        assert_eq!(
+            link_order(&set, &ObjectState::default()).first(),
+            Some(&scoped(1))
+        );
     }
 
     /// Link needs at least two roots and whole-linkset mode; unlink needs a
@@ -299,23 +409,30 @@ mod tests {
     #[test]
     fn enable_gates_follow_the_reference() {
         let tool = EditToolState::default();
+        let objects = ObjectState::default();
         let mut set = SelectionSet::default();
-        assert!(!can_link(&set, &tool), "no selection → no link");
+        assert!(!can_link(&set, &tool, &objects), "no selection → no link");
         assert!(!can_unlink(&set), "no selection → no unlink");
 
         set.insert(scoped(1), full(1), Entity::PLACEHOLDER);
-        assert!(!can_link(&set, &tool), "one root is not enough to link");
+        assert!(
+            !can_link(&set, &tool, &objects),
+            "one root is not enough to link"
+        );
         assert!(can_unlink(&set), "a lone selection can still be unlinked");
 
         set.insert(scoped(2), full(2), Entity::PLACEHOLDER);
-        assert!(can_link(&set, &tool), "two roots → link");
+        assert!(can_link(&set, &tool, &objects), "two roots → link");
 
         // Edit-linked-parts (component) mode disables link.
         let edit_linked = EditToolState {
             edit_linked: true,
             ..EditToolState::default()
         };
-        assert!(!can_link(&set, &edit_linked), "component mode → no link");
+        assert!(
+            !can_link(&set, &edit_linked, &objects),
+            "component mode → no link"
+        );
     }
 
     /// The prim-limit constant is the reference's root + 255 children.

@@ -192,11 +192,11 @@ pub(crate) fn run_neighbour_announcer(
                 Ok(sl_proto::ServerEvent::AgentArrived) => {
                     announce_neighbours(&core, &shared).await;
                 }
-                Ok(
-                    sl_proto::ServerEvent::Disconnected
-                    | sl_proto::ServerEvent::LoggedOut
-                    | sl_proto::ServerEvent::CircuitRetired,
-                )
+                Ok(sl_proto::ServerEvent::LoggedOut) => {
+                    retire_children_on_logout(&core, &shared).await;
+                    return;
+                }
+                Ok(sl_proto::ServerEvent::Disconnected | sl_proto::ServerEvent::CircuitRetired)
                 | Err(broadcast::error::RecvError::Closed) => break,
                 Ok(_other) => {}
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
@@ -204,7 +204,51 @@ pub(crate) fn run_neighbour_announcer(
                 }
             }
         }
+        // A logout closes the session in the same flush that reports it, so
+        // the close can win the `select!` above with the `LoggedOut` still
+        // queued behind it: read what is left before deciding it was not one.
+        loop {
+            match events.try_recv() {
+                Ok(sl_proto::ServerEvent::LoggedOut) => {
+                    retire_children_on_logout(&core, &shared).await;
+                    return;
+                }
+                Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => {}
+                Err(
+                    broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed,
+                ) => return,
+            }
+        }
     })
+}
+
+/// Retires every child session of the agent whose session `shared` just logged
+/// out — OpenSim's `CloseChildAgents` on logout. A viewer sends its
+/// `LogoutRequest` to the root region alone, so it is the grid that closes the
+/// child agents watching from next door; otherwise they outlive the login.
+///
+/// Only a root's logout does this: a child session never receives one.
+async fn retire_children_on_logout(core: &Arc<GridCore>, shared: &SharedSim) {
+    let (seq, agent_id) = {
+        let state = shared.state.lock().await;
+        (state.seq, state.avatar.agent_id)
+    };
+    for child in core.sessions_of(agent_id).await {
+        let (child_seq, is_root) = {
+            let state = child.state.lock().await;
+            (state.seq, state.sim.is_root_agent())
+        };
+        if child_seq == seq || is_root {
+            continue;
+        }
+        if let Err(error) = child
+            .with_sim(|session| session.retire_circuit(child.now()))
+            .await
+        {
+            tracing::warn!("retiring child session {child_seq} after a logout failed: {error}");
+        }
+        core.remove_session(child_seq).await;
+    }
 }
 
 /// The index of the region called `name`, or [`Error::UnknownRegion`].

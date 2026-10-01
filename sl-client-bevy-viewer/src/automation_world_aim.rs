@@ -393,6 +393,68 @@ mod tests {
         Ok((app, entity))
     }
 
+    /// The second prim the shift-select test selects beside [`TARGET`].
+    const BESIDE: u32 = 4;
+
+    /// A shift-select adds a prim to the selection and keeps what was
+    /// selected, and a second one on a selected prim takes it out again — the
+    /// selection gesture's extend / toggle, read off `Shift` held at the
+    /// press.
+    #[test]
+    fn a_shift_select_toggles_a_prim_and_keeps_the_rest() -> Result<(), TestError> {
+        let mut app = world_app_with_build_tools()?;
+        app.add_plugins(WorldModelPlugin);
+        seed_object(&mut app, fixture_prim(TARGET, at(128.0, 128.0, 30.0), 0));
+        seed_object(&mut app, fixture_prim(BESIDE, at(128.0, 132.0, 30.0), 0));
+        settle(&mut app, 5);
+        let target =
+            scene_position_of(&mut app, scoped(TARGET)).ok_or("the target prim never spawned")?;
+        let beside =
+            scene_position_of(&mut app, scoped(BESIDE)).ok_or("the second prim never spawned")?;
+        let middle = along(target, beside, 0.5);
+        let look = Vec3::new(middle.x - 3.5, middle.y, middle.z);
+        install_camera(
+            &mut app,
+            Vec3::new(look.x, look.y + 2.0, look.z + 16.0),
+            look,
+        );
+        open_build_floater(&mut app);
+        let selected = |app: &App| {
+            let selection = app.world().resource::<crate::world_api::SelectionSet>();
+            [TARGET, BESIDE].map(|local_id| selection.is_selected(scoped(local_id)))
+        };
+
+        let select = run(&mut app, WorldAim::new(prim(TARGET), WorldIntent::Select));
+        interact::perform(&mut app, select.target?.input());
+        settle(&mut app, 3);
+        assert_eq!(selected(&app), [true, false], "a plain select");
+
+        let add = run(
+            &mut app,
+            WorldAim::new(prim(BESIDE), WorldIntent::ShiftSelect),
+        );
+        interact::perform(&mut app, add.target?.input());
+        settle(&mut app, 3);
+        assert_eq!(
+            selected(&app),
+            [true, true],
+            "a shift-select adds the second prim and keeps the first"
+        );
+
+        let remove = run(
+            &mut app,
+            WorldAim::new(prim(TARGET), WorldIntent::ShiftSelect),
+        );
+        interact::perform(&mut app, remove.target?.input());
+        settle(&mut app, 3);
+        assert_eq!(
+            selected(&app),
+            [false, true],
+            "a shift-select on a selected prim takes it out"
+        );
+        Ok(())
+    }
+
     /// A place waits for the Create tool — the Build window open on the Move
     /// tool is not enough — and then rezzes on the prim: one `ObjectAdd`, on
     /// the prim's top face, and no touch.

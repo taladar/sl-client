@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 122 |
-| ready | 306 |
+| ideas | 124 |
+| ready | 312 |
 | blocked | 53 |
 | in-progress | 21 |
 | bugs | 16 |
-| done | 1286 |
+| done | 1287 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1851** |
+| **total** | **1860** |
 
-## ideas (122)
+## ideas (124)
 
 ### protocol
 
@@ -205,9 +205,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-crosscheck-ui-scenes`](ideas/test-crosscheck-ui-scenes.md) — UI scenes
   — putting two viewers into the same interaction state
-- [`test-e2e-live-verify-sweep`](ideas/test-e2e-live-verify-sweep.md) — Turn
-  pending live-verify checks into end-to-end tests (blocked by
-  `test-e2e-pilot-suite` (done))
 - [`test-firestorm-automation-endpoint`](ideas/test-firestorm-automation-endpoint.md)
   — The patched Firestorm answers the same automation protocol (blocked by
   `viewer-automation-protocol` (done), `viewer-automation-remote-transport`
@@ -233,6 +230,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   cross-region estate state
 - [`server-experience-service`](ideas/server-experience-service.md) — Experience
   service — records, permissions, key-value store
+- [`server-fake-grid-agent-avatars-shared`](ideas/server-fake-grid-agent-avatars-shared.md)
+  — Fake grid — logged-in agents see each other's avatars
+- [`server-fake-grid-im-relay`](ideas/server-fake-grid-im-relay.md) — Fake grid
+  — relay IMs and offers between its sessions
+- [`server-fake-grid-object-undo`](ideas/server-fake-grid-object-undo.md) — Fake
+  grid — keep an object's edit history for Undo / Redo
 - [`server-friends-service`](ideas/server-friends-service.md) — Friends service
   — relationships, rights, online fan-out
 - [`server-grid-service`](ideas/server-grid-service.md) — Grid service — region
@@ -310,7 +313,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (306)
+## ready (312)
 
 ### protocol
 
@@ -1009,6 +1012,18 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-e2e-sweep-environment`](ready/test-e2e-sweep-environment.md) —
+  End-to-end tests for the environment editors and their gates
+- [`test-e2e-sweep-live-grid`](ready/test-e2e-sweep-live-grid.md) — End-to-end
+  tests for what only a live grid has
+- [`test-e2e-sweep-relog`](ready/test-e2e-sweep-relog.md) — End-to-end tests for
+  what must survive a relog
+- [`test-e2e-sweep-rlv`](ready/test-e2e-sweep-rlv.md) — End-to-end tests for the
+  RLVa console and windows
+- [`test-e2e-sweep-single-viewer-ui`](ready/test-e2e-sweep-single-viewer-ui.md)
+  — End-to-end tests for the remaining single-viewer UI checks
+- [`test-e2e-sweep-two-avatars`](ready/test-e2e-sweep-two-avatars.md) —
+  End-to-end tests for what two avatars see of each other
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1317,7 +1332,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1286)
+## done (1287)
 
 ### protocol
 
@@ -3753,6 +3768,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — set draw distance; confirm no error and any echoed state
 - [`test-e2e-live-grids`](done/test-e2e-live-grids.md) — Run end-to-end tests
   against the local OpenSim and aditi (blocked by `test-e2e-stage` (done))
+- [`test-e2e-live-verify-sweep`](done/test-e2e-live-verify-sweep.md) — Turn
+  pending live-verify checks into end-to-end tests (blocked by
+  `test-e2e-pilot-suite` (done))
 - [`test-e2e-pilot-suite`](done/test-e2e-pilot-suite.md) — The first end-to-end
   tests — one viewer, two viewers, two regions (blocked by `test-e2e-stage`
   (done))

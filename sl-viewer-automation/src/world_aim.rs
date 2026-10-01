@@ -21,6 +21,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemState;
+use bevy::input::keyboard::Key;
 use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -114,6 +115,10 @@ pub enum WorldIntent {
     /// selection gesture's own object picker, and a point the transform rig
     /// would take is not on the target.
     Select,
+    /// [`Select`](Self::Select) with `Shift` held, which toggles the target in
+    /// the selection and keeps the rest of it. Waits and is judged as a select
+    /// is.
+    ShiftSelect,
     /// A left click with the build tool's Create tool, which rezzes the picked
     /// shape where it lands. Waits for the Create tool; with any other tool the
     /// same click would select. Judged by the pick resolver, whose hit is the
@@ -126,6 +131,14 @@ pub enum WorldIntent {
     DropFrom(Vec2),
 }
 
+impl WorldIntent {
+    /// Whether it is a build-mode selection click, judged by the selection
+    /// gesture's picker and waiting for a tool that selects.
+    const fn selects(self) -> bool {
+        matches!(self, Self::Select | Self::ShiftSelect)
+    }
+}
+
 /// What a [`WorldAim`] is doing while it is not ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AimStage {
@@ -134,7 +147,7 @@ pub enum AimStage {
     /// Waiting for the camera and the target to hold still.
     Settling,
     /// Waiting for the build tool on a tool that selects (a
-    /// [`WorldIntent::Select`] or a sweep).
+    /// [`WorldIntent::Select`], a [`WorldIntent::ShiftSelect`] or a sweep).
     BuildMode,
     /// Waiting for the build tool's Create tool (a [`WorldIntent::Place`]).
     CreateTool,
@@ -194,11 +207,31 @@ impl WorldTarget {
             WorldIntent::Click | WorldIntent::Select | WorldIntent::Place => {
                 InputAction::click(self.aim, MouseButton::Left)
             }
+            WorldIntent::ShiftSelect => shifted_click(self.aim),
             WorldIntent::RightClick => InputAction::click(self.aim, MouseButton::Right),
             WorldIntent::Hover => InputAction::move_to(self.aim),
             WorldIntent::DropFrom(from) => drop_gesture(from, self.aim, DROP_REST_FRAMES),
         }
     }
+}
+
+/// A left click at `at` with `Shift` down a frame before the press and up a
+/// frame after the release, so the selection gesture reads it held at press.
+fn shifted_click(at: Vec2) -> InputAction {
+    let (key_code, logical) = (KeyCode::ShiftLeft, Key::Shift);
+    InputAction::from_steps(vec![
+        InputStep::KeyDown {
+            key_code,
+            logical: logical.clone(),
+            text: None,
+        },
+        InputStep::Move(at),
+        InputStep::Press(MouseButton::Left),
+        InputStep::Release(MouseButton::Left),
+        InputStep::Idle,
+        InputStep::KeyUp { key_code, logical },
+        InputStep::Idle,
+    ])
 }
 
 /// A left-button drag from `from` onto `to`: press at `from`, the pointer
@@ -426,7 +459,7 @@ impl Asked {
     /// Put the question at `point` to the resolver `intent` is judged by;
     /// `None` when that resolver is not in the app.
     fn ask(world: &mut World, intent: WorldIntent, point: Vec2) -> Option<Self> {
-        if intent == WorldIntent::Select {
+        if intent.selects() {
             let mut probes = world.get_resource_mut::<SelectionProbes>()?;
             Some(Self::Press(probes.request(SelectionQuery::Press(point))))
         } else {
@@ -692,7 +725,7 @@ impl WorldAim {
         let Some(sight) = sight(world, &node) else {
             return Ok(self.lost());
         };
-        if self.intent == WorldIntent::Select
+        if self.intent.selects()
             && !world
                 .get_resource::<EditToolState>()
                 .is_some_and(|tool| tool.active && tool.tool.selects_objects())

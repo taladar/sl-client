@@ -559,6 +559,35 @@ replaces that person.
 - **A caption with `display: none` names nothing** in the model — a row that
   swaps its caption (the Build Object tab's Taper / Hole Size) can be
   `LabelledBy` itself and is called by whichever one shows.
+- **The live-verify sweep** ([[test-e2e-live-verify-sweep]]) turned the
+  features' "check it live" notes into tests; the remaining ones are its
+  `test-e2e-sweep-*` tasks. The worked examples are
+  `tests/e2e_live_checks.rs`: chords, a window's tabs and clipboard, a mode
+  that holds offers, a list's sort and filter.
+- **`UiLocator::press` clicks into the field first**, which collapses a
+  selection: `Ctrl+A` then `Backspace` through a locator deletes one
+  character. A chord that depends on the previous one goes through
+  `Viewer::press` (whatever has the focus), and clearing a field is
+  `fill("")`.
+- **A virtual list's pooled rows count for strictness**: an unbound row is a
+  hidden, unnamed `listitem`, so `window >> listitem` is ambiguous as soon as
+  the list has spare rows. Name the row (`listitem[name~=Seated]`); `nth(0)`
+  is the top bound row.
+- **The grid's side of an exchange is scripted through the viewer's
+  session**: `stage.agent(label).with_sim(|sim| sim.send_instant_message(..))`
+  delivers an IM or an offer from anybody, and what the viewer sends comes
+  back on `agent.events()` decoded — an IM as `ServerEvent::InstantMessage`,
+  an undo as `ObjectsUndone` — not as a raw `ClientMessage`. Where the fake
+  grid does not yet do the result (an IM reaching another viewer, an undo
+  moving the prim, two viewers seeing each other's avatars), a test asserts
+  what reached the grid and names the server task.
+- **A viewer that quits by itself** (a Quit chord) is announced first with
+  `Stage::expect_quit`; the teardown then holds it to a clean exit instead of
+  asking it to log out, and still fails a session left on the grid.
+- **A second prim joins the selection by `shift_select`**
+  (`WorldAction::ShiftSelect`, judged like a select, with `Shift` down a
+  frame before the press). A link that lands leaves the new child in the
+  selection; Link counts only selected linkset roots, as the reference does.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).

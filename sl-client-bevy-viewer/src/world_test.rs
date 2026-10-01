@@ -2338,6 +2338,88 @@ mod tests {
         Ok(())
     }
 
+    /// **A link that landed is one linkset, not two**: after a link, the prim
+    /// that became a child is still in the selection (unlink leaves the
+    /// selection in place, so a wrong link can be redone the other way round),
+    /// but Link counts and names only the linkset roots — the reference's
+    /// `getRootObjectCount` and `SEND_ONLY_ROOTS` — so the new linkset alone
+    /// cannot be linked again, and a second linkset beside it can.
+    #[test]
+    fn a_selected_child_prim_is_not_a_linkset_to_link() -> Result<(), TestError> {
+        use pretty_assertions::assert_eq;
+
+        let mut app = super::world_app_with_edit();
+        let root = seed_prim(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        let child = super::seed_child_prim(
+            &mut app,
+            1,
+            2,
+            Vector {
+                x: 2.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        settle(&mut app, 6);
+        let select = |app: &mut App, scoped: ScopedObjectId| -> Result<(), TestError> {
+            let objects = app.world().resource::<crate::world_api::ObjectState>();
+            let full = objects.full_key(&scoped).ok_or("an untracked prim")?;
+            let entity = objects
+                .entity_by_scoped(&scoped)
+                .ok_or("a prim with no entity")?;
+            app.world_mut()
+                .resource_mut::<crate::world_api::SelectionSet>()
+                .insert(scoped, full, entity);
+            Ok(())
+        };
+        let gate = |app: &App| {
+            let world = app.world();
+            let selection = world.resource::<crate::world_api::SelectionSet>();
+            let objects = world.resource::<crate::world_api::ObjectState>();
+            (
+                crate::edit_link::can_link(
+                    selection,
+                    world.resource::<crate::world_api::EditToolState>(),
+                    objects,
+                ),
+                crate::edit_link::link_order(selection, objects),
+            )
+        };
+        select(&mut app, child)?;
+        select(&mut app, root)?;
+        assert_eq!(
+            gate(&app),
+            (false, vec![root]),
+            "the linkset's root and its child are one linkset"
+        );
+
+        let other = super::seed_prim_numbered(
+            &mut app,
+            3,
+            Vector {
+                x: 132.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        select(&mut app, other)?;
+        assert_eq!(
+            gate(&app),
+            (true, vec![other, root]),
+            "a second linkset can be linked to it, root last-selected first"
+        );
+        Ok(())
+    }
+
     /// **Select Face picks one face, and shift toggles it back off**: the
     /// distinct `LLToolFace` mode, where a click resolves to a prim *face*
     /// rather than sweeping or driving a gizmo — and where toggling an object's

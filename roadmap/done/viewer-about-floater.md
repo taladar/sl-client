@@ -54,6 +54,9 @@ About; deferred build-once floater, tabs Info / Credits / Licenses):
   floaters at startup for screenshot runs.
 
 Live-verified on local OpenSim (screenshot run): full support block
-incl. `Simulator version: OpenSim 0.9.2.1 Yeti Dev …`. Interactive
-checks (tab switch, copy-paste, license browsing, teleport version
-update, menu check mark) still pending a live operator.
+incl. `Simulator version: OpenSim 0.9.2.1 Yeti Dev …`. The tab switch,
+copy-paste, license browsing, the Region line across a teleport and the
+menu check mark are an end-to-end test since 2026-09-30
+([[test-e2e-live-verify-sweep]]); the simulator-version line across a
+teleport needs regions with different versions
+([[test-e2e-sweep-single-viewer-ui]]).

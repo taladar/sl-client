@@ -6,7 +6,7 @@ use core::time::Duration;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use bevy::math::UVec2;
@@ -604,6 +604,10 @@ struct StageViewer {
     driver: Option<Viewer>,
     /// How it runs.
     run: ViewerRun,
+    /// Whether the body made it quit by itself ([`Stage::expect_quit`]), so
+    /// the teardown takes its own exit as its logout rather than asking for
+    /// one.
+    quits: AtomicBool,
 }
 
 /// A running stage: the grid and its viewers, each logged in.
@@ -821,6 +825,7 @@ impl Stage {
                 dir: dir.clone(),
                 driver: None,
                 run: ViewerRun::InProcess(None),
+                quits: AtomicBool::new(false),
             });
             // A grid that asks for a second factor ends the App with the
             // challenge: answer it, and log in again with a new App.
@@ -990,6 +995,7 @@ impl Stage {
                 dir: dir.root.clone(),
                 driver: None,
                 run: ViewerRun::Process(Some(running)),
+                quits: AtomicBool::new(false),
             });
             let driver = self.connect_last(&socket, &dir.log()).await?;
             if let Some(viewer) = self.viewers.last_mut() {
@@ -1183,6 +1189,24 @@ impl Stage {
             .ok_or_else(|| StageError::NoAccount(label.to_owned()))
     }
 
+    /// Say that the body is about to make viewer `label` quit by itself — a
+    /// Quit chord, a menu's Quit — so the teardown takes its exit as its
+    /// logout instead of asking for one, and holds it to having exited
+    /// cleanly: a process with status 0, and on the fake grid no session left
+    /// behind. Call it before the quit, since a viewer that exits unannounced
+    /// is a viewer that died.
+    ///
+    /// # Errors
+    ///
+    /// [`StageError::UnknownViewer`].
+    pub fn expect_quit(&self, label: &str) -> Result<(), StageError> {
+        self.viewers
+            .iter()
+            .find(|viewer| viewer.label == label)
+            .map(|viewer| viewer.quits.store(true, Ordering::Relaxed))
+            .ok_or_else(|| StageError::UnknownViewer(label.to_owned()))
+    }
+
     /// Send viewer `label` the marker `name` from the grid: it arrives after
     /// everything the grid sent that viewer before it.
     ///
@@ -1243,15 +1267,19 @@ impl Stage {
             viewer.driver = None;
         }
         if let Some(host) = self.host.take() {
-            let handles: Vec<(String, ViewerHandle)> = self
+            let handles: Vec<(String, ViewerHandle, bool)> = self
                 .viewers
                 .iter()
                 .filter_map(|viewer| match viewer.run {
-                    ViewerRun::InProcess(Some(handle)) => Some((viewer.label.clone(), handle)),
+                    ViewerRun::InProcess(Some(handle)) => Some((
+                        viewer.label.clone(),
+                        handle,
+                        viewer.quits.load(Ordering::Relaxed),
+                    )),
                     ViewerRun::InProcess(None) | ViewerRun::Process(_) => None,
                 })
                 .collect();
-            for (label, handle) in &handles {
+            for (label, handle, _quits) in handles.iter().filter(|(_, _, quits)| !quits) {
                 let raised = host
                     .with_app(*handle, |viewer| {
                         viewer
@@ -1271,7 +1299,7 @@ impl Stage {
                     Err(error) => problems.push(StageError::Host(error)),
                 }
             }
-            for (label, handle) in &handles {
+            for (label, handle, _quits) in &handles {
                 match tokio::time::timeout(LOGOUT, host.exited(*handle)).await {
                     Ok(Ok(())) => {}
                     Ok(Err(error)) => problems.push(StageError::Host(error)),
@@ -1291,27 +1319,32 @@ impl Stage {
                 problems.push(StageError::Host(error));
             }
         }
-        let processes: Vec<(String, RunningViewer)> = self
+        let processes: Vec<((String, bool), RunningViewer)> = self
             .viewers
             .iter_mut()
             .filter_map(|viewer| match &mut viewer.run {
-                ViewerRun::Process(running) => running
-                    .take()
-                    .map(|running| (viewer.label.clone(), running)),
+                ViewerRun::Process(running) => running.take().map(|running| {
+                    (
+                        (viewer.label.clone(), viewer.quits.load(Ordering::Relaxed)),
+                        running,
+                    )
+                }),
                 ViewerRun::InProcess(_) => None,
             })
             .collect();
         if !processes.is_empty() {
-            let (labels, running): (Vec<String>, Vec<RunningViewer>) =
+            let (labels, running): (Vec<(String, bool)>, Vec<RunningViewer>) =
                 processes.into_iter().unzip();
             let stopped = tokio::task::spawn_blocking(move || {
                 sl_viewer_launch::stop_all(running, LOGOUT_GRACE)
             })
             .await
             .unwrap_or_else(|join| std::panic::resume_unwind(join.into_panic()));
-            for (label, result) in labels.into_iter().zip(stopped) {
+            for ((label, quits), result) in labels.into_iter().zip(stopped) {
                 match result {
                     Ok(ran) if ran.ending == Ending::AskedToQuit => {}
+                    // Quit by itself as the body said it would, and cleanly.
+                    Ok(ran) if quits && ran.ending == Ending::Exited(0) => {}
                     Ok(ran) => problems.push(StageError::NoLogout {
                         viewer: label,
                         reason: match ran.ending {

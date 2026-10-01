@@ -119,9 +119,10 @@ the text-field, widget-focus and world cases. Plus the live bar's own pinning
 test in `menu_bar.rs`, the action-map collision test above, and the viewer
 crate's own 254 lib tests.
 
-Not verified live: whether every one of the twelve chords does the right thing
-in a running session is a manual pass over a logged-in viewer, and the actions
-they now route through are the same ones the menu picks already used.
+Every chord the menu bar draws (fourteen by 2026-09-30) is driven in a running
+viewer by the end-to-end tests of [[test-e2e-live-verify-sweep]]; the undo /
+redo chords are checked at the grid, which does not keep an edit history yet
+([[server-fake-grid-object-undo]]). The inventory `+` menu's Ctrl+U is not.
 
 Reference (Firestorm, read-only):
 `indra/newview/skins/default/xui/en/menu_viewer.xml` (shortcut=),

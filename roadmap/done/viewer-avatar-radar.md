@@ -61,9 +61,11 @@ columns, no per-column show / hide bitmask, no LSL-bridge altitude
 correction, no Phoenix script-channel alerts, no camera-zoom action (no
 focus-other-avatar camera primitive yet — follow-up), friend / muted name
 styling is colour-only, and the counts live on their own line rather than
-inside the Name header. Interactive checks (sort clicks, filter typing,
-context-menu actions, toast mode, neighbour-region coarse styling, the
-alert sound) remain for a live session.
+inside the Name header. The column sort, filter typing and the Profile / IM
+buttons are an end-to-end test since 2026-09-30
+([[test-e2e-live-verify-sweep]]); sort persistence, the row context menu,
+toast mode, neighbour-region coarse styling and the alert sound are
+[[test-e2e-sweep-two-avatars]]'s.
 
 The Firestorm-style radar: a list of who is nearby, with distance, sortable and
 filterable, updating live as avatars enter and leave range — plus the entry /

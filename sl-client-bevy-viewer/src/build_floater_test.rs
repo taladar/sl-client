@@ -1434,17 +1434,19 @@ mod tests {
         Ok(())
     }
 
-    /// **`Ctrl+Shift+L` unlinks the selected linkset.**
+    /// **`Ctrl+Shift+L` unlinks the selected linkset, and keeps both prims
+    /// selected.**
     ///
     /// Linking is a shortcut on the same selection the floater is showing, and
     /// it is gated on build mode being active and on the keyboard *not* being
     /// owned by a text field — which is exactly the arrangement this fold has.
     #[test]
-    fn ctrl_shift_l_unlinks_the_selected_linkset() -> Result<(), TestError> {
+    fn ctrl_shift_l_unlinks_the_selected_linkset_and_keeps_both_prims_selected()
+    -> Result<(), TestError> {
         let mut app = build_tools_app()?;
         let root = seed_prim_numbered(&mut app, 1, FIXTURE_AT);
         settle(&mut app, 5);
-        let _child = seed_child_prim(
+        let child = seed_child_prim(
             &mut app,
             1,
             2,
@@ -1474,6 +1476,39 @@ mod tests {
             delinks.len(),
             1,
             "`Ctrl+Shift+L` on a selected linkset must send exactly one delink, got {commands:#?}"
+        );
+
+        // The grid's answer: the child streamed again as a root of its own. It
+        // joins the selection ahead of the root, which stays primary, so the
+        // pair can be linked again the other way round — the reference keeps
+        // every prim of a linkset selected through a delink.
+        let _unlinked = seed_prim_numbered(
+            &mut app,
+            2,
+            Vector {
+                x: FIXTURE_AT.x,
+                y: FIXTURE_AT.y,
+                z: FIXTURE_AT.z + 3.0,
+            },
+        );
+        settle(&mut app, 4);
+        let world = app.world();
+        let selection = world.resource::<crate::world_api::SelectionSet>();
+        assert_eq!(
+            selection
+                .iter()
+                .map(crate::world_api::SelectedNode::scoped)
+                .collect::<Vec<_>>(),
+            vec![child, root],
+            "both former members are selected, the root still primary"
+        );
+        assert!(
+            crate::edit_link::can_link(
+                selection,
+                world.resource::<crate::world_api::EditToolState>(),
+                world.resource::<crate::world_api::ObjectState>(),
+            ),
+            "the pair can be linked again"
         );
         Ok(())
     }

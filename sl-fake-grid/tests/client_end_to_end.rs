@@ -3252,6 +3252,53 @@ mod test {
         Ok(())
     }
 
+    /// **A logout closes the agent's child agents too.** A viewer sends its
+    /// `LogoutRequest` to the root region only; the grid retires the child
+    /// agents it opened in the neighbours (OpenSim's `CloseChildAgents` on
+    /// logout). Without it a neighbour's session outlives the login and the
+    /// grid still thinks the avatar is watching from next door.
+    #[tokio::test]
+    async fn a_logout_retires_the_neighbours_child_sessions() -> Result<(), TestError> {
+        let mut running = start_in(vec![RegionConfig::default(), next_door_region()]).await?;
+        running
+            .wait_until("the neighbour's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region Next Door")
+                }
+                _ => false,
+            })
+            .await?;
+        assert_eq!(
+            running
+                ._grid
+                .sessions_in("Fake Region Next Door")
+                .await
+                .len(),
+            1,
+            "the neighbour is open before the logout"
+        );
+
+        running.commands.send(Command::Logout).await?;
+        tokio::time::timeout(WAIT, async {
+            while !running
+                ._grid
+                .sessions_in("Fake Region Next Door")
+                .await
+                .is_empty()
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .map_err(|_elapsed| "the neighbour's child session outlived the logout")?;
+        assert!(
+            running._grid.sessions_in("Fake Region").await.is_empty(),
+            "and the root session is gone"
+        );
+        Ok(())
+    }
+
     /// A request for the agent's own region finishes as a `TeleportLocal`
     /// at the requested position — no new session.
     #[tokio::test]

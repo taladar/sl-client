@@ -969,6 +969,9 @@ struct TopMenuFacts<'w> {
     selection: Res<'w, crate::world_api::SelectionSet>,
     /// The current build tool.
     edit_tool: Res<'w, crate::world_api::EditToolState>,
+    /// The tracked objects, which say which selected prims are linkset roots
+    /// (only those count towards a link).
+    objects: Res<'w, crate::world_api::ObjectState>,
     /// The Land tool's picked action, which decides whether Undo undoes a
     /// terraform stroke rather than an object edit.
     land_tool: Res<'w, crate::edit_land::LandToolState>,
@@ -1034,6 +1037,7 @@ fn update_top_menu_conditions(
         environment,
         selection,
         edit_tool,
+        objects,
         land_tool,
         settings,
         presence,
@@ -1197,7 +1201,7 @@ fn update_top_menu_conditions(
         wanted.push(COLLECT_DIAGNOSTICS_ON);
     }
     // The Build ▸ Link / Unlink enable gates, from the current selection.
-    if crate::edit_link::can_link(&selection, &edit_tool) {
+    if crate::edit_link::can_link(&selection, &edit_tool, &objects) {
         wanted.push(CAN_LINK);
     }
     if crate::edit_link::can_unlink(&selection) {

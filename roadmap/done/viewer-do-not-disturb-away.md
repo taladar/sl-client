@@ -100,10 +100,11 @@ and the blocked-sender autoresponse (`SendMutedAvatarResponse` +
 `MutedAvatarResponse`).
 
 Verified live on the local OpenSim (2026-08-20): the Online Status submenu,
-its check marks, and the mode toggles. The **IM auto-reply** is unit-verified
-only (`reply_for`'s precedence and the blocked short-circuit) — the two-avatar
-live check, and the do-not-disturb toast/offer replay against real incoming
-offers, are still outstanding.
+its check marks, and the mode toggles. The **IM auto-reply** (once per
+conversation) and the **held offer** shown when the mode ends are an
+end-to-end test on the fake grid since 2026-09-30
+([[test-e2e-live-verify-sweep]]); the re-arm on closing the conversation and
+a contact set's own reply are [[test-e2e-sweep-two-avatars]]'s.
 
 Not carried, and split out rather than silently dropped:
 
