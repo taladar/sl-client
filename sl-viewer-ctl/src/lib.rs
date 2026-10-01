@@ -11,12 +11,12 @@
 //!   connection.
 //! - **Verbs** drive the viewer at `--socket` (or `SL_VIEWER_SOCKET`, or the
 //!   one socket that answers in the viewer's default directory): `tree`,
-//!   `find`, `click`, `fill`, `press`, `wait`, `open`, `menu`, `world find`,
-//!   `world touch`, `chat`, `notifications`, `agent`, `environment`,
-//!   `screenshot`, `events --follow`. Each is one `sl-viewer-driver` call, so every action waits in
-//!   the viewer for its node to be actionable and every failure explains
-//!   itself — with its screenshot, tree and event tail saved under
-//!   `--artifacts`.
+//!   `find`, `click`, `drag`, `fill`, `press`, `wait`, `open`, `menu`,
+//!   `world find`, `world touch`, `chat`, `notifications`, `agent`,
+//!   `environment`, `screenshot`, `events --follow`. Each is one
+//!   `sl-viewer-driver` call, so every action waits in the viewer for its
+//!   node to be actionable and every failure explains itself — with its
+//!   screenshot, tree and event tail saved under `--artifacts`.
 //! - **Selectors** are `sl-automation-proto`'s string grammar
 //!   (`window[test_id=floater:build] >> button[name_key=build-apply]`), or the
 //!   locator's JSON.

@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 use sl_automation_proto::{Locator, LogStream, NameMatcher, WaitCondition, WorldLocator};
 
 /// Drive a running Second Life viewer from the shell, through its
@@ -151,6 +151,22 @@ pub enum Verb {
         #[arg(long, conflicts_with = "right")]
         double: bool,
     },
+    /// Drag the one node a selector names with the left button: drop it onto
+    /// another node (`--onto`), or move it by an offset (`--by`) — a window
+    /// by its `floater-title-bar`, or resized by its `floater-resize`.
+    #[command(group(ArgGroup::new("destination").required(true).args(["onto", "by"])))]
+    Drag {
+        /// Which node to press on.
+        #[arg(value_parser = ui_selector)]
+        selector: Locator,
+        /// Release over the one node this selector names.
+        #[arg(long, value_parser = ui_selector, value_name = "SELECTOR")]
+        onto: Option<Locator>,
+        /// Move by `X,Y` logical pixels, `X` rightwards and `Y` downwards
+        /// (`--by -40,0` moves left).
+        #[arg(long, value_parser = drag_offset, allow_hyphen_values = true, value_name = "X,Y")]
+        by: Option<[f32; 2]>,
+    },
     /// Replace the text of the one text field a selector names by typing.
     Fill {
         /// Which field.
@@ -291,6 +307,21 @@ pub fn world_selector(text: &str) -> Result<WorldLocator, String> {
         text.parse()
             .map_err(|error: sl_automation_proto::SelectorError| error.to_string())
     }
+}
+
+/// A drag's offset, `X,Y` in logical pixels.
+fn drag_offset(text: &str) -> Result<[f32; 2], String> {
+    let (x, y) = text
+        .split_once(',')
+        .ok_or_else(|| format!("{text:?} is not an offset `X,Y` (`--by -40,0`)"))?;
+    let axis = |part: &str, name: &str| -> Result<f32, String> {
+        part.trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|amount| amount.is_finite())
+            .ok_or_else(|| format!("{text:?}: {name} {part:?} is not a number of pixels"))
+    };
+    Ok([axis(x, "X")?, axis(y, "Y")?])
 }
 
 /// A state `wait` waits for.

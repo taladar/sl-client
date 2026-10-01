@@ -53,6 +53,20 @@ pub(crate) async fn run<W: Write>(
             };
             Outcome::Acted { verb, node }
         }
+        Verb::Drag { selector, onto, by } => {
+            let source = ui.locator(selector.clone());
+            match (onto, by) {
+                (Some(target), None) => Outcome::Acted {
+                    verb: "dropped onto",
+                    node: source.drag_to(&ui.locator(target.clone())).await?,
+                },
+                (None, Some([x, y])) => Outcome::Acted {
+                    verb: "dragged",
+                    node: source.drag_by(*x, *y).await?,
+                },
+                _ => return Err(CtlError::Usage("drag takes exactly one of --onto and --by")),
+            }
+        }
         Verb::Fill { selector, text } => Outcome::Acted {
             verb: "filled",
             node: ui.locator(selector.clone()).fill(text).await?,

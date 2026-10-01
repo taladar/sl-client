@@ -495,8 +495,9 @@ replaces that person.
   Their sockets go in the viewer's default socket directory
   (`$XDG_RUNTIME_DIR/sl-client-bevy-viewer/`), so a verb with no `--socket`
   finds the one viewer that answers there. Verbs (`tree`, `find`, `click`,
-  `fill`, `press`, `wait --for`, `open`, `menu`, `world find|touch`, `chat`,
-  `notifications`, `agent`, `environment`, `screenshot`, `events --follow`)
+  `drag --onto|--by`, `fill`, `press`, `wait --for`, `open`, `menu`,
+  `world find|touch`, `chat`, `notifications`, `agent`, `environment`,
+  `screenshot`, `events --follow`)
   are one driver call each; `attach` runs them line by line over one
   connection. It depends on the fake grid but not on the viewer's library, so
   it builds in seconds; it runs the release viewer beside itself. A `launch`

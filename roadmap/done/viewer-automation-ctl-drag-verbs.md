@@ -2,7 +2,7 @@
 id: viewer-automation-ctl-drag-verbs
 title: sl-viewer-ctl — drag verbs (onto a node, by an offset)
 topic: viewer
-status: ready
+status: done
 origin: test-e2e-sweep-relog (2026-10-01)
 points: 2
 refs: [viewer-automation-ctl-cli, test-e2e-sweep-relog]
@@ -31,3 +31,18 @@ windows before a screenshot, filing an item, reproducing a drag bug.
   missing, and a malformed offset is refused before anything is sent.
 - The verb list in the context file's `sl-viewer-ctl` entry and the
   crate's docs gain `drag`.
+
+## Done (2026-10-01)
+
+- `drag <selector> --onto <selector> | --by X,Y` (`cli.rs`, a required
+  one-of group; `--by` takes hyphen values, so `--by -40,0` parses, and
+  `drag_offset` refuses anything but two finite numbers). It prints
+  `dropped onto <target>` or `dragged <node as pressed>`, `"done"` in JSON.
+- Scripted-viewer tests: each form's request, a negative offset in both
+  spellings, JSON output, and the refusals (both flags, neither, four
+  malformed offsets) at parse time, before anything is sent.
+- **Acceptance, from a shell** (release build, `stage` on the fake grid):
+  the Inventory window moved by its `floater-title-bar` (`--by -60,40`),
+  resized by its `floater-resize` (`--by=30,-20`), and its title bar dropped
+  `--onto` the toolbar's Build button; each read back from the window's
+  bounds.

@@ -204,6 +204,101 @@ async fn click_asks_for_a_click_and_prints_the_node() -> Result<(), TestError> {
     Ok(())
 }
 
+/// The Build window's title bar, by its test id.
+const TITLE_BAR: &str = "window[test_id=floater:build] >> [test_id=floater-title-bar]";
+
+#[tokio::test]
+async fn drag_onto_asks_for_a_drop_and_prints_the_target() -> Result<(), TestError> {
+    let (printed, asked) = run_verb(
+        Arc::new(|_body| {
+            Ok(ResponseBody::Done {
+                node: build_window(),
+            })
+        }),
+        &["drag", APPLY, "--onto", "window[test_id=floater:build]"],
+        false,
+    )
+    .await?;
+    assert_eq!(
+        printed,
+        "dropped onto window \"Build\" #floater:build at 0,0 300x400\n"
+    );
+    match asked.as_slice() {
+        [RequestBody::DragTo { source, target, .. }] => {
+            assert_eq!(*source, apply_locator());
+            assert_eq!(
+                *target,
+                Locator {
+                    role: Some(Role::Window),
+                    ..Locator::test_id("floater:build")
+                }
+            );
+        }
+        other => return Err(format!("asked {other:?}").into()),
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn drag_by_takes_a_negative_offset_and_prints_the_pressed_node() -> Result<(), TestError> {
+    let script: Arc<Script> = Arc::new(|_body| {
+        Ok(ResponseBody::Done {
+            node: apply_button(),
+        })
+    });
+    let (printed, asked) = run_verb(
+        Arc::clone(&script),
+        &["drag", TITLE_BAR, "--by", "-40.5,12"],
+        false,
+    )
+    .await?;
+    assert_eq!(
+        printed,
+        "dragged button \"Apply\" key=build-apply #build.apply at 10,20 60x24 [disabled]\n"
+    );
+    match asked.as_slice() {
+        [RequestBody::DragBy { source, offset, .. }] => {
+            assert_eq!(source.to_string(), TITLE_BAR);
+            assert_eq!(format!("{offset:?}"), "[-40.5, 12.0]");
+        }
+        other => return Err(format!("asked {other:?}").into()),
+    }
+    let (json, _asked) =
+        run_verb(script, &["--json", "drag", TITLE_BAR, "--by=0,-3"], true).await?;
+    let parsed: serde_json::Value = serde_json::from_str(&json)?;
+    assert_eq!(parsed.pointer("/done"), Some(&json!("dragged")), "{json}");
+    assert_eq!(
+        parsed.pointer("/node/test_id"),
+        Some(&json!("build.apply")),
+        "{json}"
+    );
+    Ok(())
+}
+
+#[test]
+fn drag_refuses_both_destinations_neither_and_a_malformed_offset() {
+    let refusal = |arguments: &[&str]| {
+        Cli::try_parse_from(["sl-viewer-ctl", "drag", TITLE_BAR].iter().chain(arguments))
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default()
+    };
+    let both = refusal(&["--onto", APPLY, "--by", "1,2"]);
+    assert!(both.contains("cannot be used with"), "{both}");
+    let neither = refusal(&[]);
+    assert!(
+        neither.contains("the following required arguments were not provided"),
+        "{neither}"
+    );
+    for malformed in ["12", "1,two", "1,inf", ","] {
+        let refused = refusal(&["--by", malformed]);
+        assert!(
+            refused.contains("is not") && refused.contains(malformed),
+            "{malformed}: {refused}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_tree_prints_indented_and_cut_to_its_depth() -> Result<(), TestError> {
     let script: Arc<Script> = Arc::new(|_body| {

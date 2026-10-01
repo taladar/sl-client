@@ -26,7 +26,8 @@ pub enum Outcome {
     Nodes(Vec<UiNode>),
     /// The node an action was carried out on.
     Acted {
-        /// What was done: `clicked`, `filled`.
+        /// What was done: `clicked`, `filled`, `dropped onto` (the node is
+        /// the drop target), `dragged` (the node as it was when pressed).
         verb: &'static str,
         /// The node.
         node: UiNode,

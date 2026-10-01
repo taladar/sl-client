@@ -15,6 +15,9 @@ pub enum CtlError {
     /// Printing a result failed.
     #[error("printing: {0}")]
     Output(#[from] io::Error),
+    /// A verb was built with arguments its command line would refuse.
+    #[error("{0}")]
+    Usage(&'static str),
     /// No socket was given and none could be found.
     #[error("{0}")]
     NoSocket(String),

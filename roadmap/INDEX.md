@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 124 |
-| ready | 312 |
+| ready | 311 |
 | blocked | 53 |
 | in-progress | 20 |
 | bugs | 16 |
-| done | 1290 |
+| done | 1291 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1862** |
@@ -313,7 +313,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (311)
 
 ### protocol
 
@@ -389,8 +389,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
-- [`viewer-automation-ctl-drag-verbs`](ready/viewer-automation-ctl-drag-verbs.md)
-  — sl-viewer-ctl — drag verbs (onto a node, by an offset)
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1329,7 +1327,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1290)
+## done (1291)
 
 ### protocol
 
@@ -1782,6 +1780,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-ctl-cli`](done/viewer-automation-ctl-cli.md) —
   sl-viewer-ctl — drive a running viewer from the shell (blocked by
   `viewer-automation-driver` (done))
+- [`viewer-automation-ctl-drag-verbs`](done/viewer-automation-ctl-drag-verbs.md)
+  — sl-viewer-ctl — drag verbs (onto a node, by an offset)
 - [`viewer-automation-driver`](done/viewer-automation-driver.md) —
   sl-viewer-driver — the async test API over both transports (blocked by
   `viewer-automation-remote-transport` (done),
