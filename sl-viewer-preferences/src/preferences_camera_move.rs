@@ -354,6 +354,12 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
             // Walk (2) arrives with viewer-autopilot-click-to-walk.
         ],
     );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-double-click-scripted-objects",
+        SettingBinding::global(crate::world_api::SETTING_DOUBLE_CLICK_SCRIPTED_OBJECTS),
+    );
 }
 
 /// Add a reset-to-default button into a control `row` — the reference View
@@ -777,7 +783,7 @@ mod tests {
         let mut rows = app
             .world_mut()
             .query::<&crate::preferences::PrefSearchRow>();
-        assert_eq!(rows.iter(app.world()).count(), 12, "12 searchable rows");
+        assert_eq!(rows.iter(app.world()).count(), 13, "13 searchable rows");
     }
 
     /// Every row / section / option Fluent key this tab spawns is distinct, so
@@ -803,6 +809,7 @@ mod tests {
             "preferences-row-double-click-action",
             "preferences-double-click-none",
             "preferences-double-click-teleport",
+            "preferences-row-double-click-scripted-objects",
             "preferences-reset-default",
         ];
         let distinct: std::collections::BTreeSet<&str> = keys.iter().copied().collect();

@@ -279,6 +279,28 @@ pub enum WorldVerb {
         #[arg(long)]
         no_reveal: bool,
     },
+    /// Double-click the one thing a world selector names — with the
+    /// double-click action set to teleport, a teleport onto it.
+    DoubleClick {
+        /// Which thing.
+        #[arg(value_parser = world_selector)]
+        selector: WorldLocator,
+        /// Never move the camera: fail instead.
+        #[arg(long)]
+        no_reveal: bool,
+    },
+    /// Double-click the ground at `X,Y` in a region — with the double-click
+    /// action set to teleport, a teleport there.
+    GroundDoubleClick {
+        /// The region, by name: the agent's own or a neighbour.
+        region: String,
+        /// Where in it, `X,Y` metres from its south-west corner.
+        #[arg(value_parser = ground_position, allow_hyphen_values = true)]
+        at: [f32; 2],
+        /// Never move the camera: fail instead.
+        #[arg(long)]
+        no_reveal: bool,
+    },
 }
 
 /// A command for the attached viewer, one per line; `quit` or the end of
@@ -325,6 +347,23 @@ pub fn world_selector(text: &str) -> Result<WorldLocator, String> {
         text.parse()
             .map_err(|error: sl_automation_proto::SelectorError| error.to_string())
     }
+}
+
+/// A point of a region's ground, `X,Y` in metres from its south-west corner.
+fn ground_position(text: &str) -> Result<[f32; 2], String> {
+    let (x, y) = text
+        .split_once(',')
+        .ok_or_else(|| format!("{text:?} is not a position `X,Y` (`128,64`)"))?;
+    let axis = |part: &str, name: &str| -> Result<f32, String> {
+        part.trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|metres| metres.is_finite() && (0.0..256.0).contains(metres))
+            .ok_or_else(|| {
+                format!("{text:?}: {name} {part:?} is not a number of metres from 0 to under 256")
+            })
+    };
+    Ok([axis(x, "X")?, axis(y, "Y")?])
 }
 
 /// A drag's offset, `X,Y` in logical pixels.

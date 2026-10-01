@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
 use sl_automation_proto::{
-    AgentReadout, ConversationReadout, ConversationRef, EnvironmentReadout, LogEntry, NodeState,
-    NodeValue, NodeVisibility, NotificationReadout, UiNode, ViewerIdentity, WorldNode,
+    AgentReadout, ConversationReadout, ConversationRef, EnvironmentReadout, GroundPoint, LogEntry,
+    NodeState, NodeValue, NodeVisibility, NotificationReadout, UiNode, ViewerIdentity, WorldNode,
 };
 use sl_viewer_driver::{AnsweredFileDialog, Screenshot};
 
@@ -43,6 +43,15 @@ pub enum Outcome {
         verb: &'static str,
         /// The thing.
         node: WorldNode,
+    },
+    /// A ground action's result.
+    GroundActed {
+        /// What was done: `double-clicked`.
+        verb: &'static str,
+        /// The ground.
+        ground: GroundPoint,
+        /// Where the click landed, in the region's metres.
+        hit_point: [f32; 3],
     },
     /// The conversations.
     Conversations(Vec<ConversationReadout>),
@@ -189,6 +198,11 @@ fn json_of(outcome: &Outcome) -> io::Result<JsonValue> {
         Outcome::Pressed(keys) => json!({ "done": "pressed", "keys": keys }),
         Outcome::WorldNodes(nodes) => to_json(nodes)?,
         Outcome::WorldActed { verb, node } => json!({ "done": verb, "node": to_json(node)? }),
+        Outcome::GroundActed {
+            verb,
+            ground,
+            hit_point,
+        } => json!({ "done": verb, "ground": to_json(ground)?, "hit_point": hit_point }),
         Outcome::Conversations(conversations) => to_json(conversations)?,
         Outcome::Notifications(notifications) => to_json(notifications)?,
         Outcome::Agent(agent) => to_json(agent)?,
@@ -275,6 +289,11 @@ fn text_of(out: &mut impl Write, outcome: &Outcome) -> io::Result<()> {
             }
         }
         Outcome::WorldActed { verb, node } => writeln!(out, "{verb} {node}")?,
+        Outcome::GroundActed {
+            verb,
+            ground,
+            hit_point: [x, y, z],
+        } => writeln!(out, "{verb} {ground}, landing at <{x},{y},{z}>")?,
         Outcome::Conversations(conversations) => conversation_lines(out, conversations)?,
         Outcome::Notifications(notifications) => notification_lines(out, notifications)?,
         Outcome::Agent(agent) => agent_lines(out, agent)?,

@@ -642,6 +642,10 @@ pub(crate) fn track_balance(
 /// Fold the own-avatar object's region-local position into
 /// [`AgentRegionPosition`] as its updates arrive. The own avatar is the object
 /// whose `full_id` equals the agent id ([`SlIdentity::agent_id`]).
+///
+/// An intra-region teleport moves the agent too, and the reference takes the
+/// `TeleportLocal`'s position at once (`process_teleport_local`'s
+/// `setPositionAgent`) rather than waiting for the avatar's next update.
 fn track_agent_position(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
@@ -651,13 +655,20 @@ fn track_agent_position(
         return;
     };
     for event in events.read() {
-        let (SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object)) =
-            &event.0
-        else {
-            continue;
-        };
-        if object.full_id.uuid() == agent.uuid() {
-            position.position = Some(object.motion.position.clone());
+        match &event.0 {
+            SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object)
+                if object.full_id.uuid() == agent.uuid() =>
+            {
+                position.position = Some(object.motion.position.clone());
+            }
+            SlSessionEvent::TeleportLocal { position: at, .. } => {
+                position.position = Some(Vector {
+                    x: at.x(),
+                    y: at.y(),
+                    z: at.z(),
+                });
+            }
+            _other => {}
         }
     }
 }
@@ -851,6 +862,47 @@ mod tests {
     /// Whether any icon is shown.
     fn any_shown(icons: &ParcelIcons) -> bool {
         ParcelIcon::ALL.iter().any(|icon| icons.shown(*icon))
+    }
+
+    /// An intra-region teleport moves the agent's position at once, before
+    /// any update of its avatar: the `TeleportLocal`'s position is the
+    /// agent's.
+    #[test]
+    fn a_local_teleport_moves_the_agent_position() {
+        let mut app = bevy::app::App::new();
+        app.add_message::<sl_client_bevy::SlEvent>()
+            .init_resource::<crate::world_api::AgentRegionPosition>()
+            .insert_resource(sl_client_bevy::SlIdentity {
+                agent_id: Some(sl_client_bevy::AgentKey::from(
+                    sl_client_bevy::Uuid::from_u128(1),
+                )),
+                ..Default::default()
+            })
+            .add_systems(bevy::app::Update, super::track_agent_position);
+        app.world_mut().write_message(sl_client_bevy::SlEvent(
+            sl_client_bevy::SlSessionEvent::TeleportLocal {
+                position: sl_client_bevy::RegionCoordinates::new(140.0, 120.0, 26.0),
+                look_at: sl_client_bevy::Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+        ));
+        app.update();
+        let at = app
+            .world()
+            .resource::<crate::world_api::AgentRegionPosition>()
+            .position
+            .clone();
+        pretty_assertions::assert_eq!(
+            at,
+            Some(sl_client_bevy::Vector {
+                x: 140.0,
+                y: 120.0,
+                z: 26.0
+            })
+        );
     }
 
     /// A wide-open parcel on an unrestricted region shows no icons.

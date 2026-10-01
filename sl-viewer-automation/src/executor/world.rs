@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 
 use bevy::prelude::*;
 use sl_automation_proto::{
-    AutomationError, Deadline, DragAmount, DragModifiers, ResponseBody, SnapSide, WorldAction,
-    WorldLocator, WorldNode, WorldWaitCondition,
+    AutomationError, Deadline, DragAmount, DragModifiers, GroundPoint, ResponseBody, SnapSide,
+    WorldAction, WorldLocator, WorldNode, WorldWaitCondition,
 };
 use sl_client_bevy::Uuid;
 use sl_viewer_ui_core::synthetic_input::InputActionId;
@@ -17,6 +17,7 @@ use sl_viewer_world_api::{
 };
 
 use super::{Clock, Started, Step, Task, automation_error, enqueue, finished};
+use crate::ground_aim::{GroundAim, GroundProgress, GroundTarget, ground_is_in_a_region};
 use crate::manipulator_drag::{DragProgress, HeldKeys, ManipulatorDrag};
 use crate::pursuit::{Intent, Progress, Pursuit};
 use crate::world_aim::{AimProgress, WorldAim, WorldIntent, WorldTarget};
@@ -62,6 +63,7 @@ pub(super) fn act(
     };
     let stage = match action {
         WorldAction::Click => ActStage::Aim(Box::new(aim(WorldIntent::Click))),
+        WorldAction::DoubleClick => ActStage::Aim(Box::new(aim(WorldIntent::DoubleClick))),
         WorldAction::RightClick => ActStage::Aim(Box::new(aim(WorldIntent::RightClick))),
         WorldAction::Hover => ActStage::Aim(Box::new(aim(WorldIntent::Hover))),
         WorldAction::Select => ActStage::Aim(Box::new(aim(WorldIntent::Select))),
@@ -73,6 +75,45 @@ pub(super) fn act(
     };
     running(WorldTask::Act(Box::new(WorldAct {
         locator,
+        reveal,
+        deadline,
+        stage,
+    })))
+}
+
+/// `action` on the point of the ground `ground` names.
+pub(super) fn ground(
+    ground: GroundPoint,
+    action: WorldAction,
+    reveal: bool,
+    deadline: Deadline,
+) -> Started {
+    if !ground_is_in_a_region(&ground) {
+        return Started::answered(Err(Box::new(AutomationError::InvalidRequest {
+            reason: format!("{ground} is not in the region: x and y run from 0 to under 256"),
+        })));
+    }
+    let aim = |intent: WorldIntent| {
+        let aim = GroundAim::new(ground.clone(), intent).with_deadline(deadline);
+        if reveal { aim } else { aim.without_reveal() }
+    };
+    let stage = match action {
+        WorldAction::Click => GroundStage::Aim(Box::new(aim(WorldIntent::Click))),
+        WorldAction::DoubleClick => GroundStage::Aim(Box::new(aim(WorldIntent::DoubleClick))),
+        WorldAction::RightClick => GroundStage::Aim(Box::new(aim(WorldIntent::RightClick))),
+        WorldAction::Hover => GroundStage::Aim(Box::new(aim(WorldIntent::Hover))),
+        WorldAction::Place => GroundStage::Aim(Box::new(aim(WorldIntent::Place))),
+        WorldAction::DropFrom(source) => GroundStage::Source {
+            pursuit: Box::new(Pursuit::new(source, Intent::Click).with_deadline(deadline)),
+        },
+        WorldAction::Select | WorldAction::ShiftSelect => {
+            return Started::answered(Err(Box::new(AutomationError::InvalidRequest {
+                reason: format!("{action} on {ground}: the ground has nothing to select"),
+            })));
+        }
+    };
+    running(WorldTask::Ground(Box::new(GroundAct {
+        ground,
         reveal,
         deadline,
         stage,
@@ -163,6 +204,8 @@ pub(super) enum WorldTask {
     Wait(Box<WorldWait>),
     /// An action on one thing.
     Act(Box<WorldAct>),
+    /// An action on a point of the ground.
+    Ground(Box<GroundAct>),
     /// A handle drag.
     Drag(Box<ManipulatorDrag>),
     /// A rubber band.
@@ -172,7 +215,10 @@ pub(super) enum WorldTask {
 impl WorldTask {
     /// Whether it plays input.
     pub(super) const fn acts(&self) -> bool {
-        matches!(self, Self::Act(_) | Self::Drag(_) | Self::Sweep(_))
+        matches!(
+            self,
+            Self::Act(_) | Self::Ground(_) | Self::Drag(_) | Self::Sweep(_)
+        )
     }
 
     /// Advance it by a frame.
@@ -185,6 +231,7 @@ impl WorldTask {
             },
             Self::Wait(wait) => wait.poll(world),
             Self::Act(act) => act.poll(world),
+            Self::Ground(act) => act.poll(world),
             Self::Drag(drag) => match drag.poll(world) {
                 Ok(DragProgress::Done(predicted)) => Step::done(ResponseBody::Dragged {
                     predicted: match predicted {
@@ -309,6 +356,73 @@ impl WorldAct {
                 }
                 Step::done(ResponseBody::WorldDone {
                     node: target.node.clone(),
+                    hit_point: target.hit_point,
+                })
+            }
+        }
+    }
+}
+
+/// Where a ground action stands.
+enum GroundStage {
+    /// A drop waiting for the UI node it drags from.
+    Source {
+        /// The wait for it.
+        pursuit: Box<Pursuit>,
+    },
+    /// Aiming at the point.
+    Aim(Box<GroundAim>),
+    /// Playing the gesture there.
+    Play(InputActionId, Box<GroundTarget>),
+}
+
+/// An action on a point of the ground.
+pub(super) struct GroundAct {
+    /// The ground.
+    ground: GroundPoint,
+    /// Whether the camera may frame it.
+    reveal: bool,
+    /// The deadline each wait runs under.
+    deadline: Deadline,
+    /// Where it stands.
+    stage: GroundStage,
+}
+
+impl GroundAct {
+    /// Advance it by a frame.
+    fn poll(&mut self, world: &mut World) -> Step {
+        match &mut self.stage {
+            GroundStage::Source { pursuit } => match pursuit.poll(world) {
+                Ok(Progress::Ready(target)) => {
+                    let aim =
+                        GroundAim::new(self.ground.clone(), WorldIntent::DropFrom(target.aim))
+                            .with_deadline(self.deadline);
+                    self.stage = GroundStage::Aim(Box::new(if self.reveal {
+                        aim
+                    } else {
+                        aim.without_reveal()
+                    }));
+                    Step::Pending
+                }
+                Ok(Progress::Waiting(_check)) => Step::Pending,
+                Err(error) => Step::fail(automation_error(error)),
+            },
+            GroundStage::Aim(aim) => match aim.poll(world) {
+                Ok(GroundProgress::Ready(target)) => match enqueue(world, target.input()) {
+                    Ok(id) => {
+                        self.stage = GroundStage::Play(id, Box::new(target));
+                        Step::Pending
+                    }
+                    Err(error) => Step::fail(error),
+                },
+                Ok(GroundProgress::Waiting(_stage)) => Step::Pending,
+                Err(error) => Step::fail(automation_error(error)),
+            },
+            GroundStage::Play(id, target) => {
+                if !finished(world, *id) {
+                    return Step::Pending;
+                }
+                Step::done(ResponseBody::GroundDone {
                     hit_point: target.hit_point,
                 })
             }

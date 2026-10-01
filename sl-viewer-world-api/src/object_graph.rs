@@ -152,6 +152,11 @@ pub struct TrackedObject {
     /// (you-owner, copy) and the touch-handler flag decide which pie slices are
     /// live for this object.
     pub update_flags: u32,
+    /// The object's last-seen click action (`ClickAction`: `0` touch, `1`
+    /// sit, `2` buy, `3` pay, `4` open, `5` play, `6` open media, `7` zoom,
+    /// `8` disabled), kept for the double-click teleport's rule
+    /// ([`ObjectPickSummary::picked_click_action`]).
+    pub click_action: u8,
     /// The object's physical-material byte (`LL_MCODE_*`), kept for the build
     /// floater's material editor ([`ObjectState::edit_data`]).
     pub material: u8,
@@ -745,6 +750,8 @@ impl ObjectState {
             root_scoped,
             root_full: root.full_key,
             flags: picked.update_flags | root.update_flags,
+            picked_click_action: picked.click_action,
+            root_click_action: root.click_action,
             attachment,
             wearer: attachment.then_some(root.parent),
         })
@@ -1360,6 +1367,10 @@ pub struct ObjectPickSummary {
     pub root_full: ObjectKey,
     /// The union of the picked prim's and the root's `PrimFlags` bits.
     pub flags: u32,
+    /// The picked prim's own click action ([`TrackedObject::click_action`]).
+    pub picked_click_action: u8,
+    /// The root's click action — the attachment root's for a worn chain.
+    pub root_click_action: u8,
     /// Whether the picked chain is worn on an avatar (including HUDs) — such a
     /// pick belongs to the attachment pies (`crate::attachment_menu`), not the
     /// object one.
@@ -1452,6 +1463,7 @@ mod tests {
                 attachment_item: None,
                 owner_id: AgentKey::from(Uuid::nil()),
                 update_flags: 0,
+                click_action: 0,
                 material: 0,
                 extra: ObjectExtraParams::default(),
                 texture_animation: None,

@@ -342,12 +342,55 @@ impl fmt::Display for WorldNode {
     }
 }
 
+/// A point on the ground: a region, by name, and where in it.
+///
+/// Bare ground has no other name, so this is the one world address that
+/// states a position. The region is part of it because the ground a click
+/// reaches need not be the agent's own region's — a double-click teleport
+/// lands on a neighbour's ground across the border. The height is the
+/// ground's: the viewer reads it from the terrain it has.
+///
+/// In JSON: `{"region":"Next Door","x":20.0,"y":128.0}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroundPoint {
+    /// The region's name, compared without regard to ASCII case as the grid
+    /// compares region names.
+    pub region: String,
+    /// Metres east of the region's south-west corner.
+    pub x: f32,
+    /// Metres north of the region's south-west corner.
+    pub y: f32,
+}
+
+impl GroundPoint {
+    /// The ground at `(x, y)` in the region named `region`.
+    #[must_use]
+    pub fn new(region: impl Into<String>, x: f32, y: f32) -> Self {
+        Self {
+            region: region.into(),
+            x,
+            y,
+        }
+    }
+}
+
+/// `the ground at <20,128> in "Next Door"`.
+impl fmt::Display for GroundPoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the ground at <{},{}> in {:?}",
+            self.x, self.y, self.region
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
 
-    use super::{Anchor, WorldKind, WorldLocator, WorldNode};
+    use super::{Anchor, GroundPoint, WorldKind, WorldLocator, WorldNode};
 
     /// A named prim with every optional part filled.
     fn door() -> WorldNode {
@@ -372,6 +415,20 @@ mod tests {
             hover_text: Some("Open me".to_owned()),
             name_tag: None,
         }
+    }
+
+    /// A ground point says which region and where, in JSON and to a person.
+    #[test]
+    fn a_ground_point_round_trips_and_reads() -> Result<(), serde_json::Error> {
+        let ground = GroundPoint::new("Next Door", 20.0, 128.5);
+        let json = serde_json::to_string(&ground)?;
+        assert_eq!(json, r#"{"region":"Next Door","x":20.0,"y":128.5}"#);
+        assert_eq!(serde_json::from_str::<GroundPoint>(&json)?, ground);
+        assert_eq!(
+            ground.to_string(),
+            r#"the ground at <20,128.5> in "Next Door""#
+        );
+        Ok(())
     }
 
     #[test]

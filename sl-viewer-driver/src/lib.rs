@@ -18,8 +18,11 @@
 //!   `uncheck`, `select_option`, `drag_to`, `drag_by`, and the reads `text`,
 //!   `value`, `is_disabled`, `is_checked`, `is_visible`, `count`, `all`. A
 //!   [`WorldHandle`] names an in-world thing — `viewer.world()
-//!   .object_named("Door").touch()` — with `touch`, `open_pie`, `hover`,
-//!   `select`, `sit`, `drop_from` and its readouts.
+//!   .object_named("Door").touch()` — with `touch`, `double_click`,
+//!   `open_pie`, `hover`, `select`, `sit`, `drop_from` and its readouts. A
+//!   [`GroundHandle`] names a point of the ground — `viewer.world()
+//!   .ground("Next Door", 20.0, 128.0).double_click()` — by region and
+//!   position, since bare ground has no other name.
 //! - **Waits live in the viewer.** Every action waits there for its one node
 //!   to be actionable, and every expectation —
 //!   `viewer.expect(&button).to_be_disabled()`,
@@ -54,7 +57,7 @@ pub use crate::ui::{Ui, UiLocator};
 pub use crate::viewer::{
     AnsweredFileDialog, DEFAULT_GRACE, DEFAULT_TIMEOUT, Screenshot, Viewer, ViewerOptions,
 };
-pub use crate::world::{World, WorldHandle};
+pub use crate::world::{GroundHandle, World, WorldHandle};
 
 #[cfg(test)]
 mod tests;

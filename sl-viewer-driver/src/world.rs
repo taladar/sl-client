@@ -1,6 +1,7 @@
-//! World handles: [`World`] to start from, and [`WorldHandle`] — a
+//! World handles: [`World`] to start from, [`WorldHandle`] — a
 //! [`WorldLocator`] bound to its viewer, acted on through the viewer's own
-//! pick resolver.
+//! pick resolver — and [`GroundHandle`], a point of the ground bound the same
+//! way.
 //!
 //! A world action waits for exactly one thing to match, finds a point where
 //! a click lands on *that* thing — framing it with the camera when no point
@@ -10,8 +11,8 @@
 use std::time::Duration;
 
 use sl_automation_proto::{
-    Locator, RequestBody, ResponseBody, UiNode, WorldAction, WorldKind, WorldLocator, WorldNode,
-    WorldWaitCondition,
+    GroundPoint, Locator, RequestBody, ResponseBody, UiNode, WorldAction, WorldKind, WorldLocator,
+    WorldNode, WorldWaitCondition,
 };
 
 use crate::artifacts::Subject;
@@ -60,6 +61,19 @@ impl World {
     #[must_use]
     pub fn me(&self) -> WorldHandle {
         self.locator(WorldLocator::own_avatar())
+    }
+
+    /// The ground at `(x, y)` — metres from the south-west corner — of the
+    /// region named `region`: the agent's own, or one the viewer sees across
+    /// a border.
+    #[must_use]
+    pub fn ground(&self, region: &str, x: f32, y: f32) -> GroundHandle {
+        GroundHandle {
+            viewer: self.viewer.clone(),
+            ground: GroundPoint::new(region, x, y),
+            timeout: None,
+            reveal: true,
+        }
     }
 }
 
@@ -155,6 +169,17 @@ impl WorldHandle {
     /// viewer does not answer.
     pub async fn touch(&self) -> Result<WorldNode, DriverError> {
         self.act(WorldAction::Click).await
+    }
+
+    /// Double-click the one thing this names: with the double-click action
+    /// set to teleport, a teleport onto it — onto an avatar, or an object
+    /// that takes no click of its own.
+    ///
+    /// # Errors
+    ///
+    /// As [`touch`](Self::touch).
+    pub async fn double_click(&self) -> Result<WorldNode, DriverError> {
+        self.act(WorldAction::DoubleClick).await
     }
 
     /// Open the pie menu of the one thing this names: a right click.
@@ -325,5 +350,135 @@ impl WorldHandle {
     /// As [`nodes`](Self::nodes).
     pub async fn count(&self) -> Result<usize, DriverError> {
         Ok(self.nodes().await?.len())
+    }
+}
+
+/// A point of the ground bound to its viewer: a region, by name, and where
+/// in it. The viewer's own pick resolver must say a click at the aim point
+/// lands on that ground — not on an object or an avatar standing there, nor
+/// on water over it.
+#[derive(Debug, Clone)]
+pub struct GroundHandle {
+    /// The viewer.
+    viewer: Viewer,
+    /// The ground.
+    ground: GroundPoint,
+    /// How long its actions wait; the viewer's default when `None`.
+    timeout: Option<Duration>,
+    /// Whether an action may frame the point with the camera.
+    reveal: bool,
+}
+
+impl GroundHandle {
+    /// The ground.
+    #[must_use]
+    pub const fn as_ground(&self) -> &GroundPoint {
+        &self.ground
+    }
+
+    /// How long its actions wait.
+    #[must_use]
+    pub fn wait(&self) -> Duration {
+        self.timeout
+            .unwrap_or_else(|| self.viewer.options().timeout)
+    }
+
+    /// Wait `timeout` instead of the viewer's default.
+    #[must_use]
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Never move the camera to reach the point: an action fails instead
+    /// when no click on screen lands on it.
+    #[must_use]
+    pub const fn without_reveal(mut self) -> Self {
+        self.reveal = false;
+        self
+    }
+
+    /// Carry out `action` on the ground; where the click landed, in the
+    /// named region's metres.
+    async fn act(&self, action: WorldAction) -> Result<[f32; 3], DriverError> {
+        let description = format!("{action} on {}", self.ground);
+        match self
+            .viewer
+            .ask(
+                RequestBody::GroundAction {
+                    ground: self.ground.clone(),
+                    action,
+                    reveal: self.reveal,
+                    deadline: Viewer::deadline(self.wait()),
+                },
+                self.wait(),
+                &description,
+                Subject::Viewer,
+            )
+            .await?
+        {
+            ResponseBody::GroundDone { hit_point } => Ok(hit_point),
+            other => Err(self.viewer.unexpected(&description, &other)),
+        }
+    }
+
+    /// Left-click the ground.
+    ///
+    /// # Errors
+    ///
+    /// [`DriverError::Failed`] when the region or its ground is not known, or
+    /// no click reaches the point; the other [`DriverError`]s when the viewer
+    /// does not answer.
+    pub async fn click(&self) -> Result<[f32; 3], DriverError> {
+        self.act(WorldAction::Click).await
+    }
+
+    /// Double-click the ground: with the double-click action set to
+    /// teleport, a teleport there — across a border too.
+    ///
+    /// # Errors
+    ///
+    /// As [`click`](Self::click).
+    pub async fn double_click(&self) -> Result<[f32; 3], DriverError> {
+        self.act(WorldAction::DoubleClick).await
+    }
+
+    /// Open the land pie: a right click on the ground.
+    ///
+    /// # Errors
+    ///
+    /// As [`click`](Self::click).
+    pub async fn open_pie(&self) -> Result<[f32; 3], DriverError> {
+        self.act(WorldAction::RightClick).await
+    }
+
+    /// Rest the pointer on the ground.
+    ///
+    /// # Errors
+    ///
+    /// As [`click`](Self::click).
+    pub async fn hover(&self) -> Result<[f32; 3], DriverError> {
+        self.act(WorldAction::Hover).await
+    }
+
+    /// Rez the Build window's picked shape on the ground: a click with the
+    /// Create tool, which the action waits for.
+    ///
+    /// # Errors
+    ///
+    /// As [`click`](Self::click), and when the Create tool never comes.
+    pub async fn place(&self) -> Result<[f32; 3], DriverError> {
+        self.act(WorldAction::Place).await
+    }
+
+    /// Drag what the UI node `source` names carries (an inventory row) and
+    /// drop it on the ground — rezzing an object there.
+    ///
+    /// # Errors
+    ///
+    /// As [`click`](Self::click), and when the source is not actionable.
+    pub async fn drop_from(&self, source: &UiLocator) -> Result<[f32; 3], DriverError> {
+        self.act(WorldAction::DropFrom(source.as_locator().clone()))
+            .await
     }
 }

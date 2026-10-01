@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 124 |
-| ready | 312 |
+| ideas | 125 |
+| ready | 311 |
 | blocked | 54 |
 | in-progress | 20 |
 | bugs | 16 |
-| done | 1293 |
+| done | 1295 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1866** |
+| **total** | **1868** |
 
-## ideas (124)
+## ideas (125)
 
 ### protocol
 
@@ -164,6 +164,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   avatar marks — colour-tag nearby avatars
 - [`viewer-render-scalability-knobs`](ideas/viewer-render-scalability-knobs.md)
   — Leftover per-family render scalability knobs
+- [`viewer-scene-content-cost-report`](ideas/viewer-scene-content-cost-report.md)
+  — Content cost report for the parcel and for everything in draw distance
 - [`viewer-script-dialog-options`](ideas/viewer-script-dialog-options.md) —
   Script-dialog stacking, position & safety options
 - [`viewer-selection-hidden-silhouette`](ideas/viewer-selection-hidden-silhouette.md)
@@ -313,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (311)
 
 ### protocol
 
@@ -389,8 +391,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
-- [`viewer-automation-ground-aim`](ready/viewer-automation-ground-aim.md) —
-  Double-click teleport on every surface, and the world actions it needs
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1333,7 +1333,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1293)
+## done (1295)
 
 ### protocol
 
@@ -1797,6 +1797,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-automation-locator-engine` (done), `viewer-automation-synthetic-input`
   (done), `viewer-automation-world-aim` (done), `viewer-automation-state-probes`
   (done))
+- [`viewer-automation-ground-aim`](done/viewer-automation-ground-aim.md) —
+  Double-click teleport on every surface, and the world actions it needs
 - [`viewer-automation-inprocess-transport`](done/viewer-automation-inprocess-transport.md)
   — In-process transport — the same requests against Apps in the test process
   (blocked by `viewer-automation-executor` (done),
@@ -3072,6 +3074,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-settings-account-scope-persist`](done/viewer-settings-account-scope-persist.md)
   — Load and save both global and per-account settings in the viewer (blocked by
   `viewer-ui-settings-store` (done))
+- [`viewer-settings-prose-description-keys`](done/viewer-settings-prose-description-keys.md)
+  — Four settings register prose where their description key belongs
 - [`viewer-settings-save-as-create-then-put`](done/viewer-settings-save-as-create-then-put.md)
   — A settings Save As uploads through a cap that does not take settings
 - [`viewer-settings-toml-format`](done/viewer-settings-toml-format.md) — TOML

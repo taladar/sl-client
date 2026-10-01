@@ -150,8 +150,9 @@ pub(crate) async fn teleport_session(
 
     if source_region == request.region {
         source
-            .with_sim(|sim| {
+            .with_state(|state| {
                 let now = source.now();
+                let sim = &mut state.sim;
                 sim.send_teleport_start(request.flags, now)?;
                 // Where the agent now stands: what the region measures chat
                 // range from, and what a later movement completes to.
@@ -161,7 +162,23 @@ pub(crate) async fn teleport_session(
                     request.arrival.look_at.clone(),
                     request.flags,
                     now,
-                )
+                )?;
+                // The avatar has moved, and a simulator says so: OpenSim's
+                // `ScenePresence.Teleport` sends the presence's update to
+                // every client the moment it is placed. The fake grid runs no
+                // physics, so without this the avatar would go on standing,
+                // for everyone, where it was.
+                let landing = request.arrival.position;
+                let avatar = crate::world::avatar_prim(
+                    state.world.lock().avatar_local_id,
+                    &state.avatar,
+                    sl_types::lsl::Vector {
+                        x: landing.x(),
+                        y: landing.y(),
+                        z: landing.z(),
+                    },
+                );
+                crate::world::send_objects(&mut state.sim, &[avatar], now)
             })
             .await?;
         return Ok(TeleportOutcome::Local);

@@ -4122,6 +4122,7 @@ preferences-row-avatar-turn-rate = Turn speed (radians per second)
 preferences-row-double-click-action = Double-click on the ground
 preferences-double-click-none = No action
 preferences-double-click-teleport = Teleport to the clicked point
+preferences-row-double-click-scripted-objects = Double-click on scripted objects too
 preferences-reset-default = Reset
 
 # The network & cache tab (viewer-preferences-network-cache-tab): bandwidth
@@ -5207,6 +5208,7 @@ setting-desc-EnvironmentPersistAcrossLogin = Restore the personal (local) enviro
 setting-desc-EnvironmentRepeatedTogglesShared = Picking the environment preset that is already pinned reverts to the shared (region) environment.
 setting-desc-ExperienceLogDays = How many days of experience events to keep in the per-account log (0 keeps none, 14 is the reference's maximum)
 setting-desc-ExperienceSearchMaturity = The highest content rating experience search results may carry (13 General, 21 Moderate, 42 Adult)
+setting-desc-FSAllowDoubleClickOnScriptedObjects = Let a double-click teleport land on an object that takes a click itself (a touch script, or a click action other than sit)
 setting-desc-FSDisableMouseWheelCameraZoom = Keep the mouse wheel from zooming the camera (drag zoom still works)
 setting-desc-FSLimitFramerate = Cap the frame rate at FramePerSecondLimit (thermals / battery)
 setting-desc-FadeRange = Metres past the fade start at which name tags are fully hidden
@@ -5328,6 +5330,7 @@ setting-desc-RenderGlowStrength = Additive strength of the glow, applied each bl
 setting-desc-RenderGlowWidth = Blur width (the per-pass step is this over the glow-buffer resolution)
 setting-desc-RenderMaxPartCount = Maximum number of live particles drawn across all sources; emission stops at the cap and resumes as particles age out
 setting-desc-RenderQualityPerformance = The last-applied quality tier (0 low - 6 ultra); picking one writes the tier's values into the individual render settings
+setting-desc-RenderResolutionDivisor = Divisor for rendering the 3D scene at reduced resolution (1 = full)
 setting-desc-RenderShadowCascades = Sun shadow cascade count (1-4): fewer is faster, coarser in the distance
 setting-desc-RenderShadowDetail = Shadow detail: 0 no shadows, 1 sun / moon shadows
 setting-desc-RenderShadowMapSize = Directional shadow-map resolution (texels per side, a power of two)
@@ -5403,6 +5406,9 @@ setting-desc-imquery_list_suffix = Sent to the remote party as a suffix to @list
 setting-desc-notification-last-response = The button name replayed when this suppressed notification is raised (empty = the form's default)
 setting-desc-notification-show = Show this notification (untick to suppress it)
 setting-desc-notification-show-session = Show this notification (untick to suppress it for this session)
+setting-desc-panorama_face_size = The last-used 360 capture cube-face size (an index into the window's list)
+setting-desc-panorama_format = The last-used 360 panorama output format (an index into the window's list)
+setting-desc-panorama_output_width = The last-used 360 panorama output width (an index into the window's list)
 setting-desc-render_hero_probe_resolution = Per-face resolution of a mirror's hero-probe cubemap, in texels (RenderHeroProbeResolution). Sharper and costlier when higher; rounded to a power of two in [128, 2048]. Sizes GPU targets, so a change takes effect on restart.
 setting-desc-render_hero_probe_update_rate = How often a mirror re-renders, in frames (RenderHeroProbeUpdateRate): 1 = every frame (most live), N = every Nth frame (cheaper, laggier). The main performance lever for mirrors.
 setting-desc-render_mirrors = Enable realtime mirrors (hero probes): a mirror-flagged reflection-probe prim reflects the scene — and you — sharp and live, re-rendered every frame. Costlier than the P33 reflection probes, but only a mirror prim actually in view pays for it.

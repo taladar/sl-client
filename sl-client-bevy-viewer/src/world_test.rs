@@ -863,6 +863,43 @@ pub(crate) fn seed_terrain(app: &mut App, height: f32) {
         .write_message(SlEvent(SessionEvent::TerrainPatch(Box::new(patch))));
 }
 
+/// The region entity `maintain_world` would keep for `handle` once its
+/// `RegionHandshake` named it `name` — what a ground address finds a region
+/// by. The fixture world runs no `SlClientPlugin`, so the test spawns it.
+pub(crate) fn seed_region_name(app: &mut App, handle: sl_client_bevy::RegionHandle, name: &str) {
+    let identity = sl_client_bevy::RegionIdentity {
+        sim_name: sl_client_bevy::RegionName::try_new(name).ok(),
+        region_id: sl_client_bevy::Uuid::nil(),
+        region_handle: handle,
+        grid_coordinates: sl_client_bevy::GridCoordinates::new(0, 0),
+        region_flags: 0,
+        region_flags_extended: 0,
+        region_protocols: 0,
+        maturity: sl_client_bevy::Maturity::Pg,
+        product: sl_client_bevy::ProductType::Unknown,
+        product_sku: String::new(),
+        product_name: String::new(),
+        cpu_class_id: 0,
+        cpu_ratio: 0,
+        sim_owner: sl_client_bevy::Uuid::nil(),
+        is_estate_manager: false,
+        water_height: 20.0,
+        billable_factor: 1.0,
+        terrain: sl_client_bevy::RegionTerrainComposition {
+            detail_textures: [sl_client_bevy::Uuid::nil(); 4],
+            start_heights: [0.0; 4],
+            height_ranges: [0.0; 4],
+        },
+    };
+    app.world_mut().spawn((
+        sl_client_bevy::SlRegion {
+            handle,
+            sim: std::net::SocketAddr::from(([127, 0, 0, 1], 9000)),
+        },
+        sl_client_bevy::SlRegionIdentity(identity),
+    ));
+}
+
 /// The world position of `scoped`'s scene-object entity — where a camera
 /// must look for the cursor centre to strike that fixture.
 pub(crate) fn scene_position_of(app: &mut App, scoped: ScopedObjectId) -> Option<Vec3> {

@@ -90,6 +90,12 @@ pub const SHOW_COORDINATES_KEY: &str = "statusbar_show_coordinates";
 /// (`preferences_camera_move`).
 pub const SETTING_DOUBLE_CLICK_ACTION: &str = "DoubleClickAction";
 
+/// Whether a double-click teleport may land on an object that takes a click
+/// itself — a scripted touch handler or a click action other than sit
+/// (mirrors Firestorm's `FSAllowDoubleClickOnScriptedObjects`, on by default
+/// there too). Bound beside [`SETTING_DOUBLE_CLICK_ACTION`].
+pub const SETTING_DOUBLE_CLICK_SCRIPTED_OBJECTS: &str = "FSAllowDoubleClickOnScriptedObjects";
+
 /// How many times smaller than the window the **3D world** is rendered before
 /// being stretched back over it (the reference `RenderResolutionDivisor`,
 /// `pipeline.cpp`): `1` — the default — renders the world at the window's own

@@ -133,6 +133,35 @@ pub(crate) async fn run<W: Write>(
                 node: target.touch().await?,
             }
         }
+        Verb::World(WorldVerb::DoubleClick {
+            selector,
+            no_reveal,
+        }) => {
+            let mut target = viewer.world().locator(selector.clone());
+            if *no_reveal {
+                target = target.without_reveal();
+            }
+            Outcome::WorldActed {
+                verb: "double-clicked",
+                node: target.double_click().await?,
+            }
+        }
+        Verb::World(WorldVerb::GroundDoubleClick {
+            region,
+            at: [x, y],
+            no_reveal,
+        }) => {
+            let mut target = viewer.world().ground(region, *x, *y);
+            if *no_reveal {
+                target = target.without_reveal();
+            }
+            let hit_point = target.double_click().await?;
+            Outcome::GroundActed {
+                verb: "double-clicked",
+                ground: target.as_ground().clone(),
+                hit_point,
+            }
+        }
         Verb::Chat => Outcome::Conversations(viewer.conversations().await?),
         Verb::Notifications => Outcome::Notifications(viewer.notifications().await?),
         Verb::Agent => Outcome::Agent(viewer.agent().await?),

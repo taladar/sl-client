@@ -12,7 +12,8 @@
 //! - **Verbs** drive the viewer at `--socket` (or `SL_VIEWER_SOCKET`, or the
 //!   one socket that answers in the viewer's default directory): `tree`,
 //!   `find`, `click`, `drag`, `fill`, `press`, `wait`, `open`, `menu`,
-//!   `world find`, `world touch`, `chat`, `notifications`, `agent`,
+//!   `world find`, `world touch`, `world double-click`,
+//!   `world ground-double-click`, `chat`, `notifications`, `agent`,
 //!   `environment`, `screenshot`, `events --follow`. Each is one
 //!   `sl-viewer-driver` call, so every action waits in the viewer for its
 //!   node to be actionable and every failure explains itself — with its

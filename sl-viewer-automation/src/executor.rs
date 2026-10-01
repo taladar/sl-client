@@ -486,6 +486,12 @@ fn start(
             reveal,
             deadline,
         } => world::act(locator, action, reveal, deadline),
+        RequestBody::GroundAction {
+            ground,
+            action,
+            reveal,
+            deadline,
+        } => world::ground(ground, action, reveal, deadline),
         RequestBody::DragHandle {
             handle,
             amount,
@@ -622,6 +628,8 @@ const fn ui_locator(error: &AutomationError) -> Option<&Locator> {
         AutomationError::WorldAmbiguous { .. }
         | AutomationError::WorldNotActionable { .. }
         | AutomationError::WorldTimedOut { .. }
+        | AutomationError::GroundNotActionable { .. }
+        | AutomationError::GroundTimedOut { .. }
         | AutomationError::ManipulatorRefused { .. }
         | AutomationError::ManipulatorTimedOut { .. }
         | AutomationError::SweepInexact { .. }

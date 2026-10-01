@@ -115,6 +115,7 @@
 mod diagnostics;
 mod event_log;
 mod executor;
+mod ground_aim;
 pub mod in_app;
 mod in_process;
 mod in_process_host;
@@ -144,6 +145,7 @@ pub use crate::executor::{
     AutomationIdentity, AutomationPlugin, AutomationQueue, AutomationSystems, NOTIFICATION_ENTRIES,
     REPORT_DIAGNOSTICS, REPORT_EVENTS,
 };
+pub use crate::ground_aim::{GroundAim, GroundProgress, GroundTarget, ground_is_in_a_region};
 pub use crate::in_process::{
     DEFAULT_PATIENCE, FRAME_PAUSE, HostedApp, IN_PROCESS_ID_BASE, InProcessError,
     InProcessTransport, ViewerHandle,

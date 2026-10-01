@@ -48,7 +48,7 @@ const STABLE_FRAMES: u32 = 2;
 /// The polls after a reveal before the camera's pose is judged at all: the
 /// request is answered in the next update, and a camera that has not started
 /// moving yet looks exactly like one that has stopped.
-const REVEAL_SETTLE_FRAMES: u32 = 3;
+pub(crate) const REVEAL_SETTLE_FRAMES: u32 = 3;
 
 /// The most points probed per aim: the projected centre, the centre of each
 /// face towards the camera, and a lattice on those faces.
@@ -105,6 +105,10 @@ const DROP_REST_FRAMES: usize = 24;
 pub enum WorldIntent {
     /// A left click: a touch outside build mode.
     Click,
+    /// Two left clicks: with the double-click action set to teleport, a
+    /// teleport to where they land. Judged by the pick resolver, as a click
+    /// is.
+    DoubleClick,
     /// A right click: the target's pie menu.
     RightClick,
     /// The pointer over it: its hover tip.
@@ -203,15 +207,21 @@ impl WorldTarget {
     /// input to play.
     #[must_use]
     pub fn input(&self) -> InputAction {
-        match self.intent {
-            WorldIntent::Click | WorldIntent::Select | WorldIntent::Place => {
-                InputAction::click(self.aim, MouseButton::Left)
-            }
-            WorldIntent::ShiftSelect => shifted_click(self.aim),
-            WorldIntent::RightClick => InputAction::click(self.aim, MouseButton::Right),
-            WorldIntent::Hover => InputAction::move_to(self.aim),
-            WorldIntent::DropFrom(from) => drop_gesture(from, self.aim, DROP_REST_FRAMES),
+        gesture(self.intent, self.aim)
+    }
+}
+
+/// The gesture `intent` is, aimed at `aim` (logical pixels).
+pub(crate) fn gesture(intent: WorldIntent, aim: Vec2) -> InputAction {
+    match intent {
+        WorldIntent::Click | WorldIntent::Select | WorldIntent::Place => {
+            InputAction::click(aim, MouseButton::Left)
         }
+        WorldIntent::DoubleClick => InputAction::double_click(aim, MouseButton::Left),
+        WorldIntent::ShiftSelect => shifted_click(aim),
+        WorldIntent::RightClick => InputAction::click(aim, MouseButton::Right),
+        WorldIntent::Hover => InputAction::move_to(aim),
+        WorldIntent::DropFrom(from) => drop_gesture(from, aim, DROP_REST_FRAMES),
     }
 }
 
@@ -1036,7 +1046,7 @@ pub(crate) fn object_full_id(world: &World, scoped: &ScopedObjectId) -> Option<U
 }
 
 /// The Bevy-space offset of the agent's region from the scene origin.
-fn region_offset(world: &World) -> Vec3 {
+pub(crate) fn region_offset(world: &World) -> Vec3 {
     let handle = world
         .get_resource::<SlIdentity>()
         .and_then(|identity| identity.region_handle);

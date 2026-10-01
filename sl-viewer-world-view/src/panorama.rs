@@ -278,19 +278,19 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         SETTINGS_SECTION,
         SETTING_FACE_SIZE,
         SettingValue::I32(i32::try_from(DEFAULT_FACE_SIZE).unwrap_or(0)),
-        "last-used 360 capture cube-face size (index into the floater's list)",
+        "setting-desc-panorama_face_size",
     );
     settings.register_in(
         SETTINGS_SECTION,
         SETTING_OUTPUT_WIDTH,
         SettingValue::I32(i32::try_from(DEFAULT_OUTPUT_WIDTH).unwrap_or(0)),
-        "last-used 360 panorama output width (index into the floater's list)",
+        "setting-desc-panorama_output_width",
     );
     settings.register_in(
         SETTINGS_SECTION,
         SETTING_FORMAT,
         SettingValue::I32(i32::try_from(DEFAULT_FORMAT).unwrap_or(0)),
-        "last-used 360 panorama output format (index into the floater's list)",
+        "setting-desc-panorama_format",
     );
 }
 

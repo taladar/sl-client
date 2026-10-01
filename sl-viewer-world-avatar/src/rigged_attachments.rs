@@ -1289,6 +1289,7 @@ mod tests {
             attachment_item: None,
             owner_id: AgentKey::from(Uuid::nil()),
             update_flags: 0,
+            click_action: 0,
             material: 0,
             extra: object.extra.clone(),
             texture_animation: None,

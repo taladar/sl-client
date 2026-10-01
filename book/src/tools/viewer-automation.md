@@ -93,11 +93,19 @@ nothing runs while none are queued.
   a virtual list is scrolled to bring it into view. Input goes through the
   real input path (`sl_viewer_ui_core::synthetic_input`), so a test that
   says "a disabled button does nothing" can fail.
-- **World actions** — `touch`, `open_pie`, `hover`, `select`,
-  `shift_select`, `place` (rez with the Create tool), `drop_from` (a drag
-  from a UI node). An aim point is a projected point the viewer's own pick
-  resolver confirms lands on the target; a target nothing reaches is framed
-  by the camera once ("reveal") and looked at again until the deadline.
+- **World actions** — `touch`, `double_click`, `open_pie`, `hover`,
+  `select`, `shift_select`, `place` (rez with the Create tool), `drop_from`
+  (a drag from a UI node). An aim point is a projected point the viewer's own
+  pick resolver confirms lands on the target; a target nothing reaches is
+  framed by the camera once ("reveal") and looked at again until the
+  deadline.
+- **Ground actions** — the same gestures (but no select) on a point of the
+  ground: `viewer.world().ground("Next Door", 20.0, 128.0).double_click()`.
+  Bare ground has no id, so it is addressed by a region's name and a
+  position in it; the height is the terrain's. The pick must find the ground
+  at that point, so an object, an avatar or water standing on it, or a UI
+  node over it, makes it not actionable. The answer is where the click
+  landed, in that region's metres.
 - **Waits** run in the viewer, a predicate over the model each frame with a
   frame and a wall deadline: a node attached, detached, visible, hidden,
   enabled, disabled, checked, holding a text; a world thing present or gone;
@@ -210,6 +218,7 @@ sl-viewer-ctl tree 'window[test_id=floater:inventory]' --depth 2
 sl-viewer-ctl open build-tools
 sl-viewer-ctl click 'window[test_id=floater:build] >> radio[name_key=build-tool-move]'
 sl-viewer-ctl world touch 'object[name=Door]'
+sl-viewer-ctl world ground-double-click 'Next Door' 20,128
 sl-viewer-ctl press w --hold 60
 sl-viewer-ctl wait 'window[test_id=floater:about]' --for visible
 sl-viewer-ctl agent --json

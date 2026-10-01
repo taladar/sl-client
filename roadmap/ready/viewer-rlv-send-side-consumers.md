@@ -4,7 +4,8 @@ title: RLV — make the viewer's send paths ask the RlvActions façade
 topic: viewer
 status: ready
 origin: found while wiring viewer-menu-touch-object (2026-09-27)
-refs: [viewer-rlv-enforce-send-side, viewer-menu-touch-object]
+refs: [viewer-rlv-enforce-send-side, viewer-menu-touch-object,
+  viewer-automation-ground-aim]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -35,6 +36,12 @@ What this needs:
   IM, pay and buy.
 - A test per path that a held restriction refuses the command and greys the
   entry.
+- The **double-click teleport** (`double_click_teleport.rs`) is one of the
+  teleport paths, and the one with its own check: the reference asks
+  `RlvActions::canTeleportToLocal` (`@tplocal`, `@sittp`) before it teleports,
+  and says so with the `AutoPilot` blocked notice
+  ([[viewer-automation-ground-aim]] brought the rest of its rule over and
+  left this here).
 
 The façade puts each check at a choke point so there is one answer. The
 wiring should keep that: one gate per command family, not a copy of the check

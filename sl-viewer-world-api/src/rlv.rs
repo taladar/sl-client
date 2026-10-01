@@ -1370,7 +1370,7 @@ mod tests {
             &["render"],
             SETTING_RENDER_RESOLUTION_DIVISOR,
             SettingValue::U32(1),
-            "Divisor for rendering the 3D scene at reduced resolution (1 = full)",
+            "setting-desc-RenderResolutionDivisor",
         );
         settings
     }

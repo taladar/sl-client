@@ -11,7 +11,7 @@ use crate::probe::{DiagnosticsReadout, LogEntry, LogPage, LogStream};
 use crate::report::FailureReport;
 use crate::snapshot::UiNode;
 use crate::state::{Probe, ProbeReadout, StateCondition, StateObservation};
-use crate::world::{WorldLocator, WorldNode};
+use crate::world::{GroundPoint, WorldLocator, WorldNode};
 
 /// Pairs a [`Response`] with the [`Request`] it answers, so several requests
 /// may be in flight on one channel. Chosen by the requester; the viewer only
@@ -223,6 +223,25 @@ pub enum RequestBody {
         action: WorldAction,
         /// Whether the camera may frame the thing when no point of it takes a
         /// click; the camera stays where that leaves it.
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        reveal: bool,
+        /// When to give up.
+        #[serde(default, skip_serializing_if = "Deadline::is_default")]
+        deadline: Deadline,
+    },
+    /// Do a world action on a point of the ground: find where on screen a
+    /// click lands on that ground — asking the viewer's own pick resolver,
+    /// which must say the ground there, and framing the point with the camera
+    /// when no click reaches it — and do the action there through the real
+    /// input path. A select or shift-select has nothing to select there and
+    /// is refused. Answered with [`ResponseBody::GroundDone`].
+    GroundAction {
+        /// The ground to act on.
+        ground: GroundPoint,
+        /// What to do there.
+        action: WorldAction,
+        /// Whether the camera may frame the point when no click reaches it;
+        /// the camera stays where that leaves it.
         #[serde(default = "yes", skip_serializing_if = "is_true")]
         reveal: bool,
         /// When to give up.
@@ -580,6 +599,12 @@ pub enum ResponseBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hit_point: Option<[f32; 3]>,
     },
+    /// The answer to [`RequestBody::GroundAction`].
+    GroundDone {
+        /// Where the pick resolver said the click lands, in the named region's
+        /// own metres: the ground's height there as the viewer has it.
+        hit_point: [f32; 3],
+    },
     /// The answer to [`RequestBody::DragHandle`].
     Dragged {
         /// What the build tool predicted the drag does: the amount asked, or
@@ -774,7 +799,7 @@ mod tests {
     use crate::report::FailureReport;
     use crate::snapshot::{Bounds, NodeId, NodeState, NodeValue, NodeVisibility, Role, UiNode};
     use crate::state::{Probe, ProbeReadout, StateCondition, StateObservation, ValueTest};
-    use crate::world::{WorldKind, WorldLocator, WorldNode};
+    use crate::world::{GroundPoint, WorldKind, WorldLocator, WorldNode};
 
     /// Serializes `value`, reads it back and checks nothing was lost.
     fn round_trip<T>(value: &T) -> Result<String, serde_json::Error>
@@ -964,6 +989,12 @@ mod tests {
                 reveal: false,
                 deadline: Deadline::default(),
             },
+            RequestBody::GroundAction {
+                ground: GroundPoint::new("Next Door", 20.0, 128.5),
+                action: WorldAction::DoubleClick,
+                reveal: false,
+                deadline: Deadline::default(),
+            },
             RequestBody::DragHandle {
                 handle: "rotate-z".to_owned(),
                 amount: DragAmount::Angle(0.5),
@@ -1067,6 +1098,9 @@ mod tests {
             Ok(ResponseBody::WorldDone {
                 node: Box::new(world_node()),
                 hit_point: Some([1.0, 2.0, 3.0]),
+            }),
+            Ok(ResponseBody::GroundDone {
+                hit_point: [20.0, 128.5, 25.0],
             }),
             Ok(ResponseBody::Dragged {
                 predicted: DragAmount::Offset([0.5, 0.0]),
@@ -1172,6 +1206,17 @@ mod tests {
                 check: ActionabilityCheck::ReceivesEvents,
                 node: Box::new(world_node()),
                 covered_by: Some(uuid::Uuid::from_u128(9)),
+            }),
+            Err(AutomationError::GroundNotActionable {
+                ground: GroundPoint::new("Home", 8.0, 8.0),
+                check: ActionabilityCheck::ReceivesEvents,
+                covered_by: Some(uuid::Uuid::from_u128(9)),
+            }),
+            Err(AutomationError::GroundTimedOut {
+                ground: GroundPoint::new("Home", 8.0, 8.0),
+                failed_check: ActionabilityCheck::Attached,
+                frames: 600,
+                millis: 10_000,
             }),
             Err(AutomationError::WorldTimedOut {
                 locator: WorldLocator::own_avatar(),

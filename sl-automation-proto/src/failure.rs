@@ -9,7 +9,7 @@ use crate::message::WaitCondition;
 use crate::probe::InventoryRoot;
 use crate::snapshot::UiNode;
 use crate::state::{StateCondition, StateObservation};
-use crate::world::{WorldLocator, WorldNode};
+use crate::world::{GroundPoint, WorldLocator, WorldNode};
 
 /// One of the checks a node must pass before an action is applied to it, in
 /// the order they are made.
@@ -183,6 +183,41 @@ pub enum AutomationError {
         unresolved: Vec<WorldNode>,
         /// The things the locator matched when time ran out.
         last_observed: Vec<WorldNode>,
+        /// The frames waited.
+        frames: u32,
+        /// The wall-clock milliseconds waited.
+        millis: u64,
+    },
+    /// No click reaches the point of the ground a ground action is aimed at:
+    /// it is off screen, or a click there lands on something else (an
+    /// object, an avatar, water) — even after the camera framed it.
+    #[error(
+        "{ground} is not actionable: it fails the {check} check{}",
+        covered_detail(*covered_by)
+    )]
+    GroundNotActionable {
+        /// The ground.
+        ground: GroundPoint,
+        /// The check it failed.
+        check: ActionabilityCheck,
+        /// What a click there would have hit instead: an object's or an
+        /// avatar's full id. Absent when it would hit nothing that has one
+        /// (water, the sky) or the point was not on screen.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        covered_by: Option<uuid::Uuid>,
+    },
+    /// A ground action ran out of time: the region was never known by that
+    /// name, its ground never arrived, or no click reached the point.
+    #[error(
+        "timed out after {frames} frames ({millis} ms) on {ground}, still failing the \
+         {failed_check} check"
+    )]
+    GroundTimedOut {
+        /// The ground.
+        ground: GroundPoint,
+        /// The check still failing: `attached` while the region or its ground
+        /// is unknown.
+        failed_check: ActionabilityCheck,
         /// The frames waited.
         frames: u32,
         /// The wall-clock milliseconds waited.

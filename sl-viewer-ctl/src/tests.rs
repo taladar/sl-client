@@ -10,10 +10,10 @@ use clap::Parser as _;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use sl_automation_proto::{
-    AutomationError, Bounds, EnvironmentReadout, Locator, NodeId, NodeState, NodeVisibility,
-    PROTOCOL_VERSION, PointerButton, Probe, ProbeReadout, Request, RequestBody, Response,
-    ResponseBody, Role, SkyReadout, UiNode, ViewerIdentity, ViewerMessage, WaitCondition,
-    WaterReadout,
+    AutomationError, Bounds, EnvironmentReadout, GroundPoint, Locator, NodeId, NodeState,
+    NodeVisibility, PROTOCOL_VERSION, PointerButton, Probe, ProbeReadout, Request, RequestBody,
+    Response, ResponseBody, Role, SkyReadout, UiNode, ViewerIdentity, ViewerMessage, WaitCondition,
+    WaterReadout, WorldAction,
 };
 use sl_viewer_driver::{Viewer, ViewerOptions};
 use tokio::sync::mpsc::unbounded_channel;
@@ -239,6 +239,58 @@ async fn drag_onto_asks_for_a_drop_and_prints_the_target() -> Result<(), TestErr
         }
         other => return Err(format!("asked {other:?}").into()),
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_ground_double_click_asks_for_the_point_and_prints_the_landing() -> Result<(), TestError>
+{
+    let (printed, asked) = run_verb(
+        Arc::new(|_body| {
+            Ok(ResponseBody::GroundDone {
+                hit_point: [20.0, 128.0, 25.5],
+            })
+        }),
+        &[
+            "world",
+            "ground-double-click",
+            "Next Door",
+            "20,128",
+            "--no-reveal",
+        ],
+        false,
+    )
+    .await?;
+    assert_eq!(
+        printed,
+        "double-clicked the ground at <20,128> in \"Next Door\", landing at <20,128,25.5>\n"
+    );
+    match asked.as_slice() {
+        [
+            RequestBody::GroundAction {
+                ground,
+                action,
+                reveal,
+                ..
+            },
+        ] => {
+            assert_eq!(*ground, GroundPoint::new("Next Door", 20.0, 128.0));
+            assert_eq!(*action, WorldAction::DoubleClick);
+            assert!(!reveal, "--no-reveal");
+        }
+        other => return Err(format!("asked {other:?}").into()),
+    }
+    assert!(
+        Cli::try_parse_from([
+            "sl-viewer-ctl",
+            "world",
+            "ground-double-click",
+            "Home",
+            "256,1"
+        ])
+        .is_err(),
+        "a point past the region's edge is refused"
+    );
     Ok(())
 }
 

@@ -129,6 +129,7 @@ mod test {
                     attachment_item: object.attachment_item_id(),
                     owner_id: AgentKey::from(object.owner_id),
                     update_flags: object.update_flags,
+                    click_action: object.click_action,
                     material: object.material,
                     extra: object.extra.clone(),
                     texture_animation: object.texture_animation,

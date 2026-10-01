@@ -10,13 +10,17 @@ use crate::locator::Locator;
 
 /// What a world action does to the one thing its locator names.
 ///
-/// In JSON: `"click"`, `"right_click"`, `"hover"`, `"select"`,
-/// `"shift_select"`, `"place"`, or `{"drop_from":{…locator…}}`.
+/// In JSON: `"click"`, `"double_click"`, `"right_click"`, `"hover"`,
+/// `"select"`, `"shift_select"`, `"place"`, or `{"drop_from":{…locator…}}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorldAction {
     /// A left click: a touch, outside build mode.
     Click,
+    /// Two left clicks in quick succession: with the double-click action set
+    /// to teleport, a teleport to where the click lands. The first click is
+    /// a click like any other (a touch, on an object that takes one).
+    DoubleClick,
     /// A right click: the thing's pie menu.
     RightClick,
     /// The pointer rests over it: its hover tip.
@@ -42,6 +46,7 @@ impl fmt::Display for WorldAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Click => f.write_str("click"),
+            Self::DoubleClick => f.write_str("double_click"),
             Self::RightClick => f.write_str("right_click"),
             Self::Hover => f.write_str("hover"),
             Self::Select => f.write_str("select"),
@@ -136,6 +141,7 @@ mod tests {
     fn arguments_round_trip_in_their_terse_spelling() -> Result<(), serde_json::Error> {
         for (action, json) in [
             (WorldAction::Click, r#""click""#),
+            (WorldAction::DoubleClick, r#""double_click""#),
             (WorldAction::RightClick, r#""right_click""#),
             (WorldAction::Hover, r#""hover""#),
             (WorldAction::Select, r#""select""#),

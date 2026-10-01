@@ -84,6 +84,28 @@ mod test {
         Ok(())
     }
 
+    /// Every declared setting's description is a Fluent key the English
+    /// bundle defines — not prose passed where the key belongs, which the
+    /// lookup could only report as a missing key at every start.
+    #[test]
+    fn every_setting_description_is_an_english_key() {
+        let english = include_str!("../assets/locales/en/main.ftl");
+        let defined: std::collections::BTreeSet<&str> = english
+            .lines()
+            .filter_map(|line| line.split_once(" = ").map(|(key, _text)| key.trim()))
+            .collect();
+        let settings = ViewerSettings::declared_for_test(REGISTRARS);
+        let missing: Vec<String> = settings
+            .description_keys()
+            .filter(|(_name, key)| !defined.contains(key))
+            .map(|(name, key)| format!("{name}: {key:?}"))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "settings whose description is not an English key: {missing:#?}"
+        );
+    }
+
     /// Every module that defines a `register_settings` is listed in
     /// [`REGISTRARS`].
     ///

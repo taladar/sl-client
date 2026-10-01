@@ -115,7 +115,7 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         RENDER_SECTION,
         SETTING_RENDER_RESOLUTION_DIVISOR,
         SettingValue::U32(DEFAULT_RESOLUTION_DIVISOR),
-        "Divisor for rendering the 3D scene at reduced resolution (1 = full)",
+        "setting-desc-RenderResolutionDivisor",
     );
 }
 

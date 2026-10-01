@@ -3520,6 +3520,7 @@ fn apply_object(
         existing.animated = is_animated_object(object);
         existing.full_key = object.full_id;
         existing.update_flags = object.update_flags;
+        existing.click_action = object.click_action;
         existing.material = object.material;
         existing.extra = object.extra.clone();
         existing.texture_animation = object.texture_animation;
@@ -3647,6 +3648,7 @@ fn apply_object(
             attachment_item,
             owner_id: AgentKey::from(object.owner_id),
             update_flags: object.update_flags,
+            click_action: object.click_action,
             material: object.material,
             extra: object.extra.clone(),
             face_entities,
@@ -4939,6 +4941,7 @@ mod tests {
             attachment_item: None,
             owner_id: AgentKey::from(object.owner_id),
             update_flags: object.update_flags,
+            click_action: object.click_action,
             material: object.material,
             extra: object.extra.clone(),
             texture_animation: object.texture_animation,

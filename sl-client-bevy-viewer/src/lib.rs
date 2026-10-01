@@ -131,6 +131,8 @@ mod automation_driver;
 #[cfg(test)]
 mod automation_executor;
 #[cfg(test)]
+mod automation_ground_aim;
+#[cfg(test)]
 mod automation_locator;
 #[cfg(test)]
 mod automation_model;

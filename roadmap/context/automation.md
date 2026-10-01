@@ -577,6 +577,21 @@ replaces that person.
 - **A caption with `display: none` names nothing** in the model — a row that
   swaps its caption (the Build Object tab's Taper / Hole Size) can be
   `LabelledBy` itself and is called by whichever one shows.
+- **The ground is addressed by region and position**
+  ([[viewer-automation-ground-aim]]): `world().ground(region, x, y)`, a
+  `GroundAction` request answered with `GroundDone { hit_point }`. The aim
+  (`GroundAim`) reads the terrain's height there, projects the point, and the
+  probe must find **ground** near it; the tolerance is the ground a few
+  pixels cover at the point, since seen from far away and nearly edge-on one
+  pixel covers metres of ground.
+- **The teleport panel outlives the teleport**: after an arrival the
+  progress panel ("Arrived") stays over the middle of the window for a
+  while, and an aim there is (rightly) covered. Wait for
+  `/teleport/state` to be `idle` before aiming at the middle of the screen
+  again.
+- **A flycam flown forward sinks**: it starts looking down at the avatar, so
+  `hold("w")` takes it down the slope and, ten metres on, under the ground.
+  A test that wants the scene ahead in view flies it **back** (`"s"`).
 - **The live-verify sweep** ([[test-e2e-live-verify-sweep]]) turned the
   features' "check it live" notes into tests; the remaining ones are its
   `test-e2e-sweep-*` tasks. The worked examples are
