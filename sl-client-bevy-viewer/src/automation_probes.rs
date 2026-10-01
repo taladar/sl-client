@@ -13,25 +13,26 @@ mod tests {
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_automation_proto::{
-        CameraView, InventoryEntry, InventoryFolderReadout, InventoryRoot, LogStream,
-        NotificationReadout, OfferedButton, RegionReadout, SelectedObject,
+        CameraView, EnvironmentReadout, InventoryEntry, InventoryFolderReadout, InventoryRoot,
+        LogStream, NotificationReadout, OfferedButton, RegionReadout, SelectedObject, SkyReadout,
     };
     use sl_client_bevy::{
         AgentKey, AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolderKey,
         InventoryKey, InventoryType, ItemInfo, LandArea, LindenAmount, MoneyBalance, ObjectKey,
-        OwnerKey, Permissions5, RegionHandle, SaleInfo, SlAgentParcel, SlCommand, SlCurrentRegion,
-        SlEvent, SlIdentity, SlRegion, SlSessionEvent, Uuid, Vector,
+        OwnerKey, Permissions5, RegionHandle, SaleInfo, SkySettings, SlAgentParcel, SlCommand,
+        SlCurrentRegion, SlEvent, SlIdentity, SlRegion, SlSessionEvent, Uuid, Vector,
     };
     use sl_viewer_automation::{
-        EventLog, ProbeError, ProbeSources, StateProbesPlugin, read_agent, read_inventory,
-        read_notifications, read_quiescence, read_selection, read_status,
+        EventLog, ProbeError, ProbeSources, StateProbesPlugin, read_agent, read_environment,
+        read_inventory, read_notifications, read_quiescence, read_selection, read_status,
     };
     use sl_viewer_inventory::inventory::InventoryModel;
     use sl_viewer_notifications::{
         NotificationId, NotificationManager, NotificationRecord, ToastButton, template,
     };
     use sl_viewer_ui_core::ui_element::UiAction;
-    use sl_viewer_world_api::{AgentRegionPosition, CameraMode, SelectionSet};
+    use sl_viewer_world_api::rlv::RlvEnvironmentSlot;
+    use sl_viewer_world_api::{AgentRegionPosition, AvatarControls, CameraMode, SelectionSet};
 
     use crate::status_bar::AgentBalance;
     use crate::world_test::{entity_of, seed_prim_numbered, settle, world_app};
@@ -101,6 +102,58 @@ mod tests {
         assert_eq!(after.seated_on, Some(seat.uuid()));
         assert_eq!(after.camera, Some(CameraView::Mouselook));
         Ok(())
+    }
+
+    /// The heading is the viewer's own, and only once it is known: an unseeded
+    /// heading is no heading, whatever its placeholder value.
+    #[test]
+    fn the_agent_probe_reads_the_held_heading() {
+        let mut app = probe_world();
+        app.world_mut().resource_mut::<AvatarControls>().yaw = 1.25;
+        assert_eq!(
+            read_agent(app.world_mut()).heading,
+            None,
+            "a heading not yet seeded from the avatar is not one"
+        );
+        {
+            let mut controls = app.world_mut().resource_mut::<AvatarControls>();
+            controls.seeded = true;
+            controls.yaw = -0.5;
+        }
+        assert_eq!(read_agent(app.world_mut()).heading, Some(-0.5));
+    }
+
+    /// The environment probe reads the sky the scene publishes and whether
+    /// the local layer holds it.
+    #[test]
+    fn the_environment_probe_reads_the_published_sky() {
+        let mut app = probe_world();
+        app.world_mut().remove_resource::<RlvEnvironmentSlot>();
+        assert_eq!(
+            read_environment(app.world_mut()),
+            EnvironmentReadout {
+                sky: None,
+                local_sky: false,
+            },
+            "no environment scene, no sky"
+        );
+        let mut sky = SkySettings::legacy_windlight_default("Default");
+        sky.ambient = sl_client_bevy::Color::new(1.0, 0.0, 0.0);
+        app.world_mut().insert_resource(RlvEnvironmentSlot {
+            rendered: Some(sky),
+            fixed_sky: true,
+            ..RlvEnvironmentSlot::default()
+        });
+        assert_eq!(
+            read_environment(app.world_mut()),
+            EnvironmentReadout {
+                sky: Some(SkyReadout {
+                    name: "Default".to_owned(),
+                    ambient: [1.0, 0.0, 0.0],
+                }),
+                local_sky: true,
+            }
+        );
     }
 
     #[test]

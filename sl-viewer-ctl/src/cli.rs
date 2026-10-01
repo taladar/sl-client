@@ -198,8 +198,11 @@ pub enum Verb {
     Chat,
     /// Print every notification the viewer raised, oldest first.
     Notifications,
-    /// Print the own agent: region, position, seat, teleport, camera.
+    /// Print the own agent: region, position, seat, teleport, camera, heading.
     Agent,
+    /// Print the environment being drawn: the sky's name and ambient colour,
+    /// and whether the viewer's own local sky stands in for the shared one.
+    Environment,
     /// Save the viewer's frame to a PNG.
     Screenshot {
         /// Where.

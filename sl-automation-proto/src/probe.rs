@@ -1,7 +1,7 @@
 //! State probes: what a viewer reports about the state a test asserts on that
 //! is not one widget — the conversations, the notifications, the status bar,
-//! the own agent, the selection, the inventory, the logs of what happened and
-//! whether the scene has settled.
+//! the own agent, the environment drawn, the selection, the inventory, the logs
+//! of what happened and whether the scene has settled.
 //!
 //! Every readout is read from a model the viewer already keeps, never scraped
 //! from the widgets that draw it.
@@ -254,6 +254,32 @@ pub struct AgentReadout {
     /// How the camera is driven, where the viewer has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<CameraView>,
+    /// The heading the own avatar faces, in radians about the Second Life up
+    /// axis counter-clockwise from east (north is π/2), wrapped to `-π..=π` —
+    /// the viewer's own heading, once it is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heading: Option<f32>,
+}
+
+/// The environment the viewer draws.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentReadout {
+    /// The sky being drawn, once the viewer has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sky: Option<SkyReadout>,
+    /// Whether the viewer's own local sky — a preset pinned from World ▸
+    /// Environment, or a script's `@setenv_*` — is drawn instead of the shared
+    /// one.
+    pub local_sky: bool,
+}
+
+/// The sky being drawn, in the settings' own units.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkyReadout {
+    /// The sky frame's name.
+    pub name: String,
+    /// The ambient light colour, RGB.
+    pub ambient: [f32; 3],
 }
 
 /// One selected object.
@@ -460,10 +486,10 @@ mod tests {
 
     use super::{
         AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,
-        DiagnosticLine, DiagnosticsReadout, InventoryEntry, InventoryFolderReadout, LogEntry,
-        LogLevel, LogPage, LogStream, NotificationReadout, OfferedButton, QuiescenceReadout,
-        RegionReadout, SelectedObject, SpeakerKind, StatusReadout, TeleportReadout, TeleportState,
-        TranscriptLine,
+        DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, InventoryEntry,
+        InventoryFolderReadout, LogEntry, LogLevel, LogPage, LogStream, NotificationReadout,
+        OfferedButton, QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout, SpeakerKind,
+        StatusReadout, TeleportReadout, TeleportState, TranscriptLine,
     };
 
     /// Serializes `value`, reads it back and checks nothing was lost.
@@ -584,6 +610,7 @@ mod tests {
                     stalled: true,
                 }),
                 camera: Some(CameraView::Mouselook),
+                heading: Some(1.5),
             })?;
         }
         let json = serde_json::to_string(&TeleportReadout {
@@ -600,6 +627,27 @@ mod tests {
         ] {
             round_trip(&view)?;
         }
+        Ok(())
+    }
+
+    #[test]
+    fn environment_round_trips() -> Result<(), serde_json::Error> {
+        let json = round_trip(&EnvironmentReadout {
+            sky: Some(SkyReadout {
+                name: "Midday".to_owned(),
+                ambient: [1.0, 0.0, 0.0],
+            }),
+            local_sky: true,
+        })?;
+        assert_eq!(
+            json,
+            r#"{"sky":{"name":"Midday","ambient":[1.0,0.0,0.0]},"local_sky":true}"#
+        );
+        let none = round_trip(&EnvironmentReadout {
+            sky: None,
+            local_sky: false,
+        })?;
+        assert_eq!(none, r#"{"local_sky":false}"#);
         Ok(())
     }
 

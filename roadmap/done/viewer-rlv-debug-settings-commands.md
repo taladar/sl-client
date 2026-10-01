@@ -135,7 +135,8 @@ the restriction revision, so a `@getdebug_*` read or a `@setrot` would have
 rebuilt the Restrictions and Locks floaters for a command that changes no
 restriction. Only what `RlvState::apply` accepted counts now.
 
-Not verified live: no grid session drove the family. The console path — type
-`@getdebug_restrainedlovenosetenv=2222` at the RLVa console and read the
-answer, then `@setrot:0=force` and watch the avatar turn — is the interactive
-check to make.
+The console path is an end-to-end test on the fake grid since 2026-10-01
+([[test-e2e-sweep-rlv]], `tests/e2e_rlv.rs`): `@getdebug_restrainedlovenosetenv`
+answers `0`, then `1` once the setting is on, and `@setrot:0=force` turns the
+avatar's heading (the agent probe's new `heading`) to north, and a quarter turn
+more to east.

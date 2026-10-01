@@ -71,10 +71,10 @@
 //! one widget, read from the models the viewer already keeps — the
 //! conversations ([`read_conversations`]), the notifications and the buttons
 //! they offer ([`read_notifications`]), the status bar ([`read_status`]), the
-//! own agent ([`read_agent`]), the selection ([`read_selection`]), an
-//! inventory folder by path ([`read_inventory`]) and whether the scene has
-//! settled ([`read_quiescence`], with [`PipelineStatus`] for the render
-//! half). The models that live in the viewer's heavy crates are read through
+//! own agent ([`read_agent`]), the environment drawn ([`read_environment`]),
+//! the selection ([`read_selection`]), an inventory folder by path
+//! ([`read_inventory`]) and whether the scene has settled
+//! ([`read_quiescence`], with [`PipelineStatus`] for the render half). The models that live in the viewer's heavy crates are read through
 //! [`ProbeSources`], which the viewer's assembly fills. What happened is read
 //! by cursor: the [`EventLog`] of session events, outbound commands and UI
 //! actions, and the warnings and errors a [`LogTally`] counted
@@ -153,8 +153,8 @@ pub use crate::locate::{find_all, find_one, shallow};
 pub use crate::manipulator_drag::{DragProgress, DragStage, HeldKeys, ManipulatorDrag};
 pub use crate::probe_sources::{LiveNotifications, ProbeSources, SceneWorkReader};
 pub use crate::probes::{
-    ProbeError, read_agent, read_conversations, read_inventory, read_notifications,
-    read_quiescence, read_selection, read_status,
+    ProbeError, read_agent, read_conversations, read_environment, read_inventory,
+    read_notifications, read_quiescence, read_selection, read_status,
 };
 pub use crate::pursuit::{
     DEFAULT_DEADLINE, DEFAULT_DEADLINE_FRAMES, Intent, Progress, Pursuit, PursuitError, Target,

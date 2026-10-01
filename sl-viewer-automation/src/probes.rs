@@ -11,9 +11,9 @@
 use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
 use sl_automation_proto::{
-    AgentReadout, CameraView, ClockTime, ConversationReadout, InventoryEntry,
+    AgentReadout, CameraView, ClockTime, ConversationReadout, EnvironmentReadout, InventoryEntry,
     InventoryFolderReadout, InventoryRoot, NotificationReadout, OfferedButton, QuiescenceReadout,
-    RegionReadout, SelectedObject, StatusReadout,
+    RegionReadout, SelectedObject, SkyReadout, StatusReadout,
 };
 use sl_client_bevy::{
     FolderState, InventoryFolderKey, SlAgentParcel, SlCurrentRegion, SlIdentity, SlRegion,
@@ -23,7 +23,8 @@ use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_kit::slt;
 use sl_viewer_notifications::{NotificationManager, NotificationRecord, ToastButton, template};
 use sl_viewer_ui_core::i18n::Translator;
-use sl_viewer_world_api::{AgentRegionPosition, CameraMode, SelectionSet};
+use sl_viewer_world_api::rlv::RlvEnvironmentSlot;
+use sl_viewer_world_api::{AgentRegionPosition, AvatarControls, CameraMode, SelectionSet};
 
 use crate::probe_sources::ProbeSources;
 use crate::render_settle::PipelineStatus;
@@ -160,8 +161,8 @@ pub fn read_status(world: &mut World) -> StatusReadout {
     }
 }
 
-/// The own agent: who, where, on what, how far through a teleport and how the
-/// camera is driven.
+/// The own agent: who, where, on what, how far through a teleport, how the
+/// camera is driven and which way the avatar faces.
 #[must_use]
 pub fn read_agent(world: &mut World) -> AgentReadout {
     let teleport = ProbeSources::of(world)
@@ -187,6 +188,27 @@ pub fn read_agent(world: &mut World) -> AgentReadout {
             CameraMode::Mouselook => CameraView::Mouselook,
             CameraMode::Flycam => CameraView::Flycam,
         }),
+        heading: world
+            .get_resource::<AvatarControls>()
+            .and_then(AvatarControls::held_heading),
+    }
+}
+
+/// The environment being drawn: the sky the scene publishes for RLV's
+/// `@getenv_*` — which is the one it renders — and whether the viewer's own
+/// local sky stands in for the shared one. An app without the environment
+/// scene has drawn no sky and has no local one.
+#[must_use]
+pub fn read_environment(world: &World) -> EnvironmentReadout {
+    let slot = world.get_resource::<RlvEnvironmentSlot>();
+    EnvironmentReadout {
+        sky: slot
+            .and_then(|slot| slot.rendered.as_ref())
+            .map(|sky| SkyReadout {
+                name: sky.name.clone(),
+                ambient: [sky.ambient.red(), sky.ambient.green(), sky.ambient.blue()],
+            }),
+        local_sky: slot.is_some_and(|slot| slot.fixed_sky),
     }
 }
 

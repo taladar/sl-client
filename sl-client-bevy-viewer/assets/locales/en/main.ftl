@@ -4526,7 +4526,16 @@ rlv-behaviours-tab-modifiers = Modifiers
 # Copies the whole restriction set to the clipboard, grouped by object.
 rlv-behaviours-copy = Copy
 # The summary line under the tabs.
-rlv-behaviours-count = { $restrictions } restrictions, { $exceptions } exceptions, from { $objects } objects
+rlv-behaviours-count = { $restrictions ->
+        [one] { $restrictions } restriction
+       *[other] { $restrictions } restrictions
+    }, { $exceptions ->
+        [one] { $exceptions } exception
+       *[other] { $exceptions } exceptions
+    }, from { $objects ->
+        [one] { $objects } object
+       *[other] { $objects } objects
+    }
 # Shared column headers across the Restrictions window's three tables.
 rlv-col-behaviour = Behaviour
 rlv-col-issuer = Issued by
@@ -4543,7 +4552,10 @@ rlv-locks-col-type = Lock
 rlv-locks-col-direction = Direction
 rlv-locks-col-target = Target
 rlv-locks-col-origin = Held by
-rlv-locks-count = { $locks } locks in force
+rlv-locks-count = { $locks ->
+        [one] { $locks } lock in force
+       *[other] { $locks } locks in force
+    }
 # The Lock column's values, one per registry the lock model keeps.
 rlv-locks-type-attachment = Attachment
 rlv-locks-type-attachment-point = Attachment point

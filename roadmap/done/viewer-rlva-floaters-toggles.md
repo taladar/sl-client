@@ -2,10 +2,11 @@
 id: viewer-rlva-floaters-toggles
 title: "RLVa UI: console, restrictions/strings/locks floaters + toggles"
 topic: viewer
-status: in-progress
+status: done
 origin: main-menu survey (2026-07-23)
 blocked_by: [viewer-rlv-restriction-state]
-refs: [viewer-rlv-command-parser, viewer-rlv-notify, viewer-rlv-queries]
+refs: [viewer-rlv-command-parser, viewer-rlv-notify, viewer-rlv-queries,
+  test-e2e-sweep-rlv, viewer-rlv-receive-side-consumers]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -121,5 +122,17 @@ including the re-pinned menu-bar action table, the four `FLOATERS` registry
 guards and the blessed settings golden. `cargo clippy --release` clean across
 all three crates.
 
-Not verified live: the four windows' content and the menu's greying were not
-driven against a grid.
+The four windows' content and the menu's greying are an end-to-end test on
+the fake grid since 2026-10-01 ([[test-e2e-sweep-rlv]], `tests/e2e_rlv.rs`):
+every entry below the master switch is greyed until RLV is on; the console
+reports each command of a line; the Restrictions and Locks windows list what it
+holds, with their counts; closing the console lifts all of it; and the Strings
+window keeps an edit across picks and restores the default. The drive found two
+bugs here, both fixed with regression tests: the console showed every line one
+submit late (a row the pool grew was dressed by the binder's own commands and
+then never bound), and both windows' counts ignored plurals ("1 restrictions",
+"1 objects", "1 locks").
+
+The `blocked_recvim` strings the Strings window edits are shown nowhere yet:
+no receive path asks the façade, which is
+[[viewer-rlv-receive-side-consumers]].

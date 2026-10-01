@@ -6,8 +6,8 @@ use std::io::{self, Write};
 use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
 use sl_automation_proto::{
-    AgentReadout, ConversationReadout, ConversationRef, LogEntry, NodeState, NodeValue,
-    NodeVisibility, NotificationReadout, UiNode, ViewerIdentity, WorldNode,
+    AgentReadout, ConversationReadout, ConversationRef, EnvironmentReadout, LogEntry, NodeState,
+    NodeValue, NodeVisibility, NotificationReadout, UiNode, ViewerIdentity, WorldNode,
 };
 use sl_viewer_driver::Screenshot;
 
@@ -48,6 +48,8 @@ pub enum Outcome {
     Notifications(Vec<NotificationReadout>),
     /// The own agent.
     Agent(AgentReadout),
+    /// The environment being drawn.
+    Environment(EnvironmentReadout),
     /// A screenshot the viewer saved.
     Screenshot(Screenshot),
     /// Event log entries.
@@ -181,6 +183,7 @@ fn json_of(outcome: &Outcome) -> io::Result<JsonValue> {
         Outcome::Conversations(conversations) => to_json(conversations)?,
         Outcome::Notifications(notifications) => to_json(notifications)?,
         Outcome::Agent(agent) => to_json(agent)?,
+        Outcome::Environment(environment) => to_json(environment)?,
         Outcome::Screenshot(shot) => json!({
             "path": shot.path.display().to_string(),
             "width": shot.width,
@@ -259,6 +262,7 @@ fn text_of(out: &mut impl Write, outcome: &Outcome) -> io::Result<()> {
         Outcome::Conversations(conversations) => conversation_lines(out, conversations)?,
         Outcome::Notifications(notifications) => notification_lines(out, notifications)?,
         Outcome::Agent(agent) => agent_lines(out, agent)?,
+        Outcome::Environment(environment) => environment_lines(out, environment)?,
         Outcome::Screenshot(shot) => {
             writeln!(
                 out,
@@ -481,7 +485,28 @@ fn agent_lines(out: &mut impl Write, agent: &AgentReadout) -> io::Result<()> {
     if let Some(camera) = &agent.camera {
         writeln!(out, "camera   {}", to_json(camera)?)?;
     }
+    if let Some(heading) = agent.heading {
+        writeln!(out, "heading  {heading:.3} rad")?;
+    }
     Ok(())
+}
+
+/// The environment's readout, a field a line.
+fn environment_lines(out: &mut impl Write, environment: &EnvironmentReadout) -> io::Result<()> {
+    match &environment.sky {
+        Some(sky) => {
+            let [red, green, blue] = sky.ambient;
+            writeln!(out, "sky      {}", sky.name)?;
+            writeln!(out, "ambient  {red:.6}, {green:.6}, {blue:.6}")?;
+        }
+        None => writeln!(out, "sky      (none drawn yet)")?,
+    }
+    let layer = if environment.local_sky {
+        "local"
+    } else {
+        "shared"
+    };
+    writeln!(out, "layer    {layer}")
 }
 
 /// `text` quoted for a POSIX shell when it needs to be.

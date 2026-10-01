@@ -116,6 +116,7 @@ pub(crate) async fn run<W: Write>(
         Verb::Chat => Outcome::Conversations(viewer.conversations().await?),
         Verb::Notifications => Outcome::Notifications(viewer.notifications().await?),
         Verb::Agent => Outcome::Agent(viewer.agent().await?),
+        Verb::Environment => Outcome::Environment(viewer.environment().await?),
         Verb::Screenshot { path, outline } => {
             Outcome::Screenshot(viewer.screenshot(path, outline.clone()).await?)
         }

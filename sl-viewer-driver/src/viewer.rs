@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use sl_automation_proto::{
     AgentReadout, AutomationError, ConversationReadout, Deadline, DiagnosticsReadout,
-    InventoryFolderReadout, InventoryRoot, Locator, LogEntry, LogPage, LogStream,
-    NotificationReadout, PROTOCOL_VERSION, Probe, ProbeReadout, QuiescenceReadout, Request,
-    RequestBody, ResponseBody, SelectedObject, StateCondition, StateObservation, StatusReadout,
-    UiNode, ViewerIdentity, ViewerMessage,
+    EnvironmentReadout, InventoryFolderReadout, InventoryRoot, Locator, LogEntry, LogPage,
+    LogStream, NotificationReadout, PROTOCOL_VERSION, Probe, ProbeReadout, QuiescenceReadout,
+    Request, RequestBody, ResponseBody, SelectedObject, StateCondition, StateObservation,
+    StatusReadout, UiNode, ViewerIdentity, ViewerMessage,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -556,6 +556,22 @@ impl Viewer {
             other => {
                 Err(self.unexpected("read quiescence", &ResponseBody::Readout { readout: other }))
             }
+        }
+    }
+
+    /// The environment being drawn: the sky, and whether the viewer's own
+    /// local sky stands in for the shared one.
+    ///
+    /// # Errors
+    ///
+    /// As [`read`](Self::read).
+    pub async fn environment(&self) -> Result<EnvironmentReadout, DriverError> {
+        match self.read(Probe::Environment).await? {
+            ProbeReadout::Environment(environment) => Ok(environment),
+            other => Err(self.unexpected(
+                "read environment",
+                &ResponseBody::Readout { readout: other },
+            )),
         }
     }
 

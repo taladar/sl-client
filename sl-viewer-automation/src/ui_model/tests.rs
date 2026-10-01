@@ -19,6 +19,7 @@ use sl_viewer_testkit::{settle, spawn_under_root};
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::semantic::{Expanded, Semantic};
 use sl_viewer_ui_core::skin::{LIST_ROW_CLASS, SELECTED_CLASS};
+use sl_viewer_ui_core::virtual_list::VirtualRow;
 use sl_viewer_ui_widgets::ui_text_input::ReadOnlyField;
 
 use super::{entity_of, node_id, snapshot};
@@ -598,6 +599,41 @@ fn a_list_row_is_a_list_item_selected_by_its_class() -> Result<(), String> {
         !node(&mut app, "aviary")?.has_state(NodeState::Selected),
         "dropping the class deselects it"
     );
+    Ok(())
+}
+
+/// **A parked pooled row is unnamed**, whatever its binder left in it: a
+/// virtual list's spare rows keep the text of the item they last showed, and
+/// named by it a spare row would make a locator for that item ambiguous.
+#[test]
+fn a_parked_pool_row_has_no_name() -> Result<(), String> {
+    let mut app = app();
+    let list = spawn_under_root(
+        &mut app,
+        (
+            Name::new("list"),
+            Semantic::new(Role::List),
+            Node::default(),
+        ),
+    );
+    for (slot, index, test_id) in [(0, Some(0), "bound"), (1, None, "parked")] {
+        app.world_mut()
+            .spawn((
+                Name::new(test_id),
+                ClassList::new_with_classes([LIST_ROW_CLASS]),
+                VirtualRow { slot, index },
+                Node::default(),
+                ChildOf(list),
+            ))
+            .with_child(Text::new("RestrainedLoveNoSetEnv"));
+    }
+    assert_eq!(
+        node(&mut app, "bound")?.name.as_deref(),
+        Some("RestrainedLoveNoSetEnv")
+    );
+    let parked = node(&mut app, "parked")?;
+    assert_eq!(parked.role, Role::ListItem, "still a row of the list");
+    assert_eq!(parked.name, None, "but one that names no item");
     Ok(())
 }
 

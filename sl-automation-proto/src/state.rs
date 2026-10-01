@@ -11,8 +11,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::probe::{
-    AgentReadout, ConversationReadout, InventoryFolderReadout, InventoryRoot, LogEntry, LogStream,
-    NotificationReadout, QuiescenceReadout, SelectedObject, StatusReadout,
+    AgentReadout, ConversationReadout, EnvironmentReadout, InventoryFolderReadout, InventoryRoot,
+    LogEntry, LogStream, NotificationReadout, QuiescenceReadout, SelectedObject, StatusReadout,
 };
 
 /// One of the viewer's state readouts.
@@ -45,6 +45,8 @@ pub enum Probe {
     },
     /// Whether the scene has settled ([`QuiescenceReadout`]).
     Quiescence,
+    /// The environment being drawn ([`EnvironmentReadout`]).
+    Environment,
 }
 
 impl fmt::Display for Probe {
@@ -63,6 +65,7 @@ impl fmt::Display for Probe {
                 write!(f, "inventory {root}:/{}", path.join("/"))
             }
             Self::Quiescence => f.write_str("quiescence"),
+            Self::Environment => f.write_str("environment"),
         }
     }
 }
@@ -88,6 +91,8 @@ pub enum ProbeReadout {
     Inventory(Option<InventoryFolderReadout>),
     /// Whether the scene has settled.
     Quiescence(QuiescenceReadout),
+    /// The environment being drawn.
+    Environment(EnvironmentReadout),
 }
 
 /// A test of the JSON value a [`StateCondition::Probe`]'s pointer selects in a

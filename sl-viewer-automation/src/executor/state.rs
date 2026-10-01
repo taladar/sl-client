@@ -13,8 +13,8 @@ use super::{Answer, AutomationIdentity, Clock, Started, Step, Task};
 use crate::event_log::EventLog;
 use crate::locate::{find_all, shallow};
 use crate::probes::{
-    ProbeError, read_agent, read_conversations, read_inventory, read_notifications,
-    read_quiescence, read_selection, read_status,
+    ProbeError, read_agent, read_conversations, read_environment, read_inventory,
+    read_notifications, read_quiescence, read_selection, read_status,
 };
 use crate::screenshot::{ScreenshotTicket, request_screenshot, take_screenshot};
 use crate::ui_model::snapshot;
@@ -39,6 +39,7 @@ pub(super) fn read(world: &mut World, probe: &Probe) -> Result<ProbeReadout, Box
             read_inventory(world, *root, path).map_err(|error| probe_error(error, *root))?,
         )),
         Probe::Quiescence => ProbeReadout::Quiescence(read_quiescence(world)),
+        Probe::Environment => ProbeReadout::Environment(read_environment(world)),
     })
 }
 

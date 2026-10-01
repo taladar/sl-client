@@ -10,9 +10,9 @@ use clap::Parser as _;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use sl_automation_proto::{
-    AutomationError, Bounds, Locator, NodeId, NodeState, NodeVisibility, PROTOCOL_VERSION,
-    PointerButton, Request, RequestBody, Response, ResponseBody, Role, UiNode, ViewerIdentity,
-    ViewerMessage, WaitCondition,
+    AutomationError, Bounds, EnvironmentReadout, Locator, NodeId, NodeState, NodeVisibility,
+    PROTOCOL_VERSION, PointerButton, Probe, ProbeReadout, Request, RequestBody, Response,
+    ResponseBody, Role, SkyReadout, UiNode, ViewerIdentity, ViewerMessage, WaitCondition,
 };
 use sl_viewer_driver::{Viewer, ViewerOptions};
 use tokio::sync::mpsc::unbounded_channel;
@@ -229,6 +229,38 @@ async fn a_tree_prints_indented_and_cut_to_its_depth() -> Result<(), TestError> 
         None,
         "the JSON is cut the same way: {json}"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn environment_reads_the_probe_and_prints_the_sky() -> Result<(), TestError> {
+    let script: Arc<Script> = Arc::new(|_body| {
+        Ok(ResponseBody::Readout {
+            readout: ProbeReadout::Environment(EnvironmentReadout {
+                sky: Some(SkyReadout {
+                    name: "Midday".to_owned(),
+                    ambient: [1.0, 0.0, 0.0],
+                }),
+                local_sky: true,
+            }),
+        })
+    });
+    let (printed, asked) = run_verb(Arc::clone(&script), &["environment"], false).await?;
+    assert_eq!(
+        printed,
+        "sky      Midday\nambient  1.000000, 0.000000, 0.000000\nlayer    local\n"
+    );
+    match asked.as_slice() {
+        [
+            RequestBody::Read {
+                probe: Probe::Environment,
+            },
+        ] => {}
+        other => return Err(format!("asked {other:?}").into()),
+    }
+    let (json, _asked) = run_verb(script, &["--json", "environment"], true).await?;
+    let parsed: serde_json::Value = serde_json::from_str(&json)?;
+    assert_eq!(parsed.pointer("/local_sky"), Some(&json!(true)), "{json}");
     Ok(())
 }
 

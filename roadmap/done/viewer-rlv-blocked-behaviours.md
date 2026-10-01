@@ -126,6 +126,9 @@ with is applied, that turning it on mid-session releases the collar's hold,
 bumps the revision the floaters watch and writes the console line, that turning
 it off gives the keyword back, and that the blocked set survives `release_all`.
 
-Not verified live: no grid session drove it. The interactive check is the RLVa
-console — turn `RestrainedLoveNoSetEnv` on in the debug-settings editor, type
-`@setenv=n`, and read the report line.
+The interactive check is an end-to-end test on the fake grid since 2026-10-01
+([[test-e2e-sweep-rlv]], `tests/e2e_rlv.rs`): a held `@setenv=n` greys Use
+Shared Environment; turning `RestrainedLoveNoSetEnv` on in the debug-settings
+editor releases it with the console's line and gives the menu back; the next
+`@setenv=n` reports `(turned off in your settings)`; and `@setenv_ambient`
+still reaches the sky.

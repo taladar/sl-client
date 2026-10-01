@@ -20,6 +20,7 @@ use sl_viewer_ui_core::semantic::{
     Expanded, LabelledBy, NamePart, Semantic, SemanticName, SpokenLabel, role_from_classes,
     selected_by_class,
 };
+use sl_viewer_ui_core::virtual_list::VirtualRow;
 use sl_viewer_ui_widgets::ui_text_input::ReadOnlyField;
 
 /// The handle a snapshot reports for `entity`: its bits, stable for the
@@ -93,6 +94,8 @@ struct NodeFacts {
     spoken: Option<&'static SpokenLabel>,
     /// Its skin classes, which mark list rows and the selected one.
     classes: Option<&'static ClassList>,
+    /// Its place in a virtual list's row pool, when it is a pooled row.
+    virtual_row: Option<&'static VirtualRow>,
     /// The marker components the role and states are read from.
     markers: NodeMarkers,
 }
@@ -439,6 +442,12 @@ impl UiModel<'_, '_> {
         facts: &NodeFactsItem<'_, '_>,
         role: Role,
     ) -> (Option<String>, Option<String>) {
+        // A pooled row bound to no item presents nothing, whatever text its
+        // binder left in it when it was parked: named by that stale text, a
+        // spare row would answer for an item another row now shows.
+        if facts.virtual_row.is_some_and(|row| row.index.is_none()) {
+            return (None, None);
+        }
         if let Some(label) = facts.label {
             return (non_empty(label.0.clone()), None);
         }

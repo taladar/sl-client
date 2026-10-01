@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 124 |
 | ready | 312 |
 | blocked | 53 |
-| in-progress | 21 |
+| in-progress | 20 |
 | bugs | 16 |
-| done | 1287 |
+| done | 1289 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1860** |
+| **total** | **1861** |
 
 ## ideas (124)
 
@@ -880,6 +880,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state` (done), `viewer-camera-third-person-orbit`
   (done))
+- [`viewer-rlv-receive-side-consumers`](ready/viewer-rlv-receive-side-consumers.md)
+  — RLV — make the viewer's receive paths ask the RlvActions façade
 - [`viewer-rlv-send-side-consumers`](ready/viewer-rlv-send-side-consumers.md) —
   RLV — make the viewer's send paths ask the RlvActions façade
 - [`viewer-rlv-vision-render`](ready/viewer-rlv-vision-render.md) — RLV
@@ -1018,8 +1020,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tests for what only a live grid has
 - [`test-e2e-sweep-relog`](ready/test-e2e-sweep-relog.md) — End-to-end tests for
   what must survive a relog
-- [`test-e2e-sweep-rlv`](ready/test-e2e-sweep-rlv.md) — End-to-end tests for the
-  RLVa console and windows
 - [`test-e2e-sweep-single-viewer-ui`](ready/test-e2e-sweep-single-viewer-ui.md)
   — End-to-end tests for the remaining single-viewer UI checks
 - [`test-e2e-sweep-two-avatars`](ready/test-e2e-sweep-two-avatars.md) —
@@ -1224,7 +1224,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`)
 
-## in-progress (21)
+## in-progress (20)
 
 ### viewer
 
@@ -1257,9 +1257,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Render context matrix — subjects × eye, time of day, mirror, layering
   (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
   (done), `viewer-render-gpu-serialisation` (done))
-- [`viewer-rlva-floaters-toggles`](in-progress/viewer-rlva-floaters-toggles.md)
-  — "RLVa UI: console, restrictions/strings/locks floaters + toggles" (blocked
-  by `viewer-rlv-restriction-state` (done))
 - [`viewer-sit-stand-actions`](in-progress/viewer-sit-stand-actions.md) — Sit /
   stand actions (blocked by `viewer-object-selection-core` (done))
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
@@ -1332,7 +1329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1287)
+## done (1289)
 
 ### protocol
 
@@ -3025,6 +3022,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the restriction state machine (blocked by `viewer-rlv-command-parser` (done))
 - [`viewer-rlv-temp-attachment-gate`](done/viewer-rlv-temp-attachment-gate.md) —
   RLV — the temporary-attachment half of the owner-say gate
+- [`viewer-rlva-floaters-toggles`](done/viewer-rlva-floaters-toggles.md) — "RLVa
+  UI: console, restrictions/strings/locks floaters + toggles" (blocked by
+  `viewer-rlv-restriction-state` (done))
 - [`viewer-saved-asset-reopens-stale`](done/viewer-saved-asset-reopens-stale.md)
   — A saved notecard or script re-opened as it was before the save
 - [`viewer-scene-dump`](done/viewer-scene-dump.md) — Emit the shared scene-dump
@@ -3777,6 +3777,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-e2e-stage`](done/test-e2e-stage.md) — sl-e2e Stage — a fake grid,
   several viewers and grid control in one test (blocked by
   `viewer-automation-driver` (done), `test-e2e-viewer-process-launch` (done))
+- [`test-e2e-sweep-rlv`](done/test-e2e-sweep-rlv.md) — End-to-end tests for the
+  RLVa console and windows
 - [`test-e2e-viewer-process-launch`](done/test-e2e-viewer-process-launch.md) —
   Extract viewer process launch and graceful stop from sl-crosscheck
 - [`test-economy-data`](done/test-economy-data-request-economy-data.md) —

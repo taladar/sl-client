@@ -763,7 +763,7 @@ fn bind_console_rows(
     session: Res<RlvSession>,
     ui: Option<Res<ConsoleUi>>,
     new_rows: Query<(Entity, &ChildOf), Added<VirtualRow>>,
-    rows: Query<(Ref<VirtualRow>, &ChildOf, &ConsoleRowText)>,
+    rows: Query<(Ref<VirtualRow>, &ChildOf, Ref<ConsoleRowText>)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut classes: Query<&mut ClassList>,
 ) {
@@ -782,7 +782,12 @@ fn bind_console_rows(
         if child_of.parent() != ui.viewport {
             continue;
         }
-        if !refresh_all && !row.is_changed() {
+        // A row the pool grew was dressed by this system's own commands, so
+        // the frame its text node lands is a frame after the row was bound:
+        // its `VirtualRow` no longer reads as changed, and without the
+        // holder's arrival counting too the line would stay blank until the
+        // next one was typed.
+        if !refresh_all && !row.is_changed() && !holder.is_added() {
             continue;
         }
         let line = row.index.and_then(|index| session.console().get(index));
@@ -913,11 +918,16 @@ fn clear_console_restrictions_on_close(
 #[cfg(test)]
 mod tests {
     use super::{
-        ConsoleRun, ConsoleVerdict, classify, is_unset_or_duplicate, outcome_stream,
-        outcome_suffix, report_line, run_line,
+        ConsoleRowText, ConsoleRun, ConsoleUi, ConsoleVerdict, bind_console_rows, classify,
+        is_unset_or_duplicate, outcome_stream, outcome_suffix, report_line, run_line,
+        size_console_list,
     };
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_rlv::{RlvDebugSetting, RlvDebugValue, RlvExtSource as _, RlvOutcome, RlvState};
+    use sl_viewer_ui_core::ui::UiDirection;
+    use sl_viewer_ui_core::virtual_list::{VirtualList, layout_virtual_lists};
+    use sl_viewer_world_api::rlv::RlvSession;
     use sl_viewer_world_api::rlv::{RlvConsoleKind, RlvEnvironmentSlot, RlvExtFacts, ViewerRlvExt};
     use uuid::Uuid;
 
@@ -951,6 +961,92 @@ mod tests {
             &mut RlvEnvironmentSlot::default(),
             lines,
         )
+    }
+
+    /// The console's transcript with the virtual list's pool behind it, but no
+    /// `bevy_ui` layout: the viewport's size is written by hand, as the list's
+    /// own tests do.
+    fn transcript_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(UiDirection::Ltr)
+            .init_resource::<RlvSession>()
+            .init_resource::<super::ConsoleView>()
+            .add_systems(
+                Update,
+                (layout_virtual_lists, size_console_list, bind_console_rows).chain(),
+            );
+        let viewport = app
+            .world_mut()
+            .spawn((
+                VirtualList::new(super::console_row_height(super::FONT_SIZE)),
+                Node::default(),
+                ComputedNode {
+                    size: Vec2::new(400.0, 200.0),
+                    ..ComputedNode::DEFAULT
+                },
+            ))
+            .id();
+        let input = app.world_mut().spawn_empty().id();
+        app.insert_resource(ConsoleUi { viewport, input });
+        app
+    }
+
+    /// Every bound transcript row's text, in item order.
+    fn shown_lines(app: &mut App) -> Vec<String> {
+        let mut rows = app.world_mut().query::<(
+            &sl_viewer_ui_core::virtual_list::VirtualRow,
+            &ConsoleRowText,
+        )>();
+        let mut bound: Vec<(usize, Entity)> = rows
+            .iter(app.world())
+            .filter_map(|(row, holder)| row.index.map(|index| (index, holder.0)))
+            .collect();
+        bound.sort_unstable_by_key(|&(index, _)| index);
+        bound
+            .into_iter()
+            .map(|(_, holder)| {
+                app.world()
+                    .get::<Text>(holder)
+                    .map(|text| text.0.clone())
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    /// **A line shows as soon as it is logged**, not when the next one is: the
+    /// rows the pool grows for new lines are dressed by the binder's own
+    /// commands, a frame after they were bound, and must still be bound once
+    /// their text node lands. (Found by the RLVa console's end-to-end test: the
+    /// transcript showed every command one submit late.)
+    #[test]
+    fn a_logged_line_shows_without_waiting_for_the_next() {
+        let mut app = transcript_app();
+        for _frame in 0..3 {
+            app.update();
+        }
+        app.world_mut()
+            .resource_mut::<RlvSession>()
+            .log(RlvConsoleKind::Info, "first");
+        for _frame in 0..3 {
+            app.update();
+        }
+        assert_eq!(shown_lines(&mut app), vec!["INFO: first".to_owned()]);
+        {
+            let mut session = app.world_mut().resource_mut::<RlvSession>();
+            session.log(RlvConsoleKind::Input, "@fly=n");
+            session.log(RlvConsoleKind::Info, "@fly=n");
+        }
+        for _frame in 0..3 {
+            app.update();
+        }
+        assert_eq!(
+            shown_lines(&mut app),
+            vec![
+                "INFO: first".to_owned(),
+                "> @fly=n".to_owned(),
+                "INFO: @fly=n".to_owned(),
+            ]
+        );
     }
 
     /// The four things a submitted line can be.

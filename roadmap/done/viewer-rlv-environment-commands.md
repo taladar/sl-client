@@ -155,7 +155,9 @@ anything else that wants the intake alone) panicked on the first owner-say line
 with "Resource does not exist". It is declared by the intake plugin now, for the
 same reason that plugin already declares its own notification message.
 
-Not verified live: no grid session drove the family. The console path is the
-interactive check to make — type `@getenv_ambient=2222` at the RLVa console and
-read the answer, then `@setenv_ambient:1/0/0=force` and watch the sky go red,
-then World ▸ Environment ▸ Use Shared Environment to take it back.
+The console path is an end-to-end test on the fake grid since 2026-10-01
+([[test-e2e-sweep-rlv]], `tests/e2e_rlv.rs`): `@getenv_ambient=2222` answers,
+`@setenv_ambient:1/0/0=force` puts a red local sky over the shared one (read
+through the new environment probe) and `@getenv_ambient` reads `1/0/0` back,
+and World ▸ Environment ▸ Use Shared Environment takes it away again. The same
+commands from a worn object on a real grid are [[test-e2e-sweep-live-grid]]'s.

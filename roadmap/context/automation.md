@@ -308,6 +308,19 @@ replaces that person.
 - **Status bar read-outs are addressable**: `status-readout:region`,
   `:coordinates`, `:parcel`, `:balance`, `:time`, `:fps` — what the bar shows,
   as against the `Status` probe, which reads the models it is drawn from.
+- **The environment probe reads the sky RLV reads**: `Probe::Environment` is
+  `RlvEnvironmentSlot` (`sl-viewer-world-api`) — the sky the scene publishes
+  for `@getenv_*`, which is the one it renders, and `fixed_sky`, whether the
+  local layer (a menu preset or a script's `@setenv_*`) stands in for the
+  shared sky. The ambient is in the settings' own units, not `@getenv`'s. The
+  agent readout's `heading` is `AvatarControls::held_heading`, the viewer's
+  own heading (counter-clockwise from east), not the simulator's echo.
+- **The RLVa console is the RLV tier's driver** (`tests/e2e_rlv.rs`): a line
+  typed there runs as an object's `@`-command with the agent as issuer, and
+  closing the console lifts what it holds. The RLVa windows open over the
+  console's input, so a test issues its commands first and opens the windows
+  after. Turning RLV on raises the `RLVaToggledOn` toast over the top right
+  of the screen (floater close buttons included); answer it first.
 - **The pilot suite** (`tests/e2e_pilot.rs`) is the worked example of each
   kind of test: chrome, two viewers on one object, a pie and a touch the grid
   sees (a test prim put on the grid through `FakeAgent::with_world`), and a
@@ -483,11 +496,11 @@ replaces that person.
   (`$XDG_RUNTIME_DIR/sl-client-bevy-viewer/`), so a verb with no `--socket`
   finds the one viewer that answers there. Verbs (`tree`, `find`, `click`,
   `fill`, `press`, `wait --for`, `open`, `menu`, `world find|touch`, `chat`,
-  `notifications`, `agent`, `screenshot`, `events --follow`) are one driver
-  call each; `attach` runs them line by line over one connection. It
-  depends on the fake grid but not on the viewer's library, so it builds in
-  seconds; it runs the release viewer beside itself. A `launch` onto aditi
-  takes its turn under the shared login cooldown.
+  `notifications`, `agent`, `environment`, `screenshot`, `events --follow`)
+  are one driver call each; `attach` runs them line by line over one
+  connection. It depends on the fake grid but not on the viewer's library, so
+  it builds in seconds; it runs the release viewer beside itself. A `launch`
+  onto aditi takes its turn under the shared login cooldown.
 - **The cheap tiers speak locators** ([[viewer-automation-testkit-locators]]):
   `sl_viewer_automation::in_app` submits the protocol's requests to an
   `&mut App`'s own executor (installing `AutomationPlugin` if it is absent)
@@ -572,7 +585,10 @@ replaces that person.
 - **A virtual list's pooled rows count for strictness**: an unbound row is a
   hidden, unnamed `listitem`, so `window >> listitem` is ambiguous as soon as
   the list has spare rows. Name the row (`listitem[name~=Seated]`); `nth(0)`
-  is the top bound row.
+  is the top bound row. The model names a parked row (`VirtualRow::index`
+  `None`) nothing whatever text its binder left in it — most binders skip a
+  parked row rather than blank it, and the debug-settings list filtered to one
+  setting otherwise had two rows of that name.
 - **The grid's side of an exchange is scripted through the viewer's
   session**: `stage.agent(label).with_sim(|sim| sim.send_instant_message(..))`
   delivers an IM or an offer from anybody, and what the viewer sends comes

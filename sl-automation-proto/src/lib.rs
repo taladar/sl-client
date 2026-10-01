@@ -23,7 +23,8 @@
 //!   [`ConversationReadout`] (local chat and instant-message transcripts), a
 //!   [`NotificationReadout`] (text and offered buttons), the [`StatusReadout`]
 //!   of the status bar, the own [`AgentReadout`] (region, position, seat,
-//!   teleport, camera), the [`SelectedObject`]s, an
+//!   teleport, camera, heading), the [`EnvironmentReadout`] of the sky being
+//!   drawn, the [`SelectedObject`]s, an
 //!   [`InventoryFolderReadout`] by path, the sequence-numbered [`LogEntry`]s
 //!   of events, commands and UI actions read by cursor as a [`LogPage`], the
 //!   [`DiagnosticsReadout`] of warnings and errors, and the
@@ -96,10 +97,10 @@ pub use crate::message::{
 };
 pub use crate::probe::{
     AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,
-    DiagnosticLine, DiagnosticsReadout, InventoryEntry, InventoryFolderReadout, InventoryRoot,
-    LogEntry, LogLevel, LogPage, LogStream, NotificationReadout, OfferedButton, QuiescenceReadout,
-    RegionReadout, SelectedObject, SpeakerKind, StatusReadout, TeleportReadout, TeleportState,
-    TranscriptLine,
+    DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, InventoryEntry, InventoryFolderReadout,
+    InventoryRoot, LogEntry, LogLevel, LogPage, LogStream, NotificationReadout, OfferedButton,
+    QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout, SpeakerKind, StatusReadout,
+    TeleportReadout, TeleportState, TranscriptLine,
 };
 pub use crate::report::FailureReport;
 pub use crate::selector::SelectorError;
