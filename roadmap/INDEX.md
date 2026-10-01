@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 124 |
-| ready | 312 |
+| ready | 311 |
 | blocked | 53 |
 | in-progress | 20 |
 | bugs | 16 |
-| done | 1289 |
+| done | 1290 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1861** |
@@ -313,7 +313,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (311)
 
 ### protocol
 
@@ -1018,8 +1018,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   End-to-end tests for the environment editors and their gates
 - [`test-e2e-sweep-live-grid`](ready/test-e2e-sweep-live-grid.md) — End-to-end
   tests for what only a live grid has
-- [`test-e2e-sweep-relog`](ready/test-e2e-sweep-relog.md) — End-to-end tests for
-  what must survive a relog
 - [`test-e2e-sweep-single-viewer-ui`](ready/test-e2e-sweep-single-viewer-ui.md)
   — End-to-end tests for the remaining single-viewer UI checks
 - [`test-e2e-sweep-two-avatars`](ready/test-e2e-sweep-two-avatars.md) —
@@ -1329,7 +1327,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1289)
+## done (1290)
 
 ### protocol
 
@@ -3777,6 +3775,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-e2e-stage`](done/test-e2e-stage.md) — sl-e2e Stage — a fake grid,
   several viewers and grid control in one test (blocked by
   `viewer-automation-driver` (done), `test-e2e-viewer-process-launch` (done))
+- [`test-e2e-sweep-relog`](done/test-e2e-sweep-relog.md) — End-to-end tests for
+  what must survive a relog
 - [`test-e2e-sweep-rlv`](done/test-e2e-sweep-rlv.md) — End-to-end tests for the
   RLVa console and windows
 - [`test-e2e-viewer-process-launch`](done/test-e2e-viewer-process-launch.md) —

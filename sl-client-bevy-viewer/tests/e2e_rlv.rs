@@ -172,7 +172,7 @@ mod test {
     #[test]
     fn the_rlva_windows_show_what_the_console_holds_until_it_closes() -> Result<(), TestError> {
         stage("rlva_windows").run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
+            let alpha = &stage.viewer("Alpha")?;
             with_rlva_menu(alpha, async |alpha: &Viewer| {
                 let _off = alpha
                     .expect(&rlva_entry(alpha, "menu-bar-enable-rlva"))
@@ -308,7 +308,7 @@ mod test {
     #[test]
     fn the_strings_window_keeps_an_edit_and_restores_the_default() -> Result<(), TestError> {
         stage("rlva_strings").run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
+            let alpha = &stage.viewer("Alpha")?;
             enable_rlv(alpha).await?;
             open_rlva_window(alpha, &["menu-bar-rlva", "menu-bar-strings"], STRINGS).await?;
             let strings = alpha.ui().window(STRINGS);
@@ -368,7 +368,7 @@ mod test {
     #[test]
     fn the_console_turns_the_sky_red_and_the_avatar_round() -> Result<(), TestError> {
         stage("rlv_environment").run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
+            let alpha = &stage.viewer("Alpha")?;
             enable_rlv(alpha).await?;
             open_console(alpha).await?;
 
@@ -450,7 +450,7 @@ mod test {
     fn no_set_env_releases_and_refuses_setenv_but_not_the_force_commands() -> Result<(), TestError>
     {
         stage("rlv_no_set_env").run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
+            let alpha = &stage.viewer("Alpha")?;
             enable_rlv(alpha).await?;
             open_console(alpha).await?;
             run(alpha, "@getdebug_restrainedlovenosetenv=2222").await?;

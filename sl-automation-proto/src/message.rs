@@ -86,6 +86,22 @@ pub enum RequestBody {
         #[serde(default, skip_serializing_if = "Deadline::is_default")]
         deadline: Deadline,
     },
+    /// Wait until exactly one node matches and is actionable, then drag it
+    /// by `offset` with the left button through the viewer's real input
+    /// path: press on it, move across in steps, rest, release — how a window
+    /// is moved by its title bar or resized by its grip, where what is
+    /// dragged *is* the target and no node marks where it ends. The offset is
+    /// relative, in logical pixels, `x` rightwards and `y` downwards. Answered
+    /// with [`ResponseBody::Done`] naming the node as it was when pressed.
+    DragBy {
+        /// What to press on.
+        source: Locator,
+        /// How far to move it, `[x, y]`.
+        offset: [f32; 2],
+        /// When to give up waiting for it.
+        #[serde(default, skip_serializing_if = "Deadline::is_default")]
+        deadline: Deadline,
+    },
     /// Wait until exactly one node matches and is actionable (a disabled one
     /// may be hovered), then rest the pointer on it. Answered with
     /// [`ResponseBody::Done`].
@@ -496,8 +512,8 @@ pub enum ResponseBody {
         nodes: Vec<UiNode>,
     },
     /// The answer to a UI action ([`RequestBody::Click`],
-    /// [`RequestBody::DragTo`], [`RequestBody::Hover`], [`RequestBody::Fill`],
-    /// and the routes).
+    /// [`RequestBody::DragTo`], [`RequestBody::DragBy`], [`RequestBody::Hover`],
+    /// [`RequestBody::Fill`], and the routes).
     Done {
         /// The node acted on, without its children: as it was when the
         /// action was applied, or for a fill as it is once it holds the text.
@@ -848,6 +864,11 @@ mod tests {
             RequestBody::DragTo {
                 source: Locator::test_id("row"),
                 target: Locator::role(Role::TreeItem).named("Objects"),
+                deadline: Deadline::default(),
+            },
+            RequestBody::DragBy {
+                source: Locator::test_id("floater-title-bar"),
+                offset: [120.0, -40.5],
                 deadline: Deadline::default(),
             },
             RequestBody::Hover {

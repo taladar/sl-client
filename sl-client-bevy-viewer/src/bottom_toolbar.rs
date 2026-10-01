@@ -399,6 +399,12 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
                 should_block_lower: false,
                 is_hoverable: true,
             },
+            // Permanent too: the nearby chat bar and the media and volume
+            // controls are always there, so a window neither opens nor is
+            // dragged under them — the reference's snap region ends above its
+            // chat bar as well. At 1280×720 a tall window (Preferences) opened
+            // with OK and Cancel behind the media controls otherwise.
+            crate::ui::ScreenChrome,
             Name::new("bottom-area-upper"),
             ChildOf(area),
         ))

@@ -106,3 +106,6 @@ friends with see-online rights — seeded directly in the grid's
 `friends.db`, grid state not git). The suppressed-confirm auto-respond,
 group-notice gate and inventory auto-accept are covered by the unit
 tests, not exercised live.
+
+The relog checks are end-to-end tests now (`tests/e2e_relog.rs`,
+[[test-e2e-sweep-relog]]).

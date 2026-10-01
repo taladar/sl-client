@@ -385,6 +385,8 @@ pub struct LoginNotice {
 pub(crate) struct GridCore {
     /// The registered accounts.
     pub(crate) accounts: Vec<Account>,
+    /// The friendships between accounts, as agent pairs.
+    friendships: Vec<(AgentKey, AgentKey)>,
     /// The agent every region reports as its owner: the first account
     /// registered with estate powers, or the nil key when no account has any.
     ///
@@ -508,6 +510,31 @@ pub(crate) struct PreparedSession {
 }
 
 impl GridCore {
+    /// The buddy list of `agent`'s login response: every account it is
+    /// friends with, each seeing the other online and on the map.
+    pub(crate) fn buddies_of(&self, agent: AgentKey) -> Vec<sl_wire::BuddyListEntry> {
+        /// What each side of a stage friendship grants the other.
+        const RIGHTS: i32 =
+            sl_proto::FriendRights::CAN_SEE_ONLINE | sl_proto::FriendRights::CAN_SEE_ON_MAP;
+        self.friendships
+            .iter()
+            .filter_map(|&(one, other)| {
+                if agent == one {
+                    Some(other)
+                } else if agent == other {
+                    Some(one)
+                } else {
+                    None
+                }
+            })
+            .map(|buddy| sl_wire::BuddyListEntry {
+                buddy_id: buddy.uuid(),
+                rights_granted: RIGHTS,
+                rights_has: RIGHTS,
+            })
+            .collect()
+    }
+
     /// The index of the region an account starts in.
     pub(crate) fn start_region(&self, account: &Account) -> Option<usize> {
         match &account.config.start_region {
@@ -605,7 +632,11 @@ impl GridCore {
         ));
         {
             let mut state = prepared.shared.state.lock().await;
-            register_account_display_name(&mut state.sim, account);
+            // Every account, not only the agent's own: a grid's people service
+            // names anyone with an account — a friend in the buddy list, say.
+            for known in &self.accounts {
+                register_account_display_name(&mut state.sim, known);
+            }
             enrich_success(
                 &mut success,
                 account,
@@ -1029,8 +1060,9 @@ fn grid_info_of(identity: &GridIdentity, login_uri: &url::Url) -> GridInfo {
         .with(KEY_MESSAGE, identity.message.clone())
 }
 
-/// Registers the logging-in account with the session's people-service store, so
-/// the `GetDisplayNames` capability can resolve the agent's own id.
+/// Registers an account with the session's people-service store, so the
+/// `GetDisplayNames` capability can resolve its id — the agent's own, and
+/// every other account's.
 ///
 /// Without this the capability answers correctly but unhelpfully: the id lands
 /// in `bad_ids`, and the reference viewer renders the name tag as
@@ -1248,6 +1280,8 @@ pub struct FakeGridBuilder {
     bakes: Option<BakePolicy>,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
+    /// The friendships between accounts, each pair of `First Last` names.
+    friendships: Vec<[(String, String); 2]>,
     /// The identifier source (random unless seeded).
     minter: IdMinter,
     /// The clock every session machine is stamped from (the system clock
@@ -1346,6 +1380,7 @@ impl FakeGridBuilder {
             upload_announcements: None,
             bakes: None,
             map_tiles: MapTileStore::default(),
+            friendships: Vec::new(),
         }
     }
 
@@ -1372,6 +1407,27 @@ impl FakeGridBuilder {
             }
         }
         granted
+    }
+
+    /// Makes the accounts `first last` and `other_first other_last` friends,
+    /// each letting the other see it online and on the map: each one's login
+    /// response lists the other in its `buddy-list`.
+    ///
+    /// The friendship is a fixed fact of the grid, not a service: nothing
+    /// tells a friend when the other comes online (the roadmap's
+    /// `server-friends-service` is that), so a test announces it with the
+    /// session's `send_online_notification`.
+    #[must_use]
+    pub fn friends(
+        mut self,
+        (first, last): (&str, &str),
+        (other_first, other_last): (&str, &str),
+    ) -> Self {
+        self.friendships.push([
+            (first.to_owned(), last.to_owned()),
+            (other_first.to_owned(), other_last.to_owned()),
+        ]);
+        self
     }
 
     /// Adds a region.
@@ -1698,6 +1754,24 @@ impl FakeGridBuilder {
             .into_iter()
             .map(|config| Account::register(config, &minter))
             .collect();
+        let friendships = self
+            .friendships
+            .iter()
+            .map(|pair| {
+                let [one, other] = pair.clone().map(|(first, last)| {
+                    accounts
+                        .iter()
+                        .find(|account| {
+                            account.config.first_name == first && account.config.last_name == last
+                        })
+                        .map(|account| account.agent_id)
+                        .ok_or(Error::UnknownFriend {
+                            account: format!("{first} {last}"),
+                        })
+                });
+                Ok((one?, other?))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
         let estate_owner = accounts
             .iter()
             .find(|account| account.config.estate_manager)
@@ -1705,6 +1779,7 @@ impl FakeGridBuilder {
         let bakes = self.bakes.unwrap_or_else(|| self.imitates.bakes());
         let core = Arc::new(GridCore {
             accounts,
+            friendships,
             estate_owner,
             regions,
             gates: self.gates,

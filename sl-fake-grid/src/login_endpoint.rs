@@ -117,6 +117,7 @@ async fn respond(core: &Arc<GridCore>, parsed: &ParsedLoginRequest) -> LoginResp
             ));
         }
     };
+    success.buddy_list = core.buddies_of(account.agent_id);
     // Refuse rather than answer `login: true` without a field the reference
     // viewer requires. Such a response is accepted by the login machinery,
     // opens the circuit, and only then fails the viewer's own success check —

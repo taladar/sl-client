@@ -903,6 +903,29 @@ mod tests {
         );
     }
 
+    /// An object that queued before its entry was made — the blacklist read at
+    /// login while the arrival burst still waits in the scene mirror's backlog
+    /// — is dropped when it is finally applied, and so is a child of it; both
+    /// are recorded, so un-derendering re-fetches them. Anything else passes.
+    #[test]
+    fn a_backlogged_object_meets_an_entry_made_while_it_waited() {
+        let mut list = DerenderList::default();
+        let scoped = |id: u32| ScopedObjectId::new(CircuitId::default(), RegionLocalObjectId(id));
+        let id = Uuid::from_u128(1);
+        // Read from the update before the entry existed: nothing hid it then.
+        assert!(!list.suppresses_queued(scoped(10), id, None));
+        list.add(entry(1, true));
+        assert!(!list.is_suppressed(scoped(10)), "the index never saw it");
+        assert!(list.suppresses_queued(scoped(10), id, None));
+        assert!(list.suppresses_queued(scoped(11), Uuid::from_u128(5), Some(scoped(10))));
+        assert!(!list.suppresses_queued(scoped(12), Uuid::from_u128(6), None));
+        list.pending_refetch.clear();
+        list.remove(id);
+        let mut released = core::mem::take(&mut list.pending_refetch);
+        released.sort_by_key(|scoped| scoped.id.0);
+        assert_eq!(released, vec![scoped(10), scoped(11)]);
+    }
+
     /// Clearing the temporary entries releases (and re-fetches) only what they
     /// were suppressing.
     #[test]

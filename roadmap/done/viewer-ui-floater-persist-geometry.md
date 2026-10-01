@@ -83,3 +83,6 @@ wild-value clamp) in `floater_persist`, and `is_overridden` in `sl-settings`.
 The seed/persist/flush wiring is integration-only (needs a live login) and is
 best verified by opening the inventory, moving/resizing it, quitting, and
 logging back in.
+
+The relog checks are end-to-end tests now (`tests/e2e_relog.rs`,
+[[test-e2e-sweep-relog]]).

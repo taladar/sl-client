@@ -76,7 +76,7 @@ mod test {
     #[test]
     fn every_window_chord_on_the_menu_bar_opens_and_closes_its_window() -> Result<(), TestError> {
         stage("window_chords", &["Alpha"]).run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
+            let alpha = &stage.viewer("Alpha")?;
             for (chord, floater) in WINDOW_CHORDS {
                 let window = alpha.ui().window(floater);
                 assert!(
@@ -187,7 +187,7 @@ mod test {
             .needs(Need::Content("the stock scene's unnamed box, to rez on"))
             .needs(Need::GridControl)
             .run(async |stage: &Stage| {
-                let alpha = stage.viewer("Alpha")?;
+                let alpha = &stage.viewer("Alpha")?;
                 alpha.press("Ctrl+B").await?;
                 let build = alpha.ui().window(BUILD_WINDOW);
                 let _open = alpha.expect(&build).to_be_visible().await?;
@@ -313,7 +313,7 @@ mod test {
             .region(home)
             .region(neighbour)
             .run(async |stage: &Stage| {
-                let alpha = stage.viewer("Alpha")?;
+                let alpha = &stage.viewer("Alpha")?;
                 let _opened = alpha.menu_path(&HELP_ABOUT).await?;
                 let about = alpha.ui().window(ABOUT);
                 let _shown = alpha.expect(&about).to_be_visible().await?;
@@ -491,7 +491,7 @@ mod test {
         stage("do_not_disturb", &["Alpha"])
             .needs(Need::GridControl)
             .run(async |stage: &Stage| {
-                let alpha = stage.viewer("Alpha")?;
+                let alpha = &stage.viewer("Alpha")?;
                 let _on = alpha.menu_path(&UNAVAILABLE).await?;
                 let mut heard = stage.agent("Alpha").await?.events();
                 let caller = Uuid::from_u128(CALLER);
@@ -612,7 +612,7 @@ mod test {
         stage("radar", &["Alpha"])
             .region(catalogue()?)
             .run(async |stage: &Stage| {
-                let alpha = stage.viewer("Alpha")?;
+                let alpha = &stage.viewer("Alpha")?;
                 let _opened = alpha
                     .menu_path(&["menu-bar-world", "menu-bar-radar"])
                     .await?;

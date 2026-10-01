@@ -129,3 +129,6 @@ store at all. The interactive checks — the settings floater's five checkboxes
 and three reply editors, their persistence across a relog, and the online-first
 ordering — are outstanding, and the **per-set reply actually being sent** shares
 the two-avatar live check still outstanding from [[viewer-do-not-disturb-away]].
+
+The relog checks are end-to-end tests now (`tests/e2e_relog.rs`,
+[[test-e2e-sweep-relog]]).

@@ -145,6 +145,62 @@ mod test {
         Ok(())
     }
 
+    /// **A friendship is in both friends' buddy lists**, each seeing the
+    /// other online and on the map, and in nobody else's; a friendship naming
+    /// an account the grid lacks refuses to start the grid.
+    #[tokio::test]
+    async fn friends_find_each_other_in_their_buddy_lists() -> Result<(), TestError> {
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("Test", "User", "password"))
+            .account(AccountConfig::new("Test", "Friend", "password"))
+            .account(AccountConfig::new("Test", "Stranger", "password"))
+            .friends(("Test", "User"), ("Test", "Friend"))
+            .region(RegionConfig::default())
+            .event_queue_hold(Duration::from_millis(200))
+            .start()
+            .await?;
+        let buddies = async |last: &str| -> Result<Vec<(sl_proto::Uuid, i32, i32)>, TestError> {
+            let request = LoginRequest::new(
+                "Test",
+                last,
+                "password",
+                StartLocation::Last,
+                "sl-fake-grid-test",
+                "0.0",
+            );
+            let text = post_login(&grid, "text/xml", build_login_request(&request)).await?;
+            let LoginResponse::Success(success) = parse_login_response(&text)? else {
+                return Err(format!("expected Test {last} to log in").into());
+            };
+            Ok(success
+                .buddy_list
+                .iter()
+                .map(|buddy| (buddy.buddy_id, buddy.rights_granted, buddy.rights_has))
+                .collect())
+        };
+        let id = |last: &str| {
+            grid.account_agent_id("Test", last)
+                .map(|agent| agent.uuid())
+                .ok_or("no such account")
+        };
+        assert_eq!(buddies("User").await?, [(id("Friend")?, 3, 3)]);
+        assert_eq!(buddies("Friend").await?, [(id("User")?, 3, 3)]);
+        assert_eq!(buddies("Stranger").await?, []);
+
+        let refused = FakeGridBuilder::new()
+            .account(AccountConfig::new("Test", "User", "password"))
+            .friends(("Test", "User"), ("Test", "Nobody"))
+            .region(RegionConfig::default())
+            .start()
+            .await;
+        assert!(
+            matches!(&refused, Err(sl_fake_grid::Error::UnknownFriend { account }) if account == "Test Nobody"),
+            "a friendship with no account refuses the grid: {:?}",
+            refused.err()
+        );
+        Ok(())
+    }
+
     /// The other flavour's login says nothing about voice, because a stock
     /// OpenSim region runs none — and would not name one even if it did.
     ///

@@ -5,8 +5,8 @@
 use core::time::Duration;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
 use bevy::math::UVec2;
@@ -582,17 +582,34 @@ impl Login {
 /// How one stage viewer runs.
 #[derive(Debug)]
 enum ViewerRun {
-    /// An App on the stage's in-process host; `None` before it is hosted.
+    /// An App on the stage's in-process host; `None` before it is hosted and
+    /// once it has exited.
     InProcess(Option<ViewerHandle>),
-    /// A process; `None` once it has been stopped.
+    /// A process; `None` before it is spawned and once it has been stopped.
     Process(Option<RunningViewer>),
 }
 
+impl ViewerRun {
+    /// Nothing running yet, on `backend`.
+    const fn idle(backend: Backend) -> Self {
+        match backend {
+            Backend::InProcess => Self::InProcess(None),
+            Backend::Process => Self::Process(None),
+        }
+    }
+}
+
 /// One stage viewer.
+///
+/// What a relog replaces — the driver's handle and what runs — sits behind a
+/// lock, since a relog happens while the body holds the stage shared.
 #[derive(Debug)]
 struct StageViewer {
     /// Its label.
     label: String,
+    /// Its place among the stage's viewers: which live account it takes, and
+    /// its socket's number.
+    index: usize,
     /// Its account's `First Last` name.
     account: String,
     /// Its account's agent: on the fake grid from the start, on a live grid
@@ -600,14 +617,42 @@ struct StageViewer {
     agent: Option<AgentKey>,
     /// Its artifact directory.
     dir: PathBuf,
-    /// The driver's handle, once connected.
-    driver: Option<Viewer>,
-    /// How it runs.
-    run: ViewerRun,
+    /// The driver's handle on its current session, once connected.
+    driver: Mutex<Option<Viewer>>,
+    /// How its current session runs.
+    run: Mutex<ViewerRun>,
+    /// How many sessions it has started: the first is 0, each relog the
+    /// next.
+    sessions: AtomicU32,
     /// Whether the body made it quit by itself ([`Stage::expect_quit`]), so
     /// the teardown takes its own exit as its logout rather than asking for
     /// one.
     quits: AtomicBool,
+}
+
+impl StageViewer {
+    /// The driver's handle on its current session.
+    fn driver(&self) -> Result<Viewer, StageError> {
+        lock(&self.driver)
+            .clone()
+            .ok_or_else(|| StageError::UnknownViewer(self.label.clone()))
+    }
+
+    /// Make `driver` the handle on its current session.
+    fn connected(&self, driver: Viewer) {
+        *lock(&self.driver) = Some(driver);
+    }
+
+    /// Make `run` its current session.
+    fn running(&self, run: ViewerRun) {
+        *lock(&self.run) = run;
+    }
+}
+
+/// `mutex`'s contents, also after a panic while it was held: what it guards
+/// is replaced whole, never left half-written.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// A running stage: the grid and its viewers, each logged in.
@@ -627,12 +672,16 @@ pub struct Stage {
     live: Option<LiveAccounts>,
     /// The region the viewers start in.
     home: String,
+    /// Where every viewer logs in to, a relog included.
+    start: StartLocation,
+    /// The viewer binary, for the process backend.
+    binary: Option<PathBuf>,
     /// The viewers, in the order they were named.
     viewers: Vec<StageViewer>,
     /// The in-process host, on that backend.
     host: Option<InProcessHost<ViewerApp>>,
-    /// Where the process backend's automation sockets are.
-    sockets: Option<PathBuf>,
+    /// Where the process backend's automation sockets are, once one is.
+    sockets: OnceLock<PathBuf>,
 }
 
 impl Stage {
@@ -653,6 +702,10 @@ impl Stage {
                 (Some(grid), home)
             }
         };
+        let start = match live {
+            Some(live) => live.start.clone(),
+            None => StartLocation::region(home.clone(), builder.start),
+        };
         let mut stage = Self {
             name: builder.name.clone(),
             backend,
@@ -661,9 +714,11 @@ impl Stage {
             grid,
             live: live.cloned(),
             home,
+            start,
+            binary: builder.binary.clone(),
             viewers: Vec::new(),
             host: None,
-            sockets: None,
+            sockets: OnceLock::new(),
         };
         match stage.launch(builder).await {
             Ok(()) => Ok(stage),
@@ -680,43 +735,29 @@ impl Stage {
     /// each, and wait until all have logged in and settled — on the fake
     /// grid in its home region, on a live grid wherever the grid put them.
     async fn launch(&mut self, builder: &StageBuilder) -> Result<(), StageError> {
-        let start = match &self.live {
-            Some(live) => live.start.clone(),
-            None => StartLocation::region(self.home.clone(), builder.start),
-        };
-        match self.backend {
-            Backend::InProcess => self.launch_in_process(builder, &start).await?,
-            Backend::Process => self.launch_processes(builder, &start).await?,
+        if self.backend == Backend::InProcess {
+            self.host = Some(InProcessHost::<ViewerApp>::start()?);
+        }
+        for (index, label) in builder.labels.iter().enumerate() {
+            let login = self.login_of(index, label)?;
+            self.viewers.push(StageViewer {
+                label: label.clone(),
+                index,
+                account: login.account_name(label),
+                agent: login.agent(),
+                dir: self.dir.join(label),
+                driver: Mutex::new(None),
+                run: Mutex::new(ViewerRun::idle(self.backend)),
+                sessions: AtomicU32::new(0),
+                quits: AtomicBool::new(false),
+            });
+            if let Some(viewer) = self.viewers.last() {
+                self.start_session(viewer).await?;
+            }
         }
         let mut arrivals = tokio::task::JoinSet::new();
         for viewer in &self.viewers {
-            let driver = viewer
-                .driver
-                .clone()
-                .ok_or_else(|| StageError::UnknownViewer(viewer.label.clone()))?;
-            let home = (!self.home.is_empty()).then(|| self.home.clone());
-            let settle = if self.on.is_live() {
-                LIVE_SETTLE
-            } else {
-                LOGIN
-            };
-            let _task = arrivals.spawn(async move {
-                let arrived = async {
-                    let region = driver
-                        .expect_state(Probe::Agent)
-                        .at("/region/name")
-                        .timeout(LOGIN);
-                    let _held = match home {
-                        Some(home) => region.to_equal(json!(home)).await?,
-                        None => region.to_be_present().await?,
-                    };
-                    driver.wait_until_quiet(settle).await
-                };
-                arrived.await.map_err(|source| StageError::Driver {
-                    viewer: driver.label().to_owned(),
-                    source,
-                })
-            });
+            let _task = arrivals.spawn(arrive(viewer.driver()?, self.arrival(), self.settle()));
         }
         while let Some(joined) = arrivals.join_next().await {
             match joined {
@@ -729,9 +770,7 @@ impl Stage {
             if viewer.agent.is_some() && !self.home.is_empty() {
                 continue;
             }
-            let Some(driver) = &viewer.driver else {
-                continue;
-            };
+            let driver = viewer.driver()?;
             let readout = driver.agent().await.map_err(|source| StageError::Driver {
                 viewer: viewer.label.clone(),
                 source,
@@ -746,6 +785,34 @@ impl Stage {
             }
         }
         Ok(())
+    }
+
+    /// The region a viewer that logs in waits to arrive in: the fake grid's
+    /// home region, and on a live grid whichever the grid puts it in.
+    fn arrival(&self) -> Option<String> {
+        (!self.on.is_live() && !self.home.is_empty()).then(|| self.home.clone())
+    }
+
+    /// How long a viewer that has arrived may take to settle.
+    const fn settle(&self) -> Duration {
+        if self.on.is_live() {
+            LIVE_SETTLE
+        } else {
+            LOGIN
+        }
+    }
+
+    /// Start a session of `viewer` on the stage's backend, logged in as its
+    /// account, and connect the driver to it. Each step's result is kept on
+    /// `viewer` as it is made, so a teardown after a failed step stops what
+    /// was started.
+    async fn start_session(&self, viewer: &StageViewer) -> Result<(), StageError> {
+        let login = self.login_of(viewer.index, &viewer.label)?;
+        let session = viewer.sessions.fetch_add(1, Ordering::Relaxed);
+        match self.backend {
+            Backend::InProcess => self.start_in_process(viewer, &login).await,
+            Backend::Process => self.start_process(viewer, &login, session).await,
+        }
     }
 
     /// Who viewer `index` (labelled `label`) logs in as: its account on a
@@ -791,253 +858,314 @@ impl Stage {
         Ok(())
     }
 
-    /// The in-process backend: each viewer an App on one host.
-    async fn launch_in_process(
-        &mut self,
-        builder: &StageBuilder,
-        start: &StartLocation,
+    /// The name an in-process viewer's log span carries
+    /// ([`StageBuilder::log_label`]).
+    fn log_label(&self, label: &str) -> String {
+        format!("{}/{}/{label}", self.name, self.backend)
+    }
+
+    /// The in-process backend: `viewer` an App on the stage's host, storing
+    /// under its directory's `state/` — the same tree every session of it
+    /// reads back.
+    async fn start_in_process(
+        &self,
+        viewer: &StageViewer,
+        login: &Login,
     ) -> Result<(), StageError> {
-        self.host = Some(InProcessHost::<ViewerApp>::start()?);
-        for (index, label) in builder.labels.iter().enumerate() {
-            let login = self.login_of(index, label)?;
-            self.take_login_turn(&login).await?;
-            let (first, last, password, login_uri) = match &login {
-                Login::Live(account) => (
-                    account.avatar.first().to_owned(),
-                    account.avatar.last().to_owned(),
-                    account.avatar.password().expose().to_owned(),
-                    account.login_uri.clone(),
-                ),
-                Login::Stage { login_uri, .. } => (
-                    FIRST_NAME.to_owned(),
-                    label.clone(),
-                    PASSWORD.to_owned(),
-                    login_uri.clone(),
-                ),
+        let label = &viewer.label;
+        let dir = &viewer.dir;
+        self.take_login_turn(login).await?;
+        let (first, last, password, login_uri) = match login {
+            Login::Live(account) => (
+                account.avatar.first().to_owned(),
+                account.avatar.last().to_owned(),
+                account.avatar.password().expose().to_owned(),
+                account.login_uri.clone(),
+            ),
+            Login::Stage { login_uri, .. } => (
+                FIRST_NAME.to_owned(),
+                label.clone(),
+                PASSWORD.to_owned(),
+                login_uri.clone(),
+            ),
+        };
+        let mut request =
+            LoginRequest::new(first, last, password, self.start.clone(), "sl-e2e", "0.0");
+        // A grid that asks for a second factor ends the App with the
+        // challenge: answer it, and log in again with a new App.
+        loop {
+            let params = LoginParams {
+                login_uri: login_uri.parse().map_err(|error| StageError::Login {
+                    viewer: label.clone(),
+                    reason: format!("the login URI {login_uri}: {error}"),
+                })?,
+                request: request.clone(),
             };
-            let mut request =
-                LoginRequest::new(first, last, password, start.clone(), "sl-e2e", "0.0");
-            let dir = self.dir.join(label);
-            self.viewers.push(StageViewer {
-                label: label.clone(),
-                account: login.account_name(label),
-                agent: login.agent(),
-                dir: dir.clone(),
-                driver: None,
-                run: ViewerRun::InProcess(None),
-                quits: AtomicBool::new(false),
-            });
-            // A grid that asks for a second factor ends the App with the
-            // challenge: answer it, and log in again with a new App.
-            loop {
-                let params = LoginParams {
-                    login_uri: login_uri.parse().map_err(|error| StageError::Login {
+            let log_label = self.log_label(label);
+            let state = dir.join("state");
+            let host = self
+                .host
+                .as_ref()
+                .ok_or(sl_viewer_automation::HostError::Stopped)?;
+            let (handle, link) = host
+                .host(label.clone(), move || {
+                    in_process_viewer(params, log_label, &state)
+                })
+                .await?;
+            viewer.running(ViewerRun::InProcess(Some(handle)));
+            let driver =
+                Viewer::over_link(link.requests, link.messages, driver_options(label, dir))
+                    .await
+                    .map_err(|source| StageError::Driver {
                         viewer: label.clone(),
-                        reason: format!("the login URI {login_uri}: {error}"),
-                    })?,
-                    request: request.clone(),
-                };
-                let log_label = builder.log_label(self.backend, label);
-                let state = dir.join("state");
+                        source,
+                    })?;
+            viewer.connected(driver.clone());
+            let logged_in = driver
+                .expect_state(Probe::Agent)
+                .at("/agent_id")
+                .timeout(LOGIN)
+                .to_be_present();
+            tokio::select! {
+                logged_in = logged_in => {
+                    let _held = logged_in.map_err(|source| StageError::Driver {
+                        viewer: label.clone(),
+                        source,
+                    })?;
+                    return Ok(());
+                }
+                exited = host.exited(handle) => exited?,
+            }
+            viewer.running(ViewerRun::InProcess(None));
+            let outcome = host
+                .with_app(handle, |viewer| {
+                    viewer
+                        .app_mut()
+                        .world_mut()
+                        .remove_resource::<LoginOutcome>()
+                })
+                .await?
+                .unwrap_or_default();
+            let challenge = match (outcome.challenge, outcome.rejected) {
+                (Some(challenge), _) => challenge,
+                (None, Some(rejected)) => {
+                    return Err(StageError::Login {
+                        viewer: label.clone(),
+                        reason: format!("{} ({})", rejected.reason, rejected.message),
+                    });
+                }
+                (None, None) => {
+                    return Err(StageError::Login {
+                        viewer: label.clone(),
+                        reason: "it exited before it logged in".to_owned(),
+                    });
+                }
+            };
+            let Login::Live(account) = login else {
+                return Err(StageError::Login {
+                    viewer: label.clone(),
+                    reason: "the fake grid asked for a second factor".to_owned(),
+                });
+            };
+            tracing::info!("viewer {label}: the grid asks for a second factor");
+            let avatar = account.avatar.clone();
+            let token = tokio::task::spawn_blocking(move || avatar.acquire_mfa())
+                .await
+                .unwrap_or_else(|join| std::panic::resume_unwind(join.into_panic()))
+                .map_err(|error| StageError::Login {
+                    viewer: label.clone(),
+                    reason: error.to_string(),
+                })?
+                .ok_or_else(|| StageError::Login {
+                    viewer: label.clone(),
+                    reason: format!(
+                        "the grid asks for a second factor and avatar {} has no mfa_command",
+                        account.key
+                    ),
+                })?;
+            request = request.with_mfa(token.expose(), challenge.mfa_hash);
+        }
+    }
+
+    /// The process backend: `viewer` the real binary, headless, behind an
+    /// automation socket, confined to its directory — the same tree every
+    /// session of it reads back. Session `session`'s output goes to
+    /// `viewer.log` for the first and `viewer.<session>.log` after a relog.
+    async fn start_process(
+        &self,
+        viewer: &StageViewer,
+        login: &Login,
+        session: u32,
+    ) -> Result<(), StageError> {
+        let label = &viewer.label;
+        let binary = self.binary.clone().ok_or(StageError::NoBinary)?;
+        let sockets = self.socket_dir()?;
+        let dir = ViewerDir {
+            root: viewer.dir.clone(),
+        };
+        // A live account's own file and key; a stage account's written
+        // here. The viewer answers a second-factor challenge itself.
+        let (credentials, avatar_key, login_uri) = match login {
+            Login::Live(account) => (
+                self.live
+                    .as_ref()
+                    .map(|live| live.file.clone())
+                    .ok_or_else(|| StageError::NoAccount(label.clone()))?,
+                account.key.clone(),
+                account.login_uri.clone(),
+            ),
+            Login::Stage { login_uri, .. } => (
+                write_stage_credentials(&dir, label, login_uri)?,
+                AVATAR_KEY.to_owned(),
+                login_uri.clone(),
+            ),
+        };
+        self.take_login_turn(login).await?;
+        let socket = sockets.join(format!("{}.{session}.sock", viewer.index));
+        let mut launch = Launch::in_dir(label.clone(), &binary, &dir).args([
+            "--credentials".to_owned(),
+            credentials.display().to_string(),
+            "--avatar".to_owned(),
+            avatar_key,
+            "--login-uri".to_owned(),
+            login_uri,
+            "--start".to_owned(),
+            self.start.to_wire_string(),
+            "--headless".to_owned(),
+            "--capture-size".to_owned(),
+            format!("{}x{}", WINDOW.x, WINDOW.y),
+            "--disable-web-media".to_owned(),
+            "--automation-socket".to_owned(),
+            socket.display().to_string(),
+        ]);
+        if session > 0 {
+            launch.log = dir.root.join(format!("viewer.{session}.log"));
+        }
+        let running = RunningViewer::spawn(&launch).map_err(|source| StageError::Launch {
+            viewer: label.clone(),
+            source,
+        })?;
+        viewer.running(ViewerRun::Process(Some(running)));
+        let driver = connect(viewer, &socket, &launch.log).await?;
+        viewer.connected(driver);
+        Ok(())
+    }
+
+    /// The process backend's socket directory, made on first use. Short: a
+    /// socket path must stay under about a hundred bytes, and the artifact
+    /// directory is deep.
+    fn socket_dir(&self) -> Result<PathBuf, StageError> {
+        let sockets = self.sockets.get_or_init(|| {
+            std::env::temp_dir().join(format!(
+                "sl-e2e-{}-{}",
+                std::process::id(),
+                NEXT_SOCKET_DIR.fetch_add(1, Ordering::Relaxed)
+            ))
+        });
+        fs_err::create_dir_all(sockets).map_err(|source| StageError::Artifacts {
+            path: sockets.clone(),
+            source,
+        })?;
+        Ok(sockets.clone())
+    }
+
+    /// Log viewer `label` out and back in, keeping its directories — its
+    /// settings, its per-account files, its caches — as a person quitting
+    /// and starting the viewer again would; answers the driver's handle on
+    /// the new session, which [`viewer`](Self::viewer) answers from now on.
+    ///
+    /// The viewer is asked to log out as the teardown asks it (its
+    /// termination flag in process, `SIGTERM` to a process) and must exit
+    /// having done so; on the fake grid, its session must then be gone from
+    /// the grid. The new session logs in where the stage's viewers start —
+    /// on a live grid after its turn under the login cooldown — and is waited
+    /// for as the stage's start waits: arrived, and quiet.
+    ///
+    /// # Errors
+    ///
+    /// [`StageError::UnknownViewer`]; [`StageError::NoLogout`] when it does
+    /// not log out, [`StageError::Stranded`] when the grid keeps its session,
+    /// and as the stage's start when the new session does not come up.
+    pub async fn relog(&self, label: &str) -> Result<Viewer, StageError> {
+        let viewer = self.stage_viewer(label)?;
+        tracing::info!("stage {}: relogging viewer {label}", self.name);
+        self.log_out(viewer).await?;
+        self.start_session(viewer).await?;
+        let driver = viewer.driver()?;
+        arrive(driver.clone(), self.arrival(), self.settle()).await?;
+        tracing::info!("stage {}: viewer {label} is back", self.name);
+        Ok(driver)
+    }
+
+    /// Ask `viewer` to log out, wait until it has exited, and — on the fake
+    /// grid — until the grid no longer holds its session.
+    async fn log_out(&self, viewer: &StageViewer) -> Result<(), StageError> {
+        let label = &viewer.label;
+        drop(lock(&viewer.driver).take());
+        let run = core::mem::replace(&mut *lock(&viewer.run), ViewerRun::idle(self.backend));
+        match run {
+            ViewerRun::InProcess(Some(handle)) => {
                 let host = self
                     .host
                     .as_ref()
                     .ok_or(sl_viewer_automation::HostError::Stopped)?;
-                let (handle, link) = host
-                    .host(label.clone(), move || {
-                        in_process_viewer(params, log_label, &state)
-                    })
-                    .await?;
-                let driver =
-                    Viewer::over_link(link.requests, link.messages, driver_options(label, &dir))
-                        .await
-                        .map_err(|source| StageError::Driver {
+                ask_to_log_out(host, label, handle).await?;
+                match tokio::time::timeout(LOGOUT, host.exited(handle)).await {
+                    Ok(exited) => exited?,
+                    Err(_elapsed) => {
+                        return Err(StageError::NoLogout {
                             viewer: label.clone(),
-                            source,
-                        })?;
-                if let Some(viewer) = self.viewers.last_mut() {
-                    viewer.run = ViewerRun::InProcess(Some(handle));
-                    viewer.driver = Some(driver.clone());
-                }
-                let logged_in = driver
-                    .expect_state(Probe::Agent)
-                    .at("/agent_id")
-                    .timeout(LOGIN)
-                    .to_be_present();
-                tokio::select! {
-                    logged_in = logged_in => {
-                        let _held = logged_in.map_err(|source| StageError::Driver {
-                            viewer: label.clone(),
-                            source,
-                        })?;
-                        break;
-                    }
-                    exited = host.exited(handle) => exited?,
-                }
-                let outcome = host
-                    .with_app(handle, |viewer| {
-                        viewer
-                            .app_mut()
-                            .world_mut()
-                            .remove_resource::<LoginOutcome>()
-                    })
-                    .await?
-                    .unwrap_or_default();
-                let challenge = match (outcome.challenge, outcome.rejected) {
-                    (Some(challenge), _) => challenge,
-                    (None, Some(rejected)) => {
-                        return Err(StageError::Login {
-                            viewer: label.clone(),
-                            reason: format!("{} ({})", rejected.reason, rejected.message),
+                            reason: format!(
+                                "it had not exited {} s after being asked",
+                                LOGOUT.as_secs()
+                            ),
                         });
                     }
-                    (None, None) => {
-                        return Err(StageError::Login {
-                            viewer: label.clone(),
-                            reason: "it exited before it logged in".to_owned(),
-                        });
-                    }
-                };
-                let Login::Live(account) = &login else {
-                    return Err(StageError::Login {
-                        viewer: label.clone(),
-                        reason: "the fake grid asked for a second factor".to_owned(),
-                    });
-                };
-                tracing::info!("viewer {label}: the grid asks for a second factor");
-                let avatar = account.avatar.clone();
-                let token = tokio::task::spawn_blocking(move || avatar.acquire_mfa())
+                }
+            }
+            ViewerRun::Process(Some(running)) => {
+                let ran = tokio::task::spawn_blocking(move || running.stop(LOGOUT_GRACE))
                     .await
                     .unwrap_or_else(|join| std::panic::resume_unwind(join.into_panic()))
-                    .map_err(|error| StageError::Login {
+                    .map_err(|source| StageError::Launch {
                         viewer: label.clone(),
-                        reason: error.to_string(),
-                    })?
-                    .ok_or_else(|| StageError::Login {
-                        viewer: label.clone(),
-                        reason: format!(
-                            "the grid asks for a second factor and avatar {} has no mfa_command",
-                            account.key
-                        ),
+                        source,
                     })?;
-                request = request.with_mfa(token.expose(), challenge.mfa_hash);
-            }
-        }
-        Ok(())
-    }
-
-    /// The process backend: each viewer the real binary, headless, behind an
-    /// automation socket.
-    async fn launch_processes(
-        &mut self,
-        builder: &StageBuilder,
-        start: &StartLocation,
-    ) -> Result<(), StageError> {
-        let binary = builder.binary.clone().ok_or(StageError::NoBinary)?;
-        // Short: a socket path must stay under about a hundred bytes, and the
-        // artifact directory is deep.
-        let sockets = std::env::temp_dir().join(format!(
-            "sl-e2e-{}-{}",
-            std::process::id(),
-            NEXT_SOCKET_DIR.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs_err::create_dir_all(&sockets).map_err(|source| StageError::Artifacts {
-            path: sockets.clone(),
-            source,
-        })?;
-        let sockets = self.sockets.insert(sockets).clone();
-        for (index, label) in builder.labels.iter().enumerate() {
-            let login = self.login_of(index, label)?;
-            let dir = viewer_dir(&self.dir, label);
-            // A live account's own file and key; a stage account's written
-            // here. The viewer answers a second-factor challenge itself.
-            let (credentials, avatar_key, login_uri) = match &login {
-                Login::Live(account) => (
-                    self.live
-                        .as_ref()
-                        .map(|live| live.file.clone())
-                        .ok_or_else(|| StageError::NoAccount(label.clone()))?,
-                    account.key.clone(),
-                    account.login_uri.clone(),
-                ),
-                Login::Stage { login_uri, .. } => (
-                    write_stage_credentials(&dir, label, login_uri)?,
-                    AVATAR_KEY.to_owned(),
-                    login_uri.clone(),
-                ),
-            };
-            self.take_login_turn(&login).await?;
-            let socket = sockets.join(format!("{index}.sock"));
-            let launch = Launch::in_dir(label.clone(), &binary, &dir).args([
-                "--credentials".to_owned(),
-                credentials.display().to_string(),
-                "--avatar".to_owned(),
-                avatar_key,
-                "--login-uri".to_owned(),
-                login_uri,
-                "--start".to_owned(),
-                start.to_wire_string(),
-                "--headless".to_owned(),
-                "--capture-size".to_owned(),
-                format!("{}x{}", WINDOW.x, WINDOW.y),
-                "--disable-web-media".to_owned(),
-                "--automation-socket".to_owned(),
-                socket.display().to_string(),
-            ]);
-            let running = RunningViewer::spawn(&launch).map_err(|source| StageError::Launch {
-                viewer: label.clone(),
-                source,
-            })?;
-            self.viewers.push(StageViewer {
-                label: label.clone(),
-                account: login.account_name(label),
-                agent: login.agent(),
-                dir: dir.root.clone(),
-                driver: None,
-                run: ViewerRun::Process(Some(running)),
-                quits: AtomicBool::new(false),
-            });
-            let driver = self.connect_last(&socket, &dir.log()).await?;
-            if let Some(viewer) = self.viewers.last_mut() {
-                viewer.driver = Some(driver);
-            }
-        }
-        Ok(())
-    }
-
-    /// Connect the driver to the viewer process launched last, once its
-    /// socket answers — failing early, with its log, if it ends first.
-    async fn connect_last(&mut self, socket: &Path, log: &Path) -> Result<Viewer, StageError> {
-        let since = Instant::now();
-        let mut last = "the socket does not exist yet".to_owned();
-        loop {
-            let Some(viewer) = self.viewers.last_mut() else {
-                return Err(StageError::UnknownViewer(String::new()));
-            };
-            if fs_err::metadata(socket).is_ok() {
-                match Viewer::connect(socket, driver_options(&viewer.label, &viewer.dir)).await {
-                    Ok(driver) => return Ok(driver),
-                    Err(error) => last = error.to_string(),
+                if ran.ending != Ending::AskedToQuit {
+                    return Err(StageError::NoLogout {
+                        viewer: label.clone(),
+                        reason: format!("it ended without logging out ({:?})", ran.ending),
+                    });
                 }
             }
-            if let ViewerRun::Process(Some(running)) = &mut viewer.run
-                && let Some(ending) = running.try_ending().map_err(|source| StageError::Launch {
-                    viewer: viewer.label.clone(),
-                    source,
-                })?
-            {
-                return Err(StageError::EndedEarly {
-                    viewer: viewer.label.clone(),
-                    ending: format!("{ending:?}"),
-                    log: log.to_path_buf(),
+            ViewerRun::InProcess(None) | ViewerRun::Process(None) => {
+                return Err(StageError::NoLogout {
+                    viewer: label.clone(),
+                    reason: "it is not running".to_owned(),
                 });
             }
-            if since.elapsed() > CONNECT {
-                return Err(StageError::NoSocket {
-                    viewer: viewer.label.clone(),
-                    seconds: CONNECT.as_secs(),
-                    last,
-                });
+        }
+        let (Some(grid), Some(agent)) = (&self.grid, viewer.agent) else {
+            return Ok(());
+        };
+        let since = Instant::now();
+        loop {
+            let mut left = Vec::new();
+            for region in grid.region_names() {
+                if grid
+                    .sessions_in(&region)
+                    .await
+                    .iter()
+                    .any(|session| session.agent_id() == agent)
+                {
+                    left.push(format!("{label} in {region}"));
+                }
+            }
+            if left.is_empty() {
+                return Ok(());
+            }
+            if since.elapsed() > LOGOUT {
+                return Err(StageError::Stranded(left));
             }
             tokio::time::sleep(POLL).await;
         }
@@ -1104,16 +1232,14 @@ impl Stage {
             .ok_or_else(|| StageError::UnknownViewer(label.to_owned()))
     }
 
-    /// The driver's handle on viewer `label`.
+    /// The driver's handle on viewer `label`'s current session — after a
+    /// [`relog`](Self::relog), the new one's.
     ///
     /// # Errors
     ///
     /// [`StageError::UnknownViewer`] for a label the stage was not given.
-    pub fn viewer(&self, label: &str) -> Result<&Viewer, StageError> {
-        self.stage_viewer(label)?
-            .driver
-            .as_ref()
-            .ok_or_else(|| StageError::UnknownViewer(label.to_owned()))
+    pub fn viewer(&self, label: &str) -> Result<Viewer, StageError> {
+        self.stage_viewer(label)?.driver()
     }
 
     /// The agent viewer `label` is logged in as.
@@ -1155,7 +1281,7 @@ impl Stage {
     ///
     /// [`StageError::UnknownViewer`] for a label the stage was not given.
     pub fn pid(&self, label: &str) -> Result<Option<u32>, StageError> {
-        Ok(match &self.stage_viewer(label)?.run {
+        Ok(match &*lock(&self.stage_viewer(label)?.run) {
             ViewerRun::Process(Some(running)) => Some(running.pid()),
             ViewerRun::Process(None) | ViewerRun::InProcess(_) => None,
         })
@@ -1263,14 +1389,14 @@ impl Stage {
     /// failure is returned and the others logged.
     async fn shutdown(mut self) -> Result<(), StageError> {
         let mut problems = Vec::new();
-        for viewer in &mut self.viewers {
-            viewer.driver = None;
+        for viewer in &self.viewers {
+            drop(lock(&viewer.driver).take());
         }
         if let Some(host) = self.host.take() {
             let handles: Vec<(String, ViewerHandle, bool)> = self
                 .viewers
                 .iter()
-                .filter_map(|viewer| match viewer.run {
+                .filter_map(|viewer| match *lock(&viewer.run) {
                     ViewerRun::InProcess(Some(handle)) => Some((
                         viewer.label.clone(),
                         handle,
@@ -1280,23 +1406,8 @@ impl Stage {
                 })
                 .collect();
             for (label, handle, _quits) in handles.iter().filter(|(_, _, quits)| !quits) {
-                let raised = host
-                    .with_app(*handle, |viewer| {
-                        viewer
-                            .app()
-                            .world()
-                            .get_resource::<TerminationFlag>()
-                            .map(TerminationFlag::raise)
-                            .is_some()
-                    })
-                    .await;
-                match raised {
-                    Ok(true) => {}
-                    Ok(false) => problems.push(StageError::NoLogout {
-                        viewer: label.clone(),
-                        reason: "it has no termination flag".to_owned(),
-                    }),
-                    Err(error) => problems.push(StageError::Host(error)),
+                if let Err(error) = ask_to_log_out(&host, label, *handle).await {
+                    problems.push(error);
                 }
             }
             for (label, handle, _quits) in &handles {
@@ -1322,14 +1433,16 @@ impl Stage {
         let processes: Vec<((String, bool), RunningViewer)> = self
             .viewers
             .iter_mut()
-            .filter_map(|viewer| match &mut viewer.run {
-                ViewerRun::Process(running) => running.take().map(|running| {
-                    (
-                        (viewer.label.clone(), viewer.quits.load(Ordering::Relaxed)),
-                        running,
-                    )
-                }),
-                ViewerRun::InProcess(_) => None,
+            .filter_map(|viewer| {
+                match viewer.run.get_mut().unwrap_or_else(PoisonError::into_inner) {
+                    ViewerRun::Process(running) => running.take().map(|running| {
+                        (
+                            (viewer.label.clone(), viewer.quits.load(Ordering::Relaxed)),
+                            running,
+                        )
+                    }),
+                    ViewerRun::InProcess(_) => None,
+                }
             })
             .collect();
         if !processes.is_empty() {
@@ -1377,7 +1490,7 @@ impl Stage {
             }
             grid.shutdown();
         }
-        if let Some(sockets) = &self.sockets
+        if let Some(sockets) = self.sockets.get()
             && let Err(error) = fs_err::remove_dir_all(sockets)
         {
             tracing::warn!("removing the stage's socket directory: {error}");
@@ -1388,6 +1501,93 @@ impl Stage {
             tracing::error!("stage {} teardown: {other}", self.name);
         }
         first.map_or(Ok(()), Err)
+    }
+}
+
+/// Ask the in-process viewer `handle` (labelled `label`) on `host` to log out
+/// and exit, by raising its own termination flag.
+async fn ask_to_log_out(
+    host: &InProcessHost<ViewerApp>,
+    label: &str,
+    handle: ViewerHandle,
+) -> Result<(), StageError> {
+    let raised = host
+        .with_app(handle, |viewer| {
+            viewer
+                .app()
+                .world()
+                .get_resource::<TerminationFlag>()
+                .map(TerminationFlag::raise)
+                .is_some()
+        })
+        .await?;
+    if raised {
+        Ok(())
+    } else {
+        Err(StageError::NoLogout {
+            viewer: label.to_owned(),
+            reason: "it has no termination flag".to_owned(),
+        })
+    }
+}
+
+/// Wait until the viewer `driver` drives has arrived — in `region` when
+/// given, else anywhere — and its scene is quiet, giving it `settle` for
+/// that.
+async fn arrive(
+    driver: Viewer,
+    region: Option<String>,
+    settle: Duration,
+) -> Result<(), StageError> {
+    let arrived = async {
+        let at = driver
+            .expect_state(Probe::Agent)
+            .at("/region/name")
+            .timeout(LOGIN);
+        let _held = match region {
+            Some(region) => at.to_equal(json!(region)).await?,
+            None => at.to_be_present().await?,
+        };
+        driver.wait_until_quiet(settle).await
+    };
+    arrived.await.map_err(|source| StageError::Driver {
+        viewer: driver.label().to_owned(),
+        source,
+    })
+}
+
+/// Connect the driver to `viewer`'s process once its `socket` answers —
+/// failing early, with its `log`, if the process ends first.
+async fn connect(viewer: &StageViewer, socket: &Path, log: &Path) -> Result<Viewer, StageError> {
+    let since = Instant::now();
+    let mut last = "the socket does not exist yet".to_owned();
+    loop {
+        if fs_err::metadata(socket).is_ok() {
+            match Viewer::connect(socket, driver_options(&viewer.label, &viewer.dir)).await {
+                Ok(driver) => return Ok(driver),
+                Err(error) => last = error.to_string(),
+            }
+        }
+        if let ViewerRun::Process(Some(running)) = &mut *lock(&viewer.run)
+            && let Some(ending) = running.try_ending().map_err(|source| StageError::Launch {
+                viewer: viewer.label.clone(),
+                source,
+            })?
+        {
+            return Err(StageError::EndedEarly {
+                viewer: viewer.label.clone(),
+                ending: format!("{ending:?}"),
+                log: log.to_path_buf(),
+            });
+        }
+        if since.elapsed() > CONNECT {
+            return Err(StageError::NoSocket {
+                viewer: viewer.label.clone(),
+                seconds: CONNECT.as_secs(),
+                last,
+            });
+        }
+        tokio::time::sleep(POLL).await;
     }
 }
 

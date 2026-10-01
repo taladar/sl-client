@@ -387,6 +387,26 @@ impl UiLocator {
         .await
     }
 
+    /// Drag the one node this names by `x` logical pixels rightwards and `y`
+    /// downwards, with the left button — a window by its title bar, or by its
+    /// resize grip. Answers with the node as it was when pressed.
+    ///
+    /// # Errors
+    ///
+    /// As [`click`](Self::click).
+    pub async fn drag_by(&self, x: f32, y: f32) -> Result<UiNode, DriverError> {
+        let verb = format!("drag by ({x}, {y}) the node");
+        self.act(
+            &verb,
+            RequestBody::DragBy {
+                source: self.locator.clone(),
+                offset: [x, y],
+                deadline: Viewer::deadline(self.wait()),
+            },
+        )
+        .await
+    }
+
     /// Wait for `locator`'s matches to satisfy `condition` within this
     /// handle's wait, and return them.
     pub(crate) async fn wait_for(

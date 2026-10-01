@@ -740,6 +740,36 @@ impl DerenderList {
         self.hidden_scoped.contains_key(&scoped)
     }
 
+    /// Whether an object that waited in the scene mirror's backlog is to be
+    /// dropped as it is finally applied — `scoped`, its own id `own`, hanging
+    /// off `parent` when it is a child — recording it when it is.
+    ///
+    /// The index learns an object's scoped id when its update is read, which
+    /// for a backlogged object is before it waited: an entry made in the
+    /// meantime — the permanent blacklist read at login, while the arrival
+    /// burst still queues — would otherwise let it through, since the purge
+    /// found nothing in the scene to despawn either. So the drain asks again,
+    /// by full id and by parent, as `index_derendered_objects` would have.
+    pub fn suppresses_queued(
+        &mut self,
+        scoped: ScopedObjectId,
+        own: Uuid,
+        parent: Option<ScopedObjectId>,
+    ) -> bool {
+        if self.is_suppressed(scoped) {
+            return true;
+        }
+        let root = if self.blacklists_in_world(own) {
+            Some(HiddenBy::Blacklist(own))
+        } else {
+            parent.and_then(|parent| self.suppressing_root(parent))
+        };
+        root.is_some_and(|root| {
+            let _prior = self.hidden_scoped.insert(scoped, root);
+            true
+        })
+    }
+
     /// What suppresses `scoped`, if anything — the source an inherited
     /// suppression is inherited from.
     #[must_use]

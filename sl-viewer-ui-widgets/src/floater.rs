@@ -418,6 +418,9 @@ pub struct Floater {
     min_size: Vec2,
     /// Which chrome this floater offers.
     caps: FloaterCaps,
+    /// Whether it has just opened and is still to be fitted onto the screen
+    /// ([`fit_on_open`]), once it has been laid out.
+    fit_pending: bool,
 }
 
 /// A floater's **persistable geometry** — everything the settings store
@@ -859,6 +862,62 @@ fn clamp_position(position: Vec2, size: Vec2, snap: Rect) -> Vec2 {
     Vec2::new(inline, block)
 }
 
+/// Fit a window that has just opened onto `snap`, the screen minus its fixed
+/// chrome — the reference's `LLFloaterView::adjustToFitScreen` on open. A
+/// window `size` big whose resizable content area is `content` (`None` for one
+/// that cannot be resized) and larger than `snap` gives up the excess down to
+/// `min` on each axis; then it moves wholly inside `snap` where it fits, and to
+/// `snap`'s leading top corner where it still does not. Answers the position
+/// and the content size.
+///
+/// Only on open: afterwards [`clamp_position`] keeps a mere sliver on screen,
+/// so a window can still be dragged partly off it. Without this a window
+/// taller than a small screen opened with its footer — Preferences' OK and
+/// Cancel — under the bottom toolbar, out of reach (found by the relog
+/// end-to-end test at 1280×720).
+fn fit_on_open(
+    position: Vec2,
+    size: Vec2,
+    content: Option<Vec2>,
+    min: Vec2,
+    snap: Rect,
+) -> (Vec2, Option<Vec2>) {
+    let room = Vec2::new(snap.max.x - snap.min.x, snap.max.y - snap.min.y);
+    let shrink = |content: f32, size: f32, room: f32, min: f32| {
+        if size > room {
+            (content - (size - room)).max(min).min(content)
+        } else {
+            content
+        }
+    };
+    let fitted = content.map(|content| {
+        Vec2::new(
+            shrink(content.x, size.x, room.x, min.x),
+            shrink(content.y, size.y, room.y, min.y),
+        )
+    });
+    let size = match (content, fitted) {
+        (Some(before), Some(after)) => {
+            Vec2::new(size.x - (before.x - after.x), size.y - (before.y - after.y))
+        }
+        _ => size,
+    };
+    let inside = |at: f32, size: f32, low: f32, high: f32| {
+        if size > high - low {
+            low
+        } else {
+            at.clamp(low, high - size)
+        }
+    };
+    (
+        Vec2::new(
+            inside(position.x, size.x, snap.min.x, snap.max.x),
+            inside(position.y, size.y, snap.min.y, snap.max.y),
+        ),
+        fitted,
+    )
+}
+
 /// The logical rect of a laid-out UI node — `ComputedNode` is physical and
 /// `UiGlobalTransform` is a centre, so both are converted here rather than at
 /// each use.
@@ -910,8 +969,11 @@ const CHROME_EDGE_TOLERANCE: f32 = 1.0;
 /// A band is credited to the edge it is anchored to **and** spans, so a
 /// full-width strip at the top raises the rect's top and one at the bottom
 /// lowers its bottom; a full-height strip at either side does the same inline.
-/// A band that touches no edge reserves nothing however large it is — a window
-/// can always be dragged out from under something that is not against an edge.
+/// Anchored means flush against the edge, or against a band already credited
+/// to it — the row of controls riding on the bottom toolbar is reserved
+/// through the toolbar. A band that touches neither reserves nothing however
+/// large it is — a window can always be dragged out from under something that
+/// is not against an edge.
 ///
 /// A degenerate result (chrome that would swallow the screen) falls back to the
 /// whole viewport: a rect no window fits in would clamp every window to one
@@ -925,25 +987,46 @@ fn snap_rect_of(bands: &[Rect], viewport: Vec2) -> Rect {
         max: viewport,
     };
     let mut snap = screen;
-    for band in bands {
-        let width = band.max.x - band.min.x;
-        let height = band.max.y - band.min.y;
-        if width <= 0.0 || height <= 0.0 {
-            continue;
-        }
-        if width >= viewport.x * CHROME_EDGE_SPAN {
-            if band.min.y <= CHROME_EDGE_TOLERANCE {
-                snap.min.y = snap.min.y.max(band.max.y);
-            } else if band.max.y >= viewport.y - CHROME_EDGE_TOLERANCE {
-                snap.max.y = snap.max.y.min(band.min.y);
+    // A band rests on an edge, or on a band already reserved there (the row of
+    // controls riding on the bottom toolbar): pass again while a pass still
+    // moved an edge, which a stack of `n` bands needs at most `n` of.
+    for _pass in 0..=bands.len() {
+        let before = snap;
+        for band in bands {
+            let width = band.max.x - band.min.x;
+            let height = band.max.y - band.min.y;
+            if width <= 0.0 || height <= 0.0 {
+                continue;
+            }
+            if width >= viewport.x * CHROME_EDGE_SPAN {
+                if band.min.y <= snap.min.y + CHROME_EDGE_TOLERANCE
+                    && band.max.y > snap.min.y
+                    && band.min.y < viewport.y / 2.0
+                {
+                    snap.min.y = snap.min.y.max(band.max.y);
+                } else if band.max.y >= snap.max.y - CHROME_EDGE_TOLERANCE
+                    && band.min.y < snap.max.y
+                    && band.max.y > viewport.y / 2.0
+                {
+                    snap.max.y = snap.max.y.min(band.min.y);
+                }
+            }
+            if height >= viewport.y * CHROME_EDGE_SPAN {
+                if band.min.x <= snap.min.x + CHROME_EDGE_TOLERANCE
+                    && band.max.x > snap.min.x
+                    && band.min.x < viewport.x / 2.0
+                {
+                    snap.min.x = snap.min.x.max(band.max.x);
+                } else if band.max.x >= snap.max.x - CHROME_EDGE_TOLERANCE
+                    && band.min.x < snap.max.x
+                    && band.max.x > viewport.x / 2.0
+                {
+                    snap.max.x = snap.max.x.min(band.min.x);
+                }
             }
         }
-        if height >= viewport.y * CHROME_EDGE_SPAN {
-            if band.min.x <= CHROME_EDGE_TOLERANCE {
-                snap.min.x = snap.min.x.max(band.max.x);
-            } else if band.max.x >= viewport.x - CHROME_EDGE_TOLERANCE {
-                snap.max.x = snap.max.x.min(band.min.x);
-            }
+        if snap == before {
+            break;
         }
     }
     if snap.max.x - snap.min.x < MIN_VISIBLE || snap.max.y - snap.min.y < MIN_VISIBLE {
@@ -1457,6 +1540,7 @@ pub fn spawn_keyed_floater(
                 preferred_host: spec.dock_host,
                 min_size: spec.min_size.unwrap_or(RESIZE_FLOOR),
                 caps: spec.caps,
+                fit_pending: false,
             },
             Name::new(name),
             ChildOf(root),
@@ -2048,12 +2132,12 @@ fn apply_floater_commands(
 /// every flip made anywhere in `Update`: a feature's open system cannot end up
 /// scheduled after it and lose a frame.
 fn raise_floaters_on_open(
-    mut floaters: Query<(Entity, &UiPanelShown, &mut FloaterWasShown, &Floater)>,
+    mut floaters: Query<(Entity, &UiPanelShown, &mut FloaterWasShown, &mut Floater)>,
     mut z_indices: Query<&mut GlobalZIndex>,
     mut z_top: ResMut<FloaterZTop>,
     mut active: ResMut<ActiveFloater>,
 ) {
-    for (entity, shown, mut was_shown, floater) in &mut floaters {
+    for (entity, shown, mut was_shown, mut floater) in &mut floaters {
         if was_shown.0 == shown.0 {
             continue;
         }
@@ -2061,6 +2145,8 @@ fn raise_floaters_on_open(
         if !shown.0 {
             continue;
         }
+        // Fitted onto the screen once it has been laid out open.
+        floater.fit_pending = true;
         // A docked floater is in its host's flow and does not restack — the
         // same exemption [`FloaterOp::BringToFront`] makes.
         if floater.docked_in.is_none() {
@@ -2457,6 +2543,24 @@ fn clamp_floaters_on_screen(
         if size.x <= 0.0 || size.y <= 0.0 {
             continue;
         }
+        if floater.fit_pending {
+            floater.fit_pending = false;
+            let resizable = floater.caps.resizable && !floater.minimized;
+            let (position, content_size) = fit_on_open(
+                floater.position,
+                size,
+                floater.content_size.filter(|_| resizable),
+                floater.min_size,
+                snap,
+            );
+            if position != floater.position {
+                floater.position = position;
+            }
+            if resizable && content_size != floater.content_size {
+                floater.content_size = content_size;
+            }
+            continue;
+        }
         let clamped = clamp_position(floater.position, size, snap);
         // Exact inequality is right: `clamp_position` returns the input unchanged
         // when it is already on screen, and a bound otherwise — no epsilon needed,
@@ -2668,7 +2772,7 @@ mod tests {
         FloaterParts, FloaterSpec, FloaterSystems, FloaterZTop, KeyedFloaterOpen, KeyedFloaters,
         MIN_VISIBLE, RESIZE_FLOOR, apply_floater_commands, apply_floater_content,
         apply_floater_glyphs, apply_floater_inset, build_deferred_floater_content,
-        clamp_floaters_on_screen, clamp_position, close_owned_floaters, drag_position,
+        clamp_floaters_on_screen, clamp_position, close_owned_floaters, drag_position, fit_on_open,
         floater_panel, highlight_active_floater, picker_identity, raise_floaters_on_open,
         renumber_floater_z, resize_size, snap_rect_of, spawn_floater, toggle_floater,
     };
@@ -2912,6 +3016,82 @@ mod tests {
         assert_eq!(near.y, 0.0);
     }
 
+    /// **A window opens wholly on screen.** One taller than the room between
+    /// the bars gives its content area up to its floor and lands at the top of
+    /// the room, so its footer is above the bottom toolbar; one that fits but
+    /// hangs off an edge moves in; one already inside stays; and one that
+    /// cannot be resized only moves.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the fit produces exact bound values, asserted exactly"
+    )]
+    #[test]
+    fn a_window_opens_wholly_on_screen() {
+        // Preferences at 1280×720: a 30 px title bar over a 620 px content
+        // area, below a 19 px menu bar and above a toolbar from 640 down.
+        let snap = Rect {
+            min: Vec2::new(0.0, 19.0),
+            max: Vec2::new(1280.0, 640.0),
+        };
+        let size = Vec2::new(762.0, 651.0);
+        let content = Vec2::new(760.0, 620.0);
+        let (position, fitted) = fit_on_open(
+            Vec2::new(160.0, 80.0),
+            size,
+            Some(content),
+            Vec2::new(560.0, 380.0),
+            snap,
+        );
+        assert_eq!(fitted, Some(Vec2::new(760.0, 590.0)), "30 px given up");
+        assert_eq!(
+            position,
+            Vec2::new(160.0, 19.0),
+            "the window fills the room"
+        );
+
+        // Never below the floor: the rest stays off screen, the top on it.
+        let (position, fitted) = fit_on_open(
+            Vec2::new(160.0, 80.0),
+            size,
+            Some(content),
+            Vec2::splat(610.0),
+            snap,
+        );
+        assert_eq!(fitted, Some(Vec2::new(760.0, 610.0)));
+        assert_eq!(position.y, 19.0);
+
+        // Fits, but hangs off the trailing and bottom edges: moved in, not
+        // resized.
+        let small = Vec2::new(300.0, 200.0);
+        let (position, fitted) = fit_on_open(
+            Vec2::new(1200.0, 600.0),
+            small,
+            Some(small),
+            RESIZE_FLOOR,
+            snap,
+        );
+        assert_eq!(position, Vec2::new(980.0, 440.0));
+        assert_eq!(fitted, Some(small));
+
+        // Already inside: untouched.
+        assert_eq!(
+            fit_on_open(
+                Vec2::new(100.0, 100.0),
+                small,
+                Some(small),
+                RESIZE_FLOOR,
+                snap
+            ),
+            (Vec2::new(100.0, 100.0), Some(small))
+        );
+
+        // Not resizable: only moved, to the top of the room.
+        assert_eq!(
+            fit_on_open(Vec2::new(160.0, 80.0), size, None, RESIZE_FLOOR, snap),
+            (Vec2::new(160.0, 19.0), None)
+        );
+    }
+
     /// **A title bar is never left under the menu bar.**
     ///
     /// The menu bar is opaque and drawn over the floaters, so a window at block
@@ -3091,6 +3271,30 @@ mod tests {
         assert_eq!(snap_rect_of(&[settled], viewport).min.y, 38.0);
     }
 
+    /// **A band resting on a reserved band reserves too** — the row of the chat
+    /// bar and the media controls on the bottom toolbar — while a full-width
+    /// band with room between it and the edge's chrome still does not.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the snap rect is assembled from exact edges, asserted exactly"
+    )]
+    #[test]
+    fn a_band_resting_on_reserved_chrome_reserves_too() {
+        let viewport = Vec2::new(1280.0, 720.0);
+        let band = |top: f32, bottom: f32| Rect {
+            min: Vec2::new(0.0, top),
+            max: Vec2::new(1280.0, bottom),
+        };
+        // Listed row first, so a single pass would miss it.
+        let stacked = [band(643.0, 683.0), band(683.0, 720.0), band(0.0, 19.0)];
+        let snap = snap_rect_of(&stacked, viewport);
+        assert_eq!(snap.max.y, 643.0, "the row on the toolbar is reserved");
+        assert_eq!(snap.min.y, 19.0);
+        // Floating clear of the toolbar: not anchored, not reserved.
+        let floating = [band(500.0, 540.0), band(683.0, 720.0)];
+        assert_eq!(snap_rect_of(&floating, viewport).max.y, 683.0);
+    }
+
     /// Chrome that would swallow the screen falls back to the whole viewport: a
     /// rect no window fits in would clamp every window to one point, which is
     /// worse than the overlap it avoids.
@@ -3163,6 +3367,7 @@ mod tests {
                         closable: true,
                         dockable: true,
                     },
+                    fit_pending: false,
                 },
                 // A measured box, as the previous frame's layout would leave: 200
                 // UI-logical pixels wide at `UiScale` 2 is 400 physical.

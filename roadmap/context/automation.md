@@ -604,6 +604,36 @@ replaces that person.
   (`WorldAction::ShiftSelect`, judged like a select, with `Shift` down a
   frame before the press). A link that lands leaves the new child in the
   selection; Link counts only selected linkset roots, as the reference does.
+- **A relog is `Stage::relog(label)`** ([[test-e2e-sweep-relog]],
+  `tests/e2e_relog.rs`): the viewer is asked to log out as the teardown asks
+  it, must exit having done so and — on the fake grid — leave no session, then
+  a new App or process starts on the **same** directories, logs in where the
+  stage's viewers start (on aditi after its cooldown turn) and is waited for
+  as at the start. It answers the new session's `Viewer`, and
+  `Stage::viewer` answers that one from then on — so `Stage::viewer` hands
+  out an owned handle (`let alpha = &stage.viewer("Alpha")?;` where a
+  helper takes `&Viewer`), and a handle kept from before the relog talks to
+  a viewer that is gone. A relogged process writes `viewer.<n>.log`.
+- **A window is moved and resized by `drag_by`** (`RequestBody::DragBy`):
+  press on the node, move by a relative offset, release — on a window's
+  `floater-title-bar` or `floater-resize`. The offset is an amount, like a
+  handle drag's, not a coordinate; where the window ends up is read back
+  from its bounds.
+- **A window opens wholly on screen** (`fit_on_open` in the floater
+  manager, the reference's `adjustToFitScreen`): one taller than the room
+  between the bars gives up content height down to its floor. At the
+  stage's 1280×720, Preferences used to open with OK and Cancel under the
+  bottom toolbar.
+- **The fake grid's friends are a fixed fact**:
+  `FakeGridBuilder::friends` puts each of two accounts in the other's
+  login `buddy-list`, and every session can name every account
+  (`GetDisplayNames`, and the legacy `UUIDNameRequest` from the same store —
+  the friends list asks that way). Nothing announces presence; a test
+  does, with the session's `send_online_notification` — again after a
+  relog.
+- **The grid's side of a notice or an offer is encoded in `sl-proto`**:
+  `GroupNoticeReceived::instant_message` and `InventoryOffer::binary_bucket`
+  are the inverses of the decoders, so a test never hand-builds a bucket.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).

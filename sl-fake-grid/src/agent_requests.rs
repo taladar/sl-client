@@ -72,6 +72,26 @@ pub(crate) fn answer_agent_request(
                 tracing::warn!("answering an agent wearables request failed: {error}");
             }
         }
+        // A legacy name lookup (`UUIDNameRequest`), answered from the same
+        // people store `GetDisplayNames` serves: every account of the grid and
+        // every avatar the scene names. An id nobody knows goes unanswered, as
+        // a simulator leaves it.
+        ServerEvent::AvatarNamesRequested(ids) => {
+            let names: Vec<sl_proto::AvatarName> = ids
+                .iter()
+                .filter_map(|id| sim.display_name(AgentKey::from(*id)))
+                .map(|record| sl_proto::AvatarName {
+                    id: record.id,
+                    first_name: record.legacy_first_name.clone(),
+                    last_name: record.legacy_last_name.clone(),
+                })
+                .collect();
+            if !names.is_empty()
+                && let Err(error) = sim.send_avatar_names(&names, now)
+            {
+                tracing::warn!("answering a name request failed: {error}");
+            }
+        }
         // Set-Home. *Every* outcome is answered — that is what makes it the
         // one deterministic way to provoke an `AgentAlertMessage` — and which
         // outcome depends on the rule OpenSim applies: the land's owner may

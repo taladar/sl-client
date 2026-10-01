@@ -1839,7 +1839,7 @@ pub struct Session {
 mod caps_event;
 mod chat_session;
 mod circuit;
-mod conversions;
+pub(crate) mod conversions;
 mod inventory;
 mod inventory_cache;
 mod legacy_preset;

@@ -50,3 +50,6 @@ notifications that require an acknowledgement survive a relog.
 **Verification:** the store logic is unit-tested; the end-to-end relog behavior
 (receive a notice → quit without answering → relog → it reappears → answer →
 relog → it is gone) needs a live grid, so it is checked by running the viewer.
+
+The relog checks are end-to-end tests now (`tests/e2e_relog.rs`,
+[[test-e2e-sweep-relog]]).

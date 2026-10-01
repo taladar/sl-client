@@ -446,6 +446,11 @@ fn start(
             target,
             deadline,
         } => ui::drag_to(source, target, deadline),
+        RequestBody::DragBy {
+            source,
+            offset,
+            deadline,
+        } => ui::drag_by(source, offset, deadline),
         RequestBody::Hover { locator, deadline } => {
             ui::act(locator, ui::UiActKind::Hover, deadline)
         }

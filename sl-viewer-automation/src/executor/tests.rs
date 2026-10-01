@@ -256,6 +256,45 @@ fn a_drag_carries_one_node_onto_another() -> Result<(), String> {
     Ok(())
 }
 
+/// How far a node was dragged: the sum of its drag events' deltas.
+#[derive(Resource, Debug, Default)]
+struct Dragged(Vec2);
+
+#[test]
+fn a_drag_by_an_offset_moves_the_pointer_that_far_with_the_node_held() -> Result<(), String> {
+    let mut app = app();
+    app.init_resource::<Dragged>();
+    let grip = button(&mut app, "grip", "Grip", placed(100.0, 100.0, 120.0, 30.0));
+    app.world_mut().entity_mut(grip).observe(
+        |drag: On<Pointer<Drag>>, mut dragged: ResMut<Dragged>| {
+            dragged.0 += drag.delta;
+        },
+    );
+    settle(&mut app);
+    let body = ok(request(
+        &mut app,
+        RequestBody::DragBy {
+            source: Locator::test_id("grip"),
+            offset: [150.0, -60.0],
+            deadline: Deadline::default(),
+        },
+    )?)?;
+    let ResponseBody::Done { node } = body else {
+        return Err(format!("not a done: {body:?}"));
+    };
+    assert_eq!(
+        node.test_id.as_deref(),
+        Some("grip"),
+        "the answer names the node dragged"
+    );
+    let travelled = app.world().resource::<Dragged>().0;
+    assert!(
+        travelled.distance(Vec2::new(150.0, -60.0)) < 0.5,
+        "the drag carried the node by the offset: {travelled}"
+    );
+    Ok(())
+}
+
 #[test]
 fn requests_in_flight_are_answered_independently_and_actions_take_turns() -> Result<(), String> {
     let mut app = app();

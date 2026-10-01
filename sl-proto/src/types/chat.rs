@@ -663,6 +663,59 @@ pub struct GroupNoticeReceived {
     pub attachment: Option<GroupNoticeItem>,
 }
 
+impl GroupNoticeReceived {
+    /// The [`ImDialog::GroupNotice`] instant message that delivers this notice
+    /// to `to` under the notice id `notice` — what a simulator sends a member
+    /// when the notice is posted, and the inverse of
+    /// [`InstantMessage::group_notice`]: `subject|body` as the message, the
+    /// reference `notice_bucket_full_t` as the bucket, and the group as the
+    /// sender, as OpenSim sends it.
+    ///
+    /// # Errors
+    ///
+    /// [`sl_wire::WireError::ValueOutOfRange`] for an attachment whose asset
+    /// type has no one-byte code.
+    pub fn instant_message(
+        &self,
+        notice: Uuid,
+        to: AgentKey,
+    ) -> Result<InstantMessage, sl_wire::WireError> {
+        let (has_inventory, asset_type, item_name) = match &self.attachment {
+            Some(item) => {
+                let code = item.asset_type.to_code();
+                let code =
+                    u8::try_from(code).map_err(|_err| sl_wire::WireError::ValueOutOfRange {
+                        field: "group_notice_asset_type",
+                        value: i64::from(code),
+                    })?;
+                (1, code, item.item_name.as_bytes())
+            }
+            None => (0, 0, &[][..]),
+        };
+        let mut bucket = Vec::with_capacity(19_usize.saturating_add(item_name.len()));
+        bucket.push(has_inventory);
+        bucket.push(asset_type);
+        bucket.extend_from_slice(self.group_id.uuid().as_bytes());
+        bucket.extend_from_slice(item_name);
+        bucket.push(0);
+        Ok(InstantMessage {
+            from_agent_id: AgentKey::from(self.group_id.uuid()),
+            from_agent_name: self.sender_name.clone(),
+            to_agent_id: to,
+            dialog: ImDialog::GroupNotice,
+            from_group: true,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: self.timestamp,
+            id: notice,
+            parent_estate_id: 0,
+            message: format!("{}|{}", self.subject, self.body),
+            binary_bucket: bucket,
+        })
+    }
+}
+
 /// A received group-membership invitation, decoded from an
 /// [`ImDialog::GroupInvitation`] [`InstantMessage`] by
 /// [`InstantMessage::group_invitation`]. Reply by echoing
@@ -719,6 +772,20 @@ pub struct InventoryOffer {
     pub from_task: bool,
 }
 
+impl InventoryOffer {
+    /// The binary bucket of the [`ImDialog::InventoryOffered`] instant message
+    /// that makes this offer — `[asset-type byte] ++ [16-byte id]` — the
+    /// inverse of [`InstantMessage::inventory_offer`].
+    ///
+    /// # Errors
+    ///
+    /// [`sl_wire::WireError::ValueOutOfRange`] for an asset type with no
+    /// one-byte code.
+    pub fn binary_bucket(&self) -> Result<Vec<u8>, sl_wire::WireError> {
+        crate::session::conversions::inventory_offer_bucket(self.asset_type, self.item_id.uuid())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -773,6 +840,86 @@ mod tests {
         }
         bucket.push(0); // NUL terminator for the item name.
         bucket
+    }
+
+    /// A notice encoded into the IM a simulator sends decodes back to itself,
+    /// with an attachment and without, and is the bucket the decoder's own
+    /// fixtures spell out by hand.
+    #[test]
+    fn a_group_notice_round_trips_through_its_instant_message() -> Result<(), String> {
+        let group = Uuid::from_u128(0x9401);
+        let to = AgentKey::from(Uuid::from_u128(0xa12));
+        for attachment in [
+            None,
+            Some(super::GroupNoticeItem {
+                asset_type: AssetType::Notecard,
+                item_name: "Agenda".to_owned(),
+            }),
+        ] {
+            let notice = super::GroupNoticeReceived {
+                group_id: GroupKey::from(group),
+                sender_name: "Board Member".to_owned(),
+                subject: "Board meeting".to_owned(),
+                body: "Tuesday | noon SLT".to_owned(),
+                timestamp: Some(1_700_000_000),
+                attachment: attachment.clone(),
+            };
+            let im = notice
+                .instant_message(Uuid::from_u128(0x0117), to)
+                .map_err(|error| error.to_string())?;
+            assert_eq!(im.dialog, ImDialog::GroupNotice);
+            assert_eq!(im.to_agent_id, to);
+            assert_eq!(im.id, Uuid::from_u128(0x0117));
+            let code = attachment
+                .as_ref()
+                .map(|item| u8::try_from(item.asset_type.to_code()))
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            assert_eq!(
+                im.binary_bucket,
+                notice_bucket(
+                    group,
+                    attachment
+                        .as_ref()
+                        .zip(code)
+                        .map(|(item, code)| (code, item.item_name.as_str()))
+                )
+            );
+            assert_eq!(im.group_notice(), Some(notice));
+        }
+        Ok(())
+    }
+
+    /// An offer's bucket decodes back to the offer, for an item and a folder.
+    #[test]
+    fn an_inventory_offer_round_trips_through_its_bucket() -> Result<(), String> {
+        for (asset_type, item_id) in [
+            (
+                AssetType::Notecard,
+                InventoryItemOrFolderKey::Item(InventoryKey::from(Uuid::from_u128(0x17e))),
+            ),
+            (
+                AssetType::Folder,
+                InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(Uuid::from_u128(0xf0))),
+            ),
+        ] {
+            let offer = super::InventoryOffer {
+                asset_type,
+                item_id,
+                transaction_id: Uuid::from_u128(0x7a),
+                from_agent_id: AgentKey::from(Uuid::from_u128(0x6009)),
+                from_task: false,
+            };
+            let im = InstantMessage {
+                dialog: ImDialog::InventoryOffered,
+                id: offer.transaction_id,
+                from_group: false,
+                binary_bucket: offer.binary_bucket().map_err(|error| error.to_string())?,
+                ..group_notice_im("Agenda", Vec::new())
+            };
+            assert_eq!(im.inventory_offer(), Some(offer));
+        }
+        Ok(())
     }
 
     /// A group notice with no attachment decodes its group, sender, subject and

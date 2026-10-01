@@ -15,8 +15,8 @@
 //!   .button_key("build-apply").click()` — a [`UiLocator`] is a semantic
 //!   [`sl_automation_proto::Locator`] bound to its viewer: `click`,
 //!   `double_click`, `right_click`, `hover`, `fill`, `press`, `check` /
-//!   `uncheck`, `select_option`, `drag_to`, and the reads `text`, `value`,
-//!   `is_disabled`, `is_checked`, `is_visible`, `count`, `all`. A
+//!   `uncheck`, `select_option`, `drag_to`, `drag_by`, and the reads `text`,
+//!   `value`, `is_disabled`, `is_checked`, `is_visible`, `count`, `all`. A
 //!   [`WorldHandle`] names an in-world thing — `viewer.world()
 //!   .object_named("Door").touch()` — with `touch`, `open_pie`, `hover`,
 //!   `select`, `sit`, `drop_from` and its readouts.

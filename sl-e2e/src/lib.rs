@@ -13,7 +13,9 @@
 //!    builder's App on an in-process host ([`Backend::InProcess`]) — and
 //!    waits until each has logged in and its scene has settled;
 //! 3. hands the body a [`Stage`]: a `sl-viewer-driver` handle per viewer, the
-//!    grid, and markers ([`Stage::mark`], [`Stage::wait_marker`]);
+//!    grid, markers ([`Stage::mark`], [`Stage::wait_marker`]), and
+//!    [`Stage::relog`], which logs a viewer out and back in on the same
+//!    directories — what must survive a relog is tested that way;
 //! 4. takes it all down — also when the body failed or panicked — by asking
 //!    each viewer to log out, and fails the test if one would not or if the
 //!    fake grid still holds a session afterwards.
@@ -31,6 +33,9 @@
 //! Artifacts land in `<target>/e2e/<test>/<grid>/<backend>/`: `grid.log`
 //! (the grid and the test), and per viewer `<label>/viewer.log`,
 //! `<label>/failures/` (the driver's failure artifacts) and `<label>/state/`.
+//! A relogged viewer process writes its next session's output to
+//! `<label>/viewer.<n>.log`; an in-process viewer's sessions share
+//! `viewer.log`.
 //! A machine with no GPU adapter skips a stage loudly.
 
 pub mod backend;

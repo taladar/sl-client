@@ -36,8 +36,8 @@ mod test {
         stage("floater_and_marker", &["Alpha", "Beta"])
             .needs(Need::GridControl)
             .run(async |stage: &Stage| {
-                let alpha = stage.viewer("Alpha")?;
-                let beta = stage.viewer("Beta")?;
+                let alpha = &stage.viewer("Alpha")?;
+                let beta = &stage.viewer("Beta")?;
                 let waiting = stage.wait_marker("Beta", "inventory-open", WAIT);
                 let opening = async {
                     let ui = alpha.ui();

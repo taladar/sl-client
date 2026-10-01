@@ -1239,7 +1239,7 @@ pub fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
     faces: FaceIds,
-    derender: Res<sl_viewer_world_api::DerenderList>,
+    mut derender: ResMut<sl_viewer_world_api::DerenderList>,
     mut pending: ResMut<PendingObjectEvents>,
     mut mesh_budget: ResMut<MeshUploadBudget>,
     mut stores: GeometryStores,
@@ -1265,8 +1265,10 @@ pub fn update_objects(
                     return false;
                 };
                 // The object may have been derendered while it sat in the
-                // backlog; drop it here too, not just at the new-event gate.
-                if derender.is_suppressed(scoped) {
+                // backlog — or the blacklist read at login after it queued;
+                // drop it here too, not just at the new-event gate.
+                let parent = (object.parent_id.get() != 0).then(|| object.scoped_parent_id());
+                if derender.suppresses_queued(scoped, object.full_id.uuid(), parent) {
                     return false;
                 }
                 apply_object(&mut state, &object, &faces, build)

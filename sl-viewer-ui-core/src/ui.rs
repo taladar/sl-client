@@ -118,7 +118,8 @@ use crate::skin_palette::SkinPalette;
 use crate::ui_font::{UiFont, register_ui_fonts};
 
 /// A node that is **fixed to the screen**: permanent chrome the user cannot drag
-/// aside, dismiss, or close — the top menu bar, the bottom toolbar.
+/// aside, dismiss, or close — the top menu bar, the bottom toolbar and the
+/// row of controls riding on it (the nearby chat bar, media, volume).
 ///
 /// It exists for one guarantee: a floater's **title bar** is the only part of it
 /// a pointer can drag, so a title bar under opaque fixed chrome is a window that

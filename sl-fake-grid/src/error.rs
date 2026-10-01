@@ -67,4 +67,10 @@ pub enum Error {
         /// The missing region name.
         region: String,
     },
+    /// A friendship named an account the builder never added.
+    #[error("a friendship names {account:?}, which is no account of the grid")]
+    UnknownFriend {
+        /// The `First Last` name.
+        account: String,
+    },
 }

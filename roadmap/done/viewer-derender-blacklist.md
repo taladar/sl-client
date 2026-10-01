@@ -144,3 +144,6 @@ keeps its (hidden) coarse placeholder rather than being dropped from the
 position path, so it stays on the radar and minimap — which is what the
 reference does too (`FSRadarShowMutedAndDerendered`), and what stops the radar
 reporting a derender as a region leave.
+
+The relog checks are end-to-end tests now (`tests/e2e_relog.rs`,
+[[test-e2e-sweep-relog]]).

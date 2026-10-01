@@ -69,7 +69,7 @@ mod test {
     fn the_status_bar_names_the_region_and_the_menu_bar_opens_the_build_window()
     -> Result<(), TestError> {
         stage("login_and_chrome", &["Alpha"]).run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
+            let alpha = &stage.viewer("Alpha")?;
             let ui = alpha.ui();
             let _named = alpha
                 .expect(&ui.test_id(REGION_READOUT))
@@ -101,8 +101,8 @@ mod test {
         stage("one_prim_two_viewers", &["Alpha", "Beta"])
             .needs(Need::Content("the stock scene's unnamed box, to rez on"))
             .run(async |stage: &Stage| {
-                let alpha = stage.viewer("Alpha")?;
-                let beta = stage.viewer("Beta")?;
+                let alpha = &stage.viewer("Alpha")?;
+                let beta = &stage.viewer("Beta")?;
 
                 let _opened = alpha.menu_path(&BUILD_TOOLS).await?;
                 let build = alpha.ui().window(BUILD_WINDOW);
@@ -206,7 +206,7 @@ mod test {
         stage("object_pie", &["Alpha"])
             .needs(Need::GridControl)
             .run(async |stage: &Stage| {
-                let alpha = stage.viewer("Alpha")?;
+                let alpha = &stage.viewer("Alpha")?;
                 rez_touch_box(stage, "Alpha").await?;
                 let mut heard = stage.agent("Alpha").await?.events();
 
@@ -273,8 +273,8 @@ mod test {
     #[test]
     fn a_line_said_in_one_viewer_is_heard_in_the_other() -> Result<(), TestError> {
         stage("two_viewer_chat", &["Alpha", "Beta"]).run(async |stage: &Stage| {
-            let alpha = stage.viewer("Alpha")?;
-            let beta = stage.viewer("Beta")?;
+            let alpha = &stage.viewer("Alpha")?;
+            let beta = &stage.viewer("Beta")?;
             let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
             let _typed = bar.fill(LINE).await?;
             bar.press("Enter").await?;
@@ -319,7 +319,7 @@ mod test {
             .region(home)
             .region(neighbour)
             .run(async |stage: &Stage| {
-                let alpha = stage.viewer("Alpha")?;
+                let alpha = &stage.viewer("Alpha")?;
                 let _opened = alpha
                     .menu_path(&["menu-bar-world", "menu-bar-world-map"])
                     .await?;

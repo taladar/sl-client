@@ -110,9 +110,19 @@ pub(super) fn act(locator: Locator, kind: UiActKind, deadline: Deadline) -> Star
 
 /// A drag of the one node `source` names onto the one `target` names.
 pub(super) fn drag_to(source: Locator, target: Locator, deadline: Deadline) -> Started {
+    drag(source, DragEnd::Onto(target), deadline)
+}
+
+/// A drag of the one node `source` names by `offset` logical pixels.
+pub(super) fn drag_by(source: Locator, offset: [f32; 2], deadline: Deadline) -> Started {
+    drag(source, DragEnd::By(Vec2::from(offset)), deadline)
+}
+
+/// A drag of the one node `source` names to `end`.
+fn drag(source: Locator, end: DragEnd, deadline: Deadline) -> Started {
     Started::Running(super::Task::ui(UiTask::Drag(Box::new(UiDrag {
         pursuit: Pursuit::new(source, Intent::Click).with_deadline(deadline),
-        target,
+        end,
         deadline,
         stage: DragStage::Source,
     }))))
@@ -130,7 +140,7 @@ pub(super) fn route(route: Route) -> Started {
 pub(super) enum UiTask {
     /// An action on one node.
     Act(UiAct),
-    /// A drag of one node onto another.
+    /// A drag of one node onto another, or by an offset.
     Drag(Box<UiDrag>),
     /// A key press.
     Press(Play),
@@ -311,12 +321,21 @@ enum DragStage {
     Play(InputActionId, Box<UiNode>),
 }
 
-/// A drag of the one node a locator names onto the one another names.
+/// Where a drag ends.
+enum DragEnd {
+    /// Over the one node a locator names.
+    Onto(Locator),
+    /// This far from where it starts, in logical pixels.
+    By(Vec2),
+}
+
+/// A drag of the one node a locator names onto the one another names, or by
+/// an offset.
 pub(super) struct UiDrag {
     /// The wait for the source.
     pursuit: Pursuit,
-    /// The target.
-    target: Locator,
+    /// Where it ends.
+    end: DragEnd,
     /// When to give up waiting for the target.
     deadline: Deadline,
     /// Where it stands.
@@ -328,28 +347,30 @@ impl UiDrag {
     fn poll(&mut self, world: &mut World) -> Step {
         match &mut self.stage {
             DragStage::Source => match self.pursuit.poll(world) {
-                Ok(Progress::Ready(source)) => {
-                    // The target need only be where the pointer can reach it:
-                    // a drop target may be disabled for clicks.
-                    let pursuit = Box::new(
-                        Pursuit::new(self.target.clone(), Intent::Hover)
-                            .with_deadline(self.deadline),
-                    );
-                    self.stage = DragStage::Target(source.aim, pursuit);
-                    Step::Pending
-                }
+                Ok(Progress::Ready(source)) => match &self.end {
+                    DragEnd::Onto(target) => {
+                        // The target need only be where the pointer can reach
+                        // it: a drop target may be disabled for clicks.
+                        let pursuit = Box::new(
+                            Pursuit::new(target.clone(), Intent::Hover)
+                                .with_deadline(self.deadline),
+                        );
+                        self.stage = DragStage::Target(source.aim, pursuit);
+                        Step::Pending
+                    }
+                    DragEnd::By(offset) => {
+                        let to = Vec2::new(source.aim.x + offset.x, source.aim.y + offset.y);
+                        let gesture = drop_gesture(source.aim, to, DRAG_REST_FRAMES);
+                        self.play(world, gesture, source.node)
+                    }
+                },
                 Ok(Progress::Waiting(_check)) => Step::Pending,
                 Err(error) => Step::fail(automation_error(error)),
             },
             DragStage::Target(from, pursuit) => match pursuit.poll(world) {
                 Ok(Progress::Ready(target)) => {
-                    match enqueue(world, drop_gesture(*from, target.aim, DRAG_REST_FRAMES)) {
-                        Ok(id) => {
-                            self.stage = DragStage::Play(id, target.node);
-                            Step::Pending
-                        }
-                        Err(error) => Step::fail(error),
-                    }
+                    let gesture = drop_gesture(*from, target.aim, DRAG_REST_FRAMES);
+                    self.play(world, gesture, target.node)
                 }
                 Ok(Progress::Waiting(_check)) => Step::Pending,
                 Err(error) => Step::fail(automation_error(error)),
@@ -363,6 +384,17 @@ impl UiDrag {
                     Step::Pending
                 }
             }
+        }
+    }
+
+    /// Queue `gesture`, the drag itself, answering with `node` once played.
+    fn play(&mut self, world: &mut World, gesture: InputAction, node: Box<UiNode>) -> Step {
+        match enqueue(world, gesture) {
+            Ok(id) => {
+                self.stage = DragStage::Play(id, node);
+                Step::Pending
+            }
+            Err(error) => Step::fail(error),
         }
     }
 }
