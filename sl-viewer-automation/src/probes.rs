@@ -13,11 +13,11 @@ use bevy::prelude::*;
 use sl_automation_proto::{
     AgentReadout, CameraView, ClockTime, ConversationReadout, EnvironmentReadout, InventoryEntry,
     InventoryFolderReadout, InventoryRoot, NotificationReadout, OfferedButton, QuiescenceReadout,
-    RegionReadout, SelectedObject, SkyReadout, StatusReadout,
+    RegionReadout, SelectedObject, SkyReadout, StatusReadout, WaterReadout,
 };
 use sl_client_bevy::{
     FolderState, InventoryFolderKey, SlAgentParcel, SlCurrentRegion, SlIdentity, SlRegion,
-    SlRegionIdentity,
+    SlRegionIdentity, rotation_to_azimuth_altitude,
 };
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_kit::slt;
@@ -196,19 +196,34 @@ pub fn read_agent(world: &mut World) -> AgentReadout {
 
 /// The environment being drawn: the sky the scene publishes for RLV's
 /// `@getenv_*` — which is the one it renders — and whether the viewer's own
-/// local sky stands in for the shared one. An app without the environment
-/// scene has drawn no sky and has no local one.
+/// local sky stands in for the shared one, and — from the scene, through
+/// [`ProbeSources::environment_scene`] — the water, a cross-fade under way and
+/// the windows previewing. An app without the environment scene has drawn no
+/// sky and has no local one.
 #[must_use]
-pub fn read_environment(world: &World) -> EnvironmentReadout {
+pub fn read_environment(world: &mut World) -> EnvironmentReadout {
+    let scene = ProbeSources::of(world)
+        .environment_scene
+        .map(|reader| reader(world))
+        .unwrap_or_default();
     let slot = world.get_resource::<RlvEnvironmentSlot>();
     EnvironmentReadout {
-        sky: slot
-            .and_then(|slot| slot.rendered.as_ref())
-            .map(|sky| SkyReadout {
+        sky: slot.and_then(|slot| slot.rendered.as_ref()).map(|sky| {
+            let (azimuth, elevation) = rotation_to_azimuth_altitude(&sky.sun_rotation);
+            SkyReadout {
                 name: sky.name.clone(),
                 ambient: [sky.ambient.red(), sky.ambient.green(), sky.ambient.blue()],
-            }),
+                haze_density: sky.haze_density,
+                sun: [azimuth, elevation],
+            }
+        }),
         local_sky: slot.is_some_and(|slot| slot.fixed_sky),
+        transition: scene.transition,
+        water: scene.water.map(|water| WaterReadout {
+            name: water.name,
+            fog_density: water.fog_density,
+        }),
+        previewing: scene.previewing,
     }
 }
 

@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 124 |
 | ready | 311 |
-| blocked | 53 |
+| blocked | 54 |
 | in-progress | 20 |
 | bugs | 16 |
-| done | 1291 |
+| done | 1292 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1862** |
+| **total** | **1864** |
 
 ## ideas (124)
 
@@ -1014,8 +1014,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-e2e-sweep-environment`](ready/test-e2e-sweep-environment.md) —
-  End-to-end tests for the environment editors and their gates
 - [`test-e2e-sweep-live-grid`](ready/test-e2e-sweep-live-grid.md) — End-to-end
   tests for what only a live grid has
 - [`test-e2e-sweep-single-viewer-ui`](ready/test-e2e-sweep-single-viewer-ui.md)
@@ -1036,6 +1034,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
+  — Fake grid — push the parcel an agent walks onto, and serve parcel
+  environments
 - [`server-fake-grid-script-compile-on-upload`](ready/server-fake-grid-script-compile-on-upload.md)
   — A script upload is accepted and never compiled (blocked by
   `server-lsl-compiler-ir` (done))
@@ -1050,7 +1051,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (53)
+## blocked (54)
 
 ### viewer
 
@@ -1162,6 +1163,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-e2e-environment-parcel-layer`](blocked/test-e2e-environment-parcel-layer.md)
+  — End-to-end test of the parcel environment layer when walking between parcels
+  (blocked by `server-fake-grid-parcel-on-movement`)
 - [`test-fake-grid-lsl-offline-cases`](blocked/test-fake-grid-lsl-offline-cases.md)
   — Move the script and chat conformance cases offline (blocked by
   `server-fake-grid-scripted-scenario`)
@@ -1327,7 +1331,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1291)
+## done (1292)
 
 ### protocol
 
@@ -3777,6 +3781,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-e2e-stage`](done/test-e2e-stage.md) — sl-e2e Stage — a fake grid,
   several viewers and grid control in one test (blocked by
   `viewer-automation-driver` (done), `test-e2e-viewer-process-launch` (done))
+- [`test-e2e-sweep-environment`](done/test-e2e-sweep-environment.md) —
+  End-to-end tests for the environment editors and their gates
 - [`test-e2e-sweep-relog`](done/test-e2e-sweep-relog.md) — End-to-end tests for
   what must survive a relog
 - [`test-e2e-sweep-rlv`](done/test-e2e-sweep-rlv.md) — End-to-end tests for the

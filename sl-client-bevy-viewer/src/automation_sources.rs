@@ -6,10 +6,15 @@
 //! Registering them costs nothing: a reader runs only when a probe asks.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
-use sl_viewer_automation::ProbeSources;
+use sl_viewer_automation::{FileDialogAnswer, ProbeSources, SceneEnvironment, SceneWater};
+use sl_viewer_platform::file_dialog::{
+    FileDialogBackend, FileDialogSelection, answer_pending_dialog,
+};
+use sl_viewer_world_scene::environment::EnvironmentState;
 use sl_viewer_world_view::quiescence::SceneQuiescence;
 
 use crate::status_bar::AgentBalance;
@@ -22,7 +27,46 @@ pub(crate) fn probe_sources() -> ProbeSources {
         teleport: Some(sl_viewer_places::teleport_progress::teleport_readout),
         balance: Some(balance),
         scene_work: Some(scene_work),
+        file_dialog: Some(answer_file_dialog),
+        environment_scene: Some(environment_scene),
     }
+}
+
+/// The scene's environment beyond the sky the RLV slot publishes: the water
+/// drawn, a cross-fade under way, the windows previewing.
+fn environment_scene(world: &mut World) -> SceneEnvironment {
+    let Some(state) = world.get_resource::<EnvironmentState>() else {
+        return SceneEnvironment::default();
+    };
+    SceneEnvironment {
+        transition: state.transition_fraction(),
+        water: state
+            .water_at(sl_viewer_world_scene::sky::day_position(state))
+            .map(|water| SceneWater {
+                name: water.name,
+                fog_density: water.water_fog_density,
+            }),
+        previewing: state
+            .previewers()
+            .map(|previewer| previewer.0.to_owned())
+            .collect(),
+    }
+}
+
+/// Answer the file dialog the viewer waits on with `picked`, or Cancel — when
+/// the viewer waits on an answer at all rather than showing the desktop's
+/// chooser.
+fn answer_file_dialog(world: &mut World, picked: Option<PathBuf>) -> FileDialogAnswer {
+    if world.get_resource::<FileDialogBackend>() != Some(&FileDialogBackend::Answered) {
+        return FileDialogAnswer::ShownOnDesktop;
+    }
+    answer_pending_dialog(world, picked).map_or(FileDialogAnswer::NothingWaiting, |answered| {
+        FileDialogAnswer::Answered {
+            purpose: answered.purpose.into(),
+            title: answered.title,
+            folder: answered.selection == FileDialogSelection::Folder,
+        }
+    })
 }
 
 /// The own L$ balance as the status bar shows it.

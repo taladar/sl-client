@@ -306,6 +306,21 @@ pub enum RequestBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         outline: Option<Locator>,
     },
+    /// Answer the file dialog the viewer is waiting on — as the user would
+    /// pick in the desktop's chooser — with `path`, or Cancel it when there is
+    /// none. Waits for a dialog to be asked for. Answered with
+    /// [`ResponseBody::FileDialogAnswered`].
+    ///
+    /// Only a viewer with no window of its own waits for an answer; an
+    /// interactive one shows the desktop's chooser.
+    AnswerFileDialog {
+        /// The file or folder picked: an absolute path. Absent for Cancel.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        /// When to give up waiting for a dialog.
+        #[serde(default, skip_serializing_if = "Deadline::is_default")]
+        deadline: Deadline,
+    },
     /// Who is answering: the protocol version and the viewer's identity.
     /// Answered with [`ResponseBody::Hello`]. The first request a client on
     /// a socket sends, to learn whether it speaks the same protocol.
@@ -593,6 +608,17 @@ pub enum ResponseBody {
         /// The nodes whose boxes are outlined, without children.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         outlined: Vec<UiNode>,
+    },
+    /// The answer to [`RequestBody::AnswerFileDialog`]: the dialog that was
+    /// answered.
+    FileDialogAnswered {
+        /// What the viewer asked the file for: the purpose its reply is tagged
+        /// with (`settings-editor-import-sky`, `bulk-import-skies`, …).
+        purpose: String,
+        /// The dialog's title.
+        title: String,
+        /// Whether it asked for a folder rather than a file.
+        folder: bool,
     },
     /// The answer to [`RequestBody::Hello`].
     Hello {
@@ -965,6 +991,17 @@ mod tests {
                     millis: Some(10_000),
                 },
             },
+            RequestBody::AnswerFileDialog {
+                path: Some("/presets/skies/Dawn.xml".to_owned()),
+                deadline: Deadline::default(),
+            },
+            RequestBody::AnswerFileDialog {
+                path: None,
+                deadline: Deadline {
+                    frames: None,
+                    millis: Some(5_000),
+                },
+            },
             RequestBody::Hello,
             RequestBody::Subscribe {
                 cursor: None,
@@ -1063,6 +1100,11 @@ mod tests {
                     agent_id: None,
                 },
             }),
+            Ok(ResponseBody::FileDialogAnswered {
+                purpose: "bulk-import-skies".to_owned(),
+                title: "Import skies".to_owned(),
+                folder: true,
+            }),
             Ok(ResponseBody::Subscribed { cursor: 17 }),
             Ok(ResponseBody::Unsubscribed),
             Err(AutomationError::NotFound {
@@ -1152,6 +1194,10 @@ mod tests {
             }),
             Err(AutomationError::ScreenshotFailed {
                 reason: "no window".to_owned(),
+            }),
+            Err(AutomationError::NoFileDialog {
+                frames: 600,
+                millis: 10_000,
             }),
         ];
         for (index, result) in results.into_iter().enumerate() {

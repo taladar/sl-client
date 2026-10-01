@@ -1145,7 +1145,10 @@ mod test {
         let step1 = parse_asset_upload_response(&reply)?;
         assert_eq!(step1.state, "upload", "step 1 state for {cap}");
         let uploader: url::Url = step1.uploader.ok_or("no uploader url")?.parse()?;
-        assert_eq!(uploader.path(), format!("{path}/upload"));
+        assert!(
+            uploader.path().starts_with(&format!("{path}/upload/")),
+            "the uploader is a ticket under the cap's own upload path: {uploader}"
+        );
         let (status, reply) = respond(caps, sim, &raw_post(uploader.path(), bytes))?;
         assert_eq!(status, 200, "step 2 for {cap}");
         Ok(parse_asset_upload_response(&reply)?)
@@ -1171,6 +1174,56 @@ mod test {
         }
     }
 
+    /// Two uploads through one capability in flight at once each get an
+    /// uploader of their own, and each completes onto its own item — whatever
+    /// order the bytes arrive in. A bulk import saves that way.
+    #[test]
+    fn concurrent_uploads_through_one_cap_stay_apart() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, CAP_UPDATE_NOTECARD_AGENT_INVENTORY)?;
+        let items = [
+            InventoryKey::from(uuid::Uuid::from_u128(0x5E7_0001)),
+            InventoryKey::from(uuid::Uuid::from_u128(0x5E7_0002)),
+        ];
+        let mut uploaders = Vec::new();
+        for item in items {
+            let metadata = build_update_item_asset_request(item);
+            let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &metadata))?;
+            assert_eq!(status, 200);
+            let step1 = parse_asset_upload_response(&reply)?;
+            let uploader: url::Url = step1.uploader.ok_or("no uploader url")?.parse()?;
+            uploaders.push(uploader);
+        }
+        let [first, second] = uploaders.as_slice() else {
+            return Err("two uploaders".into());
+        };
+        assert_ne!(first, second, "each upload has an uploader of its own");
+        // The second's bytes first.
+        for (uploader, bytes) in [(second, b"second".as_slice()), (first, b"first".as_slice())] {
+            let (status, _reply) = respond(&mut caps, &mut sim, &raw_post(uploader.path(), bytes))?;
+            assert_eq!(status, 200);
+        }
+        let (status, _reply) = respond(&mut caps, &mut sim, &raw_post(first.path(), b"again"))?;
+        assert_eq!(status, 400, "a completed ticket takes no more bytes");
+        let mut stored: Vec<(InventoryKey, Vec<u8>)> = Vec::new();
+        while let Some(event) = sim.poll_event() {
+            if let ServerEvent::CapsAssetUploaded { metadata, data, .. } = event
+                && let CapsUploadMetadata::UpdateAgentItem { item_id, .. } = *metadata
+            {
+                stored.push((item_id, data));
+            }
+        }
+        assert_eq!(
+            stored,
+            vec![
+                (items[1], b"second".to_vec()),
+                (items[0], b"first".to_vec()),
+            ]
+        );
+        Ok(())
+    }
+
     /// `NewFileAgentInventory`: the two-stage uploader parks the metadata,
     /// answers an uploader URL, then completes into
     /// `ServerEvent::CapsAssetUploaded` with a fresh asset and inventory item.
@@ -1194,7 +1247,7 @@ mod test {
 
         // A bytes-POST before any step 1 is a bad request.
         let path = granted_cap_path(&caps, CAP_NEW_FILE_AGENT_INVENTORY)?;
-        let upload_path = format!("{path}/upload");
+        let upload_path = format!("{path}/upload/1");
         let (status, _) = respond(&mut caps, &mut sim, &raw_post(&upload_path, b"early"))?;
         assert_eq!(status, 400);
 

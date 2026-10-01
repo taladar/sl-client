@@ -28,18 +28,17 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        AgentKey, AnimationKey, AssetType, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
+        AgentKey, AnimationKey, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
         ChatSessionKind, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags,
         CreateGroupParams, Event, FolderType, FriendKey, GridCoordinates, GroupKey, GroupNoticeKey,
         GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
-        InterestsUpdate, InventoryCallbackId, InventoryFolderKey, InventoryKey, InventoryType,
-        LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LindenAmount,
-        LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType, NewInventoryItem,
-        ObjectExtraParams, ObjectKey, OwnerKey, ParcelObjectOwner, ParcelObjectOwnersPart, PickKey,
-        PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId, RegionHandle,
-        RegionIdentity, RegionLocalObjectId, RegionTerrainComposition, RezAttachment,
-        ScopedObjectId, ServerEvent, Session, SimSession, TextureKey, Wearable, WearableType,
-        group_powers, parse_event_queue_response,
+        InterestsUpdate, InventoryFolderKey, InventoryKey, LandStatExtended, LandStatItem,
+        LandStatReportType, LandStatScore, LindenAmount, LoginParams, LureId, Maturity,
+        MoneyTransactionType, MuteFlags, MuteType, ObjectExtraParams, ObjectKey, OwnerKey,
+        ParcelObjectOwner, ParcelObjectOwnersPart, PickKey, PickUpdate, PrimShapeParams,
+        ProductType, ProfileUpdate, QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId,
+        RegionTerrainComposition, RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession,
+        TextureKey, Wearable, WearableType, group_powers, parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_types::map::RegionCoordinates;
@@ -432,8 +431,6 @@ mod test {
         "UpdateInventoryFolder",
         "MoveInventoryFolder",
         "RemoveInventoryFolder",
-        "CreateInventoryItem",
-        "MoveInventoryItem",
         "CopyInventoryItem",
         "ChangeInventoryItemFlags",
         "RemoveInventoryItem",
@@ -503,8 +500,6 @@ mod test {
         "UpdateInventoryFolder",
         "MoveInventoryFolder",
         "RemoveInventoryFolder",
-        "CreateInventoryItem",
-        "MoveInventoryItem",
         "CopyInventoryItem",
         "ChangeInventoryItemFlags",
         "RemoveInventoryItem",
@@ -616,24 +611,10 @@ mod test {
         client.update_inventory_folder(folder, root, FolderType::None, "Things", now)?;
         client.move_inventory_folders(&[(folder, other)], true, now)?;
         client.remove_inventory_folders(&[other], now)?;
-        let callback = client.create_inventory_item(
-            &NewInventoryItem {
-                folder_id: folder,
-                transaction_id: uuid::Uuid::nil(),
-                next_owner_mask: 0x0008_e000,
-                asset_type: AssetType::Notecard,
-                inv_type: InventoryType::Notecard,
-                wearable_type: WearableType::Shape,
-                name: "Notes".to_owned(),
-                description: "a note".to_owned(),
-            },
-            now,
-        )?;
-        assert_eq!(callback, InventoryCallbackId(1));
-        // `update_inventory_item` is **not** sent here: it is typed since
-        // `test-fake-grid-asset-round-trip` (a wearable save binds its asset
-        // through it), and `tests/sim_session.rs` asserts the typed event.
-        client.move_inventory_items(&[(item, other, "Moved".to_owned())], false, now)?;
+        // `create_inventory_item` and `move_inventory_items` are **not** sent
+        // here: both are typed since `test-e2e-sweep-environment` (the fake
+        // grid answers a create and applies a rename), and `tests/sim_session.rs`
+        // asserts the typed events.
         client.copy_inventory_item(AgentKey::from(own_agent()), item, other, "Copy", now)?;
         client.change_inventory_item_flags(item, 0x100, now)?;
         client.remove_inventory_items(&[item], now)?;
@@ -644,12 +625,7 @@ mod test {
         // OpenSim-flavoured grid answers it), and `tests/sim_session.rs`
         // asserts the typed event and its reply.
 
-        let relayed = assert_family(&mut client, &mut sim, now, INVENTORY_FAMILY)?;
-        let AnyMessage::CreateInventoryItem(create) = find(&relayed, "CreateInventoryItem")? else {
-            return Err("expected a CreateInventoryItem".into());
-        };
-        assert_eq!(create.inventory_block.callback_id, 1);
-        assert_eq!(trimmed(&create.inventory_block.name), b"Notes");
+        let _relayed = assert_family(&mut client, &mut sim, now, INVENTORY_FAMILY)?;
         Ok(())
     }
 

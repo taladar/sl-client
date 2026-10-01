@@ -30,6 +30,20 @@
 //!   pointing at the asset it had before, and the viewer's next fetch of its
 //!   own wearable answers with what it saved over.
 //!
+//! # A fourth way in: an item created empty
+//!
+//! **`CreateInventoryItem`** ([`ServerEvent::CreateInventoryItem`]) is how a
+//! viewer asks for a *new* item — New Script, New Notecard, a new sky, the
+//! item a settings Save As or a bulk import fills — or names the item a
+//! transaction's upload belongs to. The grid mints the item and answers with
+//! `UpdateCreateInventoryItem`, the request's own reply (OpenSim's
+//! `InventoryAccessModule.CreateNewInventoryItem`; Second Life answers the
+//! same message). An item with no upload behind it gets the grid's starting
+//! body: a settings item the default sky, water or day cycle of its subtype
+//! (OpenSim's `IEnvironmentModule.GetDefaultAsset`), with the subtype in its
+//! flags so a viewer can tell the three kinds apart before it fetches one; a
+//! script the starter script; anything else an empty asset of its type.
+//!
 //! # Who is told, and how
 //!
 //! The two capability paths announce the item they bound according to
@@ -67,8 +81,10 @@
 use std::time::Instant;
 
 use sl_proto::{
-    AssetKey, AssetType, CapsUploadMetadata, InventoryItem, InventoryKey, InventoryType, OwnerKey,
-    Permissions5, ServerEvent, SimSession, TransactionId,
+    AssetKey, AssetType, CapsUploadMetadata, DEFAULT_SKY_FRAME, DEFAULT_WATER_FRAME,
+    EnvironmentAsset, EnvironmentSettings, InventoryCallbackId, InventoryItem, InventoryKey,
+    InventoryType, NewInventoryItem, OwnerKey, Permissions5, ServerEvent, SimSession, SkySettings,
+    TransactionId, WaterSettings, environment_asset_to_bytes,
 };
 use sl_types::key::ObjectKey;
 
@@ -127,9 +143,18 @@ pub(crate) fn answer_upload(
     announcements: UploadAnnouncements,
     sim: &mut SimSession,
     event: &ServerEvent,
+    mint: &dyn Fn() -> uuid::Uuid,
     now: Instant,
 ) -> bool {
     match event {
+        ServerEvent::CreateInventoryItem {
+            item,
+            bound_asset,
+            callback_id,
+        } => {
+            create_item(assets, sim, item, *bound_asset, *callback_id, mint, now);
+            true
+        }
         ServerEvent::CapsAssetUploaded {
             metadata,
             new_asset,
@@ -178,6 +203,125 @@ pub(crate) fn answer_upload(
 /// Puts `data` in the grid-wide store under `key`, replacing whatever was there.
 fn store(assets: &GridAssets, key: AssetKey, data: Vec<u8>) {
     let _previous = assets.write().insert(key, data);
+}
+
+/// The default script body a new script item is created with — OpenSim's
+/// `DEFAULTSCRIPT`.
+const DEFAULT_SCRIPT: &[u8] =
+    b"default\n{\n    state_entry()\n    {\n        llSay(0, \"Script running\");\n    }\n}\n";
+
+/// The asset a new settings item of `subtype` starts as (`0` sky, `1` water,
+/// `2` day cycle): its stable id and its body. `None` for a subtype that names
+/// no settings kind.
+///
+/// One id per kind, as OpenSim's environment module hands every new item of a
+/// kind the same default asset; the ids are this grid's own.
+fn default_settings_asset(subtype: u8) -> Option<(AssetKey, Vec<u8>)> {
+    let (id, asset) = match subtype {
+        0 => (
+            0x5E77_1765_0000_0000_0000_0000_0000_0000_u128,
+            EnvironmentAsset::Sky(Box::new(SkySettings::legacy_windlight_default(
+                DEFAULT_SKY_FRAME,
+            ))),
+        ),
+        1 => (
+            0x5E77_1765_0000_0000_0000_0000_0000_0001_u128,
+            EnvironmentAsset::Water(WaterSettings::legacy_default(DEFAULT_WATER_FRAME)),
+        ),
+        2 => (
+            0x5E77_1765_0000_0000_0000_0000_0000_0002_u128,
+            EnvironmentAsset::DayCycle(Box::new(EnvironmentSettings::default_region().day_cycle)),
+        ),
+        _ => return None,
+    };
+    Some((
+        AssetKey::from(uuid::Uuid::from_u128(id)),
+        environment_asset_to_bytes(&asset),
+    ))
+}
+
+/// Mints the item a `CreateInventoryItem` asked for, names the asset it starts
+/// as, and answers with the `UpdateCreateInventoryItem` that echoes the
+/// client's callback id (see the module docs on what each kind starts as).
+fn create_item(
+    assets: &GridAssets,
+    sim: &mut SimSession,
+    request: &NewInventoryItem,
+    bound_asset: Option<AssetKey>,
+    callback_id: InventoryCallbackId,
+    mint: &dyn Fn() -> uuid::Uuid,
+    now: Instant,
+) {
+    let subtype = request.wearable_type.to_code();
+    let mut flags = 0;
+    let asset_id = if request.asset_type == AssetType::Settings {
+        // A settings item is never bound to a transaction: its body is saved
+        // over it afterwards, through `UpdateSettingsAgentInventory`.
+        flags = u32::from(subtype);
+        let Some((key, body)) = default_settings_asset(subtype) else {
+            tracing::warn!("a new settings item named the unknown settings kind {subtype}");
+            return;
+        };
+        if sl_proto::AssetSource::get(&*assets.read(), key).is_none() {
+            store(assets, key, body);
+        }
+        key
+    } else if let Some(bound) = bound_asset {
+        bound
+    } else {
+        let key = AssetKey::from(mint());
+        let body = if request.asset_type == AssetType::ScriptText {
+            DEFAULT_SCRIPT.to_vec()
+        } else {
+            Vec::new()
+        };
+        store(assets, key, body);
+        key
+    };
+    if matches!(
+        request.asset_type,
+        AssetType::Clothing | AssetType::Bodypart
+    ) {
+        flags = u32::from(subtype);
+    }
+    let agent = sim
+        .agent_id()
+        .unwrap_or_else(|| sl_proto::AgentKey::from(uuid::Uuid::nil()));
+    let item = InventoryItem {
+        item_id: InventoryKey::from(mint()),
+        folder_id: request.folder_id,
+        name: request.name.clone(),
+        description: request.description.clone(),
+        asset_id: asset_id.uuid(),
+        item_type: narrow(request.asset_type.to_code()),
+        inv_type: narrow(request.inv_type.to_code()),
+        flags,
+        sale_type: sl_proto::SaleType::NotForSale.to_code(),
+        sale_price: None,
+        creation_date: 0,
+        owner: OwnerKey::Agent(agent),
+        last_owner_id: uuid::Uuid::nil(),
+        creator_id: agent,
+        group: None,
+        // OpenSim: base and owner `AllAndExport`, everyone and group nothing,
+        // next owner what the client asked for.
+        permissions: Permissions5 {
+            base: sl_proto::Permissions::ALL,
+            owner: sl_proto::Permissions::ALL,
+            group: sl_proto::Permissions::from_bits(0),
+            everyone: sl_proto::Permissions::from_bits(0),
+            next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
+        },
+    };
+    sim.agent_inventory_mut().insert_item(item.clone());
+    if let Err(error) = sim.send_inventory_items_created(
+        &[(item, callback_id)],
+        TransactionId::from(request.transaction_id),
+        true,
+        now,
+    ) {
+        tracing::warn!("answering an inventory item creation failed: {error}");
+    }
 }
 
 /// Points the item a completed CAPS upload named at the asset it just stored.
@@ -485,6 +629,28 @@ mod test {
             "the task item still names the asset the save replaced"
         );
         drop(guard);
+        Ok(())
+    }
+
+    /// Each settings kind starts as a body that decodes as that kind — what a
+    /// viewer opening a just-created sky, water or day cycle fetches.
+    #[test]
+    fn a_new_settings_item_starts_as_its_kinds_default() -> Result<(), TestError> {
+        for (subtype, kind) in [
+            (0, sl_proto::SettingsKind::Sky),
+            (1, sl_proto::SettingsKind::Water),
+            (2, sl_proto::SettingsKind::DayCycle),
+        ] {
+            let (_key, body) =
+                default_settings_asset(subtype).ok_or("a settings kind has a default")?;
+            let decoded = sl_proto::environment_asset_from_bytes("New", &body)
+                .ok_or("the default body decodes")?;
+            assert_eq!(decoded.kind(), kind, "subtype {subtype}");
+        }
+        assert!(
+            default_settings_asset(3).is_none(),
+            "no fourth settings kind"
+        );
         Ok(())
     }
 

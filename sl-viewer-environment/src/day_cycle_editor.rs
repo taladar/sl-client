@@ -105,7 +105,7 @@ use sl_viewer_ui_widgets::ui_tab::{
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
-use sl_viewer_world_scene::environment::EnvironmentState;
+use sl_viewer_world_scene::environment::{EditPreviewer, EnvironmentState};
 
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 use crate::land_environment::{LandDayCycleEdited, OpenLandDayCycle};
@@ -119,6 +119,9 @@ use crate::tabs::{SKY_TABS, TabPage, WATER_TABS};
 
 /// The window's floater id, and the prefix of every node's name in it.
 pub const DAY_CYCLE_EDITOR_FLOATER_ID: &str = "day-cycle-editor";
+
+/// This window, as it previews through the environment's edit layer.
+const PREVIEWER: EditPreviewer = EditPreviewer(DAY_CYCLE_EDITOR_FLOATER_ID);
 
 /// The element id the sky knobs are named under, so they do not collide with the
 /// water ones in the same window.
@@ -1539,6 +1542,24 @@ fn seed_day_session(
     }
 }
 
+/// Open the window's session on `cycle`, as an inventory item, for a test
+/// in another module that needs the day-cycle editor previewing.
+#[cfg(test)]
+pub(crate) fn seed_for_test(world: &mut World, cycle: DayCycle) {
+    let mut state = world.resource_mut::<DayCycleEditorState>();
+    let name = cycle.name.clone();
+    seed_day_session(
+        &mut state,
+        DaySource::Inventory(EditedItem {
+            item_id: sl_client_bevy::InventoryKey::from(sl_client_bevy::Uuid::from_u128(1)),
+            folder_id: sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(2)),
+            editable: true,
+        }),
+        name,
+        cycle,
+    );
+}
+
 /// Handle an [`OpenLandDayCycle`]: show the window on a land's own cycle.
 ///
 /// No fetch, and so no pending state — the panel had the cycle in hand, which
@@ -2056,10 +2077,10 @@ fn push_day_preview(
     session.dirty = false;
     let (sky, water) = session.preview();
     if let Some(sky) = sky {
-        environment.set_edit(EnvironmentAsset::Sky(Box::new(sky)));
+        environment.set_edit(PREVIEWER, EnvironmentAsset::Sky(Box::new(sky)));
     }
     if let Some(water) = water {
-        environment.set_edit(EnvironmentAsset::Water(water));
+        environment.set_edit(PREVIEWER, EnvironmentAsset::Water(water));
     }
 }
 
@@ -2081,8 +2102,8 @@ fn drop_day_preview_on_close(
         state.pending = None;
         state.insert = None;
         // Both tracks: this window is the only one that previews the pair.
-        environment.clear_edit(SettingsKind::Sky);
-        environment.clear_edit(SettingsKind::Water);
+        environment.clear_edit(PREVIEWER, SettingsKind::Sky);
+        environment.clear_edit(PREVIEWER, SettingsKind::Water);
     }
 }
 
@@ -3183,8 +3204,8 @@ mod tests {
         Playback, TICKS, action_enabled, clock_at, day_percent, named, neighbour_keyframe,
         strip_fraction, tick_fraction,
     };
-    use bevy::prelude::{Entity, Vec2};
-    use pretty_assertions::assert_eq;
+    use bevy::prelude::{App, Entity, Vec2};
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
         DayCycle, DayTrack, EnvironmentAsset, EnvironmentSettings, InventoryFolderKey,
         InventoryKey, KEYFRAME_SLOP, SkySettings, Uuid, environment_asset_from_bytes,
@@ -3569,6 +3590,64 @@ mod tests {
                 keyframe.name
             );
         }
+        Ok(())
+    }
+
+    /// **Every control of the day-cycle editor moves the preview** — the sky
+    /// pages on a sky track, the water page on the water track, each editing
+    /// the keyframe under the scrubber, which is what the preview blends;
+    /// **Revert** previews the cycle as opened again, and **closing** the window
+    /// takes the preview away.
+    #[test]
+    fn every_day_control_moves_the_preview_and_revert_and_close_undo_it() -> Result<(), TestError> {
+        use crate::preview_harness::{app, drawn, show, sweep};
+        let mut app = app();
+        show(&mut app, super::DAY_CYCLE_EDITOR_FLOATER_ID, true)?;
+        let cycle = EnvironmentSettings::legacy_windlight_default().day_cycle;
+        {
+            let mut state = app.world_mut().resource_mut::<super::DayCycleEditorState>();
+            super::seed_day_session(
+                &mut state,
+                open_session(cycle.clone()).source,
+                "Preview Day".to_owned(),
+                cycle,
+            );
+        }
+        sl_viewer_testkit::settle(&mut app);
+        let opened = drawn(&app);
+
+        let (driven, failures) = sweep(&mut app, "day-cycle-editor-sky");
+        assert_eq!(failures, Vec::<String>::new(), "the sky pages");
+        assert!(driven > 0, "no sky controls found");
+        sl_viewer_testkit::interact::click_node(&mut app, "day-cycle-editor-track-water:button")?;
+        sl_viewer_testkit::settle(&mut app);
+        let (driven, failures) = sweep(&mut app, "day-cycle-editor-water");
+        assert_eq!(failures, Vec::<String>::new(), "the water page");
+        assert!(driven > 0, "no water controls found");
+        assert_ne!(drawn(&app), opened, "the edits are previewed");
+
+        sl_viewer_testkit::interact::click_node(&mut app, "day-cycle-editor-revert:button")?;
+        sl_viewer_testkit::settle(&mut app);
+        assert_eq!(drawn(&app), opened, "Revert previews the cycle as opened");
+        // The sky pages are hidden while the water track is chosen; they are
+        // re-seeded when a sky track is chosen again, which is when they show.
+        sl_viewer_testkit::interact::click_node(&mut app, "day-cycle-editor-track-ground:button")?;
+        sl_viewer_testkit::settle(&mut app);
+        assert_eq!(
+            crate::preview_harness::widgets_out_of_step(&mut app, "day-cycle-editor-sky"),
+            Vec::<String>::new(),
+            "the sky pages are put back with the preview"
+        );
+        assert_eq!(
+            crate::preview_harness::widgets_out_of_step(&mut app, "day-cycle-editor-water"),
+            Vec::<String>::new(),
+            "the widgets are put back with the preview"
+        );
+
+        show(&mut app, super::DAY_CYCLE_EDITOR_FLOATER_ID, false)?;
+        let mut untouched = App::new();
+        untouched.init_resource::<sl_viewer_world_scene::environment::EnvironmentState>();
+        assert_eq!(drawn(&app), drawn(&untouched), "closing drops the preview");
         Ok(())
     }
 }

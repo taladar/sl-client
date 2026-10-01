@@ -103,6 +103,11 @@ pub struct RegionConfig {
     /// client opens a child circuit to each and can walk over the border into
     /// them ([`crate::neighbours`]).
     pub neighbours: NeighbourPolicy,
+    /// Capabilities this region does not grant (`sl_proto::CAP_*` names), as a
+    /// simulator too old for a feature leaves it out of the seed reply — the
+    /// only way a viewer learns a region cannot do something. Empty: every
+    /// capability the session serves.
+    pub withheld_caps: Vec<String>,
 }
 
 impl RegionConfig {
@@ -156,6 +161,7 @@ impl Default for RegionConfig {
             environment: None,
             scenario: None,
             neighbours: NeighbourPolicy::default(),
+            withheld_caps: Vec::new(),
         }
     }
 }
@@ -812,6 +818,14 @@ impl GridCore {
                 // itself and uploads the result -- which is the whole of what a
                 // stock OpenSim region does about appearance.
                 let _withheld = caps.withhold(sl_proto::CAP_UPDATE_AVATAR_APPEARANCE);
+            }
+            for name in &region.config.withheld_caps {
+                if !caps.withhold(name) {
+                    tracing::warn!(
+                        "region {} withholds the {name} capability, which it never served",
+                        region.config.name
+                    );
+                }
             }
             caps
         };
@@ -2181,6 +2195,17 @@ impl FakeAgent {
     /// `set_*` / `enqueue_*` on it.
     pub async fn with_sim<R>(&self, f: impl FnOnce(&mut SimSession) -> R) -> R {
         self.shared.with_sim(f).await
+    }
+
+    /// The bytes the grid stores under `asset` — what a viewer's fetch of it
+    /// would be served, a save it uploaded included — or `None` when it holds
+    /// none. How a test reads back what a viewer saved.
+    pub async fn stored_asset(&self, asset: sl_proto::AssetKey) -> Option<Vec<u8>> {
+        use sl_proto::AssetSource as _;
+        let state = self.shared.state.lock().await;
+        let bytes = state.assets.read().get(asset).map(<[u8]>::to_vec);
+        drop(state);
+        bytes
     }
 
     /// Runs `f` against this session's **region world** and its machine

@@ -345,12 +345,14 @@ impl SharedSim {
             // Before the world block, not inside it: this takes the region lock
             // itself for a task-inventory write, and the crate's one lock rule
             // is session → region, never region → region.
+            let upload_minter = state.minter.clone();
             let _upload = crate::uploads::answer_upload(
                 &state.assets,
                 &state.world,
                 state.upload_announcements,
                 &mut state.sim,
                 &event,
+                &move || upload_minter.uuid(),
                 now,
             );
             {

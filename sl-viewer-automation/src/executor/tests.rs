@@ -769,3 +769,143 @@ fn what_cannot_be_asked_is_refused_at_once() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// A stand-in for the viewer's file dialog service: the dialog waiting, if
+/// any, whether the desktop shows it instead, and what it was answered with.
+#[derive(Resource, Debug, Default)]
+struct DialogStandIn {
+    /// The purpose of the dialog waiting for an answer.
+    waiting: Option<String>,
+    /// Whether the desktop shows its own chooser instead.
+    desktop: bool,
+    /// The answers given, in order.
+    answers: Vec<Option<std::path::PathBuf>>,
+}
+
+/// The stand-in's answerer, as the viewer's assembly registers the real one.
+fn answer_stand_in(
+    world: &mut World,
+    picked: Option<std::path::PathBuf>,
+) -> crate::FileDialogAnswer {
+    let mut stand_in = world.resource_mut::<DialogStandIn>();
+    if stand_in.desktop {
+        return crate::FileDialogAnswer::ShownOnDesktop;
+    }
+    let Some(purpose) = stand_in.waiting.take() else {
+        return crate::FileDialogAnswer::NothingWaiting;
+    };
+    stand_in.answers.push(picked);
+    crate::FileDialogAnswer::Answered {
+        purpose,
+        title: "Import a sky".to_owned(),
+        folder: false,
+    }
+}
+
+/// An app whose file dialog is the stand-in.
+fn dialog_app() -> App {
+    let mut app = app();
+    app.init_resource::<DialogStandIn>()
+        .insert_resource(crate::ProbeSources {
+            file_dialog: Some(answer_stand_in),
+            ..crate::ProbeSources::default()
+        });
+    app
+}
+
+/// An answer waits for its dialog — it is usually sent before the click that
+/// asks for one lands — and then answers exactly that dialog, once.
+#[test]
+fn a_file_dialog_answer_waits_for_the_dialog_and_answers_it_once() -> Result<(), String> {
+    let mut app = dialog_app();
+    submit(
+        &mut app,
+        1,
+        RequestBody::AnswerFileDialog {
+            path: Some("/presets/skies/Dawn.xml".to_owned()),
+            deadline: Deadline::default(),
+        },
+    );
+    for _frame in 0..5 {
+        app.update();
+    }
+    assert!(
+        take(&mut app, 1).is_none(),
+        "answered before a dialog was asked for"
+    );
+    app.world_mut().resource_mut::<DialogStandIn>().waiting =
+        Some("settings-editor-import-sky".to_owned());
+    let body = ok(answer(&mut app, 1)?)?;
+    assert_eq!(
+        body,
+        ResponseBody::FileDialogAnswered {
+            purpose: "settings-editor-import-sky".to_owned(),
+            title: "Import a sky".to_owned(),
+            folder: false,
+        }
+    );
+    assert_eq!(
+        app.world().resource::<DialogStandIn>().answers,
+        vec![Some(std::path::PathBuf::from("/presets/skies/Dawn.xml"))],
+        "the dialog got the path, once"
+    );
+    Ok(())
+}
+
+/// No dialog in time is its own error; a relative path, a viewer with no
+/// dialog service, and one that shows the desktop's chooser are refused.
+#[test]
+fn a_file_dialog_answer_fails_without_a_dialog_it_can_answer() -> Result<(), String> {
+    let mut bare = app();
+    let mut app = dialog_app();
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::AnswerFileDialog {
+            path: None,
+            deadline: SHORT,
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::NoFileDialog { frames: 20, .. }),
+        "{error}"
+    );
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::AnswerFileDialog {
+            path: Some("relative.xml".to_owned()),
+            deadline: SHORT,
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::InvalidRequest { .. }),
+        "{error}"
+    );
+    app.world_mut().resource_mut::<DialogStandIn>().desktop = true;
+    let (error, _report) = failed(request(
+        &mut app,
+        RequestBody::AnswerFileDialog {
+            path: None,
+            deadline: SHORT,
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::Unavailable { .. }),
+        "{error}"
+    );
+    let (error, _report) = failed(request(
+        &mut bare,
+        RequestBody::AnswerFileDialog {
+            path: None,
+            deadline: SHORT,
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::Unavailable { .. }),
+        "{error}"
+    );
+    assert!(
+        app.world().resource::<DialogStandIn>().answers.is_empty(),
+        "nothing was answered"
+    );
+    Ok(())
+}

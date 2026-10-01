@@ -36,6 +36,9 @@ sl-viewer-world-scene = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# The preview sweep drives every window's controls through the real input
+# stack (`preview_harness`).
+sl-viewer-testkit = { workspace = true }
 
 [lints]
 workspace = true

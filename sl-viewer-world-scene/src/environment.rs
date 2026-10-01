@@ -672,6 +672,11 @@ struct ParcelRequest {
     next_retry_at: f32,
 }
 
+/// A window previewing through the edit layer, named by its floater id
+/// (`settings-editor-sky`, `day-cycle-editor`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EditPreviewer(pub &'static str);
+
 /// A cross-fade from the environment that was rendering to the one just
 /// selected — the reference's `LLSettingsBlender`, driven by
 /// [`SETTING_TRANSITION_TIME`].
@@ -872,7 +877,7 @@ pub struct EnvironmentState {
     pub manual_transition_seconds: f32,
     /// The cross-fade in flight, if any.
     transition: Option<EnvironmentTransition>,
-    /// The **edit** layer: what an open settings editor is previewing, over
+    /// The **edit** layer: what the open settings editors are previewing, over
     /// every other layer — the reference's `ENV_EDIT`
     /// (`LLFloaterFixedEnvironment::onOpen` installs the settings it is editing
     /// there and `onClose` clears them again).
@@ -885,10 +890,17 @@ pub struct EnvironmentState {
     /// in between — a script's `@setenv_*`, or the Personal Lighting window
     /// left open beside the editor, both do.
     ///
+    /// One entry per window previewing, **the one written last on top**: the
+    /// sky editor and the day-cycle editor both preview a sky, and with both
+    /// open the one the user is working in is the one drawn. Closing a window
+    /// takes only its own tracks out, so the other's preview shows through
+    /// again rather than the environment underneath — a single shared slot let
+    /// the first editor to close wipe the preview of one still open.
+    ///
     /// Never persisted: [`saved_environment`](Self::saved_environment) ignores
     /// it, because a frame somebody was looking at in an editor is not a
     /// personal environment they chose.
-    edit: LocalEnvironment,
+    edit: Vec<(EditPreviewer, LocalEnvironment)>,
     /// Whether the account's saved personal environment has been restored yet
     /// (once per session, after the account settings load — see
     /// [`restore_saved_environment`]).
@@ -924,7 +936,7 @@ impl Default for EnvironmentState {
             experience_recheck: None,
             manual_transition_seconds: 0.0,
             transition: None,
-            edit: LocalEnvironment::default(),
+            edit: Vec::new(),
             restored: false,
             req_pending: false,
             req_attempts: 0,
@@ -1120,30 +1132,54 @@ impl EnvironmentState {
     /// fade restarted per pixel would run the preview a beat behind the hand
     /// moving it — the same reason [`set_local_instant`](Self::set_local_instant)
     /// exists.
-    pub fn set_edit(&mut self, edit: EnvironmentAsset) {
+    ///
+    /// `previewer`'s preview goes on top of every other window's: the window
+    /// being worked in is the one drawn.
+    pub fn set_edit(&mut self, previewer: EditPreviewer, edit: EnvironmentAsset) {
         self.transition = None;
-        self.edit.install(edit, None);
+        let mut entry = self
+            .edit
+            .iter()
+            .position(|(owner, _layer)| *owner == previewer)
+            .map_or_else(
+                || (previewer, LocalEnvironment::default()),
+                |index| self.edit.remove(index),
+            );
+        entry.1.install(edit, None);
+        self.edit.push(entry);
         self.apply();
     }
 
-    /// Take one track out of the edit layer — an editor closing, putting back
-    /// whatever the layers underneath were holding all along.
+    /// Take one of `previewer`'s tracks out of the edit layer — an editor
+    /// closing, putting back whatever is underneath: another window's preview,
+    /// or the layers below the edit layer.
     ///
-    /// Per track, not the whole layer: the sky editor and the water editor are
-    /// separate windows and either can be open without the other.
-    pub fn clear_edit(&mut self, kind: SettingsKind) {
-        match kind {
-            SettingsKind::Sky => self.edit.sky = None,
-            SettingsKind::Water => self.edit.water = None,
-            SettingsKind::DayCycle => self.edit.day = None,
+    /// Per track, not the whole window: the day-cycle editor previews a sky and
+    /// a water frame and takes both back, and a window that never previewed a
+    /// track takes nothing.
+    pub fn clear_edit(&mut self, previewer: EditPreviewer, kind: SettingsKind) {
+        if let Some(index) = self
+            .edit
+            .iter()
+            .position(|(owner, _layer)| *owner == previewer)
+            && let Some((_owner, layer)) = self.edit.get_mut(index)
+        {
+            match kind {
+                SettingsKind::Sky => layer.sky = None,
+                SettingsKind::Water => layer.water = None,
+                SettingsKind::DayCycle => layer.day = None,
+            }
+            if layer.is_empty() {
+                drop(self.edit.remove(index));
+            }
         }
         self.apply();
     }
 
-    /// The edit layer — what an open editor is previewing, if anything.
-    #[must_use]
-    pub const fn editing(&self) -> &LocalEnvironment {
-        &self.edit
+    /// The windows previewing through the edit layer, the one drawn on top
+    /// last.
+    pub fn previewers(&self) -> impl Iterator<Item = EditPreviewer> + '_ {
+        self.edit.iter().map(|(owner, _layer)| *owner)
     }
 
     /// The pushed layer — what experiences have injected, if anything.
@@ -1368,6 +1404,15 @@ impl EnvironmentState {
         self.fixed.is_some() || self.local.sky.is_some()
     }
 
+    /// How far the cross-fade a manual change started has got, `0.0..=1.0`,
+    /// or `None` while nothing fades.
+    #[must_use]
+    pub fn transition_fraction(&self) -> Option<f32> {
+        self.transition
+            .as_ref()
+            .map(EnvironmentTransition::fraction)
+    }
+
     /// The shared day cycle sampled at `position` (`0.0..=1.0`) — the sky
     /// `@setenv_daytime` pins.
     ///
@@ -1546,18 +1591,23 @@ impl EnvironmentState {
         // editor is previewing. Its sky wins over the menu's pin as well as over
         // a local sky, which is why it is applied after both rather than folded
         // into either.
-        if let Some(day) = &self.edit.day {
-            self.settings.day_cycle = (*day.settings).clone();
-        }
-        if let Some(sky) = &self.edit.sky {
-            let name = sky.settings.name.clone();
-            let settings = (*sky.settings).clone();
-            self.pin_sky(settings, name);
-        }
-        if let Some(water) = &self.edit.water {
-            let name = water.settings.name.clone();
-            let settings = water.settings.clone();
-            pin_water_into(&mut self.settings, settings, name);
+        // Oldest first, so the window written last ends up on top, track by
+        // track.
+        let edits = self.edit.clone();
+        for (_owner, layer) in &edits {
+            if let Some(day) = &layer.day {
+                self.settings.day_cycle = (*day.settings).clone();
+            }
+            if let Some(sky) = &layer.sky {
+                let name = sky.settings.name.clone();
+                let settings = (*sky.settings).clone();
+                self.pin_sky(settings, name);
+            }
+            if let Some(water) = &layer.water {
+                let name = water.settings.name.clone();
+                let settings = water.settings.clone();
+                pin_water_into(&mut self.settings, settings, name);
+            }
         }
 
         self.day_position_pin = self.resolve_day_position_pin();
@@ -2335,12 +2385,21 @@ mod tests {
     use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
     use super::{
-        DayPositionPin, EnvironmentAsset, EnvironmentPushAction, EnvironmentSettings,
-        EnvironmentSource, EnvironmentState, ExperienceEnvironmentPush, ExperienceKey,
-        FixedEnvironment, Llsd, SavedEnvironment, SkySettings, Uuid,
+        DayPositionPin, EditPreviewer, EnvironmentAsset, EnvironmentPushAction,
+        EnvironmentSettings, EnvironmentSource, EnvironmentState, ExperienceEnvironmentPush,
+        ExperienceKey, FixedEnvironment, Llsd, SavedEnvironment, SkySettings, Uuid,
     };
     use sl_client_bevy::WaterSettings;
     use sl_viewer_kit::sky_presets::FixedSky;
+
+    /// The sky editor, as a previewer.
+    const SKY_EDITOR: EditPreviewer = EditPreviewer("settings-editor-sky");
+
+    /// The water editor, as a previewer.
+    const WATER_EDITOR: EditPreviewer = EditPreviewer("settings-editor-water");
+
+    /// The day-cycle editor, as a previewer.
+    const DAY_EDITOR: EditPreviewer = EditPreviewer("day-cycle-editor");
 
     /// An environment reply for `parcel_id` (`-1` = the whole region), tagged by
     /// its day length so the folded settings are identifiable.
@@ -2880,7 +2939,7 @@ mod tests {
 
         let mut edited = SkySettings::legacy_windlight_default("edited");
         edited.gamma = 9.5;
-        state.set_edit(EnvironmentAsset::Sky(Box::new(edited)));
+        state.set_edit(SKY_EDITOR, EnvironmentAsset::Sky(Box::new(edited)));
 
         assert_eq!(
             state.sky_at(0.0, 0.0).map(|sky| sky.gamma),
@@ -2892,7 +2951,7 @@ mod tests {
             "the personal environment is still underneath, untouched"
         );
 
-        state.clear_edit(sl_client_bevy::SettingsKind::Sky);
+        state.clear_edit(SKY_EDITOR, sl_client_bevy::SettingsKind::Sky);
         assert_eq!(
             state.sky_at(0.0, 0.0).map(|sky| sky.gamma),
             Some(3.5),
@@ -2909,12 +2968,12 @@ mod tests {
 
         let mut water = WaterSettings::legacy_default("edited-water");
         water.fresnel_scale = 0.125;
-        state.set_edit(EnvironmentAsset::Water(water));
+        state.set_edit(WATER_EDITOR, EnvironmentAsset::Water(water));
         let mut sky = SkySettings::legacy_windlight_default("edited-sky");
         sky.gamma = 9.5;
-        state.set_edit(EnvironmentAsset::Sky(Box::new(sky)));
+        state.set_edit(SKY_EDITOR, EnvironmentAsset::Sky(Box::new(sky)));
 
-        state.clear_edit(sl_client_bevy::SettingsKind::Sky);
+        state.clear_edit(SKY_EDITOR, sl_client_bevy::SettingsKind::Sky);
 
         assert_eq!(
             state.water_at(0.0).map(|water| water.fresnel_scale),
@@ -2923,13 +2982,49 @@ mod tests {
         );
     }
 
+    /// **Two windows previewing one track**: the one written last is drawn,
+    /// and closing it shows the other's preview again — not the environment
+    /// under both, which left the day-cycle editor previewing nothing once a
+    /// sky editor opened beside it was closed.
+    #[test]
+    fn closing_the_top_preview_shows_the_one_beneath() {
+        let mut state = EnvironmentState::default();
+        let _source = state.ingest_reply(reply(-1, 1234));
+        let mut day_sky = SkySettings::legacy_windlight_default("day-editor");
+        day_sky.gamma = 2.5;
+        state.set_edit(DAY_EDITOR, EnvironmentAsset::Sky(Box::new(day_sky.clone())));
+        let mut sky = SkySettings::legacy_windlight_default("sky-editor");
+        sky.gamma = 9.5;
+        state.set_edit(SKY_EDITOR, EnvironmentAsset::Sky(Box::new(sky)));
+        assert_eq!(
+            state.sky_at(0.0, 0.0).map(|sky| sky.gamma),
+            Some(9.5),
+            "the window written last is drawn"
+        );
+
+        // A drag in the day-cycle editor puts its preview back on top.
+        day_sky.gamma = 3.0;
+        state.set_edit(DAY_EDITOR, EnvironmentAsset::Sky(Box::new(day_sky)));
+        assert_eq!(state.sky_at(0.0, 0.0).map(|sky| sky.gamma), Some(3.0));
+
+        state.clear_edit(SKY_EDITOR, sl_client_bevy::SettingsKind::Sky);
+        assert_eq!(
+            state.sky_at(0.0, 0.0).map(|sky| sky.gamma),
+            Some(3.0),
+            "closing the sky editor leaves the day editor's preview"
+        );
+        assert_eq!(state.previewers().collect::<Vec<_>>(), vec![DAY_EDITOR]);
+        state.clear_edit(DAY_EDITOR, sl_client_bevy::SettingsKind::Sky);
+        assert_eq!(state.previewers().count(), 0, "nothing previews any more");
+    }
+
     /// **A preview is not a personal environment.** What an editor is showing
     /// must not be written to the account and come back at the next login: the
     /// user was looking at it, not living in it.
     #[test]
     fn an_edited_frame_is_not_saved_as_the_personal_environment() {
         let mut state = EnvironmentState::default();
-        state.set_edit(EnvironmentAsset::Sky(Box::new(script_sky())));
+        state.set_edit(SKY_EDITOR, EnvironmentAsset::Sky(Box::new(script_sky())));
         assert!(
             state.saved_environment().is_none(),
             "an open editor alone is nothing to persist"

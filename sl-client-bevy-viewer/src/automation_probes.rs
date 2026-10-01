@@ -124,21 +124,30 @@ mod tests {
     }
 
     /// The environment probe reads the sky the scene publishes and whether
-    /// the local layer holds it.
+    /// the local layer holds it, and from the scene the water drawn and the
+    /// windows previewing through the edit layer.
     #[test]
     fn the_environment_probe_reads_the_published_sky() {
         let mut app = probe_world();
         app.world_mut().remove_resource::<RlvEnvironmentSlot>();
+        let scene = app
+            .world_mut()
+            .remove_resource::<sl_viewer_world_scene::environment::EnvironmentState>();
         assert_eq!(
             read_environment(app.world_mut()),
             EnvironmentReadout {
                 sky: None,
                 local_sky: false,
+                transition: None,
+                water: None,
+                previewing: Vec::new(),
             },
             "no environment scene, no sky"
         );
         let mut sky = SkySettings::legacy_windlight_default("Default");
         sky.ambient = sl_client_bevy::Color::new(1.0, 0.0, 0.0);
+        sky.haze_density = 2.5;
+        let (azimuth, elevation) = sl_client_bevy::rotation_to_azimuth_altitude(&sky.sun_rotation);
         app.world_mut().insert_resource(RlvEnvironmentSlot {
             rendered: Some(sky),
             fixed_sky: true,
@@ -150,10 +159,35 @@ mod tests {
                 sky: Some(SkyReadout {
                     name: "Default".to_owned(),
                     ambient: [1.0, 0.0, 0.0],
+                    haze_density: 2.5,
+                    sun: [azimuth, elevation],
                 }),
                 local_sky: true,
-            }
+                transition: None,
+                water: None,
+                previewing: Vec::new(),
+            },
+            "no scene: the slot's sky alone"
         );
+
+        let mut scene = scene.unwrap_or_default();
+        let mut water = sl_client_bevy::WaterSettings::legacy_default("Edited Water");
+        water.water_fog_density = 7.5;
+        scene.set_edit(
+            sl_viewer_world_scene::environment::EditPreviewer("settings-editor-water"),
+            sl_client_bevy::EnvironmentAsset::Water(water),
+        );
+        app.world_mut().insert_resource(scene);
+        let readout = read_environment(app.world_mut());
+        assert_eq!(
+            readout.water,
+            Some(sl_automation_proto::WaterReadout {
+                name: "Edited Water".to_owned(),
+                fog_density: 7.5,
+            }),
+            "the water drawn is the one the editor previews"
+        );
+        assert_eq!(readout.previewing, vec!["settings-editor-water".to_owned()]);
     }
 
     #[test]

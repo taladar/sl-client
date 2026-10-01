@@ -131,6 +131,10 @@ pub(crate) async fn run<W: Write>(
         Verb::Notifications => Outcome::Notifications(viewer.notifications().await?),
         Verb::Agent => Outcome::Agent(viewer.agent().await?),
         Verb::Environment => Outcome::Environment(viewer.environment().await?),
+        Verb::FileDialog { path, .. } => Outcome::FileDialog {
+            answered: viewer.answer_file_dialog(path.as_deref()).await?,
+            picked: path.clone(),
+        },
         Verb::Screenshot { path, outline } => {
             Outcome::Screenshot(viewer.screenshot(path, outline.clone()).await?)
         }

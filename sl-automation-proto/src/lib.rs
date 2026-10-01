@@ -100,7 +100,7 @@ pub use crate::probe::{
     DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, InventoryEntry, InventoryFolderReadout,
     InventoryRoot, LogEntry, LogLevel, LogPage, LogStream, NotificationReadout, OfferedButton,
     QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout, SpeakerKind, StatusReadout,
-    TeleportReadout, TeleportState, TranscriptLine,
+    TeleportReadout, TeleportState, TranscriptLine, WaterReadout,
 };
 pub use crate::report::FailureReport;
 pub use crate::selector::SelectorError;

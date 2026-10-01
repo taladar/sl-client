@@ -511,3 +511,47 @@ async fn a_viewer_is_driven_over_a_socket_the_same_way() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// A file dialog is answered with an absolute path — a relative one is made
+/// absolute against the test's directory, as a screenshot path is — or
+/// cancelled with none, and the answer names the dialog.
+#[tokio::test]
+async fn a_file_dialog_is_answered_with_an_absolute_path_or_cancelled() -> Result<(), String> {
+    let (viewer, seen) = viewer(
+        ViewerOptions::new("one"),
+        Arc::new(|body| match body {
+            RequestBody::AnswerFileDialog { .. } => Some(Ok(ResponseBody::FileDialogAnswered {
+                purpose: "settings-editor-import-sky".to_owned(),
+                title: "Import".to_owned(),
+                folder: false,
+            })),
+            _ => None,
+        }),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let answered = viewer
+        .answer_file_dialog(Some(std::path::Path::new("skies/Dawn.xml")))
+        .await
+        .map_err(|error| error.to_string())?;
+    assert_eq!(answered.purpose, "settings-editor-import-sky");
+    let _cancelled = viewer
+        .answer_file_dialog(None)
+        .await
+        .map_err(|error| error.to_string())?;
+    let paths: Vec<Option<String>> = seen
+        .lock()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .filter_map(|body| match body {
+            RequestBody::AnswerFileDialog { path, .. } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    let expected = std::path::absolute("skies/Dawn.xml")
+        .map_err(|error| error.to_string())?
+        .display()
+        .to_string();
+    assert_eq!(paths, vec![Some(expected), None]);
+    Ok(())
+}

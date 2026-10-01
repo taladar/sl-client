@@ -216,9 +216,23 @@ pub enum Verb {
     Notifications,
     /// Print the own agent: region, position, seat, teleport, camera, heading.
     Agent,
-    /// Print the environment being drawn: the sky's name and ambient colour,
-    /// and whether the viewer's own local sky stands in for the shared one.
+    /// Print the environment being drawn: the sky's name, ambient colour, haze
+    /// and sun, the water's fog, whether the viewer's own local sky stands in
+    /// for the shared one, how far a manual change's cross-fade has got, and
+    /// which editor windows are previewing.
     Environment,
+    /// Answer the file dialog the viewer waits on — an Import's, a bulk
+    /// import's — with a file or a folder, or cancel it; waits for one to be
+    /// asked for. Only a `--headless` viewer waits; a windowed one shows the
+    /// desktop's chooser.
+    #[command(group(ArgGroup::new("answer").required(true).args(["path", "cancel"])))]
+    FileDialog {
+        /// The file or folder to pick.
+        path: Option<PathBuf>,
+        /// Cancel the dialog instead.
+        #[arg(long)]
+        cancel: bool,
+    },
     /// Save the viewer's frame to a PNG.
     Screenshot {
         /// Where.

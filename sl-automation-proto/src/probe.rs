@@ -271,6 +271,26 @@ pub struct EnvironmentReadout {
     /// Environment, or a script's `@setenv_*` — is drawn instead of the shared
     /// one.
     pub local_sky: bool,
+    /// How far the cross-fade a manual change started has got, `0.0..=1.0`,
+    /// while one runs; absent when the sky is not fading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<f32>,
+    /// The water being drawn, once the viewer has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub water: Option<WaterReadout>,
+    /// The windows previewing what they edit over everything else — each
+    /// named by its floater id, the one drawn on top last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previewing: Vec<String>,
+}
+
+/// The water being drawn, in the settings' own units.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WaterReadout {
+    /// The water frame's name.
+    pub name: String,
+    /// The underwater fog density.
+    pub fog_density: f32,
 }
 
 /// The sky being drawn, in the settings' own units.
@@ -280,6 +300,11 @@ pub struct SkyReadout {
     pub name: String,
     /// The ambient light colour, RGB.
     pub ambient: [f32; 3],
+    /// The haze density.
+    pub haze_density: f32,
+    /// Where the sun stands: its azimuth (`0.0..TAU`, counter-clockwise from
+    /// east) and its elevation above the horizon, in radians.
+    pub sun: [f32; 2],
 }
 
 /// One selected object.
@@ -489,7 +514,7 @@ mod tests {
         DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, InventoryEntry,
         InventoryFolderReadout, LogEntry, LogLevel, LogPage, LogStream, NotificationReadout,
         OfferedButton, QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout, SpeakerKind,
-        StatusReadout, TeleportReadout, TeleportState, TranscriptLine,
+        StatusReadout, TeleportReadout, TeleportState, TranscriptLine, WaterReadout,
     };
 
     /// Serializes `value`, reads it back and checks nothing was lost.
@@ -636,16 +661,27 @@ mod tests {
             sky: Some(SkyReadout {
                 name: "Midday".to_owned(),
                 ambient: [1.0, 0.0, 0.0],
+                haze_density: 0.5,
+                sun: [0.0, 1.5],
             }),
             local_sky: true,
+            transition: Some(0.25),
+            water: Some(WaterReadout {
+                name: "Default".to_owned(),
+                fog_density: 4.0,
+            }),
+            previewing: vec!["settings-editor-sky".to_owned()],
         })?;
         assert_eq!(
             json,
-            r#"{"sky":{"name":"Midday","ambient":[1.0,0.0,0.0]},"local_sky":true}"#
+            r#"{"sky":{"name":"Midday","ambient":[1.0,0.0,0.0],"haze_density":0.5,"sun":[0.0,1.5]},"local_sky":true,"transition":0.25,"water":{"name":"Default","fog_density":4.0},"previewing":["settings-editor-sky"]}"#
         );
         let none = round_trip(&EnvironmentReadout {
             sky: None,
             local_sky: false,
+            transition: None,
+            water: None,
+            previewing: Vec::new(),
         })?;
         assert_eq!(none, r#"{"local_sky":false}"#);
         Ok(())

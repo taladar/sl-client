@@ -2,6 +2,7 @@
 //! document per result for a script (`--json`).
 
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
@@ -9,7 +10,7 @@ use sl_automation_proto::{
     AgentReadout, ConversationReadout, ConversationRef, EnvironmentReadout, LogEntry, NodeState,
     NodeValue, NodeVisibility, NotificationReadout, UiNode, ViewerIdentity, WorldNode,
 };
-use sl_viewer_driver::Screenshot;
+use sl_viewer_driver::{AnsweredFileDialog, Screenshot};
 
 /// One result of a command.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +52,13 @@ pub enum Outcome {
     Agent(AgentReadout),
     /// The environment being drawn.
     Environment(EnvironmentReadout),
+    /// A file dialog answered.
+    FileDialog {
+        /// The dialog.
+        answered: AnsweredFileDialog,
+        /// What it was answered with; `None` for Cancel.
+        picked: Option<PathBuf>,
+    },
     /// A screenshot the viewer saved.
     Screenshot(Screenshot),
     /// Event log entries.
@@ -185,6 +193,13 @@ fn json_of(outcome: &Outcome) -> io::Result<JsonValue> {
         Outcome::Notifications(notifications) => to_json(notifications)?,
         Outcome::Agent(agent) => to_json(agent)?,
         Outcome::Environment(environment) => to_json(environment)?,
+        Outcome::FileDialog { answered, picked } => json!({
+            "done": if picked.is_some() { "answered" } else { "cancelled" },
+            "purpose": answered.purpose,
+            "title": answered.title,
+            "folder": answered.folder,
+            "path": picked.as_ref().map(|path| path.display().to_string()),
+        }),
         Outcome::Screenshot(shot) => json!({
             "path": shot.path.display().to_string(),
             "width": shot.width,
@@ -264,6 +279,16 @@ fn text_of(out: &mut impl Write, outcome: &Outcome) -> io::Result<()> {
         Outcome::Notifications(notifications) => notification_lines(out, notifications)?,
         Outcome::Agent(agent) => agent_lines(out, agent)?,
         Outcome::Environment(environment) => environment_lines(out, environment)?,
+        Outcome::FileDialog { answered, picked } => match picked {
+            Some(path) => writeln!(
+                out,
+                "answered {} ({:?}) with {}",
+                answered.purpose,
+                answered.title,
+                path.display()
+            )?,
+            None => writeln!(out, "cancelled {} ({:?})", answered.purpose, answered.title)?,
+        },
         Outcome::Screenshot(shot) => {
             writeln!(
                 out,
@@ -497,17 +522,39 @@ fn environment_lines(out: &mut impl Write, environment: &EnvironmentReadout) -> 
     match &environment.sky {
         Some(sky) => {
             let [red, green, blue] = sky.ambient;
+            let [azimuth, elevation] = sky.sun;
             writeln!(out, "sky      {}", sky.name)?;
             writeln!(out, "ambient  {red:.6}, {green:.6}, {blue:.6}")?;
+            writeln!(out, "haze     {:.6}", sky.haze_density)?;
+            writeln!(
+                out,
+                "sun      azimuth {:.1}°, elevation {:.1}°",
+                azimuth.to_degrees(),
+                elevation.to_degrees()
+            )?;
         }
         None => writeln!(out, "sky      (none drawn yet)")?,
+    }
+    if let Some(water) = &environment.water {
+        writeln!(
+            out,
+            "water    {}, fog density {:.6}",
+            water.name, water.fog_density
+        )?;
     }
     let layer = if environment.local_sky {
         "local"
     } else {
         "shared"
     };
-    writeln!(out, "layer    {layer}")
+    writeln!(out, "layer    {layer}")?;
+    if let Some(fraction) = environment.transition {
+        writeln!(out, "fading   {:.0}%", fraction * 100.0)?;
+    }
+    if !environment.previewing.is_empty() {
+        writeln!(out, "preview  {}", environment.previewing.join(", "))?;
+    }
+    Ok(())
 }
 
 /// `text` quoted for a POSIX shell when it needs to be.

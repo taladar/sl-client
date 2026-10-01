@@ -512,6 +512,9 @@ fn start(
             deadline,
         } => state::wait(condition, deadline),
         RequestBody::Screenshot { path, outline } => state::screenshot(world, path, outline),
+        RequestBody::AnswerFileDialog { path, deadline } => {
+            state::answer_file_dialog(path, deadline)
+        }
         RequestBody::Hello => Started::answered(Ok(state::hello(world))),
         RequestBody::Subscribe { cursor, streams } => {
             Started::answered(subscribe(world, subscriptions, id, cursor, streams))
@@ -626,7 +629,8 @@ const fn ui_locator(error: &AutomationError) -> Option<&Locator> {
         | AutomationError::InventoryFolderNotFound { .. }
         | AutomationError::Unavailable { .. }
         | AutomationError::InvalidRequest { .. }
-        | AutomationError::ScreenshotFailed { .. } => None,
+        | AutomationError::ScreenshotFailed { .. }
+        | AutomationError::NoFileDialog { .. } => None,
     }
 }
 

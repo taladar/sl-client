@@ -28,8 +28,8 @@ mod test {
         LandEdit, LandSearchType, LandStatItem, LandStatReportType, LandStatScore, LandingType,
         LightData, LindenAmount, LindenBalance, Llsd, LoginParams, MAX_FACES, MapItem, MapItemType,
         MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
-        MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez,
-        ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
+        MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
+        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
         ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails,
         ParcelInfo, ParcelKey, ParcelObjectOwner, ParcelRect, ParcelRequestResult,
         ParcelReturnType, ParcelStatus, Permissions, Permissions5, PingId, PlacesResult,
@@ -44,7 +44,8 @@ mod test {
         TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace,
         TextureKey, Throttle, TransactionId, TransferId, TransferRequestSource, TransferStatus,
         Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, XferId, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        ViewerEffectType, WearableType, XferId, enable_simulator_to_caps_llsd,
+        parse_event_queue_response,
     };
     use sl_proto::{
         AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
@@ -3746,6 +3747,121 @@ mod test {
         assert_eq!(clean_parcel, RegionLocalParcelId(9));
         // The 30 seconds over 15 minutes are dropped by the whole-minute wire field.
         assert_eq!(clean_time, std::time::Duration::from_secs(15 * 60));
+        Ok(())
+    }
+
+    #[test]
+    fn client_create_inventory_item_reaches_simulator() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // A day-cycle settings item: the kind rides in the subtype byte, and a
+        // nil transaction asks the simulator for its default asset.
+        let new = NewInventoryItem {
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x5001)),
+            transaction_id: uuid::Uuid::nil(),
+            next_owner_mask: 0x0008_e000,
+            asset_type: AssetType::Settings,
+            inv_type: InventoryType::Settings,
+            wearable_type: WearableType::from_code(2),
+            name: "New Day Cycle".to_owned(),
+            description: "made in a test".to_owned(),
+        };
+        let callback = client.create_inventory_item(&new, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let (item, bound_asset, callback_id) = drain_server(&mut sim)
+            .into_iter()
+            .find_map(|event| match event {
+                ServerEvent::CreateInventoryItem {
+                    item,
+                    bound_asset,
+                    callback_id,
+                } => Some((item, bound_asset, callback_id)),
+                _ => None,
+            })
+            .ok_or("expected a CreateInventoryItem server event")?;
+        assert_eq!(item, new);
+        assert_eq!(item.wearable_type.to_code(), 2, "the subtype byte survives");
+        assert_eq!(bound_asset, None, "a nil transaction binds no upload");
+        assert_eq!(callback_id, callback);
+        Ok(())
+    }
+
+    /// A UDP `MoveInventoryItem` — how a rename travels, the AIS3 move having
+    /// no name — moves and renames the item in the serving tree, so the next
+    /// fetch answers with what the client changed; a block naming an item the
+    /// tree does not hold changes nothing and is left out.
+    #[test]
+    fn client_udp_item_move_and_rename_is_applied_to_the_tree() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        let settings = InventoryFolderKey::from(uuid::Uuid::from_u128(0x6001));
+        let trash = InventoryFolderKey::from(uuid::Uuid::from_u128(0x6002));
+        for (folder_id, name, folder_type) in [(settings, "Settings", 56), (trash, "Trash", 14)] {
+            sim.agent_inventory_mut().insert_folder(InventoryFolder {
+                folder_id,
+                parent_id: None,
+                name: name.to_owned(),
+                folder_type,
+                version: 1,
+            });
+        }
+        let item_id = InventoryKey::from(uuid::Uuid::from_u128(0x6003));
+        sim.agent_inventory_mut().insert_item(InventoryItem {
+            item_id,
+            folder_id: settings,
+            name: "New Sky".to_owned(),
+            description: "kept".to_owned(),
+            ..wearable_item()
+        });
+
+        client.move_inventory_items(
+            &[
+                (item_id, settings, "Dawn".to_owned()),
+                (
+                    InventoryKey::from(uuid::Uuid::from_u128(0x6004)),
+                    settings,
+                    "Nobody".to_owned(),
+                ),
+            ],
+            false,
+            now,
+        )?;
+        client.move_inventory_item(item_id, trash, "", now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let moves: Vec<Vec<InventoryItemMove>> = drain_server(&mut sim)
+            .into_iter()
+            .filter_map(|event| match event {
+                ServerEvent::InventoryItemsMovedUdp { moves } => Some(moves),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            moves,
+            vec![
+                vec![InventoryItemMove {
+                    item: item_id,
+                    folder: settings,
+                    new_name: Some("Dawn".to_owned()),
+                }],
+                vec![InventoryItemMove {
+                    item: item_id,
+                    folder: trash,
+                    new_name: None,
+                }],
+            ]
+        );
+        let held = sim
+            .agent_inventory()
+            .item(item_id)
+            .ok_or("the item is still held")?;
+        assert_eq!(held.name, "Dawn", "renamed, and a later pure move keeps it");
+        assert_eq!(held.description, "kept");
+        assert_eq!(held.folder_id, trash);
         Ok(())
     }
 

@@ -1,5 +1,6 @@
 //! The requests on the viewer's state: reading a probe, the event log and
-//! the diagnostics, waiting for a state condition, and a screenshot.
+//! the diagnostics, waiting for a state condition, a screenshot, and the
+//! answer to a file dialog.
 
 use std::path::PathBuf;
 
@@ -12,6 +13,7 @@ use sl_automation_proto::{
 use super::{Answer, AutomationIdentity, Clock, Started, Step, Task};
 use crate::event_log::EventLog;
 use crate::locate::{find_all, shallow};
+use crate::probe_sources::{FileDialogAnswer, ProbeSources};
 use crate::probes::{
     ProbeError, read_agent, read_conversations, read_environment, read_inventory,
     read_notifications, read_quiescence, read_selection, read_status,
@@ -172,12 +174,30 @@ pub(super) fn screenshot(world: &mut World, path: String, outline: Option<Locato
     })))
 }
 
+/// An answer to the file dialog the viewer will ask for: `path`, or Cancel.
+pub(super) fn answer_file_dialog(path: Option<String>, deadline: Deadline) -> Started {
+    let picked = path.map(PathBuf::from);
+    if let Some(file) = &picked
+        && !file.is_absolute()
+    {
+        return Started::answered(Err(Box::new(AutomationError::InvalidRequest {
+            reason: format!("the picked path {} is not absolute", file.display()),
+        })));
+    }
+    Started::Running(Task::state(StateTask::FileDialog(DialogAnswer {
+        picked,
+        clock: Clock::new(deadline),
+    })))
+}
+
 /// A state request under way.
 pub(super) enum StateTask {
     /// A wait for a condition.
     Wait(Box<StateWait>),
     /// A screenshot being rendered.
     Screenshot(Capture),
+    /// An answer waiting for its file dialog.
+    FileDialog(DialogAnswer),
 }
 
 impl StateTask {
@@ -186,6 +206,52 @@ impl StateTask {
         match self {
             Self::Wait(wait) => wait.poll(world),
             Self::Screenshot(capture) => capture.poll(world),
+            Self::FileDialog(answer) => answer.poll(world),
+        }
+    }
+}
+
+/// An answer to the next file dialog.
+pub(super) struct DialogAnswer {
+    /// What to pick; `None` for Cancel.
+    picked: Option<PathBuf>,
+    /// How long to wait for a dialog.
+    clock: Clock,
+}
+
+impl DialogAnswer {
+    /// Advance it by a frame: answer the dialog once one waits.
+    fn poll(&mut self, world: &mut World) -> Step {
+        self.clock.tick();
+        let Some(answer) = ProbeSources::of(world).file_dialog else {
+            return Step::fail(AutomationError::Unavailable {
+                what: "file dialog service".to_owned(),
+            });
+        };
+        match answer(world, self.picked.clone()) {
+            FileDialogAnswer::Answered {
+                purpose,
+                title,
+                folder,
+            } => {
+                return Step::done(ResponseBody::FileDialogAnswered {
+                    purpose,
+                    title,
+                    folder,
+                });
+            }
+            FileDialogAnswer::ShownOnDesktop => {
+                return Step::fail(AutomationError::Unavailable {
+                    what: "file dialog it can answer (it shows the desktop's own chooser; \
+                           answering one needs a viewer with no window of its own)"
+                        .to_owned(),
+                });
+            }
+            FileDialogAnswer::NothingWaiting => {}
+        }
+        match self.clock.expired() {
+            Some((frames, millis)) => Step::fail(AutomationError::NoFileDialog { frames, millis }),
+            None => Step::Pending,
         }
     }
 }

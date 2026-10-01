@@ -273,6 +273,14 @@ pub enum AutomationError {
         /// Why.
         reason: String,
     },
+    /// No file dialog was asked for in time, so there was nothing to answer.
+    #[error("no file dialog was opened in {frames} frames ({millis} ms)")]
+    NoFileDialog {
+        /// The frames waited.
+        frames: u32,
+        /// The wall-clock milliseconds waited.
+        millis: u64,
+    },
     /// No rubber band over the things a locator names selects exactly them:
     /// the band would miss some, or also catch others.
     #[error(

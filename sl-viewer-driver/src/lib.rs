@@ -51,7 +51,9 @@ pub use crate::error::{Artifacts, DriverError, Failure};
 pub use crate::events::{EventCursor, EventStream};
 pub use crate::expect::{ChatExpect, NotificationExpect, StateExpect, UiExpect, WorldExpect};
 pub use crate::ui::{Ui, UiLocator};
-pub use crate::viewer::{DEFAULT_GRACE, DEFAULT_TIMEOUT, Screenshot, Viewer, ViewerOptions};
+pub use crate::viewer::{
+    AnsweredFileDialog, DEFAULT_GRACE, DEFAULT_TIMEOUT, Screenshot, Viewer, ViewerOptions,
+};
 pub use crate::world::{World, WorldHandle};
 
 #[cfg(test)]

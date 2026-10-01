@@ -575,6 +575,59 @@ impl Viewer {
         }
     }
 
+    /// Answer the file dialog the viewer asks for — the one an Import or a
+    /// bulk import opens — with `picked`, as a person would pick it in the
+    /// chooser, or Cancel it with `None`. Waits for the dialog to be asked
+    /// for, so it may be sent right after the click that opens one.
+    ///
+    /// Only a viewer with no window of its own waits for the answer; an
+    /// interactive one shows the desktop's chooser.
+    ///
+    /// # Errors
+    ///
+    /// As any request; [`AutomationError::NoFileDialog`] when no dialog is
+    /// asked for in time, and [`AutomationError::Unavailable`] when the viewer
+    /// shows the desktop's chooser instead.
+    pub async fn answer_file_dialog(
+        &self,
+        picked: Option<&Path>,
+    ) -> Result<AnsweredFileDialog, DriverError> {
+        let path = picked.map(|path| {
+            std::path::absolute(path)
+                .unwrap_or_else(|_error| path.to_owned())
+                .display()
+                .to_string()
+        });
+        let action = path.as_ref().map_or_else(
+            || "cancel the file dialog".to_owned(),
+            |path| format!("answer the file dialog with {path}"),
+        );
+        let timeout = self.inner.options.timeout;
+        match self
+            .ask(
+                RequestBody::AnswerFileDialog {
+                    path,
+                    deadline: Self::deadline(timeout),
+                },
+                timeout,
+                &action,
+                Subject::Viewer,
+            )
+            .await?
+        {
+            ResponseBody::FileDialogAnswered {
+                purpose,
+                title,
+                folder,
+            } => Ok(AnsweredFileDialog {
+                purpose,
+                title,
+                folder,
+            }),
+            other => Err(self.unexpected(&action, &other)),
+        }
+    }
+
     /// Wait up to `timeout` for `condition` over the viewer's state, and
     /// return what made it hold.
     ///
@@ -774,6 +827,18 @@ impl Viewer {
             other => Err(self.unexpected(&action, &other)),
         }
     }
+}
+
+/// A file dialog the viewer asked for, as it was answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnsweredFileDialog {
+    /// What the viewer asked the file for (`settings-editor-import-sky`,
+    /// `bulk-import-skies`, …).
+    pub purpose: String,
+    /// The dialog's title.
+    pub title: String,
+    /// Whether it asked for a folder rather than a file.
+    pub folder: bool,
 }
 
 /// A screenshot the viewer wrote.

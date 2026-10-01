@@ -13,6 +13,7 @@ use sl_automation_proto::{
     AutomationError, Bounds, EnvironmentReadout, Locator, NodeId, NodeState, NodeVisibility,
     PROTOCOL_VERSION, PointerButton, Probe, ProbeReadout, Request, RequestBody, Response,
     ResponseBody, Role, SkyReadout, UiNode, ViewerIdentity, ViewerMessage, WaitCondition,
+    WaterReadout,
 };
 use sl_viewer_driver::{Viewer, ViewerOptions};
 use tokio::sync::mpsc::unbounded_channel;
@@ -335,15 +336,25 @@ async fn environment_reads_the_probe_and_prints_the_sky() -> Result<(), TestErro
                 sky: Some(SkyReadout {
                     name: "Midday".to_owned(),
                     ambient: [1.0, 0.0, 0.0],
+                    haze_density: 0.7,
+                    sun: [0.0, core::f32::consts::FRAC_PI_4],
                 }),
                 local_sky: true,
+                transition: Some(0.5),
+                water: Some(WaterReadout {
+                    name: "Default".to_owned(),
+                    fog_density: 4.0,
+                }),
+                previewing: vec!["settings-editor-sky".to_owned()],
             }),
         })
     });
     let (printed, asked) = run_verb(Arc::clone(&script), &["environment"], false).await?;
     assert_eq!(
         printed,
-        "sky      Midday\nambient  1.000000, 0.000000, 0.000000\nlayer    local\n"
+        "sky      Midday\nambient  1.000000, 0.000000, 0.000000\nhaze     0.700000\nsun      \
+         azimuth 0.0°, elevation 45.0°\nwater    Default, fog density 4.000000\nlayer    \
+         local\nfading   50%\npreview  settings-editor-sky\n"
     );
     match asked.as_slice() {
         [
@@ -456,5 +467,43 @@ async fn attach_runs_each_line_and_counts_the_failures() -> Result<(), TestError
     assert_eq!(lines.last().copied(), Some("pressed Ctrl+A"), "{printed}");
     let asked = seen.lock().map_err(|error| error.to_string())?.len();
     assert_eq!(asked, 3, "hello, find and press — nothing after quit");
+    Ok(())
+}
+
+#[tokio::test]
+async fn file_dialog_answers_with_a_path_or_cancels() -> Result<(), TestError> {
+    let script: Arc<Script> = Arc::new(|_body| {
+        Ok(ResponseBody::FileDialogAnswered {
+            purpose: "bulk-import-skies".to_owned(),
+            title: "Import skies".to_owned(),
+            folder: true,
+        })
+    });
+    let (printed, asked) = run_verb(
+        Arc::clone(&script),
+        &["file-dialog", "/presets/skies"],
+        false,
+    )
+    .await?;
+    assert_eq!(
+        printed,
+        "answered bulk-import-skies (\"Import skies\") with /presets/skies\n"
+    );
+    match asked.as_slice() {
+        [
+            RequestBody::AnswerFileDialog {
+                path: Some(path), ..
+            },
+        ] if path == "/presets/skies" => {}
+        other => return Err(format!("asked {other:?}").into()),
+    }
+    let (json, asked) = run_verb(script, &["--json", "file-dialog", "--cancel"], true).await?;
+    let parsed: serde_json::Value = serde_json::from_str(&json)?;
+    assert_eq!(parsed.pointer("/done"), Some(&json!("cancelled")), "{json}");
+    assert_eq!(parsed.pointer("/folder"), Some(&json!(true)), "{json}");
+    match asked.as_slice() {
+        [RequestBody::AnswerFileDialog { path: None, .. }] => {}
+        other => return Err(format!("asked {other:?}").into()),
+    }
     Ok(())
 }

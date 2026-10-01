@@ -677,6 +677,12 @@ impl ViewerAppBuilder {
                 app.add_plugins(sl_viewer_ui_core::synthetic_input::SyntheticInputPlugin);
             }
         }
+        if !windowed {
+            // A viewer with no window of its own puts no chooser on the
+            // desktop: nobody could answer it there. Whoever drives the viewer
+            // answers it instead (`AnswerFileDialog`).
+            app.insert_resource(crate::file_dialog::FileDialogBackend::Answered);
+        }
         // The one part of Bevy's audio the viewer uses: the `AudioSource` asset
         // and its loader, which a skin's UI sound files load as (the clips are
         // decoded into the viewer's own mixer, never played by Bevy).

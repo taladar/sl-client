@@ -38,6 +38,17 @@
 //! window, which costs placement and modality, not function. The way to fix it
 //! is a safe handle accessor upstream, not an exception here.
 //!
+//! # A test viewer answers its own
+//!
+//! A viewer with no window of its own — a headless or windowless test viewer —
+//! must not put the desktop's chooser up: it ignores the real mouse and
+//! keyboard, so nobody could answer it, and a test run would leave choosers on
+//! the screen of whoever ran it. Under [`FileDialogBackend::Answered`] a request
+//! opens nothing; it is held as the [`PendingFileDialog`] until someone answers
+//! it with [`answer_pending_dialog`] — the automation layer, for a test that
+//! imports a file. Everything else is the same path: one dialog at a time, the
+//! same [`FileDialogClosed`] reply, the same remembered directory.
+//!
 //! # What "cancelled" covers
 //!
 //! `rfd` hands back "no file" for both a user who pressed Cancel and a desktop
@@ -131,12 +142,39 @@ pub enum FileDialogOutcome {
     Busy,
 }
 
+/// Who answers a file dialog: the desktop's chooser, or whoever drives the
+/// viewer (see the module documentation).
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileDialogBackend {
+    /// The host's own chooser, through `rfd` — an interactive viewer.
+    #[default]
+    Desktop,
+    /// Nothing is shown: the request waits as the [`PendingFileDialog`] until
+    /// [`answer_pending_dialog`] answers it — a viewer with no window of its
+    /// own.
+    Answered,
+}
+
+/// A dialog asked for under [`FileDialogBackend::Answered`], waiting for its
+/// answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingFileDialog {
+    /// The purpose its reply is tagged with.
+    pub purpose: Box<str>,
+    /// Its title.
+    pub title: String,
+    /// Whether it asks for a file or a folder.
+    pub selection: FileDialogSelection,
+}
+
 /// The dialog service's state: whether one is open, and where each purpose last
 /// picked from.
 #[derive(Resource, Debug, Default)]
 pub struct FileDialogState {
     /// Whether a chooser is on screen right now — the single-flight gate.
     open: bool,
+    /// The dialog waiting for an answer under [`FileDialogBackend::Answered`].
+    pending: Option<PendingFileDialog>,
     /// The directory each purpose last picked a file from, so the next dialog
     /// under that purpose opens where the user left off. The reference keeps
     /// one such directory for the whole viewer; one per purpose is the same
@@ -162,6 +200,46 @@ impl FileDialogState {
     pub fn last_dir(&self, purpose: &str) -> Option<&Path> {
         self.last_dir.get(purpose).map(PathBuf::as_path)
     }
+
+    /// The dialog waiting for an answer, under [`FileDialogBackend::Answered`].
+    #[must_use]
+    pub const fn pending(&self) -> Option<&PendingFileDialog> {
+        self.pending.as_ref()
+    }
+
+    /// The reply to a dialog for `purpose` that closed on `picked`: the picked
+    /// path's directory remembered, and the gate reopened.
+    fn close(&mut self, purpose: &str, picked: Option<PathBuf>) -> FileDialogClosed {
+        let outcome = match picked {
+            Some(path) => {
+                if let Some(directory) = path.parent() {
+                    self.last_dir
+                        .insert(purpose.into(), directory.to_path_buf());
+                }
+                FileDialogOutcome::Picked(path)
+            }
+            None => FileDialogOutcome::Cancelled,
+        };
+        self.open = false;
+        FileDialogClosed {
+            purpose: purpose.into(),
+            outcome,
+        }
+    }
+}
+
+/// Answer the dialog waiting under [`FileDialogBackend::Answered`]: `picked`,
+/// or `None` for Cancel. Returns the dialog answered, or `None` when none was
+/// waiting (and nothing is written).
+pub fn answer_pending_dialog(
+    world: &mut World,
+    picked: Option<PathBuf>,
+) -> Option<PendingFileDialog> {
+    let mut state = world.get_resource_mut::<FileDialogState>()?;
+    let pending = state.pending.take()?;
+    let reply = state.close(&pending.purpose, picked);
+    let _id = world.write_message(reply);
+    Some(pending)
 }
 
 /// A chooser in flight: the off-thread dialog and the purpose its answer is
@@ -192,6 +270,7 @@ fn open_file_dialogs(
     mut requests: MessageReader<OpenFileDialog>,
     mut closed: MessageWriter<FileDialogClosed>,
     mut state: ResMut<FileDialogState>,
+    backend: Res<FileDialogBackend>,
 ) {
     for request in requests.read() {
         if state.open {
@@ -206,6 +285,14 @@ fn open_file_dialogs(
             continue;
         }
         state.open = true;
+        if *backend == FileDialogBackend::Answered {
+            state.pending = Some(PendingFileDialog {
+                purpose: request.purpose.clone(),
+                title: request.title.clone(),
+                selection: request.selection,
+            });
+            continue;
+        }
         let directory = state
             .last_dir(&request.purpose)
             .map(Path::to_path_buf)
@@ -248,22 +335,7 @@ fn poll_file_dialogs(
         let Some(picked) = block_on(poll_once(&mut pending.task)) else {
             continue;
         };
-        let outcome = match picked {
-            Some(path) => {
-                if let Some(directory) = path.parent() {
-                    state
-                        .last_dir
-                        .insert(pending.purpose.clone(), directory.to_path_buf());
-                }
-                FileDialogOutcome::Picked(path)
-            }
-            None => FileDialogOutcome::Cancelled,
-        };
-        closed.write(FileDialogClosed {
-            purpose: pending.purpose.clone(),
-            outcome,
-        });
-        state.open = false;
+        closed.write(state.close(&pending.purpose, picked));
         commands.entity(entity).despawn();
     }
 }
@@ -276,6 +348,7 @@ pub struct FileDialogPlugin;
 impl Plugin for FileDialogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FileDialogState>()
+            .init_resource::<FileDialogBackend>()
             .add_message::<OpenFileDialog>()
             .add_message::<FileDialogClosed>()
             .add_systems(Update, (open_file_dialogs, poll_file_dialogs).chain());
@@ -290,8 +363,8 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        FileDialogClosed, FileDialogOutcome, FileDialogPlugin, FileDialogSelection,
-        FileDialogState, OpenFileDialog,
+        FileDialogBackend, FileDialogClosed, FileDialogOutcome, FileDialogPlugin,
+        FileDialogSelection, FileDialogState, OpenFileDialog, answer_pending_dialog,
     };
 
     /// A boxed error, so a test can `?` rather than reach for the `panic!` the
@@ -384,5 +457,83 @@ mod tests {
                 .is_empty(),
             "and no reply"
         );
+    }
+
+    /// Every reply written so far, drained.
+    fn replies(app: &mut App) -> Vec<FileDialogClosed> {
+        app.world_mut()
+            .resource_mut::<Messages<FileDialogClosed>>()
+            .drain()
+            .collect()
+    }
+
+    /// Under the answered backend a request opens no chooser: it waits, holding
+    /// the gate, until it is answered — and the answer is the ordinary reply,
+    /// with the directory remembered.
+    #[test]
+    fn an_answered_dialog_waits_and_replies_with_the_answer() -> Result<(), TestError> {
+        let mut app = app();
+        app.insert_resource(FileDialogBackend::Answered);
+        app.world_mut().write_message(request("import-sky"));
+        app.update();
+        let state = app.world().resource::<FileDialogState>();
+        assert!(state.is_open(), "the dialog holds the gate while it waits");
+        let pending = state.pending().ok_or("the request waits for an answer")?;
+        assert_eq!(&*pending.purpose, "import-sky");
+        assert_eq!(pending.title, "Pick a file");
+        assert!(replies(&mut app).is_empty(), "nothing answered it yet");
+
+        app.world_mut().write_message(request("import-water"));
+        app.update();
+        let busy = replies(&mut app);
+        assert_eq!(
+            busy.first().map(|reply| reply.outcome.clone()),
+            Some(FileDialogOutcome::Busy),
+            "a second request is refused while the first waits"
+        );
+
+        let answered = answer_pending_dialog(
+            app.world_mut(),
+            Some(PathBuf::from("/presets/skies/Dawn.xml")),
+        )
+        .ok_or("a dialog was waiting")?;
+        assert_eq!(&*answered.purpose, "import-sky");
+        let reply = replies(&mut app);
+        assert_eq!(reply.len(), 1, "exactly one reply");
+        let first = reply.first().ok_or("the reply")?;
+        assert_eq!(&*first.purpose, "import-sky");
+        assert_eq!(
+            first.outcome,
+            FileDialogOutcome::Picked(PathBuf::from("/presets/skies/Dawn.xml"))
+        );
+        let state = app.world().resource::<FileDialogState>();
+        assert!(!state.is_open(), "the gate is open again");
+        assert_eq!(
+            state.last_dir("import-sky"),
+            Some(std::path::Path::new("/presets/skies")),
+            "the directory is remembered as the chooser's would be"
+        );
+        assert!(
+            answer_pending_dialog(app.world_mut(), None).is_none(),
+            "nothing is left to answer"
+        );
+        Ok(())
+    }
+
+    /// Cancel is answered as the chooser's Cancel.
+    #[test]
+    fn an_answered_dialog_can_be_cancelled() -> Result<(), TestError> {
+        let mut app = app();
+        app.insert_resource(FileDialogBackend::Answered);
+        app.world_mut().write_message(request("bulk-import-skies"));
+        app.update();
+        let _answered =
+            answer_pending_dialog(app.world_mut(), None).ok_or("a dialog was waiting")?;
+        let reply = replies(&mut app);
+        assert_eq!(
+            reply.first().map(|reply| reply.outcome.clone()),
+            Some(FileDialogOutcome::Cancelled)
+        );
+        Ok(())
     }
 }

@@ -1054,6 +1054,11 @@ fn on_environment_row_press(
     press.propagate(false);
     focus.set(ui.viewport, FocusCause::Navigated);
     selected.0 = Some(item);
+    // A press is a new selection, and a menu opened earlier is closed by it:
+    // its target must not outlive it, or a button pressed after a primary
+    // click would act on the row that menu was opened over rather than the
+    // one now selected. A secondary press sets it again below.
+    target.0 = None;
     if press.button != PointerButton::Secondary {
         return;
     }

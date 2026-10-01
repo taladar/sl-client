@@ -1192,15 +1192,17 @@ impl SimCaps {
 
     /// Serves the shared two-stage asset uploader for one of the
     /// [`UPLOAD_CAPABILITIES`]. Step 1 (a POST to the cap URL) parses the
-    /// cap-specific metadata, parks it under `cap_name`, and answers
-    /// `{ state: "upload", uploader }` with the cap's own `upload` sub-path.
-    /// Step 2 (a POST to that sub-path) takes the parked metadata, has the
-    /// session mint the stored ids and push
+    /// cap-specific metadata, parks it under `cap_name` and a fresh ticket,
+    /// and answers `{ state: "upload", uploader }` with the cap's own
+    /// `upload/<ticket>` sub-path — one uploader URL per upload, so uploads in
+    /// flight together through one cap stay apart. Step 2 (a POST to that
+    /// sub-path) takes the parked metadata, has the session mint the stored ids
+    /// and push
     /// [`ServerEvent::CapsAssetUploaded`](crate::ServerEvent::CapsAssetUploaded),
     /// and answers `{ state: "complete", new_asset, new_inventory_item? }` —
-    /// plus `{ compiled, errors }` for a script upload. A bytes-POST with no
-    /// parked upload answers `400`; a re-POST of step 1 replaces the parked
-    /// metadata; any other sub-path answers `404`. Wrong method → `405`, an
+    /// plus `{ compiled, errors }` for a script upload. A bytes-POST to a
+    /// ticket with nothing parked (never issued, or already completed) answers
+    /// `400`; any other sub-path answers `404`. Wrong method → `405`, an
     /// unparsable metadata body → `400`.
     fn dispatch_caps_upload(
         &self,
@@ -1216,16 +1218,18 @@ impl SimCaps {
                 let Some(metadata) = Self::parse_upload_metadata(cap_name, request.body) else {
                     return CapsResponse::bad_request();
                 };
-                sim.park_caps_upload(cap_name, metadata);
-                let uploader = self.upload_uploader_url(cap_name);
+                let ticket = sim.park_caps_upload(cap_name, metadata);
+                let uploader = self.upload_uploader_url(cap_name, ticket);
                 CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
                     state: "upload".to_owned(),
                     uploader: Some(uploader.to_string()),
                     ..AssetUploadResponse::default()
                 }))
             }
-            Some(UPLOAD_SUB_PATH) => {
-                let Some(metadata) = sim.take_caps_upload(cap_name) else {
+            Some(sub_path) if upload_ticket(sub_path).is_some() => {
+                let Some(metadata) = upload_ticket(sub_path)
+                    .and_then(|ticket| sim.take_caps_upload(cap_name, ticket))
+                else {
                     return CapsResponse::bad_request();
                 };
                 let is_script = metadata.is_script();
@@ -1298,13 +1302,14 @@ impl SimCaps {
     }
 
     /// The uploader URL a two-stage upload's step 1 answers with: the cap's own
-    /// URL plus the shared [`UPLOAD_SUB_PATH`] (routed back to
+    /// URL plus [`UPLOAD_SUB_PATH`] and the upload's ticket (routed back to
     /// [`SimCaps::dispatch_caps_upload`]).
-    fn upload_uploader_url(&self, cap_name: &str) -> Url {
+    fn upload_uploader_url(&self, cap_name: &str, ticket: u128) -> Url {
         let token = self.tokens.get(cap_name).copied().unwrap_or_default();
         let mut url = self.cap_url(token);
         if let Ok(mut segments) = url.path_segments_mut() {
             segments.push(UPLOAD_SUB_PATH);
+            segments.push(&format!("{ticket:x}"));
         }
         url
     }
@@ -2452,6 +2457,13 @@ fn environment_failure_body(message: &str) -> String {
         ("message".to_owned(), Llsd::String(message.to_owned())),
     ]))
     .to_llsd_xml()
+}
+
+/// The ticket an uploader sub-path (`upload/<ticket>`, the ticket in hex)
+/// names, or `None` when the sub-path is not an uploader's.
+fn upload_ticket(sub_path: &str) -> Option<u128> {
+    let ticket = sub_path.strip_prefix(UPLOAD_SUB_PATH)?.strip_prefix('/')?;
+    u128::from_str_radix(ticket, 16).ok()
 }
 
 /// The sub-path below a capability URL's token, if any: the segment(s) after

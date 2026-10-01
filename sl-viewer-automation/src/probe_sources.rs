@@ -12,8 +12,13 @@
 //!
 //! A reader is a plain function over the world, called only when a probe is
 //! asked for, so a registered source costs nothing while idle.
+//!
+//! The file dialog is reached the same way, for the same reason: the dialog
+//! service lives beside the audio device in the platform crate, and an
+//! `AnswerFileDialog` request answers it through [`FileDialogAnswerer`].
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use bevy::prelude::*;
 use sl_automation_proto::{ConversationReadout, TeleportReadout};
@@ -42,6 +47,54 @@ pub struct ProbeSources {
     /// and decoded work not yet built, across every store — the empty
     /// buckets left out.
     pub scene_work: Option<SceneWorkReader>,
+    /// Answers the file dialog the viewer waits on.
+    pub file_dialog: Option<FileDialogAnswerer>,
+    /// What the scene's environment holds beyond the sky RLV reads: the
+    /// water drawn, a manual cross-fade under way, the windows previewing.
+    pub environment_scene: Option<fn(&mut World) -> SceneEnvironment>,
+}
+
+/// What the scene's environment holds beyond the sky the RLV slot publishes.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SceneEnvironment {
+    /// How far a manual change's cross-fade has got, while one runs.
+    pub transition: Option<f32>,
+    /// The water drawn.
+    pub water: Option<SceneWater>,
+    /// The windows previewing through the edit layer, the one on top last.
+    pub previewing: Vec<String>,
+}
+
+/// The water the scene draws.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneWater {
+    /// The water frame's name.
+    pub name: String,
+    /// The underwater fog density.
+    pub fog_density: f32,
+}
+
+/// Answers the file dialog the viewer waits on with the path picked, or
+/// `None` for Cancel.
+pub type FileDialogAnswerer = fn(&mut World, Option<PathBuf>) -> FileDialogAnswer;
+
+/// What came of answering a file dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileDialogAnswer {
+    /// The waiting dialog was answered.
+    Answered {
+        /// The purpose its reply is tagged with.
+        purpose: String,
+        /// Its title.
+        title: String,
+        /// Whether it asked for a folder rather than a file.
+        folder: bool,
+    },
+    /// No dialog is waiting yet.
+    NothingWaiting,
+    /// The viewer shows the desktop's own chooser, which only a person can
+    /// answer.
+    ShownOnDesktop,
 }
 
 /// Reads the scene's outstanding work by bucket.

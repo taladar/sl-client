@@ -106,7 +106,7 @@ use sl_viewer_ui_widgets::ui_tab::{
 };
 use sl_viewer_ui_widgets::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_viewer_ui_widgets::ui_trackball::TrackballAim;
-use sl_viewer_world_scene::environment::EnvironmentState;
+use sl_viewer_world_scene::environment::{EditPreviewer, EnvironmentState};
 
 use crate::knobs::{ColorKnob, SkyKnob, TextureKnob, WaterKnob};
 use crate::rows::{
@@ -145,6 +145,14 @@ pub enum EditorKind {
 }
 
 impl EditorKind {
+    /// This window, as it previews through the environment's edit layer.
+    const fn previewer(self) -> EditPreviewer {
+        EditPreviewer(match self {
+            Self::Sky => SKY_EDITOR_FLOATER_ID,
+            Self::Water => WATER_EDITOR_FLOATER_ID,
+        })
+    }
+
     /// The settings kind this editor authors.
     #[must_use]
     pub const fn settings_kind(self) -> SettingsKind {
@@ -1499,7 +1507,7 @@ fn push_editor_preview(
             continue;
         }
         session.dirty = false;
-        environment.set_edit(named(&session.edited, &session.name));
+        environment.set_edit(editor.previewer(), named(&session.edited, &session.name));
     }
 }
 
@@ -1524,7 +1532,7 @@ fn drop_preview_on_close(
             }
             state.session = None;
             state.pending = None;
-            environment.clear_edit(editor.settings_kind());
+            environment.clear_edit(editor.previewer(), editor.settings_kind());
         }
     }
 }
@@ -2557,6 +2565,135 @@ mod tests {
             matches!(held.0, Some(HeldReplacement::Import(EditorKind::Sky))),
             "and the import is what a yes will carry out: {:?}",
             held.0
+        );
+        Ok(())
+    }
+
+    /// A sky or water editor shown with a session open on a fresh frame of its
+    /// kind, previewing it.
+    fn previewing_editor(editor: EditorKind) -> Result<App, TestError> {
+        previewing_editor_into(crate::preview_harness::app(), editor)
+    }
+
+    /// [`previewing_editor`] in an app that may have other windows open.
+    fn previewing_editor_into(mut app: App, editor: EditorKind) -> Result<App, TestError> {
+        let (floater, asset) = match editor {
+            EditorKind::Sky => (
+                super::SKY_EDITOR_FLOATER_ID,
+                EnvironmentAsset::Sky(Box::new(SkySettings::legacy_windlight_default(
+                    "Preview Sky",
+                ))),
+            ),
+            EditorKind::Water => (
+                super::WATER_EDITOR_FLOATER_ID,
+                EnvironmentAsset::Water(WaterSettings::legacy_default("Preview Water")),
+            ),
+        };
+        crate::preview_harness::show(&mut app, floater, true)?;
+        app.world_mut()
+            .resource_mut::<SettingsEditors>()
+            .get_mut(editor)
+            .session = Some(EditSession {
+            item: None,
+            name: frame_name(&asset),
+            original: asset.clone(),
+            edited: asset,
+            dirty: true,
+            modified: false,
+            reseed: true,
+            saving: false,
+        });
+        sl_viewer_testkit::settle(&mut app);
+        Ok(app)
+    }
+
+    /// **Every control of the sky and water editors moves the preview**, to the
+    /// value it now holds; **Revert** puts the preview back on the frame as
+    /// opened, and **closing** the window takes the preview away, leaving the
+    /// environment that was drawn before.
+    #[test]
+    fn every_editor_control_moves_the_preview_and_revert_and_close_undo_it() -> Result<(), TestError>
+    {
+        for (editor, element) in [
+            (EditorKind::Sky, "settings-editor-sky"),
+            (EditorKind::Water, "settings-editor-water"),
+        ] {
+            let mut app = previewing_editor(editor)?;
+            let opened = crate::preview_harness::drawn(&app);
+            let (driven, failures) = crate::preview_harness::sweep(&mut app, element);
+            assert_eq!(failures, Vec::<String>::new(), "{element}");
+            assert!(driven > 0, "{element}: no controls found");
+            assert_ne!(
+                crate::preview_harness::drawn(&app),
+                opened,
+                "{element}: the edits are previewed"
+            );
+
+            sl_viewer_testkit::interact::click_node(&mut app, &format!("{element}-revert:button"))?;
+            sl_viewer_testkit::settle(&mut app);
+            assert_eq!(
+                crate::preview_harness::drawn(&app),
+                opened,
+                "{element}: Revert previews the frame as opened"
+            );
+            assert_eq!(
+                crate::preview_harness::widgets_out_of_step(&mut app, element),
+                Vec::<String>::new(),
+                "the widgets are put back with the preview"
+            );
+
+            let (_driven, failures) = crate::preview_harness::sweep(&mut app, element);
+            assert_eq!(failures, Vec::<String>::new(), "{element}, after Revert");
+            let floater = match editor {
+                EditorKind::Sky => super::SKY_EDITOR_FLOATER_ID,
+                EditorKind::Water => super::WATER_EDITOR_FLOATER_ID,
+            };
+            crate::preview_harness::show(&mut app, floater, false)?;
+            let mut untouched = App::new();
+            untouched.init_resource::<sl_viewer_world_scene::environment::EnvironmentState>();
+            let untouched = crate::preview_harness::drawn(&untouched);
+            assert_eq!(
+                crate::preview_harness::drawn(&app),
+                untouched,
+                "{element}: closing drops the preview"
+            );
+        }
+        Ok(())
+    }
+
+    /// **Closing one editor leaves another's preview standing.** The sky
+    /// editor and the day-cycle editor both preview through the edit layer's
+    /// sky; with both open, closing the sky editor must put the day-cycle
+    /// editor's preview back on screen — not the environment underneath, which
+    /// would leave the day editor previewing nothing while it still says it is.
+    #[test]
+    fn closing_the_sky_editor_leaves_the_day_editor_previewing() -> Result<(), TestError> {
+        use crate::day_cycle_editor::DAY_CYCLE_EDITOR_FLOATER_ID;
+        use crate::preview_harness::{app, drawn, show};
+        let mut app = app();
+        show(&mut app, DAY_CYCLE_EDITOR_FLOATER_ID, true)?;
+        let mut cycle = sl_client_bevy::EnvironmentSettings::legacy_windlight_default().day_cycle;
+        for sky in cycle.sky_frames.values_mut() {
+            sky.haze_density = 3.0;
+        }
+        crate::day_cycle_editor::seed_for_test(app.world_mut(), cycle);
+        sl_viewer_testkit::settle(&mut app);
+        let day_preview = drawn(&app).0;
+        assert!(
+            (day_preview.haze_density - 3.0).abs() < 1e-3,
+            "the day editor previews its cycle"
+        );
+
+        let mut sky_app = previewing_editor_into(app, EditorKind::Sky)?;
+        assert!(
+            (drawn(&sky_app).0.haze_density - 3.0).abs() > 1e-3,
+            "the sky editor previews its own frame over it"
+        );
+        show(&mut sky_app, super::SKY_EDITOR_FLOATER_ID, false)?;
+        assert_eq!(
+            drawn(&sky_app).0,
+            day_preview,
+            "the day editor's preview is back"
         );
         Ok(())
     }

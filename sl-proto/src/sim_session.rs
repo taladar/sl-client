@@ -203,19 +203,19 @@ use crate::types::{
     InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
     LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
     LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Material,
-    MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink, NotecardRez, Object,
-    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectProperties,
-    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelObjectOwner,
-    ParcelReturnType, ParcelUpdate, PermissionField, PlacesResult, PlayingAnimation, Postcard,
-    PrimShape, PrimShapeParams, ProposalVoteId, RegionIdentity, RegionLimits, RegionStats,
-    Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
-    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
-    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable,
+    MeanCollision, MovementMode, NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez,
+    Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
+    ObjectProperties, ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo,
+    ParcelObjectOwner, ParcelReturnType, ParcelUpdate, PermissionField, PlacesResult,
+    PlayingAnimation, Postcard, PrimShape, PrimShapeParams, ProposalVoteId, RegionIdentity,
+    RegionLimits, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest,
+    ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime,
+    SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry,
+    Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -1806,6 +1806,16 @@ pub enum ServerEvent {
         /// The folder it now sits in.
         folder_id: InventoryFolderKey,
     },
+    /// The client moved, renamed or moved-and-renamed inventory items over
+    /// the legacy UDP `MoveInventoryItem` — how a rename travels on every
+    /// grid, since the AIS3 move carries no name. Applied to the serving tree,
+    /// as the AIS3 move is; a block naming an item or folder the tree does
+    /// not hold is left out. Nothing is sent back: the client moved its own
+    /// copy first.
+    InventoryItemsMovedUdp {
+        /// The moves applied, in wire order.
+        moves: Vec<InventoryItemMove>,
+    },
     /// The client deleted an inventory folder (`InventoryAPIv3`
     /// `DELETE /category/<id>`). The whole subtree is already removed from
     /// the serving tree.
@@ -2712,6 +2722,24 @@ pub enum ServerEvent {
         /// can correlate it.
         callback_id: u32,
     },
+    /// The client asked for a new inventory item (`CreateInventoryItem`): a new
+    /// notecard, script, settings item, or the item a transaction upload's bytes
+    /// belong to. The simulator mints the item's id and answers with an
+    /// `UpdateCreateInventoryItem` echoing `callback_id`
+    /// ([`SimSession::send_inventory_items_created`]). The inverse of the
+    /// client's [`Session::create_inventory_item`](crate::Session::create_inventory_item).
+    CreateInventoryItem {
+        /// What the client asked for. Its `wearable_type` is the wire's subtype
+        /// byte, which only a clothing or body-part item reads as a wearable
+        /// slot: a settings item carries its kind there (`0` sky, `1` water, `2`
+        /// day cycle) and a script its language.
+        item: NewInventoryItem,
+        /// The asset a non-nil transaction's upload is stored under — what the
+        /// item names when it was created from uploaded bytes.
+        bound_asset: Option<AssetKey>,
+        /// The client's async callback id, echoed back in the reply.
+        callback_id: InventoryCallbackId,
+    },
     /// The client edited a group's profile (`UpdateGroupInfo`): charter, insignia,
     /// search visibility, membership fee, enrollment, and publish flags. The
     /// inverse of the client's
@@ -3094,7 +3122,7 @@ pub struct SimSession {
     /// them), keyed by capability name — one in-flight upload per cap, the same
     /// shape as [`pending_report_screenshot`](Self::pending_report_screenshot)
     /// generalised across the whole `Update*`/`NewFile*` family.
-    pending_caps_uploads: BTreeMap<&'static str, CapsUploadMetadata>,
+    pending_caps_uploads: BTreeMap<(&'static str, u128), CapsUploadMetadata>,
     /// A monotonic source for the ids the two-stage uploader mints on
     /// completion (`new_asset` / `new_inventory_item`) and the `ObjectMedia`
     /// version serials — a sim-server simplification. A real grid mints random
@@ -3715,16 +3743,30 @@ impl SimSession {
     }
 
     /// Parks the parsed step-1 metadata of a two-stage CAPS upload under its
-    /// capability name until the raw-bytes step completes it. A re-POST of
-    /// step 1 replaces the parked metadata (the same rule as the screenshot
-    /// uploader).
-    pub(crate) fn park_caps_upload(&mut self, cap: &'static str, metadata: CapsUploadMetadata) {
-        self.pending_caps_uploads.insert(cap, metadata);
+    /// capability name and a fresh ticket, until the raw-bytes step posted to
+    /// that ticket's uploader URL completes it. Every step 1 gets a ticket of
+    /// its own, as a real grid mints a fresh uploader URL per request
+    /// (OpenSim's `uploaderPath = UUID.Random()`): two saves through one
+    /// capability in flight at once — a bulk import's — must not overwrite
+    /// each other's metadata.
+    pub(crate) fn park_caps_upload(
+        &mut self,
+        cap: &'static str,
+        metadata: CapsUploadMetadata,
+    ) -> u128 {
+        let ticket = self.next_serial();
+        self.pending_caps_uploads.insert((cap, ticket), metadata);
+        ticket
     }
 
-    /// Takes the parked step-1 metadata for `cap`, if a first step stored one.
-    pub(crate) fn take_caps_upload(&mut self, cap: &'static str) -> Option<CapsUploadMetadata> {
-        self.pending_caps_uploads.remove(cap)
+    /// Takes the step-1 metadata parked for `cap` under `ticket`, if a first
+    /// step stored one there.
+    pub(crate) fn take_caps_upload(
+        &mut self,
+        cap: &'static str,
+        ticket: u128,
+    ) -> Option<CapsUploadMetadata> {
+        self.pending_caps_uploads.remove(&(cap, ticket))
     }
 
     /// Completes a two-stage CAPS upload: mints the stored asset id (and, for
@@ -11523,6 +11565,65 @@ impl SimSession {
                 self.events.push_back(ServerEvent::SetParcelOtherCleanTime {
                     local_id: RegionLocalParcelId(set.parcel_data.local_id),
                     clean_time: std::time::Duration::from_secs(minutes.saturating_mul(60)),
+                });
+            }
+            AnyMessage::MoveInventoryItem(moved) => {
+                let mut moves = Vec::new();
+                for block in &moved.inventory_data {
+                    let item = InventoryKey::from(block.item_id);
+                    let folder = InventoryFolderKey::from(block.folder_id);
+                    let name = trimmed_string(&block.new_name);
+                    let new_name = (!name.is_empty()).then_some(name);
+                    if let Err(error) = self.agent_inventory.move_item(item, folder) {
+                        tracing::debug!(
+                            "a UDP move of item {item} into {folder} failed: {error:?}"
+                        );
+                        continue;
+                    }
+                    if let Some(name) = &new_name {
+                        let description = self
+                            .agent_inventory
+                            .item(item)
+                            .map(|held| held.description.clone())
+                            .unwrap_or_default();
+                        if let Err(error) =
+                            self.agent_inventory
+                                .update_item(item, name.clone(), description)
+                        {
+                            tracing::debug!("renaming item {item} failed: {error:?}");
+                        }
+                    }
+                    moves.push(InventoryItemMove {
+                        item,
+                        folder,
+                        new_name,
+                    });
+                }
+                self.events
+                    .push_back(ServerEvent::InventoryItemsMovedUdp { moves });
+            }
+            AnyMessage::CreateInventoryItem(create) => {
+                let block = &create.inventory_block;
+                let secure = self.secure_session_id;
+                self.events.push_back(ServerEvent::CreateInventoryItem {
+                    item: NewInventoryItem {
+                        folder_id: InventoryFolderKey::from(block.folder_id),
+                        transaction_id: block.transaction_id,
+                        next_owner_mask: block.next_owner_mask,
+                        asset_type: AssetType::from_code(i32::from(block.r#type)),
+                        inv_type: InventoryType::from_code(i32::from(block.inv_type)),
+                        wearable_type: WearableType::from_code(block.wearable_type),
+                        name: trimmed_string(&block.name),
+                        description: trimmed_string(&block.description),
+                    },
+                    // Derived as the `UpdateInventoryItem` arm derives it: the
+                    // bytes were stored under the transaction combined with the
+                    // secure session id.
+                    bound_asset: (!block.transaction_id.is_nil())
+                        .then(|| secure.map(|secure| combine_uuids(block.transaction_id, secure)))
+                        .flatten()
+                        .map(AssetKey::from),
+                    callback_id: InventoryCallbackId::new(block.callback_id),
                 });
             }
             AnyMessage::LinkInventoryItem(link) => {

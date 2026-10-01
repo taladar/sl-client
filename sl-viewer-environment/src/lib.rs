@@ -66,6 +66,8 @@ pub mod knobs;
 pub mod land_environment;
 pub mod my_environments;
 pub mod personal_lighting;
+#[cfg(test)]
+mod preview_harness;
 pub mod rows;
 pub mod settings_editor;
 pub mod settings_list;

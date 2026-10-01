@@ -790,3 +790,53 @@ pub fn spawn_personal_lighting_specimen(
     });
     content
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+    use pretty_assertions::{assert_eq, assert_ne};
+    use sl_viewer_notifications::{NotificationManager, NotificationResponse};
+    use sl_viewer_world_scene::environment::EnvironmentState;
+
+    use super::{PERSONAL_LIGHTING_FLOATER_ID, RESET_CONFIRM};
+    use crate::preview_harness::{app, drawn, show, sweep};
+
+    /// A boxed error, so a test can `?` rather than reach for the `panic!` the
+    /// workspace's lints (rightly) forbid.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// **Every control of Personal Lighting moves the sky and water drawn**, to
+    /// the value it now holds, through the local layer; **Reset**, confirmed,
+    /// takes the local layer away and the shared environment is drawn again.
+    #[test]
+    fn every_personal_lighting_control_moves_the_sky_and_reset_undoes_it() -> Result<(), TestError>
+    {
+        let mut app = app();
+        let shared = drawn(&app);
+        show(&mut app, PERSONAL_LIGHTING_FLOATER_ID, true)?;
+        let (driven, failures) = sweep(&mut app, super::ELEMENT);
+        assert_eq!(failures, Vec::<String>::new());
+        assert!(driven > 0, "no controls found");
+        assert_ne!(drawn(&app), shared, "the edits are drawn");
+
+        sl_viewer_testkit::interact::click_node(&mut app, "personal-lighting-reset:button")?;
+        sl_viewer_testkit::settle(&mut app);
+        let id = NotificationManager::default().allocate_id();
+        app.world_mut().write_message(NotificationResponse {
+            id,
+            template: RESET_CONFIRM,
+            button: Some("OK"),
+            ignored: false,
+            input: None,
+        });
+        sl_viewer_testkit::settle(&mut app);
+        assert!(
+            !app.world()
+                .resource::<EnvironmentState>()
+                .has_local_fixed_sky(),
+            "the local sky is gone"
+        );
+        assert_eq!(drawn(&app), shared, "the shared environment is drawn again");
+        Ok(())
+    }
+}

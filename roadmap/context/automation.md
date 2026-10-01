@@ -497,7 +497,7 @@ replaces that person.
   finds the one viewer that answers there. Verbs (`tree`, `find`, `click`,
   `drag --onto|--by`, `fill`, `press`, `wait --for`, `open`, `menu`,
   `world find|touch`, `chat`, `notifications`, `agent`, `environment`,
-  `screenshot`, `events --follow`)
+  `file-dialog`, `screenshot`, `events --follow`)
   are one driver call each; `attach` runs them line by line over one
   connection. It depends on the fake grid but not on the viewer's library, so
   it builds in seconds; it runs the release viewer beside itself. A `launch`
@@ -635,6 +635,46 @@ replaces that person.
 - **The grid's side of a notice or an offer is encoded in `sl-proto`**:
   `GroupNoticeReceived::instant_message` and `InventoryOffer::binary_bucket`
   are the inverses of the decoders, so a test never hand-builds a bucket.
+- **A file chooser is answered by the test** ([[test-e2e-sweep-environment]]):
+  a viewer with no window of its own (`Windowless`, `Headless`) puts no
+  chooser on the desktop. `FileDialogBackend::Answered` (inserted by the
+  assembly) holds an `OpenFileDialog` as the `PendingFileDialog`, with the
+  gate shut, until `answer_pending_dialog` closes it with a path or Cancel —
+  the same `FileDialogClosed`, the same remembered directory. The request is
+  `AnswerFileDialog` (driver `answer_file_dialog`, `sl-viewer-ctl
+  file-dialog PATH|--cancel`), which waits for the dialog, so it is sent right
+  after the click that opens one. The automation crate reaches the platform
+  crate's service through `ProbeSources::file_dialog`, since depending on it
+  would bring the audio device and `rfd` into every automation build.
+- **Every two-stage upload has its own uploader URL** on the fake grid
+  (`…/upload/<ticket>`), so saves in flight together through one capability
+  (a bulk import's) cannot overwrite each other's metadata.
+- **A region can withhold capabilities**: `RegionConfig::withheld_caps` leaves
+  the named `CAP_*` out of the seed grant, as a simulator without a feature
+  does — how the settings-unsupported gate is tested.
+- **The fake grid answers `CreateInventoryItem`** (`uploads::create_item`):
+  a settings item starts as its kind's default asset with the subtype in its
+  flags (OpenSim's `GetDefaultAsset`), a script as the starter script,
+  anything else an empty asset or the transaction's upload; the reply is the
+  `UpdateCreateInventoryItem` echoing the callback id. A UDP
+  `MoveInventoryItem` (how a rename travels; the AIS3 move has no name) is
+  applied to the serving tree by `SimSession` itself. A test reads what a save
+  stored with `FakeAgent::stored_asset`.
+- **The environment readout** carries the sky's haze density and sun
+  (azimuth, elevation in radians) beside its ambient, the drawn water (name,
+  fog density), `transition` — how far a manual change's cross-fade has got —
+  and `previewing`, the editor windows previewing through the edit layer (by
+  floater id, the one on top last); all but the sky come from the scene through
+  `ProbeSources::environment_scene`. The sky in it is the target the fade runs
+  toward, never the blend on screen.
+- **Every environment control is swept below this tier**:
+  `sl-viewer-environment`'s `preview_harness` drives each slider, swatch and
+  trackball a window draws and checks the drawn sky or water follows. An e2e
+  test checks a preview live with one or two knobs, not all of them.
+- **The parcel environment layer is not driven yet**: the fake grid pushes a
+  parcel's properties only on arrival, and the driver cannot hold a movement
+  key, so walking over a parcel line changes nothing a test can see
+  ([[test-e2e-environment-parcel-layer]]).
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).
