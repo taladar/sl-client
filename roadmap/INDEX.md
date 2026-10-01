@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 124 |
-| ready | 311 |
+| ready | 312 |
 | blocked | 53 |
 | in-progress | 20 |
 | bugs | 16 |
 | done | 1290 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1861** |
+| **total** | **1862** |
 
 ## ideas (124)
 
@@ -313,7 +313,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (312)
 
 ### protocol
 
@@ -389,6 +389,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
+- [`viewer-automation-ctl-drag-verbs`](ready/viewer-automation-ctl-drag-verbs.md)
+  — sl-viewer-ctl — drag verbs (onto a node, by an offset)
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
