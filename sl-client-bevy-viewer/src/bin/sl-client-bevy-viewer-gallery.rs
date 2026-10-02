@@ -18,7 +18,7 @@ fn main() -> bevy::app::AppExit {
     sl_viewer_gallery::gallery::run(
         // Watch the skin `.css` files: the gallery is the skin-authoring
         // surface, so an edit re-applies live here without a restart.
-        sl_client_bevy_viewer::asset_root::asset_plugin(Some(true)),
+        sl_client_bevy_viewer::asset_root::asset_plugin(None, Some(true)),
         sl_viewer_gallery::gallery::GalleryRegistry {
             elements: sl_client_bevy_viewer::ui_elements::ELEMENTS,
             floaters: sl_client_bevy_viewer::floaters::FLOATERS,

@@ -157,6 +157,10 @@ profile-chrome = ["bevy/trace", "bevy/trace_chrome", "dep:tracing-chrome"]
 # The raw wgpu value types Bevy does not re-export (the GPU pick pass's
 # sequence-carrying clear color) — the same pin `sl-client-bevy` uses.
 bevy = { version = "0.19.0", features = [
+  # The asset watcher behind `--watch-skins` (and the gallery, which always
+  # watches): without it Bevy accepts `watch_for_changes_override` and watches
+  # nothing. Off at run time unless asked.
+  "file_watcher",
   "multi_threaded",
   # The OS clipboard behind Bevy's `Clipboard`: the text fields' copy / paste
   # and every "Copy …" button. A headless or test App swaps in a private one.

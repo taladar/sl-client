@@ -7,7 +7,8 @@
 //!   recolours the chat overlay and the Nearby transcript, Cancel takes it
 //!   back and OK keeps it; the account's settings file gains only that colour,
 //!   and the row's Reset hands it back to the skin; a skin given on the
-//!   command line is worn without being stored;
+//!   command line is worn without being stored; a sheet edited on disk
+//!   re-dresses a viewer that watches its skins;
 //! - the debug-settings editor: a row fills the detail pane, an edit takes
 //!   effect, a reset clears its own scope, Copy Name reaches a paste, and an
 //!   edit made in Preferences shows in the open editor;
@@ -346,6 +347,43 @@ mod test {
                     !global.contains("vintage"),
                     "the command line's skin was stored:\n{global}"
                 );
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// The colour the watched-sheet test edits graphite's `--chat-self` to.
+    const EDITED_SELF: &str = "#00ff00";
+
+    /// **A watched sheet**: a viewer started with `--watch-skins` on a copy
+    /// of the asset tree re-dresses itself when its skin's `.css` changes on
+    /// disk — the colour row nobody overrode follows the edited token with
+    /// no restart.
+    #[test]
+    fn an_edited_skin_sheet_redresses_a_watching_viewer() -> Result<(), TestError> {
+        stage("skin_watch")
+            .watch_skins()
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let window = preferences_tab(alpha, COLORS_TAB).await?;
+                let _worn = alpha
+                    .expect(&swatch(&window, CHAT_SELF))
+                    .timeout(WAIT)
+                    .to_have_text(GRAPHITE_SELF)
+                    .await?;
+                let sheet = stage.assets("Alpha")?.join("skins/graphite/skin.css");
+                let text = fs_err::read_to_string(&sheet)?;
+                let token = format!("--chat-self: {GRAPHITE_SELF};");
+                assert!(text.contains(&token), "graphite's sheet declares {token}");
+                fs_err::write(
+                    &sheet,
+                    text.replace(&token, &format!("--chat-self: {EDITED_SELF};")),
+                )?;
+                let _followed = alpha
+                    .expect(&swatch(&window, CHAT_SELF))
+                    .timeout(WAIT)
+                    .to_have_text(EDITED_SELF)
+                    .await?;
                 Ok(())
             })?;
         Ok(())

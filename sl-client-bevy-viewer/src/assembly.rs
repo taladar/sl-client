@@ -329,6 +329,11 @@ pub struct ViewerAppOptions {
     pub camera: CameraStartup,
     /// The skin the interface wears.
     pub skin: SkinRuntime,
+    /// The directory the viewer's `assets/` tree (icons, locales, skins)
+    /// sits in — what `BEVY_ASSET_ROOT` names — or `None` to resolve it as
+    /// the binary does ([`crate::asset_root`]). A test states it to run a
+    /// viewer on a copy it may edit.
+    pub assets: Option<PathBuf>,
     /// Which media engines may start.
     pub media: MediaRuntime,
     /// Whether there is an OS window.
@@ -375,6 +380,7 @@ impl ViewerAppOptions {
             capture: CaptureStartup::default(),
             camera: CameraStartup::default(),
             skin: SkinRuntime::default(),
+            assets: None,
             media: MediaRuntime::default(),
             window: WindowMode::Windowed,
             storage: Storage::default(),
@@ -454,6 +460,7 @@ impl ViewerAppBuilder {
             capture,
             camera,
             skin,
+            assets,
             media,
             window,
             storage,
@@ -568,7 +575,10 @@ impl ViewerAppBuilder {
             // Watch the asset directory so an edited skin `.css` re-applies live
             // (`--watch-skins`, the skin-authoring loop). Off unless asked, since
             // watching carries a small background cost.
-            .set(crate::asset_root::asset_plugin(watch_skins.then_some(true)))
+            .set(crate::asset_root::asset_plugin(
+                assets.as_deref(),
+                watch_skins.then_some(true),
+            ))
             // The binary installs its own `tracing` subscriber (so the
             // pre-window login logs go somewhere), and a harness captures the
             // logs itself; drop Bevy's `LogPlugin` to avoid the "global

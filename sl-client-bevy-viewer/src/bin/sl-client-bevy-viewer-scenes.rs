@@ -15,5 +15,7 @@
 fn main() -> bevy::app::AppExit {
     // Held for the whole process so the Chrome profiler (if enabled) flushes.
     let _tracing_guards = sl_client_bevy_viewer::init_tracing();
-    sl_viewer_gallery::render_gallery::run(sl_client_bevy_viewer::asset_root::asset_plugin(None))
+    sl_viewer_gallery::render_gallery::run(sl_client_bevy_viewer::asset_root::asset_plugin(
+        None, None,
+    ))
 }

@@ -126,6 +126,9 @@ struct ViewerSetup {
     /// The skin to wear for the run, overriding the stored choice as
     /// `--skin` does.
     skin: Option<String>,
+    /// Whether each viewer runs on a copy of the asset tree of its own and
+    /// watches its skin sheets for edits, as `--watch-skins` does.
+    watch_skins: bool,
 }
 
 impl core::fmt::Debug for StageBuilder {
@@ -240,6 +243,16 @@ impl StageBuilder {
     #[must_use]
     pub fn skin(mut self, skin: impl Into<String>) -> Self {
         self.setup.skin = Some(skin.into());
+        self
+    }
+
+    /// Run every viewer on a copy of the viewer's asset tree of its own
+    /// ([`Stage::assets`]) and watch its skin sheets, as `--watch-skins`
+    /// does: a sheet the body edits in the copy re-dresses that viewer
+    /// without a restart, and the workspace's own tree is never touched.
+    #[must_use]
+    pub const fn watch_skins(mut self) -> Self {
+        self.setup.watch_skins = true;
         self
     }
 
@@ -527,6 +540,43 @@ fn fresh_dir(dir: &Path) -> Result<(), StageError> {
     fs_err::create_dir_all(dir).map_err(fail)
 }
 
+/// The directory a viewer's own copy of the asset tree sits in — what
+/// `BEVY_ASSET_ROOT` names — within its directory.
+fn asset_base(viewer: &Path) -> PathBuf {
+    viewer.join("asset-base")
+}
+
+/// Copy the directory tree `from` to `to`, which must not exist yet.
+fn copy_tree(from: &Path, to: &Path) -> Result<(), std::io::Error> {
+    fs_err::create_dir(to)?;
+    for entry in fs_err::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            let _bytes = fs_err::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Give the viewer whose directory is `viewer` a copy of the asset tree the
+/// viewer would otherwise read, under [`asset_base`].
+fn copy_assets(viewer: &Path) -> Result<(), StageError> {
+    let base = asset_base(viewer);
+    let fail = |source| StageError::Artifacts {
+        path: base.clone(),
+        source,
+    };
+    fs_err::create_dir_all(&base).map_err(fail)?;
+    copy_tree(
+        &sl_client_bevy_viewer::asset_root::resolved_assets_dir(),
+        &base.join("assets"),
+    )
+    .map_err(fail)
+}
+
 /// A viewer's directory within a stage's.
 fn viewer_dir(stage: &Path, label: &str) -> ViewerDir {
     ViewerDir {
@@ -807,6 +857,9 @@ impl Stage {
                 quits: AtomicBool::new(false),
             });
             if let Some(viewer) = self.viewers.last() {
+                if self.setup.watch_skins {
+                    copy_assets(&viewer.dir)?;
+                }
                 self.start_session(viewer).await?;
             }
         }
@@ -958,6 +1011,7 @@ impl Stage {
             };
             let log_label = self.log_label(label);
             let state = dir.join("state");
+            let assets = self.setup.watch_skins.then(|| asset_base(dir));
             let setup = self.setup.clone();
             let host = self
                 .host
@@ -965,7 +1019,7 @@ impl Stage {
                 .ok_or(sl_viewer_automation::HostError::Stopped)?;
             let (handle, link) = host
                 .host(label.clone(), move || {
-                    in_process_viewer(params, log_label, &state, &setup)
+                    in_process_viewer(params, log_label, &state, assets, &setup)
                 })
                 .await?;
             viewer.running(ViewerRun::InProcess(Some(handle)));
@@ -1098,6 +1152,14 @@ impl Stage {
         }
         if let Some(skin) = &self.setup.skin {
             launch = launch.args(["--skin".to_owned(), skin.clone()]);
+        }
+        if self.setup.watch_skins {
+            launch = launch
+                .env(
+                    "BEVY_ASSET_ROOT",
+                    asset_base(&viewer.dir).display().to_string(),
+                )
+                .args(["--watch-skins".to_owned()]);
         }
         if session > 0 {
             launch.log = dir.root.join(format!("viewer.{session}.log"));
@@ -1344,6 +1406,24 @@ impl Stage {
     /// [`StageError::UnknownViewer`] for a label the stage was not given.
     pub fn artifacts(&self, label: &str) -> Result<&Path, StageError> {
         Ok(&self.stage_viewer(label)?.dir)
+    }
+
+    /// The `assets/` directory viewer `label` runs on — its own copy, on a
+    /// stage that [watches skins](StageBuilder::watch_skins): a sheet edited
+    /// under `skins/` there re-dresses that viewer alone.
+    ///
+    /// # Errors
+    ///
+    /// [`StageError::UnknownViewer`] for a label the stage was not given, and
+    /// [`StageError::NoOwnAssets`] on a stage whose viewers run on the
+    /// workspace's tree.
+    pub fn assets(&self, label: &str) -> Result<PathBuf, StageError> {
+        let viewer = self.stage_viewer(label)?;
+        if self.setup.watch_skins {
+            Ok(asset_base(&viewer.dir).join("assets"))
+        } else {
+            Err(StageError::NoOwnAssets(label.to_owned()))
+        }
     }
 
     /// Viewer `label`'s process id, on the process backend.
@@ -1658,12 +1738,14 @@ fn driver_options(label: &str, dir: &Path) -> ViewerOptions {
 }
 
 /// An in-process stage viewer: the viewer's own builder's App, headless,
-/// storing under `state`, set up as `setup` says, reached through the
-/// in-process transport and logging inside a span named `log_label`.
+/// storing under `state`, reading the asset tree in `assets` when given, set
+/// up as `setup` says, reached through the in-process transport and logging
+/// inside a span named `log_label`.
 fn in_process_viewer(
     params: LoginParams,
     log_label: String,
     state: &Path,
+    assets: Option<PathBuf>,
     setup: &ViewerSetup,
 ) -> Result<ViewerApp, BuildError> {
     let mut options = ViewerAppOptions::new(params);
@@ -1687,6 +1769,8 @@ fn in_process_viewer(
             theme: None,
         };
     }
+    options.assets = assets;
+    options.skin.watch = setup.watch_skins;
     options.render_overrides = Some(RenderOverrides::default());
     options.avatar_overrides = Some(AvatarOverrides::default());
     options.content.fetch_server_chat_history = false;

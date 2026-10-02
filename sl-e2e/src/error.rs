@@ -43,6 +43,10 @@ pub enum StageError {
     /// The stage names no viewer by this label.
     #[error("the stage has no viewer {0:?}")]
     UnknownViewer(String),
+    /// The body asked for a viewer's own asset tree on a stage that gives
+    /// its viewers none: call `StageBuilder::watch_skins`.
+    #[error("viewer {0:?} runs on the workspace's asset tree, not a copy of its own")]
+    NoOwnAssets(String),
     /// The process backend was asked for, but the stage has no viewer binary.
     #[error("the process backend needs the viewer binary: call StageBuilder::viewer_binary")]
     NoBinary,

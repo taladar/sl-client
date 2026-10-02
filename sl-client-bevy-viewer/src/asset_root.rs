@@ -22,6 +22,11 @@
 //!
 //! An installed build has no crate directory to fall back on, which is why step
 //! 2 comes first and why step 3 is guarded by the directory still existing.
+//!
+//! An App's builder may state the base directory instead
+//! (`ViewerAppOptions::assets`), which replaces all three: how a test runs an
+//! in-process viewer on a copy of the tree without touching the process's
+//! environment.
 
 use std::path::{Path, PathBuf};
 
@@ -42,6 +47,9 @@ const REQUIRED_ENTRIES: [&str; 3] = ["skins", "locales", "icons"];
 /// Which of the layouts in the module docs an [`AssetRoot`] came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Source {
+    /// The App's builder named the base directory
+    /// (`ViewerAppOptions::assets`): a test viewer on a tree of its own.
+    Stated,
     /// `BEVY_ASSET_ROOT` was set and named the base directory.
     Environment,
     /// An `assets/` beside the executable — the installed layout.
@@ -59,6 +67,7 @@ impl Source {
     /// repeating the path that follows it.
     const fn describe(self) -> &'static str {
         match self {
+            Self::Stated => "stated by the App's builder",
             Self::Environment => "BEVY_ASSET_ROOT",
             Self::BesideExecutable => "beside the executable",
             Self::CrateDirectory => "the viewer crate's source tree",
@@ -83,17 +92,34 @@ struct AssetRoot {
 /// asset root pinned to `resolve`'s answer, and the skin-watching override
 /// passed through (`--watch-skins`, and the gallery, which always watches).
 ///
-/// Logs what it resolved — once per process, since each binary builds its
-/// `App` once — and shouts if the tree is not there.
+/// `stated`, when given, is the base directory `assets/` sits in, taking the
+/// place of the whole resolution order — how a test runs an App on a tree of
+/// its own without touching the process's environment.
+///
+/// Logs what it resolved — once per App — and shouts if the tree is not
+/// there.
 #[must_use]
-pub fn asset_plugin(watch_for_changes_override: Option<bool>) -> AssetPlugin {
-    let root = resolve();
+pub fn asset_plugin(
+    stated: Option<&Path>,
+    watch_for_changes_override: Option<bool>,
+) -> AssetPlugin {
+    let root = stated.map_or_else(resolve, |base| AssetRoot {
+        path: base.join(ASSETS_DIR),
+        source: Source::Stated,
+    });
     report(&root, &missing_entries(&root, &|path| path.is_dir()));
     AssetPlugin {
         file_path: root.path.display().to_string(),
         watch_for_changes_override,
         ..AssetPlugin::default()
     }
+}
+
+/// The `assets/` directory a viewer of this process reads when nothing states
+/// another — the tree a harness copies to run a viewer on a tree of its own.
+#[must_use]
+pub fn resolved_assets_dir() -> PathBuf {
+    resolve().path
 }
 
 /// [`choose`] over this process: the real environment, the real executable, and

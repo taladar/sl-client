@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 125 |
-| ready | 311 |
+| ready | 310 |
 | blocked | 54 |
 | in-progress | 20 |
 | bugs | 16 |
-| done | 1295 |
+| done | 1296 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1868** |
@@ -315,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (310)
 
 ### protocol
 
@@ -1016,8 +1016,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-e2e-skin-sheet-watch`](ready/test-e2e-skin-sheet-watch.md) — End-to-end
-  check that --watch-skins picks up an edited sheet
 - [`test-e2e-sweep-live-grid`](ready/test-e2e-sweep-live-grid.md) — End-to-end
   tests for what only a live grid has
 - [`test-e2e-sweep-two-avatars`](ready/test-e2e-sweep-two-avatars.md) —
@@ -1333,7 +1331,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1295)
+## done (1296)
 
 ### protocol
 
@@ -3784,6 +3782,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-e2e-pilot-suite`](done/test-e2e-pilot-suite.md) — The first end-to-end
   tests — one viewer, two viewers, two regions (blocked by `test-e2e-stage`
   (done))
+- [`test-e2e-skin-sheet-watch`](done/test-e2e-skin-sheet-watch.md) — End-to-end
+  check that --watch-skins picks up an edited sheet
 - [`test-e2e-stage`](done/test-e2e-stage.md) — sl-e2e Stage — a fake grid,
   several viewers and grid control in one test (blocked by
   `viewer-automation-driver` (done), `test-e2e-viewer-process-launch` (done))

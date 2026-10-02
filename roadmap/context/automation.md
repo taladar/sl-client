@@ -328,6 +328,16 @@ replaces that person.
   kind of test: chrome, two viewers on one object, a pie and a touch the grid
   sees (a test prim put on the grid through `FakeAgent::with_world`), and a
   teleport through the world map between two stage regions.
+- **A viewer may run on an asset tree of its own**
+  (`StageBuilder::watch_skins`): each viewer gets a copy of the tree the
+  viewer would read (`asset_root::resolved_assets_dir`) in its directory's
+  `asset-base/`, named by `BEVY_ASSET_ROOT` for a process and by
+  `ViewerAppOptions::assets` in process (no environment write), and watches
+  it as `--watch-skins` does; `Stage::assets(label)` is the copy's `assets/`
+  for the body to edit. The workspace's own tree is never touched. The
+  watcher is Bevy's `file_watcher` feature, which the viewer crate enables:
+  without it `watch_for_changes_override` is accepted and nothing is
+  watched.
 - **The viewer has no grab-drag of an object outside build mode yet**, so
   there is no aimed grab; it lands with the Move tool
   ([[viewer-build-tool-row-parity]]).
