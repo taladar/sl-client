@@ -707,21 +707,21 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
         element: "group-invite-toast",
         nodes: &[
             NodeContract::new(
+                "offer-invite-action:Accept",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["accept"]),
+                    Row::emits(Gesture::DoubleClick, &["accept", "accept"]),
+                    Row::emits(Gesture::Enter, &["accept"]),
+                    Row::emits(Gesture::Space, &["accept"]),
+                ],
+            ),
+            NodeContract::new(
                 "offer-invite-action:Decline",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["decline"]),
                     Row::emits(Gesture::DoubleClick, &["decline", "decline"]),
                     Row::emits(Gesture::Enter, &["decline"]),
                     Row::emits(Gesture::Space, &["decline"]),
-                ],
-            ),
-            NodeContract::new(
-                "offer-invite-action:Join",
-                &[
-                    Row::emits(Gesture::PrimaryClick, &["accept"]),
-                    Row::emits(Gesture::DoubleClick, &["accept", "accept"]),
-                    Row::emits(Gesture::Enter, &["accept"]),
-                    Row::emits(Gesture::Space, &["accept"]),
                 ],
             ),
             NodeContract::new(
@@ -1399,21 +1399,21 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
         element: "teleport-offer-toast",
         nodes: &[
             NodeContract::new(
+                "offer-invite-action:Accept",
+                &[
+                    Row::emits(Gesture::PrimaryClick, &["accept"]),
+                    Row::emits(Gesture::DoubleClick, &["accept", "accept"]),
+                    Row::emits(Gesture::Enter, &["accept"]),
+                    Row::emits(Gesture::Space, &["accept"]),
+                ],
+            ),
+            NodeContract::new(
                 "offer-invite-action:Decline",
                 &[
                     Row::emits(Gesture::PrimaryClick, &["decline"]),
                     Row::emits(Gesture::DoubleClick, &["decline", "decline"]),
                     Row::emits(Gesture::Enter, &["decline"]),
                     Row::emits(Gesture::Space, &["decline"]),
-                ],
-            ),
-            NodeContract::new(
-                "offer-invite-action:Teleport",
-                &[
-                    Row::emits(Gesture::PrimaryClick, &["accept"]),
-                    Row::emits(Gesture::DoubleClick, &["accept", "accept"]),
-                    Row::emits(Gesture::Enter, &["accept"]),
-                    Row::emits(Gesture::Space, &["accept"]),
                 ],
             ),
             NodeContract::new(

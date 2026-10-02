@@ -147,3 +147,7 @@ reporting a derender as a region leave.
 
 The relog checks are end-to-end tests now (`tests/e2e_relog.rs`,
 [[test-e2e-sweep-relog]]).
+
+Derendering an avatar with attachments is an end-to-end test now
+(`tests/e2e_two_avatars.rs`, [[test-e2e-sweep-two-avatars]]); it found the
+derendered avatar's name tag still drawn, now hidden with its placeholder.

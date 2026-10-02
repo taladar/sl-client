@@ -624,6 +624,7 @@ fn build_offer_card(commands: &mut Commands, content: &OfferContent) -> OfferCar
     let accept = spawn_action_button(
         commands,
         action_row,
+        ACCEPT_BUTTON,
         &content.accept_label,
         content.accent,
         1,
@@ -631,14 +632,14 @@ fn build_offer_card(commands: &mut Commands, content: &OfferContent) -> OfferCar
     let decline = spawn_action_button(
         commands,
         action_row,
+        DECLINE_BUTTON,
         &content.decline_label,
         BUTTON_BORDER,
         2,
     );
-    let block = content
-        .block_label
-        .as_ref()
-        .map(|label| spawn_action_button(commands, action_row, label, BUTTON_BORDER, 3));
+    let block = content.block_label.as_ref().map(|label| {
+        spawn_action_button(commands, action_row, BLOCK_BUTTON, label, BUTTON_BORDER, 3)
+    });
 
     OfferCard {
         root,
@@ -648,6 +649,16 @@ fn build_offer_card(commands: &mut Commands, content: &OfferContent) -> OfferCar
         close,
     }
 }
+
+/// The name of a card's accepting response — Accept, Teleport, Join — which
+/// the readout reports and its button is addressed by.
+const ACCEPT_BUTTON: &str = "Accept";
+
+/// The name of a card's declining response.
+const DECLINE_BUTTON: &str = "Decline";
+
+/// The name of an inventory offer's Block response.
+const BLOCK_BUTTON: &str = "Block";
 
 /// Adopt a built card into the shared toast channel as a sticky
 /// [`Alert`](NotificationKind::Alert), recording a history line, and return its
@@ -673,12 +684,18 @@ fn adopt_offer_card(
             default_button: None,
             history_body: history,
             buttons: [
-                Some(ToastButton::new("Accept", content.accept_label.clone())),
-                Some(ToastButton::new("Decline", content.decline_label.clone())),
+                Some(ToastButton::new(
+                    ACCEPT_BUTTON,
+                    content.accept_label.clone(),
+                )),
+                Some(ToastButton::new(
+                    DECLINE_BUTTON,
+                    content.decline_label.clone(),
+                )),
                 content
                     .block_label
                     .as_ref()
-                    .map(|label| ToastButton::new("Block", label.clone())),
+                    .map(|label| ToastButton::new(BLOCK_BUTTON, label.clone())),
             ]
             .into_iter()
             .flatten()
@@ -967,6 +984,9 @@ fn spawn_friendship_card(
                     friend_id,
                     calling_card_folder,
                 }));
+                // The session adds the friend as it accepts, and says so in no
+                // friend event: re-read the buddy list, after the accept.
+                sl.write(SlCommand(Command::QueryFriends));
             }
             resolves.write(ResolveNotification {
                 toast: root,
@@ -1083,9 +1103,14 @@ fn spawn_group_invite_card(
 /// Spawn one bottom-row action button (accept / decline / Block), bordered in the
 /// given accent (the accept default wears the card accent, the rest the neutral
 /// button border). Returns the clickable box for the caller to wire onto.
+///
+/// `button` is the response's own name (`Accept`, `Decline`, `Block` — the
+/// card's [`ToastButton`] names), and the button is addressed by it whatever
+/// its caption says in the viewer's language.
 fn spawn_action_button(
     commands: &mut Commands,
     parent: Entity,
+    button: &str,
     label: &str,
     border: Color,
     tab: i32,
@@ -1095,7 +1120,7 @@ fn spawn_action_button(
         parent,
         ButtonSpec::bordered(
             UiLabel::literal(label),
-            format!("offer-invite-action:{label}"),
+            format!("offer-invite-action:{button}"),
         )
         .kind(ButtonKind::Headless)
         .tab_index(tab)

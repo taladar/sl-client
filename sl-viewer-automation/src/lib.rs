@@ -140,7 +140,7 @@ mod world_sweep;
 pub use crate::diagnostics::{
     DiagnosticsSource, LogTally, LogTallyLayer, RECENT_LINES, diagnostics_cursor, read_diagnostics,
 };
-pub use crate::event_log::{DETAIL_LIMIT, EventLog, EventLogPlugin};
+pub use crate::event_log::{DETAIL_LIMIT, EventLog, EventLogPlugin, SoundRaised};
 pub use crate::executor::{
     AutomationIdentity, AutomationPlugin, AutomationQueue, AutomationSystems, NOTIFICATION_ENTRIES,
     REPORT_DIAGNOSTICS, REPORT_EVENTS,

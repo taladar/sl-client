@@ -257,6 +257,7 @@ impl WorldModel<'_, '_> {
                     selected: false,
                     hover_text: None,
                     name_tag: self.tag_text(label),
+                    bakes: avatars.baked_texture_ids(agent),
                 }
             })
             .collect()
@@ -341,6 +342,7 @@ impl WorldModel<'_, '_> {
                         .is_some_and(|selection| selection.is_selected(*scoped)),
                     hover_text: (!tracked.text.is_empty()).then(|| tracked.text.clone()),
                     name_tag: None,
+                    bakes: Vec::new(),
                 }
             })
             .collect()

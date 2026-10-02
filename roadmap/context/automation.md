@@ -756,6 +756,44 @@ replaces that person.
 - **Experience pickers filter by scope**: Allowed offers land-scoped
   experiences, Blocked grid-scoped ones; the fake grid's land-scoped Arena is
   rated Moderate, so the rating filter must admit it.
+- **The other resident, without a second viewer**
+  ([[test-e2e-sweep-two-avatars]], `tests/e2e_two_avatars.rs`): a friend
+  account that never logs in (`configure_grid` + `friends`), a catalogue NPC,
+  or what the grid sends through the viewer's own session (`with_sim`:
+  `send_change_user_rights`, `send_chat_from_simulator` with `StartTyping`,
+  `send_coarse_location_update` on the child session of a neighbour,
+  `receive_crossing` for an arrival). What only a grid relaying between its
+  sessions shows declares `Need::LiveGrid`, and what only OpenSim does
+  `Need::OpenSim`; both skip the fake grid.
+- **UI sounds are a log stream** (`LogStream::Sound`, kind = the sound's name,
+  `radar_alert`, `typing`): the assembly forwards each `PlayUiSound` as a
+  `SoundRaised`, since the sounds' crate carries the audio backend.
+- **Bakes are readouts**: `WorldNode::bakes` is what an avatar's latest
+  appearance drapes it in, `AgentReadout::published_bakes` what the viewer's
+  own client-side bake named (OpenSim; empty where the grid bakes).
+- **A name or owner query waits on linkset roots only**: a grid answers a
+  child prim's `RequestObjectPropertiesFamily` with its root's record
+  (OpenSim's `ServiceObjectPropertiesFamilyRequest`), so a child's own name
+  comes only with a selection's full properties.
+- **The session's reports wait for the strings** (`SlEventHold`, released on
+  `LocaleSettled`, ten seconds at most): an offline offer delivered with the
+  login was carded from bare keys.
+- **An offer card's buttons are addressed by their response**:
+  `offer-invite-action:Accept` / `Decline` / `Block`, whatever the caption.
+- **What OpenSim does that the fake grid does not**: a new friendship grants
+  "see online" alone both ways (the fake grid adds the map); a rename
+  (`PrimName`) tells nobody, the writer included, so two editors each show
+  their own write until they select afresh, and the grid keeps whichever it
+  handled last; an offer left unanswered at logout comes back with the next
+  login, as a stored offline IM. A live test that rezzes names its prim per
+  run and places it per run, since a failed run leaves its prim where the
+  next would aim.
+- **Two live viewers may start apart**: aditi logs each avatar in where it
+  last was. A test that needs them together gathers them first — Alpha offers
+  Beta a teleport from the radar, Beta takes it
+  (`e2e_two_avatars.rs`'s `gather`).
+- **Delete a selected prim with the keyboard**: Escape takes the focus out of
+  a Build field, and Delete sends the selection to the Trash — no pie aim.
 - Every new crate here trips the extraction gates (`private_interfaces`,
   `must_use_candidate`, fmt, machete, cargo-about, rustdoc, `cliff.toml`,
   `CHANGELOG.md`).

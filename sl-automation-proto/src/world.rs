@@ -317,6 +317,11 @@ pub struct WorldNode {
     /// What an avatar's name tag says, one line per line of the tag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name_tag: Option<String>,
+    /// For an avatar, the baked textures its latest appearance drapes it in
+    /// (the visible body regions'), sorted: what another viewer was told the
+    /// avatar looks like.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bakes: Vec<Uuid>,
 }
 
 /// One line naming the thing for a person reading an error — kind, name, ids
@@ -414,6 +419,7 @@ mod tests {
             selected: true,
             hover_text: Some("Open me".to_owned()),
             name_tag: None,
+            bakes: Vec::new(),
         }
     }
 

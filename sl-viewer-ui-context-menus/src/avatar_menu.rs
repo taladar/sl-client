@@ -1062,8 +1062,8 @@ fn update_pick_inspector(
 /// *drag* is camera free-look here, so the menu must not appear the moment a look
 /// gesture starts. [`RIGHT_CLICK_DRAG_SLOP`] separates the two.
 ///
-/// A right-click over a **blocking** UI element (an open floater) that is *not* a
-/// name tag suppresses the pick, so a menu drawn over the world does not also open
+/// A right-click over a **blocking** UI element (an open floater) suppresses the
+/// pick, name tags included, so a menu drawn over the world does not also open
 /// an avatar or object pie behind it.
 fn request_avatar_menu_on_right_click(
     buttons: Res<ButtonInput<MouseButton>>,
@@ -1102,15 +1102,11 @@ fn request_avatar_menu_on_right_click(
         return;
     };
 
-    // 1. The name tag: the screen-space rect test against the visible tags.
-    let tag_agent = occlusion.tag_hit.agent_at(cursor);
-
-    // Occlusion order: tag, then UI, then HUD attachments, then the world (the
-    // reference's order too). The name tag above is the avatar's own overlay
-    // and wins first.
-    let agent = if let Some(agent) = tag_agent {
-        Some(agent)
-    } else if pointer_over_blocking_ui(
+    // Occlusion order: UI, then the name tag, then HUD attachments, then the
+    // world — the reference's order (its views take the mouse before anything
+    // in the world does), and the hover tip's. A tag is drawn in the world,
+    // under the floaters, so a click on a floater over a tag is the floater's.
+    if pointer_over_blocking_ui(
         &occlusion.hover_map,
         &occlusion.pickables,
         &occlusion.node_sizes,
@@ -1120,6 +1116,11 @@ fn request_avatar_menu_on_right_click(
         // overlays (the chat heads-up) and non-UI / zero-area hover entries opt out
         // and do not suppress this.
         return;
+    }
+    let agent = if let Some(agent) = occlusion.tag_hit.agent_at(cursor) {
+        // The name tag: the screen-space rect test against the visible tags,
+        // the avatar's own overlay, in front of its body and the HUDs.
+        Some(agent)
     } else if let Some((entity, hit)) = occlusion.hud.hit(cursor) {
         // A HUD attachment is under the cursor: it occludes the world (so no
         // avatar or object pie opens behind it), and — only the agent's own

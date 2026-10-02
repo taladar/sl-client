@@ -48,6 +48,10 @@ aditi:
 - [[test-group-notice]]: a group notice
   between two aditi avatars.
 - [[test-e2e-live-grids]]: the MFA challenge path, when one is issued.
+- [[test-fake-grid-concurrent-edits]]: what Second Life does when two
+  editors rename one prim — `two_residents_befriend_trade_rights_and_contest_
+  one_prim` in `tests/e2e_two_avatars.rs` gets as far as the rez on aditi, at a
+  region quiet enough for the ground aim to hold.
 
 Either grid, from real objects and real failures:
 

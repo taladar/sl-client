@@ -879,6 +879,7 @@ mod tests {
             selected: false,
             hover_text: None,
             name_tag: None,
+            bakes: Vec::new(),
         }
     }
 

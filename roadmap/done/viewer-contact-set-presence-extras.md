@@ -132,3 +132,6 @@ the two-avatar live check still outstanding from [[viewer-do-not-disturb-away]].
 
 The relog checks are end-to-end tests now (`tests/e2e_relog.rs`,
 [[test-e2e-sweep-relog]]).
+
+The per-set reply being sent is an end-to-end test now
+(`tests/e2e_two_avatars.rs`, [[test-e2e-sweep-two-avatars]]).

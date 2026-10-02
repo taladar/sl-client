@@ -43,3 +43,7 @@ P15.4 delivers the bake **textures**; publishing the worn **shape** needs
 the deferred high-level appearance API (a Phase-14 follow-up note). Verifying
 *other* viewers see the result needs a second observer and was not done here;
 the sim accepting each upload + the publish is the guarantee.
+
+The second observer is an end-to-end test now (`tests/e2e_two_avatars.rs`,
+[[test-e2e-sweep-two-avatars]]): on OpenSim the other viewer is told the bakes
+this one published.

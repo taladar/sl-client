@@ -4,8 +4,9 @@
 //! A test asks "did the viewer send exactly one `ObjectUpdate` after I
 //! clicked?" or "did the grid say the teleport finished?". A `MessageReader`
 //! cannot answer between frames — it sees a message for two frames and then
-//! never again — so the log keeps every `SlEvent`, `SlCommand` and `UiAction`
-//! it saw, numbered by one counter over all three, and a reader keeps its own
+//! never again — so the log keeps every `SlEvent`, `SlCommand`, `UiAction` and
+//! [`SoundRaised`] it saw, numbered by one counter over all of them, and a
+//! reader keeps its own
 //! cursor. It is bounded; a reader that falls further behind than the log
 //! holds is told how many entries it missed ([`LogPage::dropped`]) rather than
 //! silently skipping them.
@@ -35,12 +36,22 @@ impl Plugin for EventLogPlugin {
             .add_message::<SlEvent>()
             .add_message::<SlCommand>()
             .add_message::<UiAction>()
+            .add_message::<SoundRaised>()
             .add_systems(
                 Last,
                 record_log.in_set(crate::executor::AutomationSystems::Record),
             );
     }
 }
+
+/// A feedback sound the viewer raised, by name (`radar_alert`): what the
+/// sound log stream records.
+///
+/// The sounds live in a crate that carries the audio backend, which this one
+/// must not depend on, so the viewer's assembly forwards each of its own
+/// requests as one of these.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SoundRaised(pub &'static str);
 
 /// One logged message, kept whole until read.
 #[derive(Debug, Clone)]
@@ -51,6 +62,8 @@ enum Logged {
     Command(Command),
     /// A user interface action.
     UiAction(UiAction),
+    /// A feedback sound.
+    Sound(SoundRaised),
 }
 
 impl Logged {
@@ -60,6 +73,7 @@ impl Logged {
             Self::Event(_) => LogStream::Event,
             Self::Command(_) => LogStream::Command,
             Self::UiAction(_) => LogStream::UiAction,
+            Self::Sound(_) => LogStream::Sound,
         }
     }
 
@@ -78,6 +92,7 @@ impl Logged {
                 format!("{}.{}", action.element, action.action),
                 format!("{action:?}"),
             ),
+            Self::Sound(SoundRaised(sound)) => ((*sound).to_owned(), (*sound).to_owned()),
         };
         LogEntry {
             seq,
@@ -203,8 +218,8 @@ impl EventLog {
     }
 }
 
-/// Append this frame's events, commands and UI actions to [`EventLog`], in
-/// that order within the frame.
+/// Append this frame's events, commands, UI actions and sounds to
+/// [`EventLog`], in that order within the frame.
 ///
 /// In `Last`, after every system that writes one: a message lives for two
 /// frames, so this reader's own cursor sees each exactly once whenever in the
@@ -213,6 +228,7 @@ fn record_log(
     mut events: MessageReader<SlEvent>,
     mut commands: MessageReader<SlCommand>,
     mut actions: MessageReader<UiAction>,
+    mut sounds: MessageReader<SoundRaised>,
     mut log: ResMut<EventLog>,
 ) {
     for SlEvent(event) in events.read() {
@@ -224,6 +240,9 @@ fn record_log(
     for action in actions.read() {
         log.push(Logged::UiAction(*action));
     }
+    for sound in sounds.read() {
+        log.push(Logged::Sound(*sound));
+    }
 }
 
 #[cfg(test)]
@@ -233,7 +252,7 @@ mod tests {
     use sl_client_bevy::{Command, SlSessionEvent};
     use sl_viewer_ui_core::ui_element::UiAction;
 
-    use super::{DETAIL_LIMIT, EventLog, Logged, truncated, variant_name};
+    use super::{DETAIL_LIMIT, EventLog, Logged, SoundRaised, truncated, variant_name};
 
     /// A UI action named `action`.
     const fn action(action: &'static str) -> Logged {
@@ -250,6 +269,7 @@ mod tests {
         log.push(Logged::Event(SlSessionEvent::TeleportStarted));
         log.push(Logged::Command(Command::Stand));
         log.push(action("inventory"));
+        log.push(Logged::Sound(SoundRaised("radar_alert")));
         let page = log.read(cursor, &[], usize::MAX);
         let kinds: Vec<(u64, LogStream, &str)> = page
             .entries
@@ -262,11 +282,19 @@ mod tests {
                 (0, LogStream::Event, "TeleportStarted"),
                 (1, LogStream::Command, "Stand"),
                 (2, LogStream::UiAction, "toolbar.inventory"),
+                (3, LogStream::Sound, "radar_alert"),
             ]
         );
-        assert_eq!(page.next, 3);
+        assert_eq!(page.next, 4);
         assert_eq!(page.dropped, 0);
         assert!(log.read(page.next, &[], usize::MAX).entries.is_empty());
+        assert_eq!(
+            log.read(cursor, &[LogStream::Sound], usize::MAX)
+                .entries
+                .len(),
+            1,
+            "a sound is read on its own stream"
+        );
     }
 
     #[test]

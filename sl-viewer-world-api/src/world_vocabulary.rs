@@ -683,6 +683,19 @@ impl AvatarState {
         self.baked_textures.get(&agent).map_or(0, HashMap::len)
     }
 
+    /// The baked textures of this avatar's visible body regions, from its
+    /// latest appearance, sorted — empty before one arrives.
+    #[must_use]
+    pub fn baked_texture_ids(&self, agent: AgentKey) -> Vec<Uuid> {
+        let mut ids: Vec<Uuid> = self
+            .baked_textures
+            .get(&agent)
+            .map(|regions| regions.values().map(|texture| texture.uuid()).collect())
+            .unwrap_or_default();
+        ids.sort_unstable();
+        ids
+    }
+
     /// Every avatar this viewer currently knows in-world, with the anchor
     /// entity whose transform places it — full objects first, then the
     /// coarse-only dots. The avatar picker's Near Me tab reads this.

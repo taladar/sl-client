@@ -91,3 +91,8 @@ Reference (Firestorm, read-only): `fsradar`, `fsfloaterradar`.
 
 Deps: [[viewer-ui-virtualized-list]] (the scrolling list) and
 [[viewer-name-tags-display-names]] (shared name resolution).
+
+The live checks are end-to-end tests now (`tests/e2e_two_avatars.rs`,
+[[test-e2e-sweep-two-avatars]]): sort persistence, the row menu (Track,
+Teleport To, Add Friend, Block, Derender), toast mode with the alert sound, and
+a neighbour region's resident drawn as an approximate position.

@@ -153,3 +153,6 @@ merge is aimed at a real grid behaviour rather than an invented one.
 Not verified live. Two residents on one parcel is the acceptance the entry
 names and it needs two logins on a real grid; the fake-grid test covers the
 protocol argument and the unit tests cover the floater's half of it.
+
+Two residents on one parcel is an end-to-end test now
+(`tests/e2e_two_avatars.rs`, [[test-e2e-sweep-two-avatars]]).

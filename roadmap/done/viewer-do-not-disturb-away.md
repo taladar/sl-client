@@ -115,3 +115,6 @@ Not carried, and split out rather than silently dropped:
 - The blocked-sender reply ships, but a blocked resident's IM is still
   *displayed*; honouring the text-mute aspect in chat and IM is its own gap,
   filed as [[viewer-muted-residents-text-still-shown]].
+
+The re-arm on closing the conversation is an end-to-end test now
+(`tests/e2e_two_avatars.rs`, [[test-e2e-sweep-two-avatars]]).

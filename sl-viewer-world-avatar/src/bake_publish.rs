@@ -129,6 +129,20 @@ pub struct OwnBakePublish {
     uploaded: HashMap<usize, TextureKey>,
 }
 
+impl OwnBakePublish {
+    /// The baked textures the publish named in the own appearance, sorted —
+    /// empty until it has published, and on a grid that bakes centrally.
+    #[must_use]
+    pub fn published(&self) -> Vec<Uuid> {
+        if self.stage != PublishStage::Done {
+            return Vec::new();
+        }
+        let mut ids: Vec<Uuid> = self.uploaded.values().map(|baked| baked.uuid()).collect();
+        ids.sort_unstable();
+        ids
+    }
+}
+
 /// The deterministic cache id advertised for a baked slot.
 fn cache_id_for(slot: usize) -> Uuid {
     Uuid::from_u128(CACHE_ID_BASE | u128::try_from(slot).unwrap_or(0))
@@ -289,5 +303,32 @@ pub(crate) fn drive_bake_publish(
             publish.stage = PublishStage::Done;
         }
         PublishStage::Done => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OwnBakePublish, PublishStage};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{TextureKey, Uuid};
+
+    /// What the publish names is read out only once it has published, and
+    /// sorted whatever order the regions were uploaded in.
+    #[test]
+    fn the_published_bakes_are_read_out_once_published_and_sorted() {
+        let mut publish = OwnBakePublish::default();
+        publish
+            .uploaded
+            .insert(8, TextureKey::from(Uuid::from_u128(0xB)));
+        publish
+            .uploaded
+            .insert(9, TextureKey::from(Uuid::from_u128(0xA)));
+        publish.stage = PublishStage::Uploading;
+        assert_eq!(publish.published(), Vec::<Uuid>::new(), "still uploading");
+        publish.stage = PublishStage::Done;
+        assert_eq!(
+            publish.published(),
+            vec![Uuid::from_u128(0xA), Uuid::from_u128(0xB)]
+        );
     }
 }

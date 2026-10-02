@@ -119,7 +119,8 @@ impl UiSound {
     ];
 
     /// A short stable identifier used for the setting keys and logs.
-    const fn key(self) -> &'static str {
+    #[must_use]
+    pub const fn key(self) -> &'static str {
         match self {
             Self::Click => "click",
             Self::Typing => "typing",

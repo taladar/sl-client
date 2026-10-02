@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 310 |
 | blocked | 54 |
 | in-progress | 20 |
-| bugs | 16 |
-| done | 1296 |
+| bugs | 18 |
+| done | 1297 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1868** |
+| **total** | **1871** |
 
 ## ideas (125)
 
@@ -391,6 +391,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
+- [`viewer-automation-host-thread-per-viewer`](ready/viewer-automation-host-thread-per-viewer.md)
+  — In-process host — step each viewer on a thread of its own
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1018,8 +1020,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-e2e-sweep-live-grid`](ready/test-e2e-sweep-live-grid.md) — End-to-end
   tests for what only a live grid has
-- [`test-e2e-sweep-two-avatars`](ready/test-e2e-sweep-two-avatars.md) —
-  End-to-end tests for what two avatars see of each other
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1286,7 +1286,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (16)
+## bugs (18)
 
 ### protocol
 
@@ -1305,8 +1305,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   one should have it
 - [`viewer-friends-list-shows-a-sixth-rights-column`](bugs/viewer-friends-list-shows-a-sixth-rights-column.md)
   — The Friends list shows six rights columns; the reference shows five
+- [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
+  — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
+- [`viewer-mute-entry-name-is-not-the-username`](bugs/viewer-mute-entry-name-is-not-the-username.md)
+  — A blocked avatar's mute entry is named by its first name, not its username
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-notification-button-ids-untyped`](bugs/viewer-notification-button-ids-untyped.md)
@@ -1331,7 +1335,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1296)
+## done (1297)
 
 ### protocol
 
@@ -3795,6 +3799,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   RLVa console and windows
 - [`test-e2e-sweep-single-viewer-ui`](done/test-e2e-sweep-single-viewer-ui.md) —
   End-to-end tests for the remaining single-viewer UI checks
+- [`test-e2e-sweep-two-avatars`](done/test-e2e-sweep-two-avatars.md) —
+  End-to-end tests for what two avatars see of each other
 - [`test-e2e-viewer-process-launch`](done/test-e2e-viewer-process-launch.md) —
   Extract viewer process launch and graceful stop from sl-crosscheck
 - [`test-economy-data`](done/test-economy-data-request-economy-data.md) —

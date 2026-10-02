@@ -54,3 +54,7 @@ modal host lands, migrate this confirm onto it (matching the reference's
 on-screen modal only appears when you click an empty edit-objects checkbox,
 which needs a **friend in the list** — verify it live (dialog shows, Cancel is a
 no-op, Grant sends `GrantUserRights`) once the test account has a friend.
+
+The live check is an end-to-end test now (`tests/e2e_two_avatars.rs`,
+[[test-e2e-sweep-two-avatars]]): Cancel sends nothing, Grant sends the grant,
+and on a live grid the friend's "You can edit" box follows.

@@ -593,6 +593,17 @@ impl Plugin for SlClientPlugin {
     }
 }
 
+/// While present, the session's reports wait in its channel: the per-frame
+/// pump still forwards this frame's commands but delivers no [`SlEvent`] (nor
+/// anything else the session reported) until it is removed.
+///
+/// An app that is not ready to receive what the login brings — a viewer whose
+/// strings have not loaded, which would compose an offline offer's card from
+/// bare keys — inserts it before the first update and removes it when it is.
+/// The network thread keeps the circuit alive meanwhile.
+#[derive(Resource, Debug, Default)]
+pub struct SlEventHold;
+
 /// A high-level session event, emitted as a Bevy event.
 #[derive(Message, Debug, Clone)]
 pub struct SlEvent(pub SessionEvent);
@@ -949,6 +960,7 @@ struct SlSinks<'w> {
 /// thread; see [`run_network_thread`].
 fn drive(
     state: Res<SlState>,
+    hold: Option<Res<SlEventHold>>,
     sinks: SlSinks,
     mut identity: ResMut<SlIdentity>,
     mut agent_parcel: ResMut<SlAgentParcel>,
@@ -971,6 +983,9 @@ fn drive(
         if link.command_tx.send(command.0.clone()).is_err() {
             break;
         }
+    }
+    if hold.is_some() {
+        return;
     }
     loop {
         match link.outbound_rx.try_recv() {

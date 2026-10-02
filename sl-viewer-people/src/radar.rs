@@ -49,7 +49,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_viewer_ui_core::glyph;
-use sl_viewer_ui_core::semantic::LabelledBy;
+use sl_viewer_ui_core::semantic::{LabelledBy, Role, Semantic};
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
@@ -1707,6 +1707,7 @@ fn bind_radar_rows(
     settings: Option<Res<ViewerSettings>>,
     mut rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells, &mut BoundRadar)>,
     mut texts: Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+    mut commands: Commands,
 ) {
     let Some(ui) = ui else {
         return;
@@ -1728,7 +1729,7 @@ fn bind_radar_rows(
                     set_table_cell(&mut texts, cell, "", LABEL_COLOR);
                 }
             }
-            set_position_mark(&mut texts, cells, None);
+            set_position_mark(&mut texts, &mut commands, cells, None);
             continue;
         };
         let cell_values = radar_row_values(data, tags, &state);
@@ -1737,7 +1738,7 @@ fn bind_radar_rows(
                 set_table_cell(&mut texts, cell, &value, color);
             }
         }
-        set_position_mark(&mut texts, cells, Some(!data.coarse_only));
+        set_position_mark(&mut texts, &mut commands, cells, Some(!data.coarse_only));
     }
 }
 
@@ -1814,6 +1815,7 @@ fn radar_row_values(
 /// always a glyph host, so the mark takes the cell's role colour.
 fn set_position_mark(
     texts: &mut Query<(&mut Text, &mut TextColor, Option<&mut ClassList>)>,
+    commands: &mut Commands,
     cells: &TableRowCells,
     precise: Option<bool>,
 ) {
@@ -1823,6 +1825,27 @@ fn set_position_mark(
     if let Ok((_, _, Some(mut classes))) = texts.get_mut(cell) {
         position_mark_classes(&mut classes, precise);
     }
+    match precise {
+        Some(precise) => {
+            commands
+                .entity(cell)
+                .insert(position_mark_semantic(precise));
+        }
+        None => {
+            commands.entity(cell).remove::<Semantic>();
+        }
+    }
+}
+
+/// What the region cell's mark says in words: a glyph drawn by the skin names
+/// nothing, so a screen reader (and a test) learns "exact" or "approximate"
+/// from this.
+fn position_mark_semantic(precise: bool) -> Semantic {
+    Semantic::new(Role::Image).name_key(if precise {
+        "radar-position-exact"
+    } else {
+        "radar-position-approximate"
+    })
 }
 
 /// The region cell's classes: always a glyph host, with the
@@ -1893,7 +1916,10 @@ pub fn spawn_radar_specimen(
             let precise = Some(!data.coarse_only);
             commands
                 .entity(cell)
-                .insert(PseudoElementsSupport)
+                .insert((
+                    PseudoElementsSupport,
+                    position_mark_semantic(!data.coarse_only),
+                ))
                 .entry::<ClassList>()
                 .and_modify(move |mut classes| position_mark_classes(&mut classes, precise));
         }

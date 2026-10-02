@@ -61,8 +61,10 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::ui::Checked;
 use bevy_flair::style::components::{ClassList, PseudoElementsSupport};
 use sl_client_bevy::{
-    AgentKey, Command, FriendKey, FriendRights, MuteType, SlCommand, SlEvent, SlSessionEvent,
+    AgentKey, Command, FriendKey, FriendRights, ImDialog, MuteType, SlCommand, SlEvent,
+    SlSessionEvent,
 };
+use sl_viewer_ui_core::semantic::{Role, Semantic};
 
 use sl_settings::SettingValue;
 
@@ -557,6 +559,19 @@ enum RightKind {
 }
 
 impl RightKind {
+    /// The Fluent key naming this right's checkbox: one this agent grants
+    /// (`received == false`) or one the friend grants it.
+    const fn name_key(self, received: bool) -> &'static str {
+        match (received, self) {
+            (false, Self::SeeOnline) => "people-right-granted-online",
+            (false, Self::Map) => "people-right-granted-map",
+            (false, Self::Edit) => "people-right-granted-edit",
+            (true, Self::SeeOnline) => "people-right-received-online",
+            (true, Self::Map) => "people-right-received-map",
+            (true, Self::Edit) => "people-right-received-edit",
+        }
+    }
+
     /// Whether this right's bit is set in `rights`.
     const fn is_set(self, rights: FriendRights) -> bool {
         match self {
@@ -1127,6 +1142,7 @@ impl Plugin for PeoplePlugin {
                     notify_friend_presence,
                     request_friend_names,
                     seed_friends_on_first_show,
+                    refresh_friends_on_acceptance,
                     apply_people_sub_tab,
                     mirror_friend_selection,
                     seed_sort_from_settings.after(load_account_settings),
@@ -1484,6 +1500,9 @@ fn spawn_confirm_button(
                 should_block_lower: true,
                 is_hoverable: true,
             },
+            // A plain node, not a `Button`: the model learns its role here, and
+            // its name from the caption it shows.
+            Semantic::new(Role::Button).name_key(label_key),
             Name::new("people-grant-confirm-button"),
             ChildOf(parent),
         ))
@@ -1948,6 +1967,25 @@ fn seed_friends_on_first_show(
     }
     *seeded = true;
     commands.write(SlCommand(Command::QueryFriends));
+}
+
+/// Re-read the buddy list when a friendship forms mid-session because the other
+/// side accepted our offer (an inbound `FriendshipAccepted` IM). The session
+/// adds the friend to its cache, but no friend event says so, and the model
+/// only folds those — so without this the new friend appeared in the Friends
+/// list only after a relog. (Accepting *their* offer asks the same way, from
+/// the offer card.)
+fn refresh_friends_on_acceptance(
+    mut events: MessageReader<SlEvent>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    let accepted = events.read().any(|event| {
+        matches!(&event.0, SlSessionEvent::InstantMessageReceived(im)
+            if im.dialog == ImDialog::FriendshipAccepted)
+    });
+    if accepted {
+        commands.write(SlCommand(Command::QueryFriends));
+    }
 }
 
 /// Front the People pane with the requested sub-tab selected, retrying each
@@ -2468,6 +2506,9 @@ fn spawn_row_rights_group(
                 },
                 RightCell { kind },
                 CellFriend(None),
+                // An icon says nothing in words: the box is named by the right
+                // and its direction, as the column header's icon shows it.
+                Semantic::new(Role::Checkbox).name_key(kind.name_key(received)),
                 // Only granted rights are editable; a received cell is read-only.
                 if received {
                     Pickable::IGNORE
@@ -2503,7 +2544,7 @@ fn spawn_row_rights_group(
 /// Revoking edit-objects, and toggling see-online / see-on-map either way, apply
 /// immediately.
 fn on_toggle_right(
-    press: On<Pointer<Press>>,
+    mut press: On<Pointer<Press>>,
     cells: Query<(&RightCell, &CellFriend)>,
     mut model: ResMut<FriendsModel>,
     mut pending: ResMut<PendingGrantConfirm>,
@@ -2512,6 +2553,10 @@ fn on_toggle_right(
     if press.button != PointerButton::Primary {
         return;
     }
+    // The box's click is the box's: bubbled to the row it would count towards
+    // the row's double-click, and ticking then unticking a right quickly
+    // opened an IM with the friend.
+    press.propagate(false);
     let Ok((cell, friend)) = cells.get(press.entity) else {
         return;
     };
@@ -2729,6 +2774,56 @@ mod tests {
                 .collect(),
             built_revision: 0,
         }
+    }
+
+    /// An IM saying someone accepted our friendship offer re-reads the buddy
+    /// list — the only way the new friend reaches the model — and no other IM
+    /// does.
+    #[test]
+    fn an_accepted_friendship_rereads_the_buddy_list() {
+        use sl_client_bevy::{
+            ImDialog, InstantMessage, RegionCoordinates, SlCommand, SlEvent, SlSessionEvent,
+        };
+
+        let im = |dialog| InstantMessage {
+            from_agent_id: AgentKey::from(Uuid::from_u128(0xF1)),
+            from_agent_name: "New Friend".to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(0xA1)),
+            dialog,
+            from_group: false,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: Uuid::from_u128(0x1D),
+            parent_estate_id: 0,
+            message: String::new(),
+            binary_bucket: Vec::new(),
+        };
+        let mut app = App::new();
+        app.add_message::<SlEvent>()
+            .add_systems(Update, super::refresh_friends_on_acceptance);
+        sl_viewer_testkit::record::<SlCommand>(&mut app);
+        // Two frames: the recorder is not ordered against the system.
+        let queries = |app: &mut App| {
+            app.update();
+            app.update();
+            sl_viewer_testkit::drain::<SlCommand>(app)
+                .into_iter()
+                .filter(|SlCommand(command)| matches!(command, Command::QueryFriends))
+                .count()
+        };
+
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::InstantMessageReceived(Box::new(
+                im(ImDialog::Message),
+            ))));
+        assert_eq!(queries(&mut app), 0, "an ordinary IM");
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::InstantMessageReceived(Box::new(
+                im(ImDialog::FriendshipAccepted),
+            ))));
+        assert_eq!(queries(&mut app), 1, "the acceptance");
     }
 
     /// The selection survives the list re-sorting under it — the same people at

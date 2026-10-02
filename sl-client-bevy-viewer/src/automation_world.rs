@@ -243,21 +243,23 @@ mod tests {
             WorldWant::One,
         );
 
-        // Nothing is named yet: the query waits, and asks once for each prim
-        // it cannot judge — not for the worn hat, which is no `object`.
+        // Nothing is named yet: the query waits, and asks once for each
+        // linkset root it cannot judge — not for the worn hat, which is no
+        // `object`, and not for the hinge, a child prim whose family request a
+        // grid answers with its root's record.
         let first = door.poll(app.world_mut())?;
-        assert_eq!(first, WorldProgress::Waiting { unresolved: 3 });
+        assert_eq!(first, WorldProgress::Waiting { unresolved: 2 });
         settle(&mut app, 1);
         assert_eq!(
             property_requests(&mut app),
-            vec![DOOR, WINDOW, HINGE]
+            vec![DOOR, WINDOW]
                 .into_iter()
                 .map(u128::from)
                 .collect::<Vec<_>>()
         );
         assert_eq!(
             door.poll(app.world_mut())?,
-            WorldProgress::Waiting { unresolved: 3 }
+            WorldProgress::Waiting { unresolved: 2 }
         );
         settle(&mut app, 1);
         assert!(property_requests(&mut app).is_empty(), "asked only once");
@@ -306,6 +308,7 @@ mod tests {
             selected: true,
             hover_text: None,
             name_tag: None,
+            bakes: Vec::new(),
         };
         assert_eq!(found, vec![expected]);
         assert!(
@@ -446,7 +449,8 @@ mod tests {
                             .iter()
                             .map(|node| node.local_id)
                             .collect::<Vec<_>>(),
-                        vec![Some(DOOR), Some(WINDOW), Some(HINGE)]
+                        vec![Some(DOOR), Some(WINDOW)],
+                        "the linkset roots, not the child hinge"
                     );
                     Ok(())
                 }

@@ -96,6 +96,14 @@ people-header-status = Status
 # objects).
 people-rights-they = They
 people-rights-you = You
+# The six permission checkboxes of a friend's row, as a screen reader names
+# them: the three this agent grants, then the three the friend grants it.
+people-right-granted-online = They can see my online status
+people-right-granted-map = They can find me on the map
+people-right-granted-edit = They can edit my objects
+people-right-received-online = I can see their online status
+people-right-received-map = I can find them on the map
+people-right-received-edit = I can edit their objects
 # The per-friend action buttons under the Friends list.
 people-action-im = IM
 people-action-teleport = Offer Teleport
@@ -1319,6 +1327,10 @@ radar-col-range = Range
 # The avatar's render cost (ARC), dimmed while the viewer is drawing them as a
 # flat jellydoll instead (viewer-avatar-complexity-limit).
 radar-col-complexity = Cost
+# What the region column's dot says to a screen reader: a fully-streamed
+# avatar's position is exact, a coarse-only one's approximate.
+radar-position-exact = Position exact
+radar-position-approximate = Position approximate
 # The trailing action buttons, acting on the selected row.
 radar-action-profile = Profile
 radar-action-im = IM

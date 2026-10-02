@@ -1426,7 +1426,7 @@ fn tag_page_render_bundle(mesh: Handle<Mesh>, material: Handle<NameTagMaterial>)
 pub(crate) fn follow_tag_anchors(
     time: Res<Time>,
     cameras: Query<(&Camera, &GlobalTransform), With<sl_viewer_world_api::ViewerCamera>>,
-    anchors: Query<&Transform, (With<AvatarAnchor>, Without<NameTag>)>,
+    anchors: Query<(&Transform, Option<&Visibility>), (With<AvatarAnchor>, Without<NameTag>)>,
     mut tags: Query<
         (
             &NameTag,
@@ -1476,10 +1476,21 @@ pub(crate) fn follow_tag_anchors(
             visibility.set_if_neq(Visibility::Hidden);
             continue;
         }
-        let Ok(anchor) = anchors.get(tag.anchor) else {
+        let Ok((anchor, anchor_visibility)) = anchors.get(tag.anchor) else {
             visibility.set_if_neq(Visibility::Hidden);
             continue;
         };
+        // An avatar the viewer does not draw (derendered, filtered out) keeps
+        // its placeholder for the radar and the minimap, hidden — and its tag
+        // goes with it, as the reference's goes with the killed object.
+        if anchor_visibility == Some(&Visibility::Hidden) {
+            visibility.set_if_neq(Visibility::Hidden);
+            screen_rect.set_if_neq(NameTagScreenRect {
+                rect: None,
+                camera_distance: f32::INFINITY,
+            });
+            continue;
+        }
         let base = anchor.translation;
         // Float the tag above the avatar (per-component add to avoid the
         // `arithmetic_side_effects` lint on the glam `Vec3` operator).
@@ -2402,6 +2413,46 @@ mod tests {
         // Nothing moved: the guarded writes must all skip.
         app.update();
         assert_eq!(app.world().resource::<TagWrites>().0, 0);
+    }
+
+    /// The tag of an avatar the viewer does not draw — its anchor hidden, as
+    /// a derender leaves it — hides with it and stops being a hit target,
+    /// and shows again once the avatar does.
+    #[test]
+    fn placement_hides_the_tag_of_an_avatar_not_drawn() -> Result<(), &'static str> {
+        let mut app = placement_app();
+        let agent: sl_client_bevy::AgentKey = sl_client_bevy::Uuid::from_u128(5).into();
+        let tag = spawn_tag(&mut app, Vec3::new(5.0, 0.0, -10.0), agent);
+        app.update();
+        let anchor = app
+            .world()
+            .get::<NameTag>(tag)
+            .map(|tag| tag.anchor)
+            .ok_or("the tag names its anchor")?;
+        app.world_mut()
+            .entity_mut(anchor)
+            .insert(Visibility::Hidden);
+        app.update();
+        assert_eq!(
+            app.world().get::<Visibility>(tag).copied(),
+            Some(Visibility::Hidden)
+        );
+        assert_eq!(
+            app.world()
+                .get::<super::NameTagScreenRect>(tag)
+                .and_then(|rect| rect.rect),
+            None,
+            "a hidden avatar's tag is no hit target"
+        );
+        app.world_mut()
+            .entity_mut(anchor)
+            .insert(Visibility::Inherited);
+        app.update();
+        assert_eq!(
+            app.world().get::<Visibility>(tag).copied(),
+            Some(Visibility::Inherited)
+        );
+        Ok(())
     }
 
     /// A tag past the fade cutoff (fade start + range, default 25 m) hides.

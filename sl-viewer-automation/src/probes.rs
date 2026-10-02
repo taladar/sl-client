@@ -195,6 +195,10 @@ pub fn read_agent(world: &mut World) -> AgentReadout {
             .get_resource::<AvatarControls>()
             .and_then(AvatarControls::held_heading),
         camera_eye: camera_eye(world),
+        published_bakes: ProbeSources::of(world)
+            .published_bakes
+            .map(|reader| reader(world))
+            .unwrap_or_default(),
     }
 }
 

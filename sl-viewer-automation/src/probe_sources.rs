@@ -22,6 +22,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use sl_automation_proto::{ConversationReadout, TeleportReadout};
+use sl_client_bevy::Uuid;
 use sl_viewer_notifications::{NotificationId, ToastButton};
 
 /// The notifications on screen, each with the buttons its card shows.
@@ -52,6 +53,8 @@ pub struct ProbeSources {
     /// What the scene's environment holds beyond the sky RLV reads: the
     /// water drawn, a manual cross-fade under way, the windows previewing.
     pub environment_scene: Option<fn(&mut World) -> SceneEnvironment>,
+    /// The baked textures the viewer published for its own avatar, sorted.
+    pub published_bakes: Option<fn(&mut World) -> Vec<Uuid>>,
 }
 
 /// What the scene's environment holds beyond the sky the RLV slot publishes.

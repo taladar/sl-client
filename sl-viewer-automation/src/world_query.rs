@@ -216,6 +216,12 @@ impl WorldQuery {
 
     /// The things that match every criterion but the name and the owner, and
     /// lack whichever of the two the locator compares.
+    ///
+    /// Only an avatar or a linkset's root is waited for: a grid answers a
+    /// child prim's family request with its root's record (OpenSim's
+    /// `ServiceObjectPropertiesFamilyRequest` sends the root part), so a
+    /// child's own name arrives only with a selection's full properties, and
+    /// waiting on it would wait for good on any region with a linkset.
     fn unresolved(&self, nodes: &[WorldNode]) -> Vec<WorldNode> {
         let wants_name = self.locator.name.is_some();
         let wants_owner = self.locator.owner.is_some();
@@ -230,6 +236,7 @@ impl WorldQuery {
         };
         find_world(nodes, &loosened)
             .into_iter()
+            .filter(|node| node.kind == WorldKind::Avatar || node.parent.is_none())
             .filter(|node| {
                 (wants_name && node.name.is_none())
                     || (wants_owner && node.owner.is_none() && node.kind != WorldKind::Avatar)
@@ -269,6 +276,7 @@ mod tests {
             selected: false,
             hover_text: None,
             name_tag: None,
+            bakes: Vec::new(),
         }
     }
 
@@ -288,6 +296,26 @@ mod tests {
     /// The full ids of `nodes`, as their low numbers.
     fn ids(nodes: &[&WorldNode]) -> Vec<u128> {
         nodes.iter().map(|node| node.full_id.as_u128()).collect()
+    }
+
+    /// A query for a name waits on an unnamed linkset root, and not on an
+    /// unnamed child prim, whose family request a grid answers with the
+    /// root's record.
+    #[test]
+    fn a_name_query_waits_on_unnamed_roots_not_on_child_prims() {
+        let mut root = thing(5, WorldKind::Object, "", Some([20.0, 20.0, 20.0]));
+        root.name = None;
+        let mut child = thing(6, WorldKind::Object, "", Some([20.0, 21.0, 20.0]));
+        child.name = None;
+        child.parent = Some(5);
+        let query =
+            super::WorldQuery::new(WorldLocator::default().named("Door"), super::WorldWant::One);
+        let waiting: Vec<u128> = query
+            .unresolved(&[root, child])
+            .iter()
+            .map(|node| node.full_id.as_u128())
+            .collect();
+        assert_eq!(waiting, vec![5]);
     }
 
     #[test]

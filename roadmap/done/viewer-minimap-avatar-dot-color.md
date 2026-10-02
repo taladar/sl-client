@@ -99,3 +99,7 @@ Reference (read-only): `indra/newview/skins/vintage/colors.xml` and
 
 Screenshot the minimap with a beacon set (double-click-teleport) and a nearby
 resident in frame, to confirm the ring reads as a beacon at the real dot sizes.
+
+The screenshot check is an end-to-end test now (`tests/e2e_two_avatars.rs`,
+[[test-e2e-sweep-two-avatars]]): a resident's dot and the tracking beacon are
+told apart by colour in the minimap's own pixels.

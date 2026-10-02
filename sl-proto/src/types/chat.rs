@@ -610,6 +610,10 @@ impl InstantMessage {
     /// [`from_agent_name`](Self::from_agent_name). Returns `None` for any other
     /// dialog.
     #[must_use]
+    #[expect(
+        clippy::big_endian_bytes,
+        reason = "a group invitation's membership fee is a wire-defined big-endian S32"
+    )]
     pub fn group_invitation(&self) -> Option<GroupInvitationReceived> {
         if !matches!(self.dialog, ImDialog::GroupInvitation) {
             return None;

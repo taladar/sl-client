@@ -250,7 +250,7 @@ pub enum Verb {
         /// Keep printing entries as they are recorded, until Ctrl-C.
         #[arg(long)]
         follow: bool,
-        /// Only these streams: event, command, ui_action.
+        /// Only these streams: event, command, ui_action, sound.
         #[arg(long, value_delimiter = ',', value_parser = log_stream)]
         stream: Vec<LogStream>,
         /// The first sequence number to print; everything the viewer keeps
@@ -405,8 +405,13 @@ fn wait_condition(text: &str) -> Result<WaitCondition, String> {
 
 /// An event log stream by its name.
 fn log_stream(text: &str) -> Result<LogStream, String> {
-    [LogStream::Event, LogStream::Command, LogStream::UiAction]
-        .into_iter()
-        .find(|stream| stream.as_str() == text)
-        .ok_or_else(|| format!("unknown stream {text:?} (event, command, ui_action)"))
+    [
+        LogStream::Event,
+        LogStream::Command,
+        LogStream::UiAction,
+        LogStream::Sound,
+    ]
+    .into_iter()
+    .find(|stream| stream.as_str() == text)
+    .ok_or_else(|| format!("unknown stream {text:?} (event, command, ui_action, sound)"))
 }

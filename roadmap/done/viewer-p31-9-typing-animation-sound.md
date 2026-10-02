@@ -52,3 +52,8 @@ Deviations from the plan:
 - **Not yet run live** — needs a live run (own typing on `T`; a second login
   typing to confirm the neighbour animates). `SL_VIEWER_LOG_TYPING=1` logs the
   own edge.
+
+Both halves are end-to-end tests now (`tests/e2e_two_avatars.rs`,
+[[test-e2e-sweep-two-avatars]]): the own typing's indicator, animation and
+chirp reach the grid, and another resident's typing shows on the radar and
+animates them — scripted on the fake grid, a second viewer on a live one.

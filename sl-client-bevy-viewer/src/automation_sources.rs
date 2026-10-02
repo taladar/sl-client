@@ -29,6 +29,18 @@ pub(crate) fn probe_sources() -> ProbeSources {
         scene_work: Some(scene_work),
         file_dialog: Some(answer_file_dialog),
         environment_scene: Some(environment_scene),
+        published_bakes: Some(published_bakes),
+    }
+}
+
+/// Forward each UI sound the viewer raises to the automation event log's sound
+/// stream, by the sound's name.
+pub(crate) fn log_ui_sounds(
+    mut raised: MessageReader<sl_viewer_ui_sounds::ui_sounds::PlayUiSound>,
+    mut logged: MessageWriter<sl_viewer_automation::SoundRaised>,
+) {
+    for sound in raised.read() {
+        logged.write(sl_viewer_automation::SoundRaised(sound.0.key()));
     }
 }
 
@@ -67,6 +79,14 @@ fn answer_file_dialog(world: &mut World, picked: Option<PathBuf>) -> FileDialogA
             folder: answered.selection == FileDialogSelection::Folder,
         }
     })
+}
+
+/// The baked textures the own avatar's client-side bake published.
+fn published_bakes(world: &mut World) -> Vec<sl_client_bevy::Uuid> {
+    world
+        .get_resource::<sl_viewer_world_avatar::bake_publish::OwnBakePublish>()
+        .map(sl_viewer_world_avatar::bake_publish::OwnBakePublish::published)
+        .unwrap_or_default()
 }
 
 /// The own L$ balance as the status bar shows it.

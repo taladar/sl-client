@@ -111,3 +111,7 @@ assert the request rather than the command, and the pie is checked for sending
 
 Still live-unverified (needs a second avatar that can accept): that the typed
 message arrives with the offer on the receiving side.
+
+The typed message reaching the other side is an end-to-end test now
+(`tests/e2e_two_avatars.rs`, [[test-e2e-sweep-two-avatars]]): the grid hears it
+with the offer, and on a live grid the other viewer's card shows it.

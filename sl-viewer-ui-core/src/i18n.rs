@@ -278,7 +278,8 @@ pub fn install_english(app: &mut App, bundle: &str) {
 /// [`Text`] it spawned with, and a harness measuring a panel of empty labels
 /// would be measuring a panel that ships in no locale.
 pub fn install_untranslated(app: &mut App) {
-    app.init_resource::<Localization>()
+    app.init_resource::<LocaleSettled>()
+        .init_resource::<Localization>()
         .insert_resource(UiLocale::new(LocaleChoice::English))
         .init_resource::<LocaleFormatting>()
         .add_systems(Update, (apply_translations, apply_setting_descriptions));
@@ -488,23 +489,48 @@ fn maintain_localization(
     folder: Option<Res<LocaleFolder>>,
     locale: Res<Locale>,
     mut built: Local<bool>,
+    mut failed: Local<bool>,
 ) {
     let Some(folder) = folder else {
         return;
     };
-    if !matches!(
-        asset_server.get_load_state(&folder.0),
-        Some(LoadState::Loaded)
-    ) {
-        return;
+    match asset_server.get_load_state(&folder.0) {
+        Some(LoadState::Loaded) => {}
+        Some(LoadState::Failed(error)) => {
+            // Every key answers with itself for good: nothing is worth waiting
+            // for any longer.
+            if !*failed {
+                *failed = true;
+                error!("the locale bundles failed to load ({error}); labels show their keys");
+                commands.insert_resource(LocaleSettled);
+            }
+            return;
+        }
+        _ => return,
     }
     // Build on the first load, then only when the requested locale changes.
     if *built && !locale.is_changed() {
         return;
     }
     commands.insert_resource(builder.build(&folder.0));
+    if !*built {
+        info!("locale bundles loaded");
+        commands.insert_resource(LocaleSettled);
+    }
     *built = true;
 }
+
+/// Present once the strings are what they will be: the locale bundles have
+/// loaded and the lookup is built, their folder failed to load (every key then
+/// answers with itself for good), or a harness installed its own strings.
+///
+/// Text composed eagerly — a card formatted from an event, a transcript line —
+/// is only as translated as the lookup was when it was composed, so whatever
+/// would compose it before now waits for this: the viewer holds the session's
+/// reports until it exists, or an offer that arrived with the login would show
+/// its keys for good.
+#[derive(Resource, Debug, Default)]
+pub struct LocaleSettled;
 
 /// Copy the active locale's truncation ellipsis out of the freshly-built bundle
 /// onto [`UiLocale`], so `apply_locale_ellipsis` can drive the tab widget from

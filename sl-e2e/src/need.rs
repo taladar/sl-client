@@ -27,6 +27,13 @@ pub enum Need {
     DictatedGrid(&'static str),
     /// Content only the stage's own scene has, described.
     Content(&'static str),
+    /// What only a live grid does yet, described — two viewers seeing each
+    /// other's avatars, an IM from one reaching the other: the fake grid's
+    /// side of it is a server task still to do.
+    LiveGrid(&'static str),
+    /// What only OpenSim does, described: a simulator feature Second Life
+    /// leaves out, such as the viewer-side bake upload.
+    OpenSim(&'static str),
 }
 
 impl Need {
@@ -35,6 +42,8 @@ impl Need {
     pub const fn met_by(&self, grid: Grid) -> bool {
         match self {
             Self::GridControl | Self::DictatedGrid(_) | Self::Content(_) => !grid.is_live(),
+            Self::LiveGrid(_) => grid.is_live(),
+            Self::OpenSim(_) => matches!(grid, Grid::OpenSim),
         }
     }
 }
@@ -45,6 +54,8 @@ impl fmt::Display for Need {
             Self::GridControl => f.write_str("grid control (the fake grid's handle)"),
             Self::DictatedGrid(how) => write!(f, "a grid it configures itself ({how})"),
             Self::Content(what) => write!(f, "content only its own scene has: {what}"),
+            Self::LiveGrid(what) => write!(f, "a live grid: {what}"),
+            Self::OpenSim(what) => write!(f, "OpenSim: {what}"),
         }
     }
 }
@@ -95,6 +106,25 @@ mod tests {
                  a box to rez on"
             )
         );
+    }
+
+    /// What only a live grid does skips the fake grid, and what only OpenSim
+    /// does skips the other two.
+    #[test]
+    fn a_live_only_need_skips_the_fake_grid_and_an_opensim_one_aditi() {
+        let live = [Need::LiveGrid("an IM relayed between two viewers")];
+        assert_eq!(
+            unmet(&live, 2, Grid::Fake, None).as_deref(),
+            Some("it needs a live grid: an IM relayed between two viewers")
+        );
+        assert_eq!(unmet(&live, 2, Grid::Aditi, Some(3)), None);
+        let opensim = [Need::OpenSim("the viewer's own bake upload")];
+        assert_eq!(unmet(&opensim, 1, Grid::OpenSim, Some(3)), None);
+        assert_eq!(
+            unmet(&opensim, 1, Grid::Aditi, Some(3)).as_deref(),
+            Some("it needs OpenSim: the viewer's own bake upload")
+        );
+        assert!(unmet(&opensim, 1, Grid::Fake, None).is_some());
     }
 
     /// A test with no needs runs on a live grid while it has an account per

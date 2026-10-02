@@ -826,11 +826,22 @@ impl ViewerAppBuilder {
                 repeat: repeat_animation,
             })
             .add_systems(Startup, setup_scene)
-            .add_systems(Update, capture_login_outcome);
+            .add_systems(Update, capture_login_outcome)
+            // What the login brings waits for the strings: an offline offer's
+            // card composed before the locale bundles load would show its keys
+            // for good.
+            .insert_resource(sl_client_bevy::SlEventHold)
+            .add_systems(
+                Update,
+                release_session_hold
+                    .run_if(resource_exists::<sl_client_bevy::SlEventHold>)
+                    .before(sl_client_bevy::SlClientSystems::SessionDrained),
+            );
         // The request executor and what it reads: requests submitted to its
         // queue are carried out through the same synthetic input a headless
         // viewer installs, and answered with responses — to the caller, or
         // over the socket.
+        let automated = automation != Automation::Off;
         match automation {
             Automation::Off => {}
             Automation::InProcess => {
@@ -841,6 +852,11 @@ impl ViewerAppBuilder {
                     .map_err(Error::AutomationSocket)?;
                 app.add_plugins(sl_viewer_automation::RemoteAutomationPlugin::new(endpoint));
             }
+        }
+        if automated {
+            // The event log's sound stream: the sounds' crate carries the audio
+            // backend, which the automation crate must not depend on.
+            app.add_systems(Update, crate::automation_sources::log_ui_sounds);
         }
         // (Worn rigid attachments no longer need a hand re-propagation: their
         // attachment-point node is an avatar-root child whose local `Transform` the
@@ -1123,6 +1139,30 @@ pub(crate) fn setup_scene(
         Transform::from_translation(Vec3::new(128.0, 30.0, -128.0))
     };
     commands.spawn((viewer_camera_bundle(camera_transform), rig));
+}
+
+/// The longest the session's reports wait for the locale bundles; past it they
+/// are let through with a warning rather than a viewer that never logs in.
+const LOCALE_WAIT_SECS: f32 = 10.0;
+
+/// Let the session's reports through ([`sl_client_bevy::SlEventHold`]) once the
+/// strings have settled ([`crate::i18n::LocaleSettled`]), or after
+/// [`LOCALE_WAIT_SECS`].
+fn release_session_hold(
+    mut commands: Commands,
+    settled: Option<Res<crate::i18n::LocaleSettled>>,
+    time: Res<Time<Real>>,
+) {
+    if settled.is_none() {
+        if time.elapsed_secs() < LOCALE_WAIT_SECS {
+            return;
+        }
+        warn!(
+            "the locale bundles had not loaded after {LOCALE_WAIT_SECS} s; letting the \
+             session's reports through"
+        );
+    }
+    commands.remove_resource::<sl_client_bevy::SlEventHold>();
 }
 
 /// Capture a login-stopping outcome (MFA challenge or retryable rejection) into

@@ -42,3 +42,6 @@ permissions columns), sort order (`FSFriendListSortOrder`,
 and the contact-list search-filter toggle (`FSContactListShowSearch`).
 Sort/format also appear in [[viewer-people-groups-list-options]];
 the column machinery is this task's half.
+
+The friends-rights toggles' two-avatar check is an end-to-end test now
+(`tests/e2e_two_avatars.rs`, [[test-e2e-sweep-two-avatars]]).

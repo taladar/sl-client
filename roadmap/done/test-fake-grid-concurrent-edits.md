@@ -125,3 +125,9 @@ viewer cannot notice at all). [[test-asset-save-mutation-survey]] measures it;
 this task supplied the mechanism. The expected finding is "nothing
 arbitrates", and that is what makes convergence the viewer's job rather than
 the grid's.
+
+The live-grid half ran (`tests/e2e_two_avatars.rs`,
+[[test-e2e-sweep-two-avatars]]). On OpenSim nothing arbitrates and nobody is
+told: `PrimName` sets the name and sends no properties to anyone, the writer
+included, so the grid keeps whichever rename it handled last (both outcomes
+were seen) and each editor shows its own write until it reads again.

@@ -264,6 +264,11 @@ pub struct AgentReadout {
     /// to see the camera framed somewhere, or brought back behind the avatar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera_eye: Option<[f32; 3]>,
+    /// The baked textures the viewer uploaded for its own avatar and named in
+    /// its appearance, sorted — on a grid that leaves baking to the viewer,
+    /// once it has published; empty where the grid bakes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub published_bakes: Vec<Uuid>,
 }
 
 /// The environment the viewer draws.
@@ -374,6 +379,9 @@ pub enum LogStream {
     Command,
     /// A user interface action: a button, a menu entry, a shortcut.
     UiAction,
+    /// A feedback sound the viewer raised — a radar alert, the typing chirp —
+    /// whether or not it was audible.
+    Sound,
 }
 
 impl LogStream {
@@ -384,6 +392,7 @@ impl LogStream {
             Self::Event => "event",
             Self::Command => "command",
             Self::UiAction => "ui_action",
+            Self::Sound => "sound",
         }
     }
 }
@@ -403,7 +412,8 @@ pub struct LogEntry {
     /// Which log it is from.
     pub stream: LogStream,
     /// What it is: an event's or a command's variant name (`ChatReceived`,
-    /// `Chat`), a UI action's `element.action`.
+    /// `Chat`), a UI action's `element.action`, a sound's name
+    /// (`radar_alert`).
     pub kind: String,
     /// The whole entry as the viewer prints it, cut short past a limit.
     pub detail: String,
@@ -642,6 +652,7 @@ mod tests {
                 camera: Some(CameraView::Mouselook),
                 heading: Some(1.5),
                 camera_eye: Some([120.0, 128.0, 27.0]),
+                published_bakes: vec![uuid::Uuid::from_u128(0xBA4E)],
             })?;
         }
         let json = serde_json::to_string(&TeleportReadout {
@@ -742,7 +753,12 @@ mod tests {
                 dropped: 2,
             },
         })?;
-        for stream in [LogStream::Event, LogStream::Command, LogStream::UiAction] {
+        for stream in [
+            LogStream::Event,
+            LogStream::Command,
+            LogStream::UiAction,
+            LogStream::Sound,
+        ] {
             let json = round_trip(&stream)?;
             assert_eq!(json, format!("\"{stream}\""), "display matches serde");
         }

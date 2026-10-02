@@ -928,7 +928,9 @@ fn spawn_param_field(
             ..TextInputSpec::new(element, field.input_kind())
         },
     );
-    commands.entity(entity).insert((field, field.gate()));
+    commands
+        .entity(entity)
+        .insert((field, field.gate(), ShownText::default()));
     // One of a row's fields: named by the caption and its part.
     if let Some(part) = name_part(element) {
         commands.entity(entity).insert(part);
@@ -2158,6 +2160,14 @@ type FeatureRowQuery<'w, 's> = Query<
     (Without<ShapeRow>, Without<SwapLabel>),
 >;
 
+/// The text a parameter field last showed the selection as — written by the
+/// sync while the field is not being edited, and by a commit — so a blur
+/// commits only an edit: the reference's `LLLineEditor::onFocusLost` compares
+/// with `mPrevText`. Re-sending an unchanged name when the focus merely moved
+/// would overwrite whatever another editor wrote since.
+#[derive(Component, Debug, Default)]
+struct ShownText(String);
+
 /// Which parameter field held keyboard focus last frame, to commit on blur.
 #[derive(Resource, Debug, Default)]
 struct ParamFieldFocus {
@@ -2353,7 +2363,16 @@ fn perm_bit(
 #[derive(bevy::ecs::system::SystemParam)]
 struct ParamWidgets<'w, 's> {
     /// The parameter text fields.
-    editors: Query<'w, 's, (Entity, &'static ParamField, &'static mut EditableText)>,
+    editors: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static ParamField,
+            &'static mut EditableText,
+            &'static mut ShownText,
+        ),
+    >,
     /// The toggle checkboxes, whose tick follows the selection.
     toggles: ToggleQuery<'w, 's>,
     /// The cycle buttons' value texts.
@@ -2523,7 +2542,7 @@ fn show_param_snapshot(
     }
 
     // Field texts.
-    for (entity, field, mut editor) in &mut widgets.editors {
+    for (entity, field, mut editor, mut shown) in &mut widgets.editors {
         if widgets.focus.get() == Some(entity) {
             continue;
         }
@@ -2570,6 +2589,9 @@ fn show_param_snapshot(
                 &mut widgets.font_cx,
                 &mut widgets.layout_cx,
             );
+        }
+        if shown.0 != want {
+            shown.0 = want;
         }
     }
 
@@ -2830,6 +2852,7 @@ fn commit_param_fields(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut focus_track: ResMut<ParamFieldFocus>,
     fields: Query<(Entity, &ParamField, &EditableText)>,
+    mut shown_texts: Query<&mut ShownText>,
     mut commit_to: ParamCommit,
 ) {
     if !state.active {
@@ -2857,6 +2880,13 @@ fn commit_param_fields(
         return;
     };
     let text = editor.value().to_string();
+    // A blur commits an edit, not a focus that merely passed through.
+    if let Ok(mut shown) = shown_texts.get_mut(entity) {
+        if !enter && shown.0 == text {
+            return;
+        }
+        text.clone_into(&mut shown.0);
+    }
 
     // A helper reading any displayed field's parsed numeric value.
     let field_value = |wanted: ParamField| -> Option<f32> {
