@@ -23,7 +23,7 @@ use sl_viewer_world_api::{
 
 use crate::pursuit::{DEFAULT_DEADLINE, DEFAULT_DEADLINE_FRAMES, PursuitError};
 use crate::world_aim::{
-    AimStage, CameraStill, object_full_id, reach_the_world, screen_projection, view,
+    AimStage, CameraStill, node_corners, object_full_id, reach_the_world, screen_projection, view,
 };
 use crate::world_query::{WorldProgress, WorldQuery, WorldWant};
 
@@ -203,7 +203,13 @@ impl WorldSweep {
             self.still.reset();
             return Ok(SweepProgress::Waiting(AimStage::BuildMode));
         }
-        if !self.still.observe(world) {
+        let corners: Vec<Vec3> = self
+            .nodes
+            .iter()
+            .filter_map(|node| node_corners(world, node))
+            .flatten()
+            .collect();
+        if !self.still.observe(world, &corners) {
             return Ok(SweepProgress::Waiting(AimStage::Settling));
         }
         let Some(viewport) =

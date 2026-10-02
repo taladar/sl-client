@@ -15,6 +15,13 @@ pub enum StageError {
     /// `SL_E2E_BACKEND` names no backend.
     #[error("SL_E2E_BACKEND={0:?} is not one of process, in-process, both")]
     BackendVariable(String),
+    /// `SL_E2E_WATCH` is neither yes nor no.
+    #[error("SL_E2E_WATCH={0:?} is not one of 1, true, yes, on, 0, false, no, off")]
+    WatchVariable(String),
+    /// `SL_E2E_WATCH` asked for watch windows on the in-process backend,
+    /// which cannot show one.
+    #[error("SL_E2E_WATCH needs the process backend: set SL_E2E_BACKEND=process")]
+    WatchInProcess,
     /// `SL_E2E_GRID` names no grid.
     #[error("SL_E2E_GRID={0:?} is not one of fake, opensim, aditi")]
     GridVariable(String),

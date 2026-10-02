@@ -129,25 +129,52 @@ fn only_points_inside_the_viewport_are_candidates() {
 }
 
 #[test]
-fn a_rotation_is_the_same_as_itself_even_a_hair_off_unit_length() {
-    use super::same_rotation;
+fn the_camera_holds_while_its_points_stay_put_on_screen() {
+    use super::points_hold;
 
-    // A quarter turn a hair short of unit length, as a rotation read back
-    // from a `GlobalTransform` can be: `1 − q·q` is already ~3.4e-7.
-    let rotation = Quat::from_xyzw(0.0, 0.707_106_6, 0.0, 0.707_106_6);
-    assert!(1.0 - rotation.dot(rotation) > 1.0e-7, "the trap is real");
-    assert!(same_rotation(rotation, rotation));
+    // A ground point three metres ahead and a little below, and a prim corner
+    // ten metres off: what a pursuit would click.
+    let points = [Vec3::new(0.5, -1.5, -3.0), Vec3::new(-2.0, 0.5, -10.0)];
+    let eye_moved = |by: Vec3| move |point: Vec3| pinhole(point - by);
     assert!(
-        same_rotation(
-            rotation,
-            Quat::from_xyzw(-rotation.x, -rotation.y, -rotation.z, -rotation.w)
-        ),
-        "q and −q are one rotation"
+        points_hold(&points, pinhole, eye_moved(Vec3::new(0.002, 0.001, 0.0))),
+        "the head's sway (2 mm a frame, measured on aditi) is still: ~0.07 px here"
     );
-    assert!(!same_rotation(
-        rotation,
-        rotation.mul_quat(Quat::from_rotation_y(1.0e-4))
-    ));
+    assert!(
+        !points_hold(&points, pinhole, eye_moved(Vec3::new(0.05, 0.0, 0.0))),
+        "five centimetres (~1.7 px on the near point) is a camera move"
+    );
+    assert!(
+        !points_hold(&points, pinhole, eye_moved(Vec3::new(0.0, 0.0, -3.5))),
+        "a point passing behind the camera is a move"
+    );
+    assert!(
+        points_hold(&[], pinhole, eye_moved(Vec3::splat(10.0))),
+        "with nothing to act on, nothing moves on screen"
+    );
+}
+
+#[test]
+fn an_eye_is_inside_a_box_only_within_its_faces() {
+    use super::eye_inside;
+
+    let turned = Affine3A::from_scale_rotation_translation(
+        Vec3::new(0.5, 2.0, 0.5),
+        Quat::from_rotation_y(core::f32::consts::FRAC_PI_4),
+        Vec3::new(10.0, 1.0, -3.0),
+    );
+    assert!(
+        eye_inside(&turned, Vec3::new(10.0, 1.9, -3.0)),
+        "near the top"
+    );
+    assert!(
+        !eye_inside(&turned, Vec3::new(10.0, 2.1, -3.0)),
+        "just above it"
+    );
+    // 0.3 m along x is outside the 0.5 m box's unturned half-width of 0.25,
+    // but turned 45° its faces' diagonal reaches 0.35.
+    assert!(eye_inside(&turned, Vec3::new(10.3, 1.0, -3.0)));
+    assert!(!eye_inside(&turned, Vec3::new(10.4, 1.0, -3.0)));
 }
 
 #[test]

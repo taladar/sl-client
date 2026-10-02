@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 125 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 54 |
 | in-progress | 20 |
-| bugs | 18 |
-| done | 1297 |
+| bugs | 19 |
+| done | 1298 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1871** |
+| **total** | **1872** |
 
 ## ideas (125)
 
@@ -315,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -391,8 +391,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   not a preference
 - [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
   — sl-viewer-world-api has 214 functions and 5 tests
-- [`viewer-automation-host-thread-per-viewer`](ready/viewer-automation-host-thread-per-viewer.md)
-  — In-process host — step each viewer on a thread of its own
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1286,7 +1284,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (18)
+## bugs (19)
 
 ### protocol
 
@@ -1297,6 +1295,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
+  — A framing glide can carry the camera inside the object it frames
 - [`viewer-day-cycle-strip-click-mirrored-rtl`](bugs/viewer-day-cycle-strip-click-mirrored-rtl.md)
   — In a right-to-left layout a click on the day-cycle timeline lands mirrored
   from the markers
@@ -1335,7 +1335,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1297)
+## done (1298)
 
 ### protocol
 
@@ -1801,6 +1801,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-automation-ground-aim`](done/viewer-automation-ground-aim.md) —
   Double-click teleport on every surface, and the world actions it needs
+- [`viewer-automation-host-thread-per-viewer`](done/viewer-automation-host-thread-per-viewer.md)
+  — In-process host — step each viewer on a thread of its own
 - [`viewer-automation-inprocess-transport`](done/viewer-automation-inprocess-transport.md)
   — In-process transport — the same requests against Apps in the test process
   (blocked by `viewer-automation-executor` (done),

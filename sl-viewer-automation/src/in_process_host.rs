@@ -1,29 +1,34 @@
-//! [`InProcessHost`]: the in-process transport on a thread of its own, so an
+//! [`InProcessHost`]: in-process viewers each on a thread of its own, so an
 //! async caller — the driver, a stage — talks to an in-process viewer the way
 //! it talks to one behind a socket: requests into one channel, answers and
 //! notifications out of another ([`ViewerLink`]).
 //!
-//! - **The viewers run like processes.** The host thread steps every viewer
-//!   it hosts a frame per round, [`FRAME_PAUSE`] apart, whether or not anyone
-//!   is waiting — a login, a teleport or a chat line from the grid goes on
-//!   while the test does something else, as it does in a viewer process.
-//! - **Apps are built on the host thread** (a Bevy `App` is not `Send`): a
+//! - **The viewers run like processes.** Each viewer's thread steps it a
+//!   frame, [`FRAME_PAUSE`] apart, whether or not anyone is waiting — a
+//!   login, a teleport or a chat line from the grid goes on while the test
+//!   does something else, as it does in a viewer process. The viewers do not
+//!   take turns: a slow frame of one is no pause for another, and a test that
+//!   adds a viewer costs the others no frame rate.
+//! - **Apps are built on their own thread** (a Bevy `App` is not `Send`): a
 //!   viewer is hosted by handing the host a closure that builds it, and a
 //!   test reaches into an App (to raise its termination flag, say) by handing
-//!   the host a closure that runs there between frames ([`InProcessHost::with_app`]).
+//!   the host a closure that runs there between two of its frames
+//!   ([`InProcessHost::with_app`]). The thread starts in the tracing context
+//!   of the code that hosted the viewer.
 //! - **An exited viewer closes its link** once everything it delivered is
 //!   sent, so what waits on it learns it will get no more; the App itself
 //!   stays until the host stops.
-//! - **Stopping the host stops its thread**: it lets each viewer's render
-//!   pipelines finish compiling, as a dropped [`InProcessTransport`] does,
-//!   and reports a thread that panicked.
+//! - **Stopping the host stops every viewer's thread**: each lets its
+//!   viewer's render pipelines finish compiling, as a dropped
+//!   [`InProcessTransport`] does, and a thread that panicked is reported.
 
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Mutex, PoisonError};
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 use bevy::log::error;
 use sl_automation_proto::{Request, ViewerMessage};
+use sl_client_bevy::log_context::spawn_named_thread;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 
@@ -31,10 +36,6 @@ use crate::in_process::{FRAME_PAUSE, HostedApp, InProcessError, InProcessTranspo
 
 /// Why a viewer could not be built, as its builder reports it.
 pub type BuildError = Box<dyn std::error::Error + Send + Sync>;
-
-/// How long the idle host thread (hosting nothing) waits for a command before
-/// it looks again.
-const IDLE_WAIT: Duration = Duration::from_millis(100);
 
 /// Why the host could not do what it was asked.
 #[derive(Debug, thiserror::Error)]
@@ -51,11 +52,12 @@ pub enum HostError {
     /// The transport refused the viewer, or does not know the handle.
     #[error(transparent)]
     Transport(#[from] InProcessError),
-    /// The host thread has stopped: it panicked, or the host was stopped.
-    #[error("the in-process host thread has stopped")]
+    /// The viewer's thread has stopped (it panicked), or could not be
+    /// started.
+    #[error("the in-process viewer's thread has stopped")]
     Stopped,
-    /// The host thread panicked; the panic's message, when it had one.
-    #[error("the in-process host thread panicked: {0}")]
+    /// A viewer's thread panicked; the panic's message, when it had one.
+    #[error("an in-process viewer's thread panicked: {0}")]
     Panicked(String),
 }
 
@@ -70,41 +72,23 @@ pub struct ViewerLink {
     pub messages: UnboundedReceiver<ViewerMessage>,
 }
 
-/// Something run against a hosted App between frames; handed `None` for a
-/// handle the transport does not know.
-type AppTask<A> = Box<dyn FnOnce(Option<&mut A>) + Send>;
+/// Something run against a hosted App between frames.
+type AppTask<A> = Box<dyn FnOnce(&mut A) + Send>;
 
-/// Something to do on the host thread.
+/// What builds a viewer's App, on its thread.
+type Build<A> = Box<dyn FnOnce() -> Result<A, BuildError> + Send>;
+
+/// Something to do on a viewer's thread.
 enum Command<A> {
-    /// Build and host a viewer.
-    Host {
-        /// Its name in errors.
-        label: String,
-        /// Builds it.
-        build: Box<dyn FnOnce() -> Result<A, BuildError> + Send>,
-        /// Where the handle and the link go.
-        reply: oneshot::Sender<Result<(ViewerHandle, ViewerLink), HostError>>,
-    },
-    /// Run something against a viewer's App between frames; it is handed
-    /// `None` for a handle the transport does not know.
-    With {
-        /// The viewer.
-        viewer: ViewerHandle,
-        /// What to run.
-        run: AppTask<A>,
-    },
-    /// Say when a viewer has exited and its link is closed.
-    WhenExited {
-        /// The viewer.
-        viewer: ViewerHandle,
-        /// Told then (dropped for a handle the transport does not know).
-        reply: oneshot::Sender<()>,
-    },
+    /// Run something against the viewer's App between frames.
+    With(AppTask<A>),
+    /// Say when the viewer has exited and its link is closed.
+    WhenExited(oneshot::Sender<()>),
 }
 
-/// One hosted viewer's connection, as the host thread keeps it.
+/// The viewer's connection, as its thread keeps it.
 struct Connection {
-    /// The viewer.
+    /// The viewer, in its thread's transport.
     viewer: ViewerHandle,
     /// The caller's requests.
     requests: UnboundedReceiver<Request>,
@@ -114,98 +98,125 @@ struct Connection {
     exit_waiters: Vec<oneshot::Sender<()>>,
 }
 
-/// Viewer Apps hosted and stepped on a thread of their own, each reached
-/// through a [`ViewerLink`]. The thread steps every viewer continuously, as a
-/// process runs; Apps are built there by the closure [`host`](Self::host)
-/// takes, and reached between frames with [`with_app`](Self::with_app).
+/// One hosted viewer, as the host keeps it.
+#[derive(Debug)]
+struct ViewerThread<A> {
+    /// Where its commands go.
+    commands: Sender<Command<A>>,
+    /// Its thread.
+    thread: JoinHandle<()>,
+}
+
+/// Viewer Apps hosted and stepped each on a thread of its own, each reached
+/// through a [`ViewerLink`]. Every thread steps its viewer continuously, as a
+/// process runs; an App is built there by the closure [`host`](Self::host)
+/// takes, and reached between its frames with [`with_app`](Self::with_app).
 #[derive(Debug)]
 pub struct InProcessHost<A: HostedApp + 'static> {
-    /// Where commands go; `None` once stopped.
-    commands: Option<Sender<Command<A>>>,
-    /// The host thread; `None` once joined.
-    thread: Option<JoinHandle<()>>,
+    /// The hosted viewers, by handle.
+    viewers: Mutex<Vec<ViewerThread<A>>>,
+}
+
+impl<A: HostedApp + 'static> Default for InProcessHost<A> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<A: HostedApp + 'static> Drop for InProcessHost<A> {
     fn drop(&mut self) {
-        if let Err(error) = self.stop_thread() {
+        if let Err(error) = self.stop_threads() {
             error!("{error}");
         }
     }
 }
 
 impl<A: HostedApp + 'static> InProcessHost<A> {
-    /// Start the host thread, hosting nothing yet.
-    ///
-    /// # Errors
-    ///
-    /// [`HostError::Stopped`] when the thread cannot be spawned.
-    pub fn start() -> Result<Self, HostError> {
-        let (commands, inbox) = mpsc::channel();
-        let thread = std::thread::Builder::new()
-            .name("sl-viewer-host".to_owned())
-            .spawn(move || run(&inbox))
-            .map_err(|_error| HostError::Stopped)?;
-        Ok(Self {
-            commands: Some(commands),
-            thread: Some(thread),
-        })
+    /// A host hosting nothing yet.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            viewers: Mutex::new(Vec::new()),
+        }
     }
 
-    /// Send `command` to the host thread.
-    fn send(&self, command: Command<A>) -> Result<(), HostError> {
-        self.commands
-            .as_ref()
-            .ok_or(HostError::Stopped)?
-            .send(command)
-            .map_err(|_gone| HostError::Stopped)
+    /// Where `viewer`'s commands go, when the host knows it.
+    fn commands(&self, viewer: ViewerHandle) -> Option<Sender<Command<A>>> {
+        self.viewers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(viewer.index())
+            .map(|hosted| hosted.commands.clone())
     }
 
-    /// Build a viewer on the host thread with `build` and host it under
-    /// `label`, the name errors call it by; it is stepped from then on. The
-    /// App must have the automation executor installed.
+    /// Start a thread named for `label`, build a viewer there with `build`
+    /// and host it under `label`, the name errors call it by; it is stepped
+    /// from then on. The App must have the automation executor installed.
     ///
     /// # Errors
     ///
     /// [`HostError::Build`] when `build` fails, [`HostError::Transport`] when
-    /// the App has no executor, [`HostError::Stopped`] when the host is gone.
+    /// the App has no executor, [`HostError::Stopped`] when the thread cannot
+    /// be started, [`HostError::Panicked`] when the build panics.
     pub async fn host(
         &self,
         label: impl Into<String>,
         build: impl FnOnce() -> Result<A, BuildError> + Send + 'static,
     ) -> Result<(ViewerHandle, ViewerLink), HostError> {
+        let label = label.into();
+        let (commands, inbox) = mpsc::channel();
         let (reply, answer) = oneshot::channel();
-        self.send(Command::Host {
-            label: label.into(),
-            build: Box::new(build),
-            reply,
-        })?;
-        answer.await.map_err(|_gone| HostError::Stopped)?
+        let thread = {
+            let label = label.clone();
+            let build: Build<A> = Box::new(build);
+            spawn_named_thread(&format!("sl-viewer-{label}"), move || {
+                run(label, build, reply, &inbox);
+            })
+            .map_err(|_error| HostError::Stopped)?
+        };
+        match answer.await {
+            Ok(Ok(link)) => {
+                let mut viewers = self.viewers.lock().unwrap_or_else(PoisonError::into_inner);
+                viewers.push(ViewerThread { commands, thread });
+                Ok((
+                    ViewerHandle::from_index(viewers.len().saturating_sub(1)),
+                    link,
+                ))
+            }
+            // The thread ends once it has answered.
+            Ok(Err(error)) => {
+                join(thread)?;
+                Err(error)
+            }
+            Err(_gone) => {
+                join(thread)?;
+                Err(HostError::Stopped)
+            }
+        }
     }
 
-    /// Run `run` against `viewer`'s App on the host thread, between two of
-    /// its frames, and hand back what it returns.
+    /// Run `run` against `viewer`'s App on its thread, between two of its
+    /// frames, and hand back what it returns.
     ///
     /// # Errors
     ///
     /// [`HostError::Transport`] for a handle the host does not know, and
-    /// [`HostError::Stopped`] when the host is gone.
+    /// [`HostError::Stopped`] when the viewer's thread is gone.
     pub async fn with_app<R: Send + 'static>(
         &self,
         viewer: ViewerHandle,
         run: impl FnOnce(&mut A) -> R + Send + 'static,
     ) -> Result<R, HostError> {
+        let commands = self
+            .commands(viewer)
+            .ok_or(HostError::Transport(InProcessError::NoViewer(viewer)))?;
         let (reply, answer) = oneshot::channel();
-        self.send(Command::With {
-            viewer,
-            run: Box::new(move |app: Option<&mut A>| {
-                let _gone = reply.send(app.map(run));
-            }),
-        })?;
-        answer
-            .await
-            .map_err(|_gone| HostError::Stopped)?
-            .ok_or(HostError::Transport(InProcessError::NoViewer(viewer)))
+        commands
+            .send(Command::With(Box::new(move |app: &mut A| {
+                let _gone = reply.send(run(app));
+            })))
+            .map_err(|_gone| HostError::Stopped)?;
+        answer.await.map_err(|_gone| HostError::Stopped)
     }
 
     /// Wait until `viewer` has exited and everything it delivered has gone
@@ -213,89 +224,141 @@ impl<A: HostedApp + 'static> InProcessHost<A> {
     ///
     /// # Errors
     ///
-    /// [`HostError::Stopped`] when the host stops first, or does not know the
-    /// handle.
+    /// [`HostError::Stopped`] when its thread stops first, or the host does
+    /// not know the handle.
     pub async fn exited(&self, viewer: ViewerHandle) -> Result<(), HostError> {
+        let commands = self.commands(viewer).ok_or(HostError::Stopped)?;
         let (reply, answer) = oneshot::channel();
-        self.send(Command::WhenExited { viewer, reply })?;
+        commands
+            .send(Command::WhenExited(reply))
+            .map_err(|_gone| HostError::Stopped)?;
         answer.await.map_err(|_gone| HostError::Stopped)
     }
 
-    /// Stop the host thread and wait for it: every link closes, and each
-    /// viewer's render pipelines finish compiling first.
+    /// Stop every viewer's thread and wait for them all: every link closes,
+    /// and each viewer's render pipelines finish compiling first.
     ///
     /// # Errors
     ///
-    /// [`HostError::Panicked`] when the thread panicked.
+    /// [`HostError::Panicked`] when a thread panicked — the first of them.
     pub fn stop(mut self) -> Result<(), HostError> {
-        self.stop_thread()
+        self.stop_threads()
     }
 
-    /// Close the command channel and join the thread, once.
-    fn stop_thread(&mut self) -> Result<(), HostError> {
-        drop(self.commands.take());
-        let Some(thread) = self.thread.take() else {
-            return Ok(());
-        };
-        thread.join().map_err(|panic| {
-            HostError::Panicked(
-                panic
-                    .downcast_ref::<&str>()
-                    .map(|message| (*message).to_owned())
-                    .or_else(|| panic.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "no message".to_owned()),
-            )
-        })
-    }
-}
-
-/// The host thread: take commands, feed each viewer its requests, step every
-/// viewer a frame, send what each delivered — until the command channel
-/// closes.
-fn run<A: HostedApp>(inbox: &Receiver<Command<A>>) {
-    let mut transport = InProcessTransport::<A>::new();
-    let mut connections: Vec<Connection> = Vec::new();
-    loop {
-        // With nothing to step, wait for a command rather than spin.
-        if connections.is_empty() {
-            match inbox.recv_timeout(IDLE_WAIT) {
-                Ok(command) => obey(command, &mut transport, &mut connections),
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
-            continue;
-        }
-        if drain(inbox, &mut transport, &mut connections) == Err(TryRecvError::Disconnected) {
-            break;
-        }
-        for connection in &mut connections {
-            while let Ok(request) = connection.requests.try_recv() {
-                if let Err(error) = transport.send(connection.viewer, request) {
-                    error!("{error}");
+    /// Close every command channel, then join every thread, once; the
+    /// threads wind down side by side.
+    fn stop_threads(&mut self) -> Result<(), HostError> {
+        let viewers = std::mem::take(
+            self.viewers
+                .get_mut()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        let threads: Vec<JoinHandle<()>> = viewers
+            .into_iter()
+            .map(|ViewerThread { commands, thread }| {
+                drop(commands);
+                thread
+            })
+            .collect();
+        let mut first = Ok(());
+        for thread in threads {
+            if let Err(panic) = join(thread) {
+                if first.is_ok() {
+                    first = Err(panic);
+                } else {
+                    error!("{panic}");
                 }
             }
         }
-        transport.step();
-        for connection in &mut connections {
-            deliver(&mut transport, connection);
+        first
+    }
+}
+
+/// Join `thread`, reporting its panic.
+fn join(thread: JoinHandle<()>) -> Result<(), HostError> {
+    thread.join().map_err(|panic| {
+        HostError::Panicked(
+            panic
+                .downcast_ref::<&str>()
+                .map(|message| (*message).to_owned())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "no message".to_owned()),
+        )
+    })
+}
+
+/// A viewer's thread: build the App and answer `reply` with its link, then
+/// take commands, feed the viewer its requests, step it a frame and send what
+/// it delivered — until the command channel closes.
+fn run<A: HostedApp>(
+    label: String,
+    build: Build<A>,
+    reply: oneshot::Sender<Result<ViewerLink, HostError>>,
+    inbox: &Receiver<Command<A>>,
+) {
+    let mut transport = InProcessTransport::<A>::new();
+    let hosted = build()
+        .map_err(|source| HostError::Build {
+            label: label.clone(),
+            source,
+        })
+        .and_then(|app| Ok(transport.host(label, app)?));
+    let viewer = match hosted {
+        Ok(viewer) => viewer,
+        Err(error) => {
+            let _gone = reply.send(Err(error));
+            return;
         }
+    };
+    let (requests, requests_in) = unbounded_channel();
+    let (messages_out, messages) = unbounded_channel();
+    if reply.send(Ok(ViewerLink { requests, messages })).is_err() {
+        // Whoever hosted it stopped waiting: nobody can reach it.
+        return;
+    }
+    let mut connection = Connection {
+        viewer,
+        requests: requests_in,
+        messages: Some(messages_out),
+        exit_waiters: Vec::new(),
+    };
+    loop {
+        // An exited viewer is stepped no more: wait for a command rather
+        // than spin.
+        if connection.messages.is_none() {
+            match inbox.recv() {
+                Ok(command) => obey(command, &mut transport, &mut connection),
+                Err(_disconnected) => break,
+            }
+            continue;
+        }
+        if drain(inbox, &mut transport, &mut connection) == Err(TryRecvError::Disconnected) {
+            break;
+        }
+        while let Ok(request) = connection.requests.try_recv() {
+            if let Err(error) = transport.send(connection.viewer, request) {
+                error!("{error}");
+            }
+        }
+        transport.step();
+        deliver(&mut transport, &mut connection);
         std::thread::sleep(FRAME_PAUSE);
     }
-    // Dropping the transport lets each viewer's pipelines finish.
-    drop(connections);
+    // Dropping the transport lets the viewer's pipelines finish.
+    drop(connection);
     drop(transport);
 }
 
-/// Obey every command waiting; `Disconnected` once the host has been
-/// stopped.
+/// Obey every command waiting; `Disconnected` once the host has stopped the
+/// viewer.
 fn drain<A: HostedApp>(
     inbox: &Receiver<Command<A>>,
     transport: &mut InProcessTransport<A>,
-    connections: &mut Vec<Connection>,
+    connection: &mut Connection,
 ) -> Result<(), TryRecvError> {
     loop {
         let command = inbox.try_recv()?;
-        obey(command, transport, connections);
+        obey(command, transport, connection);
     }
 }
 
@@ -303,44 +366,20 @@ fn drain<A: HostedApp>(
 fn obey<A: HostedApp>(
     command: Command<A>,
     transport: &mut InProcessTransport<A>,
-    connections: &mut Vec<Connection>,
+    connection: &mut Connection,
 ) {
     match command {
-        Command::Host {
-            label,
-            build,
-            reply,
-        } => {
-            let hosted = build()
-                .map_err(|source| HostError::Build {
-                    label: label.clone(),
-                    source,
-                })
-                .and_then(|app| Ok(transport.host(label, app)?))
-                .map(|viewer| {
-                    let (requests, requests_in) = unbounded_channel();
-                    let (messages_out, messages) = unbounded_channel();
-                    connections.push(Connection {
-                        viewer,
-                        requests: requests_in,
-                        messages: Some(messages_out),
-                        exit_waiters: Vec::new(),
-                    });
-                    (viewer, ViewerLink { requests, messages })
-                });
-            let _gone = reply.send(hosted);
-        }
-        Command::With { viewer, run } => run(transport.app_mut(viewer)),
-        Command::WhenExited { viewer, reply } => {
-            if let Some(connection) = connections
-                .iter_mut()
-                .find(|connection| connection.viewer == viewer)
-            {
-                if connection.messages.is_some() {
-                    connection.exit_waiters.push(reply);
-                } else {
-                    let _gone = reply.send(());
-                }
+        Command::With(run) => match transport.app_mut(connection.viewer) {
+            Some(app) => run(app),
+            // Its own transport always hosts it; dropping the task fails the
+            // wait on it rather than hanging it.
+            None => error!("{}", InProcessError::NoViewer(connection.viewer)),
+        },
+        Command::WhenExited(reply) => {
+            if connection.messages.is_some() {
+                connection.exit_waiters.push(reply);
+            } else {
+                let _gone = reply.send(());
             }
         }
     }

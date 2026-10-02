@@ -129,6 +129,9 @@ struct ViewerSetup {
     /// Whether each viewer runs on a copy of the asset tree of its own and
     /// watches its skin sheets for edits, as `--watch-skins` does.
     watch_skins: bool,
+    /// Whether each viewer process opens a window a person can follow the
+    /// run in, as `--watch` does (`SL_E2E_WATCH`).
+    watch: bool,
 }
 
 impl core::fmt::Debug for StageBuilder {
@@ -368,6 +371,7 @@ impl StageBuilder {
             Some(backends) => backends.clone(),
             None => Backend::from_env()?,
         };
+        let watch = crate::watch::from_env(&backends)?;
         crate::logs::install();
         let grid = self.chosen_grid()?;
         let live = match self.plan(grid)? {
@@ -387,6 +391,7 @@ impl StageBuilder {
                 grid,
                 live.as_ref(),
                 backend,
+                watch,
                 &root.join(backend.name()),
                 &body,
             )?;
@@ -405,6 +410,7 @@ impl StageBuilder {
         grid: Grid,
         live: Option<&LiveAccounts>,
         backend: Backend,
+        watch: bool,
         dir: &Path,
         body: &F,
     ) -> Result<(), StageError>
@@ -444,7 +450,7 @@ impl StageBuilder {
             self.name,
             dir.display()
         );
-        let stage = runtime.block_on(Stage::start(self, grid, live, backend, dir))?;
+        let stage = runtime.block_on(Stage::start(self, grid, live, backend, watch, dir))?;
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| runtime.block_on(body(&stage))));
         let teardown = runtime.block_on(stage.shutdown());
         match outcome {
@@ -797,6 +803,7 @@ impl Stage {
         on: Grid,
         live: Option<&LiveAccounts>,
         backend: Backend,
+        watch: bool,
         dir: &Path,
     ) -> Result<Self, StageError> {
         let (grid, home) = match live {
@@ -820,7 +827,10 @@ impl Stage {
             home,
             start,
             binary: builder.binary.clone(),
-            setup: builder.setup.clone(),
+            setup: ViewerSetup {
+                watch,
+                ..builder.setup.clone()
+            },
             viewers: Vec::new(),
             host: None,
             sockets: OnceLock::new(),
@@ -841,7 +851,7 @@ impl Stage {
     /// grid in its home region, on a live grid wherever the grid put them.
     async fn launch(&mut self, builder: &StageBuilder) -> Result<(), StageError> {
         if self.backend == Backend::InProcess {
-            self.host = Some(InProcessHost::<ViewerApp>::start()?);
+            self.host = Some(InProcessHost::<ViewerApp>::new());
         }
         for (index, label) in builder.labels.iter().enumerate() {
             let login = self.login_of(index, label)?;
@@ -1149,6 +1159,9 @@ impl Stage {
         ]);
         if !self.setup.web_media {
             launch = launch.args(["--disable-web-media".to_owned()]);
+        }
+        if self.setup.watch {
+            launch = launch.args(["--watch".to_owned()]);
         }
         if let Some(skin) = &self.setup.skin {
             launch = launch.args(["--skin".to_owned(), skin.clone()]);

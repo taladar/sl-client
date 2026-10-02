@@ -1,6 +1,9 @@
-//! Teeth for the host thread: viewers built there answer over their links
+//! Teeth for the host: viewers built on their threads answer over their links
 //! under the caller's ids, keep running while nobody waits, can be reached
-//! between frames, and close their links when they exit.
+//! between frames, close their links when they exit, and never take turns.
+
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Mutex, PoisonError};
 
 use bevy::prelude::*;
 use pretty_assertions::assert_eq;
@@ -10,7 +13,7 @@ use sl_viewer_testkit::settle;
 
 use super::{HostError, InProcessHost, ViewerLink};
 use crate::executor::{AutomationIdentity, AutomationPlugin};
-use crate::in_process::InProcessError;
+use crate::in_process::{InProcessError, ViewerHandle};
 
 /// A settled interaction app with the executor, calling itself `viewer`.
 fn app(viewer: &str) -> App {
@@ -48,7 +51,7 @@ async fn hello(link: &mut ViewerLink, id: u64) -> Result<String, String> {
 
 #[tokio::test]
 async fn viewers_built_on_the_host_answer_over_their_links() -> Result<(), String> {
-    let host = InProcessHost::<App>::start().map_err(|error| error.to_string())?;
+    let host = InProcessHost::<App>::new();
     let (_one, mut one) = host
         .host("one", || Ok(app("one")))
         .await
@@ -69,7 +72,7 @@ async fn viewers_built_on_the_host_answer_over_their_links() -> Result<(), Strin
 
 #[tokio::test]
 async fn a_viewer_runs_while_nobody_waits_and_is_reached_between_frames() -> Result<(), String> {
-    let host = InProcessHost::<App>::start().map_err(|error| error.to_string())?;
+    let host = InProcessHost::<App>::new();
     let (viewer, _link) = host
         .host("one", || Ok(app("one")))
         .await
@@ -92,7 +95,7 @@ async fn a_viewer_runs_while_nobody_waits_and_is_reached_between_frames() -> Res
 
 #[tokio::test]
 async fn an_exited_viewer_closes_its_link_after_its_last_answer() -> Result<(), String> {
-    let host = InProcessHost::<App>::start().map_err(|error| error.to_string())?;
+    let host = InProcessHost::<App>::new();
     let (one, mut link) = host
         .host("one", || Ok(app("one")))
         .await
@@ -114,7 +117,7 @@ async fn an_exited_viewer_closes_its_link_after_its_last_answer() -> Result<(), 
 
 #[tokio::test]
 async fn a_failed_build_and_an_app_without_the_executor_are_refused() -> Result<(), String> {
-    let host = InProcessHost::<App>::start().map_err(|error| error.to_string())?;
+    let host = InProcessHost::<App>::new();
     let failed = host.host("broken", || Err("no GPU".into())).await;
     assert!(
         matches!(&failed, Err(HostError::Build { label, .. }) if label == "broken"),
@@ -130,5 +133,69 @@ async fn a_failed_build_and_an_app_without_the_executor_are_refused() -> Result<
         ),
         "{bare:?}"
     );
+    Ok(())
+}
+
+/// Holds every frame of the App it is in until the test lets go of the
+/// other end — a viewer stuck in a slow frame.
+#[derive(Resource)]
+struct Stall(Mutex<Receiver<()>>);
+
+/// Wait for the test to let go; once it has, every frame goes straight on.
+fn stall(stall: Res<'_, Stall>) {
+    let _released = stall
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .recv();
+}
+
+/// How many frames the App it is in has stepped.
+#[derive(Resource, Default)]
+struct Frames(u64);
+
+/// Count a frame.
+fn count(mut frames: ResMut<'_, Frames>) {
+    frames.0 = frames.0.saturating_add(1);
+}
+
+/// How many frames `viewer` on `host` has counted.
+async fn frames(host: &InProcessHost<App>, viewer: ViewerHandle) -> Result<u64, String> {
+    host.with_app(viewer, |app| app.world().resource::<Frames>().0)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tokio::test]
+async fn a_viewer_stuck_in_a_frame_does_not_stall_another() -> Result<(), String> {
+    let host = InProcessHost::<App>::new();
+    let (release, held): (Sender<()>, Receiver<()>) = channel();
+    let (_stuck, _stuck_link) = host
+        .host("stuck", move || {
+            let mut stuck = app("stuck");
+            stuck
+                .insert_resource(Stall(Mutex::new(held)))
+                .add_systems(Update, stall);
+            Ok(stuck)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    let (running, _running_link) = host
+        .host("running", || {
+            let mut running = app("running");
+            running.init_resource::<Frames>().add_systems(Update, count);
+            Ok(running)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    let first = frames(&host, running).await?;
+    tokio::time::sleep(core::time::Duration::from_millis(200)).await;
+    let later = frames(&host, running).await?;
+    assert!(
+        later.saturating_sub(first) >= 10,
+        "the running viewer kept stepping while the other was stuck: {first} → {later}"
+    );
+    drop(release);
+    host.stop().map_err(|error| error.to_string())?;
     Ok(())
 }

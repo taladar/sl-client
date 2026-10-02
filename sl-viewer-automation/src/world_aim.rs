@@ -62,16 +62,6 @@ const LATTICE: [f32; 3] = [-0.3, 0.0, 0.3];
 /// Candidate points nearer each other than this, logical pixels, are one.
 const DEDUPE_PIXELS: f32 = 2.0;
 
-/// How far the camera's eye may move between polls and still be still,
-/// metres. Its settle guard stops writing well above this.
-const EYE_TOLERANCE: f32 = 1.0e-4;
-
-/// How far any component of two camera rotations may differ for them to be
-/// the same — about 2e-6 rad. Component-wise, because a dot product of a
-/// quaternion with itself already misses 1 by `f32`'s epsilon when its length
-/// is a hair off 1 (and `angle_between`'s `acos` has an ~8e-4 rad floor).
-const ROTATION_TOLERANCE: f32 = 1.0e-6;
-
 /// The least a corner of the target's box may move on screen between polls
 /// and the target still be still, logical pixels: under the one-pixel pick
 /// the probes ask for, so a target a few pixels across must hold still.
@@ -83,6 +73,12 @@ const PIXEL_TOLERANCE: f32 = 0.5;
 /// (the [`LATTICE`] at ±0.3 of a face spanning ±0.5), so a quarter of that
 /// keeps a probed point well inside the target.
 const EDGE_FRACTION: f32 = 0.05;
+
+/// How far, logical pixels, a point a pursuit acts on may move on screen
+/// between two polls with the camera still counted as holding: a click lands
+/// within it, and a ground pick is accepted anywhere in a footprint three
+/// times as wide.
+const CAMERA_PIXEL_TOLERANCE: f32 = 1.0;
 
 /// How far the target may drift between polls and still be still, metres.
 const TARGET_TOLERANCE: f32 = 0.01;
@@ -335,13 +331,8 @@ impl Pose {
     /// The pose of the box `boxed` (the unit cube's image) under `project`,
     /// which puts a world point on screen.
     fn of(boxed: &Affine3A, project: impl Fn(Vec3) -> Option<Vec2>) -> Self {
-        let mut corners = [None; 8];
-        for (index, corner) in corners.iter_mut().enumerate() {
-            let side = |mask: usize| if index & mask == 0 { -0.5 } else { 0.5 };
-            *corner = project(boxed.transform_point3(Vec3::new(side(1), side(2), side(4))));
-        }
         Self {
-            corners,
+            corners: box_corners(boxed).map(project),
             target: boxed.transform_point3(Vec3::ZERO),
         }
     }
@@ -376,41 +367,94 @@ impl Pose {
     }
 }
 
-/// Whether two rotations are the same to [`ROTATION_TOLERANCE`] per
-/// component, either sign (`q` and `−q` are one rotation).
-pub(crate) fn same_rotation(a: Quat, b: Quat) -> bool {
-    a.abs_diff_eq(b, ROTATION_TOLERANCE)
-        || a.abs_diff_eq(Quat::from_xyzw(-b.x, -b.y, -b.z, -b.w), ROTATION_TOLERANCE)
+/// Whether every one of `points` lands within [`CAMERA_PIXEL_TOLERANCE`] of
+/// where it did, `before` and `after` putting a world point on screen — or
+/// stays off screen.
+fn points_hold(
+    points: &[Vec3],
+    before: impl Fn(Vec3) -> Option<Vec2>,
+    after: impl Fn(Vec3) -> Option<Vec2>,
+) -> bool {
+    points
+        .iter()
+        .all(|point| match (before(*point), after(*point)) {
+            (Some(was), Some(is)) => {
+                let moved = was.distance(is);
+                if moved >= CAMERA_PIXEL_TOLERANCE {
+                    debug!(?point, moved, "camera still: a point moved on screen");
+                }
+                moved < CAMERA_PIXEL_TOLERANCE
+            }
+            (None, None) => true,
+            (Some(_), None) | (None, Some(_)) => false,
+        })
+}
+
+/// Whether `eye` is inside the box `boxed` (the unit cube's image).
+fn eye_inside(boxed: &Affine3A, eye: Vec3) -> bool {
+    let local = boxed.inverse().transform_point3(eye);
+    local.abs().max_element() < 0.5
+}
+
+/// The eight corners of the box `boxed` (the unit cube's image).
+fn box_corners(boxed: &Affine3A) -> [Vec3; 8] {
+    let mut corners = [Vec3::ZERO; 8];
+    for (index, corner) in corners.iter_mut().enumerate() {
+        let side = |mask: usize| if index & mask == 0 { -0.5 } else { 0.5 };
+        *corner = boxed.transform_point3(Vec3::new(side(1), side(2), side(4)));
+    }
+    corners
+}
+
+/// The corners of `node`'s box in the world, while it is tracked as a full
+/// object.
+pub(crate) fn node_corners(world: &World, node: &WorldNode) -> Option<[Vec3; 8]> {
+    let (_subject, geometry, _prims) = locate(world, node)?;
+    Some(box_corners(
+        &world.get::<GlobalTransform>(geometry)?.affine(),
+    ))
 }
 
 /// Whether the camera holds still, judged a poll at a time — the stability
-/// rule every world pursuit shares: the same eye and rotation for
-/// [`STABLE_FRAMES`] polls in a row.
+/// rule every world pursuit shares: the points the pursuit will act on land
+/// within [`CAMERA_PIXEL_TOLERANCE`] of where they did, for [`STABLE_FRAMES`]
+/// polls in a row.
+///
+/// Judged on screen, not by the eye: the follow camera holds the own avatar's
+/// head, which an idle animation or an AO sways 0.5–2 mm a frame (measured on
+/// aditi), so an eye tolerance below that waits for good — and above it is
+/// arbitrary, since what a click needs is that the point under it stays put.
 #[derive(Debug, Default)]
 pub(crate) struct CameraStill {
-    /// The last poll's eye and rotation.
-    last: Option<(Vec3, Quat)>,
-    /// For how many polls in a row they have held.
+    /// The last poll's camera.
+    last: Option<(Camera, GlobalTransform)>,
+    /// For how many polls in a row the points have held.
     streak: u32,
 }
 
 impl CameraStill {
-    /// Record this poll's camera and say whether it has now held still.
-    pub(crate) fn observe(&mut self, world: &mut World) -> bool {
-        let Some((_camera, transform)) = view(world) else {
+    /// Record this poll's camera and say whether it has now held still for
+    /// `points` (Bevy world positions). With no points nothing can move on
+    /// screen, and the camera holds.
+    pub(crate) fn observe(&mut self, world: &mut World, points: &[Vec3]) -> bool {
+        let Some(now) = view(world) else {
             self.reset();
             return false;
         };
-        let (_scale, rotation, eye) = transform.to_scale_rotation_translation();
-        let same = self.last.is_some_and(|(last_eye, last_rotation)| {
-            last_eye.distance(eye) < EYE_TOLERANCE && same_rotation(last_rotation, rotation)
+        let same = self.last.as_ref().is_some_and(|last| {
+            last.0.logical_viewport_size() == now.0.logical_viewport_size()
+                && points_hold(
+                    points,
+                    |point| last.0.world_to_viewport(&last.1, point).ok(),
+                    |point| now.0.world_to_viewport(&now.1, point).ok(),
+                )
         });
         self.streak = if same {
             self.streak.saturating_add(1)
         } else {
             1
         };
-        self.last = Some((eye, rotation));
+        self.last = Some(now);
         self.streak >= STABLE_FRAMES
     }
 
@@ -753,6 +797,14 @@ impl WorldAim {
             return Ok(AimProgress::Waiting(AimStage::CreateTool));
         }
         if !self.observe(sight.pose) || self.frames < self.settle_from {
+            return Ok(AimProgress::Waiting(AimStage::Settling));
+        }
+        // A camera inside the target sees through its faces, so no point on
+        // it can take a click; after a reveal that is the glide on its way
+        // (seen on aditi, the eye passing into a fresh cube and out again),
+        // not an answer. Before one, it is a room the camera is meant to be in.
+        if self.revealed && eye_inside(&sight.boxed, sight.eye) {
+            self.stability = None;
             return Ok(AimProgress::Waiting(AimStage::Settling));
         }
         let (camera, transform) = &sight.camera;

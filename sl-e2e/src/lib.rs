@@ -21,7 +21,8 @@
 //!    fake grid still holds a session afterwards.
 //!
 //! `SL_E2E_BACKEND=process|in-process|both` picks the backends (unset is
-//! both). `SL_E2E_GRID=fake|opensim|aditi` picks the grid (unset is a fresh
+//! both). `SL_E2E_WATCH=1` opens each viewer process's `--watch` window, for
+//! a person to follow a run (the process backend only). `SL_E2E_GRID=fake|opensim|aditi` picks the grid (unset is a fresh
 //! fake grid): on a live grid the viewers log in as the accounts of its
 //! credentials file ([`live`]), there is no grid-control handle, and a test
 //! that needs one — or anything else the grid cannot give ([`Need`]) — is
@@ -46,9 +47,11 @@ pub mod live;
 mod logs;
 pub mod need;
 mod stage;
+pub mod watch;
 
 pub use backend::{BACKEND_VARIABLE, Backend};
 pub use error::{BodyError, StageError};
 pub use grid::{GRID_VARIABLE, Grid};
 pub use need::Need;
 pub use stage::{FIRST_NAME, Stage, StageBuilder};
+pub use watch::WATCH_VARIABLE;

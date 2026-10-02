@@ -6,8 +6,9 @@
 //! expectation, and an object's pie opened by a pick-verified right click. A deliberately failing expectation then leaves its three
 //! artifacts (screenshot, tree, event tail) and names them in its message.
 //!
-//! Both viewers are Apps on an `InProcessHost`'s thread, which steps them as
-//! processes run; what differs is only how the driver reaches each.
+//! Both viewers are Apps on an `InProcessHost`, each stepped on a thread of
+//! its own as a process runs; what differs is only how the driver reaches
+//! each.
 
 #[cfg(test)]
 mod full_stack {
@@ -265,7 +266,7 @@ mod full_stack {
         let socket = scratch.join("v.sock");
         let (link_login, socket_login) = (login(&grid, "Link"), login(&grid, "Socket"));
         let outcome = runtime.block_on(async {
-            let host = InProcessHost::<ViewerApp>::start()?;
+            let host = InProcessHost::<ViewerApp>::new();
             let (linked, link) = host
                 .host("link", move || {
                     viewer(link_login, "Link", Automation::InProcess)

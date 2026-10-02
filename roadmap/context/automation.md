@@ -291,9 +291,19 @@ replaces that person.
   half-pixel tolerance still did under load (at ~10 fps the sway is ~0.6 px
   a poll; found by the driver acceptance in the commit hook's parallel run,
   2026-09-29). Candidate points sit a fifth of a face from its edges, so 5 %
-  keeps a probed point on the target. The sweep and handle drags'
-  `CameraStill` still compares the eye: it only gates a two-poll streak and
-  revalidates nothing afterwards.
+  keeps a probed point on the target. The ground aim, the sweep and the
+  handle drags share `CameraStill`, judged on screen too since 2026-10-02:
+  the points each acts on (the ground point, the swept things' box corners,
+  the selection under the rig) must land within a pixel of the last poll. It
+  used to compare the eye to 0.1 mm, and on aditi an AO swayed the head
+  0.5–2 mm a frame. The camera skips writes under 0.5 mm, so that rule only
+  passed when two polls in a row fell under it — luck, on either backend, and
+  a ground aim (which also drops its probe whenever the camera moves) timed
+  out on `Stable`. After a reveal, an object aim also waits while the eye is
+  inside the target's box: the GPU pick culls back faces, so from inside no
+  point on it takes a click
+  ([[viewer-camera-framing-ends-inside-the-framed-object]]). Before a reveal
+  that rule would refuse a room the camera is meant to be in.
 - **Rezzing is a world action on what the rez lands on** (`WorldAction::Place`,
   the driver's `place()`): a click with the Create tool, waiting for that tool
   (`ActionabilityCheck::CreateTool`) and aimed through the pick resolver like a
@@ -378,14 +388,17 @@ replaces that person.
   the executor gave them. A Bevy `App` is not `Send`: the Apps are built and
   stepped on one thread, the caller's.
 - **The in-process host** (`InProcessHost`,
-  `sl-viewer-automation/src/in_process_host.rs`) runs an
-  `InProcessTransport` on a thread of its own and steps every viewer it hosts
-  continuously, 2 ms apart, as a process runs — waiting or not. Apps are
-  built there (a closure hands the host the builder), a test reaches into one
-  between frames with `with_app`, and each viewer is reached through a
-  `ViewerLink`: a request channel and a message channel, the shape a socket
-  connection has. An exited viewer closes its link; `stop` joins the thread
-  after the pipelines finish.
+  `sl-viewer-automation/src/in_process_host.rs`) gives every viewer it hosts
+  a thread of its own, with an `InProcessTransport` hosting that one viewer,
+  and steps it there continuously, 2 ms apart, as a process runs — waiting or
+  not. The viewers do not take turns: a slow frame of one stalls no other
+  (they used to share one thread, and on a busy aditi region two viewers got
+  half a thread each). Apps are built there (a closure hands the host the
+  builder; the thread starts in the hosting code's tracing context), a test
+  reaches into one between its frames with `with_app`, and each viewer is
+  reached through a `ViewerLink`: a request channel and a message channel,
+  the shape a socket connection has. An exited viewer closes its link; `stop`
+  joins every thread after its pipelines finish.
 - **The driver** (`sl-viewer-driver`) depends on the protocol and tokio
   only, not on Bevy or the viewer. Its transport boundary is that channel
   pair, not a trait: `Viewer::connect` bridges a socket to one,

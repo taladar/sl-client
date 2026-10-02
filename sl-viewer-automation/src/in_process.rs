@@ -89,6 +89,19 @@ impl HostedApp for App {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ViewerHandle(usize);
 
+impl ViewerHandle {
+    /// The handle of the viewer hosted `index`-th — for a host that keeps
+    /// its viewers, each in a transport of its own, under handles of its own.
+    pub(crate) const fn from_index(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// The order it was hosted in.
+    pub(crate) const fn index(self) -> usize {
+        self.0
+    }
+}
+
 /// Why a request through the in-process transport got no answer.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InProcessError {

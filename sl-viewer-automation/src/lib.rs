@@ -97,9 +97,8 @@
 //! in-process one is an [`InProcessTransport`]: it hosts viewer Apps in the
 //! test's own process, steps them while a caller waits, and hands the same
 //! requests to their executors directly. Both keep their clients' ids apart
-//! the same way. An [`InProcessHost`] runs an in-process transport on a
-//! thread of its own and steps its viewers continuously, as a process runs,
-//! so an async caller reaches each through a [`ViewerLink`] — a request
+//! the same way. An [`InProcessHost`] runs each viewer on a thread of its
+//! own and steps it continuously, as a process runs, so an async caller reaches each through a [`ViewerLink`] — a request
 //! channel and a message channel, the shape a socket connection has.
 //!
 //! The cheap test tiers need no transport: [`in_app`] submits the same

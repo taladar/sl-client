@@ -36,7 +36,8 @@ impl Plugin for ScreenshotProbePlugin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ScreenshotTicket(u64);
 
-/// A captured frame: tightly packed 8-bit RGBA rows, top row first.
+/// A captured frame: tightly packed 8-bit RGBA rows, top row first, every
+/// pixel opaque.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapturedFrame {
     /// The width in physical pixels.
@@ -192,26 +193,39 @@ pub fn take_screenshot(
         .remove(&ticket)
 }
 
-/// A captured window texture as tightly packed RGBA.
+/// A captured window texture as tightly packed RGBA, made opaque.
+///
+/// The viewer's world pass writes its glow mask into the frame's alpha, not
+/// opacity, and a window shows the colour alone; kept, the alpha makes an
+/// image viewer draw the world as its own background (white in one, black in
+/// another) behind a UI that reads as normal.
 fn rgba_frame(image: &Image) -> Result<CapturedFrame, ScreenshotError> {
     let rgba = image
         .clone()
         .try_into_dynamic()
         .map_err(|error| ScreenshotError::Format(error.to_string()))?
         .to_rgba8();
+    let (width, height) = (rgba.width(), rgba.height());
+    let mut rgba = rgba.into_raw();
+    for [_red, _green, _blue, alpha] in rgba.as_chunks_mut::<4>().0 {
+        *alpha = u8::MAX;
+    }
     Ok(CapturedFrame {
-        width: rgba.width(),
-        height: rgba.height(),
-        rgba: rgba.into_raw(),
+        width,
+        height,
+        rgba,
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::image::Image;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     use pretty_assertions::assert_eq;
     use sl_automation_proto::Bounds;
 
-    use super::{CapturedFrame, OVERLAY_COLOUR};
+    use super::{CapturedFrame, OVERLAY_COLOUR, rgba_frame};
 
     /// A black frame of `width` × `height`.
     fn black(width: u32, height: u32) -> CapturedFrame {
@@ -252,6 +266,26 @@ mod tests {
         );
         assert_eq!(clipped.pixel(0, 5), Some(OVERLAY_COLOUR));
         assert_eq!(clipped.pixel(7, 4), Some(OVERLAY_COLOUR));
+    }
+
+    #[test]
+    fn a_captured_frame_drops_the_glow_mask_alpha() -> Result<(), super::ScreenshotError> {
+        // A world pixel with no glow (alpha 0) and one glowing (alpha 128).
+        let image = Image::new(
+            Extent3d {
+                width: 2,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            vec![39, 40, 26, 0, 202, 238, 255, 128],
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        );
+        let frame = rgba_frame(&image)?;
+        assert_eq!(frame.pixel(0, 0), Some([39, 40, 26, 255]));
+        assert_eq!(frame.pixel(1, 0), Some([202, 238, 255, 255]));
+        Ok(())
     }
 
     #[test]

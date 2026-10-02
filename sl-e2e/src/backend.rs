@@ -14,8 +14,8 @@ pub enum Backend {
     /// Each viewer is the real binary, `--headless --automation-socket`,
     /// reached over its socket.
     Process,
-    /// Each viewer is the viewer's own builder's App, stepped on an
-    /// in-process host's thread and reached over its link.
+    /// Each viewer is the viewer's own builder's App, stepped on a
+    /// thread of its own by an in-process host and reached over its link.
     InProcess,
 }
 

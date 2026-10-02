@@ -231,7 +231,7 @@ impl GroundAim {
             self.abandon(world);
             return Ok(GroundProgress::Waiting(AimStage::CreateTool));
         }
-        let still = self.still.observe(world);
+        let still = self.still.observe(world, &[located.point]);
         if let Some(probing) = self.probing {
             if !still {
                 // The camera moved since the point was projected: the

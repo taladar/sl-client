@@ -266,7 +266,19 @@ impl ManipulatorDrag {
                 Ok(DragProgress::Waiting(DragStage::Holding))
             }
             Stage::Settle => {
-                if !self.still.observe(world) {
+                // The rig stands on the selection: where it lands on screen
+                // is where the handles do.
+                let selected: Vec<Vec3> = world
+                    .get_resource::<SelectionSet>()
+                    .map(|selection| {
+                        selection
+                            .iter()
+                            .filter_map(|node| world.get::<GlobalTransform>(node.entity))
+                            .map(GlobalTransform::translation)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !self.still.observe(world, &selected) {
                     return Ok(DragProgress::Waiting(DragStage::Settling));
                 }
                 let Some(mut probes) = world.get_resource_mut::<ManipulatorProbes>() else {

@@ -129,9 +129,10 @@ scrolled away or never built.
 
 ## The two transports
 
-- **In process**: `InProcessHost` builds viewer Apps
+- **In process**: `InProcessHost` builds each viewer App
   (`ViewerAppBuilder`, see the `sl-client-bevy-viewer` assembly) on a thread
-  of its own and steps each continuously; `Viewer::over_link` talks to one.
+  of its own and steps it there continuously, so viewers never take turns;
+  `Viewer::over_link` talks to one.
 - **Remote**: a viewer started with `--automation-socket [PATH]` serves one
   JSON request per line on a `0600` Unix socket; `Viewer::connect` talks to
   it. Requests that play input need `--headless`.
@@ -173,6 +174,10 @@ what `SL_E2E_BACKEND` says), an account `Stage <label>` per viewer, waits
 until every viewer has logged in and gone quiet, runs the body, and always
 tears down: every viewer logs out, and a session left on the grid fails the
 test. Artifacts and each viewer's log land under `target/e2e/<test>/`.
+`SL_E2E_WATCH=1` opens each viewer process's `--watch` window, so a person
+can follow a run. It needs `SL_E2E_BACKEND=process`, since an in-process
+viewer is stepped by its host, not by winit. The window shows the frame only,
+not the synthetic pointer.
 
 What a test may say about its stage:
 

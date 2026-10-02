@@ -87,6 +87,80 @@ mod test {
         Ok(())
     }
 
+    /// **A rez on bare ground the camera has to turn to**: a point eight
+    /// metres to the camera's right of the avatar and three ahead — about 45°
+    /// off the view axis, at the edge of the frame — is revealed, and the
+    /// Create tool rezzes there; then, with the selection dropped and the
+    /// camera sent back to the avatar, picking the new prim again leaves the
+    /// camera outside it. The geometry and the sequence of the live
+    /// two-resident test at its widest offset.
+    #[test]
+    fn a_ground_point_at_the_edge_of_the_view_is_revealed_and_rezzed_on() -> Result<(), TestError> {
+        stage("ground_reveal", &["Alpha"]).run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let _opened = alpha.menu_path(&BUILD_TOOLS).await?;
+            let build = alpha.ui().window(BUILD_WINDOW);
+            let _create = alpha
+                .expect(&build.get(tool("build-tool-create")))
+                .to_be_checked()
+                .await?;
+            let readout = alpha.agent().await?;
+            let spot = readout.position.ok_or("Alpha has no position")?;
+            let eye = readout.camera_eye.ok_or("Alpha has no camera")?;
+            let (ahead_x, ahead_y) = (spot[0] - eye[0], spot[1] - eye[1]);
+            let length = ahead_x.hypot(ahead_y).max(0.001);
+            let (ahead_x, ahead_y) = (ahead_x / length, ahead_y / length);
+            let _placed = alpha
+                .world()
+                .ground(
+                    stage.home_region(),
+                    spot[0] + 8.0 * ahead_y + 3.0 * ahead_x,
+                    spot[1] - 8.0 * ahead_x + 3.0 * ahead_y,
+                )
+                .timeout(WAIT)
+                .place()
+                .await?;
+            let _moving = alpha
+                .expect(&build.get(tool("build-tool-move")))
+                .to_be_checked()
+                .await?;
+            // As the live test does next: drop the selection, the camera
+            // going back to the avatar, and pick the new prim again.
+            let selected = alpha.selection().await?;
+            let [prim] = selected.as_slice() else {
+                return Err(format!("the rez left {selected:?} selected").into());
+            };
+            let prim = alpha
+                .world()
+                .locator(sl_automation_proto::WorldLocator::full_id(prim.full_id))
+                .timeout(WAIT);
+            alpha.press("Escape").await?;
+            alpha.press("Escape").await?;
+            let _reselected = prim.select().await?;
+            let node = prim.node().await?;
+            let (Some(centre), Some(size)) = (node.position, node.scale) else {
+                return Err(format!("the prim has no box: {node:?}").into());
+            };
+            let eye = alpha
+                .agent()
+                .await?
+                .camera_eye
+                .ok_or("Alpha has no camera")?;
+            let inside = (0..3).all(|axis| {
+                (eye.get(axis).copied().unwrap_or(0.0) - centre.get(axis).copied().unwrap_or(0.0))
+                    .abs()
+                    < size.get(axis).copied().unwrap_or(0.0) / 2.0
+            });
+            assert!(
+                !inside,
+                "the camera ended inside the prim it selected: eye {eye:?}, box {centre:?} ± \
+                 {size:?}/2"
+            );
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     /// The name Alpha gives the prim it rezzes.
     const PRIM: &str = "Pilot Box";
 
