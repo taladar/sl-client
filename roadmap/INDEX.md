@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 125 |
+| ideas | 136 |
 | ready | 308 |
 | blocked | 54 |
 | in-progress | 20 |
-| bugs | 18 |
-| done | 1300 |
+| bugs | 29 |
+| done | 1301 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1872** |
+| **total** | **1895** |
 
-## ideas (125)
+## ideas (136)
 
 ### protocol
 
@@ -199,9 +199,30 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### idiomatic
 
-- [`idiomatic-audit-primitive-typed-patterns`](ideas/idiomatic-audit-primitive-typed-patterns.md)
-  — Audit for stringly / integer / boolean typed patterns copied from the
-  reference
+- [`idiomatic-avatar-typed-ids`](ideas/idiomatic-avatar-typed-ids.md) — Typed
+  avatar ids: global colours, visual params, texture slots, built-in animations
+- [`idiomatic-index-and-sentinel-choices`](ideas/idiomatic-index-and-sentinel-choices.md)
+  — Enums for combo/radio/tab indices and sentinel values
+- [`idiomatic-lsl-event-id`](ideas/idiomatic-lsl-event-id.md) — Generated
+  EventId for LSL events in the runtime
+- [`idiomatic-notification-template-names-typed`](ideas/idiomatic-notification-template-names-typed.md)
+  — Compile-time-checked notification template names and bespoke card templates
+- [`idiomatic-opaque-bool-parameters`](ideas/idiomatic-opaque-bool-parameters.md)
+  — Replace call-site-opaque and correlated bools with named types
+- [`idiomatic-permissions-type-everywhere`](ideas/idiomatic-permissions-type-everywhere.md)
+  — Use the typed Permissions for every permission mask
+- [`idiomatic-prim-flags-and-object-codes`](ideas/idiomatic-prim-flags-and-object-codes.md)
+  — One PrimFlags type and typed object codes past decode
+- [`idiomatic-protocol-codes-past-decode`](ideas/idiomatic-protocol-codes-past-decode.md)
+  — Protocol integers kept past decode where a typed enum or flags type exists
+- [`idiomatic-protocol-string-vocabularies`](ideas/idiomatic-protocol-string-vocabularies.md)
+  — Closed protocol vocabularies kept as strings
+- [`idiomatic-table-sort-column-enums`](ideas/idiomatic-table-sort-column-enums.md)
+  — Table sort columns as enums instead of string tokens
+- [`idiomatic-typed-setting-keys`](ideas/idiomatic-typed-setting-keys.md) —
+  Typed setting keys and enum-valued settings
+- [`idiomatic-typed-ui-actions-and-menu-conditions`](ideas/idiomatic-typed-ui-actions-and-menu-conditions.md)
+  — Typed actions and conditions for menus, pies and UiAction dispatch
 
 ### test
 
@@ -1282,22 +1303,44 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (18)
+## bugs (29)
 
 ### protocol
 
 - [`parcel-properties-update-via-udp-poisons-opensim`](bugs/parcel-properties-update-via-udp-poisons-opensim.md)
   — Parcel updates go over UDP, not the ParcelPropertiesUpdate CAP
+- [`protocol-agent-list-voice-transition-lossy`](bugs/protocol-agent-list-voice-transition-lossy.md)
+  — Agent-list voice updates collapse ENTER/LEAVE and can-voice into one bool
+- [`protocol-classified-query-wrong-flag-space`](bugs/protocol-classified-query-wrong-flag-space.md)
+  — DirClassifiedQuery sends DirFind maturity bits instead of classified-query
+  bits
+- [`protocol-login-options-max-agent-groups-unrequested`](bugs/protocol-login-options-max-agent-groups-unrequested.md)
+  — max-agent-groups is never requested at login but is gated on the option
 - [`protocol-logout-reply-sometimes-missing-on-opensim`](bugs/protocol-logout-reply-sometimes-missing-on-opensim.md)
   — A logout on the local OpenSim sometimes gets no LogoutReply
+- [`protocol-parcel-info-reply-flags-misread`](bugs/protocol-parcel-info-reply-flags-misread.md)
+  — ParcelInfoReply's packed flags byte is read as the parcel-flags field
+- [`protocol-region-flag-deny-ageunverified-value`](bugs/protocol-region-flag-deny-ageunverified-value.md)
+  — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
+  are split
+- [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
+  — A voice accept on a 1:1 session is folded into a phantom conference
 
 ### viewer
 
+- [`prim-path-curve-byte-ignores-reference-mask`](bugs/prim-path-curve-byte-ignores-reference-mask.md)
+  — PathCurve::from_byte matches the exact byte where the reference masks 0xf0
+- [`viewer-bespoke-card-responses-lose-the-button`](bugs/viewer-bespoke-card-responses-lose-the-button.md)
+  — Bespoke notification cards resolve every click as "no choice"
+- [`viewer-build-phantom-flag-wrong-bit`](bugs/viewer-build-phantom-flag-wrong-bit.md)
+  — Build floater's Phantom checkbox reads and writes the any-owner bit
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
   — A framing glide can carry the camera inside the object it frames
 - [`viewer-day-cycle-strip-click-mirrored-rtl`](bugs/viewer-day-cycle-strip-click-mirrored-rtl.md)
   — In a right-to-left layout a click on the day-cycle timeline lands mirrored
   from the markers
+- [`viewer-default-next-owner-mask-diverges`](bugs/viewer-default-next-owner-mask-diverges.md)
+  — Three different default next-owner masks, two without PERM_MOVE
 - [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
   — Which floaters have a minimize button follows no pattern, and most that lack
   one should have it
@@ -1331,7 +1374,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1300)
+### repl
+
+- [`repl-unknown-keyword-arguments-ignored`](bugs/repl-unknown-keyword-arguments-ignored.md)
+  — sl-repl silently ignores unknown or misspelled key=value arguments
+
+## done (1301)
 
 ### protocol
 
@@ -3443,6 +3491,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   SystemParam bundle
 - [`idiomatic-audit-dead-forward-api`](done/idiomatic-audit-dead-forward-api.md)
   — Decoded-but-never-read fields and write-only state across the workspace
+- [`idiomatic-audit-primitive-typed-patterns`](done/idiomatic-audit-primitive-typed-patterns.md)
+  — Audit for stringly / integer / boolean typed patterns copied from the
+  reference
 - [`idiomatic-batched-sl-types`](done/idiomatic-batched-sl-types-batched-sl-types-migration-post-roadmap-follow-up.md)
   — Batched sl-types migration (post-roadmap follow-up)
 - [`idiomatic-p1-01`](done/idiomatic-p1-01-new-permissions-bitflags-type-the-sl-perm-set.md)
