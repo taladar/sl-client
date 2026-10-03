@@ -9,8 +9,9 @@
 //!   it remembers between sessions.
 //! - [`menu`] — the menu bar's dropdowns and the line-based context menu, and
 //!   [`menu_accel`] — the accelerator each entry draws, dispatched to it.
-//! - [`ui_text_input`], [`ui_search`], [`ui_combo`], [`ui_radio`],
-//!   [`ui_color_picker`], [`ui_trackball`] — the input controls, and
+//! - [`ui_text_input`], [`ui_spinner`], [`ui_search`], [`ui_combo`],
+//!   [`ui_radio`], [`ui_color_picker`], [`ui_trackball`] — the input controls,
+//!   and
 //!   [`ui_rich_text`] — the text field whose flow carries objects (a notecard's
 //!   embedded items) and whose ranges can be styled.
 //! - [`ui_tab`], [`ui_table`] — tab strips and the sortable, virtualized table.
@@ -56,6 +57,7 @@ pub mod ui_radio;
 pub mod ui_rich_text;
 pub mod ui_search;
 pub mod ui_slider;
+pub mod ui_spinner;
 pub mod ui_tab;
 pub mod ui_table;
 pub mod ui_text_input;

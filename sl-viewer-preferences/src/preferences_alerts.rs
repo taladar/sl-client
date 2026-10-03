@@ -42,11 +42,12 @@ use crate::notifications::NOTIFICATIONS;
 use crate::preferences::{
     PREF_TABS, PreferencesExtraHits, PreferencesState, apply_preferences_filter,
     mirror_preferences_filter, spawn_pref_checkbox, spawn_pref_combo, spawn_pref_section,
-    spawn_pref_text,
+    spawn_pref_spinner,
 };
 use crate::settings_binding::SettingBinding;
 use crate::skin::text_role;
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
+use crate::ui_spinner::SpinStep;
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
     set_table_cell, spawn_table, spawn_table_row,
@@ -243,13 +244,15 @@ pub(crate) fn build_alerts_tab(commands: &mut Commands, panel: Entity) {
             ),
         ],
     );
-    spawn_pref_text(
+    // The reference's `RadarAvatarAgeAlertValue` spinner: a day a step, -1
+    // switching the alert off.
+    spawn_pref_spinner(
         commands,
         panel,
         "preferences-row-radar-age-days",
         SettingBinding::account(crate::radar::SETTING_AGE_DAYS),
         TextInputKind::Integer,
-        1.0,
+        SpinStep::new(1.0, -1.0, 100_000.0, 0),
     );
 
     spawn_pref_section(commands, panel, "preferences-section-alert-popups");

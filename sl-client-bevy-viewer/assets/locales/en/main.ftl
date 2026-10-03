@@ -875,6 +875,10 @@ scrollbar-arrow-down = Scroll down
 scrollbar-arrow-back = Scroll back
 scrollbar-arrow-forward = Scroll forward
 
+# A spinner's step arrows (a number field's up / down buttons).
+spinner-increase = Increase
+spinner-decrease = Decrease
+
 # The overflow buttons of a tab strip too narrow for its tabs.
 tab-scroll-first = First tab
 tab-scroll-prev = Previous tab
@@ -5456,6 +5460,7 @@ text-input-float-name = Decimal number
 text-input-integer-name = Whole number
 text-input-unsigned-name = Non-negative number
 text-input-read-only-name = Read-only text
+spinner-specimen-name = Stepped number
 # What the gallery's multi-line text editor specimen is called.
 text-editor-name = Text editor
 # What the colour picker's hex-code field is called.

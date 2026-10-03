@@ -547,6 +547,103 @@ mod tests {
         Ok(())
     }
 
+    /// **An arrow step commits exactly as `Enter` would** — one `UpdateObject`
+    /// carrying the stepped position and nothing else, with the untouched axes
+    /// at their displayed values — and moves the prim at once.
+    ///
+    /// The reference's `LLSpinCtrl::onUpBtn` commits on every step; a spinner
+    /// that only changed its text would leave the prim where it was until
+    /// something else happened to commit the row.
+    #[test]
+    fn an_arrow_step_on_a_transform_field_sends_one_update() -> Result<(), TestError> {
+        let mut app = build_tools_app()?;
+        let (scoped, _at) = select_a_fixture_prim(&mut app)?;
+        show_tab(&mut app, 1)?;
+        let _settling = drain_commands(&mut app);
+
+        in_app::click(&mut app, &Locator::test_id("build-pos-x:up"))?;
+        settle(&mut app, 3);
+
+        let commands = drain_commands(&mut app);
+        let updates = object_updates(&commands);
+        assert_eq!(
+            updates.len(),
+            1,
+            "one step must send exactly one object update, got {commands:#?}"
+        );
+        let Some(transform) = updates.first() else {
+            return Err(TestError::from("no update to read"));
+        };
+        let Some(position) = transform.position.as_ref() else {
+            return Err(TestError::from("the update carries no position"));
+        };
+        assert!(
+            (position.x - (FIXTURE_AT.x + 0.01)).abs() < 1e-3,
+            "one step up is a centimetre, got {}",
+            position.x
+        );
+        assert!(
+            (position.y - FIXTURE_AT.y).abs() < 1e-3 && (position.z - FIXTURE_AT.z).abs() < 1e-3,
+            "the untouched axes keep their displayed values, got ({}, {})",
+            position.y,
+            position.z
+        );
+        assert!(
+            transform.rotation.is_none() && transform.scale.is_none(),
+            "a position step carries only a position: {transform:#?}"
+        );
+        let entity = entity_of(&mut app, scoped).ok_or("the fixture prim has no entity")?;
+        let moved = app
+            .world()
+            .get::<crate::objects::ObjectSlMotion>(entity)
+            .map(|motion| motion.position.x)
+            .unwrap_or_default();
+        assert!(
+            (moved - (FIXTURE_AT.x + 0.01)).abs() < 1e-3,
+            "the local echo moves the prim, got {moved}"
+        );
+        assert_eq!(
+            field_text(&mut app, &transform_field("pos", "x")),
+            "128.010",
+            "and the field shows where it went"
+        );
+        Ok(())
+    }
+
+    /// **The arrows share their field's gate.** With nothing selected the
+    /// transform fields are disabled, and so are their arrows — greyed by the
+    /// skin's `:disabled`, refused by the button, and reported disabled to the
+    /// automation model and a screen reader.
+    #[test]
+    fn a_disabled_fields_arrows_are_disabled_too() -> Result<(), TestError> {
+        let mut app = build_tools_app()?;
+        show_tab(&mut app, 1)?;
+        for arrow in ["build-pos-x:up", "build-pos-x:down", "build-size-z:up"] {
+            let nodes = in_app::expect_disabled(&mut app, &Locator::test_id(arrow))?;
+            assert!(
+                nodes.iter().all(|node| node.has_state(NodeState::Disabled)),
+                "`{arrow}` is disabled with nothing selected"
+            );
+        }
+        let _ignored = drain_commands(&mut app);
+        let _refused = in_app::click_while_disabled(&mut app, &Locator::test_id("build-pos-x:up"));
+        settle(&mut app, 3);
+        assert!(
+            object_updates(&drain_commands(&mut app)).is_empty(),
+            "a disabled arrow commits nothing"
+        );
+
+        let (_scoped, _at) = select_a_fixture_prim(&mut app)?;
+        let nodes = in_app::expect_enabled(&mut app, &Locator::test_id("build-pos-x:up"))?;
+        assert!(
+            nodes
+                .iter()
+                .all(|node| !node.has_state(NodeState::Disabled)),
+            "and comes back with a selection"
+        );
+        Ok(())
+    }
+
     /// **A letter never reaches a transform field, and commits nothing.**
     ///
     /// The `TextInputKind::Float` filter rejects the keystroke before the
@@ -1307,6 +1404,50 @@ mod tests {
                 "the texture entry must address the selection"
             );
         }
+        Ok(())
+    }
+
+    /// **A shape spinner's arrow commits one `SetObjectShape`**, and a Texture
+    /// spinner's one `ObjectImage` — the same commits `Enter` sends from those
+    /// tabs, reached through the arrows instead.
+    #[test]
+    fn shape_and_texture_arrow_steps_commit_their_updates() -> Result<(), TestError> {
+        let mut app = build_tools_app()?;
+        let (scoped, _at) = select_a_fixture_prim(&mut app)?;
+        show_tab(&mut app, 1)?;
+        let _settling = drain_commands(&mut app);
+
+        in_app::click(&mut app, &Locator::test_id("build-hollow:up"))?;
+        settle(&mut app, 3);
+        let commands = drain_commands(&mut app);
+        let shaped: Vec<&Command> = commands
+            .iter()
+            .filter(|command| {
+                matches!(command, Command::SetObjectShape { local_id, .. } if *local_id == scoped)
+            })
+            .collect();
+        assert_eq!(
+            shaped.len(),
+            1,
+            "one hollow step must send one shape update, got {commands:#?}"
+        );
+
+        show_tab(&mut app, 3)?;
+        let _settling = drain_commands(&mut app);
+        in_app::click(&mut app, &Locator::test_id("build-tex-glow:up"))?;
+        settle(&mut app, 3);
+        let commands = drain_commands(&mut app);
+        let images: Vec<&Command> = commands
+            .iter()
+            .filter(|command| {
+                matches!(command, Command::SetObjectImage { local_id, .. } if *local_id == scoped)
+            })
+            .collect();
+        assert_eq!(
+            images.len(),
+            1,
+            "one glow step must send one texture entry, got {commands:#?}"
+        );
         Ok(())
     }
 

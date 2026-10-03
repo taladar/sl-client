@@ -68,6 +68,7 @@ use crate::social::GroupsModel;
 use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use crate::ui_spinner::{FieldCommits, SpinStep, Spinner, SpinnerSpec, spawn_spinner};
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::world_api::AvatarState;
@@ -699,6 +700,66 @@ impl ParamField {
         format!("{value:.precision$}", precision = self.decimals())
     }
 
+    /// What one arrow step of this field does for a selection of
+    /// `prim_type` (`None` before anything is selected), or `None` for a
+    /// field that is no spinner — the name and description, and the light
+    /// colour channels, which the reference edits with a colour swatch.
+    ///
+    /// The reference's `floater_tools.xml` spinners, with the ranges
+    /// `LLPanelObject::getState` re-sets per prim type: a circular path twists
+    /// ±360° in 18° steps, a linear one ±180° in 9°; the taper row is a
+    /// hole size on the torus family, a 0–1 ratio on a sphere and an inverted
+    /// ±1 taper on the box family. The decimals are [`Self::decimals`], so a
+    /// step shows what a re-sync would.
+    fn spin_step(self, prim_type: Option<PrimTypeUi>) -> Option<SpinStep> {
+        let decimals = self.decimals();
+        let step =
+            |increment: f64, min: f64, max: f64| Some(SpinStep::new(increment, min, max, decimals));
+        let circular = prim_type.is_some_and(PrimTypeUi::circular_path);
+        let twist = f64::from(if circular {
+            TWIST_CIRCULAR_MAX_DEG
+        } else {
+            TWIST_LINEAR_MAX_DEG
+        });
+        let twist_increment = if circular { 18.0 } else { 9.0 };
+        let (scale_min, scale_max_x, scale_max_y) = match prim_type {
+            Some(PrimTypeUi::Torus | PrimTypeUi::Tube | PrimTypeUi::Ring) => {
+                (f64::from(MIN_HOLE_SIZE), 1.0, f64::from(MAX_HOLE_SIZE_Y))
+            }
+            Some(PrimTypeUi::Sphere) => (0.0, 1.0, 1.0),
+            _box_family => (-1.0, 1.0, 1.0),
+        };
+        match self {
+            Self::Name
+            | Self::Description
+            | Self::LightRed
+            | Self::LightGreen
+            | Self::LightBlue => None,
+            Self::CutBegin => step(0.025, 0.0, 0.98),
+            Self::CutEnd => step(0.025, 0.02, 1.0),
+            Self::Hollow => step(5.0, 0.0, f64::from(MAX_HOLLOW) * 100.0),
+            Self::TwistBegin | Self::TwistEnd => step(twist_increment, -twist, twist),
+            Self::ScaleX => step(0.05, scale_min, scale_max_x),
+            Self::ScaleY => step(0.05, scale_min, scale_max_y),
+            Self::ShearX | Self::ShearY => step(0.05, -0.5, 0.5),
+            Self::AdvBegin => step(0.02, 0.0, 0.98),
+            Self::AdvEnd => step(0.02, 0.02, 1.0),
+            Self::TaperX | Self::TaperY | Self::RadiusOffset => step(0.05, -1.0, 1.0),
+            Self::Revolutions => step(0.1, 1.0, 4.0),
+            Self::Skew => step(0.05, -0.95, 0.95),
+            Self::FlexSoftness => step(1.0, 0.0, 3.0),
+            Self::FlexGravity => step(0.5, -10.0, 10.0),
+            Self::FlexFriction | Self::FlexWind | Self::FlexTension => step(0.5, 0.0, 10.0),
+            Self::FlexForceX | Self::FlexForceY | Self::FlexForceZ => step(0.01, -10.0, 10.0),
+            Self::LightIntensity => step(0.1, 0.0, 1.0),
+            Self::LightRadius => step(0.1, 0.0, f64::from(MAX_LIGHT_RADIUS)),
+            Self::LightFalloff => step(0.25, 0.0, 2.0),
+            Self::SpotFov => step(0.1, 0.0, 3.0),
+            Self::SpotFocus => step(0.5, -20.0, 20.0),
+            Self::SpotAmbiance => step(0.05, 0.0, 1.0),
+        }
+    }
+
     /// The gate guarding this field.
     const fn gate(self) -> ParamGate {
         match self.family() {
@@ -913,21 +974,23 @@ fn spawn_param_field(
 ) -> Entity {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
-    let entity = spawn_text_input(
-        commands,
-        parent,
-        &TextInputSpec {
-            font_size,
-            width_glyphs,
-            tab_index: index,
-            max_characters: match field {
-                ParamField::Name => Some(MAX_NAME_CHARS),
-                ParamField::Description => Some(MAX_DESCRIPTION_CHARS),
-                _numeric => None,
-            },
-            ..TextInputSpec::new(element, field.input_kind())
+    let input = TextInputSpec {
+        font_size,
+        width_glyphs,
+        tab_index: index,
+        max_characters: match field {
+            ParamField::Name => Some(MAX_NAME_CHARS),
+            ParamField::Description => Some(MAX_DESCRIPTION_CHARS),
+            _numeric => None,
         },
-    );
+        ..TextInputSpec::new(element, field.input_kind())
+    };
+    // A reference spinner is one here too; the sync re-ranges it per prim
+    // type ([`show_param_snapshot`]).
+    let entity = match field.spin_step(None) {
+        Some(step) => spawn_spinner(commands, parent, &SpinnerSpec { input, step }).field,
+        None => spawn_text_input(commands, parent, &input),
+    };
     commands
         .entity(entity)
         .insert((field, field.gate(), ShownText::default()));
@@ -2168,13 +2231,6 @@ type FeatureRowQuery<'w, 's> = Query<
 #[derive(Component, Debug, Default)]
 struct ShownText(String);
 
-/// Which parameter field held keyboard focus last frame, to commit on blur.
-#[derive(Resource, Debug, Default)]
-struct ParamFieldFocus {
-    /// The field entity focused last frame, if any.
-    last: Option<Entity>,
-}
-
 /// The plugin wiring the parameter tabs into the viewer. Registered by
 /// [`crate::edit_tool::EditToolPlugin`]'s startup chain (the pages must exist
 /// first).
@@ -2184,8 +2240,8 @@ pub struct EditParamsPlugin;
 impl Plugin for EditParamsPlugin {
     /// Register the snapshot / focus state and the sync + commit systems.
     fn build(&self, app: &mut App) {
+        crate::ui_spinner::ensure_spinner_widget(app);
         app.init_resource::<ShownSnapshot>()
-            .init_resource::<ParamFieldFocus>()
             // Registered here as well as by the picker's own plugin: the Set…
             // button writes one and `apply_group_picks` reads the other, and a
             // harness that stands up the build floater without the picker
@@ -2390,6 +2446,8 @@ struct ParamWidgets<'w, 's> {
     swap_labels: SwapLabelQuery<'w, 's>,
     /// The feature sub-sections.
     feature_rows: FeatureRowQuery<'w, 's>,
+    /// The fields' spinners, re-ranged per prim type.
+    spinners: Query<'w, 's, (&'static ParamField, &'static mut Spinner)>,
     /// The focused field, which a programmatic rewrite must leave alone.
     focus: Res<'w, InputFocus>,
     /// The font context a programmatic [`EditableText`] rewrite relays through.
@@ -2503,6 +2561,14 @@ fn show_param_snapshot(
         _no_prim => None,
     };
     let shape_editable = prim_type.is_some_and(PrimTypeUi::shape_editable);
+    // The ranges (and the twist's step) the reference re-sets per prim type.
+    for (field, mut spinner) in &mut widgets.spinners {
+        if let Some(step) = field.spin_step(prim_type)
+            && spinner.step() != step
+        {
+            spinner.set_step(step);
+        }
+    }
     let flexi_on = data.is_some_and(|data| data.extra.flexible.is_some());
     let light_on = data.is_some_and(|data| data.extra.light.is_some());
     let spot_on = light_on && data.is_some_and(|data| data.extra.light_image.is_some());
@@ -2843,53 +2909,83 @@ struct ParamCommit<'w> {
     commands: MessageWriter<'w, SlCommand>,
 }
 
-/// Commit parameter-field edits on `Enter` or focus loss, dispatching by the
-/// field's [`CommitFamily`] — name / description sends, or a full shape /
-/// extra-params rebuild from the displayed fields.
+/// Commit parameter-field edits on `Enter`, focus loss or a spinner step
+/// ([`FieldCommits`]), dispatching by the field's [`CommitFamily`] — name /
+/// description sends, or a full shape / extra-params rebuild from the
+/// displayed fields.
 fn commit_param_fields(
     state: Res<EditToolState>,
-    focus: Res<InputFocus>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut focus_track: ResMut<ParamFieldFocus>,
+    mut commits: FieldCommits,
     fields: Query<(Entity, &ParamField, &EditableText)>,
     mut shown_texts: Query<&mut ShownText>,
     mut commit_to: ParamCommit,
 ) {
     if !state.active {
-        focus_track.last = None;
+        commits.reset();
         return;
     }
-    let focused_field = focus.get().filter(|entity| fields.contains(*entity));
-    let enter =
-        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
-    let commit = if enter {
-        focused_field
-    } else if focus_track.last != focused_field {
-        focus_track.last.filter(|entity| fields.contains(*entity))
-    } else {
-        None
-    };
-    focus_track.last = focused_field;
-    let Some(entity) = commit else {
-        return;
-    };
-    let Ok((_entity, field, editor)) = fields.get(entity) else {
-        return;
-    };
+    for commit in commits.take(|entity| fields.contains(entity)) {
+        let Ok((_entity, &field, editor)) = fields.get(commit.field) else {
+            continue;
+        };
+        let text = commit.text(editor);
+        commit_param_field(
+            &PendingParamCommit {
+                entity: commit.field,
+                field,
+                text,
+                explicit: commit.is_explicit(),
+            },
+            &fields,
+            &mut shown_texts,
+            &mut commit_to,
+        );
+    }
+}
+
+/// One parameter field to commit: which, what it holds, and whether the
+/// commit was asked for (`Enter`, a step) rather than focus moving on.
+#[derive(Debug)]
+struct PendingParamCommit {
+    /// The field entity.
+    entity: Entity,
+    /// Which parameter it edits.
+    field: ParamField,
+    /// What it holds — typed, or what a step left.
+    text: String,
+    /// `Enter` or a step, which commit even an unchanged value.
+    explicit: bool,
+}
+
+/// Commit one parameter field — the body of [`commit_param_fields`]. The
+/// other fields a rebuild reads come from their editors; this one from
+/// `pending.text`.
+fn commit_param_field(
+    pending: &PendingParamCommit,
+    fields: &Query<(Entity, &ParamField, &EditableText)>,
+    shown_texts: &mut Query<&mut ShownText>,
+    commit_to: &mut ParamCommit,
+) {
+    let entity = pending.entity;
+    let field = &pending.field;
     let Some(primary_scoped) = commit_to.selection.primary().map(|primary| primary.scoped) else {
         return;
     };
-    let text = editor.value().to_string();
+    let text = pending.text.clone();
     // A blur commits an edit, not a focus that merely passed through.
     if let Ok(mut shown) = shown_texts.get_mut(entity) {
-        if !enter && shown.0 == text {
+        if !pending.explicit && shown.0 == text {
             return;
         }
         text.clone_into(&mut shown.0);
     }
 
-    // A helper reading any displayed field's parsed numeric value.
+    // A helper reading any displayed field's parsed numeric value — the
+    // committed one's from what it is committing.
     let field_value = |wanted: ParamField| -> Option<f32> {
+        if wanted == pending.field {
+            return parse_numeric(wanted.input_kind(), &pending.text);
+        }
         fields.iter().find_map(|(_entity, field, editor)| {
             (*field == wanted)
                 .then(|| parse_numeric(wanted.input_kind(), &editor.value().to_string()))

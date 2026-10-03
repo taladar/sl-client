@@ -284,7 +284,8 @@ impl Pursuit {
             return Ok(Decision::Wait(ActionabilityCheck::Enabled));
         }
         if self.intent.needs_editable() {
-            if node.role != Role::Textbox {
+            // A spin button is a number field: it is typed into like a text box.
+            if !matches!(node.role, Role::Textbox | Role::SpinButton) {
                 return Err(Box::new(AutomationError::NotActionable {
                     locator: self.locator.clone(),
                     check: ActionabilityCheck::Editable,

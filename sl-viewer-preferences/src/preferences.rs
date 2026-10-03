@@ -72,6 +72,7 @@ use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_slider::{SliderStyle, spawn_slider};
+use crate::ui_spinner::{SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabButton, TabPanel, TabPlacement, TabSpec, TabStrip, fill_tab_container,
     spawn_tab_container,
@@ -462,6 +463,52 @@ pub(crate) fn spawn_pref_slider(
         .insert((PrefSearchRow { label }, LabelledBy(label)));
     row
 }
+
+/// Spawn a searchable row holding a translated label and a settings-bound
+/// **spinner** — a number field with step arrows, the reference's
+/// `LLSpinCtrl` with a `control_name`: typing, the arrow keys and the arrows
+/// all write the setting, and the field follows it. Returns the row node (see
+/// `spawn_pref_checkbox`).
+pub(crate) fn spawn_pref_spinner(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    binding: SettingBinding,
+    kind: TextInputKind,
+    step: SpinStep,
+) -> Entity {
+    let row = commands
+        .spawn((
+            pref_row_node(),
+            Name::new(format!("preferences:row:{label_key}")),
+            ChildOf(parent),
+        ))
+        .id();
+    let label = spawn_row_label(commands, row, label_key);
+    let field = spawn_spinner(
+        commands,
+        row,
+        &SpinnerSpec {
+            input: TextInputSpec {
+                font_size: FONT,
+                width_glyphs: PREF_SPINNER_GLYPHS,
+                ..TextInputSpec::new(label_key, kind)
+            },
+            step,
+        },
+    )
+    .field;
+    // Seeded empty; the binding's sync pass writes the stored value in.
+    commands.entity(field).insert(binding);
+    // The spinner draws no caption: the row's label names it.
+    commands
+        .entity(row)
+        .insert((PrefSearchRow { label }, LabelledBy(label)));
+    row
+}
+
+/// A preference spinner's field width, in `"0"`-glyph advances.
+const PREF_SPINNER_GLYPHS: f32 = 8.0;
 
 /// Spawn a searchable row holding a translated label and a settings-bound
 /// **combo**: each `(label_key, value)` option pair maps one translated option

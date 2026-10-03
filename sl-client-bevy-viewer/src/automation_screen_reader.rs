@@ -147,6 +147,7 @@ pub(crate) mod tests {
                     | Role::Textbox
                     | Role::Combobox
                     | Role::Slider
+                    | Role::SpinButton
                     | Role::ColorWell
                     | Role::Trackball
                     | Role::Tab
@@ -205,7 +206,8 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    /// Every **shown** field and slider of `nodes` and their subtrees.
+    /// Every **shown** field, spin button and slider of `nodes` and their
+    /// subtrees.
     ///
     /// Shown ones only: a panel that swaps its rows by mode (the Texture tab's
     /// diffuse / normal / specular rows) may reuse a caption, and two rows
@@ -216,7 +218,9 @@ pub(crate) mod tests {
             if node.visibility == NodeVisibility::Hidden {
                 continue;
             }
-            if matches!(node.role, Role::Textbox | Role::Slider) && node.name.is_some() {
+            if matches!(node.role, Role::Textbox | Role::Slider | Role::SpinButton)
+                && node.name.is_some()
+            {
                 out.push(node);
             }
             value_controls(&node.children, out);

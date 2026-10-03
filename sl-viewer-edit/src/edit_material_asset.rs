@@ -25,8 +25,9 @@
 
 use crate::skin_palette::SkinPalette;
 use bevy::prelude::*;
+use bevy::text::EditableText;
 use bevy::ui::Checked;
-use bevy::ui_widgets::{Activate, Slider, SliderRange, SliderStep, SliderValue, ValueChange};
+use bevy::ui_widgets::{Activate, ValueChange};
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
@@ -43,9 +44,10 @@ use crate::materials::MaterialManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
-use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, spawn_slider};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, LabeledRowSpec, UiLabel};
+use crate::ui_spinner::{FieldCommits, SpinStep, SpinnerSpec, format_spin_value, spawn_spinner};
 use crate::ui_text::set_node_text;
+use crate::ui_text_input::{TextInputKind, TextInputSpec};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use sl_viewer_ui_core::skin::text_role;
 
@@ -55,28 +57,13 @@ const FONT: f32 = 13.0;
 /// The labelled rows' label-column width at [`FONT`], in logical pixels.
 const LABEL_WIDTH: f32 = 110.0;
 
-/// A factor slider's value-readout width at [`FONT`], in logical pixels.
-const READOUT_WIDTH: f32 = 34.0;
-
 /// A text column's width at `font_size`: `width` at [`FONT`], and in
-/// proportion above it, so a larger font's label or `0.00` readout stays
-/// inside its column. Still a fixed width at a given font size, so successive
-/// rows keep their controls aligned and a readout's slider does not jitter as
-/// the value changes.
+/// proportion above it, so a larger font's label stays inside its column.
+/// Still a fixed width at a given font size, so successive rows keep their
+/// controls aligned.
 fn column_width(width: f32, font_size: f32) -> f32 {
     width.max((font_size * width / FONT).ceil())
 }
-
-/// How a material factor's slider is drawn.
-const SLIDER: SliderStyle = SliderStyle {
-    track_width: 140.0,
-    track_height: 12.0,
-    border: 1.0,
-    border_color: CONTROL_BORDER,
-    track_fill: TRACK_FILL,
-    thumb_width: 9.0,
-    thumb_fill: THUMB_FILL,
-};
 
 /// The preview sphere pane's side length, in logical pixels.
 const PREVIEW_SIZE: f32 = 128.0;
@@ -86,12 +73,6 @@ const LABEL_COLOR: Color = SkinPalette::FALLBACK.text_primary;
 
 /// A control's border colour.
 const CONTROL_BORDER: Color = Color::srgba(0.34, 0.40, 0.52, 1.0);
-
-/// A slider track's fill.
-const TRACK_FILL: Color = Color::srgba(0.12, 0.13, 0.16, 1.0);
-
-/// A slider thumb's fill.
-const THUMB_FILL: Color = Color::srgb(0.72, 0.76, 0.84);
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
@@ -122,17 +103,8 @@ enum MatColorSlot {
     Emissive,
 }
 
-/// Which scalar factor a slider edits.
-#[derive(Component, Debug, Clone, Copy)]
-struct MatFactorSlider {
-    /// The factor this slider drives.
-    kind: MatFactor,
-    /// The value-readout label entity.
-    label: Entity,
-}
-
-/// A scalar material factor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A scalar material factor, on the spinner field that edits it.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 enum MatFactor {
     /// The metallic factor.
     Metallic,
@@ -141,6 +113,25 @@ enum MatFactor {
     /// The alpha cutoff (Mask mode).
     Cutoff,
 }
+
+impl MatFactor {
+    /// The spinner's element id — one per factor, so each is its own node.
+    const fn element(self) -> &'static str {
+        match self {
+            Self::Metallic => "material-metallic",
+            Self::Roughness => "material-roughness",
+            Self::Cutoff => "material-alpha-cutoff",
+        }
+    }
+}
+
+/// What one arrow step of a factor spinner does — the reference
+/// `panel_gltf_material.xml` metallic / roughness / alpha-cutoff factor
+/// spinners: a hundredth within 0–1, three decimals.
+const FACTOR_STEP: SpinStep = SpinStep::new(0.01, 0.0, 1.0, 3);
+
+/// A factor spinner's field width, in `"0"`-glyph advances.
+const FACTOR_FIELD_GLYPHS: f32 = 6.0;
 
 /// The alpha-mode cycle button.
 #[derive(Component, Debug, Clone, Copy)]
@@ -225,9 +216,7 @@ pub struct EditMaterialAssetPlugin;
 impl Plugin for EditMaterialAssetPlugin {
     /// Register the open message, state and systems; spawn the hidden floater.
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<SliderWidgetPlugin>() {
-            app.add_plugins(SliderWidgetPlugin);
-        }
+        crate::ui_spinner::ensure_spinner_widget(app);
         app.init_resource::<MatEditState>()
             .add_message::<OpenMaterialEditor>()
             .add_systems(
@@ -242,7 +231,7 @@ impl Plugin for EditMaterialAssetPlugin {
                     apply_mat_texture_picked,
                     apply_mat_color_picked,
                     drive_material_preview,
-                    sync_material_sliders,
+                    commit_material_factors,
                     report_material_save,
                 )
                     .chain(),
@@ -502,7 +491,7 @@ fn spawn_material_controls(
     tab = tab.saturating_add(1);
 
     // Metallic / roughness: two factor sliders + the packed texture.
-    spawn_factor_slider(
+    spawn_factor_spinner(
         commands,
         content,
         "Metallic",
@@ -511,7 +500,7 @@ fn spawn_material_controls(
         &mut tab,
         font_size,
     );
-    spawn_factor_slider(
+    spawn_factor_spinner(
         commands,
         content,
         "Roughness",
@@ -581,7 +570,7 @@ fn spawn_material_controls(
         &mut tab,
         font_size,
     );
-    spawn_factor_slider(
+    spawn_factor_spinner(
         commands,
         content,
         "Alpha Cutoff",
@@ -646,9 +635,9 @@ fn spawn_labeled_row(
     .row
 }
 
-/// Spawn a factor slider row (`0..=1`) at `font_size`, tagged with its
-/// [`MatFactor`].
-fn spawn_factor_slider(
+/// Spawn a factor spinner row (`0..=1`) at `font_size`, its field tagged with
+/// its [`MatFactor`].
+fn spawn_factor_spinner(
     commands: &mut Commands,
     parent: Entity,
     label: &str,
@@ -658,38 +647,22 @@ fn spawn_factor_slider(
     font_size: f32,
 ) {
     let row_entity = spawn_labeled_row(commands, parent, label, font_size);
-    let readout = commands
-        .spawn((
-            Text::new(format!("{value:.2}")),
-            UiFont::Sans.at(font_size),
-            text_role(LABEL_COLOR),
-            Node {
-                width: Val::Px(column_width(READOUT_WIDTH, font_size)),
-                flex_shrink: 0.0,
-                ..Default::default()
-            },
-            ChildOf(row_entity),
-        ))
-        .id();
-    let track = spawn_slider(
+    let field = spawn_spinner(
         commands,
         row_entity,
-        SLIDER,
-        *tab,
-        0.0,
-        (
-            Slider::default(),
-            SliderValue(value.clamp(0.0, 1.0)),
-            SliderRange::new(0.0, 1.0),
-            SliderStep(0.01),
-            MatFactorSlider {
-                kind,
-                label: readout,
+        &SpinnerSpec {
+            input: TextInputSpec {
+                initial: format_spin_value(f64::from(value.clamp(0.0, 1.0)), FACTOR_STEP.decimals),
+                font_size,
+                width_glyphs: FACTOR_FIELD_GLYPHS,
+                tab_index: *tab,
+                ..TextInputSpec::new(kind.element(), TextInputKind::Float)
             },
-            Name::new("material-factor-slider"),
-        ),
-    );
-    commands.entity(track).observe(on_mat_slider_change);
+            step: FACTOR_STEP,
+        },
+    )
+    .field;
+    commands.entity(field).insert(kind);
     *tab = tab.saturating_add(1);
 }
 
@@ -755,23 +728,33 @@ fn spawn_mat_button(
 // Edit handlers.
 // ---------------------------------------------------------------------------
 
-/// A factor slider drag: clamp, write back, record the edit, mark dirty.
-fn on_mat_slider_change(
-    change: On<ValueChange<f32>>,
-    sliders: Query<&MatFactorSlider>,
-    state: Option<ResMut<MatEditState>>,
-    mut commands: Commands,
+/// A factor spinner's commit — `Enter`, focus leaving it, or an arrow step
+/// ([`FieldCommits`]): clamp, record the edit, mark dirty. A field holding no
+/// number records nothing.
+fn commit_material_factors(
+    mut commits: FieldCommits,
+    fields: Query<(&MatFactor, &EditableText)>,
+    mut state: ResMut<MatEditState>,
 ) {
-    let Ok(info) = sliders.get(change.source) else {
+    let Some(edit) = state.active.as_mut() else {
+        commits.reset();
         return;
     };
-    let clamped = change.value.clamp(0.0, 1.0);
-    commands.entity(change.source).insert(SliderValue(clamped));
-    // Absent only in the gallery, whose specimen has no edit to record into.
-    if let Some(mut state) = state
-        && let Some(edit) = state.active.as_mut()
-    {
-        match info.kind {
+    for commit in commits.take(|entity| fields.contains(entity)) {
+        let Ok((kind, editor)) = fields.get(commit.field) else {
+            continue;
+        };
+        let Some(value) = commit
+            .text(editor)
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|value| value.is_finite())
+        else {
+            continue;
+        };
+        let clamped = value.clamp(0.0, 1.0);
+        match kind {
             MatFactor::Metallic => edit.edited.metallic_factor = clamped,
             MatFactor::Roughness => edit.edited.roughness_factor = clamped,
             MatFactor::Cutoff => edit.edited.alpha_cutoff = clamped,
@@ -910,22 +893,6 @@ fn drive_material_preview(
         *preview = MaterialPreview::Material(Box::new(edit.edited));
     }
     edit.dirty = false;
-}
-
-/// Keep each factor slider's **readout** in sync with its [`SliderValue`]. The
-/// thumb is `sl_viewer_ui_widgets::ui_slider`'s to place.
-fn sync_material_sliders(
-    sliders: Query<(&MatFactorSlider, &SliderValue)>,
-    mut texts: Query<&mut Text>,
-) {
-    for (info, value) in &sliders {
-        if let Ok(mut text) = texts.get_mut(info.label) {
-            let want = format!("{:.2}", value.0);
-            if text.0 != want {
-                text.0 = want;
-            }
-        }
-    }
 }
 
 /// Save (write the edited material back onto the item) or Revert, from a

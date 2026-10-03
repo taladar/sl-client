@@ -71,8 +71,9 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use crate::ui_spinner::{FieldCommits, SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_text::set_editor_text;
-use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::ui_text_input::{TextInputKind, TextInputSpec};
 use crate::ui_texture_picker::{
     MaterialSwatchValue, TextureSwatchValue, spawn_material_swatch, spawn_texture_swatch,
 };
@@ -211,6 +212,25 @@ impl LegacyField {
         }
     }
 
+    /// What one arrow step of this field does — the reference
+    /// `panel_tools_texture.xml` bumpy / shiny spinners and the
+    /// `glossiness` / `environment` / `maskcutoff` ones, at the decimals the
+    /// tab shows.
+    const fn spin_step(self) -> SpinStep {
+        match self {
+            Self::NormalRepeatU | Self::NormalRepeatV | Self::SpecRepeatU | Self::SpecRepeatV => {
+                SpinStep::new(0.1, -10000.0, 10000.0, 3)
+            }
+            Self::NormalOffsetU | Self::NormalOffsetV | Self::SpecOffsetU | Self::SpecOffsetV => {
+                SpinStep::new(0.1, -1.0, 1.0, 3)
+            }
+            Self::NormalRotation | Self::SpecRotation => SpinStep::new(1.0, -360.0, 360.0, 3),
+            Self::Glossiness | Self::Environment | Self::MaskCutoff => {
+                SpinStep::new(1.0, 0.0, 255.0, 0)
+            }
+        }
+    }
+
     /// Read the field's display value off a resolved legacy material.
     fn display_value(self, material: &LegacyMaterial) -> f32 {
         match self {
@@ -334,6 +354,17 @@ impl PbrField {
         }
     }
 
+    /// What one arrow step of this field does — Firestorm's
+    /// `panel_fs_tools_texture.xml` `gltfTexture*` spinners, at the decimals
+    /// the tab shows.
+    const fn spin_step(self) -> SpinStep {
+        match self {
+            Self::RepeatU | Self::RepeatV => SpinStep::new(0.1, -10000.0, 10000.0, 3),
+            Self::OffsetU | Self::OffsetV => SpinStep::new(0.1, -1.0, 1.0, 3),
+            Self::Rotation => SpinStep::new(1.0, -360.0, 360.0, 3),
+        }
+    }
+
     /// Read the field's display value off a channel transform.
     fn display_value(self, transform: &GltfTextureTransform) -> f32 {
         match self {
@@ -422,6 +453,10 @@ impl PbrScalarField {
             Self::AlphaCutoff => "build-pbr-alpha-cutoff",
         }
     }
+
+    /// What one arrow step of any factor field does — the reference
+    /// `panel_gltf_material.xml` factor spinners: a hundredth within 0–1.
+    const SPIN_STEP: SpinStep = SpinStep::new(0.01, 0.0, 1.0, 3);
 
     /// Read the field's display value off an effective material.
     const fn display_value(self, material: &GltfMaterial) -> f32 {
@@ -573,6 +608,7 @@ impl Plugin for EditMaterialPlugin {
     /// Run the material-channel sync + commit systems (the widgets are spawned by
     /// `spawn_material_channels`, called from the Texture-tab spawn).
     fn build(&self, app: &mut App) {
+        crate::ui_spinner::ensure_spinner_widget(app);
         // This crate's material commits report a refusal as a local-chat
         // notice, so the channel is registered by the crate that writes it.
         app.add_message::<LocalChatNotice>()
@@ -931,16 +967,20 @@ fn spawn_pbr_scalar_row(
     commands.entity(row).insert(show_when);
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
-    let entity = spawn_text_input(
+    let entity = spawn_spinner(
         commands,
         row,
-        &TextInputSpec {
-            font_size,
-            width_glyphs: MAT_FIELD_GLYPHS,
-            tab_index: index,
-            ..TextInputSpec::new(field.element(), TextInputKind::Float)
+        &SpinnerSpec {
+            input: TextInputSpec {
+                font_size,
+                width_glyphs: MAT_FIELD_GLYPHS,
+                tab_index: index,
+                ..TextInputSpec::new(field.element(), TextInputKind::Float)
+            },
+            step: PbrScalarField::SPIN_STEP,
         },
-    );
+    )
+    .field;
     commands.entity(entity).insert((field, MatControl));
 }
 
@@ -1024,16 +1064,20 @@ fn spawn_legacy_field_row(
     for &field in fields {
         let index = *tab_index;
         *tab_index = tab_index.saturating_add(1);
-        let entity = spawn_text_input(
+        let entity = spawn_spinner(
             commands,
             row_entity,
-            &TextInputSpec {
-                font_size,
-                width_glyphs: MAT_FIELD_GLYPHS,
-                tab_index: index,
-                ..TextInputSpec::new(field.element(), field.input_kind())
+            &SpinnerSpec {
+                input: TextInputSpec {
+                    font_size,
+                    width_glyphs: MAT_FIELD_GLYPHS,
+                    tab_index: index,
+                    ..TextInputSpec::new(field.element(), field.input_kind())
+                },
+                step: field.spin_step(),
             },
-        );
+        )
+        .field;
         commands.entity(entity).insert((field, MatControl));
         // One of a row's fields: named by the caption and its part.
         if let Some(part) = name_part(field.element()) {
@@ -1042,7 +1086,7 @@ fn spawn_legacy_field_row(
     }
 }
 
-/// Spawn a labelled PBR-transform display row (read-only fields).
+/// Spawn a labelled PBR channel-transform row.
 fn spawn_pbr_field_row(
     commands: &mut Commands,
     page: Entity,
@@ -1056,16 +1100,20 @@ fn spawn_pbr_field_row(
     for &field in fields {
         let index = *tab_index;
         *tab_index = tab_index.saturating_add(1);
-        let entity = spawn_text_input(
+        let entity = spawn_spinner(
             commands,
             row_entity,
-            &TextInputSpec {
-                font_size,
-                width_glyphs: MAT_FIELD_GLYPHS,
-                tab_index: index,
-                ..TextInputSpec::new(field.element(), TextInputKind::Float)
+            &SpinnerSpec {
+                input: TextInputSpec {
+                    font_size,
+                    width_glyphs: MAT_FIELD_GLYPHS,
+                    tab_index: index,
+                    ..TextInputSpec::new(field.element(), TextInputKind::Float)
+                },
+                step: field.spin_step(),
             },
-        );
+        )
+        .field;
         commands.entity(entity).insert((field, MatControl));
         // One of a row's fields: named by the caption and its part.
         if let Some(part) = name_part(field.element()) {
@@ -1770,47 +1818,34 @@ fn set_material_preview(
 // Commit: send edits.
 // ---------------------------------------------------------------------------
 
-/// Commit numeric legacy-material edits on `Enter` in a focused field or when
-/// focus leaves one: apply the one attribute to each selected face's material and
-/// send them over the `RenderMaterials` PUT.
+/// Commit numeric legacy-material edits on `Enter` in a focused field, when
+/// focus leaves one, or when its spinner steps it ([`FieldCommits`]): apply
+/// the one attribute to each selected face's material and send them over the
+/// `RenderMaterials` PUT.
 fn commit_legacy_fields(
     tool: Res<EditToolState>,
-    focus: Res<InputFocus>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut focus_track: Local<Option<Entity>>,
+    mut commits: FieldCommits,
     fields: Query<(Entity, &LegacyField, &EditableText)>,
     mut legacy: LegacyFaceEdit,
 ) {
     if !tool.active {
-        *focus_track = None;
+        commits.reset();
         return;
     }
-    let focused = focus.get().filter(|entity| fields.contains(*entity));
-    let enter =
-        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
-    let commit = if enter {
-        focused
-    } else if *focus_track != focused {
-        focus_track.filter(|entity| fields.contains(*entity))
-    } else {
-        None
-    };
-    *focus_track = focused;
-    let Some(entity) = commit else {
-        return;
-    };
-    let Ok((_entity, &field, editor)) = fields.get(entity) else {
-        return;
-    };
-    let Some(value) = parse_tex_value(field.input_kind(), &editor.value().to_string()) else {
-        return;
-    };
-    if !legacy.allowed() {
-        return;
+    for commit in commits.take(|entity| fields.contains(entity)) {
+        let Ok((_entity, &field, editor)) = fields.get(commit.field) else {
+            continue;
+        };
+        let Some(value) = parse_tex_value(field.input_kind(), &commit.text(editor)) else {
+            continue;
+        };
+        if !legacy.allowed() {
+            continue;
+        }
+        let edit = move |material: &mut LegacyMaterial| field.apply(material, value);
+        legacy.preview(edit);
+        legacy.commit(edit);
     }
-    let edit = move |material: &mut LegacyMaterial| field.apply(material, value);
-    legacy.preview(edit);
-    legacy.commit(edit);
 }
 
 /// Apply an alpha-mode combo pick to the selected faces' materials (previewed live
@@ -2348,46 +2383,39 @@ fn prim_faces_of_node(
     }
 }
 
-/// Commit a PBR channel transform edit on `Enter` in a focused field or when
-/// focus leaves one: amend each selected PBR face's override with the changed
-/// transform component and send it over `ModifyMaterialParams`. Only faces that
-/// already carry a render material are touched.
+/// Commit a PBR channel transform edit on `Enter` in a focused field, when
+/// focus leaves one, or when its spinner steps it ([`FieldCommits`]): amend
+/// each selected PBR face's override with the changed transform component and
+/// send it over `ModifyMaterialParams`. Only faces that already carry a render
+/// material are touched.
 fn commit_pbr_fields(
     tool: Res<EditToolState>,
     mode: Res<MatModeState>,
-    focus: Res<InputFocus>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut focus_track: Local<Option<Entity>>,
+    mut commits: FieldCommits,
     fields: Query<(Entity, &PbrField, &EditableText)>,
     mut pbr: PbrFaceEdit,
 ) {
     if !tool.active {
-        *focus_track = None;
+        commits.reset();
         return;
     }
-    let focused = focus.get().filter(|entity| fields.contains(*entity));
-    let enter =
-        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
-    let commit = if enter {
-        focused
-    } else if *focus_track != focused {
-        focus_track.filter(|entity| fields.contains(*entity))
-    } else {
-        None
-    };
-    *focus_track = focused;
-    let Some(entity) = commit else {
-        return;
-    };
-    let Ok((_entity, &field, editor)) = fields.get(entity) else {
-        return;
-    };
-    let Some(value) = parse_tex_value(TextInputKind::Float, &editor.value().to_string()) else {
-        return;
-    };
-    if !pbr.allowed() {
-        return;
+    for commit in commits.take(|entity| fields.contains(entity)) {
+        let Ok((_entity, &field, editor)) = fields.get(commit.field) else {
+            continue;
+        };
+        let Some(value) = parse_tex_value(TextInputKind::Float, &commit.text(editor)) else {
+            continue;
+        };
+        if pbr.allowed() {
+            commit_pbr_transform(field, value, &mode, &mut pbr);
+        }
     }
+}
+
+/// Amend every selected PBR face's override with `field` set to `value` on
+/// the channel `mode` shows, and send them — the body of
+/// [`commit_pbr_fields`] for one committed field.
+fn commit_pbr_transform(field: PbrField, value: f32, mode: &MatModeState, pbr: &mut PbrFaceEdit) {
     let slots = pbr_channel_slots(mode.pbr_type);
     let mut updates: Vec<MaterialOverrideUpdate> = Vec::new();
     for node in pbr.selection.iter() {
@@ -2624,44 +2652,29 @@ fn apply_pbr_alpha_change(
     }
 }
 
-/// Commit a PBR scalar factor edit (metallic / roughness / alpha cutoff) on Enter
-/// or blur via an override.
+/// Commit a PBR scalar factor edit (metallic / roughness / alpha cutoff) on
+/// `Enter`, blur or a spinner step ([`FieldCommits`]) via an override.
 fn commit_pbr_scalars(
     tool: Res<EditToolState>,
-    focus: Res<InputFocus>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut focus_track: Local<Option<Entity>>,
+    mut commits: FieldCommits,
     fields: Query<(Entity, &PbrScalarField, &EditableText)>,
     mut pbr: PbrFaceEdit,
 ) {
     if !tool.active {
-        *focus_track = None;
+        commits.reset();
         return;
     }
-    let focused = focus.get().filter(|entity| fields.contains(*entity));
-    let enter =
-        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
-    let commit = if enter {
-        focused
-    } else if *focus_track != focused {
-        focus_track.filter(|entity| fields.contains(*entity))
-    } else {
-        None
-    };
-    *focus_track = focused;
-    let Some(entity) = commit else {
-        return;
-    };
-    let Ok((_entity, &field, editor)) = fields.get(entity) else {
-        return;
-    };
-    let Some(value) = parse_tex_value(TextInputKind::Float, &editor.value().to_string()) else {
-        return;
-    };
-    if !pbr.allowed() {
-        return;
+    for commit in commits.take(|entity| fields.contains(entity)) {
+        let Ok((_entity, &field, editor)) = fields.get(commit.field) else {
+            continue;
+        };
+        let Some(value) = parse_tex_value(TextInputKind::Float, &commit.text(editor)) else {
+            continue;
+        };
+        if pbr.allowed() {
+            pbr.apply_override(|over| field.apply(over, value));
+        }
     }
-    pbr.apply_override(|over| field.apply(over, value));
 }
 
 /// Toggle the double-sided flag on the selected PBR faces (reads the primary

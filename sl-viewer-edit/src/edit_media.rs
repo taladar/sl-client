@@ -94,6 +94,7 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, SpawnedButton, UiLabel};
+use crate::ui_spinner::{SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, spawn_tab_container};
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
@@ -141,6 +142,11 @@ const ROW_HEIGHT: f32 = 20.0;
 /// The width of a URL field, in `"0"`-glyph advances — what fits a tab panel's
 /// capped, padded width (the field scrolls a longer URL).
 const URL_FIELD_GLYPHS: f32 = 28.0;
+
+/// What one arrow step of a media size field does — the reference
+/// `panel_media_settings_general.xml` `width_pixels` / `height_pixels`
+/// spinners: a pixel, within 0–2048.
+const MEDIA_SIZE_STEP: SpinStep = SpinStep::new(1.0, 0.0, 2048.0, 0);
 
 /// The width of a size field, in `"0"`-glyph advances.
 const SIZE_FIELD_GLYPHS: f32 = 6.0;
@@ -1528,17 +1534,23 @@ fn spawn_general_tab(
                       element: &'static str,
                       name_key: &'static str,
                       tab_index: &mut i32| {
-        let field = spawn_text_input(
+        // The reference's `width_pixels` / `height_pixels` spinners: a pixel
+        // a step, up to the largest media texture.
+        let field = spawn_spinner(
             commands,
             size_row,
-            &TextInputSpec {
-                font_size,
-                width_glyphs: SIZE_FIELD_GLYPHS,
-                tab_index: *tab_index,
-                name_key: Some(name_key),
-                ..TextInputSpec::new(element, TextInputKind::Integer)
+            &SpinnerSpec {
+                input: TextInputSpec {
+                    font_size,
+                    width_glyphs: SIZE_FIELD_GLYPHS,
+                    tab_index: *tab_index,
+                    name_key: Some(name_key),
+                    ..TextInputSpec::new(element, TextInputKind::Integer)
+                },
+                step: MEDIA_SIZE_STEP,
             },
-        );
+        )
+        .field;
         *tab_index = tab_index.saturating_add(1);
         field
     };

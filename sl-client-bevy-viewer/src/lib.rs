@@ -401,6 +401,7 @@ pub(crate) use sl_viewer_media::web_floater;
 pub(crate) use sl_viewer_pickers::ui_texture_picker;
 pub(crate) use sl_viewer_ui_core::ui_text;
 pub(crate) use sl_viewer_ui_core::virtual_list;
+pub(crate) use sl_viewer_ui_widgets::ui_spinner;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world_scene::underwater_fog;
 pub(crate) use sl_viewer_world_scene::viewer_camera;

@@ -61,9 +61,10 @@ use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use crate::ui_spinner::{FieldCommits, SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_text::set_editor_text;
-use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
+use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::EditToolState;
@@ -206,6 +207,19 @@ impl TexField {
         match self {
             Self::Transparency => TextInputKind::Integer,
             _float => TextInputKind::Float,
+        }
+    }
+
+    /// What one arrow step of this field does — the reference
+    /// `panel_tools_texture.xml` spinners (`ColorTrans`, `glow`, `TexScaleU/V`,
+    /// `TexOffsetU/V`, `TexRot`), at the decimals [`format_tex_value`] shows.
+    const fn spin_step(self) -> SpinStep {
+        match self {
+            Self::Transparency => SpinStep::new(2.0, 0.0, 100.0, 0),
+            Self::Glow => SpinStep::new(0.1, 0.0, 1.0, 3),
+            Self::RepeatU | Self::RepeatV => SpinStep::new(0.1, -10000.0, 10000.0, 3),
+            Self::OffsetU | Self::OffsetV => SpinStep::new(0.1, -1.0, 1.0, 3),
+            Self::Rotation => SpinStep::new(1.0, -360.0, 360.0, 3),
         }
     }
 
@@ -461,13 +475,6 @@ struct TexShownSnapshot {
     enabled: Option<bool>,
 }
 
-/// Which Texture-tab field held focus last frame, to commit on blur.
-#[derive(Resource, Debug, Default)]
-struct TexFieldFocus {
-    /// The field entity focused last frame, if any.
-    last: Option<Entity>,
-}
-
 /// The plugin wiring the Texture tab into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EditTexturePlugin;
@@ -480,8 +487,8 @@ impl Plugin for EditTexturePlugin {
         if !app.is_plugin_added::<crate::edit_media::EditMediaPlugin>() {
             app.add_plugins(crate::edit_media::EditMediaPlugin);
         }
+        crate::ui_spinner::ensure_spinner_widget(app);
         app.init_resource::<TexShownSnapshot>()
-            .init_resource::<TexFieldFocus>()
             .init_resource::<TexturePreview>()
             .init_resource::<MatModeState>()
             .init_resource::<MatModeSelected>()
@@ -1003,16 +1010,20 @@ fn spawn_tex_field(
 ) {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);
-    let entity = spawn_text_input(
+    let entity = spawn_spinner(
         commands,
         parent,
-        &TextInputSpec {
-            font_size,
-            width_glyphs: TEX_FIELD_GLYPHS,
-            tab_index: index,
-            ..TextInputSpec::new(field.element(), field.input_kind())
+        &SpinnerSpec {
+            input: TextInputSpec {
+                font_size,
+                width_glyphs: TEX_FIELD_GLYPHS,
+                tab_index: index,
+                ..TextInputSpec::new(field.element(), field.input_kind())
+            },
+            step: field.spin_step(),
         },
-    );
+    )
+    .field;
     commands.entity(entity).insert((field, TexControl));
     // One of a row's fields: named by the caption and its part.
     if let Some(part) = name_part(field.element()) {
@@ -1562,44 +1573,30 @@ fn format_tex_value(field: TexField, value: f32) -> String {
     }
 }
 
-/// Commit numeric Texture-tab edits: on `Enter` in a focused field or when focus
-/// leaves one, apply the one attribute to the selected faces and send the
-/// modified entry.
+/// Commit numeric Texture-tab edits: on `Enter` in a focused field, when focus
+/// leaves one, or when its spinner steps it ([`FieldCommits`]), apply the one
+/// attribute to the selected faces and send the modified entry.
 fn commit_texture_fields(
     tool: Res<EditToolState>,
-    focus: Res<InputFocus>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut focus_track: ResMut<TexFieldFocus>,
+    mut commits: FieldCommits,
     fields: Query<(Entity, &TexField, &EditableText)>,
     mut tex: TexFaceEdit,
 ) {
     if !tool.active {
-        focus_track.last = None;
+        commits.reset();
         return;
     }
-    let focused = focus.get().filter(|entity| fields.contains(*entity));
-    let enter =
-        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
-    let commit = if enter {
-        focused
-    } else if focus_track.last != focused {
-        focus_track.last.filter(|entity| fields.contains(*entity))
-    } else {
-        None
-    };
-    focus_track.last = focused;
-    let Some(entity) = commit else {
-        return;
-    };
-    let Ok((_entity, &field, editor)) = fields.get(entity) else {
-        return;
-    };
-    let Some(value) = parse_tex_value(field.input_kind(), &editor.value().to_string()) else {
-        return;
-    };
-    tex.apply(|face| {
-        field.apply(face, value);
-    });
+    for commit in commits.take(|entity| fields.contains(entity)) {
+        let Ok((_entity, &field, editor)) = fields.get(commit.field) else {
+            continue;
+        };
+        let Some(value) = parse_tex_value(field.input_kind(), &commit.text(editor)) else {
+            continue;
+        };
+        tex.apply(|face| {
+            field.apply(face, value);
+        });
+    }
 }
 
 /// Flip a Texture-tab toggle on the selected faces.

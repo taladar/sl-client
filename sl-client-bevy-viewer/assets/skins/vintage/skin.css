@@ -195,6 +195,15 @@
   --scrollbar-arrow-bg-hover: #747474;
   --scrollbar-arrow-bg-pressed: #5a5a5a;
   --scrollbar-arrow: #c1c1c1;
+  /* A spinner's step arrows: face, hover, pressed and greyed face, the glyph
+   * and its greyed colour, and the line around the pair. */
+  --spinner-arrow-bg: #686868;
+  --spinner-arrow-bg-hover: #747474;
+  --spinner-arrow-bg-pressed: #5a5a5a;
+  --spinner-arrow-bg-disabled: #414346;
+  --spinner-arrow: #c1c1c1;
+  --spinner-arrow-disabled: #8c90c2;
+  --spinner-arrow-border: #2d2e2f;
   --tab-scroll-bg: #686868;
   --tab-scroll-bg-hover: #555555;
   --tab-scroll-bg-pressed: #2b2b2b;
@@ -471,6 +480,29 @@
 
 .sk-scrollbar-arrow:active {
   -bevy-image: url("skins/vintage/widgets/scroll-arrow-pressed.png");
+}
+
+/* A spinner's step arrows: the same grey step buttons as the scrollbar's (the
+ * reference's Stepper_Up / Stepper_Down are cut from the same art). A greyed
+ * one keeps the resting face and greys its glyph (`--spinner-arrow-disabled`). */
+.sk-spinner-arrow {
+  background-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow.png");
+  -bevy-image-mode: sliced(4px 4px 4px 4px);
+  -bevy-image-box: border-box;
+}
+
+.sk-spinner-arrow:hover {
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow-hover.png");
+}
+
+.sk-spinner-arrow:active {
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow-pressed.png");
+}
+
+.sk-spinner-arrow:disabled {
+  background-color: #00000000;
+  -bevy-image: url("skins/vintage/widgets/scroll-arrow.png");
 }
 
 /* A horizontal tab strip's overflow buttons: the same square grey step

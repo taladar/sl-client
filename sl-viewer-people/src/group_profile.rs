@@ -81,6 +81,7 @@ use crate::social::GroupsModel;
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
+use crate::ui_spinner::{SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
@@ -2060,17 +2061,25 @@ fn build_general_structure(
     ));
     if sig.can_edit_options {
         let fee_edit = spawn_labeled_row(commands, panel, "group-profile-join-fee");
-        ui.fee_field = Some(spawn_text_input(
-            commands,
-            fee_edit,
-            &TextInputSpec {
-                initial: profile.membership_fee.0.to_string(),
-                font_size: FONT_SIZE,
-                width_glyphs: 8.0,
-                tab_index: 3,
-                ..TextInputSpec::new("group-fee", TextInputKind::NonNegativeInteger)
-            },
-        ));
+        // The reference's `spin_enrollment_fee`: a Linden dollar a step, up
+        // to L$99 999.
+        ui.fee_field = Some(
+            spawn_spinner(
+                commands,
+                fee_edit,
+                &SpinnerSpec {
+                    input: TextInputSpec {
+                        initial: profile.membership_fee.0.to_string(),
+                        font_size: FONT_SIZE,
+                        width_glyphs: 8.0,
+                        tab_index: 3,
+                        ..TextInputSpec::new("group-fee", TextInputKind::NonNegativeInteger)
+                    },
+                    step: SpinStep::new(1.0, 0.0, 99_999.0, 0),
+                },
+            )
+            .field,
+        );
     }
     if sig.can_edit_identity || sig.can_edit_options {
         let save_row = spawn_button_row(commands, panel);

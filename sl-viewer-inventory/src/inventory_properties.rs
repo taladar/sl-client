@@ -195,6 +195,7 @@ impl Plugin for InventoryPropertiesPlugin {
     /// properties floater and both previews — opens per subject, so the open
     /// system spawns the instance and builds its content.
     fn build(&self, app: &mut App) {
+        crate::ui_spinner::ensure_spinner_widget(app);
         if !app.is_plugin_added::<UiTexturePlugin>() {
             app.add_plugins(UiTexturePlugin);
         }
@@ -700,20 +701,25 @@ fn spawn_properties_content(
     );
     commands.entity(type_button).insert(PropsToggle::SaleType);
     let price_field = gates.sale.then(|| {
-        let field = crate::ui_text_input::spawn_text_input(
+        // The reference's `Edit Cost` spinner: a Linden dollar a step.
+        let field = crate::ui_spinner::spawn_spinner(
             commands,
             sale_row,
-            &crate::ui_text_input::TextInputSpec {
-                initial: sale_price.0.to_string(),
-                font_size,
-                width_glyphs: 8.0,
-                tab_index: 4,
-                ..crate::ui_text_input::TextInputSpec::new(
-                    "item-properties-price",
-                    crate::ui_text_input::TextInputKind::NonNegativeInteger,
-                )
+            &crate::ui_spinner::SpinnerSpec {
+                input: crate::ui_text_input::TextInputSpec {
+                    initial: sale_price.0.to_string(),
+                    font_size,
+                    width_glyphs: 8.0,
+                    tab_index: 4,
+                    ..crate::ui_text_input::TextInputSpec::new(
+                        "item-properties-price",
+                        crate::ui_text_input::TextInputKind::NonNegativeInteger,
+                    )
+                },
+                step: PRICE_STEP,
             },
-        );
+        )
+        .field;
         // A price only means something for an item that is **for sale**, and the
         // commit path knows it: it applies a typed price only when a sale
         // exists. Showing a live field for a not-for-sale item therefore
@@ -946,55 +952,66 @@ fn sale_price_of(ui: &ItemPropertiesUi, fields: &Query<&EditableText>) -> Linden
         .map_or(LindenAmount(DEFAULT_SALE_PRICE), LindenAmount)
 }
 
+/// What one arrow step of the sale price does — the reference `Edit Cost`
+/// spinner: a Linden dollar, within L$0–999 999 999.
+const PRICE_STEP: crate::ui_spinner::SpinStep =
+    crate::ui_spinner::SpinStep::new(1.0, 0.0, 999_999_999.0, 0);
+
 /// `Enter` in the name / description / price fields commits the pending text
-/// edits as one `UpdateInventoryItem`.
+/// edits as one `UpdateInventoryItem` — and so does a step of the price
+/// spinner's arrows, which the reference commits as it steps.
 fn commit_text_edits(
     keyboard: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
+    mut steps: MessageReader<crate::ui_spinner::SpinnerStepped>,
     mut windows: Query<(&mut ItemPropertiesState, &ItemPropertiesUi)>,
     fields: Query<&EditableText>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    if !keyboard.just_pressed(KeyCode::Enter) {
-        return;
-    }
+    let enter = keyboard.just_pressed(KeyCode::Enter);
+    let stepped: Vec<Entity> = steps.read().map(|step| step.field).collect();
     // The commit belongs to the window whose field has the keyboard — with two
-    // items open, Enter must save the one being typed in.
+    // items open, Enter must save the one being typed in — or whose price was
+    // stepped.
     let focused = focus.get();
-    let Some((mut state, ui)) = windows.iter_mut().find(|(_state, ui)| {
-        [ui.name_field, ui.desc_field, ui.price_field]
-            .into_iter()
-            .flatten()
-            .any(|field| Some(field) == focused)
-    }) else {
-        return;
-    };
-    let Some(mut item) = state.item.clone() else {
-        return;
-    };
-    let read = |entity: Option<Entity>| {
-        entity
-            .and_then(|field| fields.get(field).ok())
-            .map(|field| field.value().to_string())
-    };
-    if let Some(name) = read(ui.name_field) {
-        let trimmed = name.trim();
-        if !trimmed.is_empty() {
-            trimmed.clone_into(&mut item.name);
+    for (mut state, ui) in &mut windows {
+        let typed = enter
+            && [ui.name_field, ui.desc_field, ui.price_field]
+                .into_iter()
+                .flatten()
+                .any(|field| Some(field) == focused);
+        let stepped_here = ui.price_field.is_some_and(|field| stepped.contains(&field));
+        if !(typed || stepped_here) {
+            continue;
         }
+        let Some(mut item) = state.item.clone() else {
+            continue;
+        };
+        let read = |entity: Option<Entity>| {
+            entity
+                .and_then(|field| fields.get(field).ok())
+                .map(|field| field.value().to_string())
+        };
+        if let Some(name) = read(ui.name_field) {
+            let trimmed = name.trim();
+            if !trimmed.is_empty() {
+                trimmed.clone_into(&mut item.name);
+            }
+        }
+        if let Some(description) = read(ui.desc_field) {
+            description.trim().clone_into(&mut item.description);
+        }
+        // A price is only editable while the item is offered (the field is
+        // read-only otherwise), so only then can there be a typed one to commit.
+        if item.sale.is_for_sale()
+            && let Some(price) =
+                read(ui.price_field).and_then(|price| price.trim().parse::<u64>().ok())
+        {
+            item.sale.price = LindenAmount(price);
+        }
+        send_item_update(&item, &mut commands);
+        state.item = Some(item);
     }
-    if let Some(description) = read(ui.desc_field) {
-        description.trim().clone_into(&mut item.description);
-    }
-    // A price is only editable while the item is offered (the field is
-    // read-only otherwise), so only then can there be a typed one to commit.
-    if item.sale.is_for_sale()
-        && let Some(price) = read(ui.price_field).and_then(|price| price.trim().parse::<u64>().ok())
-    {
-        item.sale.price = LindenAmount(price);
-    }
-    send_item_update(&item, &mut commands);
-    state.item = Some(item);
 }
 
 /// Send an `UpdateInventoryItem` for the (edited) item and refresh its

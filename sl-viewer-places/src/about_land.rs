@@ -99,6 +99,7 @@ use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel, spawn_button};
+use crate::ui_spinner::{SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
@@ -592,7 +593,7 @@ impl FieldText {
             media_url: url_text(draft.media_url.as_ref()),
             music_url: url_text(draft.music_url.as_ref()),
             pass_price: draft.pass_price.0.to_string(),
-            pass_hours: format!("{:.0}", draft.pass_hours),
+            pass_hours: format!("{:.2}", draft.pass_hours),
         }
     }
 }
@@ -1749,7 +1750,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> A
         font_size,
     );
     let price_row = spawn_labeled_row(commands, panel, "about-land-pass-price", font_size);
-    handles.pass_price_field = Some(spawn_edit_field(
+    handles.pass_price_field = Some(spawn_edit_spinner(
         commands,
         price_row,
         EditFieldShape {
@@ -1759,10 +1760,11 @@ fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> A
             tab_index: 2,
             max_characters: 8,
         },
+        PASS_PRICE_STEP,
         font_size,
     ));
     let hours_row = spawn_labeled_row(commands, panel, "about-land-pass-hours", font_size);
-    handles.pass_hours_field = Some(spawn_edit_field(
+    handles.pass_hours_field = Some(spawn_edit_spinner(
         commands,
         hours_row,
         EditFieldShape {
@@ -1772,6 +1774,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> A
             tab_index: 3,
             max_characters: 8,
         },
+        PASS_HOURS_STEP,
         font_size,
     ));
 
@@ -4316,6 +4319,50 @@ fn spawn_edit_field(
     commands.entity(field).insert(EditGate::Owner);
     field
 }
+
+/// An edit field with step arrows, gated on parcel ownership like
+/// [`spawn_edit_field`] — the reference's `LLSpinCtrl` rows. The arrows grey
+/// with the field's own gate.
+fn spawn_edit_spinner(
+    commands: &mut Commands,
+    parent: Entity,
+    shape: EditFieldShape,
+    step: SpinStep,
+    font_size: f32,
+) -> Entity {
+    let EditFieldShape {
+        element,
+        kind,
+        width_glyphs,
+        tab_index,
+        max_characters,
+    } = shape;
+    let field = spawn_spinner(
+        commands,
+        parent,
+        &SpinnerSpec {
+            input: TextInputSpec {
+                font_size,
+                width_glyphs,
+                tab_index,
+                max_characters: Some(max_characters),
+                ..TextInputSpec::new(element, kind)
+            },
+            step,
+        },
+    )
+    .field;
+    commands.entity(field).insert(EditGate::Owner);
+    field
+}
+
+/// What one arrow step of the pass price does — the reference `PriceSpin`: a
+/// Linden dollar, within L$1–500.
+const PASS_PRICE_STEP: SpinStep = SpinStep::new(1.0, 1.0, 500.0, 0);
+
+/// What one arrow step of the pass duration does — the reference `HoursSpin`:
+/// a quarter hour, within 0.01–24 hours.
+const PASS_HOURS_STEP: SpinStep = SpinStep::new(0.25, 0.01, 24.0, 2);
 
 /// A multi-line edit field, gated on parcel ownership.
 fn spawn_multiline_field(

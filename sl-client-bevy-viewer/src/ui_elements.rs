@@ -89,6 +89,13 @@ pub const ELEMENTS: &[UiElement] = &[
         spawn: crate::ui_text_input::spawn_unsigned_specimen,
     },
     UiElement {
+        id: "spinner",
+        summary: "The reusable spinner (`ui_spinner`): a numeric field with up / down step \
+                  arrows at its inline start — click to step, hold to repeat, the arrow keys \
+                  while focused, Alt / Ctrl / Shift for a coarser or finer step.",
+        spawn: crate::ui_spinner::spawn_spinner_specimen,
+    },
+    UiElement {
         id: "build-tools",
         summary: "The Build Tools window's live content (viewer-object-edit-floater-shell): the \
                   tool-mode radio group, the toggle rows, the grid unit and selection summary, \

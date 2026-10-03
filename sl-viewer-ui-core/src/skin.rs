@@ -722,6 +722,7 @@ const HOVER_CLASSES: &[&str] = &[
     LIST_ROW_CLASS,
     SCROLLBAR_THUMB_CLASS,
     SCROLLBAR_ARROW_CLASS,
+    SPINNER_ARROW_CLASS,
     TAB_SCROLL_BUTTON_CLASS,
 ];
 
@@ -796,6 +797,7 @@ const PRESS_CLASSES: &[&str] = &[
     TOOLBAR_BUTTON_CLASS,
     FLOATER_BUTTON_CLASS,
     SCROLLBAR_ARROW_CLASS,
+    SPINNER_ARROW_CLASS,
     TAB_SCROLL_BUTTON_CLASS,
 ];
 
@@ -1324,6 +1326,31 @@ pub const SCROLLBAR_ARROW_RIGHT_CLASS: &str = "sk-scrollbar-arrow-right";
 /// The CSS class on an arrow's glyph host, whose `::before` `content` is the
 /// arrow a skin draws (`--scrollbar-arrow`).
 pub const SCROLLBAR_ARROW_GLYPH_CLASS: &str = "sk-scrollbar-arrow-glyph";
+
+/// The CSS class on a spinner's root — the numeric field and its pair of step
+/// arrows, side by side (`ui_spinner`). Carries no paint of its own in the
+/// shipped skins; it is there for a skin that frames the whole control.
+pub const SPINNER_CLASS: &str = "sk-spinner";
+
+/// The CSS class on the column holding a spinner's two arrows
+/// (`--spinner-arrow-border`, the line between and around them).
+pub const SPINNER_ARROWS_CLASS: &str = "sk-spinner-arrows";
+
+/// The CSS class on both of a spinner's step arrows (`--spinner-arrow-bg`,
+/// `--spinner-arrow-bg-hover` under the pointer, `--spinner-arrow-bg-pressed`
+/// held down, `--spinner-arrow-bg-disabled` greyed with the field).
+pub const SPINNER_ARROW_CLASS: &str = "sk-spinner-arrow";
+
+/// The CSS class on the arrow that steps the value **up**, beside
+/// [`SPINNER_ARROW_CLASS`] — what the glyph rule selects the `▴` by.
+pub const SPINNER_ARROW_UP_CLASS: &str = "sk-spinner-arrow-up";
+
+/// The CSS class on the arrow that steps the value **down** — the `▾`.
+pub const SPINNER_ARROW_DOWN_CLASS: &str = "sk-spinner-arrow-down";
+
+/// The CSS class on a spinner arrow's glyph host, whose `::before` `content` is
+/// the arrow a skin draws (`--spinner-arrow`, `--spinner-arrow-disabled`).
+pub const SPINNER_ARROW_GLYPH_CLASS: &str = "sk-spinner-arrow-glyph";
 
 /// The CSS class the scaffold tags every editable text field with (R28), so the
 /// skin's caret / selection colour rule (`.sk-text-field`) and its any-focus

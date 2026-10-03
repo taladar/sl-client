@@ -41,24 +41,27 @@ on request from the UI's entities — the same tree the viewer hands AccessKit
 for screen readers. Each node has:
 
 - a **role** (`button`, `checkbox`, `textbox`, `combobox`, `slider`,
-  `colorwell`, `tab`, `menuitem`, `listitem`, `treeitem`, `window`, `text`,
-  `image`, `document`, …), from a widget's `Semantic` component or inferred
-  from the stock Bevy widgets;
+  `spinbutton`, `colorwell`, `tab`, `menuitem`, `listitem`, `treeitem`,
+  `window`, `text`, `image`, `document`, …), from a widget's `Semantic`
+  component or inferred from the stock Bevy widgets;
 - a **name** as the user reads it, and its **Fluent key** where it came
   from a translation — the locale-independent way to address a node;
 - a **test id**: the entity's `Name` (`floater:build`,
   `build-pos-x:field`);
-- **states** (`disabled` — inherited from any ancestor, `checked`,
-  `selected`, `expanded`, `focused`, `hovered`, `read_only`), a **value** (a
-  field's text, a combo's choice, a slider's number, a colour well's
-  `#rrggbb`), a text node's **colour**, its **bounds** in logical pixels and
-  its **visibility** (`visible`, `hidden`, `clipped`, `off_screen`,
-  `covered`).
+- **states** (`disabled` — inherited from any ancestor, `checked`, `selected`,
+  `expanded`, `focused`, `hovered`, `read_only`), a **value** (a field's text, a
+  combo's choice, a slider's or a spin button's number, a colour well's
+  `#rrggbb`), a text node's **colour**, its **bounds** in logical pixels and its
+  **visibility** (`visible`, `hidden`, `clipped`, `off_screen`, `covered`).
 
 A widget the model cannot infer says what it is with a `Semantic` on its
 root at spawn (`sl_viewer_ui_core::semantic`). A list row is named by its
 cells, not by a button inside it; a browser view is a `document` named by
-its page's title and valued by its address.
+its page's title and valued by its address. A numeric field with step
+arrows (`ui_spinner`) is a `spinbutton`: `fill` types into it like a
+`textbox`, and its two arrows are buttons beside it in the spinner's
+group (`{element}:spinner`), `{element}:up` and `{element}:down`, called
+"Increase" and "Decrease".
 
 ## Locators and selectors
 

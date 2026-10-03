@@ -50,6 +50,7 @@ use crate::skin_palette::SkinPalette;
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
+use bevy::text::EditableText;
 use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::{
     Activate, Button, Slider, SliderRange, SliderStep, SliderValue, ValueChange,
@@ -83,9 +84,11 @@ use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_slider::{SliderStyle, spawn_slider};
 use crate::ui_spawn::{self, UiLabel};
+use crate::ui_spinner::{SpinStep, Spinner, SpinnerSpec, format_spin_value, spawn_spinner};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, fill_tab_container, spawn_tab_container,
 };
+use crate::ui_text_input::{TextInputKind, TextInputSpec};
 use crate::world_api::rlv::{RlvSession, can_change_environment};
 
 /// The stable floater id: its geometry-persistence key, its menu-toggle handle,
@@ -137,7 +140,8 @@ const BUTTON_FILL: Color = Color::srgb(0.16, 0.17, 0.2);
 enum PhotoControl {
     /// A boolean setting, as a checkbox.
     Check,
-    /// A numeric setting, as a slider with a trailing readout.
+    /// A numeric setting, as a slider with a trailing readout — or, where the
+    /// reference pairs the slider with a spinner, with that spinner instead.
     Slider {
         /// The slider's inclusive minimum.
         min: f32,
@@ -147,6 +151,10 @@ enum PhotoControl {
         step: f32,
         /// Whether the readout shows whole numbers.
         integer: bool,
+        /// The reference's spinner beside the slider (its `floater_phototools`
+        /// `S_*` spinners), which replaces the readout — `None` for a row whose
+        /// reference slider shows its value as text.
+        spin: Option<SpinStep>,
     },
     /// An enumerated setting, as a combo over a **shared** option list — a
     /// function rather than a literal so the Preferences graphics tab and this
@@ -282,6 +290,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                         max: 4.0,
                         step: 1.0,
                         integer: true,
+                        spin: None,
                     },
                 },
             ],
@@ -314,6 +323,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: 1.0,
                             step: crate::preferences_graphics::TONEMAP_MIX_STEP,
                             integer: false,
+                            spin: Some(SpinStep::new(0.001, 0.0, 1.0, 3)),
                         },
                     },
                     PhotoRow {
@@ -326,6 +336,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: crate::preferences_graphics::EXPOSURE_MAX,
                             step: crate::preferences_graphics::EXPOSURE_STEP,
                             integer: false,
+                            spin: Some(SpinStep::new(0.01, 0.0, 10.0, 2)),
                         },
                     },
                     PhotoRow {
@@ -364,6 +375,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: crate::preferences_graphics::GLOW_STRENGTH_MAX,
                             step: crate::preferences_graphics::GLOW_STRENGTH_STEP,
                             integer: false,
+                            spin: Some(SpinStep::new(0.000_01, 0.0, 10.0, 5)),
                         },
                     },
                     PhotoRow {
@@ -376,6 +388,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: crate::preferences_graphics::GLOW_WIDTH_MAX,
                             step: crate::preferences_graphics::GLOW_WIDTH_STEP,
                             integer: false,
+                            spin: Some(SpinStep::new(0.001, 0.0, 5000.0, 3)),
                         },
                     },
                     PhotoRow {
@@ -388,6 +401,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: crate::preferences_graphics::GLOW_ITERATIONS_MAX,
                             step: 1.0,
                             integer: true,
+                            spin: Some(SpinStep::new(1.0, 0.0, 500.0, 0)),
                         },
                     },
                 ],
@@ -419,6 +433,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: 1024.0,
                             step: 8.0,
                             integer: true,
+                            spin: Some(SpinStep::new(8.0, 32.0, 1024.0, 0)),
                         },
                     },
                     PhotoRow {
@@ -431,6 +446,10 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: crate::render_priority::LOD_FACTOR_MAX,
                             step: crate::preferences_graphics::LOD_FACTOR_STEP,
                             integer: false,
+                            // The reference shows no decimals, but the factor
+                            // is fractional (1.125): three keep a step from
+                            // rounding it to a whole number.
+                            spin: Some(SpinStep::new(1.0, 0.0, 8.0, 3)),
                         },
                     },
                     PhotoRow {
@@ -443,6 +462,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: 8192.0,
                             step: 256.0,
                             integer: true,
+                            spin: Some(SpinStep::new(1.0, 0.0, 10_000.0, 0)),
                         },
                     },
                 ],
@@ -460,6 +480,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: crate::avatar_complexity::MAX_COMPLEXITY_SLIDER_MAX,
                             step: crate::avatar_complexity::MAX_COMPLEXITY_SLIDER_STEP,
                             integer: true,
+                            spin: None,
                         },
                     },
                     PhotoRow {
@@ -509,6 +530,7 @@ static PHOTO_TABS: &[PhotoTab] = &[
                             max: crate::preferences_graphics::FPS_LIMIT_MAX,
                             step: crate::preferences_graphics::FPS_LIMIT_STEP,
                             integer: true,
+                            spin: None,
                         },
                     },
                 ],
@@ -1304,7 +1326,19 @@ fn spawn_row(commands: &mut Commands, parent: Entity, row_def: &PhotoRow) {
             max,
             step,
             integer,
-        } => spawn_slider_row(commands, parent, row_def, min, max, step, integer),
+            spin,
+        } => spawn_slider_row(
+            commands,
+            parent,
+            row_def,
+            SliderShape {
+                min,
+                max,
+                step,
+                integer,
+                spin,
+            },
+        ),
         PhotoControl::Combo(options) => {
             spawn_combo_row(commands, parent, row_def, &options(), false);
         }
@@ -1369,16 +1403,41 @@ fn spawn_check_row(commands: &mut Commands, parent: Entity, row_def: &PhotoRow) 
         .insert(bound_checkbox(row_binding(row_def)));
 }
 
-/// Spawn a slider row with its trailing readout.
+/// What a slider row draws: its range and step, how its readout shows the
+/// value, and the reference spinner that takes the readout's place.
+#[derive(Debug, Clone, Copy)]
+struct SliderShape {
+    /// The slider's inclusive minimum.
+    min: f32,
+    /// The slider's inclusive maximum.
+    max: f32,
+    /// The slider's step.
+    step: f32,
+    /// Whether the readout shows whole numbers.
+    integer: bool,
+    /// The spinner beside the slider, in place of the readout.
+    spin: Option<SpinStep>,
+}
+
+/// A phototools spinner's field width, in `"0"`-glyph advances.
+const SPIN_FIELD_GLYPHS: f32 = 7.0;
+
+/// Spawn a slider row: the slider, then its readout — or the reference's
+/// spinner, bound to the same setting, so dragging, typing and stepping all
+/// move one value.
 fn spawn_slider_row(
     commands: &mut Commands,
     parent: Entity,
     row_def: &PhotoRow,
-    min: f32,
-    max: f32,
-    step: f32,
-    integer: bool,
+    shape: SliderShape,
 ) {
+    let SliderShape {
+        min,
+        max,
+        step,
+        integer,
+        spin,
+    } = shape;
     let row_entity = spawn_row_shell(commands, parent, row_def);
     // A trailing group keeps the slider and its readout together, so the label
     // sits at the leading edge and the control at the trailing one.
@@ -1407,6 +1466,31 @@ fn spawn_slider_row(
     commands
         .entity(track)
         .insert(Name::new(format!("{}:slider", row_def.element)));
+    if let Some(spin) = spin {
+        let kind = if spin.decimals > 0 {
+            TextInputKind::Float
+        } else if spin.min < 0.0 {
+            TextInputKind::Integer
+        } else {
+            TextInputKind::NonNegativeInteger
+        };
+        let field = spawn_spinner(
+            commands,
+            group,
+            &SpinnerSpec {
+                input: TextInputSpec {
+                    font_size: FONT,
+                    width_glyphs: SPIN_FIELD_GLYPHS,
+                    ..TextInputSpec::new(row_def.element, kind)
+                },
+                step: spin,
+            },
+        )
+        .field;
+        // Seeded empty; the binding's sync pass writes the stored value in.
+        commands.entity(field).insert(row_binding(row_def));
+        return;
+    }
     // A right-aligning slot with a *minimum* width, so the readout column lines
     // up but a long value or a large UI font grows it rather than clipping. The
     // `Text` itself stays content-sized: a width on the leaf makes bevy_text
@@ -1698,11 +1782,12 @@ fn compose_aim_specimen(
 /// The specimen's values pass: each setting slider under `slot` at a sample
 /// value ([`crate::quick_preferences::sample_slider_value`]), where the
 /// binding layer's sync would put a stored one, and its readout through
-/// [`show_value`].
+/// [`show_value`] — or its spinner, as the binding would show it.
 fn compose_values_specimen(
     In(slot): In<Entity>,
     sliders: Query<(Entity, &SettingBinding, &SliderRange, &SliderStep), With<Slider>>,
     mut labels: Query<(Entity, &mut Text, &PhotoValueLabel)>,
+    mut spinners: Query<(Entity, &SettingBinding, &Spinner, &mut EditableText)>,
     parents: Query<&ChildOf>,
     mut commands: Commands,
 ) {
@@ -1726,6 +1811,15 @@ fn compose_values_specimen(
         }
         if let Some((_name, value)) = values.iter().find(|(name, _value)| *name == label.setting) {
             show_value(&mut text, label, *value);
+        }
+    }
+    for (entity, binding, spinner, mut editor) in &mut spinners {
+        if !under_slot(entity) {
+            continue;
+        }
+        if let Some((_name, value)) = values.iter().find(|(name, _value)| *name == binding.name()) {
+            let shown = format_spin_value(f64::from(*value), spinner.step().decimals);
+            editor.editor_mut().set_text(&shown);
         }
     }
 }

@@ -190,6 +190,9 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--scrollbar-arrows` | **a `display` value**: `none` for the plain bar both shipped skins draw, `flex` for the classic bar with a step arrow at each end (press to step a row, hold to repeat); the ends take their length out of the groove, never out of the content |
 | `--scrollbar-arrow-bg` / `--scrollbar-arrow-bg-hover` / `--scrollbar-arrow-bg-pressed` | an arrow end's face, at rest, under the pointer and held down |
 | `--scrollbar-arrow` | the arrow glyph's colour (the glyph itself is `content` — see the pseudo-elements note below) |
+| `--spinner-arrow-bg` / `--spinner-arrow-bg-hover` / `--spinner-arrow-bg-pressed` / `--spinner-arrow-bg-disabled` | a spinner step arrow's face, at rest, under the pointer, held down, and greyed with its field |
+| `--spinner-arrow` / `--spinner-arrow-disabled` | a spinner arrow glyph's colour, and its greyed colour |
+| `--spinner-arrow-border` | the line around and between a spinner's two arrows |
 | `--tab-scroll-bg` / `--tab-scroll-bg-hover` / `--tab-scroll-bg-pressed` | a horizontal tab strip's overflow buttons' face, at rest, under the pointer and held down — opaque, a control's face, so the buttons look the same on whatever panel the strip sits on |
 | `--tab-scroll-arrow` | their glyphs' colour |
 | `--tab-jump-buttons` | **a `display` value**: `flex` shows the jump-to-first and jump-to-last buttons beside back and on, as the reference does; `none` leaves only the single steps |
@@ -364,6 +367,10 @@ the stock look rather than to black.
 | `.sk-scrollbar-arrow` | either arrow end (`:hover`, `:active`), hidden unless `--scrollbar-arrows` shows it |
 | `.sk-scrollbar-arrow-up` / `.sk-scrollbar-arrow-down` / `.sk-scrollbar-arrow-left` / `.sk-scrollbar-arrow-right` | which end it is — a horizontal bar is physical, so its left and right never swap under RTL |
 | `.sk-scrollbar-arrow-glyph` | the empty text node inside an arrow end whose `::before` is the arrow |
+| `.sk-spinner-arrows` | the column holding a spinner's two arrows (its border is `--spinner-arrow-border`) |
+| `.sk-spinner-arrow` | either step arrow (`:hover`, `:active`, `:disabled` — greyed with its field) |
+| `.sk-spinner-arrow-up` / `.sk-spinner-arrow-down` | which arrow it is — up and down never mirror under RTL |
+| `.sk-spinner-arrow-glyph` | the empty text node inside an arrow whose `::before` is the arrow |
 | `.sk-divider` / `.sk-divider-grip` / `.sk-column-resizer` | a pane splitter, its nub, a table column's drag handle |
 | `.sk-list-row` / `.sk-table-row` | one row of a scroll list, plus its `:hover`; worn with `.sk-stripe` on every other row and `.sk-selected` when selected |
 | `.sk-field` | an editable text field's box, plus `:focus` and `:disabled` |

@@ -1297,6 +1297,7 @@ mod tests {
             Role::Textbox,
             Role::Combobox,
             Role::Slider,
+            Role::SpinButton,
             Role::ColorWell,
             Role::Trackball,
             Role::TabList,

@@ -66,8 +66,9 @@ use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use crate::ui_spinner::{SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_text::set_editor_text;
-use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::ui_text_input::{TextInputKind, TextInputSpec};
 use crate::world_api::AvatarState;
 use crate::world_map_math::{
     self, TileRaster, WorldMapView, tile_corner, tile_level, tile_span_regions,
@@ -80,6 +81,15 @@ use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The `element` tag the world map attributes its [`UiAction`]s to.
 pub(crate) const WORLD_MAP_ELEMENT: &str = "worldmap";
+
+/// What one arrow step of the X / Y teleport coordinate does — the reference
+/// `teleport_coordinate_x` / `_y` spinners: a metre, within the region the
+/// location names (a teleport target's horizontal range here).
+const COORD_HORIZONTAL_STEP: SpinStep = SpinStep::new(1.0, 0.0, 255.0, 0);
+
+/// What one arrow step of the Z teleport coordinate does — the reference
+/// `teleport_coordinate_z`: a metre, up to the height a location carries.
+const COORD_HEIGHT_STEP: SpinStep = SpinStep::new(1.0, 0.0, 4095.0, 0);
 
 /// The world-map floater's stable [`crate::floater::Floater::id`], the key the
 /// openers (toolbar, menu bar) look the panel up by.
@@ -701,7 +711,11 @@ fn spawn_world_map_content(
         ))
         .id();
     let mut coord_fields: Vec<Entity> = Vec::new();
-    for (label, initial) in [("X", "128"), ("Y", "128"), ("Z", "0")] {
+    for (label, initial, step) in [
+        ("X", "128", COORD_HORIZONTAL_STEP),
+        ("Y", "128", COORD_HORIZONTAL_STEP),
+        ("Z", "0", COORD_HEIGHT_STEP),
+    ] {
         // A pair wraps as one, so a label never ends a line its field starts.
         let pair = commands
             .spawn((
@@ -725,17 +739,21 @@ fn spawn_world_map_content(
             .id();
         // The axis letter names the field beside it.
         commands.entity(pair).insert(LabelledBy(caption));
-        let field = spawn_text_input(
+        let field = spawn_spinner(
             commands,
             pair,
-            &TextInputSpec {
-                font_size,
-                width_glyphs: 4.0,
-                initial: initial.to_owned(),
-                max_characters: Some(4),
-                ..TextInputSpec::new(WORLD_MAP_ELEMENT, TextInputKind::NonNegativeInteger)
+            &SpinnerSpec {
+                input: TextInputSpec {
+                    font_size,
+                    width_glyphs: 4.0,
+                    initial: initial.to_owned(),
+                    max_characters: Some(4),
+                    ..TextInputSpec::new(WORLD_MAP_ELEMENT, TextInputKind::NonNegativeInteger)
+                },
+                step,
             },
-        );
+        )
+        .field;
         coord_fields.push(field);
     }
     let (field_x, field_y, field_z) = match coord_fields.as_slice() {

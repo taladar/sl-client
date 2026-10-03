@@ -980,6 +980,9 @@ pub struct TextInputPlugin;
 
 impl Plugin for TextInputPlugin {
     fn build(&self, app: &mut App) {
+        // A spinner is a numeric field with arrows: every host with fields can
+        // spawn one, so every host gets its runtime half with them.
+        crate::ui_spinner::ensure_spinner_widget(app);
         app.init_resource::<OverwriteMode>();
         // `InputFocus` normally arrives with `bevy_input_focus`'s plugin, but
         // an app without it (the gallery) must not fail the caret systems'

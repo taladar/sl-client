@@ -10153,6 +10153,7 @@ dependencies = [
 name = "sl-viewer-ui-widgets"
 version = "0.1.0"
 dependencies = [
+ "accesskit",
  "bevy",
  "bevy_flair",
  "parley",

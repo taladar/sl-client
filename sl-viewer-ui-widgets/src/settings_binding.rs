@@ -42,10 +42,16 @@
 //!   [`ComboSelection`] to the option matching the store (an external value no
 //!   option covers leaves the combo untouched).
 //! - A [text input](crate::ui_text_input) (an [`EditableText`] entity) bound to
-//!   a [`SettingValue::String`]: edits made **while the field holds focus**
-//!   write live (matching the checkbox/slider live-edit model the preferences
-//!   snapshot relies on), and the sync pass seeds / follows external changes,
-//!   skipping the focused or IME-composing field so it never clobbers typing.
+//!   a [`SettingValue::String`], or to a numeric [`SettingValue::F32`] /
+//!   [`SettingValue::I32`] / [`SettingValue::U32`] (the text parsed in the
+//!   setting's own type; a half-typed number writes nothing): edits made
+//!   **while the field holds focus** write live (matching the checkbox/slider
+//!   live-edit model the preferences snapshot relies on), and the sync pass
+//!   seeds / follows external changes, skipping the focused or IME-composing
+//!   field so it never clobbers typing. A [spinner](crate::ui_spinner)'s field
+//!   binds the same way, and its arrows write the stepped value themselves
+//!   (`write_bound_number`) — a click on an arrow does not focus the field,
+//!   and the write must not wait a frame for a sync pass to undo it.
 //! - A [colour swatch](crate::ui_color_picker) carrying a [`SettingBinding`]
 //!   beside its [`ColorSwatchValue`], bound to a [`SettingValue::Color3`]:
 //!   every [`ColorPicked`] reply — the picker's live drag, OK, and the
@@ -73,6 +79,7 @@ use tracing::warn;
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue};
 use crate::ui_combo::{ComboChanged, ComboSelection};
 use crate::ui_slider::{SliderStyle, SliderWidgetPlugin, slider_thumb, slider_track};
+use crate::ui_spinner::Spinner;
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
@@ -343,9 +350,88 @@ fn write_bound_text_edits(
             continue;
         }
         shadow.0.clone_from(&value);
-        if let Some(settings) = settings.as_mut() {
-            settings.set(binding.scope(), binding.name(), SettingValue::String(value));
+        let Some(settings) = settings.as_mut() else {
+            continue;
+        };
+        // A numeric setting takes the text parsed in its own type; a string
+        // setting (or one not declared yet) takes the text as it is.
+        let kind = settings
+            .store()
+            .declaration(binding.name())
+            .map_or(SettingKind::String, |declaration| declaration.kind());
+        if let Some(parsed) = text_as_setting(&value, kind) {
+            settings.set(binding.scope(), binding.name(), parsed);
         }
+    }
+}
+
+/// A bound field's text as a value of the setting's `kind`: the text itself
+/// for a string, the number it spells for a numeric kind, and `None` for a
+/// text that is not (yet) a number of that kind — the lone `-` of a value
+/// being typed — or a kind no text field edits.
+fn text_as_setting(text: &str, kind: SettingKind) -> Option<SettingValue> {
+    let trimmed = text.trim();
+    match kind {
+        SettingKind::String => Some(SettingValue::String(text.to_owned())),
+        SettingKind::F32 => trimmed
+            .parse::<f32>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .map(SettingValue::F32),
+        SettingKind::I32 => trimmed.parse::<i32>().ok().map(SettingValue::I32),
+        SettingKind::U32 => trimmed.parse::<u32>().ok().map(SettingValue::U32),
+        _other => None,
+    }
+}
+
+/// A setting's value as the text a bound field shows: a string as it is, a
+/// number with `decimals` decimals when the field says how many (a spinner
+/// does), and in its shortest spelling otherwise. `None` for a kind no text
+/// field shows.
+fn setting_as_text(value: &SettingValue, decimals: Option<usize>) -> Option<String> {
+    let number = |value: f64| match decimals {
+        Some(decimals) => crate::ui_spinner::format_spin_value(value, decimals),
+        None => value.to_string(),
+    };
+    match value {
+        SettingValue::String(text) => Some(text.clone()),
+        SettingValue::F32(value) => Some(number(f64::from(*value))),
+        SettingValue::I32(value) => Some(number(f64::from(*value))),
+        SettingValue::U32(value) => Some(number(f64::from(*value))),
+        _other => None,
+    }
+}
+
+/// Write `value` to `binding`'s numeric setting, in the setting's declared
+/// type — what a bound [spinner](crate::ui_spinner)'s arrow does with the
+/// value it stepped to. A setting that is not declared, or not numeric, is
+/// left alone with a warning: the binding names something no number fits.
+pub(crate) fn write_bound_number(
+    settings: &mut ViewerSettings,
+    binding: &SettingBinding,
+    value: f64,
+) {
+    let Some(kind) = settings
+        .store()
+        .declaration(binding.name())
+        .map(|declaration| declaration.kind())
+    else {
+        warn!(
+            "settings_binding: spinner bound to undeclared setting {}",
+            binding.name()
+        );
+        return;
+    };
+    match text_as_setting(&value.to_string(), kind)
+        .or_else(|| text_as_setting(&format!("{value:.0}"), kind))
+    {
+        Some(setting) if kind != SettingKind::String => {
+            settings.set(binding.scope(), binding.name(), setting);
+        }
+        _not_numeric => warn!(
+            "settings_binding: spinner bound to non-numeric setting {} ({kind:?})",
+            binding.name()
+        ),
     }
 }
 
@@ -466,9 +552,9 @@ fn sync_bound_combos(
 /// effective value, skipping the focused or IME-composing field so an active
 /// edit is never clobbered. Also the seeding pass for a freshly-spawned field.
 #[expect(
-    clippy::cmp_owned,
-    reason = "the editor's SplitString has no borrow-free comparison against &str; the guard \
-              keeps the per-frame pass write-free when nothing changed"
+    clippy::type_complexity,
+    reason = "the per-field query joins the editor, its binding, the shadow this pass keeps and \
+              the spinner whose decimals a number is shown with; they move together"
 )]
 fn sync_bound_text_inputs(
     settings: Option<Res<ViewerSettings>>,
@@ -478,6 +564,7 @@ fn sync_bound_text_inputs(
         &mut EditableText,
         &SettingBinding,
         Option<&mut BoundTextShadow>,
+        Option<&Spinner>,
     )>,
     mut commands: Commands,
 ) {
@@ -485,21 +572,21 @@ fn sync_bound_text_inputs(
         return;
     };
     let focused = focus.as_ref().and_then(|focus| focus.get());
-    for (entity, mut editable, binding, shadow) in &mut fields {
+    for (entity, mut editable, binding, shadow, spinner) in &mut fields {
         if focused == Some(entity) || editable.is_composing() {
             continue;
         }
-        let Ok(want) = settings.store().get_str(binding.name()) else {
+        let Some(want) = settings.store().get(binding.name()).and_then(|value| {
+            setting_as_text(value, spinner.map(|spinner| spinner.step().decimals))
+        }) else {
             continue;
         };
         if editable.value().to_string() != want {
-            editable.editor_mut().set_text(want);
+            editable.editor_mut().set_text(&want);
             match shadow {
-                Some(mut shadow) => want.clone_into(&mut shadow.0),
+                Some(mut shadow) => shadow.0 = want,
                 None => {
-                    commands
-                        .entity(entity)
-                        .insert(BoundTextShadow(want.to_owned()));
+                    commands.entity(entity).insert(BoundTextShadow(want));
                 }
             }
         }
@@ -980,16 +1067,16 @@ mod tests {
     use bevy::prelude::*;
     use bevy::text::EditableText;
     use bevy::ui::Checked;
-    use bevy::ui_widgets::{SliderRange, SliderStep, SliderValue, ValueChange};
+    use bevy::ui_widgets::{Activate, SliderRange, SliderStep, SliderValue, ValueChange};
     use pretty_assertions::assert_eq;
-    use sl_settings::{Scope, SettingValue, SettingsStore};
+    use sl_settings::{Scope, SettingKind, SettingValue, SettingsStore};
 
     use super::{
         ComboBindingValues, SettingBinding, bound_checkbox, bound_slider, f32_to_i32, f32_to_u32,
-        on_bound_checkbox_change, on_bound_slider_change, setting_as_slider_value,
+        on_bound_checkbox_change, on_bound_slider_change, setting_as_slider_value, setting_as_text,
         slider_value_as_setting, sync_bound_checkboxes, sync_bound_color_swatches,
-        sync_bound_combos, sync_bound_sliders, sync_bound_text_inputs, write_bound_combo_changes,
-        write_bound_swatch_picks, write_bound_text_edits,
+        sync_bound_combos, sync_bound_sliders, sync_bound_text_inputs, text_as_setting,
+        write_bound_combo_changes, write_bound_swatch_picks, write_bound_text_edits,
     };
     use crate::ui_color_picker::{ColorPicked, ColorSwatchValue};
     use crate::ui_combo::{ComboChanged, ComboSelection};
@@ -1379,6 +1466,128 @@ mod tests {
             .get::<EditableText>()
             .map(|editable| editable.value().to_string());
         assert_eq!(after_blur.as_deref(), Some("external"));
+        Ok(())
+    }
+
+    /// A text field's text in a setting's own type, and a setting's value as
+    /// the text a field shows — with a spinner's decimals when it has them.
+    #[test]
+    fn numeric_text_converts_both_ways() {
+        assert_eq!(
+            text_as_setting(" 12 ", SettingKind::I32),
+            Some(SettingValue::I32(12))
+        );
+        assert_eq!(text_as_setting("-", SettingKind::I32), None, "half typed");
+        assert_eq!(text_as_setting("-1", SettingKind::U32), None, "no sign");
+        assert_eq!(
+            text_as_setting("0.5", SettingKind::F32),
+            Some(SettingValue::F32(0.5))
+        );
+        assert_eq!(
+            text_as_setting("x", SettingKind::String),
+            Some(SettingValue::String("x".to_owned()))
+        );
+        assert_eq!(
+            setting_as_text(&SettingValue::F32(0.5), Some(3)).as_deref(),
+            Some("0.500")
+        );
+        assert_eq!(
+            setting_as_text(&SettingValue::I32(-1), None).as_deref(),
+            Some("-1")
+        );
+        assert_eq!(setting_as_text(&SettingValue::Bool(true), None), None);
+    }
+
+    /// Register the integer setting the numeric-field tests use.
+    fn register_days(store: &mut SettingsStore) {
+        store
+            .register("Days", SettingValue::I32(7), "a day count")
+            .ok();
+    }
+
+    /// **A text field bound to an integer setting** is seeded with the number
+    /// and writes what is typed as one — and a half-typed value writes
+    /// nothing. (Until this, the binding wrote every edit as a string, which an
+    /// integer setting refused.)
+    #[test]
+    fn a_numeric_text_field_reads_and_writes_its_setting() -> Result<(), TestError> {
+        let mut app = app(register_days);
+        let field = app
+            .world_mut()
+            .spawn((EditableText::new(""), SettingBinding::account("Days")))
+            .id();
+        app.update();
+        let seeded = app
+            .world()
+            .get::<EditableText>(field)
+            .map(|editable| editable.value().to_string());
+        assert_eq!(seeded.as_deref(), Some("7"));
+
+        app.world_mut()
+            .insert_resource(InputFocus::from_entity(field));
+        for (typed, stored) in [("12", 12), ("-", 12), ("-1", -1)] {
+            if let Some(mut editable) = app.world_mut().get_mut::<EditableText>(field) {
+                editable.editor_mut().set_text(typed);
+            }
+            app.update();
+            assert_eq!(
+                store(&app).get_i32("Days")?,
+                stored,
+                "after typing {typed:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// **A bound spinner's arrow writes its setting**, with the step and
+    /// without the field ever taking focus — an arrow click does not focus it.
+    #[test]
+    fn a_bound_spinner_step_writes_its_setting() -> Result<(), TestError> {
+        let mut app = app(register_days);
+        app.add_plugins(crate::ui_spinner::SpinnerPlugin);
+        let root = app.world_mut().spawn(Node::default()).id();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let parts = {
+            let mut commands = Commands::new(&mut queue, app.world());
+            crate::ui_spinner::spawn_spinner(
+                &mut commands,
+                root,
+                &crate::ui_spinner::SpinnerSpec {
+                    input: crate::ui_text_input::TextInputSpec::new(
+                        "days",
+                        crate::ui_text_input::TextInputKind::Integer,
+                    ),
+                    step: crate::ui_spinner::SpinStep::new(1.0, -1.0, 100.0, 0),
+                },
+            )
+        };
+        queue.apply(app.world_mut());
+        app.world_mut()
+            .entity_mut(parts.field)
+            .insert(SettingBinding::account("Days"));
+        app.update();
+        app.update();
+
+        app.world_mut().trigger(Activate {
+            entity: parts.up,
+            button: Some(PointerButton::Primary),
+        });
+        app.update();
+        assert_eq!(store(&app).get_i32("Days")?, 8, "one step up");
+        let shown = app
+            .world()
+            .get::<EditableText>(parts.field)
+            .map(|editable| editable.value().to_string());
+        assert_eq!(shown.as_deref(), Some("8"), "and the field agrees");
+
+        for _ in 0..10_u8 {
+            app.world_mut().trigger(Activate {
+                entity: parts.down,
+                button: Some(PointerButton::Primary),
+            });
+            app.update();
+        }
+        assert_eq!(store(&app).get_i32("Days")?, -1, "the range's floor holds");
         Ok(())
     }
 

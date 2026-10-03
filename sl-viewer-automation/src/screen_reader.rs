@@ -22,8 +22,9 @@
 //!   whole tree. A windowless viewer has no adapter, so this does nothing
 //!   there — and nothing in the automation path reads from AccessKit.
 //! - **Numeric ranges come from Bevy.** `bevy_ui_widgets`' slider keeps its
-//!   own `AccessibilityNode` current with the range and step; the model has
-//!   the value, the node the bounds of it.
+//!   own `AccessibilityNode` current with the range and step, and the spinner
+//!   widget does the same on its field; the model has the value, the node the
+//!   bounds of it.
 //!
 //! Bevy's own per-frame tree push (`ManageAccessibilityUpdates`) is switched
 //! off by [`AccessKitBridgePlugin`]: two writers to one adapter would fight.
@@ -164,7 +165,8 @@ fn add_all(
         .collect()
 }
 
-/// A slider's range and step from the node Bevy keeps for it.
+/// A slider's or a spin button's range and step from the node Bevy keeps for
+/// it (the slider widget's own, or the one `ui_spinner` puts on its field).
 fn copy_range(from: &Node, to: &mut Node) {
     if let Some(min) = from.min_numeric_value() {
         to.set_min_numeric_value(min);
@@ -271,6 +273,7 @@ pub const fn accesskit_role(role: Role, named: bool) -> AkRole {
         Role::Textbox => AkRole::TextInput,
         Role::Combobox => AkRole::ComboBox,
         Role::Slider => AkRole::Slider,
+        Role::SpinButton => AkRole::SpinButton,
         Role::ColorWell => AkRole::ColorWell,
         Role::TabList => AkRole::TabList,
         Role::Tab => AkRole::Tab,

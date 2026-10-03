@@ -12,7 +12,8 @@
 //!   reads [`ColorPicked`] filtered to its own swatch.
 //! - The picker window carries the reference's whole surface: the **hue ×
 //!   saturation field** and the **luminance strip** beside it, R/G/B and H/S/L
-//!   sliders, a **hex** field, an **eyedropper**, the 32-entry **palette**, a
+//!   [spinners](crate::ui_spinner) (the reference's `rspin` … `lspin`), a
+//!   **hex** field, an **eyedropper**, the 32-entry **palette**, a
 //!   live preview swatch to compare against the original, the **Apply now**
 //!   toggle, and OK / Cancel.
 //!
@@ -86,9 +87,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::text::EditableText;
 use bevy::ui::Checked;
-use bevy::ui_widgets::{
-    Button, Slider, SliderRange, SliderStep, SliderThumb, SliderValue, ValueChange,
-};
+use bevy::ui_widgets::{Button, ValueChange};
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
@@ -98,39 +97,35 @@ use crate::floater::{
     FloaterSystems, KeyedFloaterOpen, KeyedFloaters, host_floater, picker_identity,
 };
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
+use crate::ui_spinner::{FieldCommits, SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use sl_settings::{Scope, SettingValue};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::semantic::{Role, Semantic};
 use sl_viewer_ui_core::skin::text_role;
-use sl_viewer_ui_core::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, row};
+use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column, row};
 use sl_viewer_ui_core::ui_font::UiFont;
 use sl_viewer_ui_core::ui_spawn::{self, ButtonSpec, UiLabel};
 
 /// The picker's numeric-channel maximum (an sRGB byte).
 const CHANNEL_MAX: f32 = 255.0;
 
-/// The hue slider's maximum, in degrees.
+/// The hue spinner's maximum, in degrees.
 const HUE_MAX: f32 = 360.0;
 
-/// The saturation and luminance sliders' maximum, in percent.
+/// The saturation and luminance spinners' maximum, in percent.
 const PERCENT_MAX: f32 = 100.0;
 
-/// The RGB slider track width, in logical pixels.
-const TRACK_WIDTH: f32 = 160.0;
-
-/// The RGB slider track height.
-const TRACK_HEIGHT: f32 = 14.0;
-
-/// The slider thumb width.
-const THUMB_WIDTH: f32 = 10.0;
+/// A channel spinner's field width, in `"0"`-glyph advances — room for
+/// `360`.
+const CHANNEL_FIELD_GLYPHS: f32 = 4.0;
 
 /// A preview / original swatch's side length.
 const SWATCH_SIZE: f32 = 40.0;
 
 /// The hue × saturation field's side, in logical pixels — the reference's
-/// `mRGBViewerImageWidth` at two thirds, which is what fits beside the sliders
+/// `mRGBViewerImageWidth` at two thirds, which is what fits beside the spinners
 /// without making the window taller than the screen's short edge.
 const FIELD_SIZE: f32 = 176.0;
 
@@ -177,12 +172,6 @@ const SWATCH_CLASS: &str = "sk-swatch";
 /// A palette cell's border while the current colour is dragged over it — the
 /// reference's complementary-colour highlight, as a single bright rim.
 const DROP_BORDER: Color = Color::srgb(1.0, 0.85, 0.35);
-
-/// A slider track's fill.
-const TRACK_FILL: Color = Color::srgba(0.12, 0.12, 0.14, 1.0);
-
-/// A slider thumb's fill.
-const THUMB_FILL: Color = Color::srgb(0.75, 0.78, 0.85);
 
 /// A button's background.
 const BUTTON_BACKGROUND: Color = Color::srgba(0.18, 0.18, 0.2, 1.0);
@@ -632,10 +621,8 @@ struct ColorPickerUi {
     strip: Entity,
     /// The marker on the strip.
     strip_marker: Entity,
-    /// The six sliders, R/G/B then H/S/L.
-    sliders: [Entity; 6],
-    /// The six channel value labels, in the same order.
-    labels: [Entity; 6],
+    /// The six channel spinners' fields, R/G/B then H/S/L.
+    fields: [Entity; 6],
     /// The hex field.
     hex: Entity,
     /// The 32 palette cells.
@@ -646,7 +633,7 @@ struct ColorPickerUi {
     apply_check: Entity,
 }
 
-/// Which value a slider drives.
+/// Which value a channel spinner edits.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 enum ChannelAxis {
     /// The sRGB red byte.
@@ -664,7 +651,7 @@ enum ChannelAxis {
 }
 
 impl ChannelAxis {
-    /// The Fluent key of what the axis's slider is called — the word the
+    /// The Fluent key of what the axis's spinner is called — the word the
     /// one-letter caption beside it abbreviates.
     const fn name_key(self) -> &'static str {
         match self {
@@ -687,7 +674,7 @@ impl ChannelAxis {
         Self::Luminance,
     ];
 
-    /// The one-letter label the slider row carries.
+    /// The one-letter label the spinner row carries.
     const fn label(self) -> &'static str {
         match self {
             Self::Red => "R",
@@ -699,7 +686,7 @@ impl ChannelAxis {
         }
     }
 
-    /// The slider's upper bound: a byte for the channels, degrees for hue, and
+    /// The spinner's upper bound: a byte for the channels, degrees for hue, and
     /// percent for saturation and luminance — the reference's spinner ranges.
     const fn maximum(self) -> f32 {
         match self {
@@ -707,6 +694,24 @@ impl ChannelAxis {
             Self::Hue => HUE_MAX,
             Self::Saturation | Self::Luminance => PERCENT_MAX,
         }
+    }
+
+    /// The spinner's element id, which names its field and its arrows.
+    const fn element(self) -> &'static str {
+        match self {
+            Self::Red => "color-picker-red",
+            Self::Green => "color-picker-green",
+            Self::Blue => "color-picker-blue",
+            Self::Hue => "color-picker-hue",
+            Self::Saturation => "color-picker-saturation",
+            Self::Luminance => "color-picker-luminance",
+        }
+    }
+
+    /// What one arrow step does — the reference's `rspin` … `lspin`: a whole
+    /// unit within the axis's range.
+    fn spin_step(self) -> SpinStep {
+        SpinStep::new(1.0, 0.0, f64::from(self.maximum()), 0)
     }
 
     /// Where this axis sits in [`ChannelAxis::ALL`], and so in the UI's arrays.
@@ -832,6 +837,7 @@ pub struct ColorPickerPlugin;
 impl Plugin for ColorPickerPlugin {
     /// Register the messages, state, floater, and systems.
     fn build(&self, app: &mut App) {
+        crate::ui_spinner::ensure_spinner_widget(app);
         app.add_message::<OpenColorPicker>()
             .add_message::<ColorPicked>()
             .init_resource::<ColorPalette>()
@@ -849,10 +855,11 @@ impl Plugin for ColorPickerPlugin {
             )
             .add_systems(
                 Update,
-                // Ordered, not a bare tuple: the visual sync reads the slider
-                // values the open handler seeds (and needs its commands applied
-                // to see them), so an unordered pair would leave the thumbs a
-                // frame behind the colour the picker opened on.
+                // Ordered, not a bare tuple: the visual sync reads the state the
+                // open handler seeds (and needs its commands applied to see
+                // it), so an unordered pair would leave the spinners a frame
+                // behind the colour the picker opened on — and a channel
+                // commit must land before the sync rewrites the fields.
                 (
                     // After the manager's command pass — see `FloaterSystems`:
                     // the click on a swatch also raises the window it landed
@@ -862,6 +869,7 @@ impl Plugin for ColorPickerPlugin {
                         .after(UiScaffoldSystems::SpawnRoot),
                     attach_field_image,
                     commit_hex_field,
+                    commit_color_channels,
                     drive_eyedropper,
                     emit_live_preview,
                     sync_color_picker_visual,
@@ -982,7 +990,7 @@ fn build_color_picker_content(handle: &FloaterHandle, commands: &mut Commands) -
 }
 
 /// Build the picker's body under `parent`: the field and strip beside the
-/// sliders, the hex row, the compare swatches, the palette and the reply row.
+/// channel spinners, the hex row, the compare swatches, the palette and the reply row.
 /// Returns the body's own root — what a host that is not a floater window hangs
 /// the state on — and the entities the sync writes.
 fn build_color_picker_body(commands: &mut Commands, parent: Entity) -> (Entity, ColorPickerUi) {
@@ -997,7 +1005,7 @@ fn build_color_picker_body(commands: &mut Commands, parent: Entity) -> (Entity, 
         ))
         .id();
 
-    // The aiming row: the field, the luminance strip, and the slider stack.
+    // The aiming row: the field, the luminance strip, and the spinner stack.
     let aiming = commands
         .spawn((
             Node {
@@ -1018,15 +1026,11 @@ fn build_color_picker_body(commands: &mut Commands, parent: Entity) -> (Entity, 
             ChildOf(aiming),
         ))
         .id();
-    let mut sliders = [Entity::PLACEHOLDER; 6];
-    let mut labels = [Entity::PLACEHOLDER; 6];
+    let mut fields = [Entity::PLACEHOLDER; 6];
     for axis in ChannelAxis::ALL {
-        let (slider, label) = spawn_channel_row(commands, stack, axis);
-        if let Some(slot) = sliders.get_mut(axis.slot()) {
-            *slot = slider;
-        }
-        if let Some(slot) = labels.get_mut(axis.slot()) {
-            *slot = label;
+        let field = spawn_channel_row(commands, stack, axis);
+        if let Some(slot) = fields.get_mut(axis.slot()) {
+            *slot = field;
         }
     }
     let hex = spawn_hex_row(commands, stack);
@@ -1093,8 +1097,7 @@ fn build_color_picker_body(commands: &mut Commands, parent: Entity) -> (Entity, 
             field_marker,
             strip,
             strip_marker,
-            sliders,
-            labels,
+            fields,
             hex,
             palette,
             pipette,
@@ -1105,7 +1108,7 @@ fn build_color_picker_body(commands: &mut Commands, parent: Entity) -> (Entity, 
 
 /// Spawn the hue × saturation field: an outer box a marker's width larger than
 /// the picture, so a marker centred on any edge of the picture still lies inside
-/// the control (the slider thumb's argument, in two dimensions). Returns the
+/// the control (a slider thumb's argument, in two dimensions). Returns the
 /// marker; the outer box the pointer aims at carries its own observers.
 fn spawn_hue_saturation_field(commands: &mut Commands, parent: Entity) -> Entity {
     let outer = commands
@@ -1270,14 +1273,9 @@ fn spawn_compare_swatch(
     swatch.id()
 }
 
-/// Spawn one channel row: a name label, a slider track + thumb, and a value
-/// label. Returns the slider and value-label entities.
-fn spawn_channel_row(
-    commands: &mut Commands,
-    parent: Entity,
-    axis: ChannelAxis,
-) -> (Entity, Entity) {
-    let name = axis.label();
+/// Spawn one channel row — its one-letter caption and its spinner — and
+/// return the spinner's field, which carries the [`ChannelAxis`].
+fn spawn_channel_row(commands: &mut Commands, parent: Entity, axis: ChannelAxis) -> Entity {
     let channel_row = commands
         .spawn((
             Node {
@@ -1288,7 +1286,7 @@ fn spawn_channel_row(
         ))
         .id();
     commands.spawn((
-        Text::new(name),
+        Text::new(axis.label()),
         UiFont::Sans.at(PICKER_FONT),
         text_role(TEXT_COLOR),
         Node {
@@ -1297,58 +1295,27 @@ fn spawn_channel_row(
         },
         ChildOf(channel_row),
     ));
-    let slider = commands
-        .spawn((
-            Slider::default(),
-            SliderValue(0.0),
-            SliderRange::new(0.0, axis.maximum()),
-            SliderStep(1.0),
-            axis,
-            Node {
-                width: Val::Px(TRACK_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                border: UiRect::all(Val::Px(1.0)),
-                ..Default::default()
+    let field = spawn_spinner(
+        commands,
+        channel_row,
+        &SpinnerSpec {
+            input: TextInputSpec {
+                initial: "0".to_owned(),
+                font_size: PICKER_FONT,
+                width_glyphs: CHANNEL_FIELD_GLYPHS,
+                ..TextInputSpec::new(axis.element(), TextInputKind::NonNegativeInteger)
             },
-            BorderColor::all(CONTROL_BORDER),
-            BackgroundColor(TRACK_FILL),
-            TabIndex(0),
-            // Named by the word its caption letter abbreviates: "R" is no
-            // name a screen reader or a test locator should have to use.
-            Semantic::new(Role::Slider).name_key(axis.name_key()),
-            Name::new(format!("color-picker-slider:{name}")),
-            ChildOf(channel_row),
-        ))
-        .observe(on_color_slider_change)
-        .with_child((
-            SliderThumb,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(THUMB_WIDTH),
-                height: Val::Px(TRACK_HEIGHT),
-                ..Default::default()
-            },
-            LogicalInset(LogicalRect {
-                inline_start: Val::Px(0.0),
-                ..LogicalRect::ZERO
-            }),
-            BackgroundColor(THUMB_FILL),
-        ))
-        .id();
-    let label = commands
-        .spawn((
-            Text::new("0"),
-            UiFont::Sans.at(PICKER_FONT),
-            TextColor(TEXT_COLOR),
-            ClassList::new_with_classes([VALUE_CLASS]),
-            Node {
-                min_width: Val::Px(30.0),
-                ..Default::default()
-            },
-            ChildOf(channel_row),
-        ))
-        .id();
-    (slider, label)
+            step: axis.spin_step(),
+        },
+    )
+    .field;
+    // Named by the word its caption letter abbreviates: "R" is no name a
+    // screen reader or a test locator should have to use.
+    commands.entity(field).insert((
+        axis,
+        Semantic::new(Role::SpinButton).name_key(axis.name_key()),
+    ));
+    field
 }
 
 /// Spawn the hex row — a `#` prefix and a six-character field, the reference's
@@ -1783,30 +1750,37 @@ fn on_aim_cancel(cancel: On<Pointer<Cancel>>, mut drags: Query<&mut PickerDrag>)
 // ---------------------------------------------------------------------------
 // Sliders.
 
-/// A slider drag: write the value back and drive the picker's state from it.
-fn on_color_slider_change(
-    change: On<ValueChange<f32>>,
-    axes: Query<&ChannelAxis>,
-    ranges: Query<&SliderRange>,
-    mut windows: Query<&mut ColorPickerState>,
+/// A channel spinner's commit — `Enter`, focus leaving it, or an arrow step
+/// ([`FieldCommits`]): drive the picker's state from the value, the
+/// reference's `onTextEntryChanged`. A field holding no number commits
+/// nothing; the sync puts the state's value back.
+fn commit_color_channels(
+    mut commits: FieldCommits,
+    fields: Query<(&ChannelAxis, &EditableText)>,
     parents: Query<&ChildOf>,
-    mut commands: Commands,
+    mut windows: Query<&mut ColorPickerState>,
 ) {
-    let slider = change.source;
-    let clamped = ranges
-        .get(slider)
-        .map_or(change.value, |range| range.clamp(change.value));
-    commands.entity(slider).insert(SliderValue(clamped));
-    // The slider's own picker, not "the" picker: two swatches being answered at
-    // once are two windows with six sliders each.
-    let Some(window) = picker_window(slider, &parents, &windows) else {
-        return;
-    };
-    let Ok(mut state) = windows.get_mut(window) else {
-        return;
-    };
-    if let Ok(axis) = axes.get(slider) {
-        axis.write(&mut state, clamped);
+    for commit in commits.take(|entity| fields.contains(entity)) {
+        let Ok((axis, editor)) = fields.get(commit.field) else {
+            continue;
+        };
+        let Some(value) = commit
+            .text(editor)
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|value| value.is_finite())
+        else {
+            continue;
+        };
+        // The field's own picker, not "the" picker: two swatches being
+        // answered at once are two windows with six spinners each.
+        let Some(window) = picker_window(commit.field, &parents, &windows) else {
+            continue;
+        };
+        if let Ok(mut state) = windows.get_mut(window) {
+            axis.write(&mut state, value.clamp(0.0, axis.maximum()));
+        }
     }
 }
 
@@ -2202,7 +2176,7 @@ fn handle_open_color_picker(
 /// half of [`ColorPicked`], and the reference's `ApplyColorImmediately`.
 ///
 /// Centralised here rather than in each of the seven controls that can change a
-/// colour: the field, the strip, six sliders, the hex field, a palette cell and
+/// colour: the field, the strip, six spinners, the hex field, a palette cell and
 /// the eyedropper all move the same state, and each one remembering to speak
 /// was how the widget grew a control that silently did not.
 fn emit_live_preview(
@@ -2230,22 +2204,9 @@ fn emit_live_preview(
     }
 }
 
-/// Where a thumb's leading edge sits along its track for `value`: the value's
-/// fraction of `range`, over the track less the thumb's own width, so the thumb
-/// spans the track exactly at the ends rather than hanging off them.
-fn thumb_offset(value: f32, range: &SliderRange) -> f32 {
-    let span = range.span();
-    let fraction = if span > f32::EPSILON {
-        ((value - range.start()) / span).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    fraction * (TRACK_WIDTH - THUMB_WIDTH)
-}
-
 /// Every kind of node one picker's visual sync writes, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the fills, the gradients,
-/// the boxes, the thumb insets and the two kinds of text.
+/// the boxes and the editable fields.
 #[derive(bevy::ecs::system::SystemParam)]
 struct PickerVisuals<'w, 's> {
     /// Flat fills — swatches, the preview, the latched check marks.
@@ -2254,11 +2215,7 @@ struct PickerVisuals<'w, 's> {
     gradients: Query<'w, 's, &'static mut BackgroundGradient>,
     /// Layout, for the saturation / value square's marker.
     nodes: Query<'w, 's, &'static mut Node>,
-    /// The slider thumbs' logical insets.
-    insets: Query<'w, 's, &'static mut LogicalInset, With<SliderThumb>>,
-    /// Plain texts — the channel read-outs.
-    texts: Query<'w, 's, &'static mut Text>,
-    /// The editable hex field.
+    /// The editable fields — the hex code and the six channel spinners.
     editables: Query<'w, 's, &'static mut EditableText>,
     /// Which checkboxes carry their tick, so the apply-now mark moves only when
     /// it disagrees with the flag.
@@ -2268,20 +2225,17 @@ struct PickerVisuals<'w, 's> {
 }
 
 /// Reconcile every open picker's visuals from its live state: the compare
-/// swatches, the field and strip markers, the strip's own gradient, both slider
-/// sets, the hex text, the palette fills, and the two latched controls.
+/// swatches, the field and strip markers, the strip's own gradient, the six
+/// channel spinners, the hex text, the palette fills, and the two latched
+/// controls.
 ///
 /// Every write is guarded by a compare, as every other widget in this crate
-/// does. `LogicalInset` is exactly what `ChangedLogicalBoxes` filters on so that
-/// an unchanged UI does not re-resolve its boxes every frame, and an unguarded
-/// thumb write put all three through that resolver on every frame of the
-/// process, picker open or closed. (`resolve_logical_boxes` compares again
-/// before it touches `Node`, so taffy was never re-entered — the waste was the
-/// resolver's own pass, small but permanent.) A closed picker is not on screen,
+/// does: an unguarded write to a field's editor, or to a marker's box, would
+/// relayout an unchanged picker every frame. A closed picker is not on screen,
 /// so it does no work at all.
 fn sync_color_picker_visual(
     windows: Query<(&ColorPickerState, &ColorPickerUi, Has<Eyedropper>)>,
-    sliders: Query<(&SliderValue, &SliderRange, &ChannelAxis, &Children)>,
+    axes: Query<&ChannelAxis>,
     palette: Res<ColorPalette>,
     apply_now: Res<ApplyColorImmediately>,
     focus: Option<Res<InputFocus>>,
@@ -2328,35 +2282,15 @@ fn sync_color_picker_visual(
             Vec2::new(0.0, (1.0 - luminance) * FIELD_SIZE),
         );
 
-        for (index, slider) in ui.sliders.iter().enumerate() {
-            let Ok((value, range, axis, children)) = sliders.get(*slider) else {
+        for field in ui.fields {
+            let Ok(axis) = axes.get(field) else {
                 continue;
             };
-            let wanted = axis.read(state);
-            // `SliderValue` is an immutable component: it is replaced, not
-            // written through, and only when it would change.
-            if !slider_holds(value.0, wanted) {
-                visuals.commands.entity(*slider).insert(SliderValue(wanted));
-            }
-            let offset = Val::Px(thumb_offset(wanted, range));
-            for child in children.iter() {
-                if let Ok(mut inset) = visuals.insets.get_mut(child)
-                    && inset.0.inline_start != offset
-                {
-                    inset.0.inline_start = offset;
-                }
-            }
-            if let Some(label) = ui.labels.get(index)
-                && let Ok(mut text) = visuals.texts.get_mut(*label)
-            {
-                let want = format!("{}", wanted.round());
-                if text.0 != want {
-                    text.0 = want;
-                }
-            }
+            let want = format!("{}", axis.read(state).round());
+            seed_text(&mut visuals.editables, focused, field, &want);
         }
 
-        seed_hex(&mut visuals.editables, focused, ui.hex, &hex_of(current));
+        seed_text(&mut visuals.editables, focused, ui.hex, &hex_of(current));
 
         for (index, cell) in ui.palette.iter().enumerate() {
             paint(&mut visuals.backgrounds, *cell, palette.entry(index));
@@ -2372,21 +2306,6 @@ fn sync_color_picker_visual(
             }
         }
     }
-}
-
-/// Whether a slider already holds the value the sync would write.
-///
-/// Exactly equal, not within a margin: the number the sync computes is the same
-/// computation that produced the one the slider holds, so an unchanged state
-/// reproduces it bit for bit, and anything else genuinely is a change. A margin
-/// here would be the bug — it would leave a slider a nudge behind its state.
-#[expect(
-    clippy::float_cmp,
-    reason = "both sides are the same computation over the same state, so equality is exact \
-              whenever nothing changed; see the note above"
-)]
-fn slider_holds(value: f32, wanted: f32) -> bool {
-    value == wanted
 }
 
 /// Paint a node's fill, only if it would change.
@@ -2409,14 +2328,14 @@ fn place(nodes: &mut Query<&mut Node>, entity: Entity, at: Vec2) {
     }
 }
 
-/// Put the current colour into the hex field, unless the user is in it — the
-/// debug editor's `seed_field`, for the one field here.
+/// Put a value into one of the picker's fields — the hex code, a channel
+/// spinner — unless the user is in it: the debug editor's `seed_field`.
 #[expect(
     clippy::cmp_owned,
     reason = "the editor's SplitString has no borrow-free comparison against &str; the guard \
               keeps the pass write-free when nothing changed"
 )]
-fn seed_hex(
+fn seed_text(
     editables: &mut Query<&mut EditableText>,
     focused: Option<Entity>,
     entity: Entity,
@@ -2560,17 +2479,18 @@ mod tests {
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::{Location, PointerId};
     use bevy::prelude::*;
-    use bevy::ui_widgets::{SliderRange, SliderThumb, ValueChange};
+    use bevy::text::EditableText;
+    use bevy::ui_widgets::ValueChange;
     use pretty_assertions::assert_eq;
 
     use super::{
         ApplyColorImmediately, ApplyNowToggle, CHANNEL_MAX, ChannelAxis, ColorPicked,
         ColorPickerPlugin, ColorPickerState, ColorPickerUi, ColorSwatchValue, OpenColorPicker,
         PickerButton, byte, color_of_hex, hex_of, hsl_to_srgb, spawn_color_swatch, srgb_to_hsl,
-        thumb_offset,
     };
     use crate::floater::FloaterPlugin;
-    use sl_viewer_ui_core::ui::{LogicalInset, UiDirection, UiRoot};
+    use crate::ui_spinner::SpinnerStepped;
+    use sl_viewer_ui_core::ui::{UiDirection, UiRoot};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -2583,8 +2503,8 @@ mod tests {
     struct Recorded {
         /// Every [`ColorPicked`] the picker has emitted.
         picked: Vec<ColorPicked>,
-        /// How many thumb insets were re-marked, summed over frames.
-        inset_writes: usize,
+        /// How many editable fields were re-marked, summed over frames.
+        field_writes: usize,
         /// How many backgrounds were re-marked, summed over frames.
         background_writes: usize,
     }
@@ -2592,13 +2512,13 @@ mod tests {
     /// Copy this frame's replies and count the components the sync touched.
     fn record(
         mut picked: MessageReader<ColorPicked>,
-        insets: Query<(), (With<SliderThumb>, Changed<LogicalInset>)>,
+        fields: Query<(), Changed<EditableText>>,
         backgrounds: Query<(), Changed<BackgroundColor>>,
         mut recorded: ResMut<Recorded>,
     ) {
         let replies: Vec<ColorPicked> = picked.read().copied().collect();
         recorded.picked.extend(replies);
-        recorded.inset_writes = recorded.inset_writes.saturating_add(insets.iter().count());
+        recorded.field_writes = recorded.field_writes.saturating_add(fields.iter().count());
         recorded.background_writes = recorded
             .background_writes
             .saturating_add(backgrounds.iter().count());
@@ -2721,13 +2641,33 @@ mod tests {
             .map(|state| state.hsl)
     }
 
-    /// The only open picker window's slider for `axis`.
-    fn slider_for(app: &mut App, axis: ChannelAxis) -> Option<Entity> {
+    /// The only open picker window's spinner field for `axis`.
+    fn field_for(app: &mut App, axis: ChannelAxis) -> Option<Entity> {
         app.world_mut()
             .query::<&ColorPickerUi>()
             .iter(app.world())
             .next()
-            .and_then(|ui| ui.sliders.get(axis.slot()).copied())
+            .and_then(|ui| ui.fields.get(axis.slot()).copied())
+    }
+
+    /// Step `field` to `value` the way its arrows do — the field's text
+    /// rewritten and the step announced — and run the frame it lands in.
+    fn step_to(app: &mut App, field: Entity, value: f32) {
+        let text = format!("{value}");
+        if let Some(mut editor) = app.world_mut().get_mut::<EditableText>(field) {
+            editor.editor_mut().set_text(&text);
+        }
+        app.world_mut()
+            .resource_mut::<Messages<SpinnerStepped>>()
+            .write(SpinnerStepped { field, text });
+        app.update();
+    }
+
+    /// The text `field` shows.
+    fn field_text(app: &App, field: Entity) -> Option<String> {
+        app.world()
+            .get::<EditableText>(field)
+            .map(|editor| editor.value().to_string())
     }
 
     /// The bytes of a colour, the form the picker actually round-trips.
@@ -2739,7 +2679,7 @@ mod tests {
     fn settle(app: &mut App) {
         app.update();
         let mut recorded = app.world_mut().resource_mut::<Recorded>();
-        recorded.inset_writes = 0;
+        recorded.field_writes = 0;
         recorded.background_writes = 0;
     }
 
@@ -2852,36 +2792,25 @@ mod tests {
         );
     }
 
-    /// The thumb spans the track at both ends: at the range's start its leading
-    /// edge is at zero, at the end it is a thumb's width short of the track's, so
-    /// the thumb never hangs off either end.
-    #[expect(
-        clippy::float_cmp,
-        reason = "the offsets are exact multiples of the travel, asserted exactly"
-    )]
+    /// Each channel spinner's step is a whole unit within its axis's range —
+    /// the reference's `rspin` … `lspin`.
     #[test]
-    fn the_thumb_stays_inside_the_track() {
-        let range = SliderRange::new(0.0, super::CHANNEL_MAX);
-        let travel = super::TRACK_WIDTH - super::THUMB_WIDTH;
-        assert_eq!(thumb_offset(0.0, &range), 0.0);
-        assert_eq!(thumb_offset(super::CHANNEL_MAX, &range), travel);
-        assert_eq!(thumb_offset(super::CHANNEL_MAX / 2.0, &range), travel / 2.0);
-        assert_eq!(
-            thumb_offset(-10.0, &range),
-            0.0,
-            "a value under the range clamps to the near end"
-        );
-        assert_eq!(
-            thumb_offset(1000.0, &range),
-            travel,
-            "a value over the range clamps to the far end"
-        );
-        let degenerate = SliderRange::new(1.0, 1.0);
-        assert_eq!(
-            thumb_offset(1.0, &degenerate),
-            0.0,
-            "an empty range does not divide by zero"
-        );
+    fn each_channel_spinner_steps_through_its_axis_range() {
+        for (axis, max) in [
+            (ChannelAxis::Red, super::CHANNEL_MAX),
+            (ChannelAxis::Green, super::CHANNEL_MAX),
+            (ChannelAxis::Blue, super::CHANNEL_MAX),
+            (ChannelAxis::Hue, super::HUE_MAX),
+            (ChannelAxis::Saturation, super::PERCENT_MAX),
+            (ChannelAxis::Luminance, super::PERCENT_MAX),
+        ] {
+            let step = axis.spin_step();
+            assert_eq!(
+                (step.increment, step.min, step.max, step.decimals),
+                (1.0, 0.0, f64::from(max), 0),
+                "{axis:?}"
+            );
+        }
     }
 
     /// Clicking a swatch opens the picker on that swatch's colour, seeding both
@@ -2960,9 +2889,8 @@ mod tests {
         Ok(())
     }
 
-    /// An open picker sitting still writes nothing: the thumb insets are what the
-    /// logical-box resolver filters on, so re-marking them every frame would put
-    /// the whole picker through layout for the life of the process.
+    /// An open picker sitting still writes nothing: re-marking its fields every
+    /// frame would relayout the whole picker for the life of the process.
     #[test]
     fn an_idle_open_picker_does_not_churn_the_layout() -> Result<(), TestError> {
         let mut app = picker_app();
@@ -2973,10 +2901,7 @@ mod tests {
             app.update();
         }
         let recorded = app.world().resource::<Recorded>();
-        assert_eq!(
-            recorded.inset_writes, 0,
-            "an idle picker re-marks no thumb inset"
-        );
+        assert_eq!(recorded.field_writes, 0, "an idle picker re-marks no field");
         assert_eq!(
             recorded.background_writes, 0,
             "an idle picker re-marks no swatch fill"
@@ -2984,83 +2909,60 @@ mod tests {
         Ok(())
     }
 
-    /// Dragging a channel slider updates the channel, live-previews the new
-    /// colour to the requester without committing, and moves that thumb — and
-    /// only that thumb.
+    /// Stepping a channel spinner updates the channel and live-previews the new
+    /// colour to the requester without committing — and every spinner then
+    /// shows the colour it names.
     #[test]
-    fn a_slider_drag_previews_and_moves_its_thumb() -> Result<(), TestError> {
+    fn a_channel_step_previews_and_shows_in_every_field() -> Result<(), TestError> {
         let mut app = picker_app();
         let swatch = swatch(&mut app, Color::BLACK);
         press(&mut app, swatch);
         settle(&mut app);
-        let slider =
-            slider_for(&mut app, ChannelAxis::Red).ok_or("the picker has no red slider")?;
-        app.world_mut().trigger(ValueChange {
-            source: slider,
-            value: super::CHANNEL_MAX,
-            is_final: false,
-        });
-        app.update();
+        let red = field_for(&mut app, ChannelAxis::Red).ok_or("the picker has no red spinner")?;
+        step_to(&mut app, red, super::CHANNEL_MAX);
 
         assert_eq!(channels(&mut app), Some([255.0, 0.0, 0.0]));
         let recorded = app.world().resource::<Recorded>();
         let last = recorded.picked.last().ok_or("no preview was emitted")?;
         assert_eq!(last.requester, swatch);
         assert_eq!(bytes(last.color), [255, 0, 0, 255]);
-        assert!(!last.final_pick, "a drag previews, it does not commit");
+        assert!(!last.final_pick, "a step previews, it does not commit");
 
-        let thumb_at = |app: &App, slider: Entity| -> Option<Val> {
-            let children = app.world().entity(slider).get::<Children>()?;
-            let child = children.iter().next()?;
-            Some(
-                app.world()
-                    .entity(child)
-                    .get::<LogicalInset>()?
-                    .0
-                    .inline_start,
-            )
-        };
+        app.update();
+        assert_eq!(field_text(&app, red).as_deref(), Some("255"));
+        let luminance =
+            field_for(&mut app, ChannelAxis::Luminance).ok_or("no luminance spinner")?;
         assert_eq!(
-            thumb_at(&app, slider),
-            Some(Val::Px(super::TRACK_WIDTH - super::THUMB_WIDTH)),
-            "a full-scale channel puts the thumb at the far end"
+            field_text(&app, luminance).as_deref(),
+            Some("50"),
+            "pure red is half luminance, and the HSL spinners say so"
         );
         Ok(())
     }
 
-    /// **Driving the hue slider drives the channels**, and driving a channel
+    /// **Driving the hue spinner drives the channels**, and driving a channel
     /// drives the hue back: the two halves of the model are one state, which is
-    /// what lets the field, the strip and six sliders all name the same colour.
+    /// what lets the field, the strip and six spinners all name the same colour.
     #[test]
     fn the_two_models_follow_each_other() -> Result<(), TestError> {
         let mut app = picker_app();
         let swatch = swatch(&mut app, Color::srgb_u8(255, 0, 0));
         press(&mut app, swatch);
-        let hue = slider_for(&mut app, ChannelAxis::Hue).ok_or("the picker has no hue slider")?;
-        app.world_mut().trigger(ValueChange {
-            source: hue,
-            value: 120.0_f32,
-            is_final: true,
-        });
-        app.update();
+        let hue = field_for(&mut app, ChannelAxis::Hue).ok_or("the picker has no hue spinner")?;
+        step_to(&mut app, hue, 120.0);
         assert_eq!(
             channels(&mut app),
             Some([0.0, 255.0, 0.0]),
             "a third of the way round the wheel is pure green"
         );
 
-        let blue = slider_for(&mut app, ChannelAxis::Blue).ok_or("no blue slider")?;
-        app.world_mut().trigger(ValueChange {
-            source: blue,
-            value: 255.0_f32,
-            is_final: true,
-        });
-        app.update();
+        let blue = field_for(&mut app, ChannelAxis::Blue).ok_or("no blue spinner")?;
+        step_to(&mut app, blue, 255.0);
         let after = hsl(&mut app).ok_or("no HSL")?;
         assert_eq!(
             after.first().map(|hue| (hue * 360.0).round()),
             Some(180.0),
-            "green plus blue is cyan, and the hue slider now says so"
+            "green plus blue is cyan, and the hue spinner now says so"
         );
         Ok(())
     }
@@ -3071,14 +2973,8 @@ mod tests {
         let mut app = picker_app();
         let swatch = swatch(&mut app, Color::srgb_u8(10, 20, 30));
         press(&mut app, swatch);
-        let slider =
-            slider_for(&mut app, ChannelAxis::Red).ok_or("the picker has no red slider")?;
-        app.world_mut().trigger(ValueChange {
-            source: slider,
-            value: 200.0_f32,
-            is_final: true,
-        });
-        app.update();
+        let red = field_for(&mut app, ChannelAxis::Red).ok_or("the picker has no red spinner")?;
+        step_to(&mut app, red, 200.0);
         let ok = action_button(&mut app, PickerButton::Ok);
         press(&mut app, ok);
 
@@ -3134,13 +3030,8 @@ mod tests {
         );
 
         let before = app.world().resource::<Recorded>().picked.len();
-        let slider = slider_for(&mut app, ChannelAxis::Red).ok_or("no red slider")?;
-        app.world_mut().trigger(ValueChange {
-            source: slider,
-            value: 200.0_f32,
-            is_final: false,
-        });
-        app.update();
+        let red = field_for(&mut app, ChannelAxis::Red).ok_or("no red spinner")?;
+        step_to(&mut app, red, 200.0);
         assert_eq!(
             app.world().resource::<Recorded>().picked.len(),
             before,
@@ -3164,14 +3055,8 @@ mod tests {
         let mut app = picker_app();
         let swatch = swatch(&mut app, Color::srgb_u8(10, 20, 30));
         press(&mut app, swatch);
-        let slider =
-            slider_for(&mut app, ChannelAxis::Red).ok_or("the picker has no red slider")?;
-        app.world_mut().trigger(ValueChange {
-            source: slider,
-            value: 200.0_f32,
-            is_final: true,
-        });
-        app.update();
+        let red = field_for(&mut app, ChannelAxis::Red).ok_or("the picker has no red spinner")?;
+        step_to(&mut app, red, 200.0);
         let cancel = action_button(&mut app, PickerButton::Cancel);
         press(&mut app, cancel);
 
@@ -3288,49 +3173,42 @@ mod tests {
     }
 
     /// **The picker, driven** (`viewer-ui-widget-interaction-suite`): a click on
-    /// the swatch, a drag along a channel track, a drag across the hue ×
-    /// saturation field, and OK — through the real pointer, on the real
-    /// geometry.
+    /// the swatch, a channel spinner's arrows and typed value, a click on the
+    /// hue × saturation field, and OK — through the real pointer and keyboard,
+    /// on the real geometry.
     ///
-    /// Every test above hands the widget a `ValueChange` already carrying the
-    /// number it is meant to arrive at, which makes them tests of what the
-    /// picker does with a value and not of where a value comes from. A slider
-    /// and a two-dimensional field are the widgets here whose output is a
-    /// *function of their own layout*: a track that laid out at the wrong size,
-    /// or a field whose picture is not where the pointer thinks it is, moves the
-    /// colour by the wrong amount for a gesture that still looks right. Only a
-    /// real drag on a laid-out control can see that.
+    /// Every test above hands the widget a step already carrying the number it
+    /// is meant to arrive at, which makes them tests of what the picker does
+    /// with a value and not of where a value comes from. Here the value comes
+    /// from the arrows, the keys and the two-dimensional field — the last a
+    /// widget whose output is a *function of its own layout*: a field whose
+    /// picture is not where the pointer thinks it is moves the colour by the
+    /// wrong amount for a gesture that still looks right.
     mod scenarios {
+        use bevy::input::keyboard::Key;
         use bevy::prelude::*;
-        use bevy::ui_widgets::{SliderRange, SliderThumb, SliderValue};
         use pretty_assertions::assert_eq;
 
         use super::{TestError, bytes};
         use crate::ui_color_picker::{
-            CHANNEL_MAX, ColorPicked, ColorPickerPlugin, FIELD_SIZE, MARKER_SIZE, THUMB_WIDTH,
-            TRACK_WIDTH, spawn_color_swatch, thumb_offset,
+            CHANNEL_MAX, ColorPicked, ColorPickerPlugin, FIELD_SIZE, MARKER_SIZE,
+            spawn_color_swatch,
         };
         use crate::ui_test::interact::{self, InteractionTest, centre_of};
-        use crate::ui_test::{drain, find_by_name, record, settle};
-        use sl_viewer_ui_core::ui::{LogicalInset, UiRoot, UiScaffoldSystems};
+        use crate::ui_test::{drain, record, settle};
+        use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
 
         /// The swatch's node name.
         const SWATCH: &str = "test:color-swatch";
 
-        /// The red channel's slider.
-        const RED_SLIDER: &str = "color-picker-slider:R";
+        /// The red channel's spinner field.
+        const RED_FIELD: &str = "color-picker-red:field";
+
+        /// Its up arrow.
+        const RED_UP: &str = "color-picker-red:up";
 
         /// The hue × saturation field.
         const FIELD: &str = "color-picker-field";
-
-        /// How far the drag travels along the track, in logical pixels. Chosen
-        /// so the value it lands on is exact: the usable track is
-        /// `TRACK_WIDTH - THUMB_WIDTH` = 150 px for a span of 255, so 60 px is
-        /// 102 — no rounding to hide a small error behind.
-        const DRAG_PX: f32 = 60.0;
-
-        /// The channel value [`DRAG_PX`] must produce.
-        const DRAGGED_VALUE: f32 = 102.0;
 
         /// A swatch and the picker floater under the real pointer stack.
         fn picker_app() -> App {
@@ -3380,25 +3258,25 @@ mod tests {
                 .map(|state| state.hsl)
         }
 
-        /// Where the named slider's thumb sits along its track, in logical
-        /// pixels from the leading edge.
-        fn thumb_at(app: &mut App, slider: &str) -> Option<f32> {
-            let entity = find_by_name(app, slider)?;
-            let children = app.world().get::<Children>(entity)?;
-            let thumb = children
-                .iter()
-                .find(|child| app.world().get::<SliderThumb>(*child).is_some())?;
-            match app.world().get::<LogicalInset>(thumb)?.0.inline_start {
-                Val::Px(px) => Some(px),
-                _other => None,
+        /// Replace the red field's text by typing — click in, clear it, type —
+        /// and commit it with `Enter`.
+        fn type_red(app: &mut App, text: &str) -> Result<(), TestError> {
+            interact::click_node(app, RED_FIELD)?;
+            interact::tap(app, KeyCode::End, Key::End);
+            for _ in 0..4_u8 {
+                interact::tap(app, KeyCode::Backspace, Key::Backspace);
             }
+            interact::type_str(app, text);
+            interact::tap(app, KeyCode::Enter, Key::Enter);
+            settle(app);
+            Ok(())
         }
 
-        /// Clicking the swatch opens the picker; dragging a channel track moves
-        /// that channel by what the gesture actually travelled; OK commits it
-        /// and puts the picker away.
+        /// Clicking the swatch opens the picker; the red spinner's up arrow
+        /// steps that channel a unit a click, previewing as it goes; OK commits
+        /// it and puts the picker away.
         #[test]
-        fn a_swatch_click_a_track_drag_and_ok() -> Result<(), TestError> {
+        fn a_swatch_click_an_arrow_and_ok() -> Result<(), TestError> {
             let mut app = picker_app();
             assert!(!picker_shown(&mut app), "the picker starts closed");
 
@@ -3409,46 +3287,33 @@ mod tests {
                 "a click on the swatch opens the picker"
             );
             assert_eq!(
-                thumb_at(&mut app, RED_SLIDER),
-                Some(0.0),
-                "it opens on the swatch's colour — black, so every thumb is home"
+                interact::text_of(&mut app, RED_FIELD).as_deref(),
+                Some("0"),
+                "it opens on the swatch's colour — black"
             );
             let _opening = drain::<ColorPicked>(&mut app);
 
-            let track = centre_of(&mut app, RED_SLIDER).ok_or("the red track never laid out")?;
-            interact::drag(
-                &mut app,
-                track,
-                Vec2::new(track.x + DRAG_PX, track.y),
-                4,
-                MouseButton::Left,
-            );
+            for _ in 0..3_u8 {
+                interact::click_node(&mut app, RED_UP)?;
+            }
             settle(&mut app);
 
-            let red = red_channel(&mut app).ok_or("no red channel")?;
-            assert!(
-                (red - DRAGGED_VALUE).abs() < 1.0,
-                "a {DRAG_PX} px drag along a {TRACK_WIDTH} px track (thumb {THUMB_WIDTH}) is \
-                 {DRAGGED_VALUE} of {CHANNEL_MAX}, not {red}"
+            assert_eq!(
+                red_channel(&mut app),
+                Some(3.0),
+                "three clicks, three steps"
             );
-            let thumb = thumb_at(&mut app, RED_SLIDER).ok_or("the thumb went missing")?;
-            let wanted = thumb_offset(red, &SliderRange::new(0.0, CHANNEL_MAX));
-            assert!(
-                (thumb - wanted).abs() < 0.5,
-                "the thumb follows the value it produced: {thumb} vs {wanted}"
-            );
-
+            assert_eq!(interact::text_of(&mut app, RED_FIELD).as_deref(), Some("3"));
             let previews = drain::<ColorPicked>(&mut app);
-            let last = previews.last().ok_or("the drag previewed nothing")?;
+            let last = previews.last().ok_or("the steps previewed nothing")?;
             assert!(
                 !last.final_pick,
-                "a drag previews, it does not commit: {last:?}"
+                "a step previews, it does not commit: {last:?}"
             );
-            let [red_byte, green, blue, _alpha] = bytes(last.color);
             assert_eq!(
-                (red_byte, green, blue),
-                (102, 0, 0),
-                "the preview is the dragged channel and nothing else"
+                bytes(last.color),
+                [3, 0, 0, 255],
+                "the preview is the stepped channel and nothing else"
             );
 
             interact::click_node(&mut app, "color-picker-button:color-picker-ok")?;
@@ -3459,8 +3324,38 @@ mod tests {
                 .iter()
                 .find(|reply| reply.final_pick)
                 .ok_or("OK committed nothing")?;
-            assert_eq!(bytes(commit.color), [102, 0, 0, 255]);
+            assert_eq!(bytes(commit.color), [3, 0, 0, 255]);
             assert!(!picker_shown(&mut app), "OK puts the picker away");
+            Ok(())
+        }
+
+        /// A value typed into a channel spinner and committed with `Enter`
+        /// moves the channel; a step past the axis's end stops there.
+        #[test]
+        fn a_typed_channel_commits_and_a_step_stops_at_the_end() -> Result<(), TestError> {
+            let mut app = picker_app();
+            interact::click_node(&mut app, SWATCH)?;
+            settle(&mut app);
+
+            type_red(&mut app, "254")?;
+            assert_eq!(
+                red_channel(&mut app),
+                Some(254.0),
+                "Enter commits the typed value"
+            );
+
+            interact::click_node(&mut app, RED_UP)?;
+            interact::click_node(&mut app, RED_UP)?;
+            settle(&mut app);
+            assert_eq!(
+                red_channel(&mut app),
+                Some(CHANNEL_MAX),
+                "a step past the end pins the channel at its maximum"
+            );
+            assert_eq!(
+                interact::text_of(&mut app, RED_FIELD).as_deref(),
+                Some("255")
+            );
             Ok(())
         }
 
@@ -3554,46 +3449,6 @@ mod tests {
                     .get(1)
                     .is_some_and(|saturation| (saturation - 0.5).abs() < 0.02),
                 "and half saturation: {aimed:?}"
-            );
-            Ok(())
-        }
-
-        /// A drag that starts on the track and is released far outside it still
-        /// belongs to the slider it began on — the pointer capture every drag
-        /// widget relies on, and the reason a user can slide past the end of a
-        /// short track without the value freezing.
-        #[test]
-        fn a_drag_leaving_the_track_keeps_driving_it() -> Result<(), TestError> {
-            let mut app = picker_app();
-            interact::click_node(&mut app, SWATCH)?;
-            settle(&mut app);
-
-            let track = centre_of(&mut app, RED_SLIDER).ok_or("the red track never laid out")?;
-            // Well below the row, and past the track's trailing end: a slider
-            // that only listened while hovered would stop here.
-            interact::drag(
-                &mut app,
-                track,
-                Vec2::new(track.x + TRACK_WIDTH, track.y + 120.0),
-                4,
-                MouseButton::Left,
-            );
-            settle(&mut app);
-
-            let red = red_channel(&mut app).ok_or("no red channel")?;
-            let slider = find_by_name(&mut app, RED_SLIDER).ok_or("the slider went missing")?;
-            let value = app
-                .world()
-                .get::<SliderValue>(slider)
-                .map(|value| value.0)
-                .ok_or("the slider lost its value")?;
-            assert!(
-                (red - CHANNEL_MAX).abs() < f32::EPSILON,
-                "a drag past the end pins the channel at its maximum: {red}"
-            );
-            assert!(
-                (value - red).abs() < f32::EPSILON,
-                "and the slider and the picker agree about it: {value} vs {red}"
             );
             Ok(())
         }

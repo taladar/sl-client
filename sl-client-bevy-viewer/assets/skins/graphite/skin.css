@@ -163,6 +163,15 @@
   --scrollbar-arrow-bg-hover: #353c4a;
   --scrollbar-arrow-bg-pressed: #1d2129;
   --scrollbar-arrow: #bfc7d9;
+  /* A spinner's step arrows: face, hover, pressed and greyed face, the glyph
+   * and its greyed colour, and the line around the pair. */
+  --spinner-arrow-bg: #2a2f3a;
+  --spinner-arrow-bg-hover: #353c4a;
+  --spinner-arrow-bg-pressed: #1d2129;
+  --spinner-arrow-bg-disabled: #232730;
+  --spinner-arrow: #bfc7d9;
+  --spinner-arrow-disabled: #737d8f;
+  --spinner-arrow-border: #66809e;
   /* A horizontal tab strip's overflow buttons: their face, their face under
    * the pointer, the glyph, and whether the two jump-to-end buttons show (a
    * `display` value). The face is a control's, and OPAQUE: a transparent one

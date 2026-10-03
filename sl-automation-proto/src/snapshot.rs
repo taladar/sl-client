@@ -28,6 +28,11 @@ pub enum Role {
     Combobox,
     /// A slider over a numeric range.
     Slider,
+    /// A number field with a pair of step arrows beside it: typed into like a
+    /// text field, its value is the number it holds, and its arrows — two
+    /// buttons beside it in the spinner's group — step that number up and
+    /// down.
+    SpinButton,
     /// A swatch showing a colour, which opens a colour picker.
     ColorWell,
     /// A ball dragged to aim a direction or a rotation.
@@ -68,7 +73,7 @@ pub enum Role {
 
 impl Role {
     /// Every role, in declaration order.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::Button,
         Self::Checkbox,
         Self::Radio,
@@ -76,6 +81,7 @@ impl Role {
         Self::Textbox,
         Self::Combobox,
         Self::Slider,
+        Self::SpinButton,
         Self::ColorWell,
         Self::Trackball,
         Self::TabList,
@@ -105,6 +111,7 @@ impl Role {
             Self::Textbox => "textbox",
             Self::Combobox => "combobox",
             Self::Slider => "slider",
+            Self::SpinButton => "spinbutton",
             Self::ColorWell => "colorwell",
             Self::Trackball => "trackball",
             Self::TabList => "tablist",
@@ -165,6 +172,21 @@ pub enum NodeValue {
     /// The colour a colour well holds, as `#rrggbb` in sRGB — `#rrggbbaa`
     /// when it is not opaque.
     Color(String),
+}
+
+impl NodeValue {
+    /// Whether a field filled with `text` now holds it: the same text, or — a
+    /// spin button being valued by its number — the number `text` spells.
+    #[must_use]
+    pub fn holds(&self, text: &str) -> bool {
+        match self {
+            Self::Text(held) | Self::Color(held) => held == text,
+            Self::Number(number) => text
+                .trim()
+                .parse::<f32>()
+                .is_ok_and(|typed| typed.to_bits() == number.to_bits()),
+        }
+    }
 }
 
 /// Whether, and why not, a node can be seen.

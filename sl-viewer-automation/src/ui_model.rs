@@ -426,7 +426,14 @@ impl UiModel<'_, '_> {
         }
         let semantic = facts.semantic;
         let value = if let Some(editable) = facts.editable {
-            Some(NodeValue::Text(editable.editor.text().to_string()))
+            let text = editable.editor.text().to_string();
+            // A spin button is valued by its number; while it holds none (an
+            // empty field, a lone `-` mid-typing) the text is what it shows.
+            let number = (role == Role::SpinButton)
+                .then(|| text.trim().parse::<f32>().ok())
+                .flatten()
+                .filter(|number| number.is_finite());
+            Some(number.map_or(NodeValue::Text(text), NodeValue::Number))
         } else if let Some(shown) = semantic.and_then(Semantic::value_node) {
             Some(NodeValue::Text(self.label_text(shown).0))
         } else if let Some(reported) = facts.reported_value {
@@ -514,6 +521,7 @@ impl UiModel<'_, '_> {
             | Role::Textbox
             | Role::Combobox
             | Role::Slider
+            | Role::SpinButton
             | Role::ColorWell
             | Role::Trackball
             | Role::Tab

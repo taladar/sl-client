@@ -5,8 +5,8 @@
 use bevy::input::keyboard::Key;
 use bevy::prelude::*;
 use sl_automation_proto::{
-    AutomationError, Deadline, Locator, NodeState, NodeValue, NodeVisibility, PointerButton,
-    ResponseBody, UiNode, WaitCondition,
+    AutomationError, Deadline, Locator, NameMatcher, NodeState, NodeValue, NodeVisibility,
+    PointerButton, ResponseBody, Role, UiNode, WaitCondition,
 };
 use sl_viewer_ui_core::synthetic_input::{InputAction, InputActionId};
 
@@ -293,7 +293,7 @@ impl UiAct {
                     .ok()
                     .and_then(|roots| find_by_id(&roots, node.id).map(shallow));
                 if let Some(now) = &now
-                    && now.value == Some(NodeValue::Text(text.clone()))
+                    && now.value.as_ref().is_some_and(|value| value.holds(text))
                 {
                     return Step::done(ResponseBody::Done { node: now.clone() });
                 }
@@ -516,12 +516,21 @@ fn holds(condition: &WaitCondition, matches: &[UiNode]) -> bool {
         WaitCondition::Hidden => !matches.iter().any(visible),
         WaitCondition::Enabled => !matches.is_empty() && !matches.iter().any(disabled),
         WaitCondition::Disabled => !matches.is_empty() && matches.iter().all(disabled),
-        WaitCondition::Text(matcher) => matches.iter().any(|node| {
-            let text = match &node.value {
-                Some(NodeValue::Text(text) | NodeValue::Color(text)) => Some(text.as_str()),
-                Some(NodeValue::Number(_)) | None => node.name.as_deref(),
-            };
-            text.is_some_and(|text| matcher.matches(text))
+        WaitCondition::Text(matcher) => matches.iter().any(|node| match &node.value {
+            // A spin button's text is its number: an exact wait matches the
+            // number it spells (`1.250` waits for 1.25), a partial one its
+            // shortest spelling.
+            Some(value @ NodeValue::Number(number)) if node.role == Role::SpinButton => {
+                match matcher {
+                    NameMatcher::Exact(text) => value.holds(text),
+                    NameMatcher::Contains(_) => matcher.matches(&number.to_string()),
+                }
+            }
+            Some(NodeValue::Text(text) | NodeValue::Color(text)) => matcher.matches(text),
+            Some(NodeValue::Number(_)) | None => node
+                .name
+                .as_deref()
+                .is_some_and(|name| matcher.matches(name)),
         }),
     }
 }

@@ -51,6 +51,7 @@ pub(crate) use sl_viewer_ui_sounds::ui_sounds;
 pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::ui_checkbox;
 pub(crate) use sl_viewer_ui_widgets::ui_combo;
+pub(crate) use sl_viewer_ui_widgets::ui_spinner;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_table;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;

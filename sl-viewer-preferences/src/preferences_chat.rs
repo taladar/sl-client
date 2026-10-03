@@ -66,11 +66,12 @@ use sl_settings::{Scope, SettingValue};
 
 use crate::preferences::{
     PreferencesApplied, PreferencesUi, spawn_pref_checkbox, spawn_pref_combo, spawn_pref_section,
-    spawn_pref_slider, spawn_pref_text,
+    spawn_pref_slider, spawn_pref_spinner, spawn_pref_text,
 };
 use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
 use crate::ui::UiPanelShown;
+use crate::ui_spinner::SpinStep;
 use crate::ui_text_input::TextInputKind;
 use crate::world_api::{
     SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE, SETTING_AUTORESPOND_RESPONSE, SETTING_BUSY_RESPONSE,
@@ -273,13 +274,15 @@ pub(crate) fn build_chat_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(3.0, 60.0),
         SliderStep(1.0),
     );
-    spawn_pref_slider(
+    // The reference's `max_chat_count` spinner: a line a step, up to fifty
+    // (floored at one, the overlay's own floor).
+    spawn_pref_spinner(
         commands,
         panel,
         "preferences-row-chat-max-lines",
         SettingBinding::global(SETTING_CHAT_MAX_LINES),
-        SliderRange::new(1.0, 50.0),
-        SliderStep(1.0),
+        TextInputKind::NonNegativeInteger,
+        SpinStep::new(1.0, 1.0, 50.0, 0),
     );
 
     spawn_pref_section(commands, panel, "preferences-section-chat-logging");

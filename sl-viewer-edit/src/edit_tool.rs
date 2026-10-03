@@ -51,11 +51,14 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
+use crate::ui_spinner::{
+    FieldCommits, SpinStep, SpinnerSpec, ensure_spinner_widget, spawn_spinner,
+};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, fill_tab_container, spawn_tab_container,
 };
 use crate::ui_text::set_editor_text;
-use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::ui_text_input::{TextInputKind, TextInputSpec};
 use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
@@ -173,6 +176,32 @@ pub(crate) enum FieldGroup {
     Size,
 }
 
+impl FieldGroup {
+    /// What one arrow step of this row's `axis` field does — the reference
+    /// `floater_tools.xml` spinners': a centimetre for position and size, a
+    /// degree for rotation. The ranges are the reference's widest (a region's
+    /// own bounds are the simulator's to enforce); size is the grid-legal
+    /// scale. Three decimals, as [`format_metres`] shows them.
+    fn spin_step(self, axis: usize) -> SpinStep {
+        match (self, axis) {
+            (Self::Position, 2) => SpinStep::new(0.01, -4.0, 4096.0, 3),
+            (Self::Position, _horizontal) => SpinStep::new(0.01, -256.0, 512.0, 3),
+            (Self::Rotation, _any) => SpinStep::new(1.0, -9999.0, 9999.0, 3),
+            (Self::Size, _any) => SpinStep::new(
+                0.01,
+                f64::from(crate::edit_math::MIN_PRIM_SCALE),
+                f64::from(crate::edit_math::MAX_PRIM_SCALE),
+                3,
+            ),
+        }
+    }
+}
+
+/// What one arrow step of the grid-unit field does: the reference
+/// `GridResolution` spinner's default tenth of a metre, within the range the
+/// commit clamps the unit to.
+const GRID_UNIT_STEP: SpinStep = SpinStep::new(0.1, 0.01, 10.0, 3);
+
 /// Marks one of the nine transform fields with its row and axis.
 #[derive(Component, Debug, Clone, Copy)]
 struct BuildNumericField {
@@ -243,8 +272,10 @@ pub struct EditToolPlugin;
 impl Plugin for EditToolPlugin {
     /// Register the tool state, spawn the floater, and run the sync systems.
     fn build(&self, app: &mut App) {
+        // The transform rows and the grid unit are spinners, and the commit
+        // below reads their steps.
+        ensure_spinner_widget(app);
         app.init_resource::<EditToolState>()
-            .init_resource::<BuildFieldFocus>()
             .add_systems(
                 Startup,
                 spawn_build_floater.after(UiScaffoldSystems::SpawnRoot),
@@ -563,17 +594,21 @@ fn spawn_build_tools_content(
         ))
         .id();
     let grid_label = spawn_row_label(commands, grid_row, "build-grid-unit-label", font_size);
-    let grid_field = spawn_text_input(
+    let grid_field = spawn_spinner(
         commands,
         grid_row,
-        &TextInputSpec {
-            initial: format_metres(DEFAULT_GRID_UNIT),
-            font_size,
-            width_glyphs: 6.0,
-            tab_index: 8,
-            ..TextInputSpec::new("build-grid-unit", TextInputKind::Float)
+        &SpinnerSpec {
+            input: TextInputSpec {
+                initial: format_metres(DEFAULT_GRID_UNIT),
+                font_size,
+                width_glyphs: 6.0,
+                tab_index: 8,
+                ..TextInputSpec::new("build-grid-unit", TextInputKind::Float)
+            },
+            step: GRID_UNIT_STEP,
         },
-    );
+    )
+    .field;
     // Named by the caption beside it.
     commands
         .entity(grid_field)
@@ -736,20 +771,24 @@ fn spawn_build_tools_content(
                 (FieldGroup::Size, _z) => "build-size-z",
             };
             let slot_index = group_index.saturating_mul(3).saturating_add(axis);
-            let field = spawn_text_input(
+            let field = spawn_spinner(
                 commands,
                 transform_row,
-                &TextInputSpec {
-                    font_size,
-                    width_glyphs: FIELD_WIDTH_GLYPHS,
-                    tab_index: i32::try_from(slot_index.saturating_add(21)).unwrap_or(21),
-                    ..TextInputSpec::new(element, TextInputKind::Float)
+                &SpinnerSpec {
+                    input: TextInputSpec {
+                        font_size,
+                        width_glyphs: FIELD_WIDTH_GLYPHS,
+                        tab_index: i32::try_from(slot_index.saturating_add(21)).unwrap_or(21),
+                        ..TextInputSpec::new(element, TextInputKind::Float)
+                    },
+                    step: group.spin_step(axis),
                 },
-            );
+            )
+            .field;
             // "Position X", not the row's "Position" three times over.
             commands.entity(field).insert((
                 BuildNumericField { group, axis },
-                Semantic::new(Role::Textbox).name_key(format!("{element}-name")),
+                Semantic::new(Role::SpinButton).name_key(format!("{element}-name")),
             ));
             if let Some(slot) = fields.get_mut(slot_index) {
                 *slot = field;
@@ -1543,14 +1582,6 @@ fn sync_numeric_fields(
     }
 }
 
-/// Which field held keyboard focus last frame, to commit a numeric edit on
-/// focus loss (blur) as well as on `Enter`.
-#[derive(Resource, Debug, Default)]
-struct BuildFieldFocus {
-    /// The field entity focused last frame, if any.
-    last: Option<Entity>,
-}
-
 /// What a committed transform edit writes: the selection it applies to, the two
 /// mirrors it moves at once, and the two outgoing writers. Bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam).
@@ -1570,53 +1601,48 @@ struct TransformCommit<'w, 's> {
     notices: MessageWriter<'w, crate::intents::LocalChatNotice>,
 }
 
-/// Commit numeric edits: on `Enter` in a focused transform field, or when
-/// focus leaves one, parse its row and send the corresponding
-/// `MultipleObjectUpdate` for the primary selection — the exact command the
-/// gizmos send. The grid-unit field commits into [`EditToolState`] instead.
+/// Commit numeric edits: on `Enter` in a focused transform field, when focus
+/// leaves one, or when its spinner arrows step it ([`FieldCommits`]), parse
+/// its row and send the corresponding `MultipleObjectUpdate` for the primary
+/// selection — the exact command the gizmos send. The grid-unit field commits
+/// into [`EditToolState`] instead.
 fn commit_numeric_fields(
     ui: Option<Res<BuildToolsUi>>,
     mut state: ResMut<EditToolState>,
-    focus: Res<InputFocus>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut focus_track: ResMut<BuildFieldFocus>,
+    mut commits: FieldCommits,
     fields: NumericFieldWidgets,
     mut commit_to: TransformCommit,
 ) {
     let Some(ui) = ui else {
         return;
     };
-    let focused_field = focus
-        .get()
-        .filter(|entity| ui.fields.contains(entity) || *entity == ui.grid_field);
-    let enter =
-        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
-    // The field to commit: the focused one on Enter, or the one focus just
-    // left.
-    let commit = if enter {
-        focused_field
-    } else if focus_track.last != focused_field {
-        focus_track
-            .last
-            .filter(|entity| ui.fields.contains(entity) || *entity == ui.grid_field)
-    } else {
-        None
-    };
-    focus_track.last = focused_field;
-    let Some(field) = commit else {
-        return;
-    };
-
-    // Grid unit.
-    if field == ui.grid_field {
-        if let Ok(editor) = fields.editors.get(field)
-            && let Some(value) = parse_field(&editor.value().to_string())
-        {
-            state.grid_unit = value.clamp(0.01, 10.0);
+    let is_field = |entity: Entity| ui.fields.contains(&entity) || entity == ui.grid_field;
+    for commit in commits.take(is_field) {
+        let Ok(editor) = fields.editors.get(commit.field) else {
+            continue;
+        };
+        let text = commit.text(editor);
+        if commit.field == ui.grid_field {
+            if let Some(value) = parse_field(&text) {
+                state.grid_unit = value.clamp(0.01, 10.0);
+            }
+            continue;
         }
-        return;
+        commit_transform_row(&ui, &state, &fields, &mut commit_to, commit.field, &text);
     }
+}
 
+/// Commit the transform row `field` belongs to, its own axis read from
+/// `text` (what was typed, or what a step left) and its siblings from their
+/// fields — the body of [`commit_numeric_fields`] for one transform field.
+fn commit_transform_row(
+    ui: &BuildToolsUi,
+    state: &EditToolState,
+    fields: &NumericFieldWidgets,
+    commit_to: &mut TransformCommit,
+    field: Entity,
+    text: &str,
+) {
     let Ok(marker) = fields.markers.get(field) else {
         return;
     };
@@ -1653,10 +1679,15 @@ fn commit_numeric_fields(
         }) else {
             return;
         };
-        let Ok(editor) = fields.editors.get(entity) else {
-            return;
+        let parsed = if entity == field {
+            parse_field(text)
+        } else {
+            let Ok(editor) = fields.editors.get(entity) else {
+                return;
+            };
+            parse_field(&editor.value().to_string())
         };
-        let Some(value) = parse_field(&editor.value().to_string()) else {
+        let Some(value) = parsed else {
             return;
         };
         if let Some(slot) = values.get_mut(axis) {

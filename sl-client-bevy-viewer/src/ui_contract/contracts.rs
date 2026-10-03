@@ -50,6 +50,7 @@
 use super::{ElementContract, Gesture, NodeContract, Probe, Row};
 use bevy::input_focus::InputFocus;
 use bevy::prelude::{App, Has, Name};
+use bevy::text::EditableText;
 use bevy::ui::Checked;
 use sl_viewer_ui_widgets::ui_trackball::{SPECIMEN_MOON_AIM, SPECIMEN_SUN_AIM, TrackballAim};
 
@@ -179,6 +180,34 @@ const SUN_ARROW_STEPS: Probe = Probe {
 const MOON_ARROW_STEPS: Probe = Probe {
     what: "an arrow key moved the moon trackball's aim",
     check: |app: &mut App| aim_moved(app, MOON_TRACKBALL, SPECIMEN_MOON_AIM),
+};
+
+/// The gallery spinner specimen's field.
+const SPINNER_FIELD: &str = "spinner:field";
+
+/// The text the spinner specimen's field shows, if it is there.
+fn spinner_text(app: &mut App) -> Option<String> {
+    let mut query = app.world_mut().query::<(&Name, &EditableText)>();
+    query
+        .iter(app.world())
+        .find(|(name, _editor)| name.as_str() == SPINNER_FIELD)
+        .map(|(_name, editor)| editor.value().to_string())
+}
+
+/// An arrow key on the focused spinner steps it up a hundredth.
+///
+/// A step emits no `UiAction` — it is a `SpinnerStepped` a consumer commits —
+/// so without this probe the arrow keys would sweep as "inert" and a spinner
+/// that had stopped stepping would pass.
+const SPINNER_ARROW_UP_STEPS: Probe = Probe {
+    what: "an up arrow key stepped the spinner from 1.250 to 1.260",
+    check: |app: &mut App| spinner_text(app).as_deref() == Some("1.260"),
+};
+
+/// The down arrow key steps it down a hundredth.
+const SPINNER_ARROW_DOWN_STEPS: Probe = Probe {
+    what: "a down arrow key stepped the spinner from 1.250 to 1.240",
+    check: |app: &mut App| spinner_text(app).as_deref() == Some("1.240"),
 };
 
 /// Whether the node named `node` is ticked.
@@ -1426,6 +1455,16 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
                 ],
             ),
         ],
+    },
+    ElementContract {
+        element: "spinner",
+        nodes: &[NodeContract::new(
+            SPINNER_FIELD,
+            &[
+                Row::leaves(Gesture::ArrowUp, SPINNER_ARROW_UP_STEPS),
+                Row::leaves(Gesture::ArrowDown, SPINNER_ARROW_DOWN_STEPS),
+            ],
+        )],
     },
     ElementContract {
         element: "text-editor",

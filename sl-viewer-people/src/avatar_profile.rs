@@ -82,6 +82,7 @@ use crate::ui::{column, row};
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel};
+use crate::ui_spinner::{SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, TabStrip, fill_tab_container,
     spawn_tab_container,
@@ -2098,20 +2099,28 @@ fn build_classified_editor(
     if info.is_none() {
         // A new listing: the price is set at publish time.
         let price_row = spawn_labeled_row(commands, panel, "profile-classified-price");
-        ui.classified_price_field = Some(spawn_text_input(
-            commands,
-            price_row,
-            &TextInputSpec {
-                initial: "0".to_owned(),
-                font_size: PROFILE_FONT_SIZE,
-                width_glyphs: 8.0,
-                tab_index: 9,
-                ..TextInputSpec::new(
-                    "profile-classified-price",
-                    TextInputKind::NonNegativeInteger,
-                )
-            },
-        ));
+        // The reference's `price_for_listing`: a Linden dollar a step, up to
+        // L$999 999.
+        ui.classified_price_field = Some(
+            spawn_spinner(
+                commands,
+                price_row,
+                &SpinnerSpec {
+                    input: TextInputSpec {
+                        initial: "0".to_owned(),
+                        font_size: PROFILE_FONT_SIZE,
+                        width_glyphs: 8.0,
+                        tab_index: 9,
+                        ..TextInputSpec::new(
+                            "profile-classified-price",
+                            TextInputKind::NonNegativeInteger,
+                        )
+                    },
+                    step: SpinStep::new(1.0, 0.0, 999_999.0, 0),
+                },
+            )
+            .field,
+        );
         let location_row = spawn_labeled_row(commands, panel, "profile-classified-location");
         spawn_key_label(
             commands,

@@ -14,6 +14,9 @@ exclude.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The spin button's range and step for a screen reader, on its
+# `AccessibilityNode` — the version Bevy itself builds against.
+accesskit = { workspace = true }
 # Not a workspace dependency: members disagree about `default-features`, so the
 # spec stays per-crate (see the root manifest). `system_font_discovery` because
 # these widgets measure and lay out real text.

@@ -151,6 +151,7 @@ use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
 use crate::ui_spawn::{self, ButtonSpec, LabeledRowSpec, UiLabel, spawn_button};
+use crate::ui_spinner::{SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
@@ -1702,7 +1703,7 @@ fn build_region_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> R
     );
 
     let limit_row = spawn_labeled_row(commands, panel, "about-region-agent-limit", font_size);
-    handles.agent_limit_field = Some(spawn_edit_field(
+    handles.agent_limit_field = Some(spawn_edit_spinner(
         commands,
         limit_row,
         EditFieldShape {
@@ -1712,10 +1713,11 @@ fn build_region_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> R
             tab_index: 2,
             max_characters: 5,
         },
+        AGENT_LIMIT_STEP,
         font_size,
     ));
     let bonus_row = spawn_labeled_row(commands, panel, "about-region-object-bonus", font_size);
-    handles.object_bonus_field = Some(spawn_edit_field(
+    handles.object_bonus_field = Some(spawn_edit_spinner(
         commands,
         bonus_row,
         EditFieldShape {
@@ -1725,6 +1727,7 @@ fn build_region_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> R
             tab_index: 3,
             max_characters: 6,
         },
+        OBJECT_BONUS_STEP,
         font_size,
     ));
     let maturity_row = spawn_labeled_row(commands, panel, "about-region-maturity", font_size);
@@ -1822,7 +1825,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> De
     );
 
     let restart_row = spawn_labeled_row(commands, panel, "about-region-restart-delay", font_size);
-    handles.restart_field = Some(spawn_edit_field(
+    handles.restart_field = Some(spawn_edit_spinner(
         commands,
         restart_row,
         EditFieldShape {
@@ -1832,6 +1835,7 @@ fn build_debug_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> De
             tab_index: 4,
             max_characters: 5,
         },
+        RESTART_DELAY_STEP,
         font_size,
     ));
     let actions = spawn_row(commands, panel);
@@ -1868,6 +1872,7 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
         water_row,
         "about-region-water-field",
         2,
+        WATER_HEIGHT_STEP,
         font_size,
     ));
     let raise_row = spawn_labeled_row(commands, panel, "about-region-terrain-raise", font_size);
@@ -1876,6 +1881,7 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
         raise_row,
         "about-region-raise-field",
         3,
+        TERRAIN_RAISE_STEP,
         font_size,
     ));
     let lower_row = spawn_labeled_row(commands, panel, "about-region-terrain-lower", font_size);
@@ -1884,6 +1890,7 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
         lower_row,
         "about-region-lower-field",
         4,
+        TERRAIN_LOWER_STEP,
         font_size,
     ));
 
@@ -1921,6 +1928,7 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
             row_entity,
             "about-region-corner-low",
             6,
+            CORNER_HEIGHT_STEP,
             font_size,
         );
         spawn_key_label(commands, row_entity, high_key, DIM_LABEL_COLOR, font_size);
@@ -1929,15 +1937,16 @@ fn build_terrain_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> 
             row_entity,
             "about-region-corner-high",
             6,
+            CORNER_HEIGHT_STEP,
             font_size,
         );
         // Each field is called what the caption before it says.
         commands
             .entity(low)
-            .insert(Semantic::new(Role::Textbox).name_key(low_key));
+            .insert(Semantic::new(Role::SpinButton).name_key(low_key));
         commands
             .entity(high)
-            .insert(Semantic::new(Role::Textbox).name_key(format!("{high_key}-name")));
+            .insert(Semantic::new(Role::SpinButton).name_key(format!("{high_key}-name")));
         if let Some(slot) = handles.start_fields.get_mut(index) {
             *slot = Some(low);
         }
@@ -4873,6 +4882,72 @@ fn spawn_edit_field(
     field
 }
 
+/// An edit field with step arrows, gated on estate rights like
+/// [`spawn_edit_field`] — the reference's `LLSpinCtrl` rows. The arrows grey
+/// with the field's own gate.
+fn spawn_edit_spinner(
+    commands: &mut Commands,
+    parent: Entity,
+    shape: EditFieldShape,
+    step: SpinStep,
+    font_size: f32,
+) -> Entity {
+    let EditFieldShape {
+        element,
+        kind,
+        width_glyphs,
+        tab_index,
+        max_characters,
+    } = shape;
+    let field = spawn_spinner(
+        commands,
+        parent,
+        &SpinnerSpec {
+            input: TextInputSpec {
+                font_size,
+                width_glyphs,
+                tab_index,
+                max_characters: Some(max_characters),
+                ..TextInputSpec::new(element, kind)
+            },
+            step,
+        },
+    )
+    .field;
+    commands.entity(field).insert(EditGate);
+    field
+}
+
+/// What one arrow step of the agent limit does — the reference
+/// `agent_limit_spin`: one avatar, within 1–100 (the simulator caps a region
+/// below its hard limit).
+const AGENT_LIMIT_STEP: SpinStep = SpinStep::new(1.0, 1.0, 100.0, 0);
+
+/// What one arrow step of the object bonus does — the reference
+/// `object_bonus_spin`: a half, within 1–10, at the two decimals it is shown
+/// with.
+const OBJECT_BONUS_STEP: SpinStep = SpinStep::new(0.5, 1.0, 10.0, 2);
+
+/// What one arrow step of the restart delay does — the reference
+/// `restart_delay`: a second, within 15 s – one hour.
+const RESTART_DELAY_STEP: SpinStep = SpinStep::new(1.0, 15.0, 3600.0, 0);
+
+/// What one arrow step of the water height does — the reference
+/// `water_height_spin`: a tenth of a metre, within 0–100 m.
+const WATER_HEIGHT_STEP: SpinStep = SpinStep::new(0.1, 0.0, 100.0, 2);
+
+/// What one arrow step of the terrain raise limit does — the reference
+/// `terrain_raise_spin`: a fifth of a metre, within 0–100 m.
+const TERRAIN_RAISE_STEP: SpinStep = SpinStep::new(0.2, 0.0, 100.0, 2);
+
+/// What one arrow step of the terrain lower limit does — the reference
+/// `terrain_lower_spin`: a fifth of a metre, within −100–0 m.
+const TERRAIN_LOWER_STEP: SpinStep = SpinStep::new(0.2, -100.0, 0.0, 2);
+
+/// What one arrow step of a corner's elevation does — the reference
+/// `height_start_spin_*` / `height_range_spin_*`: half a metre, within ±500 m.
+const CORNER_HEIGHT_STEP: SpinStep = SpinStep::new(0.5, -500.0, 500.0, 2);
+
 /// A translated action button dispatching `action`. `write` tags it as a write
 /// button (hidden when the agent cannot manage the estate).
 fn spawn_action_button(
@@ -4954,9 +5029,10 @@ fn spawn_terrain_field(
     parent: Entity,
     element: &'static str,
     tab_index: i32,
+    step: SpinStep,
     font_size: f32,
 ) -> Entity {
-    spawn_edit_field(
+    spawn_edit_spinner(
         commands,
         parent,
         EditFieldShape {
@@ -4966,6 +5042,7 @@ fn spawn_terrain_field(
             tab_index,
             max_characters: 10,
         },
+        step,
         font_size,
     )
 }

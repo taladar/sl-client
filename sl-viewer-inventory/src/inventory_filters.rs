@@ -467,6 +467,16 @@ pub fn spawn_inventory_filters_specimen(
     parent
 }
 
+/// What one arrow step of the "hours ago" field does — the reference
+/// `spin_hours_ago`: an hour, up to 240 000.
+const HOURS_AGO_STEP: crate::ui_spinner::SpinStep =
+    crate::ui_spinner::SpinStep::new(1.0, 0.0, 240_000.0, 0);
+
+/// What one arrow step of the "days ago" field does — the reference
+/// `spin_days_ago`: a day, up to 10 000.
+const DAYS_AGO_STEP: crate::ui_spinner::SpinStep =
+    crate::ui_spinner::SpinStep::new(1.0, 0.0, 10_000.0, 0);
+
 /// Build the filters floater's content into `content` at `font_size`: the
 /// thirteen type boxes with All / None, the worn and since-login boxes, the
 /// newer / older pair, the hours / days fields and Reset. Returns the handles
@@ -603,20 +613,24 @@ fn spawn_filters_content(
             ChildOf(content),
         ))
         .id();
-    let hours_field = crate::ui_text_input::spawn_text_input(
+    let hours_field = crate::ui_spinner::spawn_spinner(
         commands,
         range_row,
-        &crate::ui_text_input::TextInputSpec {
-            initial: "0".to_owned(),
-            font_size,
-            width_glyphs: 6.0,
-            tab_index: 26,
-            ..crate::ui_text_input::TextInputSpec::new(
-                "inventory-filter-hours",
-                crate::ui_text_input::TextInputKind::NonNegativeInteger,
-            )
+        &crate::ui_spinner::SpinnerSpec {
+            input: crate::ui_text_input::TextInputSpec {
+                initial: "0".to_owned(),
+                font_size,
+                width_glyphs: 6.0,
+                tab_index: 26,
+                ..crate::ui_text_input::TextInputSpec::new(
+                    "inventory-filter-hours",
+                    crate::ui_text_input::TextInputKind::NonNegativeInteger,
+                )
+            },
+            step: HOURS_AGO_STEP,
         },
-    );
+    )
+    .field;
     // Each unit after its field is the field's caption.
     let hours_label = spawn_label(
         commands,
@@ -625,20 +639,24 @@ fn spawn_filters_content(
         font_size,
     );
     commands.entity(hours_field).insert(LabelledBy(hours_label));
-    let days_field = crate::ui_text_input::spawn_text_input(
+    let days_field = crate::ui_spinner::spawn_spinner(
         commands,
         range_row,
-        &crate::ui_text_input::TextInputSpec {
-            initial: "0".to_owned(),
-            font_size,
-            width_glyphs: 6.0,
-            tab_index: 27,
-            ..crate::ui_text_input::TextInputSpec::new(
-                "inventory-filter-days",
-                crate::ui_text_input::TextInputKind::NonNegativeInteger,
-            )
+        &crate::ui_spinner::SpinnerSpec {
+            input: crate::ui_text_input::TextInputSpec {
+                initial: "0".to_owned(),
+                font_size,
+                width_glyphs: 6.0,
+                tab_index: 27,
+                ..crate::ui_text_input::TextInputSpec::new(
+                    "inventory-filter-days",
+                    crate::ui_text_input::TextInputKind::NonNegativeInteger,
+                )
+            },
+            step: DAYS_AGO_STEP,
         },
-    );
+    )
+    .field;
     let days_label = spawn_label(
         commands,
         range_row,

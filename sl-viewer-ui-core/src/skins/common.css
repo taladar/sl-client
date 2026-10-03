@@ -1186,6 +1186,61 @@
   color: var(--scrollbar-arrow);
 }
 
+/* THE SPINNER (viewer-build-numeric-field-spinners): a numeric field with a
+ * column of two step arrows at its inline start, the reference's
+ * `LLSpinCtrl`. The field is an ordinary `.sk-field`; these rules dress only
+ * the arrows. The column's border is the line around and between the two, so
+ * a skin can draw them as one stepper. Every state rule below has its resting
+ * rule first, because a state rule alone would stick once it stopped
+ * matching. */
+.sk-spinner-arrows {
+  border-color: var(--spinner-arrow-border);
+  /* The column's face shows through the one-pixel gap between the arrows, so
+   * it is the same line as the border around them. */
+  background-color: var(--spinner-arrow-border);
+}
+
+.sk-spinner-arrow {
+  background-color: var(--spinner-arrow-bg);
+}
+
+.sk-spinner-arrow:hover {
+  background-color: var(--spinner-arrow-bg-hover);
+}
+
+.sk-spinner-arrow:active {
+  background-color: var(--spinner-arrow-bg-pressed);
+}
+
+/* Greyed with its field: the widget mirrors the field's `InteractionDisabled`
+ * (and a read-only field's refusal) onto both arrows. After `:hover`, so a
+ * greyed arrow under the pointer stays grey. */
+.sk-spinner-arrow:disabled {
+  background-color: var(--spinner-arrow-bg-disabled);
+}
+
+/* The arrow is the skin's glyph, the scrollbar arrow's way: an empty text host
+ * whose `::before` this fills. Up and down are the same in every script, so
+ * nothing here mirrors under right-to-left. */
+.sk-spinner-arrow-glyph::before {
+  content: "";
+  color: var(--spinner-arrow);
+}
+
+.sk-spinner-arrow-up .sk-spinner-arrow-glyph::before {
+  content: "\25B4";
+  color: var(--spinner-arrow);
+}
+
+.sk-spinner-arrow-down .sk-spinner-arrow-glyph::before {
+  content: "\25BE";
+  color: var(--spinner-arrow);
+}
+
+.sk-spinner-arrow:disabled .sk-spinner-arrow-glyph::before {
+  color: var(--spinner-arrow-disabled);
+}
+
 /* The draggable splitter between a resizable tab strip and its page, and the
  * short raised nub that marks it as a handle. */
 .sk-divider {

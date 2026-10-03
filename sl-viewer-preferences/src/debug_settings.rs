@@ -62,6 +62,7 @@ use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
+use crate::ui_spinner::{FieldCommits, SpinStep, SpinnerSpec, spawn_spinner};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
     TableState, set_table_cell, spawn_table, spawn_table_row,
@@ -290,14 +291,6 @@ impl Default for DebugEditorState {
     }
 }
 
-/// Which editor field held keyboard focus last frame, to commit on blur (the
-/// build window's `ParamFieldFocus` idiom).
-#[derive(Resource, Debug, Default)]
-struct DebugFieldFocus {
-    /// The field entity focused last frame, if any.
-    last: Option<Entity>,
-}
-
 /// The cell entities of one pooled list row, for the bind pass.
 #[derive(Component, Debug, Clone, Copy)]
 struct DebugRowParts {
@@ -328,9 +321,9 @@ pub struct DebugSettingsPlugin;
 
 impl Plugin for DebugSettingsPlugin {
     fn build(&self, app: &mut App) {
+        crate::ui_spinner::ensure_spinner_widget(app);
         app.init_resource::<DebugSettingsModel>()
             .init_resource::<DebugEditorState>()
-            .init_resource::<DebugFieldFocus>()
             .add_observer(on_debug_bool_toggle)
             .add_systems(
                 Startup,
@@ -867,18 +860,47 @@ fn spawn_editor_field(
     kind: TextInputKind,
     width_glyphs: f32,
 ) -> Entity {
-    let field = spawn_text_input(
-        commands,
-        parent,
-        &TextInputSpec {
-            font_size: FONT,
-            width_glyphs,
-            name_key,
-            ..TextInputSpec::new(element, kind)
-        },
-    );
+    let input = TextInputSpec {
+        font_size: FONT,
+        width_glyphs,
+        name_key,
+        ..TextInputSpec::new(element, kind)
+    };
+    // The reference's four `val_spinner_*`: every numeric editor is a spinner,
+    // ranged per type as `LLFloaterSettingsDebug::updateControl` ranges them.
+    let field = match debug_spin_step(element, kind) {
+        Some(step) => spawn_spinner(commands, parent, &SpinnerSpec { input, step }).field,
+        None => spawn_text_input(commands, parent, &input),
+    };
     commands.entity(field).insert(DebugEditField);
     field
+}
+
+/// What one arrow step of a numeric editor field does — the ranges and
+/// precisions `LLFloaterSettingsDebug::updateControl` gives its spinners: a
+/// whole step across the full range for the integer types, a tenth at three
+/// decimals for the float ones, and 0–1 for a colour's alpha. `None` for the
+/// string field, which is no spinner.
+fn debug_spin_step(element: &str, kind: TextInputKind) -> Option<SpinStep> {
+    match kind {
+        TextInputKind::Line | TextInputKind::Multiline => None,
+        TextInputKind::Integer => Some(SpinStep::new(
+            1.0,
+            f64::from(i32::MIN),
+            f64::from(i32::MAX),
+            0,
+        )),
+        TextInputKind::NonNegativeInteger => Some(SpinStep::new(1.0, 0.0, f64::from(u32::MAX), 0)),
+        TextInputKind::Float if element == "debug-settings-alpha" => {
+            Some(SpinStep::new(0.1, 0.0, 1.0, 3))
+        }
+        TextInputKind::Float => Some(SpinStep::new(
+            0.1,
+            f64::from(f32::MIN),
+            f64::from(f32::MAX),
+            3,
+        )),
+    }
 }
 
 /// Spawn a component field's single-letter lead-in label (an axis / edge
@@ -1676,20 +1698,17 @@ fn assemble_field_value(
 /// and swatch the value comes off.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
 struct DebugFieldCommit<'w, 's> {
-    /// What is focused now; losing focus commits.
-    focus: Option<Res<'w, InputFocus>>,
-    /// The keyboard, for the `Enter` that commits without leaving the field.
-    keyboard: Res<'w, ButtonInput<KeyCode>>,
-    /// What was focused on the previous run, which is what "lost focus" is
-    /// measured against.
-    focus_track: ResMut<'w, DebugFieldFocus>,
+    /// `Enter`, focus leaving a field, and a spinner step — the three things
+    /// that commit.
+    commits: FieldCommits<'w, 's>,
     /// The edit fields, which a committed text value is read from.
     fields: Query<'w, 's, &'static EditableText, With<DebugEditField>>,
     /// The colour swatches, likewise for a committed colour.
     swatches: Query<'w, 's, &'static ColorSwatchValue>,
 }
 
-/// Commit the visible editor fields on `Enter` or focus loss: parse every
+/// Commit the visible editor fields on `Enter`, focus loss or a spinner step:
+/// parse every
 /// field of the selected kind's stack, assemble the [`SettingValue`], and
 /// write it to the selected scope. Any incomplete field abandons the commit.
 fn commit_debug_text_fields(
@@ -1699,30 +1718,16 @@ fn commit_debug_text_fields(
     settings: Option<ResMut<ViewerSettings>>,
 ) {
     let DebugFieldCommit {
-        focus,
-        keyboard,
-        mut focus_track,
+        mut commits,
         fields,
         swatches,
     } = commit;
     let Some(ui) = ui else {
         return;
     };
-    let focused_field = focus
-        .as_ref()
-        .and_then(|focus| focus.get())
-        .filter(|entity| fields.contains(*entity));
-    let enter =
-        keyboard.just_pressed(KeyCode::Enter) || keyboard.just_pressed(KeyCode::NumpadEnter);
-    let commit = if enter {
-        focused_field
-    } else if focus_track.last != focused_field {
-        focus_track.last.filter(|entity| fields.contains(*entity))
-    } else {
-        None
-    };
-    focus_track.last = focused_field;
-    if commit.is_none() {
+    // The fields are one value's components, so however many asked, the
+    // value is assembled and written once.
+    if commits.take(|entity| fields.contains(entity)).is_empty() {
         return;
     }
     let Some(name) = state.selected.as_deref() else {
@@ -1998,10 +2003,10 @@ mod tests {
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
     use super::{
-        DebugBoolCheckbox, DebugEditField, DebugEditorState, DebugEntry, DebugFieldFocus,
-        DebugSettingsUi, NO_OVERRIDE, build_entries, build_view, commit_debug_text_fields,
-        format_setting_value, guard_debug_account_scope, is_debug_setting_locked,
-        on_debug_bool_toggle, on_reset_setting, sync_debug_detail,
+        DebugBoolCheckbox, DebugEditField, DebugEditorState, DebugEntry, DebugSettingsUi,
+        NO_OVERRIDE, build_entries, build_view, commit_debug_text_fields, format_setting_value,
+        guard_debug_account_scope, is_debug_setting_locked, on_debug_bool_toggle, on_reset_setting,
+        sync_debug_detail,
     };
     use crate::settings::ViewerSettings;
     use crate::ui_combo::ComboSelection;
@@ -2019,7 +2024,9 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(ViewerSettings::from_store_for_test(store))
             .init_resource::<DebugEditorState>()
-            .init_resource::<DebugFieldFocus>();
+            .init_resource::<InputFocus>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_message::<crate::ui_spinner::SpinnerStepped>();
         app
     }
 

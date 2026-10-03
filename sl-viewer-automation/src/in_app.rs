@@ -25,7 +25,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use sl_automation_proto::{
     Deadline, Locator, NodeValue, PointerButton, Request, RequestBody, RequestId, ResponseBody,
-    UiNode, WaitCondition,
+    Role, UiNode, WaitCondition,
 };
 use sl_viewer_driver::{Artifacts, DriverError, Failure};
 use sl_viewer_ui_core::synthetic_input::{ActionStatus, InputAction, SyntheticInput};
@@ -147,8 +147,8 @@ pub fn find(app: &mut App, locator: &Locator) -> Result<Vec<UiNode>, DriverError
     }
 }
 
-/// The text of the one node `locator` names: a field's or a label's value,
-/// else its accessible name.
+/// The text of the one node `locator` names: a field's or a label's value (a
+/// spin button's number), else its accessible name.
 ///
 /// # Errors
 ///
@@ -157,6 +157,10 @@ pub fn text(app: &mut App, locator: &Locator) -> Result<Option<String>, DriverEr
     let node = locate(app, locator)?;
     Ok(match node.value {
         Some(NodeValue::Text(text) | NodeValue::Color(text)) => Some(text),
+        // A spin button's text is the number it holds.
+        Some(NodeValue::Number(number)) if node.role == Role::SpinButton => {
+            Some(number.to_string())
+        }
         Some(NodeValue::Number(_)) | None => node.name,
     })
 }

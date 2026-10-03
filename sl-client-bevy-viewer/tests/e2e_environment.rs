@@ -947,14 +947,21 @@ mod test {
                 .test_id("personal-lighting-ambient:color-swatch")
                 .click()
                 .await?;
+            // The channels are spin buttons, as the reference's are: typed
+            // into, and committed with Enter.
             let channel = |key: &str| {
                 alpha
                     .ui()
-                    .locator(Locator::role(Role::Slider).name_key(key))
+                    .locator(Locator::role(Role::SpinButton).name_key(key))
             };
-            channel("color-picker-red-name").press("End").await?;
-            channel("color-picker-green-name").press("Home").await?;
-            channel("color-picker-blue-name").press("Home").await?;
+            for (key, value) in [
+                ("color-picker-red-name", "255"),
+                ("color-picker-green-name", "0"),
+                ("color-picker-blue-name", "0"),
+            ] {
+                let _filled = channel(key).fill(value).await?;
+                alpha.press("Enter").await?;
+            }
             let _ok = alpha
                 .ui()
                 .test_id("color-picker-button:color-picker-ok")

@@ -209,6 +209,52 @@ mod tests {
         Ok(())
     }
 
+    /// **A spinner is a spin button valued by its number, and a click on its
+    /// arrow changes the value the model reports.** Its arrows are buttons
+    /// beside it in the spinner's group, called by their own keys — no glyph
+    /// names them.
+    #[test]
+    fn a_spin_buttons_arrow_changes_its_reported_value() -> Result<(), String> {
+        let mut app = registered("spinner")?;
+        let field = node(&mut app, "spinner:field")?;
+        assert_eq!(
+            (field.role, field.value.clone(), field.name_key.as_deref()),
+            (
+                Role::SpinButton,
+                Some(NodeValue::Number(1.25)),
+                Some("spinner-specimen-name")
+            ),
+            "the field is the spin button, valued by its number"
+        );
+        let group = node(&mut app, "spinner:spinner")?;
+        let arrows: Vec<(Role, Option<&str>)> = ["spinner:up", "spinner:down"]
+            .iter()
+            .filter_map(|id| find(&group.children, id))
+            .map(|arrow| (arrow.role, arrow.name_key.as_deref()))
+            .collect();
+        assert_eq!(
+            arrows,
+            vec![
+                (Role::Button, Some("spinner-increase")),
+                (Role::Button, Some("spinner-decrease")),
+            ],
+            "both arrows, named, in the spinner's group"
+        );
+
+        interact::click_node(&mut app, "spinner:up")?;
+        let stepped = node(&mut app, "spinner:field")?;
+        assert_eq!(
+            stepped.value,
+            Some(NodeValue::Number(1.26)),
+            "one step up is a hundredth"
+        );
+        interact::click_node(&mut app, "spinner:down")?;
+        interact::click_node(&mut app, "spinner:down")?;
+        let back = node(&mut app, "spinner:field")?;
+        assert_eq!(back.value, Some(NodeValue::Number(1.24)), "and two down");
+        Ok(())
+    }
+
     /// **A tab strip is a tab list, and the selection moves with a click.**
     #[test]
     fn the_selected_tab_follows_the_click() -> Result<(), String> {

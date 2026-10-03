@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 125 |
-| ready | 309 |
+| ready | 308 |
 | blocked | 54 |
 | in-progress | 20 |
 | bugs | 19 |
-| done | 1298 |
+| done | 1299 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1872** |
@@ -315,7 +315,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (308)
 
 ### protocol
 
@@ -422,8 +422,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-grid-options`](ready/viewer-build-grid-options.md) —
   Grid-options floater + snap-XY / selection-grid (blocked by
   `viewer-transform-gizmos` (done))
-- [`viewer-build-numeric-field-spinners`](ready/viewer-build-numeric-field-spinners.md)
-  — Build-window numeric fields — up/down arrow spinners
 - [`viewer-build-physics-params`](ready/viewer-build-physics-params.md) —
   Features tab — physics shape type & material params
 - [`viewer-build-probe-animesh-controls`](ready/viewer-build-probe-animesh-controls.md)
@@ -1335,7 +1333,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1298)
+## done (1299)
 
 ### protocol
 
@@ -1895,6 +1893,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-keyboard-text-harness` (done), `viewer-world-test-harness` (done))
 - [`viewer-build-material-tab-permission-gate`](done/viewer-build-material-tab-permission-gate.md)
   — Build tools — gate the Material tab on modify permission (grey + notice)
+- [`viewer-build-numeric-field-spinners`](done/viewer-build-numeric-field-spinners.md)
+  — Spinner widget — up/down arrow numeric fields (build window and every
+  reference spinner)
 - [`viewer-build-systems-gate-on-build-mode`](done/viewer-build-systems-gate-on-build-mode.md)
   — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
