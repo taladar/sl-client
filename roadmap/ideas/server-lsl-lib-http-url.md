@@ -4,7 +4,8 @@ title: Library tranche — outbound HTTP and in-world URLs
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, server-world-determinism-contract]
+blocked_by: [server-lsl-vm-execution, server-world-determinism-contract,
+  gridspec-lsl-http-url]
 refs: [server-lsl-lib-task-inventory]
 ---
 

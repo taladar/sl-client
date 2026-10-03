@@ -4,6 +4,7 @@ title: Server-side appearance bake service
 topic: server
 status: ideas
 origin: user request (2026-07) — size what a real server would involve
+blocked_by: [gridspec-appearance-baking]
 ---
 
 Context: [context/server.md](../context/server.md).

@@ -4,7 +4,8 @@ title: Library tranche — status flags, forces, targets and vehicles
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, server-world-collision-and-physics]
+blocked_by: [server-lsl-vm-execution, server-world-collision-and-physics,
+  gridspec-lsl-physics-vehicles]
 refs: [server-physics-integration, server-lsl-lib-prim-state]
 ---
 

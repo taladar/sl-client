@@ -5,7 +5,8 @@ topic: test
 status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
-blocked_by: [server-fake-grid-script-engine-wiring]
+blocked_by: [server-fake-grid-script-engine-wiring,
+  gridspec-lsl-live-differential-runner]
 refs: [test-lsl-script-corpus, test-firestorm-crosscheck-runner,
   server-lsl-lib-math-rotations]
 ---

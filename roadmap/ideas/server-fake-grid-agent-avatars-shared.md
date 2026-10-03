@@ -5,6 +5,7 @@ topic: server
 status: ideas
 origin: test-e2e-live-verify-sweep (2026-09-30)
 refs: [test-e2e-sweep-two-avatars, server-world-agent-movement]
+blocked_by: [gridspec-avatar-presence, gridspec-animations]
 ---
 
 Context: [context/testing.md](../context/testing.md).

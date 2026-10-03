@@ -5,7 +5,7 @@ topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-chat-routing,
-  protocol-sim-script-messages]
+  protocol-sim-script-messages, gridspec-lsl-comms]
 refs: [server-world-link-sets, test-fake-grid-lsl-offline-cases]
 ---
 

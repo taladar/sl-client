@@ -5,7 +5,7 @@ topic: server
 status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
-blocked_by: [server-world-ecs-store]
+blocked_by: [server-world-ecs-store, gridspec-sit-stand, gridspec-attachments]
 refs: [server-lsl-lib-avatar-control, server-world-link-sets,
   viewer-seated-region-crossing]
 ---

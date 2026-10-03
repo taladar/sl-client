@@ -5,7 +5,7 @@ topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-agent-movement,
-  server-world-sit-and-attach]
+  server-world-sit-and-attach, gridspec-lsl-avatar-control]
 refs: [server-lsl-lib-money-permissions, server-lsl-lib-detection-sensors,
   server-fake-grid-scripted-avatars]
 ---

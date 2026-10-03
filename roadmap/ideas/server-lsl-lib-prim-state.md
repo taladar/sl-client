@@ -5,7 +5,8 @@ topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-ecs-store,
-  server-world-link-sets, server-world-update-scheduling]
+  server-world-link-sets, server-world-update-scheduling,
+  gridspec-lsl-prim-state]
 refs: [server-lsl-lib-detection-sensors, viewer-fake-grid-render-catalogue]
 ---
 

@@ -2,9 +2,10 @@
 id: fake-grid-own-attachments-and-region-moves
 title: Fake grid — the agent's own attachments, the COF, and region moves
 topic: test
-status: ready
+status: blocked
 origin: gap found while fixing viewer-inventory-worn-before-attach-confirmed (2026-09-27)
 refs: [viewer-inventory-worn-before-attach-confirmed, viewer-object-moved-region-reuse, viewer-menu-touch-object]
+blocked_by: [gridspec-outfits-wearables, gridspec-attachments]
 ---
 
 Context: [context/test.md](../context/test.md).

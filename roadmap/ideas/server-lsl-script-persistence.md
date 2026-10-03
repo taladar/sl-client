@@ -4,7 +4,8 @@ title: Script state that survives a take, a rez and a region restart
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, server-lsl-state-and-events]
+blocked_by: [server-lsl-vm-execution, server-lsl-state-and-events,
+  gridspec-lsl-persistence]
 refs: [server-fake-grid-script-engine-wiring, server-lsl-lib-task-inventory]
 ---
 

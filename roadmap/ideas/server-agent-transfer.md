@@ -5,6 +5,7 @@ topic: server
 status: ideas
 origin: user request (2026-07) — size what a real server would involve
 refs: [server-simulator-core, protocol-sim-udp-flows]
+blocked_by: [gridspec-neighbours-crossing]
 ---
 
 Context: [context/server.md](../context/server.md).

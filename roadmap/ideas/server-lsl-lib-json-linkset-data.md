@@ -4,7 +4,8 @@ title: Library tranche — llJson* and the linkset data store
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, server-lsl-library-surface-table]
+blocked_by: [server-lsl-vm-execution, server-lsl-library-surface-table,
+  gridspec-lsl-json-linkset-data]
 refs: [server-lsl-lib-strings-lists, server-world-link-sets]
 ---
 

@@ -5,7 +5,7 @@ topic: server
 status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
-blocked_by: [server-world-ecs-store]
+blocked_by: [server-world-ecs-store, gridspec-object-link-delink]
 refs: [server-lsl-lib-prim-state, server-world-touch-and-grab]
 ---
 

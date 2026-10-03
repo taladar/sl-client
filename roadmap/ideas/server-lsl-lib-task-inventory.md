@@ -4,7 +4,8 @@ title: Library tranche — task inventory, giving, rezzing and notecards
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, server-fake-grid-script-engine-wiring]
+blocked_by: [server-lsl-vm-execution, server-fake-grid-script-engine-wiring,
+  gridspec-lsl-task-inventory]
 refs: [server-lsl-state-and-events, test-fake-grid-rez-from-inventory]
 ---
 

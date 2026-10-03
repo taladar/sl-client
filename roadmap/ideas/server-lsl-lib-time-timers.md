@@ -4,7 +4,8 @@ title: Library tranche — time, timers and sleeping, on a tick clock
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, server-world-determinism-contract]
+blocked_by: [server-lsl-vm-execution, server-world-determinism-contract,
+  gridspec-lsl-time-timers]
 refs: [server-lsl-state-and-events, server-world-heartbeat]
 ---
 

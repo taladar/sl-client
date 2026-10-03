@@ -5,7 +5,7 @@ topic: server
 status: blocked
 origin: server-lsl-state-and-events review (2026-09-28)
 points: 5
-blocked_by: [server-fake-grid-script-engine-wiring]
+blocked_by: [server-fake-grid-script-engine-wiring, gridspec-lsl-events]
 refs: [server-lsl-state-and-events, server-world-link-sets,
   server-lsl-lib-prim-state, server-lsl-lib-task-inventory]
 ---

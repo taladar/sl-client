@@ -4,7 +4,7 @@ title: Scope the OSSL (os*) surface — how much, and why
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-library-surface-table]
+blocked_by: [server-lsl-library-surface-table, gridspec-lsl-ossl]
 refs: [server-lsl-lib-avatar-control, viewer-opensim-region-extras-limits]
 ---
 

@@ -64,6 +64,7 @@ TOPICS = [
     "repl",
     "aditi",
     "server",
+    "gridspec",
 ]
 
 WIKILINK = re.compile(r"\[\[([a-z0-9][a-z0-9-]*)\]\]")

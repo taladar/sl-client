@@ -52,6 +52,7 @@ roadmap** so existing code comment anchors (e.g. `ROADMAP #23`,
 | `repl` | `SL_REPL_ROAD_MAP.md` | `repl-<phase><n>` |
 | `aditi` | `KNOWN_ISSUES_ADITI.md` | `aditi-N` |
 | `server` | grid/simulator | `server-<subsystem>` |
+| `gridspec` | live-grid behaviour → fake grid | `gridspec-<feature>` |
 
 ## Task file format
 

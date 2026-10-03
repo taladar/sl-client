@@ -2,10 +2,11 @@
 id: server-fake-grid-parcel-on-movement
 title: Fake grid — push the parcel an agent walks onto, and serve parcel environments
 topic: server
-status: ready
+status: blocked
 origin: test-e2e-sweep-environment (2026-10-01)
 points: 5
 refs: [test-e2e-environment-parcel-layer, viewer-environment-personal-lighting]
+blocked_by: [gridspec-environment, gridspec-parcel-properties]
 ---
 
 Context: [context/testing.md](../context/testing.md).

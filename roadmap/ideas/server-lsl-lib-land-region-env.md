@@ -4,7 +4,8 @@ title: Library tranche — parcel, region, estate and environment queries
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, server-world-agent-movement]
+blocked_by: [server-lsl-vm-execution, server-world-agent-movement,
+  gridspec-lsl-land-region-env]
 refs: [server-lsl-lib-avatar-control, server-fake-grid-scripted-scenario]
 ---
 

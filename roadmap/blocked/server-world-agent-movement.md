@@ -5,7 +5,8 @@ topic: server
 status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
-blocked_by: [server-world-heartbeat]
+blocked_by: [server-world-heartbeat, gridspec-neighbours-crossing,
+  gridspec-agent-movement]
 refs: [server-world-chat-routing, server-world-collision-and-physics,
   server-lsl-lib-avatar-control]
 ---

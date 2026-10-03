@@ -4,7 +4,8 @@ title: Library tranche — strings, lists, encoding and hashing
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, server-lsl-library-surface-table]
+blocked_by: [server-lsl-vm-execution, server-lsl-library-surface-table,
+  gridspec-lsl-strings-math]
 refs: [server-lsl-value-model, test-lsl-script-corpus]
 ---
 

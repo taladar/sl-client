@@ -5,7 +5,7 @@ topic: server
 status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
-blocked_by: [protocol-sim-script-messages]
+blocked_by: [protocol-sim-script-messages, gridspec-touch-grab]
 refs: [server-lsl-lib-detection-sensors, test-fake-grid-lsl-offline-cases]
 ---
 

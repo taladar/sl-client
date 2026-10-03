@@ -4,7 +4,8 @@ title: Library tranche — experiences and the experience key-value store
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, server-lsl-lib-money-permissions]
+blocked_by: [server-lsl-vm-execution, server-lsl-lib-money-permissions,
+  gridspec-lsl-experience]
 refs: [protocol-experience-search-paging, server-fake-grid-agent-experiences,
   viewer-experience-event-stream]
 ---

@@ -2,10 +2,10 @@
 id: server-fake-grid-script-compile-on-upload
 title: A script upload is accepted and never compiled
 topic: server
-status: ready
+status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
-blocked_by: [server-lsl-compiler-ir]
+blocked_by: [server-lsl-compiler-ir, gridspec-lsl-compile]
 refs: [viewer-lsl-editor-save-compile, server-fake-grid-script-engine-wiring]
 ---
 

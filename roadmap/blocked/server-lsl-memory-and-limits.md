@@ -5,7 +5,8 @@ topic: server
 status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
-blocked_by: [server-lsl-vm-execution, server-lsl-memory-sizes]
+blocked_by: [server-lsl-vm-execution, server-lsl-memory-sizes,
+  gridspec-lsl-memory-limits]
 refs: [server-lsl-runtime-errors, server-fake-grid-script-engine-wiring]
 ---
 

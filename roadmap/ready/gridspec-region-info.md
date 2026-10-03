@@ -1,0 +1,33 @@
+---
+id: gridspec-region-info
+title: RegionInfo, region flags and limits on each grid
+topic: gridspec
+status: ready
+origin: gridspec survey (2026-10-03)
+refs: [gridspec-survey, protocol-region-flag-deny-ageunverified-value,
+  viewer-script-limits]
+---
+
+Context: [context/gridspec.md](../context/gridspec.md).
+
+## Known already
+
+`RegionInfo5` is newer-SL-only; `OpenRegionInfo` OpenSim-only; the fake grid
+answers `RequestRegionInfo` from defaults, not its store (stale-read bug).
+
+## Discover
+
+Extend `region-info` to record every block and field on both grids (no rights
+needed).
+
+## Document
+
+`book/src/gridspec/estate.md` § Region info.
+
+## Fake grid
+
+Small — flavour defaults and the stale read in this task.
+
+## Viewer
+
+Absent blocks, `u64` flags, status-bar icons.

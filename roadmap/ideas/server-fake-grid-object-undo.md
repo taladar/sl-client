@@ -5,6 +5,7 @@ topic: server
 status: ideas
 origin: test-e2e-live-verify-sweep (2026-09-30)
 refs: [test-e2e-live-verify-sweep]
+blocked_by: [gridspec-object-edit]
 ---
 
 Context: [context/testing.md](../context/testing.md).

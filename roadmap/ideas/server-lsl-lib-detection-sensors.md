@@ -5,7 +5,7 @@ topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-state-and-events, server-world-ecs-store,
-  server-world-touch-and-grab]
+  server-world-touch-and-grab, gridspec-lsl-detection-sensors]
 refs: [server-world-collision-and-physics, server-world-agent-movement]
 ---
 

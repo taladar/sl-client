@@ -4,7 +4,8 @@ title: Library tranche — script permissions, money and payment
 topic: server
 status: ideas
 origin: LSL-on-the-fake-grid audit (2026-09-20)
-blocked_by: [server-lsl-vm-execution, protocol-sim-script-messages]
+blocked_by: [server-lsl-vm-execution, protocol-sim-script-messages,
+  gridspec-lsl-money-permissions]
 refs: [server-lsl-lib-avatar-control, server-fake-grid-script-engine-wiring]
 ---
 

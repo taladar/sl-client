@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 308 |
-| blocked | 54 |
+| ready | 366 |
+| blocked | 100 |
 | in-progress | 20 |
 | bugs | 29 |
-| done | 1301 |
+| done | 1302 |
 | deferred | 31 |
 | wont-do | 16 |
-| **total** | **1895** |
+| **total** | **2000** |
 
 ## ideas (136)
 
@@ -240,13 +240,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-account-service`](ideas/server-account-service.md) — Accounts and
   identity service
 - [`server-agent-transfer`](ideas/server-agent-transfer.md) — Inter-simulator
-  agent transfer — teleport, crossing, child agents
+  agent transfer — teleport, crossing, child agents (blocked by
+  `gridspec-neighbours-crossing`)
 - [`server-architecture`](ideas/server-architecture.md) — Grid architecture —
   topology, service protocol, deployment
 - [`server-asset-service`](ideas/server-asset-service.md) — Asset service —
   grid-wide content store
 - [`server-bake-service`](ideas/server-bake-service.md) — Server-side appearance
-  bake service
+  bake service (blocked by `gridspec-appearance-baking`)
 - [`server-economy-service`](ideas/server-economy-service.md) — Economy service
   — balances and transactions
 - [`server-estate-service`](ideas/server-estate-service.md) — Estate service —
@@ -254,11 +255,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-experience-service`](ideas/server-experience-service.md) — Experience
   service — records, permissions, key-value store
 - [`server-fake-grid-agent-avatars-shared`](ideas/server-fake-grid-agent-avatars-shared.md)
-  — Fake grid — logged-in agents see each other's avatars
+  — Fake grid — logged-in agents see each other's avatars (blocked by
+  `gridspec-avatar-presence`, `gridspec-animations`)
 - [`server-fake-grid-im-relay`](ideas/server-fake-grid-im-relay.md) — Fake grid
-  — relay IMs and offers between its sessions
+  — relay IMs and offers between its sessions (blocked by
+  `gridspec-teleport-lures`, `gridspec-instant-messages`)
 - [`server-fake-grid-object-undo`](ideas/server-fake-grid-object-undo.md) — Fake
-  grid — keep an object's edit history for Undo / Redo
+  grid — keep an object's edit history for Undo / Redo (blocked by
+  `gridspec-object-edit`)
 - [`server-friends-service`](ideas/server-friends-service.md) — Friends service
   — relationships, rights, online fan-out
 - [`server-grid-service`](ideas/server-grid-service.md) — Grid service — region
@@ -272,54 +276,66 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-avatar-control`](ideas/server-lsl-lib-avatar-control.md) —
   Library tranche — avatars, animation, sitting, controls and camera (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
-  `server-world-sit-and-attach`)
+  `server-world-sit-and-attach`, `gridspec-lsl-avatar-control`)
 - [`server-lsl-lib-comms`](ideas/server-lsl-lib-comms.md) — Library tranche —
   chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
-  (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`)
+  (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`,
+  `gridspec-lsl-comms`)
 - [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
   — Library tranche — the detected block, sensors and raycasts (blocked by
   `server-lsl-state-and-events` (done), `server-world-ecs-store`,
-  `server-world-touch-and-grab`)
+  `server-world-touch-and-grab`, `gridspec-lsl-detection-sensors`)
 - [`server-lsl-lib-experience`](ideas/server-lsl-lib-experience.md) — Library
   tranche — experiences and the experience key-value store (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-lib-money-permissions`)
+  `server-lsl-vm-execution` (done), `server-lsl-lib-money-permissions`,
+  `gridspec-lsl-experience`)
 - [`server-lsl-lib-http-url`](ideas/server-lsl-lib-http-url.md) — Library
   tranche — outbound HTTP and in-world URLs (blocked by
-  `server-lsl-vm-execution` (done), `server-world-determinism-contract`)
+  `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
+  `gridspec-lsl-http-url`)
 - [`server-lsl-lib-json-linkset-data`](ideas/server-lsl-lib-json-linkset-data.md)
   — Library tranche — llJson* and the linkset data store (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done))
+  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
+  `gridspec-lsl-json-linkset-data`)
 - [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
   Library tranche — parcel, region, estate and environment queries (blocked by
-  `server-lsl-vm-execution` (done), `server-world-agent-movement`)
+  `server-lsl-vm-execution` (done), `server-world-agent-movement`,
+  `gridspec-lsl-land-region-env`)
 - [`server-lsl-lib-math-rotations`](ideas/server-lsl-lib-math-rotations.md) —
   Library tranche — maths, vectors and rotations (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done))
+  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
+  `gridspec-lsl-strings-math`)
 - [`server-lsl-lib-money-permissions`](ideas/server-lsl-lib-money-permissions.md)
   — Library tranche — script permissions, money and payment (blocked by
-  `server-lsl-vm-execution` (done), `protocol-sim-script-messages`)
+  `server-lsl-vm-execution` (done), `protocol-sim-script-messages`,
+  `gridspec-lsl-money-permissions`)
 - [`server-lsl-lib-ossl`](ideas/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
   surface — how much, and why (blocked by `server-lsl-library-surface-table`
-  (done))
+  (done), `gridspec-lsl-ossl`)
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
-  `server-lsl-vm-execution` (done), `server-world-collision-and-physics`)
+  `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
+  `gridspec-lsl-physics-vehicles`)
 - [`server-lsl-lib-prim-state`](ideas/server-lsl-lib-prim-state.md) — Library
   tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
   (done), `server-world-ecs-store`, `server-world-link-sets`,
-  `server-world-update-scheduling`)
+  `server-world-update-scheduling`, `gridspec-lsl-prim-state`)
 - [`server-lsl-lib-strings-lists`](ideas/server-lsl-lib-strings-lists.md) —
   Library tranche — strings, lists, encoding and hashing (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done))
+  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
+  `gridspec-lsl-strings-math`)
 - [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
   Library tranche — task inventory, giving, rezzing and notecards (blocked by
-  `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`)
+  `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`,
+  `gridspec-lsl-task-inventory`)
 - [`server-lsl-lib-time-timers`](ideas/server-lsl-lib-time-timers.md) — Library
   tranche — time, timers and sleeping, on a tick clock (blocked by
-  `server-lsl-vm-execution` (done), `server-world-determinism-contract`)
+  `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
+  `gridspec-lsl-time-timers`)
 - [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
   Script state that survives a take, a rez and a region restart (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done))
+  `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done),
+  `gridspec-lsl-persistence`)
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -336,7 +352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (308)
+## ready (366)
 
 ### protocol
 
@@ -1020,8 +1036,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`fake-grid-own-attachments-and-region-moves`](ready/fake-grid-own-attachments-and-region-moves.md)
-  — Fake grid — the agent's own attachments, the COF, and region moves
 - [`test-asset-save-mutation-survey`](ready/test-asset-save-mutation-survey.md)
   — Does a grid hand back the asset you saved?
 - [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
@@ -1051,12 +1065,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
-  — Fake grid — push the parcel an agent walks onto, and serve parcel
-  environments
-- [`server-fake-grid-script-compile-on-upload`](ready/server-fake-grid-script-compile-on-upload.md)
-  — A script upload is accepted and never compiled (blocked by
-  `server-lsl-compiler-ir` (done))
 - [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
   size-proportional call costs and the region's script budget on aditi
 - [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
@@ -1068,7 +1076,147 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
 
-## blocked (54)
+### gridspec
+
+- [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
+  we get land and estate rights on aditi for the land, estate and terraform
+  measurements
+- [`gridspec-agent-movement`](ready/gridspec-agent-movement.md) — How each grid
+  moves an agent: AgentUpdate handling, speeds, terse updates
+- [`gridspec-animations`](ready/gridspec-animations.md) — Animations as each
+  grid broadcasts them
+- [`gridspec-appearance-baking`](ready/gridspec-appearance-baking.md) —
+  Appearance and baking on each grid
+- [`gridspec-asset-fetch-http`](ready/gridspec-asset-fetch-http.md) — HTTP asset
+  fetch details on each grid
+- [`gridspec-asset-upload`](ready/gridspec-asset-upload.md) — Asset uploads and
+  their costs, refusals and announcements on each grid
+- [`gridspec-attachments`](ready/gridspec-attachments.md) — Attachments on each
+  grid: attach, detach, limits, HUDs, temporary
+- [`gridspec-avatar-presence`](ready/gridspec-avatar-presence.md) — Other
+  avatars in the region: full updates, coarse locations and kills
+- [`gridspec-avatar-render-info`](ready/gridspec-avatar-render-info.md) —
+  AvatarRenderInfo and AttachmentResources on each grid
+- [`gridspec-circuit`](ready/gridspec-circuit.md) — Circuit behaviour: acks,
+  resends, pings, inactivity, packet quirks and throttles
+- [`gridspec-environment`](ready/gridspec-environment.md) — Region and parcel
+  environments (EEP) on each grid
+- [`gridspec-estate`](ready/gridspec-estate.md) — Estate info, access, covenant
+  and estate actions on each grid
+- [`gridspec-experiences`](ready/gridspec-experiences.md) — Experience records,
+  permissions and admin on each grid
+- [`gridspec-friends-presence`](ready/gridspec-friends-presence.md) —
+  Friendship, rights, presence notifications and calling cards on each grid
+- [`gridspec-god-tools`](ready/gridspec-god-tools.md) — God tools as OpenSim
+  answers them
+- [`gridspec-group-chat-and-conference`](ready/gridspec-group-chat-and-conference.md)
+  — Group chat sessions and ad-hoc conferences on each grid
+- [`gridspec-groups`](ready/gridspec-groups.md) — Groups: membership, roles,
+  notices, invitations and accounting on each grid
+- [`gridspec-infra-fake-flavour-conformance`](ready/gridspec-infra-fake-flavour-conformance.md)
+  — Run every conformance case against both fake-grid flavours, beside the live
+  grids
+- [`gridspec-instant-messages`](ready/gridspec-instant-messages.md) — Instant
+  messages, typing, busy replies and offline storage on each grid
+- [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
+  skeleton, fetch caps, AIS3, the library and cache versions on each grid
+- [`gridspec-inventory-mutations`](ready/gridspec-inventory-mutations.md) —
+  Inventory item and folder operations and their pushes on each grid
+- [`gridspec-inventory-offers`](ready/gridspec-inventory-offers.md) — Giving
+  inventory, accepting and declining, and object gives on each grid
+- [`gridspec-land-transactions`](ready/gridspec-land-transactions.md) — Buying,
+  selling, deeding, abandoning land and passes on each grid
+- [`gridspec-landmarks-home`](ready/gridspec-landmarks-home.md) — Landmarks and
+  the home location on each grid
+- [`gridspec-local-chat`](ready/gridspec-local-chat.md) — Local chat and typing
+  on each grid
+- [`gridspec-login`](ready/gridspec-login.md) — Login response fields, the
+  options list and get_grid_info on each grid
+- [`gridspec-login-refusals`](ready/gridspec-login-refusals.md) — Login refusal
+  codes and texts, MFA, TOS/critical and presence on each grid
+- [`gridspec-logout`](ready/gridspec-logout.md) — Logout reply, timing and what
+  logout does to seats and child circuits
+- [`gridspec-lsl-aditi-script-carrier`](ready/gridspec-lsl-aditi-script-carrier.md)
+  — Put scripts into prims on aditi through a carrier object and
+  UpdateScriptTask
+- [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
+  committed LSL probe corpus and per-grid result files
+- [`gridspec-marketplace`](ready/gridspec-marketplace.md) — Marketplace direct
+  delivery on each grid
+- [`gridspec-materials`](ready/gridspec-materials.md) — Legacy and PBR material
+  edits and overrides on each grid
+- [`gridspec-money`](ready/gridspec-money.md) — Balance, L$ transfers, pay
+  dialogs and buying objects on each grid
+- [`gridspec-mute-list`](ready/gridspec-mute-list.md) — Mute (block) list
+  storage and enforcement on each grid
+- [`gridspec-neighbours-crossing`](ready/gridspec-neighbours-crossing.md) —
+  Child agents, EnableSimulator and region crossing on each grid
+- [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
+  Notecards, embedded items and gestures on each grid
+- [`gridspec-object-edit`](ready/gridspec-object-edit.md) — Object edits on each
+  grid: transforms, shape, flags, admin fields, undo, duplicate
+- [`gridspec-object-link-delink`](ready/gridspec-object-link-delink.md) — Link
+  order, limits and refusals on each grid
+- [`gridspec-object-media`](ready/gridspec-object-media.md) — Media on a prim:
+  ObjectMedia, navigation and propagation on each grid
+- [`gridspec-object-properties`](ready/gridspec-object-properties.md) — Object
+  properties and selection replies on each grid
+- [`gridspec-object-rez-derez`](ready/gridspec-object-rez-derez.md) — Rez, take,
+  take-copy, delete, return and auto-return on each grid
+- [`gridspec-object-update-stream`](ready/gridspec-object-update-stream.md) —
+  Object update forms, the interest list and kills on each grid
+- [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
+  Current Outfit Folder and wearables on each grid
+- [`gridspec-parcel-access-and-ban-lines`](ready/gridspec-parcel-access-and-ban-lines.md)
+  — Parcel access and ban lists, enforcement and ban lines on each grid
+- [`gridspec-parcel-info-dwell`](ready/gridspec-parcel-info-dwell.md) — Parcel
+  info, dwell and the remote parcel id on each grid
+- [`gridspec-parcel-management`](ready/gridspec-parcel-management.md) — Parcel
+  edits, divide/join, object owners and return on each grid
+- [`gridspec-parcel-properties`](ready/gridspec-parcel-properties.md) —
+  ParcelProperties transport, fields and pushes on each grid
+- [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
+  classifieds, notes and display names on each grid
+- [`gridspec-region-arrival`](ready/gridspec-region-arrival.md) — Region
+  handshake identity, the arrival burst and region telemetry on each grid
+- [`gridspec-region-info`](ready/gridspec-region-info.md) — RegionInfo, region
+  flags and limits on each grid
+- [`gridspec-search-directory`](ready/gridspec-search-directory.md) — Directory
+  search and the avatar picker on each grid
+- [`gridspec-simulator-features`](ready/gridspec-simulator-features.md) — The
+  full SimulatorFeatures map on each grid
+- [`gridspec-sit-stand`](ready/gridspec-sit-stand.md) — Sitting and standing:
+  placement, refusals and alerts on each grid
+- [`gridspec-task-inventory`](ready/gridspec-task-inventory.md) — Task inventory
+  reads and writes on each grid
+- [`gridspec-teleport`](ready/gridspec-teleport.md) — Teleport phases, flags,
+  failures, cancel and access refusals on each grid
+- [`gridspec-teleport-lures`](ready/gridspec-teleport-lures.md) — Teleport
+  offers, requests and their answers on each grid
+- [`gridspec-terrain`](ready/gridspec-terrain.md) — Terrain, wind and cloud
+  layers as each grid sends them
+- [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
+  Terraforming, raw terrain transfer and terrain textures on each grid
+- [`gridspec-touch-grab`](ready/gridspec-touch-grab.md) — Touch and grab on each
+  grid
+- [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
+  Viewer effects and sound relays on each grid
+- [`gridspec-world-map`](ready/gridspec-world-map.md) — World map blocks, items,
+  layers and tiles on each grid
+
+## blocked (100)
+
+### protocol
+
+- [`protocol-avatar-render-info`](blocked/protocol-avatar-render-info.md) —
+  AvatarRenderInfo — client request, SimCaps service and fake-grid answers
+  (blocked by `gridspec-avatar-render-info`)
+- [`protocol-sim-group-messages`](blocked/protocol-sim-group-messages.md) —
+  SimSession — decode group requests and send group replies (blocked by
+  `gridspec-groups`)
+- [`protocol-sim-profile-messages`](blocked/protocol-sim-profile-messages.md) —
+  SimSession — decode profile requests and send profile replies (blocked by
+  `gridspec-profiles`)
 
 ### viewer
 
@@ -1180,6 +1328,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`fake-grid-own-attachments-and-region-moves`](blocked/fake-grid-own-attachments-and-region-moves.md)
+  — Fake grid — the agent's own attachments, the COF, and region moves (blocked
+  by `gridspec-outfits-wearables`, `gridspec-attachments`)
 - [`test-e2e-environment-parcel-layer`](blocked/test-e2e-environment-parcel-layer.md)
   — End-to-end test of the parcel environment layer when walking between parcels
   (blocked by `server-fake-grid-parcel-on-movement`)
@@ -1191,7 +1342,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-fake-grid-scripted-avatars`)
 - [`test-lsl-differential-opensim`](blocked/test-lsl-differential-opensim.md) —
   Run one script on both grids and diff what it did (blocked by
-  `server-fake-grid-script-engine-wiring`)
+  `server-fake-grid-script-engine-wiring`,
+  `gridspec-lsl-live-differential-runner`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1205,6 +1357,64 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-directory-search`](blocked/server-fake-grid-directory-search.md)
+  — Fake grid — answer directory searches from an index of accounts, parcels and
+  fixtures (blocked by `gridspec-search-directory`)
+- [`server-fake-grid-edit-permission-enforcement`](blocked/server-fake-grid-edit-permission-enforcement.md)
+  — Fake grid — refuse edits the editor may not make, as each grid refuses them
+  (blocked by `gridspec-object-edit`)
+- [`server-fake-grid-estate-actions`](blocked/server-fake-grid-estate-actions.md)
+  — Fake grid — kick, eject, freeze, teleport home, estate messages and restarts
+  (blocked by `gridspec-estate`)
+- [`server-fake-grid-friends-presence`](blocked/server-fake-grid-friends-presence.md)
+  — Fake grid — a mutable friendship store with rights, presence fan-out and
+  calling cards (blocked by `gridspec-friends-presence`)
+- [`server-fake-grid-god-tools`](blocked/server-fake-grid-god-tools.md) — Fake
+  grid — god tools as OpenSim answers them (blocked by `gridspec-god-tools`)
+- [`server-fake-grid-groups`](blocked/server-fake-grid-groups.md) — Fake grid —
+  a group store: membership, roles, notices, invitations and group sessions
+  (blocked by `gridspec-groups`, `gridspec-group-chat-and-conference`,
+  `protocol-sim-group-messages`)
+- [`server-fake-grid-inventory-offers`](blocked/server-fake-grid-inventory-offers.md)
+  — Fake grid — inventory offers, filing and object gives (blocked by
+  `gridspec-inventory-offers`, `server-fake-grid-im-relay`)
+- [`server-fake-grid-inventory-udp-mutations`](blocked/server-fake-grid-inventory-udp-mutations.md)
+  — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
+  `gridspec-inventory-mutations`)
+- [`server-fake-grid-material-edits`](blocked/server-fake-grid-material-edits.md)
+  — Fake grid — apply legacy and PBR material edits and push overrides (blocked
+  by `gridspec-materials`)
+- [`server-fake-grid-mesh-upload-cost`](blocked/server-fake-grid-mesh-upload-cost.md)
+  — Fake grid — mesh upload costing and refusals (blocked by
+  `gridspec-asset-upload`)
+- [`server-fake-grid-money-ledger`](blocked/server-fake-grid-money-ledger.md) —
+  Fake grid — a money ledger: balances, transfers, buying and paying (blocked by
+  `gridspec-money`, `gridspec-land-transactions`)
+- [`server-fake-grid-mute-list`](blocked/server-fake-grid-mute-list.md) — Fake
+  grid — mute list storage, the Xfer file and each grid's empty-list reply
+  (blocked by `gridspec-mute-list`)
+- [`server-fake-grid-object-media-region`](blocked/server-fake-grid-object-media-region.md)
+  — Fake grid — region-wide object media with version bumps and propagation
+  (blocked by `gridspec-object-media`)
+- [`server-fake-grid-object-update-forms`](blocked/server-fake-grid-object-update-forms.md)
+  — Fake grid — send compressed, terse and cached object updates as each grid
+  does (blocked by `gridspec-object-update-stream`)
+- [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
+  — Fake grid — enforce parcel access and push ban lines (blocked by
+  `gridspec-parcel-access-and-ban-lines`, `server-fake-grid-parcel-on-movement`,
+  `server-world-agent-movement`)
+- [`server-fake-grid-parcel-divide-join`](blocked/server-fake-grid-parcel-divide-join.md)
+  — Fake grid — divide and join parcels (blocked by
+  `gridspec-parcel-management`)
+- [`server-fake-grid-parcel-on-movement`](blocked/server-fake-grid-parcel-on-movement.md)
+  — Fake grid — push the parcel an agent walks onto, and serve parcel
+  environments (blocked by `gridspec-environment`, `gridspec-parcel-properties`)
+- [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
+  grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
+  by `gridspec-profiles`, `protocol-sim-profile-messages`)
+- [`server-fake-grid-script-compile-on-upload`](blocked/server-fake-grid-script-compile-on-upload.md)
+  — A script upload is accepted and never compiled (blocked by
+  `server-lsl-compiler-ir` (done), `gridspec-lsl-compile`)
 - [`server-fake-grid-script-engine-wiring`](blocked/server-fake-grid-script-engine-wiring.md)
   — Wire the script engine into the fake grid (blocked by
   `server-lsl-vm-execution` (done), `server-world-heartbeat`,
@@ -1215,15 +1425,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
   — A scripts scenario — one prim per scripted behaviour (blocked by
   `server-fake-grid-script-engine-wiring`)
+- [`server-fake-grid-terraform`](blocked/server-fake-grid-terraform.md) — Fake
+  grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`)
 - [`server-lsl-memory-and-limits`](blocked/server-lsl-memory-and-limits.md) —
   Script memory and limits, because scripts observe them (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-memory-sizes`)
+  `server-lsl-vm-execution` (done), `server-lsl-memory-sizes`,
+  `gridspec-lsl-memory-limits`)
 - [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
   agent never moves — AgentUpdate is decoded and ignored (blocked by
-  `server-world-heartbeat`)
+  `server-world-heartbeat`, `gridspec-neighbours-crossing`,
+  `gridspec-agent-movement`)
 - [`server-world-changed-raisers`](blocked/server-world-changed-raisers.md) —
   Raise changed() from every grid-side cause, with the right bit (blocked by
-  `server-fake-grid-script-engine-wiring`)
+  `server-fake-grid-script-engine-wiring`, `gridspec-lsl-events`)
 - [`server-world-collision-and-physics`](blocked/server-world-collision-and-physics.md)
   — Enough physics for the collision, target and volume-detect events (blocked
   by `server-world-heartbeat`, `server-world-ecs-store`)
@@ -1232,16 +1446,84 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-heartbeat`)
 - [`server-world-link-sets`](blocked/server-world-link-sets.md) — A real
   link-set model — link numbers, root and children (blocked by
-  `server-world-ecs-store`)
+  `server-world-ecs-store`, `gridspec-object-link-delink`)
 - [`server-world-sit-and-attach`](blocked/server-world-sit-and-attach.md) —
   Sitting and attaching as world state a script can read (blocked by
-  `server-world-ecs-store`)
+  `server-world-ecs-store`, `gridspec-sit-stand`, `gridspec-attachments`)
 - [`server-world-touch-and-grab`](blocked/server-world-touch-and-grab.md) —
   Touch routing — a click on a prim reaches nothing (blocked by
-  `protocol-sim-script-messages`)
+  `protocol-sim-script-messages`, `gridspec-touch-grab`)
 - [`server-world-update-scheduling`](blocked/server-world-update-scheduling.md)
   — Batch world changes into per-tick update bursts (blocked by
-  `server-world-heartbeat`, `server-world-ecs-store`)
+  `server-world-heartbeat`, `server-world-ecs-store`, `gridspec-circuit`,
+  `gridspec-object-update-stream`)
+
+### gridspec
+
+- [`gridspec-lsl-avatar-control`](blocked/gridspec-lsl-avatar-control.md) — LSL
+  library behaviour on each grid — animations, sitting, controls and camera
+  (blocked by `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-comms`](blocked/gridspec-lsl-comms.md) — LSL library behaviour
+  on each grid — chat, listens, dialogs and link messages (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-compile`](blocked/gridspec-lsl-compile.md) — Script compilation
+  and compile errors on each grid (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-detection-sensors`](blocked/gridspec-lsl-detection-sensors.md)
+  — LSL library behaviour on each grid — sensors and raycasts (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-events`](blocked/gridspec-lsl-events.md) — The LSL event model
+  on OpenSim, beside what aditi already showed (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-experience`](blocked/gridspec-lsl-experience.md) — LSL library
+  behaviour on each grid — experiences and the key-value store (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-http-url`](blocked/gridspec-lsl-http-url.md) — LSL library
+  behaviour on each grid — outbound HTTP and in-world URLs (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-json-linkset-data`](blocked/gridspec-lsl-json-linkset-data.md)
+  — LSL library behaviour on each grid — llJson* and the linkset data store
+  (blocked by `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-land-region-env`](blocked/gridspec-lsl-land-region-env.md) —
+  LSL library behaviour on each grid — parcel, region, estate and environment
+  queries (blocked by `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-live-differential-runner`](blocked/gridspec-lsl-live-differential-runner.md)
+  — Run one probe on OpenSim YEngine, XEngine and aditi and collect the
+  transcripts (blocked by `gridspec-lsl-probe-corpus`)
+- [`gridspec-lsl-memory-limits`](blocked/gridspec-lsl-memory-limits.md) — LSL
+  memory and limits on OpenSim and the remaining SL unknowns (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-money-permissions`](blocked/gridspec-lsl-money-permissions.md)
+  — LSL library behaviour on each grid — script permissions, money and payment
+  (blocked by `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-ossl`](blocked/gridspec-lsl-ossl.md) — OSSL availability and
+  denial on OpenSim (blocked by `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-persistence`](blocked/gridspec-lsl-persistence.md) — Script
+  state across take, rez and region restart on each grid (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-physics-vehicles`](blocked/gridspec-lsl-physics-vehicles.md) —
+  LSL library behaviour on each grid — status flags, forces, targets and
+  vehicles (blocked by `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-prim-state`](blocked/gridspec-lsl-prim-state.md) — LSL library
+  behaviour on each grid — reading and writing the prim (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-runtime-errors`](blocked/gridspec-lsl-runtime-errors.md) — LSL
+  run-time errors on OpenSim and the debug channel in our viewer (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-strings-math`](blocked/gridspec-lsl-strings-math.md) — LSL
+  library behaviour on each grid — strings, lists, maths and rotations (blocked
+  by `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-task-inventory`](blocked/gridspec-lsl-task-inventory.md) — LSL
+  library behaviour on each grid — task inventory, giving, rezzing and notecards
+  (blocked by `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-throttles`](blocked/gridspec-lsl-throttles.md) — Forced delays
+  and throttles on each grid (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-lsl-time-timers`](blocked/gridspec-lsl-time-timers.md) — LSL time,
+  timers and sleep on each grid (blocked by
+  `gridspec-lsl-live-differential-runner`)
+- [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
+  signalling on each grid (blocked by `viewer-voice-audio`)
 
 ## in-progress (20)
 
@@ -1379,7 +1661,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-unknown-keyword-arguments-ignored`](bugs/repl-unknown-keyword-arguments-ignored.md)
   — sl-repl silently ignores unknown or misspelled key=value arguments
 
-## done (1301)
+## done (1302)
 
 ### protocol
 
@@ -4266,6 +4548,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`server-world-chat-routing`](done/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
+
+### gridspec
+
+- [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
+  and OpenSim and make the fake grid be each
 
 ## deferred (31)
 
