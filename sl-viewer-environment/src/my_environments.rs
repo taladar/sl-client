@@ -76,7 +76,7 @@ use sl_viewer_intents::{OpenSettingsEditor, PendingSettingsCreations, SettingsIt
 use sl_viewer_inventory::inventory::{InventoryModel, query_folder_page};
 use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
 use sl_viewer_inventory::settings_index::SettingsIndex;
-use sl_viewer_notifications::{NotificationResponse, ShowNotification};
+use sl_viewer_notifications::{NotificationResponse, ShowNotification, TemplateRef, YesNo};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
 use sl_viewer_ui_core::semantic::LabelledBy;
@@ -193,6 +193,10 @@ static MY_ENVIRONMENTS_TABLE: TableSpec = TableSpec {
 /// Condition: the pressed row's item may be written to — the owner modify bit,
 /// and not the read-only Library.
 const COND_MODIFIABLE: &str = "my-environments-modifiable";
+
+/// The confirmation before moving the selected settings item into the Trash —
+/// the reference's `DeleteItems`, whose buttons really are named `Yes` / `No`.
+const DELETE_ITEMS: TemplateRef<YesNo> = TemplateRef::new("DeleteItems");
 
 /// The per-row menu — the reference's `menu_settings_gear`.
 static MY_ENVIRONMENTS_MENU: MenuDef = MenuDef {
@@ -1371,7 +1375,7 @@ fn handle_my_environments_actions(
                     continue;
                 }
                 pending_delete.0 = Some(item);
-                notify.write(ShowNotification::new("DeleteItems").arg(
+                notify.write(ShowNotification::new(DELETE_ITEMS.name()).arg(
                     "QUESTION",
                     translator.get("my-environments-delete-question"),
                 ));
@@ -1399,7 +1403,7 @@ fn confirm_environment_delete(
     mut commands: MessageWriter<SlCommand>,
 ) {
     for response in responses.read() {
-        if response.template != "DeleteItems" {
+        if !response.is_for(DELETE_ITEMS) {
             continue;
         }
         // Only ours while one is outstanding; any other answer clears it, so a
@@ -1407,7 +1411,7 @@ fn confirm_environment_delete(
         let Some(item) = pending.0.take() else {
             continue;
         };
-        if response.button != Some("Yes") {
+        if response.answer(DELETE_ITEMS) != Some(YesNo::Yes) {
             continue;
         }
         let Some(model) = model.as_deref() else {

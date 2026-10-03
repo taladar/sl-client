@@ -41,7 +41,7 @@ use crate::floater::{
     host_floater,
 };
 use crate::i18n::Translated;
-use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::notifications::{NotificationResponse, ShowNotification, TemplateRef, YesNoCancel};
 use crate::ui_font::UiFont;
 use crate::ui_spawn::{self, ButtonSpec, UiLabel};
 use sl_viewer_ui_core::skin::text_role;
@@ -65,8 +65,9 @@ pub(crate) const CONTROL_BORDER: Color = Color::srgb(0.32, 0.36, 0.44);
 pub(crate) const CONTROL_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 
 /// The catalogue template asked before unsaved work is thrown away — the
-/// reference's own `SaveChanges` (Save / Don't Save / Cancel).
-const SAVE_CHANGES: &str = "SaveChanges";
+/// reference's own `SaveChanges` (Save / Don't Save / Cancel, named Yes / No /
+/// Cancel).
+const SAVE_CHANGES: TemplateRef<YesNoCancel> = TemplateRef::new("SaveChanges");
 
 // ---------------------------------------------------------------------------
 // Chrome.
@@ -340,7 +341,7 @@ fn ask_before_discarding(
             continue;
         }
         pending.0 = Some(request.floater);
-        notify.write(ShowNotification::new(SAVE_CHANGES));
+        notify.write(ShowNotification::new(SAVE_CHANGES.name()));
     }
 }
 
@@ -353,7 +354,7 @@ fn answer_discard(
     mut floater_commands: MessageWriter<FloaterCommand>,
 ) {
     for response in responses.read() {
-        if response.template != SAVE_CHANGES {
+        if !response.is_for(SAVE_CHANGES) {
             continue;
         }
         let Some(window) = pending.0.take() else {
@@ -362,11 +363,11 @@ fn answer_discard(
         let Ok(mut work) = windows.get_mut(window) else {
             continue;
         };
-        match response.button {
+        match response.answer(SAVE_CHANGES) {
             // Save: the close waits for the save to land, so a refused save
             // leaves the window up with its failure on screen rather than
             // closing over work that was never stored.
-            Some("Yes") => {
+            Some(YesNoCancel::Yes) => {
                 work.close_when_saved = true;
                 saves.write(SaveEditorWindow { window });
             }
@@ -374,7 +375,7 @@ fn answer_discard(
             // out **unrefusable**. Taking the guard down instead would not
             // work — the work has not stopped being unsaved, and the tracker
             // would re-arm the guard in time to ask the same question again.
-            Some("No") => {
+            Some(YesNoCancel::No) => {
                 work.close_when_saved = false;
                 floater_commands.write(FloaterCommand {
                     floater: window,
@@ -383,7 +384,7 @@ fn answer_discard(
             }
             // Cancel, or a dismissal with no choice: nothing happens, which is
             // exactly what "cancel" means for a close.
-            _other => {}
+            Some(YesNoCancel::Cancel) | None => {}
         }
     }
 }
@@ -415,10 +416,12 @@ fn close_saved_windows(
 
 #[cfg(test)]
 mod tests {
-    use super::{AssetEditorScaffoldPlugin, PendingDiscard, SaveEditorWindow, UnsavedWork};
+    use super::{
+        AssetEditorScaffoldPlugin, PendingDiscard, SAVE_CHANGES, SaveEditorWindow, UnsavedWork,
+    };
     use crate::floater::{FloaterCloseGuard, FloaterCommand, FloaterOp, FloaterPlugin};
     use crate::notifications::{
-        NotificationId, NotificationManager, NotificationResponse, ShowNotification,
+        NotificationId, NotificationManager, NotificationResponse, ShowNotification, YesNoCancel,
     };
     use crate::ui::{UiPanelShown, UiRoot};
     use bevy::prelude::*;
@@ -483,13 +486,13 @@ mod tests {
     }
 
     /// Answer the confirmation with one of its buttons.
-    fn answer(app: &mut App, button: &'static str) {
+    fn answer(app: &mut App, button: YesNoCancel) {
         app.world_mut()
             .resource_mut::<Messages<NotificationResponse>>()
             .write(NotificationResponse {
                 id: some_id(),
-                template: "SaveChanges",
-                button: Some(button),
+                template: SAVE_CHANGES.name(),
+                button: Some(button.name()),
                 ignored: false,
                 input: None,
             });
@@ -516,26 +519,6 @@ mod tests {
             .count()
     }
 
-    /// **The confirmation this scaffold routes on is the one the catalogue
-    /// ships**, down to the button names.
-    ///
-    /// A raise for a template that is not in the catalogue is dropped, and a
-    /// button name that is not in its form never matches — either way the
-    /// question would never be asked, or never answered, and the close it was
-    /// guarding would quietly discard the work again.
-    #[test]
-    fn the_save_prompt_is_catalogued_with_the_buttons_we_route_on() -> Result<(), TestError> {
-        let template = crate::notifications::template("SaveChanges")
-            .ok_or("the reference's SaveChanges is in the catalogue")?;
-        for name in ["Yes", "No", "Cancel"] {
-            assert!(
-                template.form.iter().any(|button| button.name == name),
-                "no `{name}` arm to route on"
-            );
-        }
-        Ok(())
-    }
-
     /// A dirty window's close is a question, not a close: the window survives
     /// and the `SaveChanges` prompt goes up.
     #[test]
@@ -560,7 +543,7 @@ mod tests {
             .iter_current_update_messages()
             .map(|show| show.template)
             .collect();
-        assert_eq!(raised, vec!["SaveChanges"]);
+        assert_eq!(raised, vec![SAVE_CHANGES.name()]);
         assert_eq!(
             app.world().resource::<PendingDiscard>().0,
             Some(window),
@@ -581,7 +564,7 @@ mod tests {
     fn answering_dont_save_closes_the_window() -> Result<(), TestError> {
         let (mut app, window) = guarded_app();
         close(&mut app, window);
-        answer(&mut app, "No");
+        answer(&mut app, YesNoCancel::No);
         assert_eq!(
             app.world()
                 .get::<UnsavedWork>(window)
@@ -600,7 +583,7 @@ mod tests {
             .world()
             .resource::<Messages<ShowNotification>>()
             .iter_current_update_messages()
-            .filter(|show| show.template == "SaveChanges")
+            .filter(|show| show.template == SAVE_CHANGES.name())
             .count();
         assert_eq!(
             asked_again, 0,
@@ -615,7 +598,7 @@ mod tests {
     fn answering_cancel_changes_nothing() -> Result<(), TestError> {
         let (mut app, window) = guarded_app();
         close(&mut app, window);
-        answer(&mut app, "Cancel");
+        answer(&mut app, YesNoCancel::Cancel);
         app.update();
         assert!(
             open_window(&app, window),
@@ -639,7 +622,7 @@ mod tests {
     fn answering_save_closes_only_once_the_save_lands() -> Result<(), TestError> {
         let (mut app, window) = guarded_app();
         close(&mut app, window);
-        answer(&mut app, "Yes");
+        answer(&mut app, YesNoCancel::Yes);
         assert_eq!(saves(&app), 1, "Save must ask the editor to save");
         assert!(
             open_window(&app, window),

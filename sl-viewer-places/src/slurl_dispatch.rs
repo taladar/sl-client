@@ -76,7 +76,7 @@ use crate::intents::RequestFriendship;
 use crate::intents::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::intents::{ConversationKey, OpenConversation};
 use crate::linkified_text::LinkActivated;
-use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use crate::world_api::AvatarState;
 use crate::world_map::OpenWorldMap;
 use sl_viewer_platform::system_browser::{ExternalUrl, open_in_system_browser};
@@ -84,12 +84,9 @@ use sl_viewer_platform::url_linkify::{LinkTarget, LocationCoords, LocationKind, 
 
 /// The catalogue template the teleport-SLURL confirmation raises (the reference
 /// `TeleportViaSLAPP` alert). Answered "Teleport" resolves the region and jumps;
-/// "Cancel" (or a dismiss) drops the parked destination.
-pub const TELEPORT_VIA_SLAPP_TEMPLATE: &str = "TeleportViaSLAPP";
-
-/// The affirmative button name the [`TELEPORT_VIA_SLAPP_TEMPLATE`] form carries
-/// (the stable reference `OK` functor name; its visible label reads "Teleport").
-const TELEPORT_CONFIRM_BUTTON: &str = "OK";
+/// "Cancel" (or a dismiss) drops the parked destination. The affirmative is
+/// the stable reference `OK` functor name; only its label reads "Teleport".
+pub const TELEPORT_VIA_SLAPP_TEMPLATE: TemplateRef<OkCancel> = TemplateRef::new("TeleportViaSLAPP");
 
 /// How long a parked region / parcel resolution waits for its reply before it is
 /// abandoned, in seconds — a slow or missing `MapBlockReply` must not leak a
@@ -377,7 +374,7 @@ fn route_location(
             // parked in a single slot until the confirm is answered.
             pending.teleport_confirm = Some((region.to_owned(), coords));
             out.notifications.write(
-                ShowNotification::new(TELEPORT_VIA_SLAPP_TEMPLATE)
+                ShowNotification::new(TELEPORT_VIA_SLAPP_TEMPLATE.name())
                     .arg("LOCATION", location_label(region, coords)),
             );
         }
@@ -508,13 +505,13 @@ fn handle_teleport_confirmations(
 ) {
     let now = time.elapsed_secs_f64();
     for response in responses.read() {
-        if response.template != TELEPORT_VIA_SLAPP_TEMPLATE {
+        if !response.is_for(TELEPORT_VIA_SLAPP_TEMPLATE) {
             continue;
         }
         let Some((region, coords)) = pending.teleport_confirm.take() else {
             continue;
         };
-        if response.button == Some(TELEPORT_CONFIRM_BUTTON) {
+        if response.answer(TELEPORT_VIA_SLAPP_TEMPLATE) == Some(OkCancel::Ok) {
             park_location(
                 &region,
                 coords,

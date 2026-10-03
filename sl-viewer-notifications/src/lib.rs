@@ -30,6 +30,13 @@
 //!   the messages a caller raises a notification with and reads a reply from,
 //!   following the viewer's "emit a message, someone else acts" convention
 //!   (`ui_element`).
+//! - [`FormAnswer`] + [`TemplateRef`] — the typed answer: each form's buttons
+//!   are a button-set enum ([`OkCancel`], [`YesNoCancel`], …), and a consumer
+//!   names the template it handles as a `const` [`TemplateRef`], which fails to
+//!   compile unless the template exists and its form is exactly that enum's
+//!   buttons. [`NotificationResponse::answer`] then hands back the enum, so a
+//!   handler matches `OkCancel::Ok` instead of comparing a string that may
+//!   name no button the form has.
 //! - [`NotificationManager`] — the host's runtime state: the id source, the
 //!   `unique` dedup index, and the bounded history ring the future notification
 //!   list / history panel ([[viewer-notification-history]]) renders.
@@ -55,6 +62,8 @@
 
 use std::{
     collections::{HashMap, VecDeque},
+    fmt::Debug,
+    marker::PhantomData,
     sync::LazyLock,
 };
 
@@ -148,7 +157,10 @@ pub enum NotificationPriority {
 pub struct NotificationButton {
     /// The stable button name sent back as the [`NotificationResponse::button`] —
     /// the reference "functor button" name (`"OK"`, `"Cancel"`, `"Yes"`, …). Not
-    /// translated: it is an identifier, not a label.
+    /// translated: it is an identifier, not a label. The form tables take it
+    /// from their button-set enum ([`OkCancel::Ok.name()`](OkCancel::name)),
+    /// never from a literal, so it is the same string a consumer's
+    /// [`NotificationResponse::answer`] decodes.
     pub name: &'static str,
     /// The Fluent key for the button's visible label, resolved through
     /// `i18n` so the label localizes while the [`name`](Self::name)
@@ -325,6 +337,167 @@ static TEMPLATES_BY_NAME: LazyLock<HashMap<&'static str, &'static NotificationTe
 #[must_use]
 pub fn template(name: &str) -> Option<&'static NotificationTemplate> {
     TEMPLATES_BY_NAME.get(name).copied()
+}
+
+/// A form's set of buttons as a type — one enum per distinct set of button
+/// names (`forms`' [`OkCancel`], [`YesNoCancel`], …), each variant one button.
+///
+/// The form tables are built from these, and a consumer reads its answer back
+/// as one ([`NotificationResponse::answer`]), so a button is never named by a
+/// string the form may not have. Implemented by the `forms` declarations only.
+pub trait FormAnswer: Copy + Eq + Debug + 'static {
+    /// Every button's stable name, in the enum's variant order. A form answers
+    /// with this set when its buttons carry exactly these names (in any
+    /// order) — what [`TemplateRef::new`] checks.
+    const NAMES: &'static [&'static str];
+
+    /// The button with this stable name, or `None` for a name not in
+    /// [`NAMES`](Self::NAMES).
+    fn from_name(name: &str) -> Option<Self>;
+
+    /// This button's stable name — the one [`NotificationButton::name`]
+    /// carries.
+    fn name(self) -> &'static str;
+}
+
+/// A catalogue template a consumer handles, typed by the [`FormAnswer`] its
+/// form answers with.
+///
+/// Built as a `const` ([`new`](Self::new)), which refuses to compile unless
+/// the template is in [`NOTIFICATIONS`] and its form's buttons are exactly
+/// `A`'s. That is the check a bare template-name string and button-name string
+/// could not make: `DeleteMedia` uses [`YES_NO_FORM`], whose Yes button is
+/// *named* `OK` ([`OkCancel`]), so a `TemplateRef<YesNo>` for it is a compile
+/// error rather than a handler that silently never fires.
+///
+/// ```
+/// use sl_viewer_notifications::{OkCancel, TemplateRef};
+/// const DELETE_MEDIA: TemplateRef<OkCancel> = TemplateRef::new("DeleteMedia");
+/// assert_eq!(DELETE_MEDIA.name(), "DeleteMedia");
+/// ```
+///
+/// ```compile_fail
+/// use sl_viewer_notifications::{TemplateRef, YesNo};
+/// // The labels read Yes / No; the buttons are named OK / Cancel.
+/// const DELETE_MEDIA: TemplateRef<YesNo> = TemplateRef::new("DeleteMedia");
+/// let _name = DELETE_MEDIA.name();
+/// ```
+///
+/// ```compile_fail
+/// use sl_viewer_notifications::{OkCancel, TemplateRef};
+/// const UNKNOWN: TemplateRef<OkCancel> = TemplateRef::new("DeleteMediaLater");
+/// let _name = UNKNOWN.name();
+/// ```
+#[derive(Debug)]
+pub struct TemplateRef<A> {
+    /// The template's [`name`](NotificationTemplate::name).
+    name: &'static str,
+    /// The answer type, carried without a value (`fn() -> A` keeps the handle
+    /// `Send + Sync` and covariant whatever `A` is).
+    answer: PhantomData<fn() -> A>,
+}
+
+impl<A> Clone for TemplateRef<A> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<A> Copy for TemplateRef<A> {}
+
+impl<A: FormAnswer> TemplateRef<A> {
+    /// The template named `name`, whose form answers with `A`.
+    ///
+    /// # Panics
+    ///
+    /// When `name` is not in [`NOTIFICATIONS`], or its form's buttons are not
+    /// exactly [`A::NAMES`](FormAnswer::NAMES). Declared as a `const` item —
+    /// which every consumer does — that panic is a **compile** error, naming
+    /// the item.
+    #[must_use]
+    pub const fn new(name: &'static str) -> Self {
+        assert!(
+            catalogue_entry(name).is_some(),
+            "no notification template has this name"
+        );
+        assert!(
+            matches!(
+                catalogue_entry(name),
+                Some(entry) if form_has_exactly(entry.form, A::NAMES)
+            ),
+            "the template's form does not answer with this button set"
+        );
+        Self {
+            name,
+            answer: PhantomData,
+        }
+    }
+}
+
+impl<A> TemplateRef<A> {
+    /// The template's [`name`](NotificationTemplate::name) — what
+    /// [`ShowNotification::new`] raises it by.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+}
+
+/// Whether two strings are equal, usable in a `const` context (`str`'s `==`
+/// is not).
+const fn const_str_eq(left: &str, right: &str) -> bool {
+    let (mut left, mut right) = (left.as_bytes(), right.as_bytes());
+    loop {
+        match (left, right) {
+            ([], []) => return true,
+            ([left_byte, left_rest @ ..], [right_byte, right_rest @ ..])
+                if *left_byte == *right_byte =>
+            {
+                left = left_rest;
+                right = right_rest;
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// The catalogue entry named `name`, found in a `const` context — the
+/// compile-time half of [`template`], for [`TemplateRef::new`].
+const fn catalogue_entry(name: &str) -> Option<&'static NotificationTemplate> {
+    let mut rest = NOTIFICATIONS;
+    while let [entry, tail @ ..] = rest {
+        if const_str_eq(entry.name, name) {
+            return Some(entry);
+        }
+        rest = tail;
+    }
+    None
+}
+
+/// Whether `form`'s buttons carry exactly the names in `names`, in any order.
+/// A form's names are unique (a catalogue test holds every form to that), so
+/// equal lengths plus every button found among `names` is set equality.
+const fn form_has_exactly(form: &[NotificationButton], names: &[&str]) -> bool {
+    if form.len() != names.len() {
+        return false;
+    }
+    let mut rest = form;
+    while let [button, tail @ ..] = rest {
+        let mut candidates = names;
+        let mut found = false;
+        while let [candidate, others @ ..] = candidates {
+            if const_str_eq(button.name, candidate) {
+                found = true;
+                break;
+            }
+            candidates = others;
+        }
+        if !found {
+            return false;
+        }
+        rest = tail;
+    }
+    true
 }
 
 /// The settings section under which each ignorable notification's "show again"
@@ -548,6 +721,39 @@ pub struct NotificationResponse {
     pub input: Option<String>,
 }
 
+impl NotificationResponse {
+    /// Whether this answers `template` — for a handler that has to act on any
+    /// answer to it (free a pending slot) before looking at which button.
+    #[must_use]
+    pub fn is_for<A>(&self, template: TemplateRef<A>) -> bool {
+        self.template == template.name
+    }
+
+    /// The button chosen on `template`, as its form's button-set enum, or
+    /// `None` when this answers a different template or no button was chosen
+    /// (a fading toast expired, or it was dismissed).
+    ///
+    /// A chosen button that is not on the template's form cannot come from
+    /// the host, which only answers with its form's buttons; one that does
+    /// arrive is logged as the bug it is and reads as no choice.
+    #[must_use]
+    pub fn answer<A: FormAnswer>(&self, template: TemplateRef<A>) -> Option<A> {
+        if !self.is_for(template) {
+            return None;
+        }
+        let name = self.button?;
+        let answer = A::from_name(name);
+        if answer.is_none() {
+            tracing::error!(
+                template = self.template,
+                button = name,
+                "a notification response names a button its form does not have"
+            );
+        }
+        answer
+    }
+}
+
 /// A request to dismiss a live notification programmatically (its underlying
 /// condition passed, e.g. an offer was rescinded). Tears the toast down and
 /// emits a [`NotificationResponse`] with no [`button`](NotificationResponse::button).
@@ -721,6 +927,9 @@ mod tests {
         REMOVE_CANCEL_FORM, REPLACE_ATTACHMENT_FORM, SAVE_ALL_DISCARD_CANCEL_FORM,
         SAVE_CANCEL_FORM, SAVE_DISCARD_CANCEL_FORM, SEND_CANCEL_FORM, THIS_ESTATE_ALL_ESTATES_FORM,
         VIEW_IM_QUIT_FORM, YES_NO_BUTTONS_FORM, YES_NO_FORM, substitute, template,
+    };
+    use super::{
+        FormAnswer, NotificationResponse, OK_CANCEL_FORM, OkCancel, OkOnly, TemplateRef, YesNo,
     };
     use pretty_assertions::{assert_eq, assert_ne};
 
@@ -1571,5 +1780,90 @@ mod tests {
                 .and_then(|record| record.response),
             Some("OK")
         );
+    }
+
+    /// Every catalogue form carries unique button names and answers with
+    /// exactly one button-set enum — so every template has a [`FormAnswer`] a
+    /// consumer can name it by, and no two enums claim the same form.
+    #[test]
+    fn every_form_answers_with_exactly_one_button_set() {
+        for entry in NOTIFICATIONS {
+            let mut names: Vec<&str> = entry.form.iter().map(|button| button.name).collect();
+            names.sort_unstable();
+            let total = names.len();
+            names.dedup();
+            assert_eq!(names.len(), total, "{}: duplicate button name", entry.name);
+            if entry.form.is_empty() {
+                continue;
+            }
+            let matching = super::forms::ANSWER_SETS
+                .iter()
+                .filter(|set| super::form_has_exactly(entry.form, set))
+                .count();
+            assert_eq!(
+                matching, 1,
+                "{}: form must answer with exactly one button set",
+                entry.name
+            );
+        }
+    }
+
+    /// The `const` checks behind [`TemplateRef::new`]: a known name is found
+    /// and an unknown one is not, and `DeleteMedia`'s Yes / No form — whose
+    /// Yes is *named* `OK` — answers with [`OkCancel`], not [`YesNo`]. (The
+    /// failing cases are compile errors in real use; here they are the
+    /// predicates those asserts evaluate.)
+    #[test]
+    fn template_ref_checks_name_and_button_set() {
+        assert!(
+            super::catalogue_entry("DeleteMedia").is_some(),
+            "known name"
+        );
+        assert!(
+            super::catalogue_entry("NoSuchNotification").is_none(),
+            "unknown name"
+        );
+        assert!(
+            super::form_has_exactly(YES_NO_FORM, <OkCancel as FormAnswer>::NAMES),
+            "Yes / No labels over OK / Cancel names"
+        );
+        assert!(
+            !super::form_has_exactly(YES_NO_FORM, <YesNo as FormAnswer>::NAMES),
+            "the labels are not the names"
+        );
+        assert!(
+            !super::form_has_exactly(OK_CANCEL_FORM, <OkOnly as FormAnswer>::NAMES),
+            "a subset is not the set"
+        );
+    }
+
+    /// [`NotificationResponse::answer`] decodes the chosen button for its own
+    /// template, and reads as no choice for another template's response or a
+    /// dismissal.
+    #[test]
+    fn response_answer_is_typed_and_scoped_to_its_template() {
+        const DELETE_MEDIA: TemplateRef<OkCancel> = TemplateRef::new("DeleteMedia");
+        let id = NotificationManager::default().allocate_id();
+        let response = |template, button| NotificationResponse {
+            id,
+            template,
+            button,
+            ignored: false,
+            input: None,
+        };
+        let yes = response(DELETE_MEDIA.name(), Some(OkCancel::Ok.name()));
+        assert!(yes.is_for(DELETE_MEDIA), "answers its template");
+        assert_eq!(yes.answer(DELETE_MEDIA), Some(OkCancel::Ok));
+        assert_eq!(
+            response(DELETE_MEDIA.name(), Some(OkCancel::Cancel.name())).answer(DELETE_MEDIA),
+            Some(OkCancel::Cancel)
+        );
+        assert_eq!(
+            response(DELETE_MEDIA.name(), None).answer(DELETE_MEDIA),
+            None
+        );
+        let other = response("MultipleFacesSelected", Some(OkCancel::Ok.name()));
+        assert!(!other.is_for(DELETE_MEDIA), "another template's answer");
+        assert_eq!(other.answer(DELETE_MEDIA), None);
     }
 }

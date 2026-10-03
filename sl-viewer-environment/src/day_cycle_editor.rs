@@ -78,7 +78,7 @@ use sl_viewer_intents::{
 };
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
-use sl_viewer_notifications::{NotificationResponse, ShowNotification};
+use sl_viewer_notifications::{NotificationResponse, OkCancel, ShowNotification};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_ui_core::i18n::{TransArgs, Translated, Translator};
@@ -113,7 +113,7 @@ use crate::rows::{
     AimTrackball, spawn_action_button, spawn_color_row, spawn_slider_row, spawn_texture_row,
     spawn_trackball_row, tag_aim_slider,
 };
-use crate::settings_editor::EditedItem;
+use crate::settings_editor::{EditedItem, SETTINGS_CONFIRM_LOSS};
 use crate::style::{CONTROL_BORDER, DIM_LABEL_COLOR, FONT_SIZE, LABEL_COLOR, TRACK_FILL};
 use crate::tabs::{SKY_TABS, TabPage, WATER_TABS};
 
@@ -1463,13 +1463,13 @@ fn confirm_day_replace(
     mut land_opens: MessageWriter<OpenLandDayCycle>,
 ) {
     for response in responses.read() {
-        if response.template != "SettingsConfirmLoss" {
+        if !response.is_for(SETTINGS_CONFIRM_LOSS) {
             continue;
         }
         let Some(open) = state.confirm.take() else {
             continue;
         };
-        if response.button != Some("OK") {
+        if response.answer(SETTINGS_CONFIRM_LOSS) != Some(OkCancel::Ok) {
             continue;
         }
         // Drop the session *before* replaying, or the open would find it still
@@ -1507,7 +1507,7 @@ fn ask_before_replacing(
     };
     state.confirm = Some(open);
     notify.write(
-        ShowNotification::new("SettingsConfirmLoss")
+        ShowNotification::new(SETTINGS_CONFIRM_LOSS.name())
             .arg("TYPE", "day cycle")
             .arg("NAME", name),
     );

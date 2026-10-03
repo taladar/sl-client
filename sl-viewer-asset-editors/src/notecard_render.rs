@@ -71,24 +71,19 @@ use crate::intents::OpenAvatarProfile;
 use crate::inventory::{OpenAboutLandmark, OpenMaterialEditor};
 use crate::inventory_properties::OpenItemPreview;
 use crate::linkified_text::LinkTextStyle;
-use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 
 /// The catalogue template for the copy-embedded-item confirmation — the
 /// reference `ConfirmItemCopy` alertmodal ("Copy this item to your inventory?").
-const CONFIRM_ITEM_COPY_TEMPLATE: &str = "ConfirmItemCopy";
-
-/// The affirmative button's stable functor name on `ConfirmItemCopy`.
-const CONFIRM_ITEM_COPY_BUTTON: &str = "OK";
+const CONFIRM_ITEM_COPY_TEMPLATE: TemplateRef<OkCancel> = TemplateRef::new("ConfirmItemCopy");
 
 /// The catalogue template asking to save the notecard before an item dropped
 /// into it since the last save can be opened or copied — the reference
 /// `ConfirmNotecardSave`.
-pub(crate) const CONFIRM_NOTECARD_SAVE_TEMPLATE: &str = "ConfirmNotecardSave";
-
-/// The affirmative button's stable functor name on `ConfirmNotecardSave`.
-pub(crate) const CONFIRM_NOTECARD_SAVE_BUTTON: &str = "OK";
+pub(crate) const CONFIRM_NOTECARD_SAVE_TEMPLATE: TemplateRef<OkCancel> =
+    TemplateRef::new("ConfirmNotecardSave");
 
 /// The element an embedded item's context menu attributes its actions to.
 const EMBEDDED_MENU_ELEMENT: &str = "notecard-embedded-item";
@@ -412,7 +407,7 @@ fn run_embedded_request(
     if unsaved.is_some_and(|unsaved| unsaved.0.contains(&item_box.index)) {
         out.saves.queue.push_back(item_box.body);
         out.notifications
-            .write(ShowNotification::new(CONFIRM_NOTECARD_SAVE_TEMPLATE));
+            .write(ShowNotification::new(CONFIRM_NOTECARD_SAVE_TEMPLATE.name()));
         return;
     }
     let action = match request {
@@ -455,7 +450,7 @@ fn run_embedded_request(
 fn offer_copy(target: CopyTarget, out: &mut EmbeddedOutputs) {
     out.pending.queue.push_back(target);
     out.notifications
-        .write(ShowNotification::new(CONFIRM_ITEM_COPY_TEMPLATE));
+        .write(ShowNotification::new(CONFIRM_ITEM_COPY_TEMPLATE.name()));
 }
 
 /// A primary press opens the item ([`EmbeddedAction`]); a secondary press
@@ -546,13 +541,13 @@ fn handle_embedded_copy_confirmations(
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     for response in responses.read() {
-        if response.template != CONFIRM_ITEM_COPY_TEMPLATE {
+        if !response.is_for(CONFIRM_ITEM_COPY_TEMPLATE) {
             continue;
         }
         let Some(target) = pending.queue.pop_front() else {
             continue;
         };
-        if response.button == Some(CONFIRM_ITEM_COPY_BUTTON) {
+        if response.answer(CONFIRM_ITEM_COPY_TEMPLATE) == Some(OkCancel::Ok) {
             sl_commands.write(SlCommand(Command::CopyInventoryFromNotecard {
                 notecard_id: target.notecard,
                 object_id: target.holder,

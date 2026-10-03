@@ -50,7 +50,7 @@ use bevy::ui_widgets::{Activate, SliderRange, SliderStep};
 use sl_client_bevy::{Command, Kilobits, SlCommand, SlEvent, SlSessionEvent, Throttle};
 use sl_settings::{Scope, SettingValue};
 
-use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use crate::preferences::{
     spawn_pref_action, spawn_pref_checkbox, spawn_pref_section, spawn_pref_slider, spawn_pref_text,
 };
@@ -330,7 +330,7 @@ pub(crate) fn build_network_cache_tab(commands: &mut Commands, panel: Entity) {
     );
     commands.entity(clear_cache).observe(
         |_activate: On<Activate>, mut show: MessageWriter<ShowNotification>| {
-            show.write(ShowNotification::new("ConfirmClearCache"));
+            show.write(ShowNotification::new(CONFIRM_CLEAR_CACHE.name()));
         },
     );
     let clear_inventory = spawn_pref_action(
@@ -341,7 +341,7 @@ pub(crate) fn build_network_cache_tab(commands: &mut Commands, panel: Entity) {
     );
     commands.entity(clear_inventory).observe(
         |_activate: On<Activate>, mut show: MessageWriter<ShowNotification>| {
-            show.write(ShowNotification::new("ConfirmClearInventoryCache"));
+            show.write(ShowNotification::new(CONFIRM_CLEAR_INVENTORY_CACHE.name()));
         },
     );
 }
@@ -403,29 +403,29 @@ fn handle_cache_clear_confirmations(
 ) {
     let paths = paths.as_deref().cloned().unwrap_or_default();
     for response in responses.read() {
-        if response.button != Some("OK") {
-            continue;
-        }
-        match response.template {
-            "ConfirmClearCache" => {
-                if let Err(error) = paths.mark_cache_for_purge() {
-                    warn!("could not mark the cache for a purge on next start: {error}");
-                } else {
-                    info!("cache marked for a purge on the next start");
-                }
+        if response.answer(CONFIRM_CLEAR_CACHE) == Some(OkCancel::Ok) {
+            if let Err(error) = paths.mark_cache_for_purge() {
+                warn!("could not mark the cache for a purge on next start: {error}");
+            } else {
+                info!("cache marked for a purge on the next start");
             }
-            "ConfirmClearInventoryCache" => {
-                let Some(base) = paths.cache_accounts_base() else {
-                    continue;
-                };
-                IoTaskPool::get()
-                    .spawn(async move { delete_inventory_caches(&base) })
-                    .detach();
-            }
-            _ => {}
+        } else if response.answer(CONFIRM_CLEAR_INVENTORY_CACHE) == Some(OkCancel::Ok) {
+            let Some(base) = paths.cache_accounts_base() else {
+                continue;
+            };
+            IoTaskPool::get()
+                .spawn(async move { delete_inventory_caches(&base) })
+                .detach();
         }
     }
 }
+
+/// The confirmation before marking the whole cache for a purge on next start.
+const CONFIRM_CLEAR_CACHE: TemplateRef<OkCancel> = TemplateRef::new("ConfirmClearCache");
+
+/// The confirmation before deleting the per-avatar inventory snapshots.
+const CONFIRM_CLEAR_INVENTORY_CACHE: TemplateRef<OkCancel> =
+    TemplateRef::new("ConfirmClearInventoryCache");
 
 /// The suffix every per-avatar inventory snapshot filename ends in (the
 /// library snapshot's `.lib.inv.llsd.gz` ends in it too).

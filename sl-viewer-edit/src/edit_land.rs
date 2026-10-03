@@ -61,7 +61,7 @@ use sl_client_bevy::{
 };
 use sl_client_bevy::{LandBrushAction, LandBrushRadius, LandEdit, TerraformArea};
 use sl_settings::{Scope, SettingValue};
-use sl_viewer_notifications::{NotificationResponse, ShowNotification};
+use sl_viewer_notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use sl_viewer_settings::ViewerSettings;
 use sl_viewer_ui_widgets::settings_binding::{SettingBinding, bound_checkbox, bound_slider};
 use sl_viewer_ui_widgets::ui_checkbox::{CheckboxSpec, spawn_checkbox};
@@ -500,6 +500,12 @@ pub(crate) struct LandPanelUi {
     /// The **Join** caption, greyed when the selection cannot be joined.
     join: Entity,
 }
+
+/// The warning before subdividing the selected land.
+const LAND_DIVIDE_WARNING: TemplateRef<OkCancel> = TemplateRef::new("LandDivideWarning");
+
+/// The warning before joining the selected parcels.
+const JOIN_LAND_WARNING: TemplateRef<OkCancel> = TemplateRef::new("JoinLandWarning");
 
 /// A land rectangle awaiting the user's answer to a confirmation, so the
 /// `ParcelDivide` / `ParcelJoin` goes out against the rectangle that was
@@ -1545,7 +1551,7 @@ fn handle_land_action_press(
             sinks.pending.divide = Some(rect);
             sinks
                 .notify
-                .write(ShowNotification::new("LandDivideWarning"));
+                .write(ShowNotification::new(LAND_DIVIDE_WARNING.name()));
         }
         LandButton::Join => {
             // The reference's `startJoinLand`, refusal for refusal.
@@ -1568,7 +1574,9 @@ fn handle_land_action_press(
                 return;
             }
             sinks.pending.join = Some(rect);
-            sinks.notify.write(ShowNotification::new("JoinLandWarning"));
+            sinks
+                .notify
+                .write(ShowNotification::new(JOIN_LAND_WARNING.name()));
         }
     }
 }
@@ -1624,19 +1632,24 @@ fn apply_land_confirmations(
     mut commands: MessageWriter<SlCommand>,
 ) {
     for response in responses.read() {
-        let divide = match response.template {
-            "LandDivideWarning" => true,
-            "JoinLandWarning" => false,
-            _other => continue,
-        };
-        let rect = if divide {
-            pending.divide.take()
+        let (divide, rect, answer) = if response.is_for(LAND_DIVIDE_WARNING) {
+            (
+                true,
+                pending.divide.take(),
+                response.answer(LAND_DIVIDE_WARNING),
+            )
+        } else if response.is_for(JOIN_LAND_WARNING) {
+            (
+                false,
+                pending.join.take(),
+                response.answer(JOIN_LAND_WARNING),
+            )
         } else {
-            pending.join.take()
+            continue;
         };
         // Any answer but OK — Cancel, or a dismissal — drops the pending
         // rectangle and sends nothing.
-        let (Some(rect), Some("OK")) = (rect, response.button) else {
+        let (Some(rect), Some(OkCancel::Ok)) = (rect, answer) else {
             continue;
         };
         let command = if divide {

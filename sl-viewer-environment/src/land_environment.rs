@@ -89,7 +89,7 @@ use sl_client_bevy::{
 };
 use sl_viewer_intents::{OpenSettingsPicker, SettingsPicked};
 use sl_viewer_inventory::inventory::InventoryModel;
-use sl_viewer_notifications::{NotificationResponse, ShowNotification};
+use sl_viewer_notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use sl_viewer_ui_core::i18n::{Translated, Translator};
 use sl_viewer_ui_core::semantic::{LabelledBy, Role, Semantic};
 use sl_viewer_ui_core::ui::{column, row};
@@ -138,10 +138,10 @@ const ALTITUDE_DEFAULT_STEP: i32 = 1000;
 const MINIMUM_PARCEL_AREA: LandArea = LandArea(128);
 
 /// The confirmation in front of a reset (the reference's `SettingsConfirmReset`).
-const RESET_CONFIRM: &str = "SettingsConfirmReset";
+const RESET_CONFIRM: TemplateRef<OkCancel> = TemplateRef::new("SettingsConfirmReset");
 
 /// The confirmation in front of an estate parcel-override change.
-const OVERRIDE_CONFIRM: &str = "EstateParcelEnvironmentOverride";
+const OVERRIDE_CONFIRM: TemplateRef<OkCancel> = TemplateRef::new("EstateParcelEnvironmentOverride");
 
 // ---------------------------------------------------------------------------
 // The panel's subject.
@@ -1683,7 +1683,7 @@ fn on_land_action(
                     panel: *panel,
                     action: ConfirmAction::Reset,
                 });
-                notify.write(ShowNotification::new(RESET_CONFIRM));
+                notify.write(ShowNotification::new(RESET_CONFIRM.name()));
             }
         }
         LandAction::Edit => {
@@ -1817,7 +1817,7 @@ fn on_override_pressed(
         panel: *panel,
         action: ConfirmAction::Override(!subject.allow_override),
     });
-    notify.write(ShowNotification::new(OVERRIDE_CONFIRM));
+    notify.write(ShowNotification::new(OVERRIDE_CONFIRM.name()));
 }
 
 /// A confirmation came back.
@@ -1829,13 +1829,17 @@ fn resolve_land_confirmation(
     mut overrides: MessageWriter<AllowEnvironmentOverrideRequested>,
 ) {
     for response in responses.read() {
-        if !matches!(response.template, RESET_CONFIRM | OVERRIDE_CONFIRM) {
+        let answer = if response.is_for(RESET_CONFIRM) {
+            response.answer(RESET_CONFIRM)
+        } else if response.is_for(OVERRIDE_CONFIRM) {
+            response.answer(OVERRIDE_CONFIRM)
+        } else {
             continue;
-        }
+        };
         let Some(pending) = confirm.0.take() else {
             continue;
         };
-        if response.button != Some("OK") {
+        if answer != Some(OkCancel::Ok) {
             continue;
         }
         match pending.action {

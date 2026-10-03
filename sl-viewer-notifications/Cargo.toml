@@ -20,6 +20,9 @@ publish.workspace = true
 # compiles early and in parallel with the rest of the dependency wall rather
 # than waiting behind it.
 bevy_ecs = { version = "0.19.0" }
+# A response whose button is not on its template's form is a host bug, and is
+# logged rather than read as "no answer". `bevy_ecs` already builds it.
+tracing = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

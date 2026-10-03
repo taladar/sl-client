@@ -89,7 +89,9 @@ use crate::intents::OpenAddToContactSet;
 use crate::intents::OpenAvatarProfile;
 use crate::intents::{AvatarPicked, OpenAvatarPicker};
 use crate::intents::{ConversationKey, OpenConversation};
-use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::notifications::{
+    CreateCancel, NotificationResponse, OkCancel, ShowNotification, TemplateRef,
+};
 use crate::people::PeopleUi;
 use crate::settings::ViewerSettings;
 use crate::social::{FriendsModel, short_id};
@@ -122,6 +124,18 @@ const ADD_TO_SET_FLOATER_ID: &str = "add-to-contact-set";
 
 /// The set-settings floater's stable id.
 const CONFIG_FLOATER_ID: &str = "contact-set-config";
+
+/// The prompt for a new set's name.
+const ADD_NEW_CONTACT_SET: TemplateRef<CreateCancel> = TemplateRef::new("AddNewContactSet");
+
+/// The confirmation before deleting a set.
+const REMOVE_CONTACT_SET: TemplateRef<OkCancel> = TemplateRef::new("RemoveContactSet");
+
+/// The prompt for a resident's pseudonym.
+const SET_AVATAR_PSEUDONYM: TemplateRef<CreateCancel> = TemplateRef::new("SetAvatarPseudonym");
+
+/// The confirmation before taking a resident out of a set.
+const REMOVE_CONTACT_FROM_SET: TemplateRef<OkCancel> = TemplateRef::new("RemoveContactFromSet");
 
 /// The persisted-settings section the member table's state lives under.
 const CONTACT_SETS_SECTION: &[&str] = &["contact_sets"];
@@ -1819,16 +1833,16 @@ fn on_panel_button_activate(
             };
             intents
                 .notifications
-                .write(ShowNotification::new("AddNewContactSet"));
+                .write(ShowNotification::new(ADD_NEW_CONTACT_SET.name()));
         }
         ContactSetsButton::DeleteSet => {
             let Some(name) = real_set else {
                 return;
             };
             *state.pending = PendingAction::RemoveSet { name: name.clone() };
-            intents
-                .notifications
-                .write(ShowNotification::new("RemoveContactSet").arg("SET_NAME", name.clone()));
+            intents.notifications.write(
+                ShowNotification::new(REMOVE_CONTACT_SET.name()).arg("SET_NAME", name.clone()),
+            );
         }
         ContactSetsButton::Configure => {
             if let Some(name) = real_set {
@@ -1870,7 +1884,7 @@ fn on_panel_button_activate(
                 agent,
             };
             intents.notifications.write(
-                ShowNotification::new("RemoveContactFromSet")
+                ShowNotification::new(REMOVE_CONTACT_FROM_SET.name())
                     .arg("TARGET", name)
                     .arg("SET_NAME", set),
             );
@@ -1973,7 +1987,7 @@ fn handle_open_add_to_set(
             };
             floater
                 .notifications
-                .write(ShowNotification::new("AddNewContactSet"));
+                .write(ShowNotification::new(ADD_NEW_CONTACT_SET.name()));
             continue;
         }
         floater.target.agents = residents;
@@ -2061,7 +2075,8 @@ fn handle_open_set_pseudonym(
             agent: request.agent,
             name: label.clone(),
         };
-        notifications.write(ShowNotification::new("SetAvatarPseudonym").arg("AVATAR", label));
+        notifications
+            .write(ShowNotification::new(SET_AVATAR_PSEUDONYM.name()).arg("AVATAR", label));
     }
 }
 
@@ -2113,7 +2128,7 @@ fn on_add_to_set_activate(
             };
             floater
                 .notifications
-                .write(ShowNotification::new("AddNewContactSet"));
+                .write(ShowNotification::new(ADD_NEW_CONTACT_SET.name()));
         }
         AddToSetButton::Cancel => {}
     }
@@ -2501,89 +2516,83 @@ fn handle_contact_set_notifications(
     mut view: ResMut<ContactSetsView>,
 ) {
     for response in responses.read() {
-        match response.template {
-            "AddNewContactSet" => {
-                let taken = core::mem::take(&mut *pending);
-                let PendingAction::Create {
-                    then_add,
-                    move_from,
-                } = taken
-                else {
-                    continue;
-                };
-                if response.button != Some("Create") {
-                    continue;
-                }
-                let name = response
-                    .input
-                    .as_deref()
-                    .map(str::trim)
-                    .unwrap_or_default()
-                    .to_owned();
-                if name.is_empty() {
-                    continue;
-                }
-                requests.write(RequestContactSet::Create { name: name.clone() });
-                for (agent, label) in then_add {
-                    match move_from.clone() {
-                        Some(from) => requests.write(RequestContactSet::Move {
-                            from,
-                            to: name.clone(),
-                            agent,
-                        }),
-                        None => requests.write(RequestContactSet::Add {
-                            set: name.clone(),
-                            agent,
-                            name: label,
-                        }),
-                    };
-                }
-                // Show the set that was just made: it is what the user is
-                // working on, and an empty new set is otherwise invisible.
-                view.choice = name;
+        if response.is_for(ADD_NEW_CONTACT_SET) {
+            let taken = core::mem::take(&mut *pending);
+            let PendingAction::Create {
+                then_add,
+                move_from,
+            } = taken
+            else {
+                continue;
+            };
+            if response.answer(ADD_NEW_CONTACT_SET) != Some(CreateCancel::Create) {
+                continue;
             }
-            "RemoveContactSet" => {
-                let taken = core::mem::take(&mut *pending);
-                let PendingAction::RemoveSet { name } = taken else {
-                    continue;
-                };
-                if response.button == Some("OK") {
-                    requests.write(RequestContactSet::Remove { name });
-                }
+            let name = response
+                .input
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_owned();
+            if name.is_empty() {
+                continue;
             }
-            "SetAvatarPseudonym" => {
-                let taken = core::mem::take(&mut *pending);
-                let PendingAction::SetAlias { agent, name } = taken else {
-                    continue;
+            requests.write(RequestContactSet::Create { name: name.clone() });
+            for (agent, label) in then_add {
+                match move_from.clone() {
+                    Some(from) => requests.write(RequestContactSet::Move {
+                        from,
+                        to: name.clone(),
+                        agent,
+                    }),
+                    None => requests.write(RequestContactSet::Add {
+                        set: name.clone(),
+                        agent,
+                        name: label,
+                    }),
                 };
-                if response.button != Some("Create") {
-                    continue;
-                }
-                let alias = response
-                    .input
-                    .as_deref()
-                    .map(str::trim)
-                    .unwrap_or_default()
-                    .to_owned();
-                if alias.is_empty() {
-                    continue;
-                }
-                // The list is not switched to the Pseudonyms pseudo-set: the
-                // aliased person is renamed in place wherever they already show,
-                // which is the feedback the action wants — and the prompt is
-                // just as often raised from the avatar pie, with no panel open.
-                requests.write(RequestContactSet::SetPseudonym { agent, alias, name });
             }
-            "RemoveContactFromSet" => {
-                let taken = core::mem::take(&mut *pending);
-                let PendingAction::RemoveMember { set, agent } = taken else {
-                    continue;
-                };
-                if response.button == Some("OK") {
-                    requests.write(RequestContactSet::RemoveMember { set, agent });
-                }
+            // Show the set that was just made: it is what the user is
+            // working on, and an empty new set is otherwise invisible.
+            view.choice = name;
+        } else if response.is_for(REMOVE_CONTACT_SET) {
+            let taken = core::mem::take(&mut *pending);
+            let PendingAction::RemoveSet { name } = taken else {
+                continue;
+            };
+            if response.answer(REMOVE_CONTACT_SET) == Some(OkCancel::Ok) {
+                requests.write(RequestContactSet::Remove { name });
             }
-            _other => {}
+        } else if response.is_for(SET_AVATAR_PSEUDONYM) {
+            let taken = core::mem::take(&mut *pending);
+            let PendingAction::SetAlias { agent, name } = taken else {
+                continue;
+            };
+            if response.answer(SET_AVATAR_PSEUDONYM) != Some(CreateCancel::Create) {
+                continue;
+            }
+            let alias = response
+                .input
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_owned();
+            if alias.is_empty() {
+                continue;
+            }
+            // The list is not switched to the Pseudonyms pseudo-set: the
+            // aliased person is renamed in place wherever they already show,
+            // which is the feedback the action wants — and the prompt is
+            // just as often raised from the avatar pie, with no panel open.
+            requests.write(RequestContactSet::SetPseudonym { agent, alias, name });
+        } else if response.is_for(REMOVE_CONTACT_FROM_SET) {
+            let taken = core::mem::take(&mut *pending);
+            let PendingAction::RemoveMember { set, agent } = taken else {
+                continue;
+            };
+            if response.answer(REMOVE_CONTACT_FROM_SET) == Some(OkCancel::Ok) {
+                requests.write(RequestContactSet::RemoveMember { set, agent });
+            }
         }
     }
 }

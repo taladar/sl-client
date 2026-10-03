@@ -63,21 +63,18 @@ use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, Command, SlCommand, SlIdentity};
 
 use crate::intents::RequestFriendship;
-use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::notifications::{NotificationResponse, OfferCancel, ShowNotification, TemplateRef};
 use crate::social::FriendsModel;
 use crate::world_api::AvatarState;
 
 /// The reference dialog that asks for the offer's message before sending it.
-const ASK_TEMPLATE: &str = "AddFriendWithMessage";
+const ASK_TEMPLATE: TemplateRef<OfferCancel> = TemplateRef::new("AddFriendWithMessage");
 
 /// The reference tip that refuses self-friendship.
 const SELF_TEMPLATE: &str = "AddSelfFriend";
 
 /// The reference notice confirming an offer went out.
 const SENT_TEMPLATE: &str = "FriendshipOffered";
-
-/// The [`ASK_TEMPLATE`] button that sends (`OFFER_CANCEL_FORM`'s default).
-const OFFER_BUTTON: &str = "Offer";
 
 /// What joins several residents' labels in the dialog body and the
 /// confirmation. Ours, not the reference's — it never names more than one.
@@ -179,8 +176,9 @@ fn prompt_friendship_requests(
         return;
     }
     if let Some(next) = queue.waiting.pop_front() {
-        notifications
-            .write(ShowNotification::new(ASK_TEMPLATE).arg("NAME", label_list(&avatars, &next)));
+        notifications.write(
+            ShowNotification::new(ASK_TEMPLATE.name()).arg("NAME", label_list(&avatars, &next)),
+        );
         queue.asking = Some(next);
     }
 }
@@ -199,13 +197,13 @@ fn send_prompted_friendship_offers(
     mut notifications: MessageWriter<ShowNotification>,
 ) {
     for response in responses.read() {
-        if response.template != ASK_TEMPLATE {
+        if !response.is_for(ASK_TEMPLATE) {
             continue;
         }
         let Some(targets) = queue.asking.take() else {
             continue;
         };
-        if response.button != Some(OFFER_BUTTON) {
+        if response.answer(ASK_TEMPLATE) != Some(OfferCancel::Offer) {
             continue;
         }
         // An inputless resolve (a dismissal that still chose the button) sends
@@ -226,8 +224,7 @@ fn send_prompted_friendship_offers(
 #[cfg(test)]
 mod tests {
     use super::{
-        ASK_TEMPLATE, AddFriendPlugin, FriendshipOfferQueue, OFFER_BUTTON, SELF_TEMPLATE,
-        SENT_TEMPLATE,
+        ASK_TEMPLATE, AddFriendPlugin, FriendshipOfferQueue, SELF_TEMPLATE, SENT_TEMPLATE,
     };
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
@@ -237,7 +234,7 @@ mod tests {
 
     use crate::intents::RequestFriendship;
     use crate::notifications::{
-        NotificationId, NotificationManager, NotificationResponse, ShowNotification,
+        NotificationId, NotificationManager, NotificationResponse, OfferCancel, ShowNotification,
     };
     use crate::social::FriendsModel;
     use crate::world_api::AvatarState;
@@ -316,11 +313,11 @@ mod tests {
 
     /// Answer the outstanding dialog with `button` and `message`, and run a
     /// frame.
-    fn answer(app: &mut App, button: Option<&'static str>, message: Option<&str>) {
+    fn answer(app: &mut App, button: Option<OfferCancel>, message: Option<&str>) {
         app.world_mut().write_message(NotificationResponse {
             id: some_id(),
-            template: ASK_TEMPLATE,
-            button,
+            template: ASK_TEMPLATE.name(),
+            button: button.map(OfferCancel::name),
             ignored: false,
             input: message.map(ToOwned::to_owned),
         });
@@ -346,12 +343,12 @@ mod tests {
         request(&mut app, vec![agent(2)]);
         assert_eq!(
             raised(&app),
-            vec![ASK_TEMPLATE],
+            vec![ASK_TEMPLATE.name()],
             "the request must raise the message dialog, not send"
         );
         assert_eq!(offers(&app), vec![], "nothing may go out before the answer");
 
-        answer(&mut app, Some(OFFER_BUTTON), Some("hello there"));
+        answer(&mut app, Some(OfferCancel::Offer), Some("hello there"));
         assert_eq!(
             offers(&app),
             vec![(agent(2), "hello there".to_owned())],
@@ -359,7 +356,7 @@ mod tests {
         );
         assert_eq!(
             raised(&app),
-            vec![ASK_TEMPLATE, SENT_TEMPLATE],
+            vec![ASK_TEMPLATE.name(), SENT_TEMPLATE],
             "and the send must be confirmed"
         );
     }
@@ -369,11 +366,11 @@ mod tests {
     fn cancelling_sends_nothing_and_frees_the_prompt() {
         let mut app = offer_app();
         request(&mut app, vec![agent(2)]);
-        answer(&mut app, Some("Cancel"), Some("unsent"));
+        answer(&mut app, Some(OfferCancel::Cancel), Some("unsent"));
         assert_eq!(offers(&app), vec![], "a cancelled dialog sends no offer");
         assert_eq!(
             raised(&app),
-            vec![ASK_TEMPLATE],
+            vec![ASK_TEMPLATE.name()],
             "and confirms nothing either"
         );
         assert!(
@@ -419,10 +416,10 @@ mod tests {
         request(&mut app, vec![agent(2), agent(3), agent(4), agent(2)]);
         assert_eq!(
             raised(&app),
-            vec![ASK_TEMPLATE],
+            vec![ASK_TEMPLATE.name()],
             "several residents are one dialog"
         );
-        answer(&mut app, Some(OFFER_BUTTON), Some("hi"));
+        answer(&mut app, Some(OfferCancel::Offer), Some("hi"));
         assert_eq!(
             offers(&app),
             vec![(agent(2), "hi".to_owned()), (agent(3), "hi".to_owned()),],
@@ -439,18 +436,18 @@ mod tests {
         request(&mut app, vec![agent(3)]);
         assert_eq!(
             raised(&app),
-            vec![ASK_TEMPLATE],
+            vec![ASK_TEMPLATE.name()],
             "only one dialog is outstanding at a time"
         );
 
-        answer(&mut app, Some(OFFER_BUTTON), Some("first"));
+        answer(&mut app, Some(OfferCancel::Offer), Some("first"));
         assert_eq!(
             raised(&app),
-            vec![ASK_TEMPLATE, SENT_TEMPLATE, ASK_TEMPLATE],
+            vec![ASK_TEMPLATE.name(), SENT_TEMPLATE, ASK_TEMPLATE.name()],
             "answering the first must raise the waiting one in the same frame"
         );
 
-        answer(&mut app, Some(OFFER_BUTTON), Some("second"));
+        answer(&mut app, Some(OfferCancel::Offer), Some("second"));
         assert_eq!(
             offers(&app),
             vec![

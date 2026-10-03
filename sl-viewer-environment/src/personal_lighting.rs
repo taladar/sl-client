@@ -51,7 +51,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{SliderRange, SliderValue, ValueChange};
 use sl_client_bevy::{EnvironmentAsset, SkySettings, WaterSettings};
 use sl_viewer_intents::TexturePicked;
-use sl_viewer_notifications::{NotificationResponse, ShowNotification};
+use sl_viewer_notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_ui_core::i18n::Translated;
 use sl_viewer_ui_core::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -82,7 +82,7 @@ const ELEMENT: &str = "personal-lighting";
 pub const PERSONAL_LIGHTING_FLOATER_ID: &str = "personal-lighting";
 
 /// The notification the Reset button raises before it drops the layer.
-const RESET_CONFIRM: &str = "PersonalSettingsConfirmReset";
+const RESET_CONFIRM: TemplateRef<OkCancel> = TemplateRef::new("PersonalSettingsConfirmReset");
 
 // ---------------------------------------------------------------------------
 // Components and state.
@@ -717,7 +717,7 @@ fn on_reset_pressed(
         return;
     }
     if buttons.contains(press.entity) {
-        show.write(ShowNotification::new(RESET_CONFIRM));
+        show.write(ShowNotification::new(RESET_CONFIRM.name()));
     }
 }
 
@@ -733,7 +733,7 @@ fn handle_reset_confirmation(
 ) {
     let confirmed = responses
         .read()
-        .any(|response| response.template == RESET_CONFIRM && response.button == Some("OK"));
+        .any(|response| response.answer(RESET_CONFIRM) == Some(OkCancel::Ok));
     if !confirmed {
         return;
     }
@@ -795,7 +795,7 @@ pub fn spawn_personal_lighting_specimen(
 mod tests {
     use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_viewer_notifications::{NotificationManager, NotificationResponse};
+    use sl_viewer_notifications::{NotificationManager, NotificationResponse, OkCancel};
     use sl_viewer_world_scene::environment::EnvironmentState;
 
     use super::{PERSONAL_LIGHTING_FLOATER_ID, RESET_CONFIRM};
@@ -824,8 +824,8 @@ mod tests {
         let id = NotificationManager::default().allocate_id();
         app.world_mut().write_message(NotificationResponse {
             id,
-            template: RESET_CONFIRM,
-            button: Some("OK"),
+            template: RESET_CONFIRM.name(),
+            button: Some(OkCancel::Ok.name()),
             ignored: false,
             input: None,
         });

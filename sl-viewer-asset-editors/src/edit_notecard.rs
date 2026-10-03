@@ -95,10 +95,10 @@ use crate::intents::{NotecardDropTarget, NotecardSource, OpenNotecard};
 use crate::inventory::AddEmbeddedItem;
 use crate::linkified_text::{LinkActivated, LinkTextStyle, populate_linkified_text};
 use crate::notecard_render::{
-    CONFIRM_NOTECARD_SAVE_BUTTON, CONFIRM_NOTECARD_SAVE_TEMPLATE, EmbeddedItemPlace,
-    PendingNotecardSaveConfirms, UnsavedEmbeddedItems, spawn_embedded_item_box,
+    CONFIRM_NOTECARD_SAVE_TEMPLATE, EmbeddedItemPlace, PendingNotecardSaveConfirms,
+    UnsavedEmbeddedItems, spawn_embedded_item_box,
 };
-use crate::notifications::NotificationResponse;
+use crate::notifications::{NotificationResponse, OkCancel};
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
@@ -1063,13 +1063,13 @@ fn confirm_notecard_saves(
         return;
     };
     for response in responses.read() {
-        if response.template != CONFIRM_NOTECARD_SAVE_TEMPLATE {
+        if !response.is_for(CONFIRM_NOTECARD_SAVE_TEMPLATE) {
             continue;
         }
         let Some(body) = pending.queue.pop_front() else {
             continue;
         };
-        if response.button != Some(CONFIRM_NOTECARD_SAVE_BUTTON) {
+        if response.answer(CONFIRM_NOTECARD_SAVE_TEMPLATE) != Some(OkCancel::Ok) {
             continue;
         }
         // The window may have closed while the question was up.

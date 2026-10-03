@@ -85,7 +85,7 @@ use sl_viewer_intents::{
 };
 use sl_viewer_inventory::inventory::InventoryModel;
 use sl_viewer_inventory::inventory_actions::{SettingsInventorySupport, new_settings_item};
-use sl_viewer_notifications::{NotificationResponse, ShowNotification};
+use sl_viewer_notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use sl_viewer_pickers::ui_texture_picker::TextureSwatchValue;
 use sl_viewer_platform::environment_assets::EnvironmentAssetManager;
 use sl_viewer_platform::file_dialog::{
@@ -122,6 +122,12 @@ pub const SKY_EDITOR_FLOATER_ID: &str = "settings-editor-sky";
 
 /// The water editor's floater id.
 pub const WATER_EDITOR_FLOATER_ID: &str = "settings-editor-water";
+
+/// The question before an open, an import or a close throws away unsaved
+/// edits — asked by these editors and the day-cycle editor alike. Its form is
+/// `YES_NO_FORM`, whose Yes button is *named* `OK`.
+pub(crate) const SETTINGS_CONFIRM_LOSS: TemplateRef<OkCancel> =
+    TemplateRef::new("SettingsConfirmLoss");
 
 /// How many columns a tab panel lays its controls out in.
 const COLUMNS: usize = 3;
@@ -1001,7 +1007,7 @@ fn open_settings_editor(
                 .map_or_else(String::new, |session| session.name.clone());
             confirm.0 = Some(HeldReplacement::Open(open.clone()));
             notify.write(
-                ShowNotification::new("SettingsConfirmLoss")
+                ShowNotification::new(SETTINGS_CONFIRM_LOSS.name())
                     .arg("TYPE", settings_kind_word(editor.settings_kind()))
                     .arg("NAME", name),
             );
@@ -1173,7 +1179,7 @@ fn begin_import(
         let name = session.name.clone();
         confirm.0 = Some(HeldReplacement::Import(editor));
         notify.write(
-            ShowNotification::new("SettingsConfirmLoss")
+            ShowNotification::new(SETTINGS_CONFIRM_LOSS.name())
                 .arg("TYPE", settings_kind_word(editor.settings_kind()))
                 .arg("NAME", name),
         );
@@ -1814,13 +1820,13 @@ fn confirm_editor_replace(
     translator: Translator,
 ) {
     for response in responses.read() {
-        if response.template != "SettingsConfirmLoss" {
+        if !response.is_for(SETTINGS_CONFIRM_LOSS) {
             continue;
         }
         let Some(held) = confirm.0.take() else {
             continue;
         };
-        if response.button != Some("OK") {
+        if response.answer(SETTINGS_CONFIRM_LOSS) != Some(OkCancel::Ok) {
             continue;
         }
         match held {
@@ -1909,7 +1915,7 @@ fn ask_before_closing_editor(
         };
         confirm.0 = Some(HeldReplacement::Close(editor));
         notify.write(
-            ShowNotification::new("SettingsConfirmLoss")
+            ShowNotification::new(SETTINGS_CONFIRM_LOSS.name())
                 .arg("TYPE", settings_kind_word(editor.settings_kind()))
                 .arg("NAME", session.name.clone()),
         );
@@ -2162,8 +2168,8 @@ mod tests {
 
     use super::{
         EditSession, EditorKind, HeldReplacement, OpenFileDialog, PendingEditorReplace,
-        SettingsEditors, Translator, apply_imported_preset, begin_import, frame_name,
-        import_purpose, named, settings_kind_word,
+        SETTINGS_CONFIRM_LOSS, SettingsEditors, Translator, apply_imported_preset, begin_import,
+        frame_name, import_purpose, named, settings_kind_word,
     };
     use crate::knobs::SkyKnob;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -2175,27 +2181,6 @@ mod tests {
     /// A boxed error, so a test can `?` rather than reach for the `panic!` the
     /// workspace's lints (rightly) forbid.
     type TestError = Box<dyn core::error::Error>;
-
-    /// **The confirmation this editor routes on is the one the catalogue
-    /// holds.** The template name and the button name are plain strings on both
-    /// sides, so a rename in the catalogue would leave the open path raising a
-    /// notification nothing answers — and the editor would then silently
-    /// discard unsaved work again, which is the bug the confirmation exists to
-    /// fix.
-    #[test]
-    fn the_loss_confirmation_is_catalogued_with_the_button_we_route_on() -> Result<(), TestError> {
-        let template = sl_viewer_notifications::template("SettingsConfirmLoss")
-            .ok_or("the reference's SettingsConfirmLoss is in the catalogue")?;
-        assert!(
-            template.form.iter().any(|button| button.name == "OK"),
-            "the confirm arm routes on the stable reference functor name"
-        );
-        assert!(
-            template.form.iter().any(|button| button.name == "Cancel"),
-            "and so does the refusal"
-        );
-        Ok(())
-    }
 
     /// Each settings kind gets its own `[TYPE]` word, so the confirmation says
     /// what is about to be lost rather than "settings".
@@ -2559,7 +2544,7 @@ mod tests {
             .drain()
             .collect();
         let first = raised.first().ok_or("the loss confirmation is raised")?;
-        assert_eq!(first.template, "SettingsConfirmLoss");
+        assert_eq!(first.template, SETTINGS_CONFIRM_LOSS.name());
         let held = app.world().resource::<PendingEditorReplace>();
         assert!(
             matches!(held.0, Some(HeldReplacement::Import(EditorKind::Sky))),

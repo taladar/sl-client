@@ -70,7 +70,7 @@ use sl_viewer_media::browser_widget::{
     BrowserView, BrowserViewSpec, SurfaceTrust, ValidatedMediaUrl, spawn_browser_view,
 };
 use sl_viewer_media::media_engine::MediaSurfaces;
-use sl_viewer_notifications::{NotificationResponse, ShowNotification};
+use sl_viewer_notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use sl_viewer_ui_core::semantic::LabelledBy;
 use sl_viewer_ui_core::skin::{TEXT_CLASS, WARN_TEXT_CLASS, text_meaning, text_role};
 use sl_viewer_world_view::media_prim::{MediaData, MediaPrimState, MediaStartRequests};
@@ -249,6 +249,13 @@ struct ObjectMediaSupport {
     /// Whether the last capability map carried the cap.
     supported: bool,
 }
+
+/// The question before removing the selected faces' media. Its form is
+/// `YES_NO_FORM`, whose Yes button is *named* `OK` (only its label says Yes).
+const DELETE_MEDIA: TemplateRef<OkCancel> = TemplateRef::new("DeleteMedia");
+
+/// The question before opening the settings over several faces at once.
+const MULTIPLE_FACES_SELECTED: TemplateRef<OkCancel> = TemplateRef::new("MultipleFacesSelected");
 
 /// Which confirmation this panel is waiting on.
 #[derive(Resource, Debug, Default)]
@@ -832,14 +839,14 @@ fn handle_media_section_actions(
             MediaSectionAction::Choose => {
                 if selection.face_count() > 1 {
                     pending.choose = true;
-                    notify.write(ShowNotification::new("MultipleFacesSelected"));
+                    notify.write(ShowNotification::new(MULTIPLE_FACES_SELECTED.name()));
                 } else {
                     opens.write(OpenMediaSettings);
                 }
             }
             MediaSectionAction::Remove => {
                 pending.delete = true;
-                notify.write(ShowNotification::new("DeleteMedia"));
+                notify.write(ShowNotification::new(DELETE_MEDIA.name()));
             }
             MediaSectionAction::Align => {
                 align_media(
@@ -926,30 +933,24 @@ fn answer_media_confirmations(
     mut commands: MessageWriter<SlCommand>,
 ) {
     for response in responses.read() {
-        match response.template {
-            "DeleteMedia" if pending.delete => {
-                pending.delete = false;
-                // `YES_NO_FORM`'s Yes button is *named* "OK" (only its label
-                // says Yes), like every OK / Cancel pair in the catalogue.
-                if response.button == Some("OK") {
-                    remove_selected_media(&selection, &mut commands);
-                    // The reference closes the settings window over a removal:
-                    // it would otherwise show media the faces no longer carry.
-                    if let Some(ui) = ui.as_deref()
-                        && let Ok(mut shown) = panels.get_mut(ui.panel)
-                        && shown.0
-                    {
-                        shown.0 = false;
-                    }
+        if response.is_for(DELETE_MEDIA) && pending.delete {
+            pending.delete = false;
+            if response.answer(DELETE_MEDIA) == Some(OkCancel::Ok) {
+                remove_selected_media(&selection, &mut commands);
+                // The reference closes the settings window over a removal:
+                // it would otherwise show media the faces no longer carry.
+                if let Some(ui) = ui.as_deref()
+                    && let Ok(mut shown) = panels.get_mut(ui.panel)
+                    && shown.0
+                {
+                    shown.0 = false;
                 }
             }
-            "MultipleFacesSelected" if pending.choose => {
-                pending.choose = false;
-                if response.button == Some("OK") {
-                    opens.write(OpenMediaSettings);
-                }
+        } else if response.is_for(MULTIPLE_FACES_SELECTED) && pending.choose {
+            pending.choose = false;
+            if response.answer(MULTIPLE_FACES_SELECTED) == Some(OkCancel::Ok) {
+                opens.write(OpenMediaSettings);
             }
-            _other => {}
         }
     }
 }

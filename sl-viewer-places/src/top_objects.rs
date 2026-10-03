@@ -144,7 +144,7 @@ use crate::floater::{
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
-use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use crate::social::{MapTracking, TrackTarget};
 use crate::ui::{column, row};
 use crate::ui_font::UiFont;
@@ -188,13 +188,10 @@ const WHOLE_REGION: RegionLocalParcelId = RegionLocalParcelId(-1);
 const WHOLE_REGION_REPORT: RegionLocalParcelId = RegionLocalParcelId(0);
 
 /// The confirmation before returning every listed object.
-const RETURN_ALL_CONFIRM: &str = "ReturnAllTopObjects";
+const RETURN_ALL_CONFIRM: TemplateRef<OkCancel> = TemplateRef::new("ReturnAllTopObjects");
 
 /// The confirmation before disabling every listed object's scripts.
-const DISABLE_ALL_CONFIRM: &str = "DisableAllTopObjects";
-
-/// The button an `OK` / `Cancel` confirmation answers with to go ahead.
-const CONFIRM_BUTTON: &str = "OK";
+const DISABLE_ALL_CONFIRM: TemplateRef<OkCancel> = TemplateRef::new("DisableAllTopObjects");
 
 /// The floater's body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
@@ -2171,11 +2168,11 @@ fn on_top_objects_action(
         // here that cannot be undone, so it asks first.
         TopObjectsAction::ReturnAll => {
             confirm.0 = Some((window, action));
-            notifications.write(ShowNotification::new(RETURN_ALL_CONFIRM));
+            notifications.write(ShowNotification::new(RETURN_ALL_CONFIRM.name()));
         }
         TopObjectsAction::DisableAll => {
             confirm.0 = Some((window, action));
-            notifications.write(ShowNotification::new(DISABLE_ALL_CONFIRM));
+            notifications.write(ShowNotification::new(DISABLE_ALL_CONFIRM.name()));
         }
         TopObjectsAction::Refresh => {
             ask_region(*kind, &mut state, &identity, &mut commands);
@@ -2200,13 +2197,17 @@ fn answer_confirmations(
     mut commands: MessageWriter<SlCommand>,
 ) {
     for response in responses.read() {
-        if !matches!(response.template, RETURN_ALL_CONFIRM | DISABLE_ALL_CONFIRM) {
+        let answer = if response.is_for(RETURN_ALL_CONFIRM) {
+            response.answer(RETURN_ALL_CONFIRM)
+        } else if response.is_for(DISABLE_ALL_CONFIRM) {
+            response.answer(DISABLE_ALL_CONFIRM)
+        } else {
             continue;
-        }
+        };
         let Some((window, pending)) = confirm.0.take() else {
             continue;
         };
-        if response.button != Some(CONFIRM_BUTTON) {
+        if answer != Some(OkCancel::Ok) {
             continue;
         }
         // The window may have been closed, or its region left, while the

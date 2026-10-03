@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 308 |
 | blocked | 54 |
 | in-progress | 20 |
-| bugs | 19 |
-| done | 1299 |
+| bugs | 18 |
+| done | 1300 |
 | deferred | 31 |
 | wont-do | 16 |
 | **total** | **1872** |
@@ -1282,7 +1282,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (19)
+## bugs (18)
 
 ### protocol
 
@@ -1311,8 +1311,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A blocked avatar's mute entry is named by its first name, not its username
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
-- [`viewer-notification-button-ids-untyped`](bugs/viewer-notification-button-ids-untyped.md)
-  — Notification button ids are bare strings, so a wrong one fails silently
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-parcel-audio-bar-backing-unskinned`](bugs/viewer-parcel-audio-bar-backing-unskinned.md)
@@ -1333,7 +1331,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 
-## done (1299)
+## done (1300)
 
 ### protocol
 
@@ -2383,6 +2381,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   rich-text field, and a notecard body with its items in it
 - [`viewer-notecard-preview-ignores-unsaved-text`](done/viewer-notecard-preview-ignores-unsaved-text.md)
   — The notecard's View Items preview shows the loaded text, not what you typed
+- [`viewer-notification-button-ids-untyped`](done/viewer-notification-button-ids-untyped.md)
+  — Notification button ids are bare strings, so a wrong one fails silently
 - [`viewer-notification-catalogue`](done/viewer-notification-catalogue.md) —
   Notification catalogue — port the reference server-alert & confirm entries
   (blocked by `viewer-ui-notification-host` (done))
