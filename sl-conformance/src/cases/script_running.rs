@@ -26,32 +26,31 @@
 //! 6. `ResetScript` → query → assert still **running**, and the circuit healthy.
 //! 7. Clean up: derez the container to Trash.
 //!
-//! `1av`. **OpenSim only for now.** The script lives in a prim's *task*
-//! inventory, reached through the same `RezScript` task-write Second Life
-//! silently drops (the open investigation tracked with [`super::script_upload`]
-//! and in `TEST_ROADMAP.md`'s Phase Z) — so there is no way to plant a
-//! toggleable script on SL yet, and the SL variant defers with the rest of the
-//! task-inventory batch. On OpenSim the get is answered over the CAPS event
-//! queue (`ScriptRunningReply`) when the region has one, so this session also
+//! `1av`, both live grids. The script lives in a prim's *task* inventory,
+//! planted with the same `RezScript` as [`super::script_upload`], and on Second
+//! Life it needs the same build location. The get is answered over the CAPS
+//! event queue (`ScriptRunningReply`) when the region has one, so the case also
 //! exercises that decode path.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use sl_client_tokio::{
     Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
-    InventoryKey, InventoryType, Object, ObjectKey, PrimShape, RestoreItem, RezScriptParams,
-    ScopedObjectId, TransactionId, Uuid, Vector, pcode,
+    InventoryKey, InventoryType, ObjectKey, PrimShape, RestoreItem, RezScriptParams, TransactionId,
+    Uuid, Vector,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, REPLY_TIMEOUT, check, is_opensim, secs_metric, settle_scene,
+    wait_for_own_new_object,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, whose
 /// test prim serves as the rez placement reference. On Second Life the avatar
-/// keeps `"last"`.
+/// keeps `"last"`, unless the fixtures name a build location.
 const OPENSIM_START: &str = "uri:Default Region&128&128&30";
 
 /// The overall budget for settling the initial scene (collecting pre-existing
@@ -101,10 +100,11 @@ impl GridTest for ScriptRunning {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        // OpenSim only: the script lives in task inventory, reached through the
-        // same `RezScript` task-write Second Life silently drops (tracked with
-        // `script-upload` in Phase Z).
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
+    }
+
+    fn rezzes_objects(&self) -> bool {
+        true
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {
@@ -122,6 +122,7 @@ impl GridTest for ScriptRunning {
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
             let grid = ctx.grid();
+            let build_position = ctx.build_position();
 
             // The login inventory skeleton arrives before the region is ready —
             // capture the Trash (cleanup) folder first, before `wait_for_region`
@@ -146,7 +147,7 @@ impl GridTest for ScriptRunning {
             let (mut seen, reference) = {
                 let session = ctx.primary();
                 session.wait_for_region(REGION_TIMEOUT).await?;
-                settle_scene(session).await?
+                settle_scene(session, grid, build_position, SETTLE_WINDOW, SETTLE_IDLE).await?
             };
 
             let reference = match reference {
@@ -162,27 +163,28 @@ impl GridTest for ScriptRunning {
                 }
             };
 
-            let container_position = lift(&reference.motion.position, CONTAINER_LIFT_M);
+            let container_position = lift(&reference, CONTAINER_LIFT_M);
             let session = ctx.primary();
 
             // 1. Rez the container cube whose task inventory holds the script.
             session
                 .send(Command::RezObject {
-                    shape: PrimShape::cube(container_position),
+                    shape: PrimShape::cube(container_position.clone()),
                     group_id: None,
                 })
                 .await?;
-            let container = match wait_for_new_object(session, &seen).await? {
-                Some(container) => container,
-                None if is_opensim(grid) => {
-                    return Err(TestFailure::Assertion(
-                        "no new object appeared after RezObject for the container".to_owned(),
-                    ));
+            let container = match wait_for_own_new_object(session, &seen, STEP_TIMEOUT).await? {
+                Ok(container) => container,
+                Err(reason) if is_opensim(grid) => {
+                    return Err(TestFailure::Assertion(format!(
+                        "no new object appeared after RezObject for the container: {reason}"
+                    )));
                 }
-                None => {
-                    ctx.mark_partial(
-                        "landing region refused the container rez (no object appeared)",
-                    );
+                Err(reason) => {
+                    ctx.mark_partial(&format!(
+                        "landing region refused the container rez at {:.0}/{:.0}/{:.0}: {reason}",
+                        container_position.x, container_position.y, container_position.z
+                    ));
                     return Ok(());
                 }
             };
@@ -395,64 +397,6 @@ fn lift(base: &Vector, lift: f32) -> Vector {
         x: base.x,
         y: base.y,
         z: base.z + lift,
-    }
-}
-
-/// Drains the region's initial object-update burst, returning every region-local
-/// id sighted and the first primitive seen (the placement reference). The drain
-/// ends once no new [`Event::ObjectAdded`] has arrived for [`SETTLE_IDLE`], or the
-/// overall [`SETTLE_WINDOW`] elapses.
-async fn settle_scene(
-    session: &mut Session,
-) -> Result<(HashSet<ScopedObjectId>, Option<Object>), TestFailure> {
-    let mut seen = HashSet::new();
-    let mut reference: Option<Object> = None;
-    let started = std::time::Instant::now();
-    loop {
-        let remaining = SETTLE_WINDOW.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            break;
-        }
-        let cap = remaining.min(SETTLE_IDLE);
-        match session
-            .wait_for(cap, |event| match event {
-                Event::ObjectAdded(object) => Some((**object).clone()),
-                _ => None,
-            })
-            .await
-        {
-            Ok(object) => {
-                if reference.is_none() && object.pcode == pcode::PRIMITIVE {
-                    reference = Some(object.clone());
-                }
-                seen.insert(object.scoped_id());
-            }
-            Err(TestFailure::Timeout(_)) => break,
-            Err(other) => return Err(other),
-        }
-    }
-    Ok((seen, reference))
-}
-
-/// Waits for the next [`Event::ObjectAdded`] whose region-local id is not in
-/// `seen` — the freshly rezzed object. Returns `None` if none appears within
-/// [`STEP_TIMEOUT`].
-async fn wait_for_new_object(
-    session: &mut Session,
-    seen: &HashSet<ScopedObjectId>,
-) -> Result<Option<Object>, TestFailure> {
-    match session
-        .wait_for(STEP_TIMEOUT, |event| match event {
-            Event::ObjectAdded(object) if !seen.contains(&object.scoped_id()) => {
-                Some((**object).clone())
-            }
-            _ => None,
-        })
-        .await
-    {
-        Ok(object) => Ok(Some(object)),
-        Err(TestFailure::Timeout(_)) => Ok(None),
-        Err(other) => Err(other),
     }
 }
 

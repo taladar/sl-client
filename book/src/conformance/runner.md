@@ -78,6 +78,22 @@ premade_groups = [
 ]
 ```
 
+The cases that rez objects (they say so with `GridTest::rezzes_objects`)
+read one more fixture, `build_location`, a login `start` string such as
+`"uri:Mauve&52&62&33"` naming a spot where everyone may build. On Second
+Life the last location is often land that refuses a rez, a region's telehub
+redirects logins and teleports alike, and a rez far from the avatar is
+dropped without a word, so such a case logs in there, **flies** the avatar to
+the spot when the login landed elsewhere, points the camera at it (objects
+are streamed by where the camera is), and rezzes there. Absent, the case
+keeps its own start location and records `partial` with the grid's refusal
+when the rez is refused.
+
+A case recognises the object it rezzed by its ownership — the per-viewer
+`OBJECT_YOU_OWNER` flag, since Second Life sends a plain prim's owner id as
+nil — never as "the next object that appeared": a sandbox streams other
+residents' rezzes all the time.
+
 Every field is optional and an absent file is equivalent to an empty one, so no
 fixtures file is needed to run on OpenSim.
 

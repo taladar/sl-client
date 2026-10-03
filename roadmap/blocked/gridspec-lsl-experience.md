@@ -17,7 +17,7 @@ documented values.
 
 ## Discover
 
-Probes for: Experience permissions and key-value store (aditi only; the carrier
+Probes for: Experience permissions and key-value store (aditi only; the probe
 needs an experience). Run on OpenSim YEngine / XEngine and aditi.
 
 ## Document

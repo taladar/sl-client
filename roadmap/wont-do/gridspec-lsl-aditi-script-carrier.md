@@ -2,7 +2,7 @@
 id: gridspec-lsl-aditi-script-carrier
 title: Put scripts into prims on aditi through a carrier object and UpdateScriptTask
 topic: gridspec
-status: ready
+status: wont-do
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey,
   test-phase-z-deferred-04,
@@ -10,6 +10,12 @@ refs: [gridspec-survey,
 ---
 
 Context: [context/gridspec.md](../context/gridspec.md).
+
+## Won't do (2026-10-03)
+
+Superseded by fixing the real fault: our client plants scripts on aditi
+directly with `RezScript` / `UpdateScriptTask` ([[test-phase-z-deferred-04]]),
+so no carrier object is needed.
 
 ## Known already
 

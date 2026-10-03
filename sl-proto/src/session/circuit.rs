@@ -344,6 +344,10 @@ const fn severity_of(message: &AnyMessage) -> ReliableSeverity {
     }
 }
 
+/// The reference viewer's `LL_PATH_CACHE` (`ELLPath` in `lldir.h`), the remote
+/// path it names in every `RequestXfer` for a file the simulator generated.
+const XFER_PATH_CACHE: u8 = 4;
+
 impl Circuit {
     /// Creates a circuit and arms the inactivity timer. `id` is the freshly
     /// minted [`CircuitId`] for this circuit instance, used to scope the
@@ -2058,6 +2062,10 @@ impl Circuit {
 
     /// Queues a `RequestXfer` reliably to download the file `filename` under the
     /// transfer id `xfer_id`.
+    /// The `RequestXfer` is sent the way the reference viewer requests a
+    /// simulator-generated file — a task inventory listing, the mute list —
+    /// with the remote path [`XFER_PATH_CACHE`]: Second Life does not answer
+    /// one naming path `0`, while OpenSim ignores the field.
     pub(crate) fn send_request_xfer(
         &mut self,
         xfer_id: XferId,
@@ -2068,7 +2076,7 @@ impl Circuit {
             xfer_id: RequestXferXferIDBlock {
                 id: xfer_id.get(),
                 filename: with_nul(filename),
-                file_path: 0,
+                file_path: XFER_PATH_CACHE,
                 delete_on_completion: true,
                 use_big_packets: false,
                 v_file_id: Uuid::nil(),

@@ -305,7 +305,15 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     // resource (the Phase 8/9 object/scripting cases and their OAR object in the
     // OpenSim "Default Region") overrides it. The same location is used for every
     // avatar so a multi-avatar case that overrides lands them together.
-    let start_location = test.start_location(args.grid);
+    //
+    // A case that rezzes objects logs in at the fixtures' build location
+    // instead, when the operator named one: the last location on Second Life is
+    // often land that refuses the rez.
+    let start_location = match fixtures.build_location() {
+        Some(build) if test.rezzes_objects() => build.to_owned(),
+        _ => test.start_location(args.grid).to_owned(),
+    };
+    let start_location = start_location.as_str();
 
     let primary_session = context::login(context::LoginSpec {
         grid: args.grid,

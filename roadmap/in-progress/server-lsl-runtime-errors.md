@@ -61,8 +61,10 @@ aditi before they are written. The `llScriptDanger` item above is a slip: it
 answers whether a *position* is no-script/damage land, which is parcel data,
 not this record; it stays with [[server-lsl-lib-task-inventory]].
 
-Our client cannot run the probe itself: SL drops its task-inventory writes
-([[test-phase-z-deferred-04]]), so the scripts go in by hand in Firestorm.
+Our client can now plant scripts on aditi itself (`RezScript` and
+`UpdateScriptTask` work there — [[test-phase-z-deferred-04]] was a harness
+bug), so the probe can run without hands; until that is wired up the scripts
+go in by hand in Firestorm.
 Setup: prim A holds five scripts named exactly `Controller`, `Div int`,
 `Mod int`, `Div float` and `Recurse`; prim B, a separate object about 50 m
 away (past say range, inside shout range), holds the listener. Touch prim A;

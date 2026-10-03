@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 366 |
 | blocked | 100 |
 | in-progress | 20 |
-| bugs | 29 |
-| done | 1302 |
-| deferred | 31 |
-| wont-do | 16 |
-| **total** | **2000** |
+| bugs | 31 |
+| done | 1303 |
+| deferred | 30 |
+| wont-do | 17 |
+| **total** | **2003** |
 
 ## ideas (136)
 
@@ -372,6 +372,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SimSession's 54 fields mix the driver's serving stores with the circuit
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
+- [`protocol-request-task-inventory-cap`](ready/protocol-request-task-inventory-cap.md)
+  — Fetch task inventory over the RequestTaskInventory capability
 - [`protocol-sim-lsl-syntax-document`](ready/protocol-sim-lsl-syntax-document.md)
   — The fake grid serves an empty LSLSyntax document (blocked by
   `server-lsl-library-surface-table` (done))
@@ -1136,9 +1138,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-logout`](ready/gridspec-logout.md) — Logout reply, timing and what
   logout does to seats and child circuits
-- [`gridspec-lsl-aditi-script-carrier`](ready/gridspec-lsl-aditi-script-carrier.md)
-  — Put scripts into prims on aditi through a carrier object and
-  UpdateScriptTask
 - [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
   committed LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](ready/gridspec-marketplace.md) — Marketplace direct
@@ -1585,7 +1584,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (29)
+## bugs (31)
 
 ### protocol
 
@@ -1607,6 +1606,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   are split
 - [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
   — A voice accept on a 1:1 session is folded into a phantom conference
+- [`protocol-xfer-listing-parse-error-ends-session`](bugs/protocol-xfer-listing-parse-error-ends-session.md)
+  — A malformed Xfer listing ends the whole session
 
 ### viewer
 
@@ -1655,13 +1656,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
+- [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
+  — object-edit on OpenSim never sees the sit click action re-broadcast
 
 ### repl
 
 - [`repl-unknown-keyword-arguments-ignored`](bugs/repl-unknown-keyword-arguments-ignored.md)
   — sl-repl silently ignores unknown or misspelled key=value arguments
 
-## done (1302)
+## done (1303)
 
 ### protocol
 
@@ -4384,6 +4387,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Provision a 3rd Aditi avatar (for conference / group-roster only)
 - [`test-phase-z-deferred-03`](done/test-phase-z-deferred-03-add-aditi-variants-of-the-deferred-cases-as-the-avatars-land.md)
   — Add [aditi] variants of the deferred cases as the avatars land
+- [`test-phase-z-deferred-04`](done/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
+  — script-upload on aditi — SL drops the task-inventory write.** The scri
 - [`test-picks-classifieds`](done/test-picks-classifieds-request-and-edit-picks-classifieds.md)
   — request and edit picks / classifieds
 - [`test-presence-online-offline`](done/test-presence-online-offline-observe-onlinenotification-offlinenotification-as-the-peer-l.md)
@@ -4554,7 +4559,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
 
-## deferred (31)
+## deferred (30)
 
 ### protocol
 
@@ -4632,8 +4637,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
-  — script-upload on aditi — SL drops the task-inventory write.** The scri
 - [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
   — Revisit committing sl-conformance records once implementation churn settles
 
@@ -4643,7 +4646,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Library tranche — email and XML-RPC, parked (blocked by
   `server-lsl-vm-execution` (done))
 
-## wont-do (16)
+## wont-do (17)
 
 ### protocol
 
@@ -4688,3 +4691,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start a proposal, cast a ballot
 - [`test-parcel-voice-info`](wont-do/test-parcel-voice-info-request-parcel-voice-info.md)
   — request parcel voice info
+
+### gridspec
+
+- [`gridspec-lsl-aditi-script-carrier`](wont-do/gridspec-lsl-aditi-script-carrier.md)
+  — Put scripts into prims on aditi through a carrier object and
+  UpdateScriptTask

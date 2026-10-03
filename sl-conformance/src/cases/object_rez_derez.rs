@@ -49,13 +49,11 @@
 //! grid. The aditi run is deferred with the rest of the Aditi batch (no aditi
 //! record this session).
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use sl_client_tokio::{
     AssetType, Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
-    InventoryItem, Object, PrimShape, RestoreItem, RezObjectParams, SaleType, ScopedObjectId,
-    TransactionId, Uuid, Vector, pcode,
+    InventoryItem, PrimShape, RestoreItem, RezObjectParams, SaleType, TransactionId, Uuid, Vector,
 };
 
 use crate::context::{TestContext, TestFailure};
@@ -63,7 +61,7 @@ use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
     REGION_TIMEOUT, REPLY_TIMEOUT, check, content_is_ours, created_item_announcement, is_opensim,
-    secs_metric,
+    secs_metric, settle_scene, wait_for_own_new_object,
 };
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, where
@@ -112,6 +110,10 @@ impl GridTest for ObjectRezDerez {
         &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
     }
 
+    fn rezzes_objects(&self) -> bool {
+        true
+    }
+
     fn start_location(&self, grid: Grid) -> &'static str {
         if is_opensim(grid) {
             OPENSIM_START
@@ -127,6 +129,7 @@ impl GridTest for ObjectRezDerez {
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
             let grid = ctx.grid();
+            let build_position = ctx.build_position();
 
             // The Objects folder (take destination) and Trash folder (delete
             // destination) come from the login inventory skeleton, which is
@@ -168,7 +171,7 @@ impl GridTest for ObjectRezDerez {
             let (mut seen, reference) = {
                 let session = ctx.primary();
                 session.wait_for_region(REGION_TIMEOUT).await?;
-                settle_scene(session).await?
+                settle_scene(session, grid, build_position, SETTLE_WINDOW, SETTLE_IDLE).await?
             };
 
             let reference = match reference {
@@ -187,7 +190,7 @@ impl GridTest for ObjectRezDerez {
             };
 
             // Rez position: a metre above the reference primitive.
-            let base = reference.motion.position.clone();
+            let base = reference.clone();
             let rez_position = Vector {
                 x: base.x,
                 y: base.y,
@@ -205,11 +208,13 @@ impl GridTest for ObjectRezDerez {
                     group_id: None,
                 })
                 .await?;
-            let created = wait_for_new_object(session, &seen).await?.ok_or_else(|| {
-                TestFailure::Assertion(
-                    "no new object appeared after RezObject (ObjectAdd)".to_owned(),
-                )
-            })?;
+            let created = wait_for_own_new_object(session, &seen, STEP_TIMEOUT)
+                .await?
+                .map_err(|reason| {
+                    TestFailure::Assertion(format!(
+                        "no new object appeared after RezObject (ObjectAdd): {reason}"
+                    ))
+                })?;
             let create_rtt = create_started.elapsed();
             let created_id = created.scoped_id();
             seen.insert(created_id);
@@ -247,11 +252,13 @@ impl GridTest for ObjectRezDerez {
                     params: Box::new(rez_params(&item, &rez_position)),
                 })
                 .await?;
-            let rezzed = wait_for_new_object(session, &seen).await?.ok_or_else(|| {
-                TestFailure::Assertion(
-                    "no new object appeared after RezObjectFromInventory".to_owned(),
-                )
-            })?;
+            let rezzed = wait_for_own_new_object(session, &seen, STEP_TIMEOUT)
+                .await?
+                .map_err(|reason| {
+                    TestFailure::Assertion(format!(
+                        "no new object appeared after RezObjectFromInventory: {reason}"
+                    ))
+                })?;
             let rez_rtt = rez_started.elapsed();
             let rezzed_id = rezzed.scoped_id();
             check(
@@ -319,66 +326,6 @@ fn folder_of_type(
         .iter()
         .find(|folder| folder.folder_type == folder_type.to_code())
         .map(|folder| folder.folder_id)
-}
-
-/// Drains the region's initial object-update burst, returning the set of every
-/// region-local id sighted and the first primitive seen (the placement
-/// reference, or `None` if the region streamed no primitive). The drain ends
-/// once no new [`Event::ObjectAdded`] has arrived for [`SETTLE_IDLE`], or the
-/// overall [`SETTLE_WINDOW`] elapses.
-async fn settle_scene(
-    session: &mut crate::context::Session,
-) -> Result<(HashSet<ScopedObjectId>, Option<Object>), TestFailure> {
-    let mut seen = HashSet::new();
-    let mut reference: Option<Object> = None;
-    let started = std::time::Instant::now();
-    loop {
-        let remaining = SETTLE_WINDOW.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            break;
-        }
-        let cap = remaining.min(SETTLE_IDLE);
-        match session
-            .wait_for(cap, |event| match event {
-                Event::ObjectAdded(object) => Some((**object).clone()),
-                _ => None,
-            })
-            .await
-        {
-            Ok(object) => {
-                if reference.is_none() && object.pcode == pcode::PRIMITIVE {
-                    reference = Some(object.clone());
-                }
-                seen.insert(object.scoped_id());
-            }
-            // An idle gap (no new object for `cap`) means the scene has settled.
-            Err(TestFailure::Timeout(_)) => break,
-            Err(other) => return Err(other),
-        }
-    }
-    Ok((seen, reference))
-}
-
-/// Waits for the next [`Event::ObjectAdded`] whose region-local id is not in
-/// `seen` — the freshly rezzed object. Returns `None` if none appears within
-/// [`STEP_TIMEOUT`] (a per-attempt timeout that consumes the whole window).
-async fn wait_for_new_object(
-    session: &mut crate::context::Session,
-    seen: &HashSet<ScopedObjectId>,
-) -> Result<Option<Object>, TestFailure> {
-    match session
-        .wait_for(STEP_TIMEOUT, |event| match event {
-            Event::ObjectAdded(object) if !seen.contains(&object.scoped_id()) => {
-                Some((**object).clone())
-            }
-            _ => None,
-        })
-        .await
-    {
-        Ok(object) => Ok(Some(object)),
-        Err(TestFailure::Timeout(_)) => Ok(None),
-        Err(other) => Err(other),
-    }
 }
 
 /// Builds the [`RezObjectParams`] to rez `item` back into the world at

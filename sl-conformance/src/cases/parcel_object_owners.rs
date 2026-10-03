@@ -56,7 +56,7 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    Command, Event, Object, OwnerKey, ParcelInfo, ParcelObjectOwner, ParcelReturnType, PrimShape,
+    Command, Event, OwnerKey, ParcelInfo, ParcelObjectOwner, ParcelReturnType, PrimShape,
     ScopedObjectId, ScopedParcelId, Uuid, Vector,
 };
 
@@ -65,6 +65,7 @@ use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
     LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, is_opensim, secs_metric,
+    wait_for_own_new_object,
 };
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, so the
@@ -127,6 +128,10 @@ impl GridTest for ParcelObjectOwners {
         &[Grid::Opensim, Grid::Aditi]
     }
 
+    fn rezzes_objects(&self) -> bool {
+        true
+    }
+
     fn start_location(&self, grid: Grid) -> &'static str {
         if is_opensim(grid) {
             OPENSIM_START
@@ -181,11 +186,13 @@ impl GridTest for ParcelObjectOwners {
                     group_id: None,
                 })
                 .await?;
-            let created = wait_for_new_object(session, &seen).await?.ok_or_else(|| {
-                TestFailure::Assertion(
-                    "no new object appeared after RezObject (ObjectAdd)".to_owned(),
-                )
-            })?;
+            let created = wait_for_own_new_object(session, &seen, STEP_TIMEOUT)
+                .await?
+                .map_err(|reason| {
+                    TestFailure::Assertion(format!(
+                        "no new object appeared after RezObject (ObjectAdd): {reason}"
+                    ))
+                })?;
             let rez_rtt = rez_started.elapsed();
             let created_id = created.scoped_id();
             seen.insert(created_id);
@@ -349,26 +356,4 @@ async fn settle_scene(session: &mut Session) -> Result<HashSet<ScopedObjectId>, 
         }
     }
     Ok(seen)
-}
-
-/// Waits for the next [`Event::ObjectAdded`] whose region-local id is not in
-/// `seen` — the freshly rezzed object. Returns `None` if none appears within
-/// [`STEP_TIMEOUT`].
-async fn wait_for_new_object(
-    session: &mut Session,
-    seen: &HashSet<ScopedObjectId>,
-) -> Result<Option<Object>, TestFailure> {
-    match session
-        .wait_for(STEP_TIMEOUT, |event| match event {
-            Event::ObjectAdded(object) if !seen.contains(&object.scoped_id()) => {
-                Some((**object).clone())
-            }
-            _ => None,
-        })
-        .await
-    {
-        Ok(object) => Ok(Some(object)),
-        Err(TestFailure::Timeout(_)) => Ok(None),
-        Err(other) => Err(other),
-    }
 }

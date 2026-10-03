@@ -2,11 +2,46 @@
 id: test-phase-z-deferred-04
 title: script-upload on aditi — SL drops the task-inventory write.** The scri
 topic: test
-status: deferred
+status: done
 origin: TEST_ROADMAP.md — Phase Z — Deferred: multi-avatar Aditi work
 ---
 
 Context: [context/test.md](../context/test.md).
+
+## Done (2026-10-03) — Second Life never dropped the write
+
+`script-upload` and `script-running` now pass on aditi, complete. Second Life
+was never dropping our `RezScript`. Four separate faults were in the way,
+each hiding the next:
+
+1. **The harness scripted a stranger's prim.** Every object case took the
+   first unseen `ObjectAdded` after its rez as its own. On a busy sandbox that
+   is usually somebody else's (often temporary) prim, so the `RezScript`, the
+   `ObjectSelect` and the cleanup derez all went to an object we did not own,
+   which the grid drops silently — while our own cube sat until auto-return
+   (the "objects persisted and were auto-returned" clue). The eight copies of
+   the waiter are one shared `support::wait_for_own_new_object`, which takes a
+   root prim we own, read from the per-viewer `OBJECT_YOU_OWNER` flag: a plain
+   prim's owner id arrives **nil** on Second Life (it is sent only with sound
+   or particles). A refused rez now reports the grid's alert text.
+2. **No place to build.** The avatar's last location was no-build land, a
+   telehub redirects logins and teleports, and Second Life ignores a rez about
+   70 m from the avatar without a word. A `build_location` fixture names a
+   spot (aditi: the Mauve public sandbox); the rezzing cases
+   (`GridTest::rezzes_objects`) log in there, fly the avatar to the spot when
+   the login landed elsewhere (Second Life ignores the `autopilot` generic
+   message), point the **camera** at it — objects stream by camera position,
+   and the cubes were landing all along, out of view — and rez there.
+3. **The contents listing's `Xfer` named remote path `0`.** Second Life does
+   not answer that; the reference names `LL_PATH_CACHE` (4) — now ours too.
+4. **The listing parser required `group_owned`.** The reference writes the
+   line only when it is true; absent now reads as false.
+
+Second Life's Mono compile error format, measured:
+`(4, 20) : ERROR : Syntax error`. Follow-ups filed:
+[[protocol-request-task-inventory-cap]] (current viewers fetch contents over
+HTTP), [[protocol-xfer-listing-parse-error-ends-session]],
+[[test-conformance-object-edit-click-action-opensim]].
 
 **`script-upload` on aditi — SL drops the task-inventory write.** The
 `script-upload` case is green on OpenSim but gated to OpenSim only: on SL the

@@ -43,11 +43,18 @@
 //! # feature the test avatar owns none of by default, so absent this the case
 //! # records `partial`.
 //! experience = "44444444-4444-4444-4444-444444444444"
+//!
+//! # Where the cases that rez objects log in, as a login `start` string. On
+//! # Second Life the avatar's last location is often land that refuses a rez
+//! # ("You cannot create objects here"), so a case that builds is pointed at a
+//! # sandbox or a parcel the avatar may build on. Absent, such a case keeps
+//! # the last location and records `partial` when the rez is refused.
+//! build_location = "uri:Some Sandbox&128&128&25"
 //! ```
 
 use std::path::{Path, PathBuf};
 
-use sl_client_tokio::{AgentKey, ExperienceKey, GroupKey, MeshKey, Uuid};
+use sl_client_tokio::{AgentKey, ExperienceKey, GroupKey, MeshKey, Uuid, Vector};
 
 use crate::grid::Grid;
 
@@ -72,6 +79,11 @@ pub struct Fixtures {
     /// the test avatar owns none by default, so absent this the case has no
     /// guaranteed experience to resolve and records `partial`.
     experience: Option<ExperienceKey>,
+    /// Where a case that rezzes objects logs in (a login `start` string,
+    /// `"uri:Region&x&y&z"`), overriding its own
+    /// [`start_location`](crate::registry::GridTest::start_location) — see
+    /// [`GridTest::rezzes_objects`](crate::registry::GridTest::rezzes_objects).
+    build_location: Option<String>,
 }
 
 /// The raw TOML shape, before ids are parsed into typed keys.
@@ -94,6 +106,9 @@ struct RawFixtures {
     /// [`Fixtures::experience`].
     #[serde(default)]
     experience: Option<String>,
+    /// The build location, verbatim ([`Fixtures::build_location`]).
+    #[serde(default)]
+    build_location: Option<String>,
 }
 
 /// Why a fixtures file could not be turned into [`Fixtures`].
@@ -248,6 +263,31 @@ impl Fixtures {
             other_avatar,
             mesh_asset,
             experience,
+            build_location: raw.build_location,
+        })
+    }
+
+    /// Where a case that rezzes objects logs in on this grid, if the operator
+    /// named a place that allows building.
+    #[must_use]
+    pub fn build_location(&self) -> Option<&str> {
+        self.build_location.as_deref()
+    }
+
+    /// The region-local position named by [`build_location`](Self::build_location)
+    /// (`"uri:Region&x&y&z"`), where a case that rezzes places its objects.
+    ///
+    /// The login itself may not land there — a region's telehub or a parcel's
+    /// landing point redirects an arrival — so the cases rez at this position
+    /// rather than next to wherever the avatar arrived.
+    #[must_use]
+    pub fn build_position(&self) -> Option<Vector> {
+        let mut parts = self.build_location()?.split('&').skip(1);
+        let mut coordinate = || parts.next()?.trim().parse::<f32>().ok();
+        Some(Vector {
+            x: coordinate()?,
+            y: coordinate()?,
+            z: coordinate()?,
         })
     }
 
@@ -341,6 +381,7 @@ mod tests {
             other_avatar: None,
             mesh_asset: None,
             experience: None,
+            build_location: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.premade_group(0).is_some());
@@ -363,6 +404,7 @@ mod tests {
             other_avatar: Some("33333333-4444-5555-6666-777777777777".to_owned()),
             mesh_asset: None,
             experience: None,
+            build_location: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.other_avatar().is_some());
@@ -378,6 +420,7 @@ mod tests {
             other_avatar: None,
             mesh_asset: Some("44444444-5555-6666-7777-888888888888".to_owned()),
             experience: None,
+            build_location: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.mesh_asset().is_some());
@@ -393,6 +436,7 @@ mod tests {
             other_avatar: None,
             mesh_asset: Some("not-a-uuid".to_owned()),
             experience: None,
+            build_location: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -411,6 +455,7 @@ mod tests {
             other_avatar: Some("not-a-uuid".to_owned()),
             mesh_asset: None,
             experience: None,
+            build_location: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -430,6 +475,7 @@ mod tests {
             other_avatar: None,
             mesh_asset: None,
             experience: None,
+            build_location: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -449,6 +495,7 @@ mod tests {
             other_avatar: None,
             mesh_asset: None,
             experience: Some("55555555-6666-7777-8888-999999999999".to_owned()),
+            build_location: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.experience().is_some());
@@ -464,6 +511,7 @@ mod tests {
             other_avatar: None,
             mesh_asset: None,
             experience: Some("not-a-uuid".to_owned()),
+            build_location: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -472,5 +520,27 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// The build location's coordinates parse out of its `uri:` start string,
+    /// and a location without them names no position.
+    #[test]
+    fn build_position_parses_the_start_uri() -> Result<(), super::FixturesError> {
+        let with = |location: &str| {
+            Fixtures::from_raw(RawFixtures {
+                premade_groups: Vec::new(),
+                other_avatar: None,
+                mesh_asset: None,
+                experience: None,
+                build_location: Some(location.to_owned()),
+            })
+        };
+        let position = with("uri:Mauve&48&64&30")?.build_position();
+        assert_eq!(
+            position.map(|vector| (vector.x, vector.y, vector.z)),
+            Some((48.0, 64.0, 30.0))
+        );
+        assert_eq!(with("last")?.build_position(), None);
+        Ok(())
     }
 }

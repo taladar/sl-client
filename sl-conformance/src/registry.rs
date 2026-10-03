@@ -61,6 +61,18 @@ pub trait GridTest: Send + Sync {
         "last"
     }
 
+    /// Whether this case rezzes objects, and so must log in where building is
+    /// allowed.
+    ///
+    /// When it does and the grid's fixtures name a
+    /// [`build_location`](crate::fixtures::Fixtures::build_location), the runner
+    /// logs in there instead of [`start_location`](Self::start_location): on
+    /// Second Life the last location is often land that refuses a rez. Defaults
+    /// to `false`.
+    fn rezzes_objects(&self) -> bool {
+        false
+    }
+
     /// The overall wall-clock budget the runner gives this case's body before
     /// cancelling it as hung ([`crate::isolate::run_isolated`]).
     ///

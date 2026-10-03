@@ -127,7 +127,7 @@ pub use sl_proto::{
     decode_texture_anim, decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
     environment_asset_to_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
     legacy_day_cycle_from_bytes, legacy_preset_from_bytes, legacy_preset_name, particle_pattern,
-    pcode, rotation_to_azimuth_altitude, sim_access, sky_with_blended_values,
+    pcode, prim_flags, rotation_to_azimuth_altitude, sim_access, sky_with_blended_values,
     sky_with_pushed_values, texture_anim_mode, water_with_blended_values, water_with_pushed_values,
 };
 // Linden's four ported WindLight sky presets and the day cycle that schedules

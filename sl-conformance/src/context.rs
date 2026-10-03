@@ -797,6 +797,13 @@ impl TestContext {
         self.fixtures.other_avatar()
     }
 
+    /// Where a case that rezzes places its objects, if the fixtures name a
+    /// build location (see [`Fixtures::build_position`]).
+    #[must_use]
+    pub fn build_position(&self) -> Option<sl_client_tokio::Vector> {
+        self.fixtures.build_position()
+    }
+
     /// The configured fetchable mesh asset the `mesh-fetch-http` case pulls, if
     /// any. When absent the case scans the region's object stream for a
     /// mesh-shaped prim instead.

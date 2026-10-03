@@ -63,7 +63,7 @@ use sl_client_tokio::{
     ClickAction, Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
     LindenAmount, Material, Object, ObjectFlagSettings, ObjectProperties, ObjectTransform,
     PermissionField, Permissions, PrimShape, PrimShapeParams, SaleType, ScopedObjectId,
-    TransactionId, Uuid, Vector, pcode,
+    TransactionId, Uuid, Vector,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -71,6 +71,7 @@ use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
     REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, content_is_ours, is_opensim, secs_metric,
+    settle_scene, wait_for_own_new_object,
 };
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, where
@@ -169,6 +170,10 @@ impl GridTest for ObjectEdit {
         &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
     }
 
+    fn rezzes_objects(&self) -> bool {
+        true
+    }
+
     fn start_location(&self, grid: Grid) -> &'static str {
         if is_opensim(grid) {
             OPENSIM_START
@@ -184,6 +189,7 @@ impl GridTest for ObjectEdit {
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
             let grid = ctx.grid();
+            let build_position = ctx.build_position();
 
             // The Trash folder (cleanup destination) comes from the login
             // inventory skeleton, emitted before the region is ready — capture it
@@ -214,7 +220,7 @@ impl GridTest for ObjectEdit {
             let (seen, reference) = {
                 let session = ctx.primary();
                 session.wait_for_region(REGION_TIMEOUT).await?;
-                settle_scene(session).await?
+                settle_scene(session, grid, build_position, SETTLE_WINDOW, SETTLE_IDLE).await?
             };
 
             let reference = match reference {
@@ -232,7 +238,7 @@ impl GridTest for ObjectEdit {
                 }
             };
 
-            let base = reference.motion.position.clone();
+            let base = reference.clone();
             let session = ctx.primary();
 
             // Rez the throwaway cube to edit, a metre above the reference prim.
@@ -247,11 +253,13 @@ impl GridTest for ObjectEdit {
                     group_id: None,
                 })
                 .await?;
-            let object = wait_for_new_object(session, &seen).await?.ok_or_else(|| {
-                TestFailure::Assertion(
-                    "no new object appeared after RezObject (ObjectAdd)".to_owned(),
-                )
-            })?;
+            let object = wait_for_own_new_object(session, &seen, STEP_TIMEOUT)
+                .await?
+                .map_err(|reason| {
+                    TestFailure::Assertion(format!(
+                        "no new object appeared after RezObject (ObjectAdd): {reason}"
+                    ))
+                })?;
             let scoped = object.scoped_id();
             let object_id = object.full_id;
 
@@ -660,66 +668,6 @@ async fn confirm_object_update(
         Err(TestFailure::Timeout(_)) => Err(TestFailure::Assertion(format!(
             "the object never re-broadcast with {what} within the step window"
         ))),
-        Err(other) => Err(other),
-    }
-}
-
-/// Drains the region's initial object-update burst, returning the set of every
-/// region-local id sighted and the first primitive seen (the placement
-/// reference, or `None` if the region streamed no primitive). The drain ends
-/// once no new [`Event::ObjectAdded`] has arrived for [`SETTLE_IDLE`], or the
-/// overall [`SETTLE_WINDOW`] elapses.
-async fn settle_scene(
-    session: &mut Session,
-) -> Result<(HashSet<ScopedObjectId>, Option<Object>), TestFailure> {
-    let mut seen = HashSet::new();
-    let mut reference: Option<Object> = None;
-    let started = Instant::now();
-    loop {
-        let remaining = SETTLE_WINDOW.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            break;
-        }
-        let cap = remaining.min(SETTLE_IDLE);
-        match session
-            .wait_for(cap, |event| match event {
-                Event::ObjectAdded(object) => Some((**object).clone()),
-                _ => None,
-            })
-            .await
-        {
-            Ok(object) => {
-                if reference.is_none() && object.pcode == pcode::PRIMITIVE {
-                    reference = Some(object.clone());
-                }
-                seen.insert(object.scoped_id());
-            }
-            // An idle gap (no new object for `cap`) means the scene has settled.
-            Err(TestFailure::Timeout(_)) => break,
-            Err(other) => return Err(other),
-        }
-    }
-    Ok((seen, reference))
-}
-
-/// Waits for the next [`Event::ObjectAdded`] whose region-local id is not in
-/// `seen` — the freshly rezzed cube. Returns `None` if none appears within
-/// [`STEP_TIMEOUT`].
-async fn wait_for_new_object(
-    session: &mut Session,
-    seen: &HashSet<ScopedObjectId>,
-) -> Result<Option<Object>, TestFailure> {
-    match session
-        .wait_for(STEP_TIMEOUT, |event| match event {
-            Event::ObjectAdded(object) if !seen.contains(&object.scoped_id()) => {
-                Some((**object).clone())
-            }
-            _ => None,
-        })
-        .await
-    {
-        Ok(object) => Ok(Some(object)),
-        Err(TestFailure::Timeout(_)) => Ok(None),
         Err(other) => Err(other),
     }
 }

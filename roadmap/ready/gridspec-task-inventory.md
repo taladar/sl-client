@@ -13,14 +13,19 @@ Context: [context/gridspec.md](../context/gridspec.md).
 
 ## Known already
 
-SL drops our `RezScript` / `UpdateTaskInventory` writes (serial stays 0);
-OpenSim mints a fresh item id on copy-in. The fake grid ignores `RezScript`,
+`RezScript` works on both grids (the long-standing "SL drops it" was the
+harness scripting a stranger's prim, [[test-phase-z-deferred-04]]); SL leaves
+`group_owned` out of a contents listing unless it is true and needs the
+listing's `Xfer` to name remote path `LL_PATH_CACHE`; current viewers fetch the
+listing over the `RequestTaskInventory` capability instead
+([[protocol-request-task-inventory-cap]]). OpenSim mints a fresh item id on
+copy-in. The fake grid ignores `RezScript`,
 `MoveTaskInventory`, `RemoveTaskInventory`.
 
 ## Discover
 
 Run `task-inventory` on both grids; add remove / move-to-agent legs; the
-SL write path via [[gridspec-lsl-aditi-script-carrier]]; the serial-push half
+`UpdateTaskInventory` drop on SL; the serial-push half
 with a second avatar.
 
 ## Document

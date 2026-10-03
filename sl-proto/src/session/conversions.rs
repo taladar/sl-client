@@ -417,7 +417,10 @@ impl TaskItemFields {
     fn build(self) -> Result<TaskInventoryItem, sl_wire::WireError> {
         let owner_id = parse_uuid_field("owner_id", &require("owner_id", self.owner_id)?)?;
         let group_id = parse_uuid_field("group_id", &require("group_id", self.group_id)?)?;
-        let group_owned = require("group_owned", self.group_owned)?.trim() == "1";
+        // `LLPermissions::exportLegacyStream` writes the line only for a
+        // group-owned item, so Second Life's listings carry it only then
+        // (OpenSim always writes it); its absence means "not group-owned".
+        let group_owned = self.group_owned.is_some_and(|value| value.trim() == "1");
         let asset_uuid = parse_uuid_field("asset_id", &require("asset_id", self.asset_id)?)?;
         Ok(TaskInventoryItem {
             item_id: InventoryKey::from(parse_uuid_field(
@@ -8038,6 +8041,54 @@ mod caps_serializer_tests {
         // not change the checksum — Second Life accepts it.
         assert_eq!(renamed.crc, kept.crc);
         assert_eq!(kept.name, "Old Name");
+        Ok(())
+    }
+
+    /// A Second Life listing leaves out `group_owned` for an item that is not
+    /// group-owned (the reference writes the line only when it is true), and
+    /// that reads as not group-owned — it is not a missing required field.
+    #[test]
+    fn parse_task_inventory_reads_an_item_without_group_owned() -> Result<(), sl_wire::WireError> {
+        let prim = Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222);
+        let item = Uuid::from_u128(0x3333_3333_3333_3333_3333_3333_3333_3333);
+        let creator = Uuid::from_u128(0x4444_4444_4444_4444_4444_4444_4444_4444);
+        let listing = format!(
+            "\tinv_item\t0\n\t{{\n\
+             \t\titem_id\t{item}\n\
+             \t\tparent_id\t{prim}\n\
+             \t\tpermissions 0\n\t\t{{\n\
+             \t\t\tbase_mask\t7fffffff\n\
+             \t\t\towner_mask\t7fffffff\n\
+             \t\t\tgroup_mask\t00000000\n\
+             \t\t\teveryone_mask\t00000000\n\
+             \t\t\tnext_owner_mask\t00082000\n\
+             \t\t\tcreator_id\t{creator}\n\
+             \t\t\towner_id\t{creator}\n\
+             \t\t\tlast_owner_id\t00000000-0000-0000-0000-000000000000\n\
+             \t\t\tgroup_id\t00000000-0000-0000-0000-000000000000\n\t\t}}\n\
+             \t\tasset_id\t00000000-0000-0000-0000-000000000000\n\
+             \t\ttype\tlsltext\n\
+             \t\tinv_type\tscript\n\
+             \t\tflags\t00000000\n\
+             \t\tsale_info\t0\n\t\t{{\n\
+             \t\t\tsale_type\tnot\n\
+             \t\t\tsale_price\t10\n\t\t}}\n\
+             \t\tname\tNew Script|\n\
+             \t\tdesc\t|\n\
+             \t\tcreation_date\t1791000000\n\t}}\n",
+        );
+        let items = super::parse_task_inventory(listing.as_bytes())?;
+        let [script] = items.as_slice() else {
+            return Err(sl_wire::WireError::InvalidScalar {
+                field: "item_count",
+                value: items.len().to_string(),
+            });
+        };
+        assert!(
+            !script.group_owned,
+            "an absent group_owned is not group-owned"
+        );
+        assert_eq!(script.name, "New Script");
         Ok(())
     }
 

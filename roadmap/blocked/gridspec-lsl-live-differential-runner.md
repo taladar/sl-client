@@ -19,7 +19,8 @@ fake-grid leg.
 ## Discover
 
 The live half of the differential runner: plant a probe (OpenSim directly,
-aditi via [[gridspec-lsl-aditi-script-carrier]]), drive it (touch, chat,
+aditi through the same `RezScript` / `UpdateScriptTask` at the fixtures'
+`build_location`), drive it (touch, chat,
 time) through the automation / `sl-client-tokio`, collect `ChatFromSimulator`
 lines into the result files; a tolerance model (ids, timestamps, last float
 digit, merging / ordering). Unblock the live verbs of

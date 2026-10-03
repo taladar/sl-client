@@ -25,35 +25,41 @@
 //!    `line`/`column` — the payoff of the structured parse.
 //! 5. Clean up: derez the container to Trash.
 //!
-//! `1av`. **OpenSim only for now.** On Second Life the task-inventory *write*
-//! never lands (the object's contents serial stays `0` after `RezScript` and
-//! after an `UpdateTaskInventory` drop) even though rez, agent-inventory create,
-//! and reads (`RequestTaskInventory`) all succeed on the same session, the
-//! checksum/parent are matched to the viewer, and the avatar owns the object.
-//! Auth, land permission, CRC, parent, and object selection have all been ruled
-//! out, and the wire encoding matches the viewer byte-for-byte — so the next step
-//! is a real-viewer **packet capture** of an object-Contents "New Script" on
-//! aditi to see the exact sequence/fields SL requires (see the Phase Z note in
-//! `TEST_ROADMAP.md`). The `for_task_drop` / `new_script` / parent-aware CRC
-//! support all exist for when that lands.
+//! `1av`, both live grids. On Second Life the case needs a parcel that lets
+//! everyone build: the `build_location` fixture names it (see
+//! [`GridTest::rezzes_objects`]), and a run without one records `partial` with
+//! the grid's refusal. Second Life answers the invalid source in its Mono
+//! format, `(4, 20) : ERROR : Syntax error`.
+//!
+//! This case was gated to OpenSim for months on the belief that Second Life
+//! drops our task-inventory write. It never did: the case took the first
+//! unseen object after its rez for its own, and on a busy sandbox that is
+//! somebody else's, so the script went to a stranger's prim
+//! ([`wait_for_own_new_object`]). Two
+//! real bugs hid behind it, both found once the right object was in hand: the
+//! contents listing's `Xfer` named remote path `0`, which Second Life does not
+//! answer, and the listing parser required the `group_owned` line Second Life
+//! leaves out.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use sl_client_tokio::{
     Command, DeRezDestination, Event, FolderType, InventoryFolder, InventoryFolderKey,
-    InventoryType, Object, PrimShape, RestoreItem, RezScriptParams, ScopedObjectId,
-    ScriptCompileError, ScriptTarget, ScriptUploadLocation, TransactionId, Uuid, Vector, pcode,
+    InventoryType, Object, PrimShape, RestoreItem, RezScriptParams, ScriptCompileError,
+    ScriptTarget, ScriptUploadLocation, TransactionId, Uuid, Vector,
 };
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, count_metric, is_opensim, secs_metric};
+use crate::support::{
+    REGION_TIMEOUT, REPLY_TIMEOUT, check, count_metric, is_opensim, secs_metric, settle_scene,
+    wait_for_own_new_object,
+};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred, whose
 /// test prim serves as the rez placement reference. On Second Life the avatar
-/// keeps `"last"`.
+/// keeps `"last"`, unless the fixtures name a build location.
 const OPENSIM_START: &str = "uri:Default Region&128&128&30";
 
 /// The overall budget for settling the initial scene (collecting pre-existing
@@ -99,9 +105,11 @@ impl GridTest for ScriptUpload {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        // OpenSim only: Second Life silently drops the task-inventory write, an
-        // open investigation tracked in Phase Z (needs a viewer packet capture).
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
+    }
+
+    fn rezzes_objects(&self) -> bool {
+        true
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {
@@ -119,6 +127,7 @@ impl GridTest for ScriptUpload {
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
             let grid = ctx.grid();
+            let build_position = ctx.build_position();
 
             // The login inventory skeleton arrives before the region is ready —
             // capture the Trash (cleanup) folder first, before `wait_for_region`
@@ -143,7 +152,7 @@ impl GridTest for ScriptUpload {
             let (mut seen, reference) = {
                 let session = ctx.primary();
                 session.wait_for_region(REGION_TIMEOUT).await?;
-                settle_scene(session).await?
+                settle_scene(session, grid, build_position, SETTLE_WINDOW, SETTLE_IDLE).await?
             };
 
             let reference = match reference {
@@ -159,7 +168,7 @@ impl GridTest for ScriptUpload {
                 }
             };
 
-            let container_position = lift(&reference.motion.position, CONTAINER_LIFT_M);
+            let container_position = lift(&reference, CONTAINER_LIFT_M);
             let session = ctx.primary();
 
             // 1. Rez the container cube — the prim whose task inventory holds the
@@ -167,21 +176,22 @@ impl GridTest for ScriptUpload {
             //    `partial` on Second Life (a hard failure on OpenSim).
             session
                 .send(Command::RezObject {
-                    shape: PrimShape::cube(container_position),
+                    shape: PrimShape::cube(container_position.clone()),
                     group_id: None,
                 })
                 .await?;
-            let container = match wait_for_new_object(session, &seen).await? {
-                Some(container) => container,
-                None if is_opensim(grid) => {
-                    return Err(TestFailure::Assertion(
-                        "no new object appeared after RezObject for the container".to_owned(),
-                    ));
+            let container = match wait_for_own_new_object(session, &seen, STEP_TIMEOUT).await? {
+                Ok(container) => container,
+                Err(reason) if is_opensim(grid) => {
+                    return Err(TestFailure::Assertion(format!(
+                        "no new object appeared after RezObject for the container: {reason}"
+                    )));
                 }
-                None => {
-                    ctx.mark_partial(
-                        "landing region refused the container rez (no object appeared)",
-                    );
+                Err(reason) => {
+                    ctx.mark_partial(&format!(
+                        "landing region refused the container rez at {:.0}/{:.0}/{:.0}: {reason}",
+                        container_position.x, container_position.y, container_position.z
+                    ));
                     return Ok(());
                 }
             };
@@ -365,64 +375,6 @@ fn lift(base: &Vector, lift: f32) -> Vector {
         x: base.x,
         y: base.y,
         z: base.z + lift,
-    }
-}
-
-/// Drains the region's initial object-update burst, returning every region-local
-/// id sighted and the first primitive seen (the placement reference). The drain
-/// ends once no new [`Event::ObjectAdded`] has arrived for [`SETTLE_IDLE`], or the
-/// overall [`SETTLE_WINDOW`] elapses.
-async fn settle_scene(
-    session: &mut crate::context::Session,
-) -> Result<(HashSet<ScopedObjectId>, Option<Object>), TestFailure> {
-    let mut seen = HashSet::new();
-    let mut reference: Option<Object> = None;
-    let started = std::time::Instant::now();
-    loop {
-        let remaining = SETTLE_WINDOW.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            break;
-        }
-        let cap = remaining.min(SETTLE_IDLE);
-        match session
-            .wait_for(cap, |event| match event {
-                Event::ObjectAdded(object) => Some((**object).clone()),
-                _ => None,
-            })
-            .await
-        {
-            Ok(object) => {
-                if reference.is_none() && object.pcode == pcode::PRIMITIVE {
-                    reference = Some(object.clone());
-                }
-                seen.insert(object.scoped_id());
-            }
-            Err(TestFailure::Timeout(_)) => break,
-            Err(other) => return Err(other),
-        }
-    }
-    Ok((seen, reference))
-}
-
-/// Waits for the next [`Event::ObjectAdded`] whose region-local id is not in
-/// `seen` — the freshly rezzed object. Returns `None` if none appears within
-/// [`STEP_TIMEOUT`].
-async fn wait_for_new_object(
-    session: &mut crate::context::Session,
-    seen: &HashSet<ScopedObjectId>,
-) -> Result<Option<Object>, TestFailure> {
-    match session
-        .wait_for(STEP_TIMEOUT, |event| match event {
-            Event::ObjectAdded(object) if !seen.contains(&object.scoped_id()) => {
-                Some((**object).clone())
-            }
-            _ => None,
-        })
-        .await
-    {
-        Ok(object) => Ok(Some(object)),
-        Err(TestFailure::Timeout(_)) => Ok(None),
-        Err(other) => Err(other),
     }
 }
 

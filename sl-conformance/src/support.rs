@@ -11,10 +11,13 @@
 //!   suffixes,
 //! - a [`fixtures`] module of well-known ids.
 
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    Command, CreateGroupParams, Event, GroupKey, InventoryItem, InventoryKey, LindenAmount, Uuid,
+    Camera, Command, ControlFlags, CreateGroupParams, Event, GroupKey, InventoryItem, InventoryKey,
+    LindenAmount, Object, RegionLocalObjectId, Rotation, ScopedObjectId, Uuid, Vector, pcode,
+    prim_flags,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -433,6 +436,357 @@ pub async fn confirm_group_departure(
             Err(other) => return Err(other),
         }
     }
+}
+
+/// Waits for the next object **this avatar rezzed**: a root prim
+/// ([`Object::parent_id`] zero) owned by the session's agent whose scoped id is
+/// not in `seen` — the region's objects settled before the rez.
+///
+/// "The next object not seen before" is not enough on a live grid. A Second
+/// Life sandbox streams other residents' rezzes the whole time — rezzers
+/// spawning temporary prims every few seconds — so the first unseen
+/// [`Event::ObjectAdded`] after our `RezObject` is often somebody else's. A case
+/// that took it would then select, edit, derez or write the task inventory of
+/// an object it does not own, which the grid drops without a word, while its
+/// own cube sits untouched until the parcel's auto-return. That was the whole
+/// "Second Life drops our `RezScript`" mystery.
+///
+/// Ownership is read from the object's per-viewer
+/// [`OBJECT_YOU_OWNER`](prim_flags::OBJECT_YOU_OWNER) flag as well as its
+/// owner id: Second Life sends the owner id only for objects that carry a sound
+/// or particles, so a plain cube arrives with a nil owner.
+///
+/// When no such object appears within `timeout`, the inner `Err` says why as
+/// far as the grid told us: a refused rez is answered with an
+/// [`Event::AlertMessage`] (no-build land, a full parcel), and its text is the
+/// reason a case records.
+///
+/// # Errors
+///
+/// Propagates [`Session::wait_for`] failures other than the timeout, and fails
+/// with [`TestFailure::Assertion`] when login reported no agent id.
+pub async fn wait_for_own_new_object(
+    session: &mut Session,
+    seen: &HashSet<ScopedObjectId>,
+    timeout: Duration,
+) -> Result<Result<Object, String>, TestFailure> {
+    /// One thing the wait can see: our object, or an alert worth reporting.
+    enum Sighting {
+        /// The object we rezzed.
+        Own(Box<Object>),
+        /// An alert the grid sent meanwhile — the likely refusal.
+        Alert(String),
+    }
+    let owner = session
+        .agent_id()
+        .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?
+        .uuid();
+    let started = Instant::now();
+    let mut alert: Option<String> = None;
+    loop {
+        let remaining = timeout.saturating_sub(started.elapsed());
+        let sighting = session
+            .wait_for(remaining, |event| match event {
+                Event::ObjectAdded(object)
+                    if is_own(object, owner)
+                        && object.parent_id == RegionLocalObjectId(0)
+                        && !seen.contains(&object.scoped_id()) =>
+                {
+                    Some(Sighting::Own(object.clone()))
+                }
+                Event::ObjectAdded(object)
+                    if object.parent_id == RegionLocalObjectId(0)
+                        && !seen.contains(&object.scoped_id()) =>
+                {
+                    tracing::debug!(
+                        id = %object.full_id.uuid(),
+                        owner = %object.owner_id,
+                        flags = object.update_flags,
+                        pcode = object.pcode,
+                        x = object.motion.position.x,
+                        y = object.motion.position.y,
+                        z = object.motion.position.z,
+                        "an unseen object that is not ours appeared while waiting for our rez"
+                    );
+                    None
+                }
+                Event::AlertMessage {
+                    message,
+                    alert_info,
+                    ..
+                } => Some(Sighting::Alert(
+                    alert_info
+                        .first()
+                        .filter(|_| message.is_empty())
+                        .map_or_else(|| message.clone(), |info| info.message.clone()),
+                )),
+                _ => None,
+            })
+            .await;
+        match sighting {
+            Ok(Sighting::Own(object)) => return Ok(Ok(*object)),
+            Ok(Sighting::Alert(text)) => alert = Some(text),
+            Err(TestFailure::Timeout(_)) => {
+                return Ok(Err(alert.map_or_else(
+                    || format!("no object of ours appeared within {}s", timeout.as_secs()),
+                    |text| format!("no object of ours appeared; the grid said: {text}"),
+                )));
+            }
+            Err(other) => return Err(other),
+        }
+    }
+}
+
+/// Drains the region's initial object-update burst before a case rezzes
+/// anything, returning every scoped id sighted (so a later rez can be told
+/// apart — see [`wait_for_own_new_object`]) and the **anchor** to rez against.
+///
+/// The burst ends once no new [`Event::ObjectAdded`] has arrived for `idle`,
+/// or after `window` overall.
+///
+/// The anchor is grid-dependent. Where the region's contents are ours
+/// ([`content_is_ours`]) it is the first primitive streamed — the workspace's
+/// test object on OpenSim, a fixture on the fake grid — which is what the
+/// cases have always placed against. On Second Life the first primitive is
+/// *anybody's*, anywhere in the region or in a neighbour, so a rez placed
+/// against it lands on whatever parcel that happens to be. There the anchor is
+/// **our own avatar**, which the login put on a parcel that allows building
+/// (`build_location` in the fixtures, see
+/// [`GridTest::rezzes_objects`](crate::registry::GridTest::rezzes_objects)).
+/// `None` when the burst held no such object.
+///
+/// A `build_position` (the fixtures' build location) overrides all of that:
+/// the operator named the spot that allows building, and the avatar's arrival
+/// point may not be it — a telehub or a landing point redirects a login.
+///
+/// # Errors
+///
+/// Propagates [`Session::wait_for`] failures other than the idle timeout.
+pub async fn settle_scene(
+    session: &mut Session,
+    grid: Grid,
+    build_position: Option<Vector>,
+    window: Duration,
+    idle: Duration,
+) -> Result<(HashSet<ScopedObjectId>, Option<Vector>), TestFailure> {
+    let own = session.agent_id().map(|agent| agent.uuid());
+    let mut seen = HashSet::new();
+    let mut anchor: Option<Vector> = None;
+    let mut avatar: Option<Vector> = None;
+    drain_scene(session, window, idle, &mut seen, |object| {
+        if Some(object.full_id.uuid()) == own {
+            avatar = Some(object.motion.position.clone());
+        }
+        let anchors = if content_is_ours(grid) {
+            object.pcode == pcode::PRIMITIVE
+        } else {
+            object.pcode == pcode::AVATAR && Some(object.full_id.uuid()) == own
+        };
+        if anchor.is_none() && anchors {
+            anchor = Some(object.motion.position.clone());
+        }
+    })
+    .await?;
+    let Some(build) = build_position else {
+        return Ok((seen, anchor));
+    };
+    // The build location: rez right there. When the login did not land the
+    // avatar on it (a telehub or a landing point redirects a login — Mauve's
+    // sends every arrival to its hub), the avatar is moved there first: a
+    // grid ignores a rez far from the avatar without a word (Second Life did
+    // at about 70 m). The scene around it is then settled again so an object
+    // of ours already standing there is not mistaken for the new rez.
+    let from = avatar.ok_or_else(|| {
+        TestFailure::Assertion("our own avatar never appeared in the object stream".to_owned())
+    })?;
+    let arrived = if within(&from, &build, ARRIVAL_RADIUS_M) {
+        from
+    } else {
+        let arrived = walk_within_region(session, from, &build).await?;
+        drain_scene(session, window, idle, &mut seen, |_object| {}).await?;
+        arrived
+    };
+    // The named spot's x/y, at the avatar's own height: the fixture's height
+    // is only a login hint.
+    let spot = Vector {
+        x: build.x,
+        y: build.y,
+        z: arrived.z,
+    };
+    // Look at it. A grid streams objects by where the agent's *camera* is, not
+    // its avatar, and the camera is still where the login put it — at the
+    // hub, out of range of the spot — so the rez would land and never be
+    // seen. (That was the last of the "no object appeared" runs: the cubes
+    // were all there.)
+    session
+        .send(Command::SetCamera(Camera::looking_at(
+            Vector {
+                x: spot.x - CAMERA_BACK_M,
+                y: spot.y,
+                z: spot.z + CAMERA_BACK_M,
+            },
+            spot.clone(),
+        )))
+        .await?;
+    drain_scene(session, window, idle, &mut seen, |_object| {}).await?;
+    Ok((seen, Some(spot)))
+}
+
+/// Records every [`Event::ObjectAdded`] into `seen` (and shows it to
+/// `observe`) until none has arrived for `idle`, or `window` has passed.
+async fn drain_scene(
+    session: &mut Session,
+    window: Duration,
+    idle: Duration,
+    seen: &mut HashSet<ScopedObjectId>,
+    mut observe: impl FnMut(&Object),
+) -> Result<(), TestFailure> {
+    let started = Instant::now();
+    loop {
+        let remaining = window.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            return Ok(());
+        }
+        match session
+            .wait_for(remaining.min(idle), |event| match event {
+                Event::ObjectAdded(object) => Some((**object).clone()),
+                _ => None,
+            })
+            .await
+        {
+            Ok(object) => {
+                observe(&object);
+                seen.insert(object.scoped_id());
+            }
+            Err(TestFailure::Timeout(_)) => return Ok(()),
+            Err(other) => return Err(other),
+        }
+    }
+}
+
+/// Moves the avatar from `from` towards `position` in its current region the
+/// way a viewer's autopilot does, until it is within [`ARRIVAL_RADIUS_M`], and
+/// returns where it stopped: face
+/// the target ([`Command::SetRotation`]), fly forwards
+/// ([`Command::SetControls`]) — at a nudge's pace for the last
+/// [`SLOWDOWN_RADIUS_M`], or the flight overshoots between two updates —
+/// re-aim on every update of our own avatar, and let go.
+///
+/// Not a teleport: a region with a telehub (Mauve on aditi) or a parcel with a
+/// landing point redirects every teleport, in-region ones included, away from
+/// the spot that allows building. Not the simulator's `autopilot` generic
+/// message either: Second Life ignores it (the reference viewer's autopilot is
+/// its own steering, `LLAgent::autoPilot`). Flying keeps the route clear of
+/// whatever stands on the ground in between.
+async fn walk_within_region(
+    session: &mut Session,
+    from: Vector,
+    position: &Vector,
+) -> Result<Vector, TestFailure> {
+    let agent = session
+        .agent_id()
+        .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?
+        .uuid();
+    let started = Instant::now();
+    tracing::info!(
+        from_x = from.x,
+        from_y = from.y,
+        to_x = position.x,
+        to_y = position.y,
+        "moving the avatar to the build location"
+    );
+    let mut current = from;
+    loop {
+        if within(&current, position, ARRIVAL_RADIUS_M) {
+            tracing::info!(
+                x = current.x,
+                y = current.y,
+                z = current.z,
+                secs = started.elapsed().as_secs_f32(),
+                "the avatar reached the build location"
+            );
+            session
+                .send(Command::SetControls(ControlFlags::empty()))
+                .await?;
+            return Ok(current);
+        }
+        if started.elapsed() >= WALK_TIMEOUT {
+            session
+                .send(Command::SetControls(ControlFlags::empty()))
+                .await?;
+            return Err(TestFailure::Assertion(format!(
+                "could not move the avatar to the build location {:.0}/{:.0} (stuck at {:.0}/{:.0})",
+                position.x, position.y, current.x, current.y
+            )));
+        }
+        let half_yaw = (position.y - current.y).atan2(position.x - current.x) / 2.0;
+        let facing = Rotation {
+            x: 0.0,
+            y: 0.0,
+            z: half_yaw.sin(),
+            s: half_yaw.cos(),
+        };
+        session
+            .send(Command::SetRotation {
+                body: facing.clone(),
+                head: facing,
+            })
+            .await?;
+        session
+            .send(Command::SetControls(
+                if within(&current, position, SLOWDOWN_RADIUS_M) {
+                    ControlFlags::FLY | ControlFlags::NUDGE_AT_POS
+                } else {
+                    ControlFlags::FLY | ControlFlags::AT_POS
+                },
+            ))
+            .await?;
+        match session
+            .wait_for(STEER_INTERVAL, |event| match event {
+                Event::ObjectUpdated(object) | Event::ObjectAdded(object)
+                    if object.full_id.uuid() == agent =>
+                {
+                    Some(object.motion.position.clone())
+                }
+                _ => None,
+            })
+            .await
+        {
+            Ok(moved) => current = moved,
+            Err(TestFailure::Timeout(_)) => {}
+            Err(other) => return Err(other),
+        }
+    }
+}
+
+/// How far behind and above the build spot the camera looks at it from.
+const CAMERA_BACK_M: f32 = 6.0;
+
+/// How often the walk re-aims when no update of our own avatar arrives.
+const STEER_INTERVAL: Duration = Duration::from_millis(250);
+
+/// How close to the build location the walk slows to a nudge.
+const SLOWDOWN_RADIUS_M: f32 = 15.0;
+
+/// How close to the build location the walk has to bring the avatar before it
+/// rezzes there.
+const ARRIVAL_RADIUS_M: f32 = 4.0;
+
+/// Whether `a` and `b` are within `radius` metres of each other horizontally.
+fn within(a: &Vector, b: &Vector, radius: f32) -> bool {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    dx.mul_add(dx, dy * dy) <= radius * radius
+}
+
+/// How long the flight to the build location may take — a region's diagonal,
+/// with room for a slow region.
+const WALK_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Whether the agent `owner` owns `object`, by its owner id or by the
+/// per-viewer [`OBJECT_YOU_OWNER`](prim_flags::OBJECT_YOU_OWNER) flag.
+fn is_own(object: &Object, owner: Uuid) -> bool {
+    object.owner_id == owner || object.update_flags & prim_flags::OBJECT_YOU_OWNER != 0
 }
 
 /// Where the group a membership/messaging case operates on came from.
