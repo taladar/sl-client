@@ -52,12 +52,9 @@
 //! process. An earlier version ran the rez on live grids too and left a cube
 //! standing in a sandbox when a take went unacknowledged. `1av`.
 //!
-//! Two things it cannot see, both recorded rather than glossed: the Library
-//! root 404s, because library folders are served by `LibraryAPIv3` and this
-//! workspace only ever asks `InventoryAPIv3`
-//! ([[protocol-ais3-library-cap]]); and on Second Life the AIS3 walk goes one
-//! level at a time, because the client parser reads only the top level of a
-//! nested `_embedded` ([[protocol-ais3-nested-embedded]]).
+//! On Second Life the walk goes over AIS3 one level at a time, into the agent's
+//! tree and the Library both (library folders answer on `LibraryAPIv3`, which
+//! the client routes to by folder owner — [[protocol-ais3-library-cap]]).
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -523,15 +520,11 @@ async fn object_items(session: &mut Session, grid: Grid) -> Result<Survey, TestF
 
 /// The AIS3 walk: one `depth=1` fetch per folder, breadth-first.
 ///
-/// **Not one deep fetch, deliberately.** The AIS service nests `_embedded`
-/// recursively, one level per depth, and this workspace's parser
-/// (`ais_inventory_update_from_llsd`) reads only the *top* level of it — a
-/// divergence its own serializer documents, since the fake grid flattens the
-/// subtree to compensate. Against the real service a `depth=50` fetch therefore
-/// yields the root's subfolders and no items at all, which is precisely what
-/// the second aditi run of this case recorded. Asking one level at a time keeps
-/// every answer inside what the parser reads. See
-/// [[protocol-ais3-nested-embedded]].
+/// **Not one deep fetch, deliberately.** The walk samples a budget of folders,
+/// Objects first, and a level at a time is what lets it steer: a deep fetch
+/// would hand back whichever subtree the root happened to list. (The second
+/// aditi run of this case, before [[protocol-ais3-nested-embedded]], recorded
+/// a `depth=50` fetch yielding no items at all.)
 async fn ais3_walk(
     session: &mut Session,
     root: InventoryFolderKey,
@@ -869,7 +862,15 @@ async fn read_folder(
             _other => None,
         })
         .await?;
-    queue.extend(folders.iter().map(|folder| folder.folder_id));
+    // Objects last, so the stack pops them first: the walk stops at a folder
+    // budget, and which folders it reaches before that must not hang on the
+    // order a grid happens to list them in (AIS3 lists them in key order, the
+    // UDP reply in creation order). See the same rule in `ais3_walk`.
+    let (objects, others): (Vec<_>, Vec<_>) = folders
+        .iter()
+        .partition(|folder| folder.folder_type == FolderType::Object.to_code());
+    queue.extend(others.iter().map(|folder| folder.folder_id));
+    queue.extend(objects.iter().map(|folder| folder.folder_id));
     Ok((folders, items))
 }
 

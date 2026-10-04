@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 366 |
+| ready | 364 |
 | blocked | 100 |
 | in-progress | 20 |
-| bugs | 31 |
-| done | 1303 |
+| bugs | 32 |
+| done | 1305 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2003** |
+| **total** | **2004** |
 
 ## ideas (136)
 
@@ -352,14 +352,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (366)
+## ready (364)
 
 ### protocol
 
-- [`protocol-ais3-library-cap`](ready/protocol-ais3-library-cap.md) — An AIS3
-  request for a library folder goes to the wrong capability
-- [`protocol-ais3-nested-embedded`](ready/protocol-ais3-nested-embedded.md) — An
-  AIS3 depth fetch reads only its first level
 - [`protocol-audit-asset-store-duplication`](ready/protocol-audit-asset-store-duplication.md)
   — Three hand-rolled copies of the same asset store
 - [`protocol-audit-decoder-fuzz-harness`](ready/protocol-audit-decoder-fuzz-harness.md)
@@ -1584,7 +1580,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (31)
+## bugs (32)
 
 ### protocol
 
@@ -1629,6 +1625,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   one should have it
 - [`viewer-friends-list-shows-a-sixth-rights-column`](bugs/viewer-friends-list-shows-a-sixth-rights-column.md)
   — The Friends list shows six rights columns; the reference shows five
+- [`viewer-inventory-settings-subtree-shows-unloaded`](bugs/viewer-inventory-settings-subtree-shows-unloaded.md)
+  — The Library root and its Environments subtree never read as loaded in the
+  viewer model
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1664,7 +1663,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-unknown-keyword-arguments-ignored`](bugs/repl-unknown-keyword-arguments-ignored.md)
   — sl-repl silently ignores unknown or misspelled key=value arguments
 
-## done (1303)
+## done (1305)
 
 ### protocol
 
@@ -1789,6 +1788,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
 - [`protocol-account-benefits-package`](done/protocol-account-benefits-package.md)
   — What an account is entitled to arrives at login, and nothing decodes it
+- [`protocol-ais3-library-cap`](done/protocol-ais3-library-cap.md) — Read both
+  inventory trees over AIS3 on Second Life, the library over LibraryAPIv3
+- [`protocol-ais3-nested-embedded`](done/protocol-ais3-nested-embedded.md) — An
+  AIS3 depth fetch reads only its first level
 - [`protocol-audit-asset-decoder-allocation-caps`](done/protocol-audit-asset-decoder-allocation-caps.md)
   — Notecard, animation and legacy-material decoders reserve from a
   wire-supplied count

@@ -4859,6 +4859,65 @@ pub(crate) fn ais_inventory_update_from_llsd(
     (folders, items)
 }
 
+/// Parses the reply to an AIS3 folder **fetch** (`GET /category/<id>/children`)
+/// into one [`Event::InventoryDescendents`] per folder the listing opened: the
+/// fetched folder first, then — for a `depth` above zero — every sub-folder the
+/// listing went into, each before its own.
+///
+/// The fetched folder's own fields sit at the top level (`category_id`,
+/// `version`) and its contents under `_embedded` (`categories`, `items`,
+/// `links`), a sub-folder's contents nested inside that sub-folder's map. A
+/// sub-folder carrying no `_embedded` was not opened and yields no event, so it
+/// stays unloaded. AIS states no descendent count; like the reference
+/// (`AISUpdate::parseDescendentCount`) it is the number of entries the listing
+/// names. Links count as items, as the descendents capabilities list them.
+pub(crate) fn ais_folder_listing_from_llsd(body: &Llsd) -> Vec<Event> {
+    let mut events = Vec::new();
+    collect_ais_listing(body, &mut events);
+    events
+}
+
+/// Appends the [`Event::InventoryDescendents`] of `folder` — when its listing
+/// was opened — and then of every opened sub-folder (see
+/// [`ais_folder_listing_from_llsd`]).
+fn collect_ais_listing(folder: &Llsd, events: &mut Vec<Event>) {
+    let Some(embedded) = folder.get("_embedded") else {
+        return;
+    };
+    let folder_id = InventoryFolderKey::from(uuid_member_lenient(folder, "category_id"));
+    if folder_id.uuid().is_nil() {
+        return;
+    }
+    let categories: Vec<&Llsd> = embedded
+        .get("categories")
+        .and_then(Llsd::as_map)
+        .map(|map| map.values().collect())
+        .unwrap_or_default();
+    let mut items: Vec<InventoryItem> = Vec::new();
+    for key in ["items", "links"] {
+        if let Some(map) = embedded.get(key).and_then(Llsd::as_map) {
+            items.extend(map.values().filter_map(inventory_item_from_llsd));
+        }
+    }
+    items.retain(|item| !item.item_id.uuid().is_nil());
+    let folders: Vec<InventoryFolder> = categories
+        .iter()
+        .map(|category| inventory_folder_from_llsd(category))
+        .filter(|child| !child.folder_id.uuid().is_nil())
+        .collect();
+    let descendents = i32::try_from(folders.len().saturating_add(items.len())).unwrap_or(i32::MAX);
+    events.push(Event::InventoryDescendents {
+        folder_id,
+        version: i32_member(folder, "version"),
+        descendents,
+        folders,
+        items,
+    });
+    for category in categories {
+        collect_ais_listing(category, events);
+    }
+}
+
 /// Folds one `_embedded` block — and every `_embedded` block nested inside the
 /// categories it lists — into the flat folder / item accumulators.
 ///
@@ -7398,7 +7457,7 @@ pub(crate) fn full_update_block(object: &Object) -> ObjectUpdateObjectDataBlock 
 mod caps_serializer_tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-    use crate::types::{AssetType, InventoryListing, Maturity, MuteType};
+    use crate::types::{AssetType, InventoryListing, InventoryListingChildren, Maturity, MuteType};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_types::key::AgentKey;
     use sl_types::key::GroupKey;
@@ -8582,6 +8641,95 @@ mod caps_serializer_tests {
                 next_owner: Permissions::from_bits(0x0008_2000),
             },
         }
+    }
+
+    /// A folder for the AIS3 listing tests.
+    fn listing_folder(id: u128, parent: u128, name: &str, version: i32) -> InventoryFolder {
+        InventoryFolder {
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(id)),
+            parent_id: crate::types::optional_key_from_wire(Uuid::from_u128(parent)),
+            name: name.to_owned(),
+            folder_type: -1,
+            version,
+        }
+    }
+
+    /// An AIS3 fetch reply, nested one level per level of the listing as the
+    /// real service sends it, yields one `InventoryDescendents` per folder the
+    /// listing opened — the fetched folder first, carrying its version and a
+    /// descendent count of what it lists — and none for a sub-folder it did not
+    /// open, which must stay unloaded.
+    #[test]
+    fn an_ais3_fetch_reply_lists_each_opened_folder() -> Result<(), sl_wire::WireError> {
+        let opened_item = sample_item(0xa10);
+        let root_item = sample_item(0xa20);
+        let listing = InventoryListing {
+            folder: listing_folder(0xa0, 0x1, "Root", 7),
+            children: Some(InventoryListingChildren {
+                folders: vec![
+                    InventoryListing {
+                        folder: listing_folder(0xa1, 0xa0, "Opened", 3),
+                        children: Some(InventoryListingChildren {
+                            folders: Vec::new(),
+                            items: vec![opened_item.clone()],
+                        }),
+                    },
+                    InventoryListing::unlisted(listing_folder(0xa2, 0xa0, "Closed", 9)),
+                ],
+                items: vec![root_item.clone()],
+            }),
+        };
+        let events = super::ais_folder_listing_from_llsd(
+            &super::ais_category_children_reply_to_llsd(&listing)?,
+        );
+        let [root, opened] = events.as_slice() else {
+            return Err(sl_wire::WireError::InvalidScalar {
+                field: "listing_count",
+                value: events.len().to_string(),
+            });
+        };
+        let Event::InventoryDescendents {
+            folder_id,
+            version,
+            descendents,
+            folders,
+            items,
+        } = root
+        else {
+            return Err(sl_wire::WireError::InvalidScalar {
+                field: "root_event",
+                value: format!("{root:?}"),
+            });
+        };
+        assert_eq!(*folder_id, InventoryFolderKey::from(Uuid::from_u128(0xa0)));
+        assert_eq!(*version, 7);
+        assert_eq!(*descendents, 3, "two sub-folders and one item");
+        assert_eq!(folders.len(), 2);
+        assert_eq!(items, &vec![root_item]);
+        let Event::InventoryDescendents {
+            folder_id, items, ..
+        } = opened
+        else {
+            return Err(sl_wire::WireError::InvalidScalar {
+                field: "opened_event",
+                value: format!("{opened:?}"),
+            });
+        };
+        assert_eq!(*folder_id, InventoryFolderKey::from(Uuid::from_u128(0xa1)));
+        assert_eq!(items, &vec![opened_item]);
+        Ok(())
+    }
+
+    /// A reply with no `_embedded` (a mutation's echo of a folder, or a folder
+    /// the listing did not open) lists nothing, so nothing is marked loaded.
+    #[test]
+    fn an_unopened_folder_lists_nothing() {
+        let listing = InventoryListing::unlisted(listing_folder(0xb0, 0x1, "Closed", 2));
+        let reply = super::ais_category_children_reply_to_llsd(&listing);
+        assert!(
+            reply.is_ok_and(|reply| super::ais_folder_listing_from_llsd(&reply).is_empty()),
+            "an unopened folder must yield no listing"
+        );
     }
 
     #[test]

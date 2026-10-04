@@ -453,6 +453,20 @@ pub const CAP_INVENTORY_API_V3: &str = "InventoryAPIv3";
 /// (read-only, same REST shape as [`CAP_INVENTORY_API_V3`]). Second-Life only.
 pub const CAP_LIBRARY_API_V3: &str = "LibraryAPIv3";
 
+/// The tag the runtimes attach when forwarding the reply to an AIS3 *fetch* of
+/// a folder of the agent's own inventory (`GET <InventoryAPIv3>/category/<id>/children`)
+/// to [`Session::handle_caps_event`]. A synthetic routing key (never a real
+/// capability name): the same capability answers a mutation and a fetch with
+/// the same shape, but only a fetch lists a folder completely, so only a fetch
+/// may mark it loaded at its version — the reply is decoded into
+/// [`Event::InventoryDescendents`], exactly as a `FetchInventoryDescendents2`
+/// reply is.
+pub const AIS3_FETCH_INVENTORY_TAG: &str = "InventoryAPIv3/fetch";
+
+/// [`AIS3_FETCH_INVENTORY_TAG`] for a folder of the shared library, fetched over
+/// [`CAP_LIBRARY_API_V3`].
+pub const AIS3_FETCH_LIBRARY_TAG: &str = "LibraryAPIv3/fetch";
+
 /// Inventory mutation (#30): the `CreateInventoryCategory` capability — a folder
 /// create that returns a synchronous `{ folder_id, name, parent_id, type }`
 /// reply (unlike the no-reply UDP `CreateInventoryFolder`). Served by **both**

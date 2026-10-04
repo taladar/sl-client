@@ -220,6 +220,18 @@ pub enum Verb {
     Notifications,
     /// Print the own agent: region, position, seat, teleport, camera, heading.
     Agent,
+    /// Print a whole inventory tree as the viewer knows it: every folder with
+    /// its id, whether its contents were fetched, its sub-folders and items.
+    Inventory {
+        /// Walk the shared library instead of the agent's own inventory.
+        #[arg(long)]
+        library: bool,
+        /// Wait up to this many seconds for every folder to be loaded and the
+        /// tree to stop changing (the background fetch to finish) before
+        /// printing; what is known then is printed either way.
+        #[arg(long, value_name = "SECS")]
+        wait_loaded: Option<u64>,
+    },
     /// Print the environment being drawn: the sky's name, ambient colour, haze
     /// and sun, the water's fog, whether the viewer's own local sky stands in
     /// for the shared one, how far a manual change's cross-fade has got, and

@@ -115,7 +115,11 @@ nothing runs while none are queued.
   a probe's readout holding a value at a JSON pointer. A test never sleeps.
 - **Probes** read the viewer's models, not its widgets: `agent` (region,
   position, seat, teleport, camera mode and eye, heading), `status`,
-  `conversations`, `notifications`, `selection`, `inventory`, `quiescence`
+  `conversations`, `notifications`, `selection`, `inventory` (one folder by
+  name path), `inventory_tree` (every folder of a tree by id — what
+  `sl-viewer-ctl inventory [--library] [--wait-loaded SECS]` prints; the
+  viewer's model holds a folder's items once the UI has paged it, so a whole
+  tree is read after a search query has swept every folder), `quiescence`
   (outstanding work, bucket by bucket) and `environment`.
 - **Streams** — the event log (session events, outbound commands, UI
   actions; sequence-numbered, read by cursor or subscribed to) and the

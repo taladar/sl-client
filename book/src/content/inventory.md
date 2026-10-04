@@ -26,16 +26,33 @@ parent, type, and version — but no items. This lets a client render the folder
 tree instantly and fetch contents lazily, only descending into folders the user
 opens. The library (shared, read-only inventory) arrives as a separate skeleton.
 
-## Fetching contents — two paths
+## Fetching contents — three roads
 
-- **Modern (CAPS / AIS3).** The `FetchInventoryDescendents2` capability fetches
-  a folder's descendants over HTTP as [LLSD](../comms/llsd.md); the full
-  read/write **AIS3** API (`InventoryAPIv3`, with `CreateInventoryCategory` for
-  folder creation) is the modern way to mutate inventory. This path is reliable,
-  batched, and the default.
-- **Legacy (UDP).** Older messages request a folder's contents over the circuit
-  and stream the descendants back. Still present for compatibility and on
-  servers without the caps.
+A folder's contents are read over the most modern road the region offers for
+the tree it belongs to — the agent's own or the shared Library:
+
+- **AIS3.** `GET <InventoryAPIv3>/category/<id>/children?depth=0` for the
+  agent's tree, the same on `LibraryAPIv3` for the Library — what the reference
+  viewer reads both trees over whenever AIS is available
+  (`LLInventoryModelBackgroundFetch::bulkFetchViaAis`). Second Life serves it;
+  stock OpenSim does not. The reply nests a listing one level per level of
+  depth, the fetched folder's own fields (`category_id`, `version`) at the top
+  and its contents under `_embedded`; AIS states no descendent count, so it is
+  the number of entries the listing names. The runtimes forward such a reply
+  under a fetch tag of its own (`AIS3_FETCH_INVENTORY_TAG` /
+  `AIS3_FETCH_LIBRARY_TAG`): the same capability answers a mutation with the
+  same shape, and only a fetch lists a folder completely, so only a fetch may
+  mark it loaded.
+- **The descendents capabilities.** `FetchInventoryDescendents2` /
+  `FetchLibDescendents2` fetch a batch of folders per POST as
+  [LLSD](../comms/llsd.md) — the road on OpenSim.
+- **Legacy (UDP).** `FetchInventoryDescendents` streams a folder's contents over
+  the circuit, for a server with neither capability (Second Life leaves it
+  unanswered).
+
+All three decode to the same `InventoryDescendents` and mark the folder loaded
+at its version. The **AIS3** API is also how inventory is *mutated* on Second
+Life (see [Mutating inventory](#mutating-inventory)).
 
 The `version` number is how a client knows its cached copy of a folder is
 current without re-fetching.
@@ -114,9 +131,11 @@ folder fetches and pays nothing. While enabled, the runtime drives the crawl by
 calling `Session::next_inventory_fetch_batch(max_in_flight, now)` each tick — it
 returns the next batch of folders to fetch (bounded by `max_in_flight` minus
 those already in flight, `INVENTORY_FETCH_MAX_IN_FLIGHT` being the conventional
-bound) and flips each to `Fetching`. The shell POSTs a
-`FetchInventoryDescendents2` per folder; each reply folds in, flips the folder
-`Loaded`, and seeds its children `Unknown` for the next sweep.
+bound) and flips each to `Fetching`. The shell fetches each over the roads
+above — one AIS3 `GET` per folder where AIS3 is granted, otherwise one
+descendents-capability POST for the batch — and each reply folds in, flips the
+folder `Loaded`, and seeds its children `Unknown` for the next sweep. A request
+that fails is logged; the folder's stall deadline then frees it for a retry.
 `Session::inventory_fully_loaded(owner)` is the completion signal — true once no
 folder of that tree is `Unknown`, `Fetching` or `Failed`.
 

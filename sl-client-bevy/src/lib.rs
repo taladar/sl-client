@@ -11,20 +11,21 @@ use bevy::prelude::*;
 use std::collections::{BTreeSet, HashMap};
 
 use sl_proto::{
-    AVATAR_PICKER_PAGE_SIZE, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
+    AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_PAGE_SIZE,
+    CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
     CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE,
     CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT,
     CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3,
-    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_SEND_USER_REPORT,
-    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
+    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO,
+    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
     Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, NeighbourCaps,
     NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, Session, SessionMessage, UserInfoUpdate,
@@ -418,8 +419,8 @@ use crate::http::{
     run_remote_parcel_request,
 };
 use crate::inventory::{
-    fetch_folder_contents, run_group_members_fetch, run_increment_cof_version, run_inventory_fetch,
-    run_server_appearance_update,
+    fetch_folder_contents, run_ais3_folder_fetches, run_group_members_fetch,
+    run_increment_cof_version, run_inventory_fetch, run_server_appearance_update,
 };
 use crate::marketplace::dispatch_marketplace_request;
 use crate::materials::{
@@ -1500,44 +1501,71 @@ fn advance_running(
         }
 
         // Background inventory crawl: when enabled, sweep the next bounded batch
-        // of unfetched folders and POST a `FetchInventoryDescendents2` for each.
+        // of unfetched folders and fetch each over the most modern road the
+        // region offers for its tree — AIS3 (`InventoryAPIv3` / `LibraryAPIv3`,
+        // one `children?depth=0` GET per folder, Second Life), else the
+        // descendents capabilities (`FetchInventoryDescendents2` /
+        // `FetchLibDescendents2`, OpenSim), else, for the Library, UDP.
         // Self-gating — `next_inventory_fetch_batch` returns empty when the crawl
-        // is off. Only swept while the fetch capability and agent id are known, so
-        // folders are never flipped to `Fetching` for a request that cannot be
-        // issued. The replies fold in over `events_rx` and the next frame
-        // continues the sweep a level deeper.
-        if let (Some(url), Some(owner)) = (
-            caps.map.get(CAP_FETCH_INVENTORY).cloned(),
-            session.agent_id(),
-        ) {
+        // is off — and only swept while the agent tree has a road, so folders are
+        // never flipped to `Fetching` for a request that cannot be issued. The
+        // replies fold in over `events_rx` and the next frame continues the sweep
+        // a level deeper.
+        let agent_ais = caps.map.get(CAP_INVENTORY_API_V3).cloned();
+        let agent_fetch = caps.map.get(CAP_FETCH_INVENTORY).cloned();
+        if let Some(owner) = session.agent_id()
+            && (agent_ais.is_some() || agent_fetch.is_some())
+        {
             let batch = session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, now);
-            // The batch can span both trees: the agent folders go to
-            // `FetchInventoryDescendents2` with the agent owner, the Library folders
-            // to `FetchLibDescendents2` with the Library owner (or, where the grid
-            // does not serve that cap — e.g. OpenSim — over the UDP path instead, so
-            // they never stay stuck `Fetching`).
             let (library_folders, agent_folders): (Vec<_>, Vec<_>) =
                 batch.into_iter().partition(|folder| {
                     session.inventory_owner(*folder) == Some(InventoryOwner::Library)
                 });
             if !agent_folders.is_empty() {
                 let events_tx = caps.events_tx.clone();
-                crate::log_context::spawn_thread(move || {
-                    run_inventory_fetch(
-                        &url,
-                        owner.uuid(),
-                        &agent_folders,
-                        CAP_FETCH_INVENTORY,
-                        &events_tx,
-                    );
-                });
+                match (agent_ais, agent_fetch) {
+                    (Some(base), _) => {
+                        crate::log_context::spawn_thread(move || {
+                            run_ais3_folder_fetches(
+                                &base,
+                                &agent_folders,
+                                AIS3_FETCH_INVENTORY_TAG,
+                                &events_tx,
+                            );
+                        });
+                    }
+                    (None, Some(url)) => {
+                        crate::log_context::spawn_thread(move || {
+                            run_inventory_fetch(
+                                &url,
+                                owner.uuid(),
+                                &agent_folders,
+                                CAP_FETCH_INVENTORY,
+                                &events_tx,
+                            );
+                        });
+                    }
+                    (None, None) => {}
+                }
             }
             if !library_folders.is_empty() {
                 match (
+                    caps.map.get(CAP_LIBRARY_API_V3).cloned(),
                     caps.map.get(CAP_FETCH_LIBRARY).cloned(),
                     session.library_owner(),
                 ) {
-                    (Some(lib_url), Some(lib_owner)) => {
+                    (Some(base), _, _) => {
+                        let events_tx = caps.events_tx.clone();
+                        crate::log_context::spawn_thread(move || {
+                            run_ais3_folder_fetches(
+                                &base,
+                                &library_folders,
+                                AIS3_FETCH_LIBRARY_TAG,
+                                &events_tx,
+                            );
+                        });
+                    }
+                    (None, Some(lib_url), Some(lib_owner)) => {
                         let events_tx = caps.events_tx.clone();
                         crate::log_context::spawn_thread(move || {
                             run_inventory_fetch(
@@ -2203,8 +2231,15 @@ fn apply_command(
             }
         }
         Command::Ais3FetchFolderChildren { folder_id, depth } => {
+            // A Library folder lives behind `LibraryAPIv3`; sending it to the
+            // agent's `InventoryAPIv3` is a 404 on Second Life.
+            let cap = if session.inventory_owner(*folder_id) == Some(InventoryOwner::Library) {
+                CAP_LIBRARY_API_V3
+            } else {
+                CAP_INVENTORY_API_V3
+            };
             if let Some(caps) = caps
-                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+                && let Some(base) = caps.map.get(cap).cloned()
             {
                 let events_tx = caps.events_tx.clone();
                 let url = format!(
@@ -2212,7 +2247,7 @@ fn apply_command(
                     ais_category_children_fetch_url(*folder_id, *depth)
                 );
                 crate::log_context::spawn_thread(move || {
-                    run_get_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
+                    run_get_caps_llsd(&url, cap, &events_tx);
                 });
             }
         }

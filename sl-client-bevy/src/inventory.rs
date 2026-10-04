@@ -1,33 +1,36 @@
 //! Inventory / group-member / appearance capability fetches.
 
+use crate::http::run_get_caps_llsd;
 use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{
-    CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION,
+    AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
+    CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_LIBRARY_API_V3,
     CAP_UPDATE_AVATAR_APPEARANCE, Error, GroupKey, InventoryFolderKey, InventoryOwner, Llsd,
-    Session, Uuid, build_fetch_inventory_request, build_group_member_data_request,
-    build_update_avatar_appearance_request, parse_llsd_xml,
+    Session, Uuid, ais_category_children_fetch_url, build_fetch_inventory_request,
+    build_group_member_data_request, build_update_avatar_appearance_request, parse_llsd_xml,
 };
 use std::time::Instant;
 
-/// Issues a contents fetch for a single `folder_id`, automatically choosing the
-/// modern CAPS inventory capability the region advertises and falling back to
-/// the legacy UDP `FetchInventoryDescendents` when it does not (or when the
-/// capability map is not yet known).
+/// Issues a contents fetch for a single `folder_id` over the most modern road
+/// the region offers for the tree the folder belongs to:
 ///
-/// Second Life serves inventory only over CAPS — its UDP fetch goes
-/// unanswered — while OpenSim still answers the UDP path, so routing here keeps
-/// the explicit
+/// 1. **AIS3** — `GET <InventoryAPIv3>/category/<id>/children?depth=0` for the
+///    agent's tree, `LibraryAPIv3` for the Library — what the reference viewer
+///    reads both trees over whenever AIS is available
+///    (`LLInventoryModelBackgroundFetch::bulkFetchViaAis`); Second Life serves
+///    it, stock OpenSim does not;
+/// 2. the descendents capabilities, `FetchInventoryDescendents2` /
+///    `FetchLibDescendents2` (OpenSim);
+/// 3. the legacy UDP `FetchInventoryDescendents` when no capability is known.
+///
+/// Every road decodes to
+/// [`SessionEvent::InventoryDescendents`](sl_proto::Event::InventoryDescendents)
+/// and marks the folder loaded at its version, so the explicit
 /// ([`Command::RequestFolderContents`](sl_proto::Command::RequestFolderContents))
-/// and on-demand (paging an unfetched folder) pulls grid-agnostic, mirroring the
-/// background crawl's per-tree batch routing. The agent tree fetches over
-/// `FetchInventoryDescendents2`, the Library tree over `FetchLibDescendents2`;
-/// both decode to
-/// [`SessionEvent::InventoryDescendents`](sl_proto::Event::InventoryDescendents).
-/// The AIS3 (`InventoryAPIv3`) capability backs the inventory *mutation*
-/// commands; the read path keeps the descendents semantics (folder versioning /
-/// `Loaded` marking) that those caps provide.
+/// and on-demand (paging an unfetched folder) pulls stay grid-agnostic,
+/// mirroring the background crawl's per-tree routing.
 ///
 /// # Errors
 ///
@@ -40,15 +43,24 @@ pub(crate) fn fetch_folder_contents(
     caps: Option<&Caps>,
     now: Instant,
 ) -> Result<(), Error> {
+    let library = session.inventory_owner(folder_id) == Some(InventoryOwner::Library);
+    if let Some((base, tag, events_tx)) = caps.and_then(|caps| {
+        let (cap, tag) = ais3_fetch_cap(library);
+        Some((caps.map.get(cap).cloned()?, tag, caps.events_tx.clone()))
+    }) {
+        let url = format!("{base}{}", ais_category_children_fetch_url(folder_id, 0));
+        crate::log_context::spawn_thread(move || run_get_caps_llsd(&url, tag, &events_tx));
+        session.mark_folder_fetching(folder_id, now);
+        return Ok(());
+    }
     let route = caps.and_then(|caps| {
-        let (url, owner, response_cap) =
-            if session.inventory_owner(folder_id) == Some(InventoryOwner::Library) {
-                let url = caps.map.get(CAP_FETCH_LIBRARY).cloned()?;
-                (url, session.library_owner()?.uuid(), CAP_FETCH_LIBRARY)
-            } else {
-                let url = caps.map.get(CAP_FETCH_INVENTORY).cloned()?;
-                (url, session.agent_id()?.uuid(), CAP_FETCH_INVENTORY)
-            };
+        let (url, owner, response_cap) = if library {
+            let url = caps.map.get(CAP_FETCH_LIBRARY).cloned()?;
+            (url, session.library_owner()?.uuid(), CAP_FETCH_LIBRARY)
+        } else {
+            let url = caps.map.get(CAP_FETCH_INVENTORY).cloned()?;
+            (url, session.agent_id()?.uuid(), CAP_FETCH_INVENTORY)
+        };
         Some((url, owner, response_cap, caps.events_tx.clone()))
     });
     match route {
@@ -58,7 +70,7 @@ pub(crate) fn fetch_folder_contents(
             });
             // Mirror the UDP path's in-flight bookkeeping so the background crawl
             // does not re-pick this folder before its reply lands — and so a POST
-            // that errors out (every failure above returns silently) releases the
+            // that errors out (logged by the fetch, which delivers nothing) releases the
             // in-flight slot again once its stall deadline passes.
             session.mark_folder_fetching(folder_id, now);
         }
@@ -67,6 +79,35 @@ pub(crate) fn fetch_folder_contents(
         }
     }
     Ok(())
+}
+
+/// The AIS3 capability a folder of the agent's tree (`library == false`) or of
+/// the Library is fetched over, and the tag its reply is forwarded under.
+pub(crate) const fn ais3_fetch_cap(library: bool) -> (&'static str, &'static str) {
+    if library {
+        (CAP_LIBRARY_API_V3, AIS3_FETCH_LIBRARY_TAG)
+    } else {
+        (CAP_INVENTORY_API_V3, AIS3_FETCH_INVENTORY_TAG)
+    }
+}
+
+/// GETs the AIS3 listing of each of `folder_ids` (`?depth=0`, one request per
+/// folder, as the reference does) from the AIS3 capability at `base`, and
+/// forwards every reply to `caps_tx` tagged `tag`
+/// ([`AIS3_FETCH_INVENTORY_TAG`] / [`AIS3_FETCH_LIBRARY_TAG`]), for the session
+/// to decode into [`SlSessionEvent::InventoryDescendents`]. A failed request is
+/// logged and reported as the folder's fetch failing; the folder's stall
+/// deadline then frees it for the crawl to retry.
+pub(crate) fn run_ais3_folder_fetches(
+    base: &str,
+    folder_ids: &[InventoryFolderKey],
+    tag: &'static str,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    for folder in folder_ids {
+        let url = format!("{base}{}", ais_category_children_fetch_url(*folder, 0));
+        run_get_caps_llsd(&url, tag, caps_tx);
+    }
 }
 
 /// POSTs a `FetchInventoryDescendents2` / `FetchLibDescendents2` request for
@@ -89,19 +130,38 @@ pub(crate) fn run_inventory_fetch(
         return;
     };
     let body = build_fetch_inventory_request(owner_id, folder_ids);
-    let Ok(response) = http
+    // Every failure is logged: the folders stay `Fetching` until their stall
+    // deadline frees them for the crawl to retry, and without a line here a
+    // fetch that never works looks exactly like a slow one.
+    let response = match http
         .post(cap_url)
         .header("Content-Type", "application/llsd+xml")
         .body(body)
         .send()
-    else {
-        return;
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::warn!(capability = response_cap, %error, "an inventory fetch POST failed");
+            return;
+        }
     };
-    let Ok(text) = response.text() else {
+    let status = response.status();
+    if !status.is_success() {
+        tracing::warn!(capability = response_cap, %status, "an inventory fetch POST was rejected");
         return;
+    }
+    let text = match response.text() {
+        Ok(text) => text,
+        Err(error) => {
+            tracing::warn!(capability = response_cap, %error, "an inventory fetch reply could not be read");
+            return;
+        }
     };
-    if let Ok(llsd) = parse_llsd_xml(&text) {
-        deliver(caps_tx, (response_cap.to_owned(), llsd));
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => deliver(caps_tx, (response_cap.to_owned(), llsd)),
+        Err(error) => {
+            tracing::warn!(capability = response_cap, %error, "an inventory fetch reply did not parse");
+        }
     }
 }
 

@@ -3,7 +3,7 @@
 use super::caps_event::CapsEvent;
 use super::conversions::{
     OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
-    agent_list_voice_updates_from_llsd, agent_state_update_from_llsd,
+    agent_list_voice_updates_from_llsd, agent_state_update_from_llsd, ais_folder_listing_from_llsd,
     ais_inventory_update_from_llsd, ais_updated_category_versions, avatar_animations,
     avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_picker_result,
     avatar_properties, benefits_of, bulk_update_folder, bulk_update_inventory_from_llsd,
@@ -650,6 +650,33 @@ impl Session {
                             .mark_folder_loaded(*folder_id, *version, owner);
                     }
                     self.events.push_back(event);
+                }
+            }
+            // The reply to an AIS3 folder *fetch* — the modern read path the
+            // runtimes take wherever `InventoryAPIv3` / `LibraryAPIv3` is
+            // granted. Each folder the listing opened is folded into its tree and
+            // marked loaded at its version, exactly as a descendents-cap reply
+            // is, and surfaced as the same `InventoryDescendents`.
+            CapsEvent::Ais3FetchInventory | CapsEvent::Ais3FetchLibrary => {
+                let owner = if matches!(event, CapsEvent::Ais3FetchLibrary) {
+                    InventoryOwner::Library
+                } else {
+                    InventoryOwner::Agent
+                };
+                for listing in ais_folder_listing_from_llsd(body) {
+                    if let Event::InventoryDescendents {
+                        folder_id,
+                        version,
+                        folders,
+                        items,
+                        ..
+                    } = &listing
+                    {
+                        self.cache_inventory(folders, items, owner);
+                        self.inventory
+                            .mark_folder_loaded(*folder_id, *version, owner);
+                    }
+                    self.events.push_back(listing);
                 }
             }
             // A `FetchInventory2` / `FetchLib2` per-item fetch reply

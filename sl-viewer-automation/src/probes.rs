@@ -320,6 +320,37 @@ pub fn read_inventory(
     Ok(folder_readout(model, folder))
 }
 
+/// Every folder reachable from the `root` inventory's root folder, each with
+/// its known contents, the root first and every folder before its own
+/// sub-folders (a breadth-first walk). Empty when the model or the root is not
+/// there yet.
+#[must_use]
+pub(crate) fn read_inventory_tree(
+    world: &World,
+    root: InventoryRoot,
+) -> Vec<InventoryFolderReadout> {
+    let Some(model) = world.get_resource::<InventoryModel>() else {
+        return Vec::new();
+    };
+    let Some(root_folder) = (match root {
+        InventoryRoot::Agent => model.agent_root(),
+        InventoryRoot::Library => model.library_root(),
+    }) else {
+        return Vec::new();
+    };
+    let mut readouts = Vec::new();
+    let mut queue = std::collections::VecDeque::from([root_folder]);
+    let mut visited = std::collections::HashSet::new();
+    while let Some(folder) = queue.pop_front() {
+        if !visited.insert(folder) {
+            continue;
+        }
+        queue.extend(model.child_folders_of(folder).iter().copied());
+        readouts.push(folder_readout(model, folder));
+    }
+    readouts
+}
+
 /// One folder of `model` and its known contents.
 fn folder_readout(model: &InventoryModel, folder: InventoryFolderKey) -> InventoryFolderReadout {
     let info = model.folder_info(folder);

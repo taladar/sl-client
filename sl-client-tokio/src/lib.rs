@@ -11,7 +11,8 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
 use sl_proto::{
-    AVATAR_PICKER_PAGE_SIZE, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
+    AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_PAGE_SIZE,
+    CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
     CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE,
     CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT,
@@ -19,8 +20,8 @@ use sl_proto::{
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
     CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3,
-    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
+    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
@@ -198,7 +199,9 @@ use crate::http::{
     post_chat_session_fetch_history, post_chat_session_request, post_remote_parcel_request,
     put_caps_llsd,
 };
-use crate::inventory::{fetch_folder_contents, fetch_group_members, fetch_inventory};
+use crate::inventory::{
+    fetch_ais3_folders, fetch_folder_contents, fetch_group_members, fetch_inventory,
+};
 use crate::marketplace::dispatch_marketplace_request;
 use crate::materials::{fetch_render_materials, post_modify_material_params, set_render_materials};
 use crate::media::{fetch_object_media, post_object_media};
@@ -807,46 +810,68 @@ impl Client {
             inventory_cache.maybe_save(&mut self.session, Instant::now());
 
             // Background inventory crawl: when enabled, sweep the next bounded
-            // batch of unfetched folders and POST a `FetchInventoryDescendents2`
-            // for each. Self-gating — `next_inventory_fetch_batch` returns empty
-            // when the crawl is off, so this costs nothing for a consumer that
-            // ignores inventory. The replies fold in over `caps_rx` and the next
-            // loop iteration continues the sweep a level deeper. Only swept while
-            // the fetch capability and agent id are known, so folders are never
-            // flipped to `Fetching` for a request that cannot be issued.
-            if let (Some(url), Some(owner)) = (
-                caps.get(CAP_FETCH_INVENTORY).cloned(),
-                self.session.agent_id(),
-            ) {
+            // batch of unfetched folders and fetch each over the most modern road
+            // the region offers for its tree — AIS3 (`InventoryAPIv3` /
+            // `LibraryAPIv3`, one `children?depth=0` GET per folder, Second
+            // Life), else the descendents capabilities (`FetchInventoryDescendents2`
+            // / `FetchLibDescendents2`, OpenSim), else, for the Library, UDP.
+            // Self-gating — `next_inventory_fetch_batch` returns empty when the
+            // crawl is off — and only swept while the agent tree has a road, so
+            // folders are never flipped to `Fetching` for a request that cannot be
+            // issued. The replies fold in over `caps_rx` and the next loop
+            // iteration continues the sweep a level deeper.
+            let agent_ais = caps.get(CAP_INVENTORY_API_V3).cloned();
+            let agent_fetch = caps.get(CAP_FETCH_INVENTORY).cloned();
+            if let Some(owner) = self.session.agent_id()
+                && (agent_ais.is_some() || agent_fetch.is_some())
+            {
                 let batch = self
                     .session
                     .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, Instant::now());
-                // The batch can span both trees (the scheduler walks from both
-                // roots): the agent folders go to `FetchInventoryDescendents2` with
-                // the agent owner, the Library folders to `FetchLibDescendents2`
-                // with the Library owner (or, where the grid does not serve that cap
-                // — e.g. OpenSim — over the UDP path instead, so they never stay
-                // stuck `Fetching`).
                 let (library_folders, agent_folders): (Vec<_>, Vec<_>) =
                     batch.into_iter().partition(|folder| {
                         self.session.inventory_owner(*folder) == Some(InventoryOwner::Library)
                     });
                 if !agent_folders.is_empty() {
-                    tokio::spawn(fetch_inventory(
-                        url,
-                        owner.uuid(),
-                        agent_folders,
-                        CAP_FETCH_INVENTORY,
-                        http.clone(),
-                        caps_tx.clone(),
-                    ));
+                    match (agent_ais, agent_fetch) {
+                        (Some(base), _) => {
+                            tokio::spawn(fetch_ais3_folders(
+                                base,
+                                agent_folders,
+                                AIS3_FETCH_INVENTORY_TAG,
+                                http.clone(),
+                                caps_tx.clone(),
+                            ));
+                        }
+                        (None, Some(url)) => {
+                            tokio::spawn(fetch_inventory(
+                                url,
+                                owner.uuid(),
+                                agent_folders,
+                                CAP_FETCH_INVENTORY,
+                                http.clone(),
+                                caps_tx.clone(),
+                            ));
+                        }
+                        (None, None) => {}
+                    }
                 }
                 if !library_folders.is_empty() {
                     match (
+                        caps.get(CAP_LIBRARY_API_V3).cloned(),
                         caps.get(CAP_FETCH_LIBRARY).cloned(),
                         self.session.library_owner(),
                     ) {
-                        (Some(lib_url), Some(lib_owner)) => {
+                        (Some(base), _, _) => {
+                            tokio::spawn(fetch_ais3_folders(
+                                base,
+                                library_folders,
+                                AIS3_FETCH_LIBRARY_TAG,
+                                http.clone(),
+                                caps_tx.clone(),
+                            ));
+                        }
+                        (None, Some(lib_url), Some(lib_owner)) => {
                             tokio::spawn(fetch_inventory(
                                 lib_url,
                                 lib_owner.uuid(),
@@ -1256,9 +1281,16 @@ impl Client {
                             }
                         }
                         Some(Command::Ais3FetchFolderChildren { folder_id, depth }) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
+                            // A Library folder lives behind `LibraryAPIv3`; sending it to
+                            // the agent's `InventoryAPIv3` is a 404 on Second Life.
+                            let cap = if self.session.inventory_owner(folder_id) == Some(InventoryOwner::Library) {
+                                CAP_LIBRARY_API_V3
+                            } else {
+                                CAP_INVENTORY_API_V3
+                            };
+                            if let Some(base) = caps.get(cap).cloned() {
                                 let url = format!("{base}{}", ais_category_children_fetch_url(folder_id, depth));
-                                tokio::spawn(get_caps_llsd(url, CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
+                                tokio::spawn(get_caps_llsd(url, cap, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::Ais3UpdateItem { item_id, name, description }) => {

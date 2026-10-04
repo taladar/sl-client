@@ -2,11 +2,20 @@
 id: protocol-ais3-nested-embedded
 title: An AIS3 depth fetch reads only its first level
 topic: protocol
-status: ready
+status: done
 origin: measured doing object-asset-format on aditi (2026-09-06)
 points: 3
 refs: [protocol-ais3-library-cap]
 ---
+
+## Done (already, 2026-09-09)
+
+Found implemented when this task was cited as a blocker (2026-10-03):
+`ais_inventory_update_from_llsd` recurses through `gather_ais_embedded`
+(`sl-proto/src/session/conversions.rs`), which folds every nested
+`_embedded` block, and the fake grid's flattened form still parses. Landed
+with the commit "fix(fake-grid): a viewer could not count what a folder held,
+and now can" without this file being moved.
 
 `GET /category/<id>/children?depth=<n>` asks the AIS service for a subtree, and
 the real service answers by nesting `_embedded` once per level. This

@@ -566,6 +566,26 @@ impl Viewer {
         }
     }
 
+    /// Every folder reachable from an inventory root, the root first, each
+    /// with what the viewer knows of its contents — empty while the root is not
+    /// known.
+    ///
+    /// # Errors
+    ///
+    /// As [`read`](Self::read).
+    pub async fn inventory_tree(
+        &self,
+        root: InventoryRoot,
+    ) -> Result<Vec<InventoryFolderReadout>, DriverError> {
+        match self.read(Probe::InventoryTree { root }).await? {
+            ProbeReadout::InventoryTree(folders) => Ok(folders),
+            other => Err(self.unexpected(
+                "read inventory tree",
+                &ResponseBody::Readout { readout: other },
+            )),
+        }
+    }
+
     /// Whether the scene has settled.
     ///
     /// # Errors

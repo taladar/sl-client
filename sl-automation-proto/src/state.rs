@@ -43,6 +43,15 @@ pub enum Probe {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         path: Vec<String>,
     },
+    /// Every folder reachable from an inventory root, each with what the
+    /// viewer knows of its contents ([`InventoryFolderReadout`]s) — the whole
+    /// tree in one read, addressed by id rather than by name, so two sibling
+    /// folders of one name are both there.
+    InventoryTree {
+        /// Which inventory to walk.
+        #[serde(default)]
+        root: InventoryRoot,
+    },
     /// Whether the scene has settled ([`QuiescenceReadout`]).
     Quiescence,
     /// The environment being drawn ([`EnvironmentReadout`]).
@@ -64,6 +73,10 @@ impl fmt::Display for Probe {
                 };
                 write!(f, "inventory {root}:/{}", path.join("/"))
             }
+            Self::InventoryTree { root } => match root {
+                InventoryRoot::Agent => f.write_str("inventory tree agent"),
+                InventoryRoot::Library => f.write_str("inventory tree library"),
+            },
             Self::Quiescence => f.write_str("quiescence"),
             Self::Environment => f.write_str("environment"),
         }
@@ -89,6 +102,9 @@ pub enum ProbeReadout {
     Selection(Vec<SelectedObject>),
     /// The inventory folder, or nothing while no folder is at the path.
     Inventory(Option<InventoryFolderReadout>),
+    /// Every folder of the tree, the root first and each folder before its
+    /// sub-folders; empty while the root is not known.
+    InventoryTree(Vec<InventoryFolderReadout>),
     /// Whether the scene has settled.
     Quiescence(QuiescenceReadout),
     /// The environment being drawn.

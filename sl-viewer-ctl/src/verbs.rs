@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use sl_automation_proto::{NameMatcher, WaitCondition};
+use sl_automation_proto::{InventoryFolderReadout, InventoryRoot, NameMatcher, WaitCondition};
 use sl_viewer_driver::Viewer;
 
 use crate::cli::{Verb, WorldVerb};
@@ -165,6 +165,17 @@ pub(crate) async fn run<W: Write>(
         Verb::Chat => Outcome::Conversations(viewer.conversations().await?),
         Verb::Notifications => Outcome::Notifications(viewer.notifications().await?),
         Verb::Agent => Outcome::Agent(viewer.agent().await?),
+        Verb::Inventory {
+            library,
+            wait_loaded,
+        } => {
+            let root = if *library {
+                InventoryRoot::Library
+            } else {
+                InventoryRoot::Agent
+            };
+            Outcome::InventoryTree(settled_inventory_tree(viewer, root, *wait_loaded).await?)
+        }
         Verb::Environment => Outcome::Environment(viewer.environment().await?),
         Verb::FileDialog { path, .. } => Outcome::FileDialog {
             answered: viewer.answer_file_dialog(path.as_deref()).await?,
@@ -192,6 +203,38 @@ pub(crate) async fn run<W: Write>(
     };
     printer.print(&outcome)?;
     Ok(())
+}
+
+/// How often [`settled_inventory_tree`] re-reads the tree while it waits.
+const INVENTORY_POLL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The `root` inventory tree, read once — or, given `wait_loaded`, re-read
+/// until every folder is loaded and two reads in a row agree (the background
+/// fetch has finished), or that many seconds have passed; the last read is
+/// returned either way, its unloaded folders saying how far it got.
+async fn settled_inventory_tree(
+    viewer: &Viewer,
+    root: InventoryRoot,
+    wait_loaded: Option<u64>,
+) -> Result<Vec<InventoryFolderReadout>, CtlError> {
+    let mut tree = viewer.inventory_tree(root).await?;
+    let Some(seconds) = wait_loaded else {
+        return Ok(tree);
+    };
+    let started = tokio::time::Instant::now();
+    let budget = std::time::Duration::from_secs(seconds);
+    loop {
+        if started.elapsed() >= budget {
+            return Ok(tree);
+        }
+        tokio::time::sleep(INVENTORY_POLL).await;
+        let next = viewer.inventory_tree(root).await?;
+        let settled = !next.is_empty() && next.iter().all(|folder| folder.loaded) && next == tree;
+        tree = next;
+        if settled {
+            return Ok(tree);
+        }
+    }
 }
 
 /// Print the event log's entries as they are recorded — from `from` when

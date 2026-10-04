@@ -7,8 +7,9 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
 use sl_automation_proto::{
-    AgentReadout, ConversationReadout, ConversationRef, EnvironmentReadout, GroundPoint, LogEntry,
-    NodeState, NodeValue, NodeVisibility, NotificationReadout, UiNode, ViewerIdentity, WorldNode,
+    AgentReadout, ConversationReadout, ConversationRef, EnvironmentReadout, GroundPoint,
+    InventoryFolderReadout, LogEntry, NodeState, NodeValue, NodeVisibility, NotificationReadout,
+    UiNode, ViewerIdentity, WorldNode,
 };
 use sl_viewer_driver::{AnsweredFileDialog, Screenshot};
 
@@ -59,6 +60,8 @@ pub enum Outcome {
     Notifications(Vec<NotificationReadout>),
     /// The own agent.
     Agent(AgentReadout),
+    /// An inventory tree, the root folder first.
+    InventoryTree(Vec<InventoryFolderReadout>),
     /// The environment being drawn.
     Environment(EnvironmentReadout),
     /// A file dialog answered.
@@ -206,6 +209,7 @@ fn json_of(outcome: &Outcome) -> io::Result<JsonValue> {
         Outcome::Conversations(conversations) => to_json(conversations)?,
         Outcome::Notifications(notifications) => to_json(notifications)?,
         Outcome::Agent(agent) => to_json(agent)?,
+        Outcome::InventoryTree(folders) => to_json(folders)?,
         Outcome::Environment(environment) => to_json(environment)?,
         Outcome::FileDialog { answered, picked } => json!({
             "done": if picked.is_some() { "answered" } else { "cancelled" },
@@ -297,6 +301,7 @@ fn text_of(out: &mut impl Write, outcome: &Outcome) -> io::Result<()> {
         Outcome::Conversations(conversations) => conversation_lines(out, conversations)?,
         Outcome::Notifications(notifications) => notification_lines(out, notifications)?,
         Outcome::Agent(agent) => agent_lines(out, agent)?,
+        Outcome::InventoryTree(folders) => inventory_lines(out, folders)?,
         Outcome::Environment(environment) => environment_lines(out, environment)?,
         Outcome::FileDialog { answered, picked } => match picked {
             Some(path) => writeln!(
@@ -535,6 +540,29 @@ fn agent_lines(out: &mut impl Write, agent: &AgentReadout) -> io::Result<()> {
         writeln!(out, "heading  {heading:.3} rad")?;
     }
     Ok(())
+}
+
+/// One block per folder: its id, name and whether it was fetched, then its
+/// items, indented; a last line counts what is there and what is not loaded.
+fn inventory_lines(out: &mut impl Write, folders: &[InventoryFolderReadout]) -> io::Result<()> {
+    for folder in folders {
+        let state = if folder.loaded {
+            "loaded"
+        } else {
+            "NOT LOADED"
+        };
+        writeln!(out, "{} {:?} ({state})", folder.id, folder.name)?;
+        for item in &folder.items {
+            writeln!(out, "  {} {:?} {}", item.id, item.name, item.kind)?;
+        }
+    }
+    let items: usize = folders.iter().map(|folder| folder.items.len()).sum();
+    let unloaded = folders.iter().filter(|folder| !folder.loaded).count();
+    writeln!(
+        out,
+        "{} folders, {items} items, {unloaded} not loaded",
+        folders.len()
+    )
 }
 
 /// The environment's readout, a field a line.

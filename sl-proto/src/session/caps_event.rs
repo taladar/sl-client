@@ -17,17 +17,18 @@
 //! exhaustive — so a new tag cannot be added without the handler being told.
 
 use super::{
-    AVATAR_PICKER_SEARCH_TAG, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
-    CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM,
-    CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
-    CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
-    CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
+    AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_SEARCH_TAG,
+    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
+    CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
+    CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA,
+    CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
+    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
     CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG,
 };
@@ -70,6 +71,10 @@ pub(crate) enum CapsEvent {
     InventoryApiV3,
     /// The reply to an AIS3 operation on the Library tree.
     LibraryApiV3,
+    /// The reply to an AIS3 *fetch* of a folder of the agent's tree.
+    Ais3FetchInventory,
+    /// The reply to an AIS3 *fetch* of a folder of the Library tree.
+    Ais3FetchLibrary,
     /// The folder a `CreateInventoryCategory` POST created.
     CreateInventoryCategory,
     /// The agent's group memberships.
@@ -192,6 +197,8 @@ impl CapsEvent {
             "BulkUpdateInventory" => Self::BulkUpdateInventory,
             CAP_INVENTORY_API_V3 => Self::InventoryApiV3,
             CAP_LIBRARY_API_V3 => Self::LibraryApiV3,
+            AIS3_FETCH_INVENTORY_TAG => Self::Ais3FetchInventory,
+            AIS3_FETCH_LIBRARY_TAG => Self::Ais3FetchLibrary,
             CAP_CREATE_INVENTORY_CATEGORY => Self::CreateInventoryCategory,
             "AgentGroupDataUpdate" => Self::AgentGroupDataUpdate,
             CAP_GROUP_MEMBER_DATA => Self::GroupMemberData,
@@ -252,8 +259,8 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
 
     use crate::session::{
-        AVATAR_PICKER_SEARCH_TAG, CAP_FETCH_LIBRARY, CAP_LIBRARY_API_V3,
-        CHAT_SESSION_FETCH_HISTORY_TAG,
+        AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_SEARCH_TAG,
+        CAP_FETCH_LIBRARY, CAP_LIBRARY_API_V3, CHAT_SESSION_FETCH_HISTORY_TAG,
     };
 
     /// The three tag shapes the space is made of all resolve: a bare
@@ -291,6 +298,25 @@ mod test {
         assert_ne!(
             CapsEvent::from_tag(CAP_FETCH_LIBRARY),
             CapsEvent::from_tag("FetchInventoryDescendents2")
+        );
+    }
+
+    /// An AIS3 fetch reply is its own event, not the capability's mutation
+    /// reply: only a fetch lists a folder completely, so only a fetch may mark
+    /// it loaded.
+    #[test]
+    fn an_ais3_fetch_is_not_an_ais3_mutation() {
+        assert_eq!(
+            CapsEvent::from_tag(AIS3_FETCH_INVENTORY_TAG),
+            Some(CapsEvent::Ais3FetchInventory)
+        );
+        assert_eq!(
+            CapsEvent::from_tag(AIS3_FETCH_LIBRARY_TAG),
+            Some(CapsEvent::Ais3FetchLibrary)
+        );
+        assert_ne!(
+            CapsEvent::from_tag(AIS3_FETCH_LIBRARY_TAG),
+            CapsEvent::from_tag(CAP_LIBRARY_API_V3)
         );
     }
 
