@@ -12,7 +12,8 @@
 //! its keyword name first, then by positional index, resolves any leading
 //! `$placeholder` through the [`ReplContext`], and finally parses the literal.
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
 use sl_proto::{
@@ -33,6 +34,20 @@ pub struct Args {
     positional: Vec<String>,
     /// The `key=value` keyword arguments.
     keyword: BTreeMap<String, String>,
+    /// Which arguments a build function has read, so whatever it did not read
+    /// — a misspelled key, a surplus positional — can be refused instead of
+    /// silently ignored ([`Args::unread`]). Interior-mutable because the typed
+    /// accessors take `&self`.
+    read: RefCell<ReadArgs>,
+}
+
+/// The arguments of one [`Args`] that a build function has looked up.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ReadArgs {
+    /// The keyword keys read.
+    keys: BTreeSet<String>,
+    /// The positional indices read.
+    positions: BTreeSet<usize>,
 }
 
 /// One accumulator state while tokenizing a line.
@@ -252,6 +267,7 @@ impl Args {
             command: String::new(),
             positional,
             keyword,
+            read: RefCell::default(),
         })
     }
 
@@ -262,24 +278,62 @@ impl Args {
         self
     }
 
-    /// The keyword arguments.
+    /// The keyword arguments, for the tokenizer tests.
+    #[cfg(test)]
     #[must_use]
     pub(crate) const fn keyword(&self) -> &BTreeMap<String, String> {
         &self.keyword
     }
 
+    /// Whether any keyword argument other than those named in `keys` was given.
+    ///
+    /// For a build function that picks a shape by which keys are present; it
+    /// does not count as reading any of them.
+    #[must_use]
+    pub(crate) fn has_keyword_other_than(&self, keys: &[&str]) -> bool {
+        self.keyword.keys().any(|key| !keys.contains(&key.as_str()))
+    }
+
     /// The raw (unresolved) value for `field`, preferring the keyword argument
-    /// then the positional slot `pos`.
+    /// then the positional slot `pos`, and noting whichever one it used as
+    /// read.
     ///
     /// A `pos` at or above [`KEYWORD_ONLY`] marks a field with no positional
     /// spelling at all, so the positional lookup is skipped outright rather
     /// than merely being out of practical reach.
     fn raw(&self, field: &str, pos: usize) -> Option<&str> {
-        self.keyword.get(field).map(String::as_str).or_else(|| {
-            (pos < KEYWORD_ONLY)
-                .then(|| self.positional.get(pos).map(String::as_str))
-                .flatten()
-        })
+        if let Some(value) = self.keyword.get(field) {
+            let _new = self.read.borrow_mut().keys.insert(field.to_owned());
+            return Some(value.as_str());
+        }
+        if pos >= KEYWORD_ONLY {
+            return None;
+        }
+        let value = self.positional.get(pos)?;
+        let _new = self.read.borrow_mut().positions.insert(pos);
+        Some(value.as_str())
+    }
+
+    /// The arguments no accessor has read, rendered as typed (`key=value`, or
+    /// the bare positional token): what a build function ignored. A command
+    /// that built without reading them would have done something other than
+    /// what the line asked for — a misspelled `kind=` sending the default kind
+    /// — so [`Registry::build`](crate::registry::Registry::build) refuses them.
+    #[must_use]
+    pub(crate) fn unread(&self) -> Vec<String> {
+        let read = self.read.borrow();
+        let keys = self
+            .keyword
+            .iter()
+            .filter(|(key, _value)| !read.keys.contains(key.as_str()))
+            .map(|(key, value)| format!("{key}={value}"));
+        let positions = self
+            .positional
+            .iter()
+            .enumerate()
+            .filter(|(index, _value)| !read.positions.contains(index))
+            .map(|(_index, value)| value.clone());
+        positions.chain(keys).collect()
     }
 
     /// Build a [`ReplError::MissingArg`] for `field`.
@@ -597,6 +651,10 @@ impl Args {
         from_pos: usize,
     ) -> Result<Vec<Uuid>, ReplError> {
         let mut ids = Vec::new();
+        self.read
+            .borrow_mut()
+            .positions
+            .extend(from_pos..self.positional.len());
         for raw in self.positional.iter().skip(from_pos) {
             let value = resolve(ctx, raw)?;
             let id = Uuid::parse_str(&value)

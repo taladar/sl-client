@@ -67,7 +67,10 @@ one registry entry per `Command` variant, named with the registry spelling
 things the client can send.
 
 - **Positional and keyword tokens** — arguments are either positional or
-  `key=value`. Strings that contain spaces are double-quoted.
+  `key=value`. Strings that contain spaces are double-quoted. An argument the
+  command does not read — a misspelled key, or more positionals than it takes —
+  is refused with an error naming it, never silently ignored: ignoring
+  `knd=payobject` would send the default kind, a gift.
 - **Vectors and rotations** — `<x,y,z>` for an `LLVector3`, `<x,y,z,s>` for a
   quaternion.
 - **Byte blobs** — written as hex.

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 364 |
 | blocked | 100 |
 | in-progress | 20 |
-| bugs | 31 |
-| done | 1306 |
+| bugs | 30 |
+| done | 1307 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2004** |
@@ -1580,7 +1580,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (31)
+## bugs (30)
 
 ### protocol
 
@@ -1656,12 +1656,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-### repl
-
-- [`repl-unknown-keyword-arguments-ignored`](bugs/repl-unknown-keyword-arguments-ignored.md)
-  — sl-repl silently ignores unknown or misspelled key=value arguments
-
-## done (1306)
+## done (1307)
 
 ### protocol
 
@@ -4519,6 +4514,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-e2`](done/repl-e2-local-opensim-verification-both-runtimes.md) — Local
   OpenSim verification (both runtimes)
 - [`repl-e3`](done/repl-e3-live-aditi-run.md) — Live aditi run
+- [`repl-unknown-keyword-arguments-ignored`](done/repl-unknown-keyword-arguments-ignored.md)
+  — sl-repl silently ignores unknown or misspelled key=value arguments
 
 ### aditi
 

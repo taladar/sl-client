@@ -256,9 +256,12 @@ impl Registry {
     ///
     /// # Errors
     ///
-    /// Returns [`ReplError::UnknownCommand`] if the name is not registered, or
+    /// Returns [`ReplError::UnknownCommand`] if the name is not registered,
     /// whatever the command's build function returns when an argument is
-    /// missing, malformed, or an unresolvable placeholder.
+    /// missing, malformed, or an unresolvable placeholder, and
+    /// [`ReplError::UnreadArgs`] when the line gave an argument the build
+    /// function never read — a misspelled key or a surplus positional, which
+    /// would otherwise be silently ignored.
     pub fn build(
         &self,
         pending: &PendingCommand,
@@ -268,7 +271,15 @@ impl Registry {
             .spec(&pending.name)
             .ok_or_else(|| ReplError::UnknownCommand(pending.name.clone()))?;
         let args = pending.args.clone().with_command(spec.name);
-        (spec.build)(&args, ctx)
+        let command = (spec.build)(&args, ctx)?;
+        let unread = args.unread();
+        if !unread.is_empty() {
+            return Err(ReplError::UnreadArgs {
+                command: spec.name.to_owned(),
+                unread,
+            });
+        }
+        Ok(command)
     }
 }
 
@@ -5624,11 +5635,7 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "set_object_media",
             usage: "<object_id> [clear=N | home_url=<url> …]",
             build: |args, ctx| {
-                let faces = if args
-                    .keyword()
-                    .keys()
-                    .any(|key| key != "object_id" && key != "clear")
-                {
+                let faces = if args.has_keyword_other_than(&["object_id", "clear"]) {
                     vec![Some(build_media_entry(args, ctx)?)]
                 } else {
                     let count = args.parse_or::<u32>(ctx, "clear", 100, "u32", 0)?;
@@ -6399,6 +6406,76 @@ mod tests {
             );
             assert!(registry.spec(spec.name).is_some());
         }
+    }
+
+    /// The error a line with arguments its command never reads must give.
+    fn unread(command: &str, unread: &[&str]) -> Option<ReplError> {
+        Some(ReplError::UnreadArgs {
+            command: command.to_owned(),
+            unread: unread.iter().map(|arg| (*arg).to_owned()).collect(),
+        })
+    }
+
+    /// A misspelled keyword is refused, not ignored: `knd=` used to send the
+    /// default `kind`, a **gift**, instead of the payment the line asked for.
+    #[test]
+    fn a_misspelled_keyword_is_refused() {
+        let dest = "11111111-1111-1111-1111-111111111111";
+        assert_eq!(
+            build(&format!("send_money_transfer {dest} 10 knd=payobject")).err(),
+            unread("send_money_transfer", &["knd=payobject"])
+        );
+        assert!(matches!(
+            build(&format!("send_money_transfer {dest} 10 kind=payobject")),
+            Ok(Command::SendMoneyTransfer {
+                kind: sl_proto::MoneyTransactionType::PayObject,
+                ..
+            })
+        ));
+    }
+
+    /// A key that picks a branch it then does not read is refused too:
+    /// `cleared=3` used to take the "any other key" branch and set a default
+    /// media entry on face 0 instead of clearing three faces.
+    #[test]
+    fn a_keyword_no_branch_reads_is_refused() {
+        let object = "11111111-1111-1111-1111-111111111111";
+        assert_eq!(
+            build(&format!("set_object_media {object} cleared=3")).err(),
+            unread("set_object_media", &["cleared=3"])
+        );
+        assert!(matches!(
+            build(&format!("set_object_media {object} clear=3")),
+            Ok(Command::SetObjectMedia { faces, .. }) if faces == vec![None, None, None]
+        ));
+    }
+
+    /// More positionals than a command takes are refused, named as typed.
+    #[test]
+    fn a_surplus_positional_is_refused() {
+        assert_eq!(
+            build("request_parcel_properties 0 0 256 256 0 false extra").err(),
+            unread("request_parcel_properties", &["extra"])
+        );
+        assert_eq!(
+            build("request_region_info now").err(),
+            unread("request_region_info", &["now"])
+        );
+    }
+
+    /// A variadic positional list reads every token from its start on, so a
+    /// long list is not mistaken for surplus.
+    #[test]
+    fn a_variadic_list_reads_every_token() {
+        let ids = [
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "33333333-3333-3333-3333-333333333333",
+        ];
+        assert!(matches!(
+            build(&format!("request_avatar_names {}", ids.join(" "))),
+            Ok(Command::RequestAvatarNames(names)) if names.len() == 3
+        ));
     }
 
     #[test]

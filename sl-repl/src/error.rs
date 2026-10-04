@@ -29,6 +29,17 @@ pub enum ReplError {
         /// A human description of the type that was expected.
         expected: String,
     },
+    /// The line gave arguments the command does not read — a misspelled or
+    /// unknown `key=value`, or more positionals than it takes. Refused rather
+    /// than ignored, since ignoring one means doing something other than what
+    /// the line asked for.
+    #[error("command `{command}` does not take argument(s): {}", .unread.join(" "))]
+    UnreadArgs {
+        /// The command the arguments were given to.
+        command: String,
+        /// The arguments it did not read, as typed.
+        unread: Vec<String>,
+    },
     /// A `$placeholder` token could not be resolved against the context.
     #[error("could not resolve placeholder `{0}`")]
     Unresolved(String),

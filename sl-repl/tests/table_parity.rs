@@ -313,12 +313,30 @@ mod test {
     fn sample_line(name: &str, usage: &str) -> String {
         let mut line = name.to_owned();
         let mut rest = usage;
+        // How many `[` are open where `rest` starts: a `<…>` inside any of them
+        // (`[flexi_force=<v>]`, `[<name>]`) is optional, and the registry now
+        // refuses an argument its build function does not read.
+        let mut depth = 0_usize;
         while let Some((before, open)) = rest.split_once('<') {
             let Some(close) = open.find('>') else { break };
+            for c in before.chars() {
+                match c {
+                    '[' => depth = depth.saturating_add(1),
+                    ']' => depth = depth.saturating_sub(1),
+                    _other => {}
+                }
+            }
             let token = open.get(..close).unwrap_or_default();
-            // Only a `<…>` that does not sit inside a `[…]` is required.
-            if !before.ends_with('[') && !before.contains("=[") {
+            if depth == 0 {
                 line.push(' ');
+                // A `key=<…>` field is keyword-only: spell it as one.
+                if let Some(head) = before.strip_suffix('=') {
+                    let start = head
+                        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                        .map_or(0, |at| at.saturating_add(1));
+                    line.push_str(head.get(start..).unwrap_or_default());
+                    line.push('=');
+                }
                 line.push_str(&sample_value(token));
             }
             rest = open.get(close.saturating_add(1)..).unwrap_or_default();
