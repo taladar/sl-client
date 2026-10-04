@@ -91,3 +91,11 @@ Still to do (each needs [[viewer-lsl-editor-widget]] or its own task):
   itself. (The read-only block is already monospace.)
 - **No experience is set on a task upload** (`experience: None`), and the
   Firestorm preprocessor stays out of v1 as planned.
+
+## Capability (triage 2026-10-04)
+
+A script's experience is read over `GetMetadata`:
+[[protocol-cap-get-metadata]].
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

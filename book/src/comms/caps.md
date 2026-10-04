@@ -47,6 +47,8 @@ region yields a new seed URL and therefore a fresh capability map.
 Which of them each grid actually grants — Second Life refuses two of the
 client's list, a stock OpenSim thirty-three — is measured in
 [Grid Behaviour → Capabilities](../gridspec/capabilities.md).
+The capabilities the reference viewer requests beyond this client's, with
+their shapes, are in the [Capability Reference](caps-reference.md).
 
 ## What capabilities exist
 

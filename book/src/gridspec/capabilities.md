@@ -59,9 +59,10 @@ Of the 51 names Firestorm requests that our list does not, **aditi grants 48**
 `SimConsoleAsync`, `UntrustedSimulatorMessage`, `UpdateAgentInformation`,
 `UpdateAgentLanguage` and `UpdateGestureTaskInventory`.
 
-Each of those is a capability path a viewer here does not take yet; the grids
-that offer one prefer it to the UDP message it replaces. Neither grid granted
-a name nobody asked for.
+What each of them does, its request and response shapes, whether it is current
+or deprecated, and which roadmap task adopts it are in the
+[Capability Reference](../comms/caps-reference.md). Neither grid granted a name
+nobody asked for.
 
 ## Neighbour regions
 

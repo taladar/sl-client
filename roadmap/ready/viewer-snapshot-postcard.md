@@ -35,3 +35,14 @@ Reference (Firestorm, read-only): `panel_snapshot_postcard.xml`,
 
 Builds on: [[viewer-snapshot-floater]] (the floater and the captured image),
 [[api-g16]] (`Command::SendPostcard`).
+
+## Capability (triage 2026-10-04)
+
+Firestorm sends postcards **only** over `SendPostcard` (Second Life): the
+two-step upload with `{pos-global, to, name, subject, msg}` (plus `from` off
+Second Life), the JPEG being the second step. It never sends the UDP
+`SendPostcard` our client implements, and OpenSim ignores that message. Use the
+capability; without it, say "postcards are not available in this region".
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

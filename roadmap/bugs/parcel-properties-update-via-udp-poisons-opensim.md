@@ -40,3 +40,12 @@ Fix:
 - Wire it through both runtimes. Add a fake-grid or loopback test that a
   parcel edit on a region granting the capability goes out as the CAP
   POST, not UDP.
+
+## Capability (triage 2026-10-04)
+
+Firestorm never hits this on OpenSim because it uses the
+`ParcelPropertiesUpdate` capability, which both grids grant:
+[[protocol-cap-parcel-properties-update]].
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

@@ -41,3 +41,10 @@ affordance), **Dump Region Object Cache**, **Record Stats to File**
 viewer-statistics-floater), and **Dump Scripted Camera** (print the
 active follow-cam parameters; refs
 viewer-scripted-followcam-llsetcameraparams).
+
+## Capability (triage 2026-10-04)
+
+The interest-list toggle needs [[protocol-cap-interest-list]].
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

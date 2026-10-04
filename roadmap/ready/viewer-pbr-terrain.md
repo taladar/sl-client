@@ -40,3 +40,12 @@ The parity audit adds the Develop ▸ Terrain dev tools
 Paintmap** — the local dev preview of PBR terrain painting, which this
 task does not mention — and **Rebuild Terrain** (a trivial
 re-tessellate that folds into the same surface).
+
+## Capability (triage 2026-10-04)
+
+Region PBR terrain transforms ride `ModifyRegion` (Second Life only): GET on
+every region handshake → `{success, overrides:[4 GLTF material overrides]}`;
+POST `{overrides:[4]}` from the terrain tab (experimental in Firestorm).
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

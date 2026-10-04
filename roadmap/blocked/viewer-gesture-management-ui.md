@@ -21,3 +21,14 @@ Reference (Firestorm, read-only): `llfloatergesture`, `llpreviewgesture`,
 `llgesturemgr`.
 
 Builds on: [[viewer-gesture-runtime]].
+
+## Capability (triage 2026-10-04)
+
+Saving a gesture held in an object uses `UpdateGestureTaskInventory` (both
+grids): the two-step upload with `{task_id, item_id}`, used only when
+`UpdateGestureAgentInventory` is granted too; otherwise the legacy asset store
+plus `UpdateTaskInventory`. Our client already dispatches it — only the name is
+missing from `REQUESTED_CAPABILITIES`.
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

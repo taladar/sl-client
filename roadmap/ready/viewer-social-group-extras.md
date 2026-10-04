@@ -39,3 +39,11 @@ Scope additions from the parity audit: the groups-list row extras from
 menu_people_groups.xml — **Pin/Unpin group** (Firestorm's list pinning,
 keeping chosen groups at the top) and **Copy group SLurl to clipboard**.
 Activate / Info / Chat / Leave are already done (viewer-social-groups).
+
+## Capability (triage 2026-10-04)
+
+Group bans ride `GroupAPIv1` (Second Life only); the protocol half is
+[[protocol-cap-group-bans]].
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

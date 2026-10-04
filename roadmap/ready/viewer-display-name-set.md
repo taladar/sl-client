@@ -21,3 +21,14 @@ Reference (Firestorm, read-only): `llfloaterdisplayname`,
 `llavatarnamecache`.
 
 Builds on: the `api-g3` display-names CAPS pairing and the name cache.
+
+## Capability (triage 2026-10-04)
+
+`SetDisplayName` (Second Life only): POST `{display_name:[old, new]}` with an
+`Accept-Language` header; the result arrives as the event-queue
+`SetDisplayNameReply` `{status, reason, content}`, which our client already
+decodes. On 409 refetch the name. No capability → the feature is unavailable
+(OpenSim has no display names).
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

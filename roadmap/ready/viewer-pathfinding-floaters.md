@@ -30,3 +30,20 @@ Reference (Firestorm, read-only): `llfloaterpathfindingconsole`,
 `llpathfindingmanager`.
 
 Builds on: `missing-eq-batch-1` events + the caps layer.
+
+## Capability (triage 2026-10-04)
+
+The full capability set (all Second Life only): `NavMeshGenerationStatus` (GET
+status `{region_id, status, version}`; POST `{command:"rebuild"}` rebakes),
+`AgentState` (GET `{can_modify_navmesh}`, gating the rebake button),
+`RegionObjects` (GET the linkset list keyed by object id),
+`ObjectNavMeshProperties` (PUT changed linkset fields: `phantom`,
+`navmesh_category` 0/1/2, `A`–`D`), `TerrainNavMeshProperties` (GET / PUT the
+terrain entry; Firestorm refuses linkset edits without it) and
+`CharacterProperties` (GET characters with `cpu_time`, capsule size). The
+presence of `RetrieveNavMeshSrc` is Firestorm's "pathfinding enabled" test;
+drawing the navmesh is [[viewer-pathfinding-navmesh-view]]. The event-queue
+`NavMeshStatusUpdate` / `AgentStateUpdate` are already decoded.
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

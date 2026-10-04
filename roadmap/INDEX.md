@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 362 |
-| blocked | 100 |
+| ready | 376 |
+| blocked | 102 |
 | in-progress | 20 |
 | bugs | 30 |
-| done | 1313 |
+| done | 1314 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2008** |
+| **total** | **2025** |
 
 ## ideas (136)
 
@@ -352,7 +352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (362)
+## ready (376)
 
 ### protocol
 
@@ -366,11 +366,30 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Re-exports and derived login state reach only the bevy runtime
 - [`protocol-audit-sim-session-stores`](ready/protocol-audit-sim-session-stores.md)
   — SimSession's 54 fields mix the driver's serving stores with the circuit
+- [`protocol-cap-agent-profile`](ready/protocol-cap-agent-profile.md) — Read and
+  write profiles over the AgentProfile capability
+- [`protocol-cap-dispatch-region-info`](ready/protocol-cap-dispatch-region-info.md)
+  — Write region settings over the DispatchRegionInfo capability
+- [`protocol-cap-estate-access`](ready/protocol-cap-estate-access.md) — Read the
+  estate access lists over the EstateAccess capability
+- [`protocol-cap-get-metadata`](ready/protocol-cap-get-metadata.md) — Read a
+  script's experience over GetMetadata
+- [`protocol-cap-group-bans`](ready/protocol-cap-group-bans.md) — Group ban
+  lists over the GroupAPIv1 capability
+- [`protocol-cap-home-location`](ready/protocol-cap-home-location.md) — Set home
+  over the HomeLocation capability
+- [`protocol-cap-interest-list`](ready/protocol-cap-interest-list.md) — Switch
+  the interest list mode over the InterestList capability
+- [`protocol-cap-offline-friendship-answers`](ready/protocol-cap-offline-friendship-answers.md)
+  — Answer offline friendship offers over AcceptFriendship / DeclineFriendship
+- [`protocol-cap-parcel-properties-update`](ready/protocol-cap-parcel-properties-update.md)
+  — Edit parcels over the ParcelPropertiesUpdate capability
+- [`protocol-cap-product-info`](ready/protocol-cap-product-info.md) — Land type
+  names over ProductInfoRequest
+- [`protocol-cap-update-agent-information`](ready/protocol-cap-update-agent-information.md)
+  — Set the maturity preference over UpdateAgentInformation
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
-- [`protocol-reference-capabilities`](ready/protocol-reference-capabilities.md)
-  — Request and use the capabilities the reference viewer asks for and the grids
-  grant
 - [`protocol-request-task-inventory-cap`](ready/protocol-request-task-inventory-cap.md)
   — Fetch task inventory over the RequestTaskInventory capability
 - [`protocol-sim-lsl-syntax-document`](ready/protocol-sim-lsl-syntax-document.md)
@@ -387,6 +406,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
   — About Land — object return, editable autoreturn & small option gaps
+- [`viewer-about-release-notes`](ready/viewer-about-release-notes.md) — Link the
+  simulator's release notes from the About floater
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
   — Ingest the account hover height (AgentPreferences) into the plant
 - [`viewer-ambient-wind-sound`](ready/viewer-ambient-wind-sound.md) — Ambient
@@ -521,6 +542,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the chat display windows
 - [`viewer-chat-transcript-style-options`](ready/viewer-chat-transcript-style-options.md)
   — Chat / IM transcript display and style options
+- [`viewer-classified-click-stats`](ready/viewer-classified-click-stats.md) —
+  Show click statistics on one's own classifieds
 - [`viewer-collision-messages-chat`](ready/viewer-collision-messages-chat.md) —
   Collision events to nearby chat
 - [`viewer-color-picker-face-pipette`](ready/viewer-color-picker-face-pipette.md)
@@ -698,6 +721,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-editor-widget`](ready/viewer-lsl-editor-widget.md) — LSL editor
   widget — a parley PlainEditor fork with coloured ranges (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))
+- [`viewer-material-save-to-object`](ready/viewer-material-save-to-object.md) —
+  Save a PBR material into an object's inventory
 - [`viewer-media-playback-policies`](ready/viewer-media-playback-policies.md) —
   Media playback policies — URL filter, perms, first-click, rolloff
 - [`viewer-menu-advanced-shortcuts`](ready/viewer-menu-advanced-shortcuts.md) —
@@ -973,6 +998,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-about-floater` (done))
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
+- [`viewer-telemetry-opt-in`](ready/viewer-telemetry-opt-in.md) — Opt-in viewer
+  telemetry, saying exactly what is sent
 - [`viewer-terrain-land-cache-on-disk`](ready/viewer-terrain-land-cache-on-disk.md)
   — Persist the land-height cache to disk (ground floor available at login)
 - [`viewer-text-field-context-menu`](ready/viewer-text-field-context-menu.md) —
@@ -1195,7 +1222,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-world-map`](ready/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 
-## blocked (100)
+## blocked (102)
 
 ### protocol
 
@@ -1257,11 +1284,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-quickjump-movelock`](blocked/viewer-movement-quickjump-movelock.md)
   — Movelock and Quickjump movement toggles (blocked by
   `viewer-fs-bridge-protocol`)
+- [`viewer-nearby-voice-moderation`](blocked/viewer-nearby-voice-moderation.md)
+  — Moderate nearby (spatial) voice (blocked by `viewer-voice-audio`)
 - [`viewer-outfit-layer-reorder`](blocked/viewer-outfit-layer-reorder.md) —
   Clothing layer re-ordering UI (and token read-back) (blocked by
   `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync.md) — Voice lip-sync
   (blocked by `viewer-voice-audio`)
+- [`viewer-pathfinding-navmesh-view`](blocked/viewer-pathfinding-navmesh-view.md)
+  — Render and test the region's navmesh (blocked by
+  `viewer-pathfinding-floaters`)
 - [`viewer-projector-lights-spot-shadows`](blocked/viewer-projector-lights-spot-shadows.md)
   — Projector spot-shadow tier (blocked by `viewer-projector-lights-textured`)
 - [`viewer-render-hud-and-actor-axes`](blocked/viewer-render-hud-and-actor-axes.md)
@@ -1652,7 +1684,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1313)
+## done (1314)
 
 ### protocol
 
@@ -1850,6 +1882,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — max-agent-groups is never requested at login but is gated on the option
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
+- [`protocol-reference-capabilities`](done/protocol-reference-capabilities.md) —
+  Request and use the capabilities the reference viewer asks for and the grids
+  grant
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —
   Server-side agent-communication caps (blocked by `protocol-sim-caps-framework`
   (done))

@@ -35,3 +35,13 @@ the two-step upload).
 
 Builds on: [[viewer-mesh-encoder]] (the raw LLMesh assets) and the `protocol-23`
 upload caps.
+
+## Capability (triage 2026-10-04)
+
+Before offering Upload, Firestorm GETs `MeshUploadFlag` (both grids) →
+`{mesh_upload_status:"valid"|…}`; anything but `valid` (or empty) disables
+upload with a notice, and a missing capability is treated as allowed. OpenSim
+always answers `valid` when mesh upload is enabled.
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

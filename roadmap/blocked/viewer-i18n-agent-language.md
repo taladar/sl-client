@@ -16,3 +16,12 @@ the agent-language update, and re-send it when the locale changes at runtime.
 
 Reference (Firestorm, read-only): `llagentlanguage` (the `UpdateAgentLanguage`
 cap and the "share my language with objects" setting).
+
+## Capability (triage 2026-10-04)
+
+`UpdateAgentLanguage` is granted by both grids: POST `{language,
+language_is_public}` at login and whenever the setting changes; the reply is
+ignored.
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

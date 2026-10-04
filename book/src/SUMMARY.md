@@ -10,6 +10,7 @@
 - [LLUDP Transport](comms/lludp-transport.md)
 - [Circuits](comms/circuits.md)
 - [CAPS & the Event Queue](comms/caps.md)
+  - [Capability Reference](comms/caps-reference.md)
 - [LLSD](comms/llsd.md)
 - [Messages & the Template](comms/messages.md)
 - [Generic Messages](comms/generic-messages.md)

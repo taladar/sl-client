@@ -26,3 +26,13 @@ Reference (Firestorm, read-only): `llfloaterregionrestart`,
 
 Deps: [[viewer-region-options-general]] (floater placement + estate
 gating).
+
+## Capability (triage 2026-10-04)
+
+`RegionSchedule` (Second Life only): GET → `{restart:{type:"W"|"D",
+days:"MTWRFSU subset", time:<seconds after midnight>}}` (no `restart` = none);
+POST the same shape, empty `days` with type `W` resetting it. Firestorm shows
+the button only with the capability.
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

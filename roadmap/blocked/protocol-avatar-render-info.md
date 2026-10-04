@@ -22,3 +22,16 @@ Implement the behaviour the discovery task measured and the book's
 `sl-fake-grid/src/imitates.rs` for every divergence), and hold it to the
 measurement with the discovery task's conformance cases run against
 `FakeSl` and `FakeOpensim`. See `roadmap/context/gridspec.md`.
+
+## Capability (triage 2026-10-04)
+
+`AvatarRenderInfo` (Second Life only) is two halves. The GET (every 15 s)
+returns `{agents:{<id>:{weight}}, reportinglimit, overlimit}` — the
+server-reported complexity and the "N residents render you as a jellydoll"
+notice; that half is a feature. The POST (every 60 s) reports
+`{agents:{<id>:{weight, tooComplex}}}` for the avatars this viewer sees; it is
+what other residents' notices are built from, so it is sent like the GET, not
+behind [[viewer-telemetry-opt-in]].
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

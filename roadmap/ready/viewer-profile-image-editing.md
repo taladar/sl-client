@@ -24,3 +24,15 @@ texture picker ([[viewer-ui-texture-picker]]) exists:
 
 All four update paths already carry the id — only the picker wiring is
 missing.
+
+## Capability (triage 2026-10-04)
+
+Second Life grants `UploadAgentProfileImage`: a two-step upload — POST
+`{profile-image-asset:"sl_image_id"|"fl_image_id"}` → `{uploader}`, then POST
+the JPEG2000 bytes (`application/jp2`) → `{state:"complete", new_asset}`.
+Firestorm enables "upload a new picture" only with the capability; picking an
+existing texture is the route on OpenSim. The profile write itself is
+[[protocol-cap-agent-profile]].
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

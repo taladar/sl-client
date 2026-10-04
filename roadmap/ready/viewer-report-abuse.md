@@ -27,3 +27,13 @@ Reference (Firestorm, read-only): `llfloaterreporter`,
 `floater_report_abuse.xml`.
 
 Builds on: [[api-df1]] and the screenshot capture path (`screenshot.rs`).
+
+## Capability (triage 2026-10-04)
+
+`AbuseCategories` (Second Life only): GET `<cap>[?lc=<language>]` →
+`{categories:[{category, description_localized}]}`, replacing the static
+category list when the floater opens. The report itself already has a UDP
+fallback when neither report capability is granted.
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

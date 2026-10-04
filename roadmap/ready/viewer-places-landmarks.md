@@ -52,3 +52,10 @@ the from-a-place entry point rides here). Also the teleport-history gear
 details (menu_teleport_history_gear.xml family): **Clear Teleport
 History**, the timezone choice (UTC / SLT / Local) for history entries,
 and the show position / date column toggles.
+
+## Capability (triage 2026-10-04)
+
+"Set Home to Here" should go over [[protocol-cap-home-location]].
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

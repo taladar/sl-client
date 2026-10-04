@@ -27,3 +27,11 @@ Reference (Firestorm, read-only): `fsareasearch`,
 `floater_fs_area_search.xml`.
 
 Builds on: the scene mirror + `protocol-36` object properties.
+
+## Capability (triage 2026-10-04)
+
+Firestorm switches the interest list to `360` while area search is open, so
+objects outside the view frustum are streamed: [[protocol-cap-interest-list]].
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

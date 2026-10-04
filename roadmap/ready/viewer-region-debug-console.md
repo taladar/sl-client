@@ -26,3 +26,12 @@ Reference (Firestorm, read-only): `llfloaterregiondebugconsole`,
 `floater_region_debug_console.xml`.
 
 Builds on: the CAPS + event-queue layer (`caps.rs`).
+
+## Capability (triage 2026-10-04)
+
+`SimConsoleAsync` (both grids; estate managers on OpenSim): POST the command
+line as an LLSD string; the output arrives as the event-queue
+`SimConsoleResponse`, which our client already decodes.
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

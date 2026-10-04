@@ -44,3 +44,13 @@ Add the god-only **land auction** floater (`llfloaterauction.cpp`,
 Sale…" button: snapshot the parcel and put it up for Linden auction.
 God-gated admin surface; the god-tools region tabs already covered by
 this task are its natural home.
+
+## Capability (triage 2026-10-04)
+
+On Second Life Firestorm sends god kick / freeze / unfreeze (`GodKickUser`)
+over `UntrustedSimulatorMessage`: POST `{message:"GodKickUser",
+body:{UserInfo:[{GodID, GodSessionID, AgentID, KickFlags, Reason}]}}`. OpenSim
+accepts both that and the UDP message.
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.

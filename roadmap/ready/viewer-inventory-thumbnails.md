@@ -27,3 +27,14 @@ Builds on: AIS3 inventory mutation (`protocol-30` / `protocol-61`) and the
 inventory gallery.
 
 Deps: [[viewer-ui-texture-picker]] (image selection).
+
+## Capability (triage 2026-10-04)
+
+Uploading a thumbnail uses `InventoryThumbnailUpload` (Second Life only): the
+two-step upload with `{item_id}`, `{category_id}` or `{item_id, task_id}`, then
+the JPEG2000 image (64–256 px) → `{state:"complete", new_asset}`. A texture
+already small enough skips the upload and sets `thumbnail:{asset_id}` over
+AIS3.
+
+Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
+grants it: `book/src/gridspec/capabilities.md`.
