@@ -5,6 +5,7 @@
 //! avatar's `mfa_command`, and spawns the client run loop. [`TestContext`] hands
 //! the live session(s) and a [`Metrics`] collector to the test body.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -151,6 +152,14 @@ pub struct Session {
     /// `login-options` case changes it between logins with
     /// [`Session::relogin_with_options`].
     options: Option<Vec<String>>,
+    /// The capability names the seed requests ask for, or `None` for the
+    /// client's default list. Retained like [`options`](Self::options); the
+    /// `seed-capabilities` case changes it with
+    /// [`Session::relogin_requesting_capabilities`].
+    capabilities: Option<Vec<String>>,
+    /// Each neighbour region's capability map as its seed answered, keyed by
+    /// the neighbour's simulator address.
+    neighbour_caps: Arc<Mutex<NeighbourCapabilityMaps>>,
     /// Whether the run loop is currently live. A [`Session::disconnect`] tears it
     /// down (the avatar goes offline on the grid) without discarding the identity
     /// needed to [`Session::relogin`].
@@ -170,6 +179,31 @@ impl Session {
             Ok(caps) => caps.get(name).cloned(),
             Err(poisoned) => poisoned.into_inner().get(name).cloned(),
         }
+    }
+
+    /// The names of every capability the current region granted.
+    #[must_use]
+    pub fn capability_names(&self) -> std::collections::BTreeSet<String> {
+        let caps = self
+            .caps
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        caps.keys().cloned().collect()
+    }
+
+    /// The names of every capability each neighbour region granted, by the
+    /// neighbour's simulator address — empty until a neighbour's seed answers.
+    #[must_use]
+    pub fn neighbour_capability_names(
+        &self,
+    ) -> Vec<(SocketAddr, std::collections::BTreeSet<String>)> {
+        let maps = self
+            .neighbour_caps
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        maps.iter()
+            .map(|(sim, map)| (*sim, map.keys().cloned().collect()))
+            .collect()
     }
 
     /// The agent's own id, if login reported one.
@@ -445,7 +479,23 @@ impl Session {
     /// cooldown stamp cannot be written.
     pub async fn relogin(&mut self) -> Result<(), TestFailure> {
         let options = self.options.clone();
-        self.relogin_with_options(options).await
+        let capabilities = self.capabilities.clone();
+        self.relogin_with(options, capabilities).await
+    }
+
+    /// [`Session::relogin`], asking every seed for `capabilities` (or the
+    /// client's default list for `None`) — how a case surveys which
+    /// capabilities a grid grants.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::relogin`].
+    pub async fn relogin_requesting_capabilities(
+        &mut self,
+        capabilities: Option<Vec<String>>,
+    ) -> Result<(), TestFailure> {
+        let options = self.options.clone();
+        self.relogin_with(options, capabilities).await
     }
 
     /// [`Session::relogin`], asking for `options` (or the client's default list
@@ -458,6 +508,16 @@ impl Session {
     pub async fn relogin_with_options(
         &mut self,
         options: Option<Vec<String>>,
+    ) -> Result<(), TestFailure> {
+        let capabilities = self.capabilities.clone();
+        self.relogin_with(options, capabilities).await
+    }
+
+    /// The relogin behind the three public forms, with both overrides.
+    async fn relogin_with(
+        &mut self,
+        options: Option<Vec<String>>,
+        capabilities: Option<Vec<String>>,
     ) -> Result<(), TestFailure> {
         let grid = self.grid;
         let avatar = self.avatar.clone();
@@ -481,6 +541,7 @@ impl Session {
             force,
             cache_dir,
             options,
+            capabilities,
         })
         .await?;
         Ok(())
@@ -525,6 +586,9 @@ pub struct LoginSpec<'a> {
     /// The login request's `options` list, or `None` for the client's default
     /// (what every case but `login-options` passes).
     pub options: Option<Vec<String>>,
+    /// The capability names the seed requests ask for, or `None` for the
+    /// client's default (what every case but `seed-capabilities` passes).
+    pub capabilities: Option<Vec<String>>,
 }
 
 /// Log in as the spec says, answering any MFA challenge, and spawn the run
@@ -563,6 +627,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         force,
         cache_dir,
         options,
+        capabilities,
     } = spec;
     // The avatar's own URI wins; otherwise the grid's fixed address. The fake
     // grid has none — it binds an ephemeral port, and the credentials
@@ -665,6 +730,23 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
     // Capture the region capability map so a case can drive a TextureStore off
     // the live `GetTexture` cap. The reporter fires at startup and each region
     // change; a drain keeps the shared map current.
+    if let Some(capabilities) = capabilities.as_ref() {
+        client.set_requested_capabilities(capabilities.iter().cloned());
+    }
+    // The neighbours' capability maps, as each seed answers.
+    let neighbour_caps = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let (neighbour_tx, mut neighbour_rx) =
+        mpsc::channel::<(SocketAddr, std::collections::HashMap<String, String>)>(8);
+    client.set_neighbour_caps_reporter(neighbour_tx);
+    let neighbour_sink = Arc::clone(&neighbour_caps);
+    let _neighbour_drain = tokio::spawn(async move {
+        while let Some((sim, map)) = neighbour_rx.recv().await {
+            neighbour_sink
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(sim, map);
+        }
+    });
     let caps = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let (caps_tx, mut caps_rx) = mpsc::channel::<std::collections::HashMap<String, String>>(4);
     client.set_caps_reporter(caps_tx);
@@ -736,6 +818,8 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         force,
         cache_dir,
         options,
+        capabilities,
+        neighbour_caps,
         connected: true,
         caps,
     })
@@ -981,6 +1065,11 @@ pub fn now_rfc3339() -> Result<String, TestFailure> {
         .format(&Rfc3339)
         .map_err(|error| TestFailure::State(error.to_string()))
 }
+
+/// Each neighbour region's capability map (name → URL), keyed by the
+/// neighbour's simulator address.
+type NeighbourCapabilityMaps =
+    std::collections::HashMap<SocketAddr, std::collections::HashMap<String, String>>;
 
 /// A test failure: any reason a conformance test did not pass.
 #[derive(Debug, thiserror::Error)]

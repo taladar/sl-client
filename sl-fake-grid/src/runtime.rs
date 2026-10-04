@@ -442,6 +442,9 @@ pub(crate) struct GridCore {
     /// The login response's fields that differ by flavour whatever the
     /// `options` list asked for ([`ImitatedGrid::login_fields`]).
     pub(crate) login_fields: crate::imitates::LoginFields,
+    /// The capabilities the imitated grid's seed refuses
+    /// ([`ImitatedGrid::withheld_capabilities`]).
+    pub(crate) withheld_capabilities: &'static [&'static str],
     /// The spatial-voice backend every region serves ([`VoiceBackend`]).
     pub(crate) voice_backend: VoiceBackend,
     /// The clock every session machine is stamped from.
@@ -837,6 +840,11 @@ impl GridCore {
                 // itself and uploads the result -- which is the whole of what a
                 // stock OpenSim region does about appearance.
                 let _withheld = caps.withhold(sl_proto::CAP_UPDATE_AVATAR_APPEARANCE);
+            }
+            // What the imitated grid refuses, whether or not this grid serves
+            // it at all — a name it never served is simply already absent.
+            for name in self.withheld_capabilities {
+                let _withheld = caps.withhold(name);
             }
             for name in &region.config.withheld_caps {
                 if !caps.withhold(name) {
@@ -1882,6 +1890,7 @@ impl FakeGridBuilder {
                 .unwrap_or_else(|| self.imitates.advertises_open_sim_extras()),
             account_entitlements: self.imitates.describes_account_entitlements(),
             login_fields: self.imitates.login_fields(),
+            withheld_capabilities: self.imitates.withheld_capabilities(),
             packages: self
                 .packages
                 .unwrap_or_else(crate::benefits::second_life_packages),

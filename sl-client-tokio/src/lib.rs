@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::io::Error as IoError;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::Client as ReqwestClient;
@@ -98,17 +100,17 @@ pub use sl_proto::{
     ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
     Permissions, Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate,
     PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-    ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags,
-    RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags,
-    RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
-    RegionLocalParcelId, RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability,
-    RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
-    ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptTeleportRequest,
-    ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber, SessionMessage,
-    SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
+    ProposalCandidateId, ProposalVoteId, QueryId, REQUESTED_CAPABILITIES, ReflectionProbe,
+    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates,
+    RegionDebugUpdate, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
+    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionTerrainComposition,
+    RegionTerrainUpdate, Reliability, RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction,
+    ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
+    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
+    SessionMessage, SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload,
+    StartLocation, StartLocationParseError, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
     TaskInventoryReply, TerraformArea, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
     TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
     TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit, UI_SOUND_ALERT,
@@ -187,7 +189,7 @@ mod voice;
 use crate::appearance::{increment_cof_version, request_server_appearance_update};
 use crate::caps::{
     CAPS_FAILURE_PREFIX, abort_task, deliver, fetch_capabilities, make_sleep, refetch_capabilities,
-    spawn_event_queue, spawn_simulator_features,
+    report_caps_failure, spawn_event_queue, spawn_simulator_features,
 };
 use crate::experiences::{
     fetch_experience_admin, fetch_experience_contributor, fetch_group_experiences,
@@ -350,6 +352,14 @@ pub struct Client {
     /// every region change), for a driver that wants to resolve/symbolize
     /// `$cap:Name` placeholders.
     caps_reporter: Option<mpsc::Sender<HashMap<String, String>>>,
+    /// The optional channel over which [`Client::run`] reports each neighbour
+    /// region's capability map, keyed by the neighbour's simulator address.
+    neighbour_caps_reporter: Option<mpsc::Sender<(SocketAddr, HashMap<String, String>)>>,
+    /// The capability names every seed request asks for — the root region's,
+    /// a region change's and each neighbour's:
+    /// [`REQUESTED_CAPABILITIES`] unless
+    /// [`Client::set_requested_capabilities`] replaced it.
+    requested_capabilities: Arc<[String]>,
     /// The optional local chat-log configuration (default off). When any text-chat
     /// type is enabled, [`Client::run`] writes Firestorm-compatible transcripts and
     /// serves file-backed history pages.
@@ -436,6 +446,11 @@ impl Client {
             socket,
             recv_buf: vec![0u8; RECV_BUFFER_SIZE],
             caps_reporter: None,
+            neighbour_caps_reporter: None,
+            requested_capabilities: sl_proto::REQUESTED_CAPABILITIES
+                .iter()
+                .map(|&name| name.to_owned())
+                .collect(),
             chat_log_config: ChatLogConfig::default(),
             directories: ClientDirectories::default(),
             inventory_cache_config: InventoryCacheConfig::default(),
@@ -545,6 +560,26 @@ impl Client {
         self.caps_reporter = Some(reporter);
     }
 
+    /// Sets the channel over which [`Client::run`] reports each neighbour
+    /// region's capability map once its seed has answered, with the
+    /// neighbour's simulator address. Best-effort, like
+    /// [`set_caps_reporter`](Self::set_caps_reporter).
+    pub fn set_neighbour_caps_reporter(
+        &mut self,
+        reporter: mpsc::Sender<(SocketAddr, HashMap<String, String>)>,
+    ) {
+        self.neighbour_caps_reporter = Some(reporter);
+    }
+
+    /// Replaces the capability names every seed request asks for
+    /// ([`REQUESTED_CAPABILITIES`] by
+    /// default) — for a survey of what a grid grants, not for ordinary use: a
+    /// capability the session relies on and the list leaves out is one it will
+    /// not have. Call before [`Client::run`].
+    pub fn set_requested_capabilities(&mut self, names: impl IntoIterator<Item = String>) {
+        self.requested_capabilities = names.into_iter().collect();
+    }
+
     /// Sets the local chat-log configuration. Off by default; once any text-chat
     /// type is enabled, [`Client::run`] writes Firestorm-compatible transcripts for
     /// nearby chat / IMs / group / conference sessions (per the enabled set) and
@@ -651,7 +686,12 @@ impl Client {
         // `CompleteAgentMovement` only now, on success, also guarantees the simulator
         // knows we render animesh (the seed-caps request advertises it) before it
         // streams the scene — its one-shot `ObjectAnimation` is gated on both.
-        let mut caps = fetch_capabilities(self.session.seed_capability(), &http).await?;
+        let mut caps = fetch_capabilities(
+            self.session.seed_capability(),
+            &http,
+            &self.requested_capabilities,
+        )
+        .await?;
         self.session.notify_capabilities_ready(Instant::now())?;
         if let Some(reporter) = &self.caps_reporter {
             deliver(reporter, caps.clone()).await;
@@ -717,6 +757,7 @@ impl Client {
                     tokio::spawn(object_caps::fetch_neighbour_caps(
                         *sim,
                         seed_capability.clone(),
+                        Arc::clone(&self.requested_capabilities),
                         http.clone(),
                         neighbour_map_tx.clone(),
                     ));
@@ -792,6 +833,7 @@ impl Client {
                     caps_refetch_task = Some(tokio::spawn(refetch_capabilities(
                         caps_generation,
                         self.session.seed_capability().cloned(),
+                        Arc::clone(&self.requested_capabilities),
                         http.clone(),
                         caps_map_tx.clone(),
                         caps_tx.clone(),
@@ -981,8 +1023,13 @@ impl Client {
                 }
                 neighbour_map = neighbour_map_rx.recv() => {
                     if let Some((sim, outcome)) = neighbour_map {
-                        if let Err(reason) = &outcome {
-                            tracing::warn!(%sim, "a neighbour region's capabilities could not be fetched: {reason}");
+                        match &outcome {
+                            Err(reason) => tracing::warn!(%sim, "a neighbour region's capabilities could not be fetched: {reason}"),
+                            Ok(map) => {
+                                if let Some(reporter) = &self.neighbour_caps_reporter {
+                                    deliver(reporter, (sim, map.clone())).await;
+                                }
+                            }
                         }
                         neighbours.fetched(sim, outcome);
                     }
@@ -1619,6 +1666,7 @@ impl Client {
                             // the snapshot over the two-step uploader (filling
                             // `screenshot_id` with a fresh texture asset id) and POST
                             // the report referencing it; otherwise the plain path.
+                            let has_screenshot = screenshot.as_ref().is_some_and(|bytes| !bytes.is_empty());
                             match caps
                                 .get(CAP_SEND_USER_REPORT_WITH_SCREENSHOT)
                                 .cloned()
@@ -1640,6 +1688,16 @@ impl Client {
                                     if let Some(url) = caps.get(CAP_SEND_USER_REPORT).cloned() {
                                         let body = build_send_user_report(&report);
                                         tokio::spawn(post_caps_oneway(url, body, http.clone()));
+                                    } else {
+                                        // A grid with neither report capability (a stock
+                                        // OpenSim) takes the report over the UDP
+                                        // `UserReport`, as the reference viewer does.
+                                        // The snapshot cannot ride along: attaching one
+                                        // there needs the legacy asset upload.
+                                        if has_screenshot {
+                                            tracing::warn!("the grid offers no report capability; filing the report over UDP without its screenshot");
+                                        }
+                                        self.session.send_abuse_report(&report, Instant::now())?;
                                     }
                                 }
                             }
@@ -2228,6 +2286,10 @@ impl Client {
                             if let Some(url) = caps.get(CAP_MODIFY_MATERIAL_PARAMS).cloned() {
                                 let body = build_modify_material_params_request(&updates);
                                 tokio::spawn(post_modify_material_params(url, body, http.clone(), caps_tx.clone()));
+                            } else {
+                                // No PBR material overrides on this grid (a stock
+                                // OpenSim grants none): say so rather than drop the edit.
+                                report_caps_failure(&caps_tx, CAP_MODIFY_MATERIAL_PARAMS).await;
                             }
                         }
                         Some(Command::RequestVoiceAccount { request }) => {
@@ -2648,6 +2710,12 @@ impl Client {
                         Some(Command::RequestOfflineMessages) => {
                             if let Some(url) = caps.get(CAP_READ_OFFLINE_MSGS).cloned() {
                                 tokio::spawn(get_caps_llsd(url, CAP_READ_OFFLINE_MSGS, http.clone(), caps_tx.clone()));
+                            } else {
+                                // A grid without the capability (a stock OpenSim)
+                                // delivers stored messages over the UDP
+                                // `RetrieveInstantMessages`, as the reference viewer
+                                // falls back to.
+                                self.session.retrieve_instant_messages(Instant::now())?;
                             }
                         }
                         Some(Command::TeleportViaLandmark { landmark }) => {

@@ -300,7 +300,7 @@ async fn save(
     let data = fixture.edited_body.clone();
     match fixture.save_path {
         SavePath::NewFileOnly => Ok(None),
-        SavePath::UpdateCap(kind) => save_over_cap(ctx, item.item_id, kind, data).await.map(Some),
+        SavePath::UpdateCap(kind) => save_over_cap(ctx, item.item_id, kind, data).await,
         SavePath::ScriptCap => save_script(ctx, item.item_id, data).await.map(Some),
         SavePath::UdpTransaction => save_over_transaction(ctx, item, fixture, data)
             .await
@@ -308,13 +308,21 @@ async fn save(
     }
 }
 
-/// The `Update*AgentInventory` two-stage capability.
+/// The `Update*AgentInventory` two-stage capability, or `None` when the grid
+/// does not grant it: a class with no update capability has no in-place save
+/// on that grid at all — OpenSim grants no `UpdateMaterialAgentInventory`
+/// (`seed-capabilities`, 2026-10-04) — and that is recorded, not failed.
 async fn save_over_cap(
     ctx: &mut TestContext,
     item_id: InventoryKey,
     kind: UpdatableAssetType,
     data: Vec<u8>,
-) -> Result<Uuid, TestFailure> {
+) -> Result<Option<Uuid>, TestFailure> {
+    if ctx.primary().cap(kind.cap()).is_none() {
+        ctx.metrics()
+            .set(&format!("not_granted_{}", kind.cap()), true);
+        return Ok(None);
+    }
     let session = ctx.primary();
     session
         .send(Command::UpdateInventoryAsset {
@@ -330,7 +338,9 @@ async fn save_over_cap(
             _other => None,
         })
         .await?;
-    outcome.map_err(|reason| TestFailure::Assertion(format!("{} failed: {reason}", kind.cap())))
+    outcome
+        .map(Some)
+        .map_err(|reason| TestFailure::Assertion(format!("{} failed: {reason}", kind.cap())))
 }
 
 /// `UpdateScriptAgent`, whose completion also carries the compile result.

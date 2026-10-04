@@ -356,7 +356,11 @@ impl GridTest for OfflineMsgFetch {
                     }
                 }
             } else {
-                ctx.primary().send(Command::RetrieveInstantMessages).await?;
+                // The capability command, not the UDP trigger: a grid without
+                // `ReadOfflineMsgs` (OpenSim) has the client fall back to
+                // `RetrieveInstantMessages` itself, and this is where that
+                // fallback is exercised against a live grid.
+                ctx.primary().send(Command::RequestOfflineMessages).await?;
                 ctx.primary()
                     .wait_for(REPLY_TIMEOUT, |event| match event {
                         Event::InstantMessageReceived(im)

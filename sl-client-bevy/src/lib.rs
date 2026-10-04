@@ -2805,6 +2805,19 @@ fn apply_command(
                             crate::log_context::spawn_thread(move || {
                                 run_caps_oneway(&url, body);
                             });
+                        } else {
+                            // A grid with neither report capability (a stock
+                            // OpenSim) takes the report over the UDP
+                            // `UserReport`, as the reference viewer does. The
+                            // snapshot cannot ride along: attaching one there
+                            // needs the legacy asset upload.
+                            if screenshot.as_ref().is_some_and(|bytes| !bytes.is_empty()) {
+                                tracing::warn!(
+                                    "the grid offers no report capability; filing the report \
+                                     over UDP without its screenshot"
+                                );
+                            }
+                            session.send_abuse_report(report, now)?;
                         }
                     }
                 }
@@ -3772,14 +3785,22 @@ fn apply_command(
             }
         }
         Command::ModifyMaterialParams { updates } => {
-            if let Some(caps) = caps
-                && let Some(url) = caps.map.get(CAP_MODIFY_MATERIAL_PARAMS).cloned()
-            {
-                let body = build_modify_material_params_request(updates);
-                let events_tx = caps.events_tx.clone();
-                crate::log_context::spawn_thread(move || {
-                    run_modify_material_params(&url, body, &events_tx);
-                });
+            if let Some(caps) = caps {
+                if let Some(url) = caps.map.get(CAP_MODIFY_MATERIAL_PARAMS).cloned() {
+                    let body = build_modify_material_params_request(updates);
+                    let events_tx = caps.events_tx.clone();
+                    crate::log_context::spawn_thread(move || {
+                        run_modify_material_params(&url, body, &events_tx);
+                    });
+                } else {
+                    // No PBR material overrides on this grid (a stock OpenSim
+                    // grants none): say so rather than drop the edit.
+                    crate::caps::report_caps_failure(&caps.events_tx, CAP_MODIFY_MATERIAL_PARAMS);
+                }
+            } else {
+                tracing::warn!(
+                    "a material edit before the region's capabilities arrived was not sent"
+                );
             }
         }
         Command::RequestVoiceAccount { request } => {
@@ -4477,6 +4498,11 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_READ_OFFLINE_MSGS, &events_tx);
                 });
+            } else {
+                // A grid without the capability (a stock OpenSim) delivers
+                // stored messages over the UDP `RetrieveInstantMessages`, as the
+                // reference viewer falls back to.
+                session.retrieve_instant_messages(now)?;
             }
         }
         Command::TeleportViaLandmark { landmark } => {

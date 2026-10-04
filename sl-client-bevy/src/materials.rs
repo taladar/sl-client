@@ -99,6 +99,7 @@ pub(crate) fn run_modify_material_params(
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
+        crate::caps::report_caps_failure(caps_tx, CAP_MODIFY_MATERIAL_PARAMS);
         return;
     };
     let Ok(response) = http
@@ -107,12 +108,15 @@ pub(crate) fn run_modify_material_params(
         .body(body)
         .send()
     else {
+        crate::caps::report_caps_failure(caps_tx, CAP_MODIFY_MATERIAL_PARAMS);
         return;
     };
     let Ok(text) = response.text() else {
+        crate::caps::report_caps_failure(caps_tx, CAP_MODIFY_MATERIAL_PARAMS);
         return;
     };
-    if let Ok(llsd) = parse_llsd_xml(&text) {
-        deliver(caps_tx, (CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd));
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => deliver(caps_tx, (CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd)),
+        Err(_unparsable) => crate::caps::report_caps_failure(caps_tx, CAP_MODIFY_MATERIAL_PARAMS),
     }
 }

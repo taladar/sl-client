@@ -1,6 +1,6 @@
 //! Render-materials capability fetch and ModifyMaterialParams post.
 
-use crate::caps::deliver;
+use crate::caps::{deliver, report_caps_failure};
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
     CAP_MODIFY_MATERIAL_PARAMS, Event, FaceMaterialPut, Llsd, Uuid,
@@ -102,12 +102,15 @@ pub(crate) async fn post_modify_material_params(
         .send()
         .await
     else {
+        report_caps_failure(&caps_tx, CAP_MODIFY_MATERIAL_PARAMS).await;
         return;
     };
     let Ok(text) = response.text().await else {
+        report_caps_failure(&caps_tx, CAP_MODIFY_MATERIAL_PARAMS).await;
         return;
     };
-    if let Ok(llsd) = parse_llsd_xml(&text) {
-        deliver(&caps_tx, (CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd)).await;
+    match parse_llsd_xml(&text) {
+        Ok(llsd) => deliver(&caps_tx, (CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd)).await,
+        Err(_unparsable) => report_caps_failure(&caps_tx, CAP_MODIFY_MATERIAL_PARAMS).await,
     }
 }

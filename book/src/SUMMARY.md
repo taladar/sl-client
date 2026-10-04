@@ -47,6 +47,7 @@
 
 - [Overview](gridspec/index.md)
 - [Login](gridspec/login.md)
+- [Capabilities](gridspec/capabilities.md)
 
 ## Simulator
 

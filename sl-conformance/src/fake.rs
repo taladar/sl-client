@@ -131,6 +131,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "keepalive-ping",
     "throttle-set",
     "simulator-features",
+    "seed-capabilities",
     "object-update-decode",
     "parcel-properties",
     "terrain-raw-transfer-download",
@@ -406,6 +407,7 @@ impl FakeGridHarness {
                     force: false,
                     cache_dir: None,
                     options: None,
+                    capabilities: None,
                 })
                 .await?,
             );

@@ -44,6 +44,10 @@ differ between Second Life and OpenSim, and between OpenSim configurations.
 Capabilities are re-seeded per region: crossing to or teleporting into a new
 region yields a new seed URL and therefore a fresh capability map.
 
+Which of them each grid actually grants — Second Life refuses two of the
+client's list, a stock OpenSim thirty-three — is measured in
+[Grid Behaviour → Capabilities](../gridspec/capabilities.md).
+
 ## What capabilities exist
 
 There are dozens. A non-exhaustive sense of the range:

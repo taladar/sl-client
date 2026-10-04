@@ -4,10 +4,11 @@ use crate::IDLE_SLEEP;
 use reqwest::Client as ReqwestClient;
 use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, transient_backoff};
 use sl_proto::{
-    CAP_SIMULATOR_FEATURES, Llsd, REQUESTED_CAPABILITIES, build_event_queue_request,
-    build_seed_request, parse_event_queue_response, parse_seed_response,
+    CAP_SIMULATOR_FEATURES, Llsd, build_event_queue_request, build_seed_request,
+    parse_event_queue_response, parse_seed_response,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -79,6 +80,7 @@ pub(crate) fn abort_task(task: &mut Option<tokio::task::JoinHandle<()>>) {
 pub(crate) async fn fetch_capabilities(
     seed: Option<&url::Url>,
     http: &ReqwestClient,
+    requested: &[String],
 ) -> Result<HashMap<String, String>, crate::Error> {
     let seed_url = seed.ok_or_else(|| crate::Error::NoCapabilities {
         message: "the login response carried no capability-seed URL".to_owned(),
@@ -86,7 +88,9 @@ pub(crate) async fn fetch_capabilities(
     let response = http
         .post(seed_url.clone())
         .header("Content-Type", "application/llsd+xml")
-        .body(build_seed_request(REQUESTED_CAPABILITIES))
+        .body(build_seed_request(
+            &requested.iter().map(String::as_str).collect::<Vec<_>>(),
+        ))
         .send()
         .await?;
     let text = response.text().await?;
@@ -115,6 +119,7 @@ pub(crate) async fn fetch_capabilities(
 pub(crate) async fn refetch_capabilities(
     generation: u64,
     seed: Option<url::Url>,
+    requested: Arc<[String]>,
     http: ReqwestClient,
     map_tx: mpsc::Sender<(u64, HashMap<String, String>)>,
     caps_tx: mpsc::Sender<(String, Llsd)>,
@@ -125,7 +130,7 @@ pub(crate) async fn refetch_capabilities(
         return;
     };
     for attempt in 0..=MAX_SEED_FETCH_RETRIES {
-        match fetch_capabilities(Some(&seed), &http).await {
+        match fetch_capabilities(Some(&seed), &http, &requested).await {
             Ok(capabilities) => {
                 deliver(&map_tx, (generation, capabilities)).await;
                 return;
@@ -257,7 +262,16 @@ mod tests {
     use super::{CAPS_FAILURE_PREFIX, SEED_CAPABILITIES_TAG, refetch_capabilities};
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
+    use std::sync::Arc;
     use tokio::sync::mpsc;
+
+    /// The default requested capability list, as the client holds it.
+    fn requested() -> Arc<[String]> {
+        sl_proto::REQUESTED_CAPABILITIES
+            .iter()
+            .map(|&name| name.to_owned())
+            .collect()
+    }
 
     /// The `(message, body)` key a reported seed failure arrives under.
     fn failure_key() -> String {
@@ -275,7 +289,7 @@ mod tests {
         let (map_tx, mut map_rx) = mpsc::channel::<(u64, HashMap<String, String>)>(4);
         let (caps_tx, mut caps_rx) = mpsc::channel(4);
 
-        refetch_capabilities(1, None, http, map_tx, caps_tx).await;
+        refetch_capabilities(1, None, requested(), http, map_tx, caps_tx).await;
 
         assert!(
             map_rx.try_recv().is_err(),
@@ -311,7 +325,7 @@ mod tests {
         let (map_tx, mut map_rx) = mpsc::channel::<(u64, HashMap<String, String>)>(4);
         let (caps_tx, mut caps_rx) = mpsc::channel(4);
 
-        refetch_capabilities(2, Some(seed), http, map_tx, caps_tx).await;
+        refetch_capabilities(2, Some(seed), requested(), http, map_tx, caps_tx).await;
 
         assert!(
             map_rx.try_recv().is_err(),

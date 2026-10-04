@@ -328,6 +328,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         force: args.force,
         cache_dir: primary_cache_dir,
         options: None,
+        capabilities: None,
     })
     .await
     .map_err(|error| Error::Test(error.to_string()))?;
@@ -343,6 +344,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 force: args.force,
                 cache_dir: None,
                 options: None,
+                capabilities: None,
             })
             .await
             .map_err(|error| Error::Test(error.to_string()))?,
@@ -361,6 +363,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 force: args.force,
                 cache_dir: None,
                 options: None,
+                capabilities: None,
             })
             .await
             .map_err(|error| Error::Test(error.to_string()))?,

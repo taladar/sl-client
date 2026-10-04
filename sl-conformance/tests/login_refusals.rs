@@ -450,6 +450,7 @@ mod test {
             force: false,
             cache_dir: None,
             options: None,
+            capabilities: None,
         })
         .await?;
         session.logout().await?;

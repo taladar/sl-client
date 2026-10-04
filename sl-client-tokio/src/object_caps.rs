@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Instant;
 
 use reqwest::Client as ReqwestClient;
@@ -32,17 +33,18 @@ pub(crate) type NeighbourMapOutcome = (SocketAddr, Result<HashMap<String, String
 pub(crate) async fn fetch_neighbour_caps(
     sim: SocketAddr,
     seed: url::Url,
+    requested: Arc<[String]>,
     http: ReqwestClient,
     map_tx: mpsc::Sender<NeighbourMapOutcome>,
 ) {
-    let mut outcome = fetch_capabilities(Some(&seed), &http).await;
+    let mut outcome = fetch_capabilities(Some(&seed), &http, &requested).await;
     for attempt in 0..MAX_SEED_FETCH_RETRIES {
         let Err(error) = &outcome else {
             break;
         };
         tracing::warn!(%sim, %seed, attempt, %error, "neighbour seed-capabilities fetch failed");
         tokio::time::sleep(transient_backoff(attempt)).await;
-        outcome = fetch_capabilities(Some(&seed), &http).await;
+        outcome = fetch_capabilities(Some(&seed), &http, &requested).await;
     }
     deliver(&map_tx, (sim, outcome.map_err(|error| error.to_string()))).await;
 }

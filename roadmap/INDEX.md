@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 362 |
 | blocked | 100 |
 | in-progress | 20 |
-| bugs | 29 |
-| done | 1312 |
+| bugs | 30 |
+| done | 1313 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2006** |
+| **total** | **2008** |
 
 ## ideas (136)
 
@@ -368,6 +368,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — SimSession's 54 fields mix the driver's serving stores with the circuit
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
+- [`protocol-reference-capabilities`](ready/protocol-reference-capabilities.md)
+  — Request and use the capabilities the reference viewer asks for and the grids
+  grant
 - [`protocol-request-task-inventory-cap`](ready/protocol-request-task-inventory-cap.md)
   — Fetch task inventory over the RequestTaskInventory capability
 - [`protocol-sim-lsl-syntax-document`](ready/protocol-sim-lsl-syntax-document.md)
@@ -1171,8 +1174,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   flags and limits on each grid
 - [`gridspec-search-directory`](ready/gridspec-search-directory.md) — Directory
   search and the avatar picker on each grid
-- [`gridspec-seed-capabilities`](ready/gridspec-seed-capabilities.md) — Which
-  capabilities each grid grants from the seed, and to whom
 - [`gridspec-simulator-features`](ready/gridspec-simulator-features.md) — The
   full SimulatorFeatures map on each grid
 - [`gridspec-sit-stand`](ready/gridspec-sit-stand.md) — Sitting and standing:
@@ -1575,7 +1576,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (29)
+## bugs (30)
 
 ### protocol
 
@@ -1633,6 +1634,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The parcel audio bar's backing is a colour no skin can reach
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-refused-capability-silent-drops`](bugs/viewer-refused-capability-silent-drops.md)
+  — Commands for a capability the grid refuses are dropped without a word
 - [`viewer-script-compile-error-positions-zero-based`](bugs/viewer-script-compile-error-positions-zero-based.md)
   — Grid compile-error positions are zero-based and shown as one-based
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
@@ -1649,7 +1652,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1312)
+## done (1313)
 
 ### protocol
 
@@ -4561,6 +4564,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grids
 - [`gridspec-login`](done/gridspec-login.md) — Login response fields, the
   options list and get_grid_info on each grid
+- [`gridspec-seed-capabilities`](done/gridspec-seed-capabilities.md) — Which
+  capabilities each grid grants from the seed, and to whom
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
 

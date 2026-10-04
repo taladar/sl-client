@@ -1720,10 +1720,11 @@ mod test {
     /// the stream before the loop below does.
     #[tokio::test]
     async fn an_opensim_flavoured_grid_introduces_itself_as_opensim() -> Result<(), TestError> {
-        let (grid, client, agent) =
+        let (grid, mut client, _agent) =
             connect_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
         let login_uri = grid.login_uri();
-        let mut server_events = agent.events();
+        let (caps_tx, mut caps_rx) = mpsc::channel(4);
+        client.set_caps_reporter(caps_tx);
         let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
         let (command_tx, command_rx) = mpsc::channel::<Command>(8);
         let (diag_tx, _diag_rx) = mpsc::channel(16);
@@ -1774,17 +1775,107 @@ mod test {
         assert_eq!(features.voice_server_type, None);
         assert!(!named_a_backend, "OpenSim sends no RequiredVoiceVersion");
 
-        // Grid-side, because a refusal is what the *grid* decided; the client
-        // only learns that its POST failed.
+        // A stock OpenSim region offers no voice capability at all — the seed
+        // refuses `ProvisionVoiceAccountRequest`, `ParcelVoiceInfoRequest` and
+        // `VoiceSignalingRequest` (`seed-capabilities`, 2026-10-04) — so the
+        // request above has nowhere to go, rather than being refused by a POST.
+        let caps = tokio::time::timeout(WAIT, caps_rx.recv())
+            .await?
+            .ok_or("no capability map")?;
+        for refused in [
+            "ProvisionVoiceAccountRequest",
+            "ParcelVoiceInfoRequest",
+            "VoiceSignalingRequest",
+        ] {
+            assert!(
+                !caps.contains_key(refused),
+                "an OpenSim-flavoured grid granted {refused}"
+            );
+        }
+
+        drop(command_tx);
+        run.abort();
+        Ok(())
+    }
+
+    /// **A report on a grid without the report capabilities goes over UDP.**
+    /// A stock OpenSim grants neither `SendUserReport` nor
+    /// `SendUserReportWithScreenshot` (`seed-capabilities`, 2026-10-04); the
+    /// client used to drop the report, where the reference viewer files it as
+    /// the UDP `UserReport`.
+    #[tokio::test]
+    async fn a_report_without_the_capabilities_goes_over_udp() -> Result<(), TestError> {
+        let (_grid, client, agent) =
+            connect_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
+        let mut server_events = agent.events();
+        let (event_tx, _event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        let report = sl_proto::AbuseReport {
+            report_type: sl_proto::AbuseReportType::Complaint,
+            category: 66,
+            position: sl_types::lsl::Vector {
+                x: 128.0,
+                y: 64.0,
+                z: 22.0,
+            },
+            check_flags: 0,
+            screenshot_id: sl_proto::Uuid::nil(),
+            object_id: sl_types::key::ObjectKey::from(sl_proto::Uuid::from_u128(0x22)),
+            abuser_id: sl_proto::Uuid::from_u128(0x33),
+            abuse_region_name: None,
+            abuse_region_id: sl_proto::Uuid::nil(),
+            summary: "Griefing".to_owned(),
+            details: "Detail".to_owned(),
+            version_string: "7.1 Lnx".to_owned(),
+        };
+        command_tx
+            .send(Command::SendAbuseReportViaCaps {
+                report: Box::new(report),
+                screenshot: None,
+            })
+            .await?;
         loop {
             let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
-            if let ServerEvent::VoiceProvisionRequested { outcome, .. } = &event {
-                assert_eq!(
-                    *outcome,
-                    sl_proto::VoiceProvisionOutcome::Refused(
-                        sl_proto::VoiceProvisionRefusal::BackendUnavailable
-                    )
-                );
+            if let ServerEvent::AbuseReportReceived(received) = &event {
+                assert_eq!(received.summary, "Griefing");
+                break;
+            }
+        }
+
+        drop(command_tx);
+        run.abort();
+        Ok(())
+    }
+
+    /// **A material edit on a grid without PBR overrides is reported, not
+    /// dropped.** A stock OpenSim grants no `ModifyMaterialParams`
+    /// (`seed-capabilities`, 2026-10-04); the client used to send the edit
+    /// nowhere and say nothing, so a material editor's change just vanished.
+    #[tokio::test]
+    async fn a_material_edit_without_the_capability_is_reported() -> Result<(), TestError> {
+        let (_grid, mut client, _agent) =
+            connect_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
+        client.set_diagnostics(true);
+        let (event_tx, _event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, mut diag_rx) = mpsc::channel(64);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        command_tx
+            .send(Command::ModifyMaterialParams {
+                updates: Vec::new(),
+            })
+            .await?;
+        loop {
+            let diagnostic = tokio::time::timeout(WAIT, diag_rx.recv())
+                .await?
+                .ok_or("the diagnostics stream ended early")?;
+            if let sl_proto::Diagnostic::ExpectedReplyMissing { request, .. } = diagnostic
+                && request == "ModifyMaterialParams"
+            {
                 break;
             }
         }
@@ -1884,7 +1975,9 @@ mod test {
             assert_eq!(caps.contains_key("UpdateAvatarAppearance"), bakes);
             // A neighbouring upload cap is still there on both, so the check
             // above is about this capability and not about the seed grant.
-            assert!(caps.contains_key("UploadBakedTexture"));
+            // (Not `UploadBakedTexture`: aditi refuses it, so the
+            // Second-Life-flavoured grid does too.)
+            assert!(caps.contains_key("NewFileAgentInventory"));
 
             drop(command_tx);
             run.abort();

@@ -2,13 +2,46 @@
 id: gridspec-seed-capabilities
 title: Which capabilities each grid grants from the seed, and to whom
 topic: gridspec
-status: ready
+status: done
 origin: user question during gridspec-login (2026-10-04)
 refs: [gridspec-survey, gridspec-simulator-features, gridspec-region-arrival,
   gridspec-neighbours-crossing]
 ---
 
 Context: [context/gridspec.md](../context/gridspec.md).
+
+## Done (2026-10-04)
+
+Measured and written up in `book/src/gridspec/capabilities.md`.
+
+- **Discover.** The tokio client can now be told which capabilities to request
+  (`Client::set_requested_capabilities`, an `Arc<[String]>` shared by the
+  root, region-change and neighbour seed requests) and reports neighbours'
+  capability maps (`Client::set_neighbour_caps_reporter`). The conformance
+  `Session` carries both (`relogin_requesting_capabilities`,
+  `capability_names`, `neighbour_capability_names`). The bevy client has no
+  override: only the conformance harness, which runs on tokio, needs one.
+- **The `seed-capabilities` case** logs in with our list, then with ours plus
+  Firestorm's 116. aditi refuses only `ObjectAnimation` and
+  `UploadBakedTexture` and grants 48 of the 51 reference-only names; OpenSim
+  refuses 33 of ours (AIS3, the library fetches, experiences, voice, group
+  invites, offline messages, the bake trigger, material saving) and grants 12
+  reference-only names, identically on its neighbours. aditi's child grant was
+  not measured: the test avatar's start region (Mauve) has no neighbours.
+- **Fake grid.** `ImitatedGrid::withheld_capabilities` withholds each grid's
+  refused set; `FakeOpensim` was granting AIS3, the library fetches,
+  experiences and voice, and `FakeSl` `UploadBakedTexture`. The case holds live
+  grids to exactly the measured refusals and fakes to at least them.
+  `asset-round-trip` now records a class with no update capability instead of
+  failing, and two `client_end_to_end` tests assert the measured shapes.
+- **Viewer.** An audit of both runtimes for every refused capability found
+  three silent gaps, fixed and tested: a user report falls back to the UDP
+  `UserReport`, `RequestOfflineMessages` to `RetrieveInstantMessages`
+  (exercised on live OpenSim by `offline-msg-fetch`), and a material edit
+  without `ModifyMaterialParams` is reported rather than dropped. The rest —
+  experiences, voice, bevy's pre-capability window — is
+  [[viewer-refused-capability-silent-drops]]. The capabilities only the
+  reference viewer requests are [[protocol-reference-capabilities]].
 
 The survey's tasks measure what individual capabilities *answer*
 ([[gridspec-simulator-features]], [[gridspec-inventory-fetch]], the asset

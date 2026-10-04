@@ -30,6 +30,7 @@
 //! | whether an update capability's completion names the item it rewrote ([`UpdateCompletionItem`]) | omitted: `new_asset` alone, and the client uses the id it sent | echoed: `new_inventory_item` carries the rewritten item |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
+//! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 33 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger |
 //! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //!
@@ -169,6 +170,23 @@ impl ImitatedGrid {
     #[must_use]
     pub const fn honors_login_options(self) -> bool {
         matches!(self, Self::SecondLife)
+    }
+
+    /// The capabilities this grid's seed **refuses** of the ones a client
+    /// here asks for — measured by `seed-capabilities` on aditi and the local
+    /// OpenSim (2026-10-04, `book/src/gridspec/capabilities.md`). A fake grid
+    /// imitating it withholds every one it would otherwise grant, so a client
+    /// takes the path it would take on the live grid: no AIS3 and no
+    /// experiences on OpenSim, no baked-texture upload on Second Life.
+    ///
+    /// `ObjectAnimation` is refused by both and served by neither fake
+    /// flavour; it is listed for completeness.
+    #[must_use]
+    pub const fn withheld_capabilities(self) -> &'static [&'static str] {
+        match self {
+            Self::SecondLife => SECOND_LIFE_REFUSED_CAPABILITIES,
+            Self::OpenSim => OPENSIM_REFUSED_CAPABILITIES,
+        }
     }
 
     /// The login response's fields that differ by grid **whatever the
@@ -354,6 +372,49 @@ impl ImitatedGrid {
         }
     }
 }
+
+/// What aditi's seed refused of the client's requested capabilities.
+pub const SECOND_LIFE_REFUSED_CAPABILITIES: &[&str] = &["ObjectAnimation", "UploadBakedTexture"];
+
+/// What the local OpenSim's seed refused of the client's requested
+/// capabilities: AIS3 and the library fetches, every experience capability,
+/// voice (no voice module), the group-invite and offline-message capabilities
+/// (OpenSim does both over UDP), and the central-bake trigger.
+pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
+    "AcceptGroupInvite",
+    "AgentExperiences",
+    "ChatSessionRequest",
+    "DeclineGroupInvite",
+    "DirectDelivery",
+    "ExperiencePreferences",
+    "ExperienceQuery",
+    "FetchLib2",
+    "FetchLibDescendents2",
+    "FindExperienceByName",
+    "GetAdminExperiences",
+    "GetCreatorExperiences",
+    "GetExperienceInfo",
+    "GetExperiences",
+    "GroupExperiences",
+    "IncrementCOFVersion",
+    "InventoryAPIv3",
+    "IsExperienceAdmin",
+    "IsExperienceContributor",
+    "LibraryAPIv3",
+    "ModifyMaterialParams",
+    "ObjectAnimation",
+    "ParcelVoiceInfoRequest",
+    "ProvisionVoiceAccountRequest",
+    "ReadOfflineMsgs",
+    "RegionExperiences",
+    "SendUserReport",
+    "SendUserReportWithScreenshot",
+    "UpdateAvatarAppearance",
+    "UpdateExperience",
+    "UpdateMaterialAgentInventory",
+    "UserInfo",
+    "VoiceSignalingRequest",
+];
 
 /// `max-agent-groups` on a stock OpenSim grid: its login service's
 /// `MaxAgentGroups` default, which the local grid answered (2026-10-04).

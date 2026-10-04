@@ -80,6 +80,7 @@ mod test {
         keepalive_ping => "keepalive-ping" [fake_sl, fake_opensim],
         throttle_set => "throttle-set" [fake_sl, fake_opensim],
         simulator_features => "simulator-features" [fake_sl, fake_opensim],
+        seed_capabilities => "seed-capabilities" [fake_sl, fake_opensim],
         object_update_decode => "object-update-decode" [fake_sl, fake_opensim],
         parcel_properties => "parcel-properties" [fake_sl, fake_opensim],
         terrain_raw_transfer_download => "terrain-raw-transfer-download" [fake_sl, fake_opensim],

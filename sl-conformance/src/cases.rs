@@ -94,6 +94,7 @@ pub mod script_dialog;
 pub mod script_permissions;
 pub mod script_running;
 pub mod script_upload;
+pub mod seed_capabilities;
 pub mod server_appearance_bake;
 pub mod server_error;
 pub mod session_mark_read;
