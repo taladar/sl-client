@@ -362,6 +362,14 @@ const LIB_TEXTURE: u128 = 0xFB11;
 const PARCEL: u128 = 0xFC01;
 /// The stock creator/owner agent id used for fixture items.
 const FIXTURE_CREATOR: u128 = 0xFD01;
+
+/// The agent that owns the seeded library — the fixture creator, who owns
+/// every stock item — which the login response names as
+/// `inventory-lib-owner`.
+pub(crate) fn library_owner() -> AgentKey {
+    AgentKey::from(uuid::Uuid::from_u128(FIXTURE_CREATOR))
+}
+
 /// The stock scripted object's full key.
 const SCRIPTED_OBJECT: u128 = 0xFE01;
 /// The stock scripted object's region-local id.

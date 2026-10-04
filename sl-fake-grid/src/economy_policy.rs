@@ -93,7 +93,9 @@ pub struct EconomyConfig {
     /// `SimulatorFeatures` (`currency`), or `None` to advertise none.
     ///
     /// `None` is not "no currency" — it is a grid that never says, which is
-    /// what a stock OpenSim region is. Its login service defaults the field to
+    /// what both live grids are: aditi sends no `currency` even when the
+    /// request asks for it (`login-options`, 2026-10-04), and neither does a
+    /// stock OpenSim region. Its login service defaults the field to
     /// the empty string and emits the key only `if (currency != String.Empty)`,
     /// and its `OpenSimExtras` block carries `currency-base-uri` but no symbol.
     /// A viewer then falls back to its own default, which for Firestorm is
@@ -243,13 +245,16 @@ impl EconomyConfig {
     /// US$ 2.50 per 1000, no upgrades required, the fixed token
     /// `fake-grid-confirm`, and **that grid's** price list.
     ///
-    /// The price list and the currency symbol follow the flavour; the rest is
+    /// The price list follows the flavour; the rest is
     /// helper policy a test sets deliberately (is the site up, does buying land
     /// demand an upgrade, what token do quotes hand out).
     #[must_use]
     pub fn for_grid(grid: ImitatedGrid) -> Self {
         Self {
-            currency_symbol: grid.currency_symbol().map(str::to_owned),
+            // Neither grid names a symbol: aditi sends no `currency` even when
+            // asked, and a stock OpenSim sends none either (`login-options`,
+            // 2026-10-04). A test that wants one sets it.
+            currency_symbol: None,
             us_cents_per_thousand_linden: 250,
             site_valid: true,
             membership_upgrade: false,

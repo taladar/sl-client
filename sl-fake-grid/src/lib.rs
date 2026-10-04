@@ -50,7 +50,7 @@ pub use fixtures::{
     CatalogueEntry, FaceStyle, Landmark, NamedScenario, NpcAppearance, NpcBake, NpcFixture,
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
-pub use imitates::ImitatedGrid;
+pub use imitates::{ImitatedGrid, LoginFields, OPENSIM_MAX_AGENT_GROUPS};
 pub use inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,
 };

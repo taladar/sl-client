@@ -93,8 +93,8 @@ backend.
 
 The server side of the same signalling — the three caps served from a
 `SimVoice` stub that answers offers, records the trickle, and advertises
-its backend (login `voice-config`, `SimulatorFeatures.VoiceServerType`,
-`RequiredVoiceVersion`) — is described in
+its backend (`SimulatorFeatures.VoiceServerType`, `RequiredVoiceVersion`;
+not the login `voice-config`, which Second Life does not send) — is described in
 [Capabilities → The voice handlers](../comms/caps.md#the-voice-handlers).
 
 ---

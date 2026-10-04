@@ -1964,6 +1964,7 @@ impl Session {
                     max_agent_groups: success.max_agent_groups,
                     library_root: success.library_root,
                     library_owner: success.library_owner,
+                    response_fields: success.response_fields.clone(),
                 };
                 self.login_account = Some(account.clone());
                 self.events.push_back(Event::Account(Box::new(account)));

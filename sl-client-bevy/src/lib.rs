@@ -1010,10 +1010,17 @@ fn drive(
             }
             Ok(NetOutbound::Identity(new_identity)) => *identity = *new_identity,
             Ok(NetOutbound::AgentParcel(parcel)) => *agent_parcel = *parcel,
+            // Both end the session thread on purpose: the login stopped for an
+            // answer the driver has to supply. Marking the session ended keeps
+            // the thread's exit from reading as a crash below, which raced the
+            // driver's retry with a `Disconnected(ProtocolError)` that made a
+            // viewer quit instead of answering the challenge.
             Ok(NetOutbound::Mfa(challenge)) => {
+                *session_ended = true;
                 mfa.write(SlMfaChallenge(challenge));
             }
             Ok(NetOutbound::Rejected(failure)) => {
+                *session_ended = true;
                 rejected.write(SlLoginRejected(failure));
             }
             Err(TryRecvError::Empty) => break,

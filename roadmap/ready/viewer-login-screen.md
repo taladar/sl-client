@@ -94,3 +94,14 @@ password URLs), with a retry / legacy-fallback state machine, a
 grids from removal. The body today covers only manual add/edit/remove
 (login_uri, display name). Our server side of the same endpoint is
 tracked in [[protocol-sim-http-misc]].
+
+## MFA end to end (2026-10-04)
+
+`sl-e2e` can now put a fake-grid account behind a second factor
+(`StageBuilder::mfa(label, token)`, `AccountConfig::second_factor`), and
+`e2e_login`'s `a_login_behind_a_second_factor_answers_the_challenge` covers
+the CLI path on both backends. Writing it fixed two bugs in that path: the
+binary never answered a challenge (it read the login outcome after `App::run`
+had emptied the App), and the bevy client raced the challenge against a
+spurious `Disconnected(ProtocolError)`. When the prompt lands, that test is
+the one to extend to drive it.

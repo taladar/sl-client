@@ -449,6 +449,7 @@ mod test {
             cooldown: &sl_repl::LoginCooldown::under(std::env::temp_dir()),
             force: false,
             cache_dir: None,
+            options: None,
         })
         .await?;
         session.logout().await?;

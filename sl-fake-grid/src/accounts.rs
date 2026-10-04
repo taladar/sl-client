@@ -103,6 +103,19 @@ impl AccountConfig {
         self
     }
 
+    /// The same account, behind a second factor: a login without `token`
+    /// (or the remembered-device hash a challenge hands out) is answered with
+    /// an MFA challenge, as Second Life answers an account with MFA enabled.
+    #[must_use]
+    pub fn second_factor(mut self, token: impl Into<String>) -> Self {
+        self.mfa = Some(MfaPolicy {
+            expected_token: token.into(),
+            mfa_hash: format!("fake-grid-device-{}-{}", self.first_name, self.last_name),
+            challenge_message: "Enter the code from your authenticator app.".to_owned(),
+        });
+        self
+    }
+
     /// The same account, holding estate powers over the grid's regions.
     #[must_use]
     pub const fn estate_manager(mut self) -> Self {

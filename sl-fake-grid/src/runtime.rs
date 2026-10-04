@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use sl_proto::{
     ArrivalPlacement, EnvironmentSettings, Maturity, OpenSimExtras, ProductType, RegionHandle,
-    RegionIdentity, RegionLocalObjectId, SimSession, SimulatorFeatures, Uuid, VoiceConfig,
+    RegionIdentity, RegionLocalObjectId, SimSession, SimulatorFeatures, Uuid,
     install_preset_day_cycle, region_name_from_wire,
 };
 use sl_types::key::{AgentKey, ObjectKey};
@@ -439,6 +439,9 @@ pub(crate) struct GridCore {
     /// mean anything per account, or are OpenSim's hard-coded `M`/`A`
     /// ([`ImitatedGrid::describes_account_entitlements`]).
     pub(crate) account_entitlements: bool,
+    /// The login response's fields that differ by flavour whatever the
+    /// `options` list asked for ([`ImitatedGrid::login_fields`]).
+    pub(crate) login_fields: crate::imitates::LoginFields,
     /// The spatial-voice backend every region serves ([`VoiceBackend`]).
     pub(crate) voice_backend: VoiceBackend,
     /// The clock every session machine is stamped from.
@@ -654,8 +657,11 @@ impl GridCore {
                 account,
                 region,
                 &state.sim,
-                self.account_entitlements,
-                &self.packages,
+                LoginPolicy {
+                    account_entitlements: self.account_entitlements,
+                    fields: self.login_fields,
+                    packages: &self.packages,
+                },
             );
         }
         success.message = Some(self.identity.message.clone());
@@ -1022,8 +1028,8 @@ impl GridCore {
     ///
     /// A Second-Life-flavoured grid omits the block entirely, as Second Life
     /// does. Nothing goes missing with it: the map-tile server is in the login
-    /// response's `map-server-url`, the currency symbol in its `currency`, and
-    /// the currency helper base in `get_grid_info`'s `economy` key — the routes
+    /// response's `map-server-url` and the currency helper base in
+    /// `get_grid_info`'s `economy` key — the routes
     /// the reference viewer reads when no extras block overrode them.
     fn simulator_features(&self) -> SimulatorFeatures {
         SimulatorFeatures {
@@ -1112,6 +1118,19 @@ fn register_account_display_name(sim: &mut SimSession, account: &Account) {
     );
 }
 
+/// What the flavour decides about a login response, resolved once at start.
+#[derive(Debug, Clone, Copy)]
+struct LoginPolicy<'grid> {
+    /// Whether the response describes the account's entitlements
+    /// ([`ImitatedGrid::describes_account_entitlements`]).
+    account_entitlements: bool,
+    /// The fields sent or omitted whatever was asked for
+    /// ([`ImitatedGrid::login_fields`]).
+    fields: crate::imitates::LoginFields,
+    /// Every subscription package the grid describes.
+    packages: &'grid BTreeMap<String, sl_proto::AccountBenefits>,
+}
+
 /// Fills the optional login-response fields the fixtures can answer:
 /// names, region placement, and the inventory/library skeletons derived
 /// from the session's trees.
@@ -1120,15 +1139,41 @@ fn enrich_success(
     account: &Account,
     region: &RegionEntry,
     sim: &SimSession,
-    account_entitlements: bool,
-    packages: &BTreeMap<String, sl_proto::AccountBenefits>,
+    policy: LoginPolicy<'_>,
 ) {
+    let LoginPolicy {
+        account_entitlements,
+        fields,
+        packages,
+    } = policy;
     success.first_name = Some(account.config.first_name.clone());
     success.last_name = Some(account.config.last_name.clone());
     success.region_x = region.config.grid_x.checked_mul(256);
     success.region_y = region.config.grid_y.checked_mul(256);
-    success.region_size_x = Some(256);
-    success.region_size_y = Some(256);
+    if fields.region_size {
+        success.region_size_x = Some(256);
+        success.region_size_y = Some(256);
+    }
+    // Both grids send the facing at the start location, and OpenSim also
+    // names home — the same spot here, since an account's home is where it
+    // lands when nothing else was asked for.
+    let arrival = sim.arrival_position();
+    let facing = sl_wire::Direction::new(arrival.look_at.x, arrival.look_at.y, arrival.look_at.z);
+    success.look_at = Some(facing);
+    if fields.home {
+        success.home = Some(sl_wire::HomeLocation {
+            region_handle: region.handle(),
+            position: arrival.position,
+            look_at: facing,
+        });
+    }
+    // Both grids send it, asked for or not: a fixed figure on OpenSim, the
+    // account package's own limit on Second Life.
+    success.max_agent_groups = fields.max_agent_groups.or_else(|| {
+        packages
+            .get(&account.config.package)
+            .and_then(|benefits| u32::try_from(benefits.group_membership_limit).ok())
+    });
     // `agent_access` is **not** the account's preference or its ceiling: aditi
     // sent `M` on three runs whose ceiling *and* preference were both `A`
     // (2026-09-08), and OpenSim's login service hard-codes the same `M` for
@@ -1198,14 +1243,10 @@ fn enrich_success(
         success.agent_access = Some("M".to_owned());
         success.agent_access_max = Some("A".to_owned());
     }
-    // The `voice-config` section mirrors the backend the region ended up
-    // running; a silent region sends no section at all.
-    success.voice_config = sim
-        .voice()
-        .advertised_server_type()
-        .map(|voice_server_type| VoiceConfig {
-            voice_server_type: voice_server_type.to_owned(),
-        });
+    // No `voice-config` section on either flavour: aditi sends none even when
+    // the request asks for the option, and a stock OpenSim none at all
+    // (`login-options`, 2026-10-04). The backend is named in
+    // `SimulatorFeatures` instead.
     success.start_location = Some("last".to_owned());
     success.seconds_since_epoch = Some(now_epoch_seconds());
 
@@ -1215,6 +1256,9 @@ fn enrich_success(
     let (lib_roots, lib_skeleton) = skeleton_of(sim.library_inventory());
     success.library_root = lib_roots.first().copied();
     success.library_skeleton = lib_skeleton;
+    // Both grids name the library's owner, which is who a viewer fetches the
+    // library's contents as.
+    success.library_owner = Some(crate::scenario::library_owner());
 }
 
 /// The wall-clock time as UNIX seconds (the `seconds_since_epoch` field).
@@ -1525,10 +1569,9 @@ impl FakeGridBuilder {
     /// block, which otherwise follows [`imitates`](Self::imitates): OpenSim
     /// always sends it, Second Life has no such key.
     ///
-    /// Turning it off hides no URL. The map-tile server, the currency symbol
-    /// and the currency helper base each reach a viewer by a route both grids
-    /// serve — the login response's `map-server-url` and `currency`, and
-    /// `get_grid_info`'s `economy` key.
+    /// Turning it off hides no URL. The map-tile server and the currency
+    /// helper base each reach a viewer by a route both grids serve — the login
+    /// response's `map-server-url` and `get_grid_info`'s `economy` key.
     #[must_use]
     pub const fn open_sim_extras(mut self, advertise: bool) -> Self {
         self.open_sim_extras = Some(advertise);
@@ -1825,6 +1868,7 @@ impl FakeGridBuilder {
                 .open_sim_extras
                 .unwrap_or_else(|| self.imitates.advertises_open_sim_extras()),
             account_entitlements: self.imitates.describes_account_entitlements(),
+            login_fields: self.imitates.login_fields(),
             packages: self
                 .packages
                 .unwrap_or_else(crate::benefits::second_life_packages),

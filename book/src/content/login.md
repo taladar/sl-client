@@ -6,6 +6,10 @@ Login is the one part of the protocol that happens *before* there is a
 login service (historically `login.cgi`), and its response bootstraps everything
 else.
 
+What Second Life and OpenSim each actually send — which fields, which the
+`options` list gates, `get_grid_info` — is measured in
+[Grid Behaviour → Login](../gridspec/login.md).
+
 ## The request
 
 The client POSTs an XML-RPC `login_to_simulator` call carrying, among other

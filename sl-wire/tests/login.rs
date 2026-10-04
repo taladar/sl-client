@@ -135,6 +135,25 @@ mod test {
             Some("https://id.secondlife.com/openid/webkit")
         );
         assert_eq!(success.openid_token.as_deref(), Some("a-one-time-token"));
+        // Every member is named, sorted, whether or not a typed field reads it.
+        assert_eq!(
+            success.response_fields,
+            vec![
+                "agent_appearance_service",
+                "agent_id",
+                "circuit_code",
+                "login",
+                "map-server-url",
+                "message",
+                "openid_token",
+                "openid_url",
+                "secure_session_id",
+                "seed_capability",
+                "session_id",
+                "sim_ip",
+                "sim_port",
+            ]
+        );
         Ok(())
     }
 
@@ -760,6 +779,7 @@ mod test {
             account_type: Some("Premium".to_owned()),
             account_level_benefits: Some(benefits),
             premium_packages: Some(premium_packages),
+            response_fields: Vec::new(),
         })
     }
 
@@ -1214,9 +1234,10 @@ mod test {
         assert!(success.library_root.is_none());
         assert!(success.library_owner.is_none());
         assert!(success.library_skeleton.is_empty());
-        assert!(success.map_server_url.is_none());
-        assert!(success.max_agent_groups.is_none());
-        // …while non-optioned fields stay untouched.
+        // …while non-optioned fields stay untouched, including the two that
+        // have an option of their own name but arrive unasked on Second Life.
+        assert!(success.map_server_url.is_some());
+        assert!(success.max_agent_groups.is_some());
         assert!(success.home.is_some());
         assert!(success.seed_capability.as_str().contains("CAPS"));
         assert!(success.account_type.is_some());

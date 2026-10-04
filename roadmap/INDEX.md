@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 363 |
 | blocked | 100 |
 | in-progress | 20 |
-| bugs | 30 |
-| done | 1308 |
+| bugs | 29 |
+| done | 1311 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2004** |
+| **total** | **2006** |
 
 ## ideas (136)
 
@@ -690,8 +690,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-login-screen`](ready/viewer-login-screen.md) — Login screen — grid
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-login-voice-config-unread`](ready/viewer-login-voice-config-unread.md)
-  — The login response's voice-config is decoded and read by nobody
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
   (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
 - [`viewer-lsl-editor-widget`](ready/viewer-lsl-editor-widget.md) — LSL editor
@@ -1063,6 +1061,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-login-response-sections`](ready/server-fake-grid-login-response-sections.md)
+  — The fake grid's login response lacks the sections and scalars the live grids
+  send
 - [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
   size-proportional call costs and the region's script budget on aditi
 - [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
@@ -1125,8 +1126,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the home location on each grid
 - [`gridspec-local-chat`](ready/gridspec-local-chat.md) — Local chat and typing
   on each grid
-- [`gridspec-login`](ready/gridspec-login.md) — Login response fields, the
-  options list and get_grid_info on each grid
 - [`gridspec-login-refusals`](ready/gridspec-login-refusals.md) — Login refusal
   codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-logout`](ready/gridspec-logout.md) — Logout reply, timing and what
@@ -1175,6 +1174,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   flags and limits on each grid
 - [`gridspec-search-directory`](ready/gridspec-search-directory.md) — Directory
   search and the avatar picker on each grid
+- [`gridspec-seed-capabilities`](ready/gridspec-seed-capabilities.md) — Which
+  capabilities each grid grants from the seed, and to whom
 - [`gridspec-simulator-features`](ready/gridspec-simulator-features.md) — The
   full SimulatorFeatures map on each grid
 - [`gridspec-sit-stand`](ready/gridspec-sit-stand.md) — Sitting and standing:
@@ -1577,7 +1578,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (30)
+## bugs (29)
 
 ### protocol
 
@@ -1588,8 +1589,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-classified-query-wrong-flag-space`](bugs/protocol-classified-query-wrong-flag-space.md)
   — DirClassifiedQuery sends DirFind maturity bits instead of classified-query
   bits
-- [`protocol-login-options-max-agent-groups-unrequested`](bugs/protocol-login-options-max-agent-groups-unrequested.md)
-  — max-agent-groups is never requested at login but is gated on the option
 - [`protocol-logout-reply-sometimes-missing-on-opensim`](bugs/protocol-logout-reply-sometimes-missing-on-opensim.md)
   — A logout on the local OpenSim sometimes gets no LogoutReply
 - [`protocol-parcel-info-reply-flags-misread`](bugs/protocol-parcel-info-reply-flags-misread.md)
@@ -1653,7 +1652,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1308)
+## done (1311)
 
 ### protocol
 
@@ -1847,6 +1846,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — An experience's sky follows you off its land, and nothing takes it back
 - [`protocol-experience-search-paging`](done/protocol-experience-search-paging.md)
   — Carry the experience search's paging URLs through to the viewer
+- [`protocol-login-options-max-agent-groups-unrequested`](done/protocol-login-options-max-agent-groups-unrequested.md)
+  — max-agent-groups is never requested at login but is gated on the option
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —
@@ -2596,6 +2597,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-load-url-body-links`](done/viewer-load-url-body-links.md) — Script
   web-page toast body — clickable URLs / SLURLs (blocked by
   `viewer-url-linkification` (done))
+- [`viewer-login-voice-config-unread`](done/viewer-login-voice-config-unread.md)
+  — The login response's voice-config is decoded and read by nobody
 - [`viewer-lsl-diagnostics`](done/viewer-lsl-diagnostics.md) — LSL diagnostics —
   rustc-grade spans and did-you-mean (blocked by `viewer-lsl-semantic-pass`
   (done))
@@ -4556,6 +4559,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-infra-fake-flavour-conformance`](done/gridspec-infra-fake-flavour-conformance.md)
   — Run every conformance case against both fake-grid flavours, beside the live
   grids
+- [`gridspec-login`](done/gridspec-login.md) — Login response fields, the
+  options list and get_grid_info on each grid
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
 

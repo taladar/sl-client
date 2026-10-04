@@ -127,6 +127,7 @@ pub const EAST_REGION: &str = "Fake Region East";
 /// and it declares both unless it is in [`SINGLE_FLAVOUR`].
 pub const OFFLINE_CASES: &[&str] = &[
     "login-handshake",
+    "login-options",
     "keepalive-ping",
     "throttle-set",
     "simulator-features",
@@ -404,6 +405,7 @@ impl FakeGridHarness {
                     // Nothing to force: the fake grid rate-limits nothing.
                     force: false,
                     cache_dir: None,
+                    options: None,
                 })
                 .await?,
             );

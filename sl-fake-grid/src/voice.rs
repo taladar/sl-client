@@ -1,8 +1,10 @@
 //! Which spatial-voice backend the grid's regions speak.
 //!
-//! Second Life is WebRTC, and says so three ways —
-//! `SimulatorFeatures.VoiceServerType`, the login response's `voice-config`
-//! section, and the `RequiredVoiceVersion` event-queue push on region entry.
+//! Second Life is WebRTC, and says so two ways —
+//! `SimulatorFeatures.VoiceServerType` and the `RequiredVoiceVersion`
+//! event-queue push on region entry. The login response's `voice-config`
+//! section is **not** one of them: aditi sends none even when the request asks
+//! for it (`login-options`, 2026-10-04).
 //!
 //! A stock OpenSim region speaks **nothing**. Its two voice modules
 //! (`VivoxVoiceModule`, `FreeSwitchVoiceModule`) are optional and off by
@@ -46,8 +48,8 @@ pub enum VoiceBackend {
     #[default]
     WebRtc,
     /// No voice backend: nothing is advertised —
-    /// `SimulatorFeatures.VoiceServerType`, the login `voice-config` and the
-    /// arrival `RequiredVoiceVersion` are all absent — and a provision request
+    /// `SimulatorFeatures.VoiceServerType` and the arrival
+    /// `RequiredVoiceVersion` are both absent — and a provision request
     /// is refused with
     /// [`VoiceProvisionRefusal::BackendUnavailable`](sl_proto::VoiceProvisionRefusal::BackendUnavailable).
     ///

@@ -46,6 +46,7 @@
 ## Grid Behaviour
 
 - [Overview](gridspec/index.md)
+- [Login](gridspec/login.md)
 
 ## Simulator
 

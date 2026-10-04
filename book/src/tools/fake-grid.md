@@ -1133,28 +1133,29 @@ a Second-Life-flavoured fake grid omits it
 
 The part that had to be checked rather than assumed is that **nothing goes
 missing with the block**. What rides in it that a viewer actually reads is
-the map-tile server, the currency symbol and the currency helper base, and
-each has a second route that both grids serve and the reference viewer
-reads first when no extras block overrode it: the login response's
-`map-server-url` (`LLStartUp::process_login_success_response`), the login
-response's `currency`, and `get_grid_info`'s `economy` key
+the map-tile server and the currency helper base, and each has a second
+route that both grids serve and the reference viewer reads first when no
+extras block overrode it: the login response's `map-server-url`
+(`LLStartUp::process_login_success_response`) and `get_grid_info`'s
+`economy` key
 (`LLGridManager::getHelperURI`). `LFSimFeatureHandler` treats the extras
 copies as *overrides* of those, not as the only source. So dropping the
 block removes a duplicate, not a surface — which is what the assertions in
 `http_misc.rs`'s `grid_info_is_served_as_xml_and_xml_rpc` are there to keep
 true.
 
-The currency **symbol** is the exception, and it is a real divergence rather
-than a hole: stock OpenSim puts no symbol in *either* place. Its login
-service defaults `currency` to the empty string and emits the key only
+The currency **symbol** is not a divergence at all: neither grid names one.
+Stock OpenSim puts no symbol in *either* place — its login service defaults
+`currency` to the empty string and emits the key only
 `if (currency != String.Empty)`, and its extras block carries
-`currency-base-uri` with no symbol beside it. So a viewer against a stock
-OpenSim grid falls back to its own default — `OS$` in Firestorm — while
-Second Life sends `L$` in the login response and has no extras block to
-copy it into. `ImitatedGrid::currency_symbol` follows that: `Some("L$")`
-against `None`.
+`currency-base-uri` with no symbol beside it — and aditi sends no `currency`
+even when the login request asks for the option (`login-options`,
+2026-10-04; it was believed to send `L$` until then). So a viewer falls back
+to its own default on both — `L$` on Second Life, `OS$` for Firestorm on
+OpenSim — and `EconomyConfig::currency_symbol` defaults to `None` on both
+flavours. A test that wants a symbol sets one.
 
-Modelling it as presence rather than as a second symbol is the point. On
+Modelling it as absence rather than as a symbol per grid is the point. On
 OpenSim the symbol is a *deployment's* choice, not the software's —
 `StandaloneCommon.ini` ships `Currency = ""` under "Ask co-operative
 viewers to use a different currency name", real grids do set it, and
@@ -1169,7 +1170,7 @@ software, and would hide the fallback path a viewer actually takes.
 | --- | --- | --- |
 | backend | WebRTC (`WebRtcStub`) | none (`VoiceBackend::Silent`) |
 | `SimulatorFeatures.VoiceServerType` | `"webrtc"` | absent |
-| login `voice-config` | present | absent |
+| login `voice-config` | absent — aditi sends none even when asked (2026-10-04) | absent |
 | `RequiredVoiceVersion` push on arrival | sent | absent |
 | `ProvisionVoiceAccountRequest` | answered | refused (`BackendUnavailable`) |
 
@@ -2382,11 +2383,11 @@ serves it is the grid's, installed by the runtime from
 refusal. A scenario that enables one itself keeps it.
 
 Every backend advertisement then derives from the backend that ended up
-installed: the login response's `voice-config`,
-`SimulatorFeatures.VoiceServerType`, and a `RequiredVoiceVersion` push over
-the event queue when the avatar arrives. A `VoiceBackend::Silent` region —
-the OpenSim flavour — advertises none of them and refuses a provision
-request with `BackendUnavailable`.
+installed: `SimulatorFeatures.VoiceServerType`, and a `RequiredVoiceVersion`
+push over the event queue when the avatar arrives. The login response's
+`voice-config` is not one of them — Second Life does not send it either. A
+`VoiceBackend::Silent` region — the OpenSim flavour — advertises none of them
+and refuses a provision request with `BackendUnavailable`.
 
 A client's `RequestVoiceAccount` (WebRTC offer) is
 answered with a JSEP answer, its `SendVoiceSignaling` trickle is recorded

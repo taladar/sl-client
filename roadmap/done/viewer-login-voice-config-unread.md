@@ -2,7 +2,7 @@
 id: viewer-login-voice-config-unread
 title: The login response's voice-config is decoded and read by nobody
 topic: viewer
-status: ready
+status: done
 origin: found flipping the fake grid to Second Life's login-options behaviour (2026-09-07)
 points: 1
 refs: [test-fake-grid-imitates-audit]
@@ -38,3 +38,13 @@ Acceptance: `voice_config` is either load-bearing (read by the viewer, and
 requested at login) or documented as deliberately unused, and the `http_glue`
 test's explicit `options.push("voice-config")` either becomes unnecessary or is
 explained by that decision.
+
+## Done (2026-10-04)
+
+Settled by measurement in [[gridspec-login]]: **neither live grid sends
+`voice-config`** — aditi did not even when the request asked for the option,
+and a stock OpenSim has no such section. So the field is documented as
+deliberately unread where `LoginSuccess::voice_config` is declared, the
+viewer keeps learning the backend from `SimulatorFeatures.VoiceServerType` and
+`RequiredVoiceVersion`, and the fake grid stopped sending the section on
+either flavour; the `http_glue` test now asks for it and asserts it is absent.

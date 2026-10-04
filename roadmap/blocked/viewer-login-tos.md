@@ -23,3 +23,13 @@ Reference (Firestorm, read-only): `llfloatertos`, `llstartup` (TOS state),
 `floater_tos.xml`, `floater_critical.xml`.
 
 Deps: [[viewer-login-screen]] (the flow this interrupts).
+
+## Today's behaviour, and the test that pins it (2026-10-04)
+
+`LoginRequest::new` sends `agree_to_tos: true` and `read_critical: true` on
+the first request, so a grid holding the login for either lets this viewer
+straight in without the text ever being shown — the reference sends both
+`false` and shows the floater first. `sl-client-bevy-viewer`'s `e2e_login`
+test `a_login_held_for_terms_and_a_critical_message_gets_through` pins that
+behaviour against a fake grid with both `LoginGates`; this task flips the
+defaults to `false` and changes that test to show and accept both dialogs.

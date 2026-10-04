@@ -112,6 +112,9 @@ pub struct StageBuilder {
     on: Option<Grid>,
     /// The labels whose accounts hold estate powers on the fake grid.
     estate_managers: Vec<String>,
+    /// The labels whose accounts must pass a second factor on the fake grid,
+    /// each with the one-time token that satisfies it.
+    mfa_tokens: Vec<(String, String)>,
     /// How every viewer is set up beyond its login.
     setup: ViewerSetup,
 }
@@ -173,6 +176,7 @@ impl StageBuilder {
             needs: Vec::new(),
             on: None,
             estate_managers: Vec::new(),
+            mfa_tokens: Vec::new(),
             setup: ViewerSetup::default(),
         }
     }
@@ -229,6 +233,18 @@ impl StageBuilder {
     pub fn estate_manager(mut self, label: impl Into<String>) -> Self {
         self.estate_managers.push(label.into());
         self.dictates("it makes an account an estate manager")
+    }
+
+    /// Viewer `label`'s account must pass a second factor on the fake grid:
+    /// its first login is answered with an MFA challenge, and `token` is the
+    /// one-time token that satisfies it — what a resident would read off an
+    /// authenticator. The viewer answers it the way it answers a live grid's
+    /// (the process backend's credentials name a command printing `token`).
+    /// The stage skips a live grid.
+    #[must_use]
+    pub fn mfa(mut self, label: impl Into<String>, token: impl Into<String>) -> Self {
+        self.mfa_tokens.push((label.into(), token.into()));
+        self.dictates("it makes an account pass a second factor")
     }
 
     /// Let every viewer start the web (CEF) engine, which a stage viewer
@@ -616,7 +632,10 @@ async fn start_fake_grid(builder: &StageBuilder) -> Result<(FakeGrid, String), S
         grid = grid.region(region);
     }
     for label in &builder.labels {
-        let account = AccountConfig::new(FIRST_NAME, label, PASSWORD);
+        let mut account = AccountConfig::new(FIRST_NAME, label, PASSWORD);
+        if let Some((_owner, token)) = builder.mfa_tokens.iter().find(|(owner, _)| owner == label) {
+            account = account.second_factor(token.clone());
+        }
         grid = grid.account(if builder.estate_managers.contains(label) {
             account.estate_manager()
         } else {
@@ -637,15 +656,22 @@ fn write_stage_credentials(
     dir: &ViewerDir,
     label: &str,
     login_uri: &str,
+    mfa_token: Option<&str>,
 ) -> Result<PathBuf, StageError> {
     let credentials = dir.root.join("credentials.toml");
+    // A second factor is answered the way a live account's is: by a command
+    // whose output is the token. The token is fixed, not a TOTP code, so no
+    // window has to be waited out.
+    let mfa = mfa_token.map_or_else(String::new, |token| {
+        format!("mfa_command = \"echo {token}\"\nmfa_window_guard_secs = 0\n")
+    });
     fs_err::write(
         &credentials,
         format!(
             "# Written by sl-e2e for one stage against a fake grid.\n\
              default_avatar = \"{AVATAR_KEY}\"\n\n[avatars.{AVATAR_KEY}]\nfirst = \
              \"{FIRST_NAME}\"\nlast = \"{label}\"\npassword = \"{PASSWORD}\"\nlogin_uri = \
-             \"{login_uri}\"\n"
+             \"{login_uri}\"\n{mfa}"
         ),
     )
     .map_err(|source| StageError::Artifacts {
@@ -664,6 +690,8 @@ enum Login {
         agent: AgentKey,
         /// The grid's login URI.
         login_uri: String,
+        /// The token that passes its second factor, when it has one.
+        mfa_token: Option<String>,
     },
     /// A live grid's account.
     Live(LiveAccount),
@@ -792,6 +820,9 @@ pub struct Stage {
     host: Option<InProcessHost<ViewerApp>>,
     /// Where the process backend's automation sockets are, once one is.
     sockets: OnceLock<PathBuf>,
+    /// The fake-grid accounts that pass a second factor, and their tokens
+    /// ([`StageBuilder::mfa`]).
+    mfa_tokens: Vec<(String, String)>,
 }
 
 impl Stage {
@@ -834,6 +865,7 @@ impl Stage {
             viewers: Vec::new(),
             host: None,
             sockets: OnceLock::new(),
+            mfa_tokens: builder.mfa_tokens.clone(),
         };
         match stage.launch(builder).await {
             Ok(()) => Ok(stage),
@@ -947,6 +979,11 @@ impl Stage {
             None => Ok(Login::Stage {
                 agent: self.agent_of(label)?,
                 login_uri: self.fake()?.login_uri().to_string(),
+                mfa_token: self
+                    .mfa_tokens
+                    .iter()
+                    .find(|(owner, _token)| owner == label)
+                    .map(|(_owner, token)| token.clone()),
             }),
         }
     }
@@ -1057,12 +1094,16 @@ impl Stage {
                 exited = host.exited(handle) => exited?,
             }
             viewer.running(ViewerRun::InProcess(None));
+            // Taken out of the resource, not the resource out of the world: the
+            // app may still be stepped while it winds down, and its
+            // `capture_login_outcome` system needs the resource to exist.
             let outcome = host
                 .with_app(handle, |viewer| {
                     viewer
                         .app_mut()
                         .world_mut()
-                        .remove_resource::<LoginOutcome>()
+                        .get_resource_mut::<LoginOutcome>()
+                        .map(|mut outcome| core::mem::take(&mut *outcome))
                 })
                 .await?
                 .unwrap_or_default();
@@ -1081,13 +1122,28 @@ impl Stage {
                     });
                 }
             };
-            let Login::Live(account) = login else {
-                return Err(StageError::Login {
-                    viewer: label.clone(),
-                    reason: "the fake grid asked for a second factor".to_owned(),
-                });
-            };
             tracing::info!("viewer {label}: the grid asks for a second factor");
+            let account = match login {
+                Login::Live(account) => account,
+                // A stage account answers with the token the test set, as a
+                // resident would type it in.
+                Login::Stage {
+                    mfa_token: Some(token),
+                    ..
+                } => {
+                    request = request.with_mfa(token.as_str(), challenge.mfa_hash);
+                    continue;
+                }
+                Login::Stage {
+                    mfa_token: None, ..
+                } => {
+                    return Err(StageError::Login {
+                        viewer: label.clone(),
+                        reason: "the fake grid asked for a second factor this account has none of"
+                            .to_owned(),
+                    });
+                }
+            };
             let avatar = account.avatar.clone();
             let token = tokio::task::spawn_blocking(move || avatar.acquire_mfa())
                 .await
@@ -1134,8 +1190,12 @@ impl Stage {
                 account.key.clone(),
                 account.login_uri.clone(),
             ),
-            Login::Stage { login_uri, .. } => (
-                write_stage_credentials(&dir, label, login_uri)?,
+            Login::Stage {
+                login_uri,
+                mfa_token,
+                ..
+            } => (
+                write_stage_credentials(&dir, label, login_uri, mfa_token.as_deref())?,
                 AVATAR_KEY.to_owned(),
                 login_uri.clone(),
             ),
@@ -1182,7 +1242,7 @@ impl Stage {
             source,
         })?;
         viewer.running(ViewerRun::Process(Some(running)));
-        let driver = connect(viewer, &socket, &launch.log).await?;
+        let driver = logged_in(viewer, &socket, &launch.log).await?;
         viewer.connected(driver);
         Ok(())
     }
@@ -1707,6 +1767,47 @@ async fn arrive(
         viewer: driver.label().to_owned(),
         source,
     })
+}
+
+/// How many times a process viewer may restart its app before it is logged
+/// in: once per second factor it answers, which is once.
+const LOGIN_RESTARTS: u32 = 2;
+
+/// Connect the driver to `viewer`'s process and wait until it has logged in.
+///
+/// A viewer the grid challenges for a second factor answers by ending its app
+/// and starting a new one with the token folded in, as the in-process backend
+/// does from outside — and the new app listens on a new automation socket. So
+/// a connection that closes while the process lives on is the old app going,
+/// and the driver connects again, up to [`LOGIN_RESTARTS`] times.
+async fn logged_in(viewer: &StageViewer, socket: &Path, log: &Path) -> Result<Viewer, StageError> {
+    let mut restarts: u32 = 0;
+    loop {
+        let driver = connect(viewer, socket, log).await?;
+        let logged_in = driver
+            .expect_state(Probe::Agent)
+            .at("/agent_id")
+            .timeout(LOGIN)
+            .to_be_present()
+            .await;
+        match logged_in {
+            Ok(_held) => return Ok(driver),
+            Err(sl_viewer_driver::DriverError::Closed { .. }) if restarts < LOGIN_RESTARTS => {
+                restarts = restarts.saturating_add(1);
+                tracing::info!(
+                    "viewer {}: its app restarted before it logged in (a second factor); \
+                     reconnecting",
+                    viewer.label
+                );
+            }
+            Err(source) => {
+                return Err(StageError::Driver {
+                    viewer: viewer.label.clone(),
+                    source,
+                });
+            }
+        }
+    }
 }
 
 /// Connect the driver to `viewer`'s process once its `socket` answers —

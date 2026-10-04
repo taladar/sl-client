@@ -390,6 +390,14 @@ pub struct LoginAccount {
     /// The agent id owning the shared Library (`inventory-lib-owner`), if
     /// provided. Library folder contents are fetched as this owner's inventory.
     pub library_owner: Option<AgentKey>,
+    /// The name of every top-level field the login response carried, sorted
+    /// ([`LoginSuccess::response_fields`](sl_wire::LoginSuccess::response_fields)).
+    ///
+    /// Not a fact about the account but about the grid's answer: which fields a
+    /// grid sends, and which `options` gate them, differs between Second Life
+    /// and OpenSim, and this is where a client (or the conformance suite) can
+    /// see it.
+    pub response_fields: Vec<String>,
 }
 
 /// The agent's directory (search) visibility — whether the account's online

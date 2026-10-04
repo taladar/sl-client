@@ -58,6 +58,7 @@ pub mod keepalive_ping;
 pub mod kick_user;
 pub mod library_tree_fetch;
 pub mod login_handshake;
+pub mod login_options;
 pub mod logout_clean;
 pub mod map_blocks_items;
 pub mod marketplace_direct_delivery;

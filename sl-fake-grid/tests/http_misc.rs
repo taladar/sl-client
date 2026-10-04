@@ -72,7 +72,8 @@ mod test {
         assert_eq!(via_rpc.login_uri(), Some(grid.login_uri()));
 
         // The login still works on the same URL, and advertises the tile base
-        // and the currency symbol. Together with `helper_uri` above, this is
+        // — but no currency symbol, which neither live grid names (aditi sends
+        // no `currency` even when asked). Together with `helper_uri` above, this is
         // the whole set of URLs the `OpenSimExtras` block would have carried —
         // reached here by the routes a Second-Life-flavoured grid, which sends
         // no such block, leaves them on. Losing any of these would hide a
@@ -94,7 +95,7 @@ mod test {
             return Err("expected a successful login".into());
         };
         assert_eq!(success.map_server_url, Some(grid.login_uri()));
-        assert_eq!(success.currency.as_deref(), Some("L$"));
+        assert_eq!(success.currency, None);
 
         let response = reqwest::Client::new()
             .post(grid.login_uri().join(GRID_INFO_PATH)?)

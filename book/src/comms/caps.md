@@ -712,11 +712,12 @@ limit).
 Two protocol facts worth knowing: the server's own ICE candidates ride
 **inside the JSEP answer** — the viewer has no inbound ICE-trickle path,
 so there is no server→client signalling event to serve; and the backend
-is advertised three ways, all of which the fake grid derives from the
-stub (`SimVoice::advertised_server_type`): the login response's
-`voice-config`, `SimulatorFeatures.VoiceServerType` (the field the viewer
-picks its spatial voice module from), and the `RequiredVoiceVersion`
-event-queue push on region entry.
+is advertised two ways, both of which the fake grid derives from the stub
+(`SimVoice::advertised_server_type`): `SimulatorFeatures.VoiceServerType`
+(the field the viewer picks its spatial voice module from) and the
+`RequiredVoiceVersion` event-queue push on region entry. The login
+response's `voice-config` section is not a third: aditi sends none even
+when the request asks for it, so the fake grid sends none either.
 
 No new wire codecs beyond two gaps the cluster closed:
 `SimulatorFeatures.voice_server_type`, and the multi-agent form's

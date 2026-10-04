@@ -143,6 +143,11 @@ pub struct Session {
     /// preceding [`Session::disconnect`] saved. Retained so the reconnection uses
     /// the same directory as the initial login (the `inventory-cache-skip` case).
     cache_dir: Option<PathBuf>,
+    /// The login request's `options` list, or `None` for the client's default.
+    /// Retained so a [`Session::relogin`] asks for the same fields; the
+    /// `login-options` case changes it between logins with
+    /// [`Session::relogin_with_options`].
+    options: Option<Vec<String>>,
     /// Whether the run loop is currently live. A [`Session::disconnect`] tears it
     /// down (the avatar goes offline on the grid) without discarding the identity
     /// needed to [`Session::relogin`].
@@ -430,6 +435,21 @@ impl Session {
     /// Returns a [`TestFailure`] if the login fails (see [`login`]) or the
     /// cooldown stamp cannot be written.
     pub async fn relogin(&mut self) -> Result<(), TestFailure> {
+        let options = self.options.clone();
+        self.relogin_with_options(options).await
+    }
+
+    /// [`Session::relogin`], asking for `options` (or the client's default list
+    /// for `None`) instead of what the previous login asked for — which is how
+    /// a case maps which fields each option gates.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::relogin`].
+    pub async fn relogin_with_options(
+        &mut self,
+        options: Option<Vec<String>>,
+    ) -> Result<(), TestFailure> {
         let grid = self.grid;
         let avatar = self.avatar.clone();
         let channel = self.channel.clone();
@@ -451,6 +471,7 @@ impl Session {
             cooldown: &cooldown,
             force,
             cache_dir,
+            options,
         })
         .await?;
         Ok(())
@@ -492,6 +513,9 @@ pub struct LoginSpec<'a> {
     /// there across the session's [`Session::disconnect`] /
     /// [`Session::relogin`] cycle.
     pub cache_dir: Option<PathBuf>,
+    /// The login request's `options` list, or `None` for the client's default
+    /// (what every case but `login-options` passes).
+    pub options: Option<Vec<String>>,
 }
 
 /// Log in as the spec says, answering any MFA challenge, and spawn the run
@@ -529,6 +553,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         cooldown,
         force,
         cache_dir,
+        options,
     } = spec;
     // The avatar's own URI wins; otherwise the grid's fixed address. The fake
     // grid has none — it binds an ephemeral port, and the credentials
@@ -562,6 +587,9 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         channel.to_owned(),
         version.to_owned(),
     );
+    if let Some(options) = options.as_ref() {
+        request.options.clone_from(options);
+    }
     let mut already_logged_in_retries: u8 = 0;
     let mut client = loop {
         let params = LoginParams {
@@ -696,6 +724,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         cooldown: cooldown.clone(),
         force,
         cache_dir,
+        options,
         connected: true,
         caps,
     })

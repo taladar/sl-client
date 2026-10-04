@@ -40,3 +40,13 @@ entries (menu_inventory.xml, `Inventory.FileUploadLocation`), which set
 where each upload type files its results. Ours has no equivalent; add
 the context entries and the per-type destination settings alongside the
 upload flows.
+
+## Cost source per grid (gridspec-login, 2026-10-04)
+
+The quoted cost must come from where each grid puts it, measured in
+`book/src/gridspec/login.md`: on Second Life the login's benefits package
+(`LoginAccount::benefits`, `texture_upload_cost_for` for the tiered texture
+price), which aditi always sends; on OpenSim there is no benefits package at
+all, so fall back to `EconomyData::price_upload`. The viewer's uploads today
+(wearables, materials) are all free and send `expected_upload_cost: 0`, so
+nothing reads either yet.

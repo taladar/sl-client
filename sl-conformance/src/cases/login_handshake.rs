@@ -10,6 +10,7 @@ use sl_client_tokio::{Event, LoginAccount};
 
 use crate::context::TestContext;
 use crate::grid::Grid;
+use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
 
 /// How long to wait for the first region to become active.
@@ -18,6 +19,25 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long to wait for the account event, which the session pushes as soon as
 /// the login response is parsed.
 const ACCOUNT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The account maturity the login reports, as `agent_access` / `agent_access_max`.
+///
+/// Both live grids answered `M` / `A` for the test accounts — OpenSim for every
+/// account, Second Life for these (it answers per account; see
+/// `protocol-agent-access-meaning` for what `agent_access` means).
+const ACCESS: Measured<(&str, &str)> = Measured {
+    second_life: ("Mature", "Adult"),
+    opensim: ("Mature", "Adult"),
+    source: "book/src/gridspec/login.md (login-handshake, 2026-10-04)",
+};
+
+/// `max-agent-groups`: the `Base` package's group limit on Second Life, the
+/// login service's fixed default on OpenSim.
+const MAX_AGENT_GROUPS: Measured<Option<u32>> = Measured {
+    second_life: Some(50),
+    opensim: Some(42),
+    source: "book/src/gridspec/login.md (login-handshake, 2026-10-04)",
+};
 
 /// Records what the login response said the account is entitled to.
 ///
@@ -33,6 +53,16 @@ const ACCOUNT_TIMEOUT: Duration = Duration::from_secs(30);
 /// so `economy-data`'s `price_upload` is a real measurement of a field nobody
 /// spends, and these are the numbers an upload is actually billed.
 fn record_account(metrics: &mut crate::metrics::Metrics, account: &LoginAccount) {
+    // Every top-level field the response carried for the client's default
+    // `options` list, so a grid that starts or stops sending one shows up as
+    // a changed record (`login-options` maps which option gates which).
+    metrics.set("response_fields", account.response_fields.join(","));
+    metrics.set(
+        "max_agent_groups",
+        account
+            .max_agent_groups
+            .map_or_else(|| "absent".to_owned(), |groups| groups.to_string()),
+    );
     metrics.set("agent_access", format!("{:?}", account.agent_access));
     metrics.set(
         "agent_access_max",
@@ -200,6 +230,16 @@ impl GridTest for LoginHandshake {
             let elapsed = start.elapsed().as_secs_f64();
             ctx.metrics().set_timing("handshake_secs", elapsed);
             record_account(ctx.metrics(), &account);
+            let grid = ctx.grid();
+            ACCESS.check(
+                "the account's agent_access / agent_access_max",
+                grid,
+                &(
+                    format!("{:?}", account.agent_access).as_str(),
+                    format!("{:?}", account.agent_access_max).as_str(),
+                ),
+            )?;
+            MAX_AGENT_GROUPS.check("max-agent-groups", grid, &account.max_agent_groups)?;
             ctx.metrics().set(
                 "start_region_maturity",
                 region_maturity

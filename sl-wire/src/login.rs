@@ -229,15 +229,18 @@ impl LoginRequest {
             // carries the shared read-only library tree, the buddy list so
             // it carries the agent's friends and their rights, and the grid's
             // map-tile server so the world map has somewhere to fetch from.
-            // (`home`, `look_at`, `agent_access[_max]`, and `max-agent-groups`
-            // are standard top-level fields and need no option.)
+            // (`home`, `look_at` and `agent_access[_max]` are standard
+            // top-level fields and need no option.)
             //
             // **Ask for everything read back.** A grid that honours this list
             // — Second Life does; OpenSim sends every field whatever was asked
             // for — simply omits what is not named here, so a field consumed
             // but unrequested is `None` on the one grid this workspace targets
-            // and present on the one it tests against. `map-server-url` was
-            // exactly that until a fake grid imitating Second Life caught it.
+            // and present on the one it tests against. `map-server-url` and
+            // `max-agent-groups` are asked for as the reference viewer asks,
+            // although aditi sends both unasked (`login-options`,
+            // 2026-10-04): an option that costs nothing to name is cheaper
+            // than a field that silently stops arriving.
             options: vec![
                 "inventory-root".to_owned(),
                 "inventory-skeleton".to_owned(),
@@ -246,6 +249,7 @@ impl LoginRequest {
                 "inventory-skel-lib".to_owned(),
                 "buddy-list".to_owned(),
                 "map-server-url".to_owned(),
+                "max-agent-groups".to_owned(),
             ],
         }
     }
@@ -581,6 +585,13 @@ pub struct LoginSuccess {
     /// The `newuser-config` section (default new-user avatars), if provided.
     pub newuser_config: Option<NewUserConfig>,
     /// The `voice-config` section (the grid's voice backend), if provided.
+    ///
+    /// **Deliberately unread** by the clients. Neither live grid sends it:
+    /// aditi did not even when the request asked for the option, and a stock
+    /// OpenSim has no such section (`login-options`, 2026-10-04). A viewer
+    /// learns the backend from `SimulatorFeatures.VoiceServerType` and the
+    /// `RequiredVoiceVersion` push instead; this stays decoded for a grid that
+    /// does send it.
     pub voice_config: Option<VoiceConfig>,
     /// The avatar's active gestures (`gestures`). Empty if not
     /// requested/provided.
@@ -629,6 +640,16 @@ pub struct LoginSuccess {
     /// `Premium` keys to exist on grids that send this at all — a fidelity
     /// obligation on the *caller* filling this in, not on the codec.
     pub premium_packages: Option<Llsd>,
+    /// The name of every top-level member the response carried, sorted —
+    /// including the ones this struct has no field for.
+    ///
+    /// Filled in by the parsers and **ignored by the encoders**, which write
+    /// what the typed fields hold: it is a record of what a grid sent, not
+    /// something a server sets. It is how a client tells "the grid omitted
+    /// this" from "the grid sent something this codec does not read", and how
+    /// the conformance suite maps which `options` gate which fields on each
+    /// grid. Empty for a success built rather than parsed.
+    pub response_fields: Vec<String>,
 }
 
 impl LoginSuccess {
@@ -707,6 +728,7 @@ impl LoginSuccess {
             account_type: None,
             account_level_benefits: None,
             premium_packages: None,
+            response_fields: Vec::new(),
         }
     }
 
@@ -714,6 +736,15 @@ impl LoginSuccess {
     /// `options`, leaving the always-sent fields untouched — the behaviour of
     /// a grid that honours the request's `options` list (Second Life does;
     /// OpenSim ignores the list and sends everything).
+    ///
+    /// The gated set is what aditi gates (`login-options`, 2026-10-04): the
+    /// inventory and library sections, `gestures`, `login-flags`,
+    /// `global-textures`, `ui-config`, the two category lists,
+    /// `initial-outfit` and `tutorial_setting`. `buddy-list`,
+    /// `event_notifications`, `newuser-config` and `voice-config` did not
+    /// arrive even when asked for, so they stay gated here too. `map-server-url`
+    /// and `max-agent-groups`, although they have options of the same name,
+    /// arrive whether asked for or not, so this leaves them alone.
     ///
     /// [`LoginServer::respond`] deliberately does **not** call this: whether
     /// to honour the options is the serving grid's policy, so a fake grid
@@ -773,12 +804,6 @@ impl LoginSuccess {
         }
         if !wants(options, "voice-config") {
             self.voice_config = None;
-        }
-        if !wants(options, "map-server-url") {
-            self.map_server_url = None;
-        }
-        if !wants(options, "max-agent-groups") {
-            self.max_agent_groups = None;
         }
     }
 
@@ -1273,7 +1298,27 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, WireError> {
         account_level_benefits: member_value_node(response_struct, "account_level_benefits")
             .map(value_to_llsd),
         premium_packages: member_value_node(response_struct, "premium_packages").map(value_to_llsd),
+        response_fields: member_names(response_struct),
     })))
+}
+
+/// The sorted names of every member of `struct_node`, whatever its value's
+/// shape — [`collect_members`] keys only what it can read as a scalar.
+fn member_names(struct_node: roxmltree::Node<'_, '_>) -> Vec<String> {
+    let mut names: Vec<String> = struct_node
+        .children()
+        .filter(|node| node.has_tag_name("member"))
+        .filter_map(|member| {
+            member
+                .children()
+                .find(|node| node.has_tag_name("name"))
+                .and_then(|node| node.text())
+                .map(str::to_owned)
+        })
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 /// Extracts a UUID from the named member: an array holding one struct with a

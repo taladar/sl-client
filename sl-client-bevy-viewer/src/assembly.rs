@@ -65,6 +65,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::log::LogPlugin;
@@ -403,7 +404,7 @@ pub struct ViewerAppBuilder {
 
 /// The recoverable outcome of one session: an MFA challenge to answer or a
 /// retryable login rejection, either of which stops the app.
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug, Default, Clone)]
 pub struct LoginOutcome {
     /// The MFA challenge the session stopped on, if any.
     pub challenge: Option<MfaChallenge>,
@@ -961,17 +962,26 @@ impl ViewerApp {
     /// status, which is **not** a recoverable outcome: the caller must not retry
     /// it the way it retries an MFA challenge.
     pub fn run(mut self) -> Result<LoginOutcome, Error> {
+        // Copied out as it is captured, because it cannot be read back after:
+        // `App::run` hands the App to its runner and leaves an empty one
+        // behind, so the world the outcome was captured in is gone by the time
+        // `run` returns. Reading it from `self.app` afterwards always found
+        // nothing, and the binary ended its session on every MFA challenge
+        // instead of answering it.
+        let slot: Arc<Mutex<LoginOutcome>> = Arc::default();
+        let sink = Arc::clone(&slot);
+        self.app
+            .add_systems(Last, move |outcome: Res<LoginOutcome>| {
+                if outcome.is_changed() {
+                    *sink.lock().unwrap_or_else(PoisonError::into_inner) = outcome.clone();
+                }
+            });
         let exit = self.span.in_scope(|| self.app.run());
-        // Taken before the exit is judged, so the outcome is out of the world
-        // either way — but reported only on a clean exit. An app that failed has
-        // not "stopped on an MFA challenge"; it stopped on the failure, and
-        // handing the caller a challenge to retry would send it round the login
-        // loop again on the strength of a run that never got that far.
-        let outcome = self
-            .app
-            .world_mut()
-            .remove_resource::<LoginOutcome>()
-            .unwrap_or_default();
+        // Reported only on a clean exit. An app that failed has not "stopped on
+        // an MFA challenge"; it stopped on the failure, and handing the caller
+        // a challenge to retry would send it round the login loop again on the
+        // strength of a run that never got that far.
+        let outcome = core::mem::take(&mut *slot.lock().unwrap_or_else(PoisonError::into_inner));
         match exit {
             AppExit::Success => Ok(outcome),
             AppExit::Error(code) => Err(Error::AppFailed(code)),

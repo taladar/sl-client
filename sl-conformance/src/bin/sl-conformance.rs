@@ -327,6 +327,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         cooldown: &cooldown,
         force: args.force,
         cache_dir: primary_cache_dir,
+        options: None,
     })
     .await
     .map_err(|error| Error::Test(error.to_string()))?;
@@ -341,6 +342,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 cooldown: &cooldown,
                 force: args.force,
                 cache_dir: None,
+                options: None,
             })
             .await
             .map_err(|error| Error::Test(error.to_string()))?,
@@ -358,6 +360,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 cooldown: &cooldown,
                 force: args.force,
                 cache_dir: None,
+                options: None,
             })
             .await
             .map_err(|error| Error::Test(error.to_string()))?,

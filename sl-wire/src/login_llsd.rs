@@ -641,6 +641,9 @@ fn parse_success_members(map: &HashMap<String, Llsd>) -> Result<LoginSuccess, Wi
         require_parsed(map, "sim_port")?,
         require_parsed(map, "seed_capability")?,
     );
+    let mut response_fields: Vec<String> = map.keys().cloned().collect();
+    response_fields.sort_unstable();
+    success.response_fields = response_fields;
     success.message = map.get("message").and_then(llsd_scalar_string);
     success.mfa_hash = map.get("mfa_hash").and_then(llsd_scalar_string);
     success.agent_access = map.get("agent_access").and_then(llsd_scalar_string);

@@ -894,6 +894,7 @@ mod tests {
             max_agent_groups: None,
             library_root: None,
             library_owner: None,
+            response_fields: Vec::new(),
         })))
     }
 

@@ -21,7 +21,7 @@
 //! | a taken object's asset ([`ObjectAssetPolicy`]) | withheld: nil id, an unfetchable Linden-text body | served: minted id, a `<SceneObjectGroup>` XML body under it |
 //! | the login response's `options` list ([`honor_options`](crate::FakeGridBuilder::honor_options)) | honoured: the response is trimmed to what was asked for | ignored: every field is sent |
 //! | the `OpenSimExtras` block in `SimulatorFeatures` ([`advertises_open_sim_extras`](ImitatedGrid::advertises_open_sim_extras)) | absent | sent, carrying the grid's map-tile and currency-helper URLs |
-//! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named three ways: `SimulatorFeatures.VoiceServerType`, the login `voice-config`, the `RequiredVoiceVersion` push | none: a stock region loads no voice module, and nothing is advertised |
+//! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named two ways: `SimulatorFeatures.VoiceServerType` and the `RequiredVoiceVersion` push — **not** the login `voice-config`, which aditi does not send even when asked (2026-10-04) | none: a stock region loads no voice module, and nothing is advertised |
 //! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
 //! | how a **taken** item is announced ([`InventoryAnnouncement`]) | a `BulkUpdateInventory` over the event queue | the legacy UDP `UpdateCreateInventoryItem` |
 //! | how an item a capability upload **rewrote** is announced ([`UploadAnnouncements::saved`]) | the legacy UDP `UpdateCreateInventoryItem` | nothing: the capability's HTTP response is the whole answer |
@@ -30,7 +30,7 @@
 //! | whether an update capability's completion names the item it rewrote ([`UpdateCompletionItem`]) | omitted: `new_asset` alone, and the client uses the id it sent | echoed: `new_inventory_item` carries the rewritten item |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
-//! | the currency symbol ([`currency_symbol`](ImitatedGrid::currency_symbol)) | `L$`, in the login response and nothing else | none announced anywhere, so a viewer falls back to its own default (`OS$`) |
+//! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //!
 //! **The inventory rows are the divergence a viewer is most likely to trip
@@ -57,20 +57,17 @@
 //! route that is not `OpenSimExtras` and that both grids serve: the map-tile
 //! server through the login response's `map-server-url`
 //! (`LLStartUp::process_login_success_response` reads it there and
-//! `LFSimFeatureHandler` only *overrides* it from the extras), the currency
-//! symbol through the login response's `currency`, and the currency helper
-//! base through `get_grid_info`'s `economy` key, which is where
+//! `LFSimFeatureHandler` only *overrides* it from the extras), and the
+//! currency helper base through `get_grid_info`'s `economy` key, which is where
 //! `LLGridManager::getHelperURI` reads it when no extras block overrode it.
 //! Dropping the block on the Second Life side therefore hides no URL — it
-//! removes a *second* copy of two of them.
+//! removes a *second* copy of them.
 //!
-//! The currency **symbol** is the one of those three that does not survive, and
-//! that is correct rather than a hole: a stock OpenSim grid does not put a
-//! symbol in either place (see
-//! [`currency_symbol`](ImitatedGrid::currency_symbol)), so there is no copy to
-//! lose. Second Life sends `L$` in the login response and has no extras block
-//! to duplicate it into; OpenSim sends nothing in either, and a viewer falls
-//! back to its own default.
+//! The currency **symbol** is not a divergence at all: neither grid names one.
+//! A stock OpenSim grid puts none in the login response or the extras block,
+//! and aditi sends no `currency` field even when the request asks for the
+//! option (`login-options`, 2026-10-04) — so a viewer shows its own default on
+//! both (`L$` on Second Life, `OS$` for Firestorm on OpenSim).
 //!
 //! **The bake pair is the divergence that cost the most to derive**, and the
 //! reason it is a policy type rather than a boolean: withdrawing the appearance
@@ -93,10 +90,9 @@
 //! # What it does not decide yet, and why
 //!
 //! Nothing, today. Every divergence this crate has measured is derived here.
-//! The economy was the last one outstanding, and it turned out to be two rows
-//! rather than one: the price list
-//! ([`prices`](ImitatedGrid::prices)) and the currency symbol
-//! ([`currency_symbol`](ImitatedGrid::currency_symbol)). What is left of
+//! The economy was the last one outstanding: the price list
+//! ([`prices`](ImitatedGrid::prices)). The currency symbol was thought to be a
+//! second row until aditi was measured sending none either. What is left of
 //! [`EconomyConfig`](crate::EconomyConfig) — the L$-to-dollars rate, whether
 //! the site is up, whether buying land demands an upgrade, the confirm token —
 //! is deliberately *not* flavour policy but test policy, set per test.
@@ -172,6 +168,25 @@ impl ImitatedGrid {
     #[must_use]
     pub const fn honors_login_options(self) -> bool {
         matches!(self, Self::SecondLife)
+    }
+
+    /// The login response's fields that differ by grid **whatever the
+    /// `options` list asked for** — measured by `login-options` on aditi and
+    /// the local OpenSim (2026-10-04, `book/src/gridspec/login.md`).
+    #[must_use]
+    pub const fn login_fields(self) -> LoginFields {
+        match self {
+            Self::SecondLife => LoginFields {
+                home: false,
+                region_size: false,
+                max_agent_groups: None,
+            },
+            Self::OpenSim => LoginFields {
+                home: true,
+                region_size: true,
+                max_agent_groups: Some(OPENSIM_MAX_AGENT_GROUPS),
+            },
+        }
     }
 
     /// Whether this grid's `SimulatorFeatures` carries the `OpenSimExtras`
@@ -288,33 +303,6 @@ impl ImitatedGrid {
         }
     }
 
-    /// The currency symbol this grid announces, or `None` when it announces
-    /// none.
-    ///
-    /// Second Life says `L$`. A **stock** OpenSim region says nothing at all:
-    /// `LLLoginResponse` defaults its `currency` to the empty string and emits
-    /// the key only `if (currency != String.Empty)`, and the `OpenSimExtras`
-    /// block carries `currency-base-uri` without a symbol beside it. So this is
-    /// a divergence of *presence*, like the extras block itself, and the
-    /// difference a viewer sees is not `L$` against some other symbol but `L$`
-    /// against whatever it falls back to — `OS$` in Firestorm's case.
-    ///
-    /// Which is the honest model precisely because the symbol is a deployment's
-    /// choice on OpenSim, not the grid software's: `StandaloneCommon.ini` ships
-    /// `Currency = ""` under "Ask co-operative viewers to use a different
-    /// currency name", real grids do set it, and Firestorm honours a per-region
-    /// `OpenSimExtras.currency` override with a subsystem built for the purpose.
-    /// A fake grid that picked one symbol for "OpenSim" would be modelling one
-    /// deployment rather than the software, and would hide the fallback path a
-    /// viewer actually takes.
-    #[must_use]
-    pub const fn currency_symbol(self) -> Option<&'static str> {
-        match self {
-            Self::SecondLife => Some("L$"),
-            Self::OpenSim => None,
-        }
-    }
-
     /// Whether this grid's login response describes what the account is
     /// entitled to: the benefits package and the maturity *preference*.
     ///
@@ -364,6 +352,30 @@ impl ImitatedGrid {
     }
 }
 
+/// `max-agent-groups` on a stock OpenSim grid: its login service's
+/// `MaxAgentGroups` default, which the local grid answered (2026-10-04).
+pub const OPENSIM_MAX_AGENT_GROUPS: u32 = 42;
+
+/// The login response's fields a grid sends or omits regardless of the
+/// request's `options` list ([`ImitatedGrid::login_fields`]).
+///
+/// Both grids send `look_at`, `max-agent-groups`, `map-server-url` and the
+/// library owner; neither sends `voice-config` or a currency symbol. Those need
+/// no row. What is here is where the two disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoginFields {
+    /// Whether the response carries `home`. OpenSim does; aditi did not, even
+    /// with every option asked for.
+    pub home: bool,
+    /// Whether the response carries `region_size_x` / `region_size_y`. Only
+    /// OpenSim, whose regions may be larger than 256 m, sends them.
+    pub region_size: bool,
+    /// The `max-agent-groups` figure, or `None` for the account's own package
+    /// limit — which is what Second Life sends (50 for a `Base` account on
+    /// aditi, its `group_membership_limit`).
+    pub max_agent_groups: Option<u32>,
+}
+
 #[cfg(test)]
 mod test {
     use pretty_assertions::{assert_eq, assert_ne};
@@ -402,27 +414,10 @@ mod test {
         assert_ne!(sl.bakes(), opensim.bakes());
         assert_ne!(sl.region_protocol_bits(), opensim.region_protocol_bits());
         assert_ne!(sl.prices(), opensim.prices());
-        assert_ne!(sl.currency_symbol(), opensim.currency_symbol());
         assert_ne!(
             sl.describes_account_entitlements(),
             opensim.describes_account_entitlements()
         );
-    }
-
-    /// Only one grid names a currency, and the other names none rather than
-    /// naming a different one.
-    ///
-    /// The distinction is the whole content of the knob. A stock OpenSim region
-    /// announces no symbol in the login response *or* the extras block, so the
-    /// viewer behaviour it provokes is a fallback to the viewer's own default
-    /// (`OS$` in Firestorm) — not the display of some other grid's symbol. An
-    /// `OpenSim => Some("OS$")` here would look more helpful and would be
-    /// wrong: it would model one deployment's choice as the software's, and a
-    /// viewer that never exercised its fallback would pass.
-    #[test]
-    fn only_one_grid_names_a_currency() {
-        assert_eq!(ImitatedGrid::SecondLife.currency_symbol(), Some("L$"));
-        assert_eq!(ImitatedGrid::OpenSim.currency_symbol(), None);
     }
 
     /// The bake policy is four coupled advertisements, and the flavour has to
