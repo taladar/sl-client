@@ -2,9 +2,10 @@
 id: protocol-cap-get-metadata
 title: Read a script's experience over GetMetadata
 topic: protocol
-status: ready
+status: blocked
 origin: protocol-reference-capabilities triage (2026-10-04)
 refs: [protocol-reference-capabilities, viewer-lsl-editor-save-compile]
+blocked_by: [gridspec-task-inventory]
 ---
 
 Context: [context/protocol.md](../context/protocol.md).
@@ -24,3 +25,9 @@ Every capability adopted here goes into `REQUESTED_CAPABILITIES`
 existing path where it does not, and is served by the fake grid per flavour as
 `seed-capabilities` measured it (`book/src/gridspec/capabilities.md`). Shapes
 and Firestorm references: `book/src/comms/caps-reference.md`.
+
+## Done together with [[gridspec-task-inventory]]
+
+This capability is adopted inside that gridspec task, which measures the
+feature on both grids over both paths, makes the fake grid serve the
+capability per flavour, and checks the viewer. Claim that task.

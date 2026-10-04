@@ -34,3 +34,11 @@ Small in this task: cost checks, notecard refusal. Mesh costing:
 ## Viewer
 
 Price from benefits on SL, `EconomyData` on OpenSim.
+
+## Capabilities done in this task
+
+The protocol halves of three upload-related capabilities: `MeshUploadFlag`
+(both grids; [[viewer-mesh-upload-sequence]]), `InventoryThumbnailUpload`
+(Second Life; [[viewer-inventory-thumbnails]]) and `SendPostcard` (Second Life;
+[[viewer-snapshot-postcard]]) — the command, the two-step upload where it
+applies, and the fake grid serving each per flavour.

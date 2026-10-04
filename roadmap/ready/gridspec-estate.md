@@ -35,3 +35,8 @@ Small restart alert row in this task; actions —
 ## Viewer
 
 One countdown from both restart forms; kicked / frozen / ejected handling.
+
+## Capabilities done in this task
+
+[[protocol-cap-estate-access]]: the estate access lists over `EstateAccess`,
+with the ban details only the capability carries.

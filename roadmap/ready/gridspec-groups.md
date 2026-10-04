@@ -35,3 +35,8 @@ Large — [[protocol-sim-group-messages]] then [[server-fake-grid-groups]].
 
 Ejectee list on SL (no `AgentDropGroup`); 35-character limit; finance tab
 tolerates silence.
+
+## Capabilities done in this task
+
+[[protocol-cap-group-bans]]: group ban lists over `GroupAPIv1` (Second Life
+only).

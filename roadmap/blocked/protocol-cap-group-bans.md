@@ -2,9 +2,10 @@
 id: protocol-cap-group-bans
 title: Group ban lists over the GroupAPIv1 capability
 topic: protocol
-status: ready
+status: blocked
 origin: protocol-reference-capabilities triage (2026-10-04)
 refs: [protocol-reference-capabilities, viewer-social-group-extras]
+blocked_by: [gridspec-groups]
 ---
 
 Context: [context/protocol.md](../context/protocol.md).
@@ -24,3 +25,9 @@ Every capability adopted here goes into `REQUESTED_CAPABILITIES`
 existing path where it does not, and is served by the fake grid per flavour as
 `seed-capabilities` measured it (`book/src/gridspec/capabilities.md`). Shapes
 and Firestorm references: `book/src/comms/caps-reference.md`.
+
+## Done together with [[gridspec-groups]]
+
+This capability is adopted inside that gridspec task, which measures the
+feature on both grids over both paths, makes the fake grid serve the
+capability per flavour, and checks the viewer. Claim that task.

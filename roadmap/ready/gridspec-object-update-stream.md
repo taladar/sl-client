@@ -34,3 +34,8 @@ Large — [[server-fake-grid-object-update-forms]] and
 ## Viewer
 
 Cache probes answered, compressed / terse decoded, out-of-range kills re-added.
+
+## Capabilities done in this task
+
+[[protocol-cap-interest-list]]: the `InterestList` mode, measured by what
+the update stream carries in `default` and `360` modes.

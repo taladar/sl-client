@@ -12,8 +12,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 376 |
-| blocked | 102 |
+| ready | 365 |
+| blocked | 113 |
 | in-progress | 20 |
 | bugs | 30 |
 | done | 1314 |
@@ -352,7 +352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (376)
+## ready (365)
 
 ### protocol
 
@@ -366,32 +366,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Re-exports and derived login state reach only the bevy runtime
 - [`protocol-audit-sim-session-stores`](ready/protocol-audit-sim-session-stores.md)
   — SimSession's 54 fields mix the driver's serving stores with the circuit
-- [`protocol-cap-agent-profile`](ready/protocol-cap-agent-profile.md) — Read and
-  write profiles over the AgentProfile capability
-- [`protocol-cap-dispatch-region-info`](ready/protocol-cap-dispatch-region-info.md)
-  — Write region settings over the DispatchRegionInfo capability
-- [`protocol-cap-estate-access`](ready/protocol-cap-estate-access.md) — Read the
-  estate access lists over the EstateAccess capability
-- [`protocol-cap-get-metadata`](ready/protocol-cap-get-metadata.md) — Read a
-  script's experience over GetMetadata
-- [`protocol-cap-group-bans`](ready/protocol-cap-group-bans.md) — Group ban
-  lists over the GroupAPIv1 capability
-- [`protocol-cap-home-location`](ready/protocol-cap-home-location.md) — Set home
-  over the HomeLocation capability
-- [`protocol-cap-interest-list`](ready/protocol-cap-interest-list.md) — Switch
-  the interest list mode over the InterestList capability
-- [`protocol-cap-offline-friendship-answers`](ready/protocol-cap-offline-friendship-answers.md)
-  — Answer offline friendship offers over AcceptFriendship / DeclineFriendship
-- [`protocol-cap-parcel-properties-update`](ready/protocol-cap-parcel-properties-update.md)
-  — Edit parcels over the ParcelPropertiesUpdate capability
-- [`protocol-cap-product-info`](ready/protocol-cap-product-info.md) — Land type
-  names over ProductInfoRequest
 - [`protocol-cap-update-agent-information`](ready/protocol-cap-update-agent-information.md)
   — Set the maturity preference over UpdateAgentInformation
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
-- [`protocol-request-task-inventory-cap`](ready/protocol-request-task-inventory-cap.md)
-  — Fetch task inventory over the RequestTaskInventory capability
 - [`protocol-sim-lsl-syntax-document`](ready/protocol-sim-lsl-syntax-document.md)
   — The fake grid serves an empty LSLSyntax document (blocked by
   `server-lsl-library-surface-table` (done))
@@ -1222,13 +1200,42 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-world-map`](ready/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 
-## blocked (102)
+## blocked (113)
 
 ### protocol
 
 - [`protocol-avatar-render-info`](blocked/protocol-avatar-render-info.md) —
   AvatarRenderInfo — client request, SimCaps service and fake-grid answers
   (blocked by `gridspec-avatar-render-info`)
+- [`protocol-cap-agent-profile`](blocked/protocol-cap-agent-profile.md) — Read
+  and write profiles over the AgentProfile capability (blocked by
+  `gridspec-profiles`)
+- [`protocol-cap-dispatch-region-info`](blocked/protocol-cap-dispatch-region-info.md)
+  — Write region settings over the DispatchRegionInfo capability (blocked by
+  `gridspec-region-info`)
+- [`protocol-cap-estate-access`](blocked/protocol-cap-estate-access.md) — Read
+  the estate access lists over the EstateAccess capability (blocked by
+  `gridspec-estate`)
+- [`protocol-cap-get-metadata`](blocked/protocol-cap-get-metadata.md) — Read a
+  script's experience over GetMetadata (blocked by `gridspec-task-inventory`)
+- [`protocol-cap-group-bans`](blocked/protocol-cap-group-bans.md) — Group ban
+  lists over the GroupAPIv1 capability (blocked by `gridspec-groups`)
+- [`protocol-cap-home-location`](blocked/protocol-cap-home-location.md) — Set
+  home over the HomeLocation capability (blocked by `gridspec-landmarks-home`)
+- [`protocol-cap-interest-list`](blocked/protocol-cap-interest-list.md) — Switch
+  the interest list mode over the InterestList capability (blocked by
+  `gridspec-object-update-stream`)
+- [`protocol-cap-offline-friendship-answers`](blocked/protocol-cap-offline-friendship-answers.md)
+  — Answer offline friendship offers over AcceptFriendship / DeclineFriendship
+  (blocked by `gridspec-friends-presence`)
+- [`protocol-cap-parcel-properties-update`](blocked/protocol-cap-parcel-properties-update.md)
+  — Edit parcels over the ParcelPropertiesUpdate capability (blocked by
+  `gridspec-parcel-management`)
+- [`protocol-cap-product-info`](blocked/protocol-cap-product-info.md) — Land
+  type names over ProductInfoRequest (blocked by `gridspec-search-directory`)
+- [`protocol-request-task-inventory-cap`](blocked/protocol-request-task-inventory-cap.md)
+  — Fetch task inventory over the RequestTaskInventory capability (blocked by
+  `gridspec-task-inventory`)
 - [`protocol-sim-group-messages`](blocked/protocol-sim-group-messages.md) —
   SimSession — decode group requests and send group replies (blocked by
   `gridspec-groups`)

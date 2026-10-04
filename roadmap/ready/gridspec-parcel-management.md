@@ -36,3 +36,10 @@ the poisoning teeth test. Divide / join:
 ## Viewer
 
 Cap first, UDP fallback; re-request after unanswered divide / join.
+
+## Capabilities done in this task
+
+[[protocol-cap-parcel-properties-update]]: parcel edits over
+`ParcelPropertiesUpdate`, measured against the UDP path on both grids — it
+also fixes [[parcel-properties-update-via-udp-poisons-opensim]], so this task
+is the first of the capability work.

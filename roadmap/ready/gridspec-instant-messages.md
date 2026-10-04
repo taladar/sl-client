@@ -32,3 +32,10 @@ Large — [[server-fake-grid-im-relay]].
 ## Viewer
 
 No wait for acceptance IMs on SL; de-duplicate SL's offline replay.
+
+## Capabilities done in this task
+
+The `ReadOfflineMsgs` half of [[protocol-cap-offline-friendship-answers]]:
+when all of `ReadOfflineMsgs`, `AcceptFriendship` and `AcceptGroupInvite` are
+granted, offline messages arrive over the capability, as Firestorm reads them.
+Measure both deliveries (shape, transaction ids) on aditi.

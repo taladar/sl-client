@@ -31,3 +31,10 @@ Small — flavour defaults and the stale read in this task.
 ## Viewer
 
 Absent blocks, `u64` flags, status-bar icons.
+
+## Capabilities done in this task
+
+[[protocol-cap-dispatch-region-info]]: region settings over
+`DispatchRegionInfo` (Second Life), including the two flags UDP cannot
+carry. Also the protocol half of `RegionSchedule` (read and write the restart
+schedule; the floater is [[viewer-region-restart-schedule]]).

@@ -2,9 +2,10 @@
 id: protocol-request-task-inventory-cap
 title: Fetch task inventory over the RequestTaskInventory capability
 topic: protocol
-status: ready
+status: blocked
 origin: test-phase-z-deferred-04 (2026-10-03)
 refs: [test-phase-z-deferred-04, gridspec-task-inventory]
+blocked_by: [gridspec-task-inventory]
 ---
 
 Context: [context/protocol.md](../context/protocol.md).
@@ -34,3 +35,9 @@ arrives. Keep the UDP + Xfer path for OpenSim.
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Done together with [[gridspec-task-inventory]]
+
+This capability is adopted inside that gridspec task, which measures the
+feature on both grids over both paths, makes the fake grid serve the
+capability per flavour, and checks the viewer. Claim that task.

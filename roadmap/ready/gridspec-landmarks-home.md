@@ -31,3 +31,8 @@ Small — landmark bodies, the cap, a Set-Home flavour row.
 ## Viewer
 
 Cap first, UDP fallback.
+
+## Capabilities done in this task
+
+[[protocol-cap-home-location]]: setting home over `HomeLocation`, with the
+reply each grid sends.

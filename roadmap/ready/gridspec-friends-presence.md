@@ -33,3 +33,9 @@ Large — [[server-fake-grid-friends-presence]].
 ## Viewer
 
 The masked bit on SL; never wait for OpenSim's calling-card confirmation.
+
+## Capabilities done in this task
+
+[[protocol-cap-offline-friendship-answers]]: answering offline friendship
+offers over `AcceptFriendship` / `DeclineFriendship`, measured together with
+[[gridspec-instant-messages]]' offline delivery.

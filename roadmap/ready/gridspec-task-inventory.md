@@ -40,3 +40,12 @@ cause is known.
 ## Viewer
 
 The Contents tab survives a write that does not land.
+
+## Capabilities done in this task
+
+[[protocol-request-task-inventory-cap]] (task inventory over
+`RequestTaskInventory`) and [[protocol-cap-get-metadata]] (a script's
+experience over `GetMetadata`). Also the protocol halves of
+`UpdateGestureTaskInventory` (both grids; the editor is
+[[viewer-gesture-management-ui]]) and `UpdateMaterialTaskInventory` (Second
+Life; the editor half is [[viewer-material-save-to-object]]).

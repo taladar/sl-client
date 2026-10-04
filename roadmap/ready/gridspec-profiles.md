@@ -35,3 +35,12 @@ Display names small in this task; profiles large —
 
 Picks from volunteered replies on OpenSim; blank notes; display-name UI hidden
 without the cap.
+
+## Capabilities done in this task
+
+[[protocol-cap-agent-profile]]: profiles over `AgentProfile`. Also the
+protocol halves of `UploadAgentProfileImage`
+([[viewer-profile-image-editing]]), `SetDisplayName`
+([[viewer-display-name-set]]) and `SearchStatRequest`
+([[viewer-classified-click-stats]]): the command, the reply, the fake grid's
+Second Life flavour serving it; the UI stays in those tasks.

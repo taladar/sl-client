@@ -31,3 +31,8 @@ Medium — [[server-fake-grid-directory-search]].
 ## Viewer
 
 Sentinel row, empty tabs on OpenSim.
+
+## Capabilities done in this task
+
+[[protocol-cap-product-info]]: land-type names over `ProductInfoRequest`, with
+the `ProductSKU` the LLSD forms of the land replies carry.

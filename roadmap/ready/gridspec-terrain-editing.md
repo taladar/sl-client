@@ -30,3 +30,8 @@ Large — [[server-fake-grid-terraform]].
 ## Viewer
 
 Per-grid limits from `RegionInfo`; no reliance on undo on OpenSim.
+
+## Capabilities done in this task
+
+The protocol half of `ModifyRegion` (Second Life): reading and writing the
+region's PBR terrain overrides; rendering them is [[viewer-pbr-terrain]].
