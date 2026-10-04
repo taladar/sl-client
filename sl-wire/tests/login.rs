@@ -765,7 +765,8 @@ mod test {
                 .collect(),
             )],
             tutorial_settings: vec![TutorialSetting {
-                tutorial_url: "http://example.com/tutorial/".to_owned(),
+                tutorial_url: Some("http://example.com/tutorial/".to_owned()),
+                use_tutorial: Some(String::new()),
             }],
             help_url_format: Some("https://help.example.com/[TOPIC]?lang=[LANGUAGE]".to_owned()),
             web_profile_url: Some(url::Url::parse("https://my.example.com/")?),
@@ -780,6 +781,13 @@ mod test {
             account_level_benefits: Some(benefits),
             premium_packages: Some(premium_packages),
             response_fields: Vec::new(),
+            empty_lists: Vec::new(),
+            agent_flags: Some(0),
+            cof_version: Some(3),
+            god_level: Some(0),
+            max_god_level: Some(0),
+            is_admin_login: Some(false),
+            linden_status_code: Some("1-6ac27ca9-0123456789abcdef01234567".to_owned()),
         })
     }
 
@@ -910,6 +918,12 @@ mod test {
             success.account_level_benefits
         );
         assert_eq!(parsed.premium_packages, success.premium_packages);
+        assert_eq!(parsed.agent_flags, success.agent_flags);
+        assert_eq!(parsed.cof_version, success.cof_version);
+        assert_eq!(parsed.god_level, success.god_level);
+        assert_eq!(parsed.max_god_level, success.max_god_level);
+        assert_eq!(parsed.is_admin_login, success.is_admin_login);
+        assert_eq!(parsed.linden_status_code, success.linden_status_code);
         Ok(())
     }
 
@@ -1241,6 +1255,67 @@ mod test {
         assert!(success.home.is_some());
         assert!(success.seed_capability.as_str().contains("CAPS"));
         assert!(success.account_type.is_some());
+        Ok(())
+    }
+
+    /// The shapes aditi and OpenSim were measured sending (2026-10-04) survive
+    /// a parse and a re-encode: Second Life's `<int>` scalars, its two-entry
+    /// `tutorial_setting` and empty `initial-outfit` struct, and OpenSim's
+    /// list sections sent as empty arrays.
+    #[test]
+    fn measured_login_shapes_round_trip() -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{LoginList, build_login_response};
+
+        let xml = response(
+            "<member><name>login</name><value><string>true</string></value></member>\
+             <member><name>agent_id</name><value><string>11111111-1111-1111-1111-111111111111</string></value></member>\
+             <member><name>session_id</name><value><string>22222222-2222-2222-2222-222222222222</string></value></member>\
+             <member><name>secure_session_id</name><value><string>33333333-3333-3333-3333-333333333333</string></value></member>\
+             <member><name>circuit_code</name><value><int>123456</int></value></member>\
+             <member><name>sim_ip</name><value><string>127.0.0.1</string></value></member>\
+             <member><name>sim_port</name><value><int>9000</int></value></member>\
+             <member><name>seed_capability</name><value><string>http://127.0.0.1:9000/CAPS/seed</string></value></member>\
+             <member><name>agent_flags</name><value><int>0</int></value></member>\
+             <member><name>cof_version</name><value><int>1</int></value></member>\
+             <member><name>god_level</name><value><int>0</int></value></member>\
+             <member><name>max_god_level</name><value><int>0</int></value></member>\
+             <member><name>is_admin_login</name><value><string>false</string></value></member>\
+             <member><name>Linden_Status_Code</name><value><string>1-6ac27ca9-0123456789abcdef01234567</string></value></member>\
+             <member><name>tutorial_setting</name><value><array><data>\
+             <value><struct><member><name>tutorial_url</name><value><string>http://help.secondlife.com/orientation/</string></value></member></struct></value>\
+             <value><struct><member><name>use_tutorial</name><value><string /></value></member></struct></value>\
+             </data></array></value></member>\
+             <member><name>initial-outfit</name><value><array><data><value><struct></struct></value></data></array></value></member>\
+             <member><name>buddy-list</name><value><array><data></data></array></value></member>\
+             <member><name>gestures</name><value><array><data></data></array></value></member>",
+        );
+        let LoginResponse::Success(success) = parse_login_response(&xml)? else {
+            return Err("expected a successful login".into());
+        };
+        assert_eq!(success.agent_flags, Some(0));
+        assert_eq!(success.cof_version, Some(1));
+        assert_eq!(success.god_level, Some(0));
+        assert_eq!(success.max_god_level, Some(0));
+        assert_eq!(success.is_admin_login, Some(false));
+        assert_eq!(
+            success.linden_status_code.as_deref(),
+            Some("1-6ac27ca9-0123456789abcdef01234567")
+        );
+        assert_eq!(success.tutorial_settings.len(), 2);
+        assert_eq!(
+            success.empty_lists,
+            vec![LoginList::BuddyList, LoginList::Gestures]
+        );
+        let LoginResponse::Success(again) = parse_login_response(&build_login_response(
+            &LoginResponse::Success(success.clone()),
+        ))?
+        else {
+            return Err("expected the re-encoded login to succeed".into());
+        };
+        assert_eq!(again.response_fields, success.response_fields);
+        assert_eq!(again.tutorial_settings, success.tutorial_settings);
+        assert_eq!(again.initial_outfit, success.initial_outfit);
+        assert_eq!(again.empty_lists, success.empty_lists);
         Ok(())
     }
 

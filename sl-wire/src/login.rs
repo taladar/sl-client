@@ -650,6 +650,84 @@ pub struct LoginSuccess {
     /// the conformance suite maps which `options` gate which fields on each
     /// grid. Empty for a success built rather than parsed.
     pub response_fields: Vec<String>,
+    /// The list sections the grid sent as an **empty array** rather than
+    /// leaving out — OpenSim sends `buddy-list`, `gestures`,
+    /// `event_categories` and `event_notifications` that way for an account
+    /// with none. The `Vec` fields alone cannot say so (empty is empty), so
+    /// the parsers record it here and the encoders write an empty array for
+    /// each list named here whose `Vec` is empty.
+    pub empty_lists: Vec<LoginList>,
+    /// The account's agent flags (`agent_flags`, Second Life; `0` on aditi).
+    pub agent_flags: Option<u32>,
+    /// The Current Outfit Folder's version as the login service knows it
+    /// (`cof_version`, Second Life).
+    pub cof_version: Option<i32>,
+    /// The account's current god level (`god_level`, Second Life; `0` for a
+    /// resident).
+    pub god_level: Option<u8>,
+    /// The highest god level the account may request (`max_god_level`,
+    /// Second Life).
+    pub max_god_level: Option<u8>,
+    /// Whether this is an administrative login (`is_admin_login`, Second
+    /// Life, sent as the string `"true"` / `"false"`).
+    pub is_admin_login: Option<bool>,
+    /// The login service's request trace id (`Linden_Status_Code`, Second
+    /// Life, e.g. `1-6ac27ca9-…`) — the same shape as the `Linden_Error_Code`
+    /// a refusal carries.
+    pub linden_status_code: Option<String>,
+}
+
+/// A list section of a login response a grid may send as an empty array
+/// rather than leave out ([`LoginSuccess::empty_lists`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum LoginList {
+    /// `buddy-list`.
+    BuddyList,
+    /// `gestures`.
+    Gestures,
+    /// `event_categories`.
+    EventCategories,
+    /// `classified_categories`.
+    ClassifiedCategories,
+    /// `event_notifications`.
+    EventNotifications,
+}
+
+impl LoginList {
+    /// Every list section, in wire order.
+    pub const ALL: [Self; 5] = [
+        Self::BuddyList,
+        Self::Gestures,
+        Self::EventCategories,
+        Self::ClassifiedCategories,
+        Self::EventNotifications,
+    ];
+
+    /// The member name on the wire — also the name of the `options` entry
+    /// that asks for it.
+    #[must_use]
+    pub const fn member(self) -> &'static str {
+        match self {
+            Self::BuddyList => "buddy-list",
+            Self::Gestures => "gestures",
+            Self::EventCategories => "event_categories",
+            Self::ClassifiedCategories => "classified_categories",
+            Self::EventNotifications => "event_notifications",
+        }
+    }
+
+    /// Whether `success` holds no entries in this list.
+    #[must_use]
+    pub const fn is_empty_in(self, success: &LoginSuccess) -> bool {
+        match self {
+            Self::BuddyList => success.buddy_list.is_empty(),
+            Self::Gestures => success.gestures.is_empty(),
+            Self::EventCategories => success.event_categories.is_empty(),
+            Self::ClassifiedCategories => success.classified_categories.is_empty(),
+            Self::EventNotifications => success.event_notifications.is_empty(),
+        }
+    }
 }
 
 impl LoginSuccess {
@@ -729,6 +807,13 @@ impl LoginSuccess {
             account_level_benefits: None,
             premium_packages: None,
             response_fields: Vec::new(),
+            empty_lists: Vec::new(),
+            agent_flags: None,
+            cof_version: None,
+            god_level: None,
+            max_god_level: None,
+            is_admin_login: None,
+            linden_status_code: None,
         }
     }
 
@@ -802,6 +887,8 @@ impl LoginSuccess {
         if !wants(options, "tutorial_setting") {
             self.tutorial_settings.clear();
         }
+        self.empty_lists
+            .retain(|list| wants(options, list.member()));
         if !wants(options, "voice-config") {
             self.voice_config = None;
         }
@@ -1004,7 +1091,11 @@ pub struct LoginCategory {
 pub struct TutorialSetting {
     /// The tutorial web page URL (`tutorial_url`), kept verbatim (grids have
     /// sent both full URLs and URL fragments here).
-    pub tutorial_url: String,
+    pub tutorial_url: Option<String>,
+    /// Whether to show the tutorial (`use_tutorial`), kept verbatim. Second
+    /// Life sends it as an entry of its own, with an empty string, after the
+    /// one carrying the URL; the reference viewer no longer reads it.
+    pub use_tutorial: Option<String>,
 }
 
 /// The reason a login was rejected.
@@ -1299,7 +1390,44 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, WireError> {
             .map(value_to_llsd),
         premium_packages: member_value_node(response_struct, "premium_packages").map(value_to_llsd),
         response_fields: member_names(response_struct),
+        empty_lists: empty_lists(response_struct),
+        agent_flags: members
+            .get("agent_flags")
+            .and_then(|f| f.trim().parse().ok()),
+        cof_version: members
+            .get("cof_version")
+            .and_then(|v| v.trim().parse().ok()),
+        god_level: members.get("god_level").and_then(|g| g.trim().parse().ok()),
+        max_god_level: members
+            .get("max_god_level")
+            .and_then(|g| g.trim().parse().ok()),
+        is_admin_login: members
+            .get("is_admin_login")
+            .and_then(|flag| parse_wire_bool(flag)),
+        linden_status_code: members.get("Linden_Status_Code").cloned(),
     })))
+}
+
+/// The list sections `response_struct` carries as an empty array
+/// ([`LoginSuccess::empty_lists`]).
+fn empty_lists(response_struct: roxmltree::Node<'_, '_>) -> Vec<LoginList> {
+    LoginList::ALL
+        .into_iter()
+        .filter(|list| {
+            member_value_node(response_struct, list.member())
+                .is_some_and(|value| array_value_nodes(value).next().is_none())
+        })
+        .collect()
+}
+
+/// A boolean sent as text: `true` / `false`, or the `1` / `0` and `Y` / `N`
+/// forms grids also use.
+pub(crate) fn parse_wire_bool(text: &str) -> Option<bool> {
+    match text.trim() {
+        "true" | "True" | "1" | "Y" | "y" => Some(true),
+        "false" | "False" | "0" | "N" | "n" => Some(false),
+        _other => None,
+    }
 }
 
 /// The sorted names of every member of `struct_node`, whatever its value's
@@ -1637,9 +1765,11 @@ fn parse_tutorial_settings(response_struct: roxmltree::Node<'_, '_>) -> Vec<Tuto
     array_structs(value)
         .filter_map(|setting_struct| {
             let members = collect_members(setting_struct);
-            Some(TutorialSetting {
-                tutorial_url: members.get("tutorial_url")?.clone(),
-            })
+            let setting = TutorialSetting {
+                tutorial_url: members.get("tutorial_url").cloned(),
+                use_tutorial: members.get("use_tutorial").cloned(),
+            };
+            (setting.tutorial_url.is_some() || setting.use_tutorial.is_some()).then_some(setting)
         })
         .collect()
 }
@@ -2137,9 +2267,14 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         });
     }
     if let Some(outfit) = &success.initial_outfit {
+        // Second Life sends an outfit with neither member as an empty struct.
         push_single_struct_member(out, "initial-outfit", |body| {
-            push_string_member(body, "folder_name", &outfit.folder_name);
-            push_string_member(body, "gender", &outfit.gender);
+            if !outfit.folder_name.is_empty() {
+                push_string_member(body, "folder_name", &outfit.folder_name);
+            }
+            if !outfit.gender.is_empty() {
+                push_string_member(body, "gender", &outfit.gender);
+            }
         });
     }
     if let Some(config) = &success.newuser_config {
@@ -2190,7 +2325,8 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         "tutorial_setting",
         &success.tutorial_settings,
         |body, setting| {
-            push_string_member(body, "tutorial_url", &setting.tutorial_url);
+            push_opt_string_member(body, "tutorial_url", setting.tutorial_url.as_deref());
+            push_opt_string_member(body, "use_tutorial", setting.use_tutorial.as_deref());
         },
     );
     push_opt_string_member(out, "help_url_format", success.help_url_format.as_deref());
@@ -2232,6 +2368,33 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     }
     if let Some(packages) = &success.premium_packages {
         push_member(out, "premium_packages", packages);
+    }
+    if let Some(flags) = success.agent_flags {
+        push_int_member(out, "agent_flags", i32::try_from(flags).unwrap_or(i32::MAX));
+    }
+    if let Some(version) = success.cof_version {
+        push_int_member(out, "cof_version", version);
+    }
+    if let Some(level) = success.god_level {
+        push_int_member(out, "god_level", i32::from(level));
+    }
+    if let Some(level) = success.max_god_level {
+        push_int_member(out, "max_god_level", i32::from(level));
+    }
+    if let Some(admin) = success.is_admin_login {
+        push_string_member(out, "is_admin_login", if admin { "true" } else { "false" });
+    }
+    push_opt_string_member(
+        out,
+        "Linden_Status_Code",
+        success.linden_status_code.as_deref(),
+    );
+    for list in &success.empty_lists {
+        if list.is_empty_in(success) {
+            out.push_str("<member><name>");
+            out.push_str(list.member());
+            out.push_str("</name><value><array><data>\n</data></array></value></member>\n");
+        }
     }
 }
 

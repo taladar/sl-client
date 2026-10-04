@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 363 |
+| ready | 362 |
 | blocked | 100 |
 | in-progress | 20 |
 | bugs | 29 |
-| done | 1311 |
+| done | 1312 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2006** |
@@ -352,7 +352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (363)
+## ready (362)
 
 ### protocol
 
@@ -1061,9 +1061,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-login-response-sections`](ready/server-fake-grid-login-response-sections.md)
-  — The fake grid's login response lacks the sections and scalars the live grids
-  send
 - [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
   size-proportional call costs and the region's script budget on aditi
 - [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
@@ -1652,7 +1649,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1311)
+## done (1312)
 
 ### protocol
 
@@ -4530,6 +4527,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-fake-grid-agent-experiences`](done/server-fake-grid-agent-experiences.md)
   — Fake grid — the agent's own five experience lists
+- [`server-fake-grid-login-response-sections`](done/server-fake-grid-login-response-sections.md)
+  — The fake grid's login response lacks the sections and scalars the live grids
+  send
 - [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them

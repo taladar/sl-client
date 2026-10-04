@@ -154,7 +154,7 @@ pub use llsd::{
 };
 pub use login::{
     BuddyListEntry, Credential, GestureEntry, GlobalTextures, HomeLocation, InitialOutfit,
-    LoginCategory, LoginFailure, LoginFlags, LoginGates, LoginRedirect, LoginRejectKind,
+    LoginCategory, LoginFailure, LoginFlags, LoginGates, LoginList, LoginRedirect, LoginRejectKind,
     LoginRequest, LoginResponse, LoginServer, LoginSuccess, MfaChallenge, MfaPolicy, NewUserConfig,
     ParsedLoginRequest, SkeletonFolder, StartLocation, StartLocationParseError, TutorialSetting,
     UiConfig, VoiceConfig, build_login_request, build_login_request_with_method,

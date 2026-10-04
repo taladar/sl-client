@@ -20,14 +20,17 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
 /// the login response is parsed.
 const ACCOUNT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The account maturity the login reports, as `agent_access` / `agent_access_max`.
+/// The account's maturity ceiling, `agent_access_max`: `A` on both grids for
+/// every test account.
 ///
-/// Both live grids answered `M` / `A` for the test accounts — OpenSim for every
-/// account, Second Life for these (it answers per account; see
-/// `protocol-agent-access-meaning` for what `agent_access` means).
-const ACCESS: Measured<(&str, &str)> = Measured {
-    second_life: ("Mature", "Adult"),
-    opensim: ("Mature", "Adult"),
+/// `agent_access` itself is not pinned. OpenSim answers `M` for every account,
+/// but Second Life answers per account — `M` for two of the three aditi test
+/// accounts and `A` for the third, whose preference is `M` (see
+/// `protocol-agent-access-meaning` for what it may mean) — so it is recorded,
+/// not held.
+const ACCESS_MAX: Measured<&str> = Measured {
+    second_life: "Adult",
+    opensim: "Adult",
     source: "book/src/gridspec/login.md (login-handshake, 2026-10-04)",
 };
 
@@ -231,13 +234,10 @@ impl GridTest for LoginHandshake {
             ctx.metrics().set_timing("handshake_secs", elapsed);
             record_account(ctx.metrics(), &account);
             let grid = ctx.grid();
-            ACCESS.check(
-                "the account's agent_access / agent_access_max",
+            ACCESS_MAX.check(
+                "the account's agent_access_max",
                 grid,
-                &(
-                    format!("{:?}", account.agent_access).as_str(),
-                    format!("{:?}", account.agent_access_max).as_str(),
-                ),
+                &format!("{:?}", account.agent_access_max).as_str(),
             )?;
             MAX_AGENT_GROUPS.check("max-agent-groups", grid, &account.max_agent_groups)?;
             ctx.metrics().set(

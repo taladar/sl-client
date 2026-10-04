@@ -245,6 +245,7 @@ impl Session {
             openid_url: None,
             openid_token: None,
             login_account: None,
+            login_success: None,
             secure_session_id: Uuid::nil(),
             transfers: Transfers::new(),
             world: WorldCache::new(),
@@ -1887,6 +1888,7 @@ impl Session {
                 self.login_method = Some(redirect.next_method);
             }
             sl_wire::LoginResponse::Success(success) => {
+                self.login_success = Some(success.clone());
                 let sim_addr = SocketAddr::new(IpAddr::V4(success.sim_ip), success.sim_port);
                 let circuit_id = self.mint_circuit_id();
                 let mut circuit = Circuit::new(
@@ -10383,6 +10385,15 @@ impl Session {
     #[must_use]
     pub const fn login_account(&self) -> Option<&LoginAccount> {
         self.login_account.as_ref()
+    }
+
+    /// The whole parsed login response, or `None` before login: every section
+    /// the grid sent — gestures, login flags, the category lists, the UI
+    /// config, … — including the ones the session does not act on. Its
+    /// identifiers (session ids, circuit code) are this session's own.
+    #[must_use]
+    pub fn login_success(&self) -> Option<&sl_wire::LoginSuccess> {
+        self.login_success.as_deref()
     }
 
     /// Requests the contents (sub-folders and items) of the inventory folder

@@ -1118,6 +1118,9 @@ fn register_account_display_name(sim: &mut SimSession, account: &Account) {
     );
 }
 
+/// The Current Outfit Folder's preferred type.
+const FOLDER_TYPE_CURRENT_OUTFIT: i8 = 46;
+
 /// What the flavour decides about a login response, resolved once at start.
 #[derive(Debug, Clone, Copy)]
 struct LoginPolicy<'grid> {
@@ -1259,6 +1262,16 @@ fn enrich_success(
     // Both grids name the library's owner, which is who a viewer fetches the
     // library's contents as.
     success.library_owner = Some(crate::scenario::library_owner());
+    // The content sections, as each grid was measured sending them. The
+    // Current Outfit Folder's version is what Second Life names in
+    // `cof_version`.
+    let cof_version = success
+        .inventory_skeleton
+        .iter()
+        .find(|folder| folder.type_default == FOLDER_TYPE_CURRENT_OUTFIT)
+        .map_or(1, |folder| folder.version);
+    let now = success.seconds_since_epoch.unwrap_or(0);
+    fields.sections.fill(success, now, cof_version);
 }
 
 /// The wall-clock time as UNIX seconds (the `seconds_since_epoch` field).

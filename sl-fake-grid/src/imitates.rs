@@ -108,6 +108,7 @@ use crate::bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH};
 use crate::inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,
 };
+use crate::login_sections::LoginSections;
 use crate::uploads::UpdateCompletionItem;
 use crate::voice::VoiceBackend;
 
@@ -180,11 +181,13 @@ impl ImitatedGrid {
                 home: false,
                 region_size: false,
                 max_agent_groups: None,
+                sections: LoginSections::SECOND_LIFE,
             },
             Self::OpenSim => LoginFields {
                 home: true,
                 region_size: true,
                 max_agent_groups: Some(OPENSIM_MAX_AGENT_GROUPS),
+                sections: LoginSections::OPENSIM,
             },
         }
     }
@@ -374,6 +377,9 @@ pub struct LoginFields {
     /// limit — which is what Second Life sends (50 for a `Base` account on
     /// aditi, its `group_membership_limit`).
     pub max_agent_groups: Option<u32>,
+    /// The content sections and the one-grid scalars, with the values each
+    /// grid was measured sending.
+    pub sections: LoginSections,
 }
 
 #[cfg(test)]

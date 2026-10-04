@@ -192,7 +192,8 @@ mod test {
                 .collect(),
         )];
         success.tutorial_settings = vec![TutorialSetting {
-            tutorial_url: "http://example.com/tutorial/".to_owned(),
+            tutorial_url: Some("http://example.com/tutorial/".to_owned()),
+            use_tutorial: Some(String::new()),
         }];
         success.help_url_format = Some("https://help.example.com/[TOPIC]".to_owned());
         success.web_profile_url = Some(url::Url::parse("https://my.example.com/")?);

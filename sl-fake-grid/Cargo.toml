@@ -31,6 +31,8 @@ sl-test-assets = { workspace = true }
 sl-types = { workspace = true }
 sl-wire = { workspace = true }
 thiserror = { workspace = true }
+# Pacific daylight-saving time for the login's `daylight_savings` flag.
+time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "tracing-log"] }

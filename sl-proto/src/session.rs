@@ -1787,6 +1787,9 @@ pub struct Session {
     /// Account-level facts from the login response (home, maturity, group limit,
     /// Library roots), or `None` before login.
     login_account: Option<LoginAccount>,
+    /// The whole parsed login response, or `None` before login — every section
+    /// a grid sent, including the ones nothing above extracts.
+    login_success: Option<Box<sl_wire::LoginSuccess>>,
     /// The account's secure session id from the login response, used to predict
     /// a legacy asset upload's stored id (`combine(transaction_id,
     /// secure_session_id)` — see [`sl_wire::combine_uuids`]). Nil before login.

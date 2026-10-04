@@ -20,6 +20,7 @@ mod http_service;
 pub mod imitates;
 pub mod inventory;
 mod login_endpoint;
+pub mod login_sections;
 mod map_tiles;
 pub mod marker;
 pub mod neighbours;

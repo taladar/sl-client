@@ -82,8 +82,8 @@ pub use sl_proto::{
     LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType, LegacyMaterial,
     LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
     LoggedChatType, LoginAccount, LoginParams, LoginRejectKind, LoginRequest, LoginResponse,
-    LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
-    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, MarketplaceApiError,
+    LoginSuccess, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
+    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, MarketplaceApiError,
     MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo,
     MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus,
     MeshKey, MessageCursor, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
@@ -465,6 +465,14 @@ impl Client {
     #[must_use]
     pub const fn login_account(&self) -> Option<&LoginAccount> {
         self.session.login_account()
+    }
+
+    /// The whole parsed login response
+    /// ([`Session::login_success`](sl_proto::Session::login_success)), or
+    /// `None` before login.
+    #[must_use]
+    pub fn login_success(&self) -> Option<&LoginSuccess> {
+        self.session.login_success()
     }
 
     /// The region handle of the region the agent logged in to, available once

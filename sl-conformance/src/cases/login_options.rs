@@ -177,7 +177,304 @@ const PRESENCE: &[(&str, Asked, Measured<bool>)] = &[
             source: SOURCE,
         },
     ),
+    (
+        "classified_categories",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "event_categories",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "global-textures",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "login-flags",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "ui-config",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "initial-outfit",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "tutorial_setting",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: false,
+            source: SOURCE,
+        },
+    ),
+    (
+        "buddy-list",
+        Asked::Everything,
+        Measured {
+            second_life: false,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "event_notifications",
+        Asked::Everything,
+        Measured {
+            second_life: false,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "http_port",
+        Asked::Everything,
+        Measured {
+            second_life: false,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "real_id",
+        Asked::Everything,
+        Measured {
+            second_life: false,
+            opensim: true,
+            source: SOURCE,
+        },
+    ),
+    (
+        "agent_flags",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: false,
+            source: SOURCE,
+        },
+    ),
+    (
+        "cof_version",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: false,
+            source: SOURCE,
+        },
+    ),
+    (
+        "god_level",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: false,
+            source: SOURCE,
+        },
+    ),
+    (
+        "max_god_level",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: false,
+            source: SOURCE,
+        },
+    ),
+    (
+        "is_admin_login",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: false,
+            source: SOURCE,
+        },
+    ),
+    (
+        "Linden_Status_Code",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: false,
+            source: SOURCE,
+        },
+    ),
+    (
+        "udp_blacklist",
+        Asked::Everything,
+        Measured {
+            second_life: true,
+            opensim: false,
+            source: SOURCE,
+        },
+    ),
 ];
+
+/// How many event categories the grid lists: Second Life's thirteen, and a
+/// stock OpenSim's empty array.
+const EVENT_CATEGORIES: Measured<usize> = Measured {
+    second_life: 13,
+    opensim: 0,
+    source: SOURCE,
+};
+
+/// How many classified categories the grid lists: the same nine on both.
+const CLASSIFIED_CATEGORIES: Measured<usize> = Measured {
+    second_life: 9,
+    opensim: 9,
+    source: SOURCE,
+};
+
+/// The moon texture `global-textures` names — the one of its three ids the
+/// two grids disagree on besides the clouds.
+const MOON_TEXTURE: Measured<Option<&str>> = Measured {
+    second_life: Some("d07f6eed-b96a-47cd-b51d-400ad4a1c428"),
+    opensim: Some("ec4b9f0b-d008-45c6-96a4-01dd947ac621"),
+    source: SOURCE,
+};
+
+/// The initial outfit's folder: Second Life sends the section as an empty
+/// struct, a stock OpenSim names its default outfit.
+const INITIAL_OUTFIT_FOLDER: Measured<Option<&str>> = Measured {
+    second_life: Some(""),
+    opensim: Some("Nightclub Female"),
+    source: SOURCE,
+};
+
+/// The tutorial page: Second Life's orientation page, none on OpenSim.
+const TUTORIAL_URL: Measured<Option<&str>> = Measured {
+    second_life: Some("http://help.secondlife.com/orientation/"),
+    opensim: None,
+    source: SOURCE,
+};
+
+/// The UDP messages Second Life hands over through the event queue instead.
+const UDP_BLACKLIST: Measured<&str> = Measured {
+    second_life: "EnableSimulator,TeleportFinish,CrossedRegion,OpenCircuit",
+    opensim: "",
+    source: SOURCE,
+};
+
+/// The list sections sent as an empty array, for test accounts with no
+/// friends, gestures or notifications: none on Second Life, four on OpenSim.
+const EMPTY_LISTS: Measured<&str> = Measured {
+    second_life: "",
+    opensim: "buddy-list,gestures,event_categories,event_notifications",
+    source: SOURCE,
+};
+
+/// The response's `http_port`: OpenSim sends `0`, Second Life nothing.
+const HTTP_PORT: Measured<Option<u16>> = Measured {
+    second_life: None,
+    opensim: Some(0),
+    source: SOURCE,
+};
+
+/// Record the content sections of `success` and hold them to the measured
+/// values.
+fn check_sections(
+    metrics: &mut crate::metrics::Metrics,
+    grid: Grid,
+    success: &sl_client_tokio::LoginSuccess,
+) -> Result<(), TestFailure> {
+    let moon = success
+        .global_textures
+        .as_ref()
+        .map(|textures| textures.moon_texture_id.to_string());
+    let outfit = success
+        .initial_outfit
+        .as_ref()
+        .map(|outfit| outfit.folder_name.clone());
+    let tutorial = success
+        .tutorial_settings
+        .iter()
+        .find_map(|setting| setting.tutorial_url.clone());
+    let blacklist = success.udp_blacklist.join(",");
+    let empty_lists = success
+        .empty_lists
+        .iter()
+        .map(|list| list.member())
+        .collect::<Vec<_>>()
+        .join(",");
+    metrics.set(
+        "event_categories_count",
+        i64::try_from(success.event_categories.len()).unwrap_or(-1),
+    );
+    metrics.set(
+        "classified_categories_count",
+        i64::try_from(success.classified_categories.len()).unwrap_or(-1),
+    );
+    metrics.set(
+        "gestures_count",
+        i64::try_from(success.gestures.len()).unwrap_or(-1),
+    );
+    metrics.set("moon_texture", moon.clone().unwrap_or_default());
+    metrics.set("login_flags", format!("{:?}", success.login_flags));
+    metrics.set("ui_config", format!("{:?}", success.ui_config));
+    metrics.set("initial_outfit", format!("{:?}", success.initial_outfit));
+    metrics.set(
+        "tutorial_settings",
+        format!("{:?}", success.tutorial_settings),
+    );
+    metrics.set("udp_blacklist", blacklist.clone());
+    metrics.set("empty_lists", empty_lists.clone());
+    metrics.set("cof_version", format!("{:?}", success.cof_version));
+    metrics.set("agent_flags", format!("{:?}", success.agent_flags));
+    metrics.set(
+        "god_levels",
+        format!("{:?}/{:?}", success.god_level, success.max_god_level),
+    );
+    metrics.set("is_admin_login", format!("{:?}", success.is_admin_login));
+    metrics.set("http_port", format!("{:?}", success.http_port));
+    EVENT_CATEGORIES.check(
+        "the event categories",
+        grid,
+        &success.event_categories.len(),
+    )?;
+    CLASSIFIED_CATEGORIES.check(
+        "the classified categories",
+        grid,
+        &success.classified_categories.len(),
+    )?;
+    MOON_TEXTURE.check("the moon texture", grid, &moon.as_deref())?;
+    INITIAL_OUTFIT_FOLDER.check("the initial outfit's folder", grid, &outfit.as_deref())?;
+    TUTORIAL_URL.check("the tutorial page", grid, &tutorial.as_deref())?;
+    UDP_BLACKLIST.check("the UDP blacklist", grid, &blacklist.as_str())?;
+    EMPTY_LISTS.check("the lists sent empty", grid, &empty_lists.as_str())?;
+    HTTP_PORT.check("http_port", grid, &success.http_port)?;
+    Ok(())
+}
 
 /// The overall budget: three logins, two of them behind aditi's 120 s
 /// per-avatar cooldown.
@@ -244,6 +541,9 @@ impl GridTest for LoginOptions {
                     .collect(),
             )
             .await?;
+            let every_success = session.login_success().cloned().ok_or_else(|| {
+                TestFailure::State("the every-option login left no response".to_owned())
+            })?;
             // Back to the default list, so the runner's logout — and anything
             // after it — sees the session every other case gets.
             session.disconnect().await?;
@@ -286,6 +586,7 @@ impl GridTest for LoginOptions {
                     &fields.contains(*field),
                 )?;
             }
+            check_sections(ctx.metrics(), grid, &every_success)?;
             Ok(())
         })
     }

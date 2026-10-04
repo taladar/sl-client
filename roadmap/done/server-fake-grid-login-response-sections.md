@@ -2,12 +2,40 @@
 id: server-fake-grid-login-response-sections
 title: The fake grid's login response lacks the sections and scalars the live grids send
 topic: server
-status: ready
+status: done
 origin: gridspec-login (2026-10-04)
 refs: [gridspec-login, server-login-service]
 ---
 
 Context: [context/server.md](../context/server.md).
+
+## Done (2026-10-04)
+
+- **Values captured** with a temporary raw-body dump on one login per grid
+  (removed again), then made permanent: `Session::login_success` (sl-proto,
+  and `Client::login_success` on the tokio client) keeps the whole parsed
+  response, and `login-options` records every section's contents.
+- **`sl-wire`** gained the Second Life scalars (`agent_flags`, `cof_version`,
+  `god_level`, `max_god_level`, `is_admin_login`, `linden_status_code`),
+  `LoginSuccess::empty_lists` (which list sections arrived as an empty array —
+  `LoginList`), a two-field `TutorialSetting` (`tutorial_url`, `use_tutorial`)
+  for Second Life's two-entry form, and an empty `initial-outfit` struct, in
+  both the XML-RPC and LLSD codecs.
+- **The fake grid** fills every section per flavour from the measurement
+  (`sl-fake-grid/src/login_sections.rs`): the category lists, the global
+  textures, the login flags (with `daylight_savings` computed for Pacific
+  time), the UI config, the initial outfit, the tutorial setting, the Second
+  Life scalars and `udp_blacklist`, OpenSim's `http_port` / `real_id` and its
+  empty lists.
+- **`login-buddy-list`** (new, live only) settled the open question: both
+  grids send `buddy-list` for an account with a friend, so Second Life leaves
+  out an *empty* list where OpenSim sends `[]`.
+- **Held** by 18 more `PRESENCE` rows and eight value checks in
+  `login-options`, passing on aditi, OpenSim and both fake flavours.
+- **Not imitated, on purpose:** `openid_url` / `openid_token` — a viewer POSTs
+  the token there at login and the fake grid serves no OpenID endpoint; said
+  so in `book/src/gridspec/login.md`. `gestures` follows each account's own
+  active gestures (the fake accounts have none).
 
 [[gridspec-login]] measured, field by field, what aditi and the local OpenSim
 put in a successful login response (`book/src/gridspec/login.md`), and made

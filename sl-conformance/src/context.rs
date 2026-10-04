@@ -79,6 +79,9 @@ pub struct Session {
     /// upload's price before it sends the upload cannot afford to have missed
     /// it.
     login_account: Option<LoginAccount>,
+    /// The whole parsed login response, captured at connect for the same
+    /// reason: every section a grid sent, which `login-options` records.
+    login_success: Option<Box<sl_client_tokio::LoginSuccess>>,
     /// The agent's login session id, available after login. Needed by a case
     /// that hand-builds a raw wire message for
     /// [`Command::Send`] (most messages carry an
@@ -184,6 +187,12 @@ impl Session {
     #[must_use]
     pub const fn login_account(&self) -> Option<&LoginAccount> {
         self.login_account.as_ref()
+    }
+
+    /// The whole parsed login response, if the login produced one.
+    #[must_use]
+    pub fn login_success(&self) -> Option<&sl_client_tokio::LoginSuccess> {
+        self.login_success.as_deref()
     }
 
     /// The agent's login session id, if login reported one. Pairs with
@@ -671,6 +680,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
 
     let agent_id = client.agent_id();
     let login_account = client.login_account().cloned();
+    let login_success = client.login_success().cloned().map(Box::new);
     let login_session_id = client.session_id();
     let region_handle = client.region_handle();
     let circuit_id = client.root_circuit_id();
@@ -709,6 +719,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
     Ok(Session {
         agent_id,
         login_account,
+        login_success,
         login_session_id,
         region_handle,
         circuit_id,

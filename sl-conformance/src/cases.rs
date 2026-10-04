@@ -57,6 +57,7 @@ pub mod inventory_tree_crawl;
 pub mod keepalive_ping;
 pub mod kick_user;
 pub mod library_tree_fetch;
+pub mod login_buddy_list;
 pub mod login_handshake;
 pub mod login_options;
 pub mod logout_clean;

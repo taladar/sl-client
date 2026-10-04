@@ -29,10 +29,10 @@ use sl_llsd::LlsdError;
 use crate::llsd::{Llsd, parse_llsd_xml};
 use crate::login::{
     BuddyListEntry, GestureEntry, GlobalTextures, InitialOutfit, LoginCategory, LoginFailure,
-    LoginFlags, LoginRedirect, LoginRequest, LoginResponse, LoginSuccess, MfaChallenge,
+    LoginFlags, LoginList, LoginRedirect, LoginRequest, LoginResponse, LoginSuccess, MfaChallenge,
     NewUserConfig, ParsedLoginRequest, SkeletonFolder, TutorialSetting, UiConfig, VoiceConfig,
-    home_to_string, parse_direction, parse_home, parse_start_member, password_hash,
-    vector3_to_string, yn_str, yn_wire_flag,
+    home_to_string, parse_direction, parse_home, parse_start_member, parse_wire_bool,
+    password_hash, vector3_to_string, yn_str, yn_wire_flag,
 };
 use crate::{CircuitCode, WireError};
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, TextureKey};
@@ -395,6 +395,32 @@ fn insert_success_members(map: &mut HashMap<String, Llsd>, success: &LoginSucces
     if let Some(groups) = success.max_agent_groups {
         put("max-agent-groups", u32_to_llsd(groups));
     }
+    if let Some(flags) = success.agent_flags {
+        put("agent_flags", u32_to_llsd(flags));
+    }
+    if let Some(version) = success.cof_version {
+        put("cof_version", Llsd::Integer(version));
+    }
+    if let Some(level) = success.god_level {
+        put("god_level", Llsd::Integer(i32::from(level)));
+    }
+    if let Some(level) = success.max_god_level {
+        put("max_god_level", Llsd::Integer(i32::from(level)));
+    }
+    if let Some(admin) = success.is_admin_login {
+        put(
+            "is_admin_login",
+            Llsd::String(if admin { "true" } else { "false" }.to_owned()),
+        );
+    }
+    if let Some(code) = &success.linden_status_code {
+        put("Linden_Status_Code", Llsd::String(code.clone()));
+    }
+    for list in &success.empty_lists {
+        if list.is_empty_in(success) {
+            put(list.member(), Llsd::Array(Vec::new()));
+        }
+    }
     if !success.udp_blacklist.is_empty() {
         put(
             "udp_blacklist",
@@ -504,11 +530,16 @@ fn insert_success_members(map: &mut HashMap<String, Llsd>, success: &LoginSucces
                     .iter()
                     .map(|setting| {
                         Llsd::Map(
-                            [(
-                                "tutorial_url".to_owned(),
-                                Llsd::String(setting.tutorial_url.clone()),
-                            )]
+                            [
+                                ("tutorial_url", &setting.tutorial_url),
+                                ("use_tutorial", &setting.use_tutorial),
+                            ]
                             .into_iter()
+                            .filter_map(|(key, value)| {
+                                value
+                                    .as_ref()
+                                    .map(|text| (key.to_owned(), Llsd::String(text.clone())))
+                            })
                             .collect(),
                         )
                     })
@@ -580,17 +611,17 @@ fn insert_success_members(map: &mut HashMap<String, Llsd>, success: &LoginSucces
         );
     }
     if let Some(outfit) = &success.initial_outfit {
+        // Second Life sends an outfit with neither member as an empty map.
         put(
             "initial-outfit",
             wrap_section(
                 [
-                    (
-                        "folder_name".to_owned(),
-                        Llsd::String(outfit.folder_name.clone()),
-                    ),
-                    ("gender".to_owned(), Llsd::String(outfit.gender.clone())),
+                    ("folder_name", &outfit.folder_name),
+                    ("gender", &outfit.gender),
                 ]
                 .into_iter()
+                .filter(|(_key, value)| !value.is_empty())
+                .map(|(key, value)| (key.to_owned(), Llsd::String(value.clone())))
                 .collect(),
             ),
         );
@@ -735,11 +766,31 @@ fn parse_success_members(map: &HashMap<String, Llsd>) -> Result<LoginSuccess, Wi
         .unwrap_or_default();
     success.tutorial_settings = array_maps(map.get("tutorial_setting"))
         .filter_map(|entry| {
-            Some(TutorialSetting {
-                tutorial_url: entry.get("tutorial_url").and_then(llsd_scalar_string)?,
-            })
+            let setting = TutorialSetting {
+                tutorial_url: entry.get("tutorial_url").and_then(llsd_scalar_string),
+                use_tutorial: entry.get("use_tutorial").and_then(llsd_scalar_string),
+            };
+            (setting.tutorial_url.is_some() || setting.use_tutorial.is_some()).then_some(setting)
         })
         .collect();
+    success.empty_lists = LoginList::ALL
+        .into_iter()
+        .filter(|list| {
+            map.get(list.member())
+                .and_then(Llsd::as_array)
+                .is_some_and(<[Llsd]>::is_empty)
+        })
+        .collect();
+    success.agent_flags = llsd_u32(map, "agent_flags");
+    success.cof_version = llsd_i32(map, "cof_version");
+    success.god_level = llsd_u32(map, "god_level").and_then(|level| u8::try_from(level).ok());
+    success.max_god_level =
+        llsd_u32(map, "max_god_level").and_then(|level| u8::try_from(level).ok());
+    success.is_admin_login = map.get("is_admin_login").and_then(|flag| match flag {
+        Llsd::Boolean(flag) => Some(*flag),
+        other => llsd_scalar_string(other).and_then(|text| parse_wire_bool(&text)),
+    });
+    success.linden_status_code = map.get("Linden_Status_Code").and_then(llsd_scalar_string);
     success.login_flags = section_map(map, "login-flags").map(|section| LoginFlags {
         ever_logged_in: section_yn(section, "ever_logged_in"),
         daylight_savings: section_yn(section, "daylight_savings"),
