@@ -224,21 +224,12 @@ impl GridTest for ScriptRunning {
                         target: container_id,
                     })
                     .await?;
-                let found = session
-                    .wait_for(STEP_TIMEOUT, |event| match event {
-                        Event::TaskInventoryContents { task, items, .. }
-                            if *task == container.full_id =>
-                        {
-                            Some(
-                                items
-                                    .iter()
-                                    .find(|entry| entry.inv_type == InventoryType::Script)
-                                    .map(|entry| entry.item_id),
-                            )
-                        }
-                        _ => None,
-                    })
-                    .await?;
+                let found =
+                    crate::support::wait_for_task_listing(session, container.full_id, STEP_TIMEOUT)
+                        .await?
+                        .iter()
+                        .find(|entry| entry.inv_type == InventoryType::Script)
+                        .map(|entry| entry.item_id);
                 if let Some(item_id) = found {
                     break item_id;
                 }

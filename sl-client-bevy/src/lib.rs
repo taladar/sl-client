@@ -123,7 +123,7 @@ pub use sl_proto::{
     UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
     UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
     Vector, ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, WireError, XferId,
+    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, WireError, XferId, XferListing,
     avatar_texture, azimuth_altitude_to_rotation, chat_text_muted, decode_particle_system,
     decode_texture_anim, decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
     environment_asset_to_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
@@ -1063,14 +1063,17 @@ fn set_nonblocking(socket: &UdpSocket, nonblocking: bool) {
     }
 }
 
-/// Feed one inbound datagram to the session, warning on an undecodable one.
+/// Feed one inbound datagram to the session, logging one whose packet framing
+/// fails to parse.
 ///
 /// A framing-level parse failure is *not* covered by the session's own
 /// [`Diagnostic`]s (those start once a message body is reached) and must never
-/// end the tick loop over a single bad packet, so the log is its record.
+/// end the tick loop over a single bad packet, so the log is its record — at
+/// `error`, since a grid sending a packet this client cannot frame is a gap to
+/// fix.
 fn handle_datagram(session: &mut Session, from: SocketAddr, datagram: &[u8], now: Instant) {
     if let Err(error) = session.handle_datagram(from, datagram, now) {
-        tracing::warn!(%from, "dropping an undecodable datagram: {error}");
+        tracing::error!(%from, "dropping a datagram whose packet framing failed to parse: {error}");
     }
 }
 

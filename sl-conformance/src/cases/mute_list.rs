@@ -38,7 +38,7 @@
 
 use std::time::{Duration, Instant};
 
-use sl_client_tokio::{Command, Event, MuteEntry, MuteFlags, MuteType, Uuid};
+use sl_client_tokio::{Command, Event, MuteEntry, MuteFlags, MuteType, Uuid, XferListing};
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
@@ -225,16 +225,26 @@ fn count_value(len: usize) -> i64 {
     i64::try_from(len).unwrap_or(-1)
 }
 
-/// Requests the mute list with a zero CRC and returns the simulator's answer.
+/// Requests the mute list with a zero CRC and returns the simulator's answer,
+/// failing the step with the parse error when the downloaded list did not
+/// parse.
 async fn read_mute_list(session: &mut Session) -> Result<MuteRead, TestFailure> {
     session.send(Command::RequestMuteList).await?;
     session
         .wait_for(REPLY_TIMEOUT, |event| match event {
-            Event::MuteList(entries) => Some(MuteRead::List(entries.clone())),
-            Event::MuteListUnchanged => Some(MuteRead::Unchanged),
+            Event::MuteList(entries) => Some(Ok(MuteRead::List(entries.clone()))),
+            Event::MuteListUnchanged => Some(Ok(MuteRead::Unchanged)),
+            Event::XferDecodeFailed {
+                file: XferListing::MuteList,
+                error,
+                ..
+            } => Some(Err(error.clone())),
             _ => None,
         })
-        .await
+        .await?
+        .map_err(|error| {
+            TestFailure::Assertion(format!("the downloaded mute list failed to parse: {error}"))
+        })
 }
 
 /// Re-reads the mute list until `predicate` holds over the returned entries, or

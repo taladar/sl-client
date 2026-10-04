@@ -189,6 +189,7 @@ build-tab-placeholder = 未実装
 # コンテンツタブ + オブジェクトのコンテンツフローター (viewer-prim-inventory-editing)。
 build-content-no-target = オブジェクトが選択されていません
 build-content-loading = コンテンツを読み込み中…
+build-content-unreadable = コンテンツを読み取れませんでした
 build-content-count = { $count } 個のアイテム
 build-content-new-script = 新規スクリプト
 build-content-new-script-name = 新規スクリプト

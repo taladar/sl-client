@@ -88,7 +88,7 @@ use crate::types::{
     StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
     TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
     Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType,
+    Wearable, WearableType, XferListing,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -2067,10 +2067,15 @@ impl Session {
 
     /// Processes an inbound datagram received from `from` at `now`.
     ///
+    /// A message whose body fails to decode, or whose handler rejects what it
+    /// carries, is dropped — logged, and surfaced as a [`Diagnostic`] — and the
+    /// session carries on: one bad message is not a reason to end the circuit.
+    ///
     /// # Errors
     ///
-    /// Returns [`Error::Wire`] if the datagram cannot be parsed or a reply fails
-    /// to encode.
+    /// Returns [`Error::Wire`] if the datagram's packet framing cannot be parsed
+    /// (header, zero-coding or message id). That too spoils only this datagram;
+    /// the session stays usable.
     pub fn handle_datagram(
         &mut self,
         from: SocketAddr,
@@ -2158,10 +2163,27 @@ impl Session {
             );
         }
         tracing::trace!(?id, name = message.name(), %from, "inbound message");
-        match role {
+        let handled = match role {
             CircuitRole::Root => self.dispatch(from, &message, now),
             CircuitRole::Child => self.dispatch_child(from, &message, now),
+        };
+        if let Err(error) = handled {
+            let name = message.name();
+            tracing::error!(
+                ?id,
+                name,
+                %from,
+                %error,
+                "an inbound message failed in its handler; dropped it and kept the session"
+            );
+            self.push_diagnostic(Diagnostic::HandlerFailed {
+                id,
+                name,
+                error: error.to_string(),
+                child: role == CircuitRole::Child,
+            });
         }
+        Ok(())
     }
 
     /// Which circuit the simulator address `from` speaks on, or `None` when it
@@ -8959,15 +8981,23 @@ impl Session {
         download: XferDownload,
     ) -> Result<(), Error> {
         match download.purpose {
-            XferPurpose::MuteList => {
-                self.note_mute_list(parse_mute_list(&download.buffer)?);
-            }
+            XferPurpose::MuteList => match parse_mute_list(&download.buffer) {
+                Ok(entries) => self.note_mute_list(entries),
+                Err(error) => self.xfer_decode_failed(xfer_id, XferListing::MuteList, error),
+            },
             XferPurpose::TaskInventory { task, serial } => {
-                self.events.push_back(Event::TaskInventoryContents {
-                    task,
-                    serial,
-                    items: parse_task_inventory(&download.buffer)?,
-                });
+                match parse_task_inventory(&download.buffer) {
+                    Ok(items) => self.events.push_back(Event::TaskInventoryContents {
+                        task,
+                        serial,
+                        items,
+                    }),
+                    Err(error) => self.xfer_decode_failed(
+                        xfer_id,
+                        XferListing::TaskInventory { task, serial },
+                        error,
+                    ),
+                }
             }
             XferPurpose::Generic => {
                 self.events.push_back(Event::XferDownloaded {
@@ -8983,6 +9013,19 @@ impl Session {
             }
         }
         Ok(())
+    }
+
+    /// Reports a downloaded `Xfer` file that failed to parse: loudly, because it
+    /// means the grid wrote something the parser does not read yet, and as an
+    /// [`Event::XferDecodeFailed`] so the requester is not left waiting — but not
+    /// as an error, which would end the session over one file.
+    fn xfer_decode_failed(&mut self, xfer_id: XferId, file: XferListing, error: WireError) {
+        tracing::error!(?xfer_id, ?file, %error, "a downloaded Xfer file failed to parse");
+        self.events.push_back(Event::XferDecodeFailed {
+            xfer_id,
+            file,
+            error,
+        });
     }
 
     /// Streams the next chunk of the in-flight outbound `Xfer` upload `xfer_id`

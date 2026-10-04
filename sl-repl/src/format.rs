@@ -321,6 +321,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::ServerFileDownloaded { .. } => "server_file_downloaded",
         Event::XferUploaded { .. } => "xfer_uploaded",
         Event::XferAborted { .. } => "xfer_aborted",
+        Event::XferDecodeFailed { .. } => "xfer_decode_failed",
         Event::TaskItemAssetReceived { .. } => "task_item_asset_received",
         Event::EstateCovenantAssetReceived { .. } => "estate_covenant_asset_received",
         Event::TransferFailed { .. } => "transfer_failed",

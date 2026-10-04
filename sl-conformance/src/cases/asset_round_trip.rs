@@ -666,14 +666,7 @@ async fn fetch_task_item_id(
     name: &str,
 ) -> Result<InventoryKey, TestFailure> {
     session.send(Command::FetchTaskInventory { target }).await?;
-    let items = session
-        .wait_for(LONG_TIMEOUT, |event| match event {
-            Event::TaskInventoryContents {
-                task: got, items, ..
-            } if *got == task => Some(items.clone()),
-            _other => None,
-        })
-        .await?;
+    let items = crate::support::wait_for_task_listing(session, task, LONG_TIMEOUT).await?;
     items
         .into_iter()
         .find(|entry| entry.name == name)

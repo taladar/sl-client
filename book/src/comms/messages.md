@@ -111,12 +111,21 @@ message is often just a matter of the template already containing it.
 
 ## When decoding goes wrong
 
-Two things can happen on the receive path that are worth surfacing rather than
-swallowing. A message body may **fail to decode** — truncated, corrupt, or a
-template mismatch — and a message may decode fine but have **no handler** in the
-session. Both are reported as [diagnostics](sessions.md#diagnostics)
-(`DecodeFailed` with the byte offset where decoding stopped, and
-`UnhandledMessage`) when diagnostics are enabled. To label them readably, the
+Three things can happen on the receive path that are worth surfacing rather
+than swallowing. A message body may **fail to decode** — truncated, corrupt, or
+a template mismatch — a message may decode fine but have **no handler** in the
+session, and a handler may **reject what a message carries** (a field that
+fails validation, a payload it cannot read). All three are reported as
+[diagnostics](sessions.md#diagnostics) (`DecodeFailed` with the byte offset
+where decoding stopped, `UnhandledMessage`, and `HandlerFailed`) when
+diagnostics are enabled.
+
+None of them ends the session: one bad message spoils that message, not the
+circuit. A decode failure or a rejected message is still **loud** — logged at
+warning and error level respectively whether diagnostics are on or not —
+because each is a gap in this client to fix. The same goes for a datagram whose
+packet framing does not parse: the runtimes log it as an error and keep
+reading. To label them readably, the
 build step also generates `message_name(MessageId) -> Option<&'static str>`, so
 a numeric id can be turned back into its template name in logs and dumps.
 

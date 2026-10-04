@@ -188,6 +188,15 @@ still emitted first, for a caller that only wants the serial). Note the
 simulator redacts `asset_id` to nil unless the requester may edit the prim's
 inventory, so a parsed item's asset id is optional.
 
+A listing that downloads but does not parse fails that one fetch, never the
+session: the client logs the parse error at error level and surfaces
+`Event::XferDecodeFailed` naming the file (`XferListing::TaskInventory` with
+the task and serial, or `XferListing::MuteList` for the other file the session
+parses itself), so a caller waiting for the listing gets the reason instead of
+a timeout. Second Life showed why this matters: its listings leave out
+`group_owned` unless it is true, and while the parser still required the key
+every such fetch ended the whole session.
+
 ## Uploads and transport choice
 
 Legacy asset **uploads** run over the same messages in the other direction: a

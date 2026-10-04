@@ -321,16 +321,9 @@ impl GridTest for TaskInventory {
                     target: container_id,
                 })
                 .await?;
-            let contents = session
-                .wait_for(STEP_TIMEOUT, |event| match event {
-                    Event::TaskInventoryContents { task, items, .. }
-                        if *task == container.full_id =>
-                    {
-                        Some(items.clone())
-                    }
-                    _ => None,
-                })
-                .await?;
+            let contents =
+                crate::support::wait_for_task_listing(session, container.full_id, STEP_TIMEOUT)
+                    .await?;
             let fetch_rtt = fetch_started.elapsed();
             check(
                 contents.iter().any(|entry| entry.name == item.name),

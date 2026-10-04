@@ -1451,6 +1451,7 @@ build-tab-placeholder = Not implemented yet
 # Content tab + Object Contents floater (viewer-prim-inventory-editing).
 build-content-no-target = No object selected
 build-content-loading = Loading contents…
+build-content-unreadable = Could not read the contents
 build-content-count = { $count ->
     [one] { $count } item
    *[other] { $count } items

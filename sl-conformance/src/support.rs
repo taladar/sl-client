@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
     Camera, Command, ControlFlags, CreateGroupParams, Event, GroupKey, InventoryItem, InventoryKey,
-    LindenAmount, Object, RegionLocalObjectId, Rotation, ScopedObjectId, Uuid, Vector, pcode,
-    prim_flags,
+    LindenAmount, Object, ObjectKey, RegionLocalObjectId, Rotation, ScopedObjectId,
+    TaskInventoryItem, Uuid, Vector, XferListing, pcode, prim_flags,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -1059,6 +1059,40 @@ pub mod fixtures {
     pub fn plywood_texture() -> TextureKey {
         TextureKey::from(PLYWOOD_TEXTURE)
     }
+}
+
+/// Waits for `task`'s parsed task-inventory listing — the answer to a
+/// [`Command::FetchTaskInventory`] — and fails the step with the parse error
+/// when the listing arrived but did not parse, rather than timing out waiting
+/// for a listing the session will never surface.
+///
+/// # Errors
+///
+/// Returns [`TestFailure::Assertion`] when the listing failed to parse, and the
+/// wait's own failure when neither answer arrives within `timeout`.
+pub async fn wait_for_task_listing(
+    session: &mut Session,
+    task: ObjectKey,
+    timeout: Duration,
+) -> Result<Vec<TaskInventoryItem>, TestFailure> {
+    session
+        .wait_for(timeout, |event| match event {
+            Event::TaskInventoryContents {
+                task: got, items, ..
+            } if *got == task => Some(Ok(items.clone())),
+            Event::XferDecodeFailed {
+                file: XferListing::TaskInventory { task: got, .. },
+                error,
+                ..
+            } if *got == task => Some(Err(error.clone())),
+            _other => None,
+        })
+        .await?
+        .map_err(|error| {
+            TestFailure::Assertion(format!(
+                "the prim's task inventory listing failed to parse: {error}"
+            ))
+        })
 }
 
 #[cfg(test)]

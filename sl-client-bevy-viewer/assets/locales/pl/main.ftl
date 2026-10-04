@@ -197,6 +197,7 @@ build-tab-placeholder = Jeszcze nie zaimplementowane
 # Karta Zawartość + okno Zawartość obiektu (viewer-prim-inventory-editing).
 build-content-no-target = Nie wybrano obiektu
 build-content-loading = Wczytywanie zawartości…
+build-content-unreadable = Nie można odczytać zawartości
 build-content-count = { $count ->
     [one] { $count } element
     [few] { $count } elementy

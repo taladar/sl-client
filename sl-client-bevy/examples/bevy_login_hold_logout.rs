@@ -335,6 +335,7 @@ fn on_events(
             | SlSessionEvent::ServerFileDownloaded { .. }
             | SlSessionEvent::XferUploaded { .. }
             | SlSessionEvent::XferAborted { .. }
+            | SlSessionEvent::XferDecodeFailed { .. }
             | SlSessionEvent::TaskItemAssetReceived { .. }
             | SlSessionEvent::EstateCovenantAssetReceived { .. }
             | SlSessionEvent::TransferFailed { .. }

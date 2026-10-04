@@ -125,6 +125,8 @@ The kinds of diagnostic are:
 - a message that failed to decode (with the raw bytes and the byte offset where
   decoding gave up),
 - a message that arrived with no handler,
+- a message its handler rejected (a field that failed validation, a payload it
+  could not read) — dropped, and the session carries on,
 - an unknown or undecodable [event-queue](caps.md) event,
 - a reliable packet that exhausted its retransmissions without a reply (a
   handshake packet, a logout, or a sit), so its expected reply never came.
@@ -172,10 +174,10 @@ real grid.
 >   and emits [`Event`](../content/index.md)s; the actual socket work is done by
 >   the driver crates (`sl-client-tokio`, `sl-client-bevy`).
 > - The diagnostic type is `Diagnostic` in `sl-proto/src/types/diagnostic.rs`
->   (`DecodeFailed`, `UnhandledMessage`, `UnknownCapsEvent`, `CapsDecodeFailed`,
->   `ExpectedReplyMissing`) — a separate enum from `Event`. `Session` gates it
->   with `set_diagnostics(bool)` (default off), queues into a `VecDeque`, and
->   hands them out via `poll_diagnostic()`.
+>   (`DecodeFailed`, `UnhandledMessage`, `HandlerFailed`, `UnknownCapsEvent`,
+>   `CapsDecodeFailed`, `ExpectedReplyMissing`) — a separate enum from `Event`.
+>   `Session` gates it with `set_diagnostics(bool)` (default off), queues into a
+>   `VecDeque`, and hands them out via `poll_diagnostic()`.
 > - The drivers surface diagnostics for parity: `sl-client-tokio`'s
 >   `Client::run` takes a `diagnostics: mpsc::Sender<Diagnostic>` and is enabled
 >   with `Client::set_diagnostics`; `sl-client-bevy` registers an `SlDiagnostic`

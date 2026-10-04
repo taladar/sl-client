@@ -116,10 +116,10 @@ pub use sl_proto::{
     UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
     UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
     UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, avatar_texture,
-    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
-    grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c, particle_pattern, pcode,
-    prim_flags, sim_access, texture_anim_mode,
+    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, XferListing,
+    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
+    encode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
+    particle_pattern, pcode, prim_flags, sim_access, texture_anim_mode,
 };
 // `sl_texture::TextureEntry` (the store's LOD-aware texture object) and
 // `TextureReadLease` are reachable as `sl_texture::…`; they are not re-exported
@@ -927,8 +927,17 @@ impl Client {
             tokio::select! {
                 result = self.socket.recv_from(&mut self.recv_buf) => {
                     let (len, from) = result?;
-                    if let Some(datagram) = self.recv_buf.get(..len) {
-                        self.session.handle_datagram(from, datagram, Instant::now())?;
+                    // One packet this client cannot frame spoils that packet, not
+                    // the session (a message that frames but fails to decode or
+                    // to handle is already dropped inside the session). Logged
+                    // at `error`, because it is a gap to fix.
+                    if let Some(datagram) = self.recv_buf.get(..len)
+                        && let Err(error) = self.session.handle_datagram(from, datagram, Instant::now())
+                    {
+                        tracing::error!(
+                            %from,
+                            "dropping a datagram whose packet framing failed to parse: {error}"
+                        );
                     }
                 }
                 caps_map = caps_map_rx.recv() => {

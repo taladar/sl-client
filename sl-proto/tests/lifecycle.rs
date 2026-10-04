@@ -44,9 +44,9 @@ mod test {
         TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TaskInventoryKey, TaskInventoryReply, TeleportFlags,
         TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle,
         TransactionId, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
-        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
-        chat_session_agent_params_from_llsd, chat_session_agents_body, chat_session_request_body,
-        decode_texture_entry, group_powers, pcode,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, XferListing,
+        avatar_texture, chat_session_agent_params_from_llsd, chat_session_agents_body,
+        chat_session_request_body, decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -6135,6 +6135,89 @@ mod test {
             })
             .ok_or("expected a RemoveMuteListEntry")?;
         assert_eq!(remove.mute_data.mute_id, target);
+        Ok(())
+    }
+
+    /// Asks for the mute list the way the simulator prompts it (a
+    /// `MuteListUpdate` naming a file), answers the `RequestXfer` with `file`
+    /// in one packet, and returns the transfer id and the events that followed.
+    fn deliver_mute_list_file(
+        session: &mut Session,
+        file: &str,
+        sequence: u32,
+        now: Instant,
+    ) -> Result<(u64, Vec<Event>), TestError> {
+        let update = AnyMessage::MuteListUpdate(MuteListUpdate {
+            mute_data: MuteListUpdateMuteDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                filename: b"mutes00000000\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&update, sequence, true)?, now)?;
+        let xfer_id = drain(session)?
+            .iter()
+            .find_map(|m| match m {
+                AnyMessage::RequestXfer(r) => Some(r.xfer_id.id),
+                _ => None,
+            })
+            .ok_or("expected a RequestXfer")?;
+        let packet = xfer_packet(xfer_id, 0, true, file.len(), file.as_bytes());
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&packet, sequence.wrapping_add(1), true)?,
+            now,
+        )?;
+        drain(session)?;
+        Ok((xfer_id, drain_events(session)))
+    }
+
+    /// A downloaded file the parser cannot read is the failure of that one
+    /// request: the requester gets the parse error as an event, and the session
+    /// stays usable — the next download of the same file is parsed as normal.
+    /// (A task-inventory listing Second Life wrote without `group_owned` once
+    /// ended the whole session this way.)
+    #[test]
+    fn a_malformed_xfer_file_fails_its_request_and_not_the_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let (xfer_id, events) =
+            deliver_mute_list_file(&mut session, "x 0000 Not A Line|0\n", 9, now)?;
+        let failed = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::XferDecodeFailed {
+                    xfer_id: failed_id,
+                    file,
+                    error,
+                } => Some((failed_id, file, error)),
+                _ => None,
+            })
+            .ok_or("expected an XferDecodeFailed event")?;
+        assert_eq!(
+            failed,
+            (
+                sl_proto::XferId(xfer_id),
+                XferListing::MuteList,
+                WireError::InvalidScalar {
+                    field: "mute_type",
+                    value: "x".to_owned(),
+                }
+            )
+        );
+
+        let muted = uuid::Uuid::from_u128(0x9002);
+        let (_xfer_id, events) =
+            deliver_mute_list_file(&mut session, &format!("1 {muted} Bad Actor|0\n"), 11, now)?;
+        let entries = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::MuteList(entries) => Some(entries),
+                _ => None,
+            })
+            .ok_or("the session stopped answering after a malformed file")?;
+        assert_eq!(entries.len(), 1);
         Ok(())
     }
 
@@ -14234,6 +14317,75 @@ mod test {
         assert_eq!(details.actual_area, LandArea(512));
         assert_eq!(details.sale_price, Some(LindenAmount(1000)));
         assert_eq!(details.global_position.z().to_bits(), 23.5_f64.to_bits());
+        Ok(())
+    }
+
+    /// A message that decodes but carries a value its handler rejects (here a
+    /// negative parcel area) is dropped — logged, and surfaced as a
+    /// [`Diagnostic::HandlerFailed`] — instead of failing the datagram, which
+    /// ended the whole session in a runtime that stopped on the error. The
+    /// next message is handled as usual.
+    #[test]
+    fn a_message_its_handler_rejects_is_dropped_and_the_session_carries_on() -> Result<(), TestError>
+    {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_diagnostics(true);
+        drain(&mut session)?;
+        drain_events(&mut session);
+        drain_diagnostics(&mut session);
+
+        let reply = |actual_area: i32| {
+            AnyMessage::ParcelInfoReply(ParcelInfoReply {
+                agent_data: ParcelInfoReplyAgentDataBlock {
+                    agent_id: uuid::Uuid::from_u128(1),
+                },
+                data: ParcelInfoReplyDataBlock {
+                    parcel_id: uuid::Uuid::from_u128(0x00C0_FFEE),
+                    owner_id: uuid::Uuid::from_u128(0x55),
+                    name: with_nul_bytes("Sunny Plaza"),
+                    desc: with_nul_bytes("A nice spot"),
+                    actual_area,
+                    billable_area: 480,
+                    flags: 0,
+                    global_x: 256_000.0,
+                    global_y: 257_024.0,
+                    global_z: 23.5,
+                    sim_name: with_nul_bytes("Default Region"),
+                    snapshot_id: uuid::Uuid::from_u128(0x77),
+                    dwell: 0.0,
+                    sale_price: 0,
+                    auction_id: 0,
+                },
+            })
+        };
+        session.handle_datagram(sim_addr(), &server_message(&reply(-1), 9, true)?, now)?;
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::ParcelDetails(_))),
+            "a rejected message surfaces nothing"
+        );
+        let failure = drain_diagnostics(&mut session)
+            .into_iter()
+            .find_map(|diagnostic| match diagnostic {
+                Diagnostic::HandlerFailed {
+                    name, error, child, ..
+                } => Some((name, error, child)),
+                _ => None,
+            })
+            .ok_or("expected a HandlerFailed diagnostic")?;
+        assert_eq!(failure.0, "ParcelInfoReply");
+        assert!(failure.1.contains("ActualArea"), "{}", failure.1);
+        assert!(!failure.2);
+
+        session.handle_datagram(sim_addr(), &server_message(&reply(512), 10, true)?, now)?;
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::ParcelDetails(_))),
+            "the session stopped handling messages after a rejected one"
+        );
         Ok(())
     }
 

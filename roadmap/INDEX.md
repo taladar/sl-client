@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 364 |
 | blocked | 100 |
 | in-progress | 20 |
-| bugs | 32 |
-| done | 1305 |
+| bugs | 31 |
+| done | 1306 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2004** |
@@ -1580,7 +1580,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (32)
+## bugs (31)
 
 ### protocol
 
@@ -1602,8 +1602,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   are split
 - [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
   — A voice accept on a 1:1 session is folded into a phantom conference
-- [`protocol-xfer-listing-parse-error-ends-session`](bugs/protocol-xfer-listing-parse-error-ends-session.md)
-  — A malformed Xfer listing ends the whole session
 
 ### viewer
 
@@ -1663,7 +1661,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-unknown-keyword-arguments-ignored`](bugs/repl-unknown-keyword-arguments-ignored.md)
   — sl-repl silently ignores unknown or misspelled key=value arguments
 
-## done (1305)
+## done (1306)
 
 ### protocol
 
@@ -1900,6 +1898,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Defer handover teardown until the destination confirms (+ overlap safety)
 - [`protocol-teleport-timeout-strands-child-circuits`](done/protocol-teleport-timeout-strands-child-circuits.md)
   — A timed-out teleport strands the session and loses its child circuits
+- [`protocol-xfer-listing-parse-error-ends-session`](done/protocol-xfer-listing-parse-error-ends-session.md)
+  — A malformed Xfer listing ends the whole session
 
 ### viewer
 

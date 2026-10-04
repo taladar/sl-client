@@ -56,6 +56,24 @@ pub enum Diagnostic {
         /// rather than the root circuit.
         child: bool,
     },
+    /// A message decoded, but its handler rejected what it carried — a field
+    /// that failed validation (a region name, an L$ price out of range), a
+    /// payload it could not read, a reply that failed to encode. The session
+    /// drops that one message and carries on: one bad message is the failure of
+    /// whatever it was about, not of the circuit. The failure is also logged at
+    /// `error` level whether or not diagnostics are on, because it is a gap in
+    /// this client to fix.
+    HandlerFailed {
+        /// The message's frequency-coded id.
+        id: MessageId,
+        /// The message name.
+        name: &'static str,
+        /// The error the handler returned, rendered.
+        error: String,
+        /// Whether it arrived on a child-agent circuit (a neighbouring region)
+        /// rather than the root circuit.
+        child: bool,
+    },
     /// A CAPS event-queue event (or capability reply) arrived under a name the
     /// session does not handle.
     UnknownCapsEvent {
@@ -124,6 +142,15 @@ impl std::fmt::Display for Diagnostic {
                     None => Ok(()),
                 }
             }
+            Self::HandlerFailed {
+                id,
+                name,
+                error,
+                child,
+            } => write!(
+                f,
+                "HandlerFailed id={id:?} name={name} child={child} error={error}"
+            ),
             Self::UnknownCapsEvent { message } => {
                 write!(f, "UnknownCapsEvent message={message}")
             }

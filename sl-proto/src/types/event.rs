@@ -56,6 +56,7 @@ use sl_wire::ResourceSummary;
 use sl_wire::SelectedResourceCost;
 use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
+use sl_wire::WireError;
 use sl_wire::{ExperienceInfo, ExperienceSearchPage};
 use uuid::Uuid;
 
@@ -102,6 +103,25 @@ impl Arrival {
     pub const fn is_teleport(self) -> bool {
         matches!(self, Self::NearTeleport | Self::DistantTeleport)
     }
+}
+
+/// Which file an [`Event::XferDecodeFailed`] could not read: the `Xfer`
+/// downloads the session parses itself rather than handing over as bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XferListing {
+    /// The agent's mute list, requested with
+    /// [`Session::request_mute_list`](crate::Session::request_mute_list); it
+    /// would have been an [`Event::MuteList`].
+    MuteList,
+    /// An in-world object's task inventory, fetched with
+    /// [`Command::FetchTaskInventory`](crate::Command::FetchTaskInventory); it
+    /// would have been an [`Event::TaskInventoryContents`].
+    TaskInventory {
+        /// The in-world object (task) whose inventory the file lists.
+        task: ObjectKey,
+        /// The contents serial the listing was fetched at.
+        serial: i16,
+    },
 }
 
 /// A high-level event surfaced to the driver/application.
@@ -856,6 +876,20 @@ pub enum Event {
         viewer_filename: String,
         /// The number of file bytes uploaded.
         byte_count: usize,
+    },
+    /// A downloaded `Xfer` file the session parses itself — the mute list or a
+    /// task inventory listing — failed to parse. The download is the failure of
+    /// that one request: the session carries on, and this stands in for the
+    /// [`Event::MuteList`] / [`Event::TaskInventoryContents`] the requester was
+    /// waiting for. The parse error is also logged at `error` level, since it
+    /// means the grid wrote something this parser does not read yet.
+    XferDecodeFailed {
+        /// The transfer the file arrived on.
+        xfer_id: XferId,
+        /// Which file it was.
+        file: XferListing,
+        /// Why it did not parse.
+        error: WireError,
     },
     /// An in-flight `Xfer` transfer (upload or download) was aborted, so it will
     /// not complete — either by the simulator (`AbortXfer`) or by this session

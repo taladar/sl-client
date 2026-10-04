@@ -65,6 +65,7 @@ use sl_client_bevy::{
     CircuitId, Command, FolderType, InventoryKey, InventoryType, ObjectKey, Permissions,
     RegionLocalObjectId, RestoreItem, RezScriptParams, ScopedObjectId, SlCommand, SlEvent,
     SlIdentity, SlSessionEvent, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, Uuid,
+    XferListing,
 };
 
 use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS};
@@ -163,6 +164,10 @@ struct ContentsEntry {
     /// Whether a listing has actually arrived (distinguishes "known empty" from
     /// "not fetched yet").
     loaded: bool,
+    /// Whether the last listing the simulator sent failed to parse. It is not
+    /// re-requested until the prim's contents serial moves (the same file
+    /// would fail the same way); any earlier good listing stays shown.
+    unreadable: bool,
 }
 
 /// The session-lifetime cache of every fetched prim task inventory, keyed by the
@@ -198,6 +203,15 @@ impl TaskInventoryCache {
         entry.items = items;
         entry.fetching = false;
         entry.loaded = true;
+        entry.unreadable = false;
+    }
+
+    /// Record that `task`'s listing at `serial` arrived but failed to parse.
+    fn store_unreadable(&mut self, task: ObjectKey, serial: i16) {
+        let entry = self.entries.entry(task).or_default();
+        entry.serial = Some(serial);
+        entry.fetching = false;
+        entry.unreadable = true;
     }
 
     /// Record an empty task inventory (a reply whose Xfer filename was empty, so
@@ -208,6 +222,7 @@ impl TaskInventoryCache {
         entry.items.clear();
         entry.fetching = false;
         entry.loaded = true;
+        entry.unreadable = false;
     }
 
     /// Mark a cached entry stale after we sent a mutation, so it is re-fetched
@@ -240,10 +255,13 @@ impl TaskInventoryCache {
     /// Compared for inequality, not order: the serial is an `i16` that wraps,
     /// and any disagreement means the listing is not the one the region holds.
     /// A listing that was never loaded is not stale but absent, and one already
-    /// being fetched is about to be replaced anyway.
+    /// being fetched is about to be replaced anyway. One that failed to parse is
+    /// stale like a loaded one: a moved serial names a new file worth reading.
     fn is_stale_against(&self, task: &ObjectKey, serial: i16) -> bool {
         self.entries.get(task).is_some_and(|entry| {
-            entry.loaded && !entry.fetching && entry.serial.is_some_and(|cached| cached != serial)
+            (entry.loaded || entry.unreadable)
+                && !entry.fetching
+                && entry.serial.is_some_and(|cached| cached != serial)
         })
     }
 }
@@ -370,6 +388,9 @@ struct ContentsSurfaceView {
     /// already-loaded listing does not set this — its pending items carry their
     /// own per-row [`RowState`] instead, so the last-good contents stay shown.
     loading: bool,
+    /// Whether the target's latest listing failed to parse (any earlier good
+    /// listing's rows are still shown).
+    unreadable: bool,
 }
 
 /// Both surfaces' flattened views, rebuilt from the selection / open-target and
@@ -909,6 +930,7 @@ pub fn spawn_object_contents_specimen(
         rows,
         perms: ContentsPerms::default(),
         loading: false,
+        unreadable: false,
     };
     let specimen = ContentsSpecimen {
         parts,
@@ -979,6 +1001,7 @@ pub(crate) fn fill_contents_tab_specimen(
             allows_drop: false,
         },
         loading: false,
+        unreadable: false,
     };
     let specimen = ContentsTabSpecimen {
         ui,
@@ -1249,6 +1272,17 @@ fn ingest_task_inventory(
                 cache.store_empty(*task, *serial);
                 pending.clear_object(task);
             }
+            // The session has already logged the parse error; here it only has
+            // to stop the list waiting for a listing that is not coming. The
+            // pending overlays go too: their reconcile is what failed, so they
+            // would otherwise claim "refreshing" for good.
+            SlSessionEvent::XferDecodeFailed {
+                file: XferListing::TaskInventory { task, serial },
+                ..
+            } => {
+                cache.store_unreadable(*task, *serial);
+                pending.clear_object(task);
+            }
             _other => {}
         }
     }
@@ -1311,7 +1345,7 @@ fn drive_contents_fetch(
         };
         let needs_fetch = cache
             .get(&full)
-            .is_none_or(|entry| !entry.loaded && !entry.fetching);
+            .is_none_or(|entry| !entry.loaded && !entry.fetching && !entry.unreadable);
         if needs_fetch && cache.begin_fetch(full) {
             commands.write(SlCommand(Command::FetchTaskInventory { target: scoped }));
         }
@@ -1514,6 +1548,7 @@ fn rebuild_one_view(
     view.name.clear();
     view.perms = ContentsPerms::default();
     view.loading = false;
+    view.unreadable = false;
     let Some((scoped, full)) = target else {
         return;
     };
@@ -1525,8 +1560,9 @@ fn rebuild_one_view(
     {
         properties.name.clone_into(&mut view.name);
     }
+    view.unreadable = cache.get(&full).is_some_and(|entry| entry.unreadable);
     let Some(entry) = cache.get(&full).filter(|entry| entry.loaded) else {
-        view.loading = true;
+        view.loading = !view.unreadable;
         return;
     };
     view.rows = merge_contents_rows(&entry.items, pending.for_object(&full));
@@ -1943,6 +1979,9 @@ fn open_floater_name_line(view: &ContentsSurfaceView, translator: &Translator) -
 fn contents_summary(view: &ContentsSurfaceView, translator: &Translator) -> String {
     if view.target.is_none() {
         return translator.get("build-content-no-target");
+    }
+    if view.unreadable {
+        return translator.get("build-content-unreadable");
     }
     if view.loading {
         return translator.get("build-content-loading");
@@ -2674,6 +2713,40 @@ mod tests {
         cache.mark_stale(&task);
         assert!(!cache.is_stale_against(&task, 4));
     }
+
+    /// A listing that failed to parse stops the wait without inviting a
+    /// re-fetch loop: the same file would fail again, so it is read again only
+    /// once the prim's contents serial moves.
+    #[test]
+    fn an_unreadable_listing_is_retried_only_when_its_serial_moves() {
+        use super::{ObjectKey, TaskInventoryCache};
+
+        let task = ObjectKey::from(sl_client_bevy::Uuid::from_bytes([9; 16]));
+        let mut cache = TaskInventoryCache::default();
+        assert!(cache.begin_fetch(task));
+        cache.store_unreadable(task, 5);
+
+        let entry = cache
+            .get(&task)
+            .map(|entry| (entry.loaded, entry.fetching, entry.unreadable));
+        assert_eq!(entry, Some((false, false, true)));
+        assert!(
+            !cache.is_stale_against(&task, 5),
+            "the same file fails the same way"
+        );
+        assert!(
+            cache.is_stale_against(&task, 6),
+            "a moved serial names a new file"
+        );
+
+        cache.store(task, 6, Vec::new());
+        assert!(
+            cache
+                .get(&task)
+                .is_some_and(|entry| entry.loaded && !entry.unreadable)
+        );
+    }
+
     /// **A contents action button acts from the keyboard as from the mouse.**
     ///
     /// The buttons used to observe `Pointer<Press>`, so `Tab` reached them and

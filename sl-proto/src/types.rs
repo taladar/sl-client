@@ -503,7 +503,7 @@ pub use environment::{
     SettingsKind, SkySettings, TRACK_MAX, WaterSettings, azimuth_altitude_to_rotation,
     rotation_to_azimuth_altitude,
 };
-pub use event::{Arrival, Event};
+pub use event::{Arrival, Event, XferListing};
 pub use generic::{GenericMessage, GenericStreamingMessage};
 pub use group::{
     ActiveGroup, CreateGroupParams, GroupAccountDetails, GroupAccountDetailsEntry,

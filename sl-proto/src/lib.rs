@@ -210,10 +210,11 @@ pub use types::{
     UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
     UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
     UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    WaterSettings, Wearable, WearableType, attachment_state_from_point, avatar_texture,
-    azimuth_altitude_to_rotation, global_to_handle, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, hexdump, packages_from_llsd, particle_pattern, pcode, prim_flags,
-    rotation_to_azimuth_altitude, saved_item_rebinding, texture_anim_mode, uploaded_inventory_item,
+    WaterSettings, Wearable, WearableType, XferListing, attachment_state_from_point,
+    avatar_texture, azimuth_altitude_to_rotation, global_to_handle, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, hexdump, packages_from_llsd, particle_pattern, pcode,
+    prim_flags, rotation_to_azimuth_altitude, saved_item_rebinding, texture_anim_mode,
+    uploaded_inventory_item,
 };
 pub use types::{
     MIDDAY, MIDNIGHT, PRESET_DAY_CYCLE_NAME, PRESET_DAY_KEYFRAMES, SUNRISE, SUNSET, SkyPreset,

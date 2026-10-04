@@ -197,6 +197,7 @@ build-tab-placeholder = غير منفذ بعد
 # علامة تبويب المحتوى + نافذة محتويات الكائن (viewer-prim-inventory-editing).
 build-content-no-target = لم يتم تحديد أي كائن
 build-content-loading = جارٍ تحميل المحتويات…
+build-content-unreadable = تعذّرت قراءة المحتويات
 build-content-count = { $count ->
     [zero] لا عناصر
     [one] عنصر واحد
