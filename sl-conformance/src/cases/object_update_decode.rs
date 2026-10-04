@@ -60,7 +60,7 @@ impl GridTest for ObjectUpdateDecode {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {

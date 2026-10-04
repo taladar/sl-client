@@ -167,7 +167,7 @@ impl GridTest for ObjectEdit {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn rezzes_objects(&self) -> bool {

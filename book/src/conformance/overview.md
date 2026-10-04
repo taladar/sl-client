@@ -21,9 +21,11 @@ against one grid, when you want to check that feature on that grid.
 Not every case needs a grid somebody stood up. A case that asserts protocol
 *shape* — a handshake, a ping, a throttle, a parcel record, the world map, a
 region crossing — needs only fixtures the workspace already ships, and
-`Grid::FakeSl` gives it those: an `sl-fake-grid` started inside the test process
+the fake grid gives it those: an `sl-fake-grid` started inside the test process
 on ephemeral ports, serving the same fixture catalogue the viewer's render
-harness photographs.
+harness photographs, as `Grid::FakeSl` (imitating Second Life) or
+`Grid::FakeOpensim` (imitating OpenSim). Every offline case runs on both, each
+held to the answer measured on the live grid it imitates.
 
 Those cases (`sl_conformance::fake::OFFLINE_CASES`) run as ordinary `cargo test`
 tests in `sl-conformance/tests/offline.rs`, so they are exercised on every
@@ -38,11 +40,13 @@ one.
 ## The two binaries
 
 - `sl-conformance` — the runner. Logs in, runs exactly one test, and appends the
-  result to that test's record. There is no "run all" command, by design.
+  result to that test's record. There is no "run all" command for a live
+  grid, by design; `run-offline` is the fake grid's batch form.
 - `sl-conformance-report` — a read-only summary. It reads `records/` only (no
-  network) and prints a `cargo test`-style table: a status per grid, with
-  per-metric performance trends and commit-freshness annotations. It exits
-  non-zero if any recorded run failed, so it can gate scripts.
+  network) and prints a `cargo test`-style table: a status per grid, each live
+  grid beside its fake twin, with per-metric performance trends,
+  commit-freshness annotations and the fields a fake twin answers differently.
+  It exits non-zero if any recorded run failed, so it can gate scripts.
 
 ## The workflow
 

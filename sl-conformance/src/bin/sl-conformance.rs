@@ -1,8 +1,10 @@
 //! The conformance test runner.
 //!
 //! Runs exactly one test, against one grid, per invocation — there is no
-//! "run all" command, by design (logging in many times in quick succession on
-//! aditi risks rate-limiting or a ban). The result, git-stamped with the
+//! "run all" command for a live grid, by design (logging in many times in quick
+//! succession on aditi risks rate-limiting or a ban). The fake grid has no such
+//! limit, so `run-offline` records every offline case on it in one go, which
+//! is what fills the fake columns the reporter sets beside the live ones. The result, git-stamped with the
 //! behaviour-aware describe and any metrics the test wrote, is appended to the
 //! committed record for that `(test, grid)` pair.
 
@@ -10,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser as _;
 use sl_conformance::context::{self, TestContext, TestFailure};
-use sl_conformance::fake::FakeGridHarness;
+use sl_conformance::fake::{FakeGridHarness, OFFLINE_CASES, run_case};
 use sl_conformance::fixtures::Fixtures;
 use sl_conformance::grid::Grid;
 use sl_conformance::record::{Outcome, Record, Run};
@@ -61,6 +63,7 @@ fn print_line(line: &str) {
 async fn dispatch(options: Options) -> Result<(), Error> {
     match options.command {
         Subcommand::Run(args) => run(args).await,
+        Subcommand::RunOffline(args) => run_offline(args.grid).await,
         Subcommand::List(args) => {
             list(args.grid);
             Ok(())
@@ -418,6 +421,81 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     )
 }
 
+/// Run every offline case on the fake flavour `only` names, or on both, and
+/// record each run — the fake columns the reporter sets beside the live grid
+/// each flavour imitates.
+///
+/// A failing case is recorded and reported and the sweep goes on; the error at
+/// the end counts them.
+///
+/// # Errors
+///
+/// Returns [`Error::NotApplicable`] if `only` is a live grid, and
+/// [`Error::Test`] if any case failed or could not start (each is also printed
+/// as it happens), or the git / record errors of writing a record.
+async fn run_offline(only: Option<Grid>) -> Result<(), Error> {
+    let repo_root = gitinfo::repo_root(Path::new(".")).map_err(Error::Git)?;
+    init_logging(&repo_root.join("sl-conformance.log"))?;
+    let records_dir = repo_root.join("records");
+    let flavours: Vec<Grid> = match only {
+        Some(grid) if grid.is_fake() => vec![grid],
+        Some(grid) => {
+            return Err(Error::NotApplicable {
+                test: "run-offline".to_owned(),
+                grid,
+            });
+        }
+        None => vec![Grid::FakeSl, Grid::FakeOpensim],
+    };
+    let mut failed: Vec<String> = Vec::new();
+    for flavour in flavours {
+        for name in OFFLINE_CASES {
+            let test = find(name).ok_or_else(|| Error::UnknownTest((*name).to_owned()))?;
+            if !test.grids().contains(&flavour) {
+                continue;
+            }
+            tracing::info!("running test `{name}` on {flavour}");
+            let fake_run = match run_case(test.as_ref(), flavour).await {
+                Ok(fake_run) => fake_run,
+                Err(failure) => {
+                    print_line(&format!(
+                        "FAIL: {name} on {flavour} did not start — {failure}"
+                    ));
+                    failed.push(format!("{name} on {flavour}"));
+                    continue;
+                }
+            };
+            let recorded = write_record(
+                &repo_root,
+                &records_dir,
+                flavour,
+                test.as_ref(),
+                RunResult {
+                    outcome: fake_run.outcome,
+                    metrics: fake_run.metrics,
+                    completeness: fake_run.completeness,
+                    completeness_note: fake_run.note,
+                },
+            );
+            match recorded {
+                Ok(()) => {}
+                // The case failed: already printed and recorded.
+                Err(Error::Test(_reason)) => failed.push(format!("{name} on {flavour}")),
+                Err(other) => return Err(other),
+            }
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Test(format!(
+            "{} offline run(s) failed: {}",
+            failed.len(),
+            failed.join(", ")
+        )))
+    }
+}
+
 /// What one finished case leaves behind: whether it passed, what it measured,
 /// and how much of the behaviour it actually covered. Everything the record's
 /// `run` entry is built from, as against the four arguments that say *where*
@@ -564,11 +642,15 @@ struct Options {
     command: Subcommand,
 }
 
-/// The runner subcommands. There is intentionally no "run all" variant.
+/// The runner subcommands. There is intentionally no "run all" variant for a
+/// live grid.
 #[derive(clap::Subcommand, Debug)]
 enum Subcommand {
     /// Run exactly one test against one grid and record the result.
     Run(RunArgs),
+    /// Run every offline case on the fake grid — both flavours, or the one
+    /// `--grid` names — and record each result.
+    RunOffline(RunOfflineArgs),
     /// List the registered tests.
     List(ListArgs),
     /// Generate the man page.
@@ -621,6 +703,14 @@ struct RunArgs {
     timeout: Option<u64>,
     /// The single test to run.
     test: String,
+}
+
+/// Arguments for the `run-offline` subcommand.
+#[derive(clap::Args, Debug)]
+struct RunOfflineArgs {
+    /// Restrict the sweep to one fake flavour (`fake-sl` or `fake-opensim`).
+    #[clap(long, value_enum)]
+    grid: Option<Grid>,
 }
 
 /// Arguments for the `list` subcommand.

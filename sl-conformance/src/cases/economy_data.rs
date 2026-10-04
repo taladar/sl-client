@@ -33,8 +33,8 @@ use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, send_then_w
 /// [`ImitatedGrid`](sl_fake_grid::ImitatedGrid) whose price list was not wired
 /// to the flavour — or a builder default that quietly handed an
 /// OpenSim-flavoured grid Second Life's prices — fails here naming both tables.
-/// It runs on **both** fake flavours for that reason, unlike almost every other
-/// offline case.
+/// It runs on **both** fake flavours, as every offline case does, and here the
+/// pair is the point.
 ///
 /// What it does **not** replace is the encoder-slot check: both sides of this
 /// comparison come from the same constant, so a price written into the wrong

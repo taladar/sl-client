@@ -41,16 +41,25 @@ pub enum Grid {
 }
 
 impl Grid {
-    /// The grids whose runs are **recorded** under `records/`, in declaration
-    /// order — the columns the reporter lays out when it is not told which grid
-    /// to show.
+    /// The columns the reporter lays out when it is not told which grid to
+    /// show: each live grid **followed by the fake flavour imitating it**, so a
+    /// case's live answer and the fake grid's sit side by side.
     ///
-    /// Neither fake flavour is here, deliberately. Their cases are asserted on
-    /// every `cargo test` (see [`crate::fake`]), so a committed record of them
-    /// would be a second, staler copy of an answer the test suite already
-    /// gives; the reporter still renders the column on an explicit
-    /// `--grid fake-sl` if someone runs the runner against one.
-    pub const RECORDED: [Self; 2] = [Self::Opensim, Self::Aditi];
+    /// The fake columns read records the runner writes on
+    /// `sl-conformance run --grid fake-sl` (or `run-offline`); the offline
+    /// `cargo test` writes none, since there the assertion is the record.
+    pub const REPORTED: [Self; 4] = [Self::Opensim, Self::FakeOpensim, Self::Aditi, Self::FakeSl];
+
+    /// The fake flavour imitating this live grid, or `None` for a fake grid —
+    /// which is the imitation, not the thing imitated.
+    #[must_use]
+    pub const fn fake_twin(self) -> Option<Self> {
+        match self {
+            Self::Opensim => Some(Self::FakeOpensim),
+            Self::Aditi => Some(Self::FakeSl),
+            Self::FakeSl | Self::FakeOpensim => None,
+        }
+    }
 
     /// The on-disk directory name (under `records/`) holding this grid's
     /// records.
@@ -153,16 +162,30 @@ mod tests {
         assert_eq!(format!("{}", Grid::Aditi), "aditi");
     }
 
-    /// Only a fake grid has no fixed address, and neither flavour is a column
-    /// the reporter lays out by default.
+    /// Only a fake grid has no fixed address.
     #[test]
-    fn only_the_fake_grids_are_addressless_and_unrecorded() {
+    fn only_the_fake_grids_are_addressless() {
         assert!(Grid::Opensim.default_login_uri().is_some());
         assert!(Grid::Aditi.default_login_uri().is_some());
         for fake in [Grid::FakeSl, Grid::FakeOpensim] {
             assert_eq!(fake.default_login_uri(), None);
-            assert!(!Grid::RECORDED.contains(&fake));
         }
+    }
+
+    /// Each live grid's twin is the fake flavour that behaves like it, and the
+    /// report lays every live grid out immediately followed by its twin.
+    #[test]
+    fn each_live_grid_is_reported_beside_its_fake_twin() {
+        for live in [Grid::Opensim, Grid::Aditi] {
+            let twin = live.fake_twin();
+            assert!(twin.is_some_and(Grid::is_fake), "{live} has no fake twin");
+            assert_eq!(twin.map(Grid::behaves_like), Some(live.behaves_like()));
+            let position = Grid::REPORTED.iter().position(|grid| *grid == live);
+            let twin_position = Grid::REPORTED.iter().position(|grid| Some(*grid) == twin);
+            assert_eq!(twin_position, position.map(|index| index.saturating_add(1)));
+        }
+        assert_eq!(Grid::FakeSl.fake_twin(), None);
+        assert_eq!(Grid::FakeOpensim.fake_twin(), None);
     }
 
     /// A fake grid is exactly one that names the live grid it imitates, and the

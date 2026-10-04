@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 364 |
+| ready | 363 |
 | blocked | 100 |
 | in-progress | 20 |
 | bugs | 30 |
-| done | 1307 |
+| done | 1308 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2004** |
@@ -352,7 +352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (364)
+## ready (363)
 
 ### protocol
 
@@ -1111,9 +1111,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Group chat sessions and ad-hoc conferences on each grid
 - [`gridspec-groups`](ready/gridspec-groups.md) — Groups: membership, roles,
   notices, invitations and accounting on each grid
-- [`gridspec-infra-fake-flavour-conformance`](ready/gridspec-infra-fake-flavour-conformance.md)
-  — Run every conformance case against both fake-grid flavours, beside the live
-  grids
 - [`gridspec-instant-messages`](ready/gridspec-instant-messages.md) — Instant
   messages, typing, busy replies and offline storage on each grid
 - [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
@@ -1656,7 +1653,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1307)
+## done (1308)
 
 ### protocol
 
@@ -4556,6 +4553,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### gridspec
 
+- [`gridspec-infra-fake-flavour-conformance`](done/gridspec-infra-fake-flavour-conformance.md)
+  — Run every conformance case against both fake-grid flavours, beside the live
+  grids
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
 

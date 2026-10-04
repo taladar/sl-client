@@ -77,7 +77,7 @@ impl GridTest for TerrainRawDownload {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::FakeSl]
+        &[Grid::Opensim, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {

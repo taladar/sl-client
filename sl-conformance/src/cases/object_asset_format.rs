@@ -67,10 +67,20 @@ use sl_object_asset::ObjectAsset;
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
+use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
     ANNOUNCED_BULK, ANNOUNCED_LEGACY, LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check,
     created_item_announcement, is_aditi, is_fake,
+};
+
+/// How each grid announces the item a take creates: OpenSim with the legacy
+/// UDP `UpdateCreateInventoryItem`, Second Life with an event-queue
+/// `BulkUpdateInventory`.
+const TAKE_ANNOUNCEMENT: Measured<&str> = Measured {
+    second_life: ANNOUNCED_BULK,
+    opensim: ANNOUNCED_LEGACY,
+    source: "object-rez-derez's take on aditi and OpenSim (ImitatedGrid audit, 2026-09-07)",
 };
 
 /// How many object assets to pull. Enough for a shape to be more than one
@@ -160,17 +170,10 @@ impl GridTest for ObjectAssetFormat {
                 // notice the fake grid answering with the wrong one.
                 if let Some(announcement) = outcome.announcement {
                     ctx.metrics().set("take_announcement", announcement);
-                    let expected = match grid.behaves_like() {
-                        sl_fake_grid::ImitatedGrid::OpenSim => ANNOUNCED_LEGACY,
-                        sl_fake_grid::ImitatedGrid::SecondLife => ANNOUNCED_BULK,
-                    };
-                    check(
-                        announcement == expected,
-                        &format!(
-                            "a grid behaving like {:?} announced a taken object with \
-                             {announcement}, expected {expected}",
-                            grid.behaves_like()
-                        ),
+                    TAKE_ANNOUNCEMENT.check(
+                        "the announcement of a taken object",
+                        grid,
+                        &announcement,
                     )?;
                 }
                 if let Some(taken) = outcome.item.filter(|item| !item.asset_id.is_nil()) {

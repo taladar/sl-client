@@ -52,7 +52,7 @@ impl GridTest for NeighbourChildCircuits {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::FakeSl]
+        &[Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {

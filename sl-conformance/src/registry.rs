@@ -28,10 +28,10 @@ pub trait GridTest: Send + Sync {
     ///
     /// The fake grid is two of them — [`Grid::FakeSl`] and
     /// [`Grid::FakeOpensim`] — because it can be either live grid where the two
-    /// disagree. Almost every case names only [`Grid::FakeSl`], the flavour this
-    /// workspace targets; a case names the other when what it came to assert is
-    /// OpenSim's behaviour, and **both** when it is a survey whose answer
-    /// differs between them and both answers are worth having.
+    /// disagree. A case that runs offline names **both**, so each flavour is
+    /// held to the live grid it imitates; the few meaningful on one flavour
+    /// only are listed, with the reason, in
+    /// [`SINGLE_FLAVOUR`](crate::fake::SINGLE_FLAVOUR).
     fn grids(&self) -> &'static [Grid];
 
     /// How many distinct logged-in avatars the test needs (1, 2, or 3).

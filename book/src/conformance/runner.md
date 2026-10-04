@@ -10,13 +10,19 @@ sl-conformance run    --grid <opensim|aditi|fake-sl|fake-opensim>
                       [--credentials <path>]
                       [--fixtures <path>] [--force] [--timeout <secs>]
                       <TEST>
+sl-conformance run-offline [--grid <fake-sl|fake-opensim>]
 sl-conformance list   [--grid <opensim|aditi|fake-sl|fake-opensim>]
 sl-conformance generate-manpage --output-dir <dir>
 sl-conformance generate-shell-completion --output-file <f> --shell <shell>
 ```
 
-- `run` takes a single positional `TEST`. There is no batch form: running tests
-  one at a time is the primary safeguard against aditi rate-limiting.
+- `run` takes a single positional `TEST`. There is no batch form for a live
+  grid: running tests one at a time is the primary safeguard against aditi
+  rate-limiting.
+- `run-offline` is the batch form for the fake grid, which has no such limit:
+  it runs every offline case on both flavours (or the one `--grid` names) and
+  records each run, which is what fills the fake columns of the report (see
+  [Live and fake side by side](#live-and-fake-side-by-side)).
 - `list` shows the registered tests, the grids each applies to, and how many
   avatars each needs.
 
@@ -109,11 +115,13 @@ bound as synthesised credentials. Everything below that is the ordinary login
 path, XML-RPC round trip included.
 
 The point is `sl-conformance/tests/offline.rs`: one `#[tokio::test]` per name in
-`fake::OFFLINE_CASES`, each on its own fresh grid. Those cases are therefore
-exercised on **every** `cargo test` — and so on every commit — instead of the
-next time somebody remembers to log a live grid in. A unit test pins the list
-against the registry in both directions, so a case cannot declare *a* fake grid
-without being run, nor be listed without declaring one.
+`fake::OFFLINE_CASES` **and per flavour** (`object_edit::fake_sl`,
+`object_edit::fake_opensim`), each on its own fresh grid. Those cases are
+therefore exercised on **every** `cargo test` — and so on every commit — instead
+of the next time somebody remembers to log a live grid in. Unit tests pin the
+list against the registry in both directions, so a case cannot declare *a* fake
+grid without being run, nor be listed without declaring one, and pin the tests
+in that file to exactly the flavours each case declares.
 
 Two rules decide whether a case belongs there:
 
@@ -158,11 +166,11 @@ to make it — which
 is what `TestContext::fake()` hands a case. It is `None` on every live grid, and
 a case that reaches for it declares a fake grid and nothing else.
 
-Nothing offline writes a record. The committed `records/` tree holds the last
-known answer from a grid somebody had to log into; this answer is re-made from
-scratch every run, so a stored copy could only ever be staler than the truth —
-which is why `Grid::RECORDED`, the reporter's default column set, is the two
-live grids.
+The `cargo test` run writes no record: there the assertion is the record,
+re-made from scratch every run. `run-offline` runs the same cases through the
+same code (`fake::run_case`) and does record them, under `records/fake-sl/` and
+`records/fake-opensim/`, so the reporter can set each beside the live grid it
+imitates.
 
 ### Which grid the fake one is
 
@@ -179,22 +187,86 @@ stock fake grid announced `platform: OpenSim`, kept every login field like
 OpenSim, and withheld a taken object's asset like Second Life, all at once — and
 a viewer passing against that has not been tested against anything.
 
-Almost every case names only `Grid::FakeSl`, which is what this workspace
-targets and what the fake grid is by default. Two do otherwise, and they are the
-two shapes worth copying:
+**Every offline case names both flavours.** The fake grid exists to be each
+live grid in turn, and a case run against one flavour only leaves the other
+free to drift from what it imitates — which is how a grid that is nobody comes
+back. The exceptions are listed in `fake::SINGLE_FLAVOUR`, each with its reason,
+and a unit test holds every other offline case to both. There is one today:
 
 - `asset-round-trip` names **`Grid::FakeOpensim` alone**, because reading a
   taken object's asset back is something only OpenSim ever lets a viewer do. It
   does not run on the Second Life flavour and claim to have tested it.
-- `object-asset-format` names **both**, because it is a survey of exactly the
-  thing the two disagree about: `take_step` reads `item-created-nil-asset` on
-  one and `item-created-with-asset` on the other, and both answers are worth
-  having. `run_offline_case` runs such a case once per flavour, under its one
-  name, and a failure says which flavour failed.
-- `economy-data` names both for a related reason: the two grids' price lists
-  differ in twelve of seventeen fields, so the case compares the whole reply
-  against the flavour's own list. That is what makes "a fake grid quotes the
-  grid it says it is" a test rather than a claim in a doc comment.
+
+An exemption says the other flavour has *nothing to assert*, never that it
+fails: a case failing on one flavour is a fake grid that does not yet imitate
+its live grid, and the fix is the grid or a per-grid answer, below.
+
+### Holding a flavour to its live grid
+
+Where the two live grids answer differently, a case states both answers as a
+`measured::Measured` constant, beside the code that observes it, naming where
+the measurement is written down:
+
+```rust
+use sl_conformance::measured::Measured;
+
+/// How each grid announces the item a take creates.
+const TAKE_ANNOUNCEMENT: Measured<&str> = Measured {
+    second_life: ANNOUNCED_BULK,
+    opensim: ANNOUNCED_LEGACY,
+    source: "object-rez-derez's take on aditi and OpenSim (2026-09-07)",
+};
+
+/// In the case body, where the take's announcement was `seen`.
+fn hold(grid: Grid, seen: &str) -> Result<(), TestFailure> {
+    TAKE_ANNOUNCEMENT.check("the announcement of a taken object", grid, &seen)
+}
+```
+
+`check` picks the answer by `Grid::behaves_like`, so one line pairs all four
+grids: a `FakeSl` run is held to the **aditi** answer and a `FakeOpensim` run to
+the **OpenSim** one, and each live run to its own. A fake grid that drifts fails
+offline, on every commit; a live grid that changes its behaviour (or a book
+table that was wrong) fails the run that measured it, instead of leaving a stale
+table behind. The failure quotes `source`, so whoever reads it knows which
+table to re-check. `simulator-features` (`OpenSimExtras`, `VoiceServerType`)
+and `object-asset-format` (the take announcement) are written this way;
+`economy-data`, which compares a seventeen-field price list, keeps its own
+table from `ImitatedGrid::prices`.
+
+For the `gridspec-*` tasks the `source` is the book's
+[Grid Behaviour](../gridspec/index.md) table the answer was written into, with
+the case and date it was measured. A gridspec feature is done when:
+
+1. it is **measured** on aditi and on OpenSim — a conformance case recording
+   the whole shape, a `sl-repl --script` probe, the viewer automation, or the
+   user driving a viewer for what none of those reach;
+2. it is **documented** as a table per behaviour in `book/src/gridspec/`, a
+   column per grid, each cell saying how and when it was measured;
+3. the **fake grid** gives each flavour's answer — a row in `imitates.rs` per
+   divergence — and the case runs offline on **both** flavours with the
+   answers as `Measured` constants, so the fake grid is held to the
+   measurement (a large gap becomes its own implementation task);
+4. the **viewer** handles each grid's answer — an `e2e` test against each fake
+   flavour where possible, a live check otherwise.
+
+### Live and fake side by side
+
+`sl-conformance-report` lays its columns out in pairs, each live grid followed
+by the flavour imitating it (`Grid::REPORTED`: `opensim`, `fake-opensim`,
+`aditi`, `fake-sl`). Under a case whose live grid and fake twin both have a
+newest run it lists every recorded field the two answer differently:
+
+```text
+    [opensim ≠ fake-opensim] dwell            7.611 (live) vs 42.500 (fake)
+```
+
+That listing is not a verdict. Some fields legitimately differ — a parcel's
+name describes the fixture, not the grid — and the ones that must not are held
+by a `Measured` check that fails the case. What it shows is the *unasserted*
+rest, which is where the next measurement starts. Timings are left out (a
+duration measures the machine as much as the grid), and so are ids on both
+sides, since every grid mints its own.
 
 What the flavour decides — a taken object's asset, the login response's
 `options` handling, the price list, and six more — is [audited in the fake
@@ -287,6 +359,8 @@ a complete run's.
 
 Restrict `grids()` to the grids where the feature exists — e.g. an
 experiences-only test returns `&[Grid::Aditi]`, and the reporter shows `n/a` for
-OpenSim. Adding a fake grid also means adding the case's name to
-`fake::OFFLINE_CASES` and a line to `tests/offline.rs`; a unit test fails if you
-do one without the other.
+OpenSim. Adding the fake grid means declaring **both** flavours (or listing the
+case in `fake::SINGLE_FLAVOUR` with its reason), adding the name to
+`fake::OFFLINE_CASES`, and adding a line
+`case => "case" [fake_sl, fake_opensim],` to `tests/offline.rs`; unit tests fail
+if any of the three disagree.

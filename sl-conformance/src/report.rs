@@ -5,8 +5,12 @@
 //! whether the test applies to the grid) into a [`Cell`] the binary renders. The
 //! delta logic refuses to judge a metric as better/worse unless it is complete
 //! in both the newest and previous runs.
+//!
+//! It also lines a live grid's newest run up against the newest run of the fake
+//! flavour imitating it ([`divergences`]), which is how the reporter shows a
+//! case's live and fake answers side by side.
 
-use crate::record::{Outcome, Record, Run};
+use crate::record::{MetricValue, Outcome, Record, Run};
 
 /// The percentage change below which a metric is treated as unchanged, to avoid
 /// noise from tiny run-to-run variation.
@@ -246,9 +250,78 @@ pub fn classify(applicable: bool, record: Option<&Record>, freshness: Freshness)
     }
 }
 
+/// One metric on which a fake flavour's newest run and the newest run on the
+/// live grid it imitates disagree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Divergence {
+    /// The metric name.
+    pub key: String,
+    /// The live grid's value, or `None` when it recorded none.
+    pub live: Option<MetricValue>,
+    /// The fake grid's value, or `None` when it recorded none.
+    pub fake: Option<MetricValue>,
+}
+
+/// Whether `key` is a timing in either run: a duration measures the machine and
+/// the network as much as the grid, so a fake grid answering faster than a live
+/// one is not a disagreement about behaviour.
+fn is_timing(key: &str, live: &Run, fake: &Run) -> bool {
+    [live, fake].iter().any(|run| {
+        run.metric_meta
+            .get(key)
+            .is_some_and(|meta| meta.lower_is_better.is_some())
+    })
+}
+
+/// Whether `value` is an id — a UUID, or a comma-separated list of them. Ids
+/// are minted by whichever grid created the thing, so a live grid's and a fake
+/// grid's never match and their differing says nothing.
+fn is_identifier(value: Option<&MetricValue>) -> bool {
+    match value {
+        Some(MetricValue::Text(text)) => text
+            .split(',')
+            .all(|piece| sl_client_tokio::Uuid::parse_str(piece.trim()).is_ok()),
+        Some(MetricValue::Bool(_) | MetricValue::Int(_) | MetricValue::Float(_)) | None => false,
+    }
+}
+
+/// The metrics a fake run (`fake`) and the live run it imitates (`live`)
+/// record differently — present in one only, or with different values —
+/// sorted by key. Two kinds are left out: timings, since a duration measures
+/// the machine and the network as much as the grid, and ids on both sides
+/// (`is_identifier`), since each grid mints its own.
+///
+/// This is a listing, not a verdict. Some metrics legitimately differ — a count
+/// of the objects in a region describes the fixture, not the grid — and the
+/// ones that must not are held to the live answer inside the case itself, by a
+/// [`Measured`](crate::measured::Measured) check that fails the run. What this
+/// adds is the *unasserted* rest: every recorded field a fake grid answers
+/// differently, which is where the next gridspec measurement starts.
+#[must_use]
+pub fn divergences(live: &Run, fake: &Run) -> Vec<Divergence> {
+    let mut keys: Vec<&String> = live.metrics.keys().chain(fake.metrics.keys()).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    keys.into_iter()
+        .filter(|key| !is_timing(key, live, fake))
+        .filter_map(|key| {
+            let live_value = live.metrics.get(key);
+            let fake_value = fake.metrics.get(key);
+            let both_ids = is_identifier(live_value) && is_identifier(fake_value);
+            (live_value != fake_value && !both_ids).then(|| Divergence {
+                key: key.clone(),
+                live: live_value.cloned(),
+                fake: fake_value.cloned(),
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CellStatus, Freshness, Judgement, classify, freshness_of};
+    use super::{
+        CellStatus, Divergence, Freshness, Judgement, classify, divergences, freshness_of,
+    };
     use crate::record::{Completeness, MetricMeta, MetricValue, Outcome, Record, Run};
     use pretty_assertions::assert_eq;
     use std::collections::BTreeMap;
@@ -386,5 +459,49 @@ mod tests {
         let delta = only_delta(&cell)?;
         assert_eq!(delta.judgement, Judgement::Unchanged);
         Ok(())
+    }
+
+    /// A live run and its fake twin are compared on everything but timings and
+    /// ids: a matching field is silent, a differing or one-sided one is listed.
+    #[test]
+    fn divergences_skip_timings_and_list_what_differs() {
+        let mut live = run("a", 4.0, Completeness::Complete);
+        let mut fake = run("a", 0.1, Completeness::Complete);
+        for (key, live_value, fake_value) in [
+            ("same", MetricValue::Int(3), MetricValue::Int(3)),
+            (
+                "announcement",
+                MetricValue::Text("bulk".to_owned()),
+                MetricValue::Text("legacy".to_owned()),
+            ),
+            (
+                "rezzed_objects",
+                MetricValue::Text(
+                    "91850a38-81b0-4d3a-89a9-3a5a9760b0dd,cf065737-1298-469c-952c-51a3a30176c3"
+                        .to_owned(),
+                ),
+                MetricValue::Text("2b694c16-1f7a-f999-c323-3d74269d4a2a".to_owned()),
+            ),
+        ] {
+            live.metrics.insert(key.to_owned(), live_value);
+            fake.metrics.insert(key.to_owned(), fake_value);
+        }
+        live.metrics
+            .insert("live_only".to_owned(), MetricValue::Bool(true));
+        assert_eq!(
+            divergences(&live, &fake),
+            vec![
+                Divergence {
+                    key: "announcement".to_owned(),
+                    live: Some(MetricValue::Text("bulk".to_owned())),
+                    fake: Some(MetricValue::Text("legacy".to_owned())),
+                },
+                Divergence {
+                    key: "live_only".to_owned(),
+                    live: Some(MetricValue::Bool(true)),
+                    fake: None,
+                },
+            ]
+        );
     }
 }

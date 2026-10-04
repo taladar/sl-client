@@ -1,8 +1,10 @@
 //! The read-only conformance report.
 //!
-//! Walks the committed `records/` tree and prints a `cargo test`-style summary:
-//! one row per test, a status per grid, and — under each — the per-metric trend
-//! of the latest run versus the previous one. Does no network I/O; it only reads
+//! Walks the `records/` tree and prints a `cargo test`-style summary: one row
+//! per test, a status per grid (each live grid beside the fake flavour
+//! imitating it), and — under each — the per-metric trend of the latest run
+//! versus the previous one, then every recorded field on which a fake
+//! flavour's newest run answers differently from its live grid's. Does no network I/O; it only reads
 //! records, so it can run anywhere the repository is checked out. Exits non-zero
 //! when any recorded run failed, so it can gate scripts.
 
@@ -13,10 +15,11 @@ use clap::Parser as _;
 use owo_colors::OwoColorize as _;
 use sl_conformance::gitinfo;
 use sl_conformance::grid::Grid;
-use sl_conformance::record::Record;
+use sl_conformance::record::{MetricValue, Record, Run};
 use sl_conformance::registry::registry;
 use sl_conformance::report::{
-    Cell, CellStatus, Freshness, Judgement, MetricDelta, classify, freshness_of,
+    Cell, CellStatus, Divergence, Freshness, Judgement, MetricDelta, classify, divergences,
+    freshness_of,
 };
 
 /// When to colourise output.
@@ -78,7 +81,7 @@ fn run(args: &Options) -> Result<bool, Error> {
     let color = color_enabled(args.color);
     let grids: Vec<Grid> = match args.grid {
         Some(grid) => vec![grid],
-        None => Grid::RECORDED.to_vec(),
+        None => Grid::REPORTED.to_vec(),
     };
 
     let mut any_failed = false;
@@ -88,6 +91,7 @@ fn run(args: &Options) -> Result<bool, Error> {
     for test in registry() {
         let mut cells: Vec<String> = Vec::new();
         let mut detail_lines: Vec<String> = Vec::new();
+        let mut newest: Vec<(Grid, Run)> = Vec::new();
         for grid in &grids {
             let applicable = test.grids().contains(grid);
             let record = load_record(&records_dir, *grid, test.name());
@@ -106,6 +110,9 @@ fn run(args: &Options) -> Result<bool, Error> {
                 None => Freshness::Unknown,
             };
             let cell = classify(applicable, record.as_ref(), freshness);
+            if applicable && let Some(run) = record.as_ref().and_then(Record::newest) {
+                newest.push((*grid, run.clone()));
+            }
             cells.push(format!(
                 "{}: {}",
                 grid.dir_name(),
@@ -123,6 +130,7 @@ fn run(args: &Options) -> Result<bool, Error> {
                 ));
             }
         }
+        detail_lines.extend(twin_lines(&newest, color));
         print_line(&format!("{:24}{}", test.name(), cells.join("   ")));
         for detail in detail_lines {
             print_line(&detail);
@@ -141,6 +149,58 @@ fn run(args: &Options) -> Result<bool, Error> {
         print_line(&summary);
     }
     Ok(any_failed)
+}
+
+/// The lines listing, for each live grid whose fake twin also has a newest run
+/// of this case, every recorded field the two answer differently.
+fn twin_lines(newest: &[(Grid, Run)], color: bool) -> Vec<String> {
+    let run_on = |wanted: Grid| {
+        newest
+            .iter()
+            .find(|(grid, _run)| *grid == wanted)
+            .map(|(_grid, run)| run)
+    };
+    let mut lines = Vec::new();
+    for (live, live_run) in newest {
+        let Some(twin) = live.fake_twin() else {
+            continue;
+        };
+        let Some(fake_run) = run_on(twin) else {
+            continue;
+        };
+        for divergence in divergences(live_run, fake_run) {
+            lines.push(format!(
+                "    [{} \u{2260} {}] {}",
+                live.dir_name(),
+                twin.dir_name(),
+                render_divergence(&divergence, color)
+            ));
+        }
+    }
+    lines
+}
+
+/// Render one live-versus-fake divergence: the live value, then the fake one.
+fn render_divergence(divergence: &Divergence, color: bool) -> String {
+    let value = |value: Option<&MetricValue>| {
+        value.map_or_else(|| paint(color, "(none)", Tone::Dim), render_value)
+    };
+    format!(
+        "{key:28} {live} (live) vs {fake} (fake)",
+        key = divergence.key,
+        live = value(divergence.live.as_ref()),
+        fake = paint(color, &value(divergence.fake.as_ref()), Tone::Yellow),
+    )
+}
+
+/// Render a recorded metric value as the record holds it.
+fn render_value(value: &MetricValue) -> String {
+    match value {
+        MetricValue::Bool(flag) => flag.to_string(),
+        MetricValue::Int(count) => count.to_string(),
+        MetricValue::Float(number) => format_number(*number),
+        MetricValue::Text(text) => format!("{text:?}"),
+    }
 }
 
 /// Load a record, treating a parse error as a missing record (with a warning).
