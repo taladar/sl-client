@@ -24,7 +24,7 @@ mod test {
         STOCK_PARCEL_LOCAL_ID, STOCK_PARCEL_NAME, STOCK_SCRIPTED_OBJECT_LOCAL_ID,
         STOCK_SCRIPTED_OBJECT_POSITION, stock_scripted_object,
     };
-    use sl_fake_grid::{AccountConfig, FakeGrid, FakeGridBuilder, RegionConfig};
+    use sl_fake_grid::{AccountConfig, FakeGrid, FakeGridBuilder, ImitatedGrid, RegionConfig};
     use sl_proto::{ObjectKey, ServerEvent};
     use tokio::sync::broadcast;
 
@@ -85,6 +85,11 @@ mod test {
             Self::start_requesting(channel, region, None)
         }
 
+        /// [`start`](Self::start) against a grid imitating `imitates`.
+        fn start_imitating(channel: &str, imitates: ImitatedGrid) -> Result<Self, TestError> {
+            Self::start_with(channel, RegionConfig::default(), None, imitates)
+        }
+
         /// [`start_in`](Self::start_in), with the plugin's seed requests
         /// asking for `requested` instead of the client's own list.
         fn start_requesting(
@@ -92,12 +97,25 @@ mod test {
             region: RegionConfig,
             requested: Option<std::sync::Arc<[String]>>,
         ) -> Result<Self, TestError> {
+            Self::start_with(channel, region, requested, ImitatedGrid::default())
+        }
+
+        /// The harness every other constructor builds: a grid of flavour
+        /// `imitates` serving `region`, and an app whose seeds ask for
+        /// `requested`.
+        fn start_with(
+            channel: &str,
+            region: RegionConfig,
+            requested: Option<std::sync::Arc<[String]>>,
+            imitates: ImitatedGrid,
+        ) -> Result<Self, TestError> {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?;
             let grid = runtime.block_on(
                 FakeGridBuilder::new()
                     .account(AccountConfig::new("Test", "User", "password"))
+                    .imitates(imitates)
                     .region(region)
                     .event_queue_hold(Duration::from_secs(2))
                     .start(),
@@ -510,6 +528,40 @@ mod test {
         let mut names: Vec<&str> = granted.keys().map(String::as_str).collect();
         names.sort_unstable();
         assert_eq!(names, vec!["EventQueueGet", "SimulatorFeatures"]);
+        Ok(())
+    }
+
+    /// A set on a grid that answers it with a bare `{success: true}` — the
+    /// OpenSim flavour, as live OpenSim does — still ends in the stored
+    /// environment: the driver asks for it where the reply leaves it out.
+    #[test]
+    fn bevy_client_fetches_the_environment_a_bare_reply_left_out() -> Result<(), TestError> {
+        const DAY_LENGTH: i32 = 7_200;
+        let mut harness =
+            Harness::start_imitating("sl-fake-grid-bevy-environment", ImitatedGrid::OpenSim)?;
+        harness.step_until("the capability map", |app| {
+            app.world()
+                .resource::<Recorded>()
+                .capabilities
+                .iter()
+                .any(|caps| caps.contains_key("ExtEnvironment"))
+                .then_some(())
+        })?;
+        harness.command(Command::SetEnvironment {
+            parcel_id: Some(STOCK_PARCEL_LOCAL_ID.0),
+            track_no: None,
+            update: Box::new(sl_client_bevy::EnvironmentUpdate {
+                day_length: Some(DAY_LENGTH),
+                ..sl_client_bevy::EnvironmentUpdate::default()
+            }),
+        });
+        let stored = harness.wait_for_event("the stored environment", |event| match event {
+            SlSessionEvent::Environment(environment) => {
+                Some((environment.parcel_id, environment.day_length))
+            }
+            _ => None,
+        })?;
+        assert_eq!(stored, (STOCK_PARCEL_LOCAL_ID.0, DAY_LENGTH));
         Ok(())
     }
 

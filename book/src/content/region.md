@@ -230,7 +230,9 @@ A region's — or an individual parcel's — sky, water, and **day cycle** are t
 [capability](../comms/caps.md) (`ExtEnvironment`), not UDP.
 `Command::RequestEnvironment { parcel_id }` performs the `GET` (`parcel_id` of
 `None` asks for the whole region); the reply is
-`Event::Environment(EnvironmentSettings)`.
+`Event::Environment(EnvironmentSettings)`. What each grid answers — a
+parcel that only inherits, a refused change, OpenSim's bare acceptance of a set
+— is in [Grid Behaviour → Environment](../gridspec/environment.md).
 
 `EnvironmentSettings` holds the parcel/region id, the **day length** and
 **offset** (in seconds), the three **track altitudes** at which the sky changes

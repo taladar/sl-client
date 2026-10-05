@@ -2,7 +2,7 @@
 
 use super::caps_event::CapsEvent;
 use super::conversions::{
-    OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
+    EnvironmentReply, OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
     agent_list_voice_updates_from_llsd, agent_state_update_from_llsd, ais_folder_listing_from_llsd,
     ais_inventory_update_from_llsd, ais_updated_category_versions, avatar_animations,
     avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_picker_result,
@@ -10,7 +10,7 @@ use super::conversions::{
     bulk_update_item, chat_message, chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
     chatterbox_session_start_reply_from_llsd, classified_info, cof_version_increment_from_llsd,
     created_category_from_llsd, crossed_region_from_caps_llsd, display_name_update_from_llsd,
-    economy_data, enable_simulator_from_caps_llsd, environment_from_llsd,
+    economy_data, enable_simulator_from_caps_llsd, environment_reply_from_llsd,
     establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
     fetch_inventory_items_from_llsd, friend, grid_coordinates_from_handle, group_account_details,
     group_account_summary, group_account_transactions, group_active_proposal_item, group_member,
@@ -486,14 +486,21 @@ impl Session {
                     self.caps_decode_failed(message);
                 }
             }
-            CapsEvent::ExtEnvironment => {
-                if let Some(environment) = environment_from_llsd(body) {
-                    self.events
-                        .push_back(Event::Environment(Box::new(environment)));
-                } else {
-                    self.caps_decode_failed(message);
+            CapsEvent::ExtEnvironment => match environment_reply_from_llsd(body) {
+                EnvironmentReply::Settings(environment) => {
+                    self.events.push_back(Event::Environment(environment));
                 }
-            }
+                // Taken, with nothing to apply: the drivers follow such a reply
+                // with a GET, so this is only what one that did not would see.
+                EnvironmentReply::Accepted => {
+                    tracing::debug!("an environment change was accepted without its settings");
+                }
+                EnvironmentReply::Refused(message) => {
+                    self.events
+                        .push_back(Event::EnvironmentChangeRefused { message });
+                }
+                EnvironmentReply::Malformed => self.caps_decode_failed(message),
+            },
             // A task script's run state, answered over the event queue when the
             // region has one (OpenSim's default, and modern SL) in place of the
             // UDP `ScriptRunningReply`, in response to a `GetScriptRunning`.

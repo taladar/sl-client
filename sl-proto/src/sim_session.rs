@@ -3032,6 +3032,10 @@ pub struct SimSession {
     /// Which grid's wire types the event-queue `ParcelProperties` uses; see
     /// [`SimSession::set_parcel_dialect`].
     parcel_dialect: crate::ParcelLlsdDialect,
+    /// Whether an `ExtEnvironment` PUT or DELETE is answered with a bare
+    /// verdict in place of the settings now in force; see
+    /// [`SimSession::set_bare_environment_replies`].
+    bare_environment_replies: bool,
     /// The region handle this simulator serves (echoed in `AgentMovementComplete`).
     region_handle: RegionHandle,
     /// The channel/version string reported in `AgentMovementComplete`.
@@ -3394,6 +3398,7 @@ impl SimSession {
             state: SimState::AwaitingCircuit,
             update_completion_names_item: false,
             parcel_dialect: crate::ParcelLlsdDialect::SecondLife,
+            bare_environment_replies: false,
             region_handle,
             channel_version: b"sl-proto SimSession".to_vec(),
             client_addr: None,
@@ -3977,6 +3982,35 @@ impl SimSession {
     /// `ExtEnvironment` GET serves from.
     pub fn set_environment(&mut self, environment: EnvironmentSettings) {
         self.environments.insert(environment.parcel_id, environment);
+    }
+
+    /// Sets whether an `ExtEnvironment` PUT or DELETE is answered with a bare
+    /// verdict — OpenSim's `{success: true}` for a set, the region and message
+    /// ids beside it for a reset — in place of the settings now in force
+    /// (default `false`). A client talking to such a grid has to ask for them.
+    pub const fn set_bare_environment_replies(&mut self, bare: bool) {
+        self.bare_environment_replies = bare;
+    }
+
+    /// Whether [`set_bare_environment_replies`](Self::set_bare_environment_replies)
+    /// is on.
+    pub(crate) const fn bare_environment_replies(&self) -> bool {
+        self.bare_environment_replies
+    }
+
+    /// The `ExtEnvironment` reply body for `parcel_id` as things stand: its
+    /// own environment, or — for a parcel that has none — the `is_default`
+    /// body both grids answer with, which carries no day cycle.
+    pub(crate) fn environment_body(&self, parcel_id: i32) -> Llsd {
+        if parcel_id == -1 || self.environments.contains_key(&parcel_id) {
+            return crate::session::environment_to_llsd(&self.environment(parcel_id));
+        }
+        let region = self.environment(-1);
+        crate::session::inheriting_environment_to_llsd(
+            parcel_id,
+            self.region_id,
+            &region.track_altitudes,
+        )
     }
 
     /// The environment served for `parcel_id`: its own entry when the driver

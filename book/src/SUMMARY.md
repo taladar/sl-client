@@ -50,6 +50,7 @@
 - [Login](gridspec/login.md)
 - [Capabilities](gridspec/capabilities.md)
 - [Land](gridspec/land.md)
+- [Environment](gridspec/environment.md)
 
 ## Simulator
 

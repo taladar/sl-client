@@ -465,6 +465,11 @@ pub(crate) struct GridCore {
     /// How the region answers the About Land traffic
     /// ([`ImitatedGrid::parcel_policy`]).
     pub(crate) parcel_policy: crate::imitates::ParcelPolicy,
+    /// What an accepted environment set or reset is answered with
+    /// ([`ImitatedGrid::environment_change_reply`]).
+    pub(crate) environment_change_reply: crate::imitates::EnvironmentChangeReply,
+    /// How a region's default day is labelled ([`ImitatedGrid::stock_day`]).
+    pub(crate) stock_day: crate::imitates::StockDay,
     /// The spatial-voice backend every region serves ([`VoiceBackend`]).
     pub(crate) voice_backend: VoiceBackend,
     /// The clock every session machine is stamped from.
@@ -743,6 +748,10 @@ impl GridCore {
         sim.set_region_id(region.region_id);
         sim.set_update_completion_names_item(self.update_completion_item.names_item());
         sim.set_parcel_dialect(self.parcel_policy.wire_types);
+        sim.set_bare_environment_replies(matches!(
+            self.environment_change_reply,
+            crate::imitates::EnvironmentChangeReply::Bare
+        ));
         if let Some(arrival) = arrival {
             sim.set_arrival_position(arrival.position, arrival.look_at);
         } else {
@@ -772,17 +781,23 @@ impl GridCore {
                 },
             );
         }
-        if let Some(environment) = region.config.environment.clone() {
-            let stamped = EnvironmentSettings {
-                region_id: if environment.region_id.is_nil() {
-                    region.region_id
-                } else {
-                    environment.region_id
-                },
-                ..environment
-            };
-            sim.set_environment(stamped);
-        }
+        // The region's environment: the scene's own, or the stock day labelled
+        // as the imitated grid labels its default. Either names its region, as
+        // a live grid's always does.
+        let environment = region.config.environment.clone().unwrap_or_else(|| {
+            let mut stock = EnvironmentSettings::default_region();
+            self.stock_day.name.clone_into(&mut stock.day_cycle.name);
+            stock.env_version = self.stock_day.env_version;
+            stock
+        });
+        sim.set_environment(EnvironmentSettings {
+            region_id: if environment.region_id.is_nil() {
+                region.region_id
+            } else {
+                environment.region_id
+            },
+            ..environment
+        });
         (region.scenario.setup)(&mut sim, now);
         // The identity half of the seeding, run here because here is the first
         // place that knows who logged in: the scenario's `setup` above ran
@@ -1923,6 +1938,8 @@ impl FakeGridBuilder {
             login_fields: self.imitates.login_fields(),
             withheld_capabilities: self.imitates.withheld_capabilities(),
             parcel_policy: self.imitates.parcel_policy(),
+            environment_change_reply: self.imitates.environment_change_reply(),
+            stock_day: self.imitates.stock_day(),
             packages: self
                 .packages
                 .unwrap_or_else(crate::benefits::second_life_packages),

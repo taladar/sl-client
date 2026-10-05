@@ -68,59 +68,59 @@ pub use sl_proto::{
     CreateGroupParams, CreateListing, DEFAULT_PRIM_TEXTURE, DayCycle, DayCycleFrame,
     DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility,
     DiscardLevel, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData,
-    EnvironmentPushAction, EnvironmentSettings, EstateAccessDelta, EstateAccessKind,
-    EstateCovenant, EstateInfo, EstateInfoUpdate, Event, ExperienceEnvironmentPush,
-    ExperienceEvent, ExperienceEventPermission, ExperienceInfo, ExperienceKey,
-    ExperiencePermission, ExperienceProperties, ExperienceSearchPage, ExperienceUpdate,
-    ExtendedMesh, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey,
-    FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
-    GridCoordinates, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
-    HomeLocation, IceCandidate, ImDialog, ImSessionId, ImageCodec, InstantMessage, InterestsUpdate,
-    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryOwner, InventoryType, InviteChannel, ItemInfo, Key, Kilobits, LandArea,
-    LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandSearchType,
-    LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType, LegacyMaterial,
-    LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
-    LoggedChatType, LoginAccount, LoginParams, LoginRejectKind, LoginRequest, LoginResponse,
-    LoginSuccess, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP,
-    MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, MarketplaceApiError,
-    MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo,
-    MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus,
-    MeshKey, MessageCursor, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
-    MovementMode, MuteEntry, MuteFlags, MuteType, NearbyHistoryLine, NegativeBalanceError,
-    NeighborInfo, NewInventoryItem, NewInventoryLink, Object, ObjectExtraParams,
-    ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
-    ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo,
-    OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell,
-    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    Permissions, Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate,
-    PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-    ProposalCandidateId, ProposalVoteId, QueryId, REQUESTED_CAPABILITIES, ReflectionProbe,
-    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates,
-    RegionDebugUpdate, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionTerrainComposition,
-    RegionTerrainUpdate, Reliability, RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction,
-    ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
-    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
-    SessionMessage, SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload,
-    StartLocation, StartLocationParseError, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TerraformArea, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
-    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
-    TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit, UI_SOUND_ALERT,
-    UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
-    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
-    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, XferListing,
-    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
+    EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, EstateAccessDelta,
+    EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, Event,
+    ExperienceEnvironmentPush, ExperienceEvent, ExperienceEventPermission, ExperienceInfo,
+    ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
+    ExperienceUpdate, ExtendedMesh, FlexibleData, FolderInfo, FolderState, FolderType, Friend,
+    FriendKey, FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow,
+    GltfMaterialOverride, GridCoordinates, GroupKey, GroupMember, GroupMembership, GroupNotice,
+    GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole,
+    GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
+    GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId, ImageCodec,
+    InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId, InventoryCursor,
+    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
+    InventoryOffer, InventoryOwner, InventoryType, InviteChannel, ItemInfo, Key, Kilobits,
+    LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact,
+    LandSearchType, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd,
+    LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams, LoginRejectKind, LoginRequest,
+    LoginResponse, LoginSuccess, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
+    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
+    MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
+    MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
+    MediaEntry, MerchantStatus, MeshKey, MessageCursor, MfaChallenge, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
+    NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
+    Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
+    ObjectPermMasks, ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily, ObjectTransform,
+    OpenRegionInfo, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
+    ParcelOverlayCell, ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect,
+    ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo,
+    ParticleSystem, PermissionField, Permissions, Permissions5, PhysicsShapeType,
+    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
+    PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
+    REQUESTED_CAPABILITIES, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
+    RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
+    RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
+    RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
+    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
+    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
+    SculptOrMeshKey, SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures,
+    SkySettings, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
+    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerraformArea,
+    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace,
+    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
+    TransferId, TransferStatus, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
+    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
+    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
+    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
+    Vector, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
+    XferListing, avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
     encode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
     particle_pattern, pcode, prim_flags, sim_access, texture_anim_mode,
 };
@@ -200,7 +200,7 @@ use crate::http::{
     delete_caps_llsd, fetch_land_resources, fetch_lsl_syntax, get_avatar_picker_search,
     get_caps_llsd, get_experience_query, patch_caps_llsd, post_caps_oneway,
     post_chat_session_fetch_history, post_chat_session_request, post_remote_parcel_request,
-    put_caps_llsd,
+    put_caps_llsd, settle_environment_change,
 };
 use crate::inventory::{
     fetch_ais3_folders, fetch_folder_contents, fetch_group_members, fetch_inventory,
@@ -1068,6 +1068,16 @@ impl Client {
                                 deliver(&diagnostics, Diagnostic::ExpectedReplyMissing { request: cap.to_owned(), sequence: None, }).await;
                             }
                         } else {
+                            // The body as the grid sent it, before any decode —
+                            // an event-queue event or a capability's reply. What
+                            // a gridspec probe reads to see every field and its
+                            // wire type (`RUST_LOG=sl_client_tokio::wire=trace`).
+                            tracing::trace!(
+                                target: "sl_client_tokio::wire",
+                                message = %message,
+                                body = ?body,
+                                "CAPS body"
+                            );
                             self.session.handle_caps_event(&message, &body, Instant::now())?;
                         }
                     }
@@ -1592,25 +1602,26 @@ impl Client {
                         Some(Command::SetEnvironment { parcel_id, track_no, update }) => {
                             if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
                                 let url = environment_cap_url(&base, parcel_id, track_no);
+                                let refetch = environment_cap_url(&base, parcel_id, None);
                                 let body = build_environment_update_request(&update);
-                                tokio::spawn(put_caps_llsd(
-                                    url,
-                                    body,
-                                    CAP_EXT_ENVIRONMENT,
-                                    http.clone(),
-                                    caps_tx.clone(),
-                                ));
+                                let (reply_tx, reply_rx) = mpsc::channel(1);
+                                let (http, caps_tx) = (http.clone(), caps_tx.clone());
+                                tokio::spawn(async move {
+                                    put_caps_llsd(url, body, CAP_EXT_ENVIRONMENT, http.clone(), reply_tx).await;
+                                    settle_environment_change(reply_rx, refetch, http, caps_tx).await;
+                                });
                             }
                         }
                         Some(Command::ResetEnvironment { parcel_id, track_no }) => {
                             if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
                                 let url = environment_cap_url(&base, parcel_id, track_no);
-                                tokio::spawn(delete_caps_llsd(
-                                    url,
-                                    CAP_EXT_ENVIRONMENT,
-                                    http.clone(),
-                                    caps_tx.clone(),
-                                ));
+                                let refetch = environment_cap_url(&base, parcel_id, None);
+                                let (reply_tx, reply_rx) = mpsc::channel(1);
+                                let (http, caps_tx) = (http.clone(), caps_tx.clone());
+                                tokio::spawn(async move {
+                                    delete_caps_llsd(url, CAP_EXT_ENVIRONMENT, http.clone(), reply_tx).await;
+                                    settle_environment_change(reply_rx, refetch, http, caps_tx).await;
+                                });
                             }
                         }
                         Some(Command::RequestMoneyBalance) => {

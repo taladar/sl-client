@@ -1907,11 +1907,11 @@ pub use conversions::{
     copy_inventory_from_notecard_body, created_category_to_llsd, crossed_region_to_caps_llsd,
     day_cycle_from_asset, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
     environment_asset_from_bytes, environment_asset_to_bytes, environment_cap_url,
-    environment_to_llsd, establish_agent_communication_to_llsd, fetch_inventory_items_to_llsd,
-    group_invite_response_body, group_members_to_caps_llsd, group_memberships_to_caps_llsd,
-    inventory_descendents_to_llsd, land_stat_reply_to_caps_llsd, nav_mesh_status_to_llsd,
-    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
-    parcel_object_owners_to_caps_llsd, required_voice_version_to_llsd,
+    environment_reply_needs_refetch, environment_to_llsd, establish_agent_communication_to_llsd,
+    fetch_inventory_items_to_llsd, group_invite_response_body, group_members_to_caps_llsd,
+    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, land_stat_reply_to_caps_llsd,
+    nav_mesh_status_to_llsd, offline_messages_to_llsd, open_region_info_to_llsd,
+    parcel_info_to_llsd, parcel_object_owners_to_caps_llsd, required_voice_version_to_llsd,
     server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
     sim_console_response_to_llsd, sky_settings_from_asset, sky_with_blended_values,
     sky_with_pushed_values, teleport_finish_to_llsd, water_settings_from_asset,
@@ -1919,7 +1919,7 @@ pub use conversions::{
 };
 pub(crate) use conversions::{
     ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,
-    instant_message, object_transform_from_wire, parcel_properties_to_llsd,
-    parcel_properties_to_wire, parse_copy_inventory_from_notecard, region_handshake_message,
-    shape_from_object_shape_block, unpack_uuids,
+    inheriting_environment_to_llsd, instant_message, object_transform_from_wire,
+    parcel_properties_to_llsd, parcel_properties_to_wire, parse_copy_inventory_from_notecard,
+    region_handshake_message, shape_from_object_shape_block, unpack_uuids,
 };

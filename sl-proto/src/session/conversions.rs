@@ -781,6 +781,48 @@ pub(crate) fn group_names(reply: &UUIDGroupNameReply) -> Vec<GroupName> {
         .collect()
 }
 
+/// What an `ExtEnvironment` reply says — to a GET, a PUT or a DELETE alike.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum EnvironmentReply {
+    /// The environment the land has now.
+    Settings(Box<EnvironmentSettings>),
+    /// The change was taken, and the reply does not say what the land has now:
+    /// OpenSim answers a PUT with `{success: true}` and a DELETE with the
+    /// region and message ids beside it. The reference viewer applies nothing
+    /// and leaves the refresh to what the grid sends next.
+    Accepted,
+    /// The grid refused (`success: false`), with its reason when it gave one.
+    Refused(String),
+    /// Neither an environment nor a verdict.
+    Malformed,
+}
+
+/// Reads an `ExtEnvironment` reply ([`EnvironmentReply`]).
+pub(crate) fn environment_reply_from_llsd(body: &Llsd) -> EnvironmentReply {
+    let verdict = body.get("success").and_then(Llsd::as_bool);
+    if verdict == Some(false) {
+        return EnvironmentReply::Refused(
+            body.get("message")
+                .and_then(Llsd::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        );
+    }
+    match (environment_from_llsd(body), verdict) {
+        (Some(settings), _) => EnvironmentReply::Settings(Box::new(settings)),
+        (None, Some(true)) => EnvironmentReply::Accepted,
+        (None, _) => EnvironmentReply::Malformed,
+    }
+}
+
+/// Whether an `ExtEnvironment` PUT or DELETE reply took the change without
+/// saying what the land has now, so a driver has to ask (a GET) to answer its
+/// caller with the stored settings, as it does on a grid that sends them.
+#[must_use]
+pub fn environment_reply_needs_refetch(body: &Llsd) -> bool {
+    environment_reply_from_llsd(body) == EnvironmentReply::Accepted
+}
+
 /// Parses an `ExtEnvironment` GET reply (the
 /// [`Command::RequestEnvironment`](crate::Command::RequestEnvironment) result)
 /// into [`EnvironmentSettings`]. Returns `None` if the `environment` envelope is
@@ -6063,6 +6105,31 @@ pub fn environment_to_llsd(env: &EnvironmentSettings) -> Llsd {
     ])
 }
 
+/// The `ExtEnvironment` reply for a parcel that has no environment of its own:
+/// an `environment` saying `is_default` and carrying no day cycle, which is
+/// what both grids answer (`environment` conformance case,
+/// `book/src/gridspec/environment.md`). A viewer shows such a parcel the
+/// region's environment.
+pub(crate) fn inheriting_environment_to_llsd(
+    parcel_id: i32,
+    region_id: Uuid,
+    track_altitudes: &[f32; 3],
+) -> Llsd {
+    llsd_map(vec![
+        (
+            "environment",
+            llsd_map(vec![
+                ("is_default", Llsd::Boolean(true)),
+                ("parcel_id", Llsd::Integer(parcel_id)),
+                ("region_id", Llsd::Uuid(region_id)),
+                ("track_altitudes", reals_to_llsd(track_altitudes)),
+            ]),
+        ),
+        ("parcel_id", Llsd::Integer(parcel_id)),
+        ("success", Llsd::Boolean(true)),
+    ])
+}
+
 /// The `ExtEnvironment` URL addressing one scope of one region's environment:
 /// the capability's base with `?parcelid=` for a parcel and `&trackno=` for a
 /// single sky track.
@@ -8645,6 +8712,64 @@ mod caps_serializer_tests {
             }
         }
         Ok(())
+    }
+
+    /// The four things an `ExtEnvironment` reply says, in the shapes the two
+    /// grids send them: OpenSim's bare acceptance of a set and of a reset are
+    /// not decode failures, and a refusal carries its reason.
+    #[test]
+    fn an_environment_reply_is_settings_an_acceptance_or_a_refusal() {
+        use super::{
+            EnvironmentReply, environment_reply_from_llsd, environment_reply_needs_refetch,
+        };
+
+        let map = |entries: Vec<(&str, Llsd)>| super::llsd_map(entries);
+        let inherited = map(vec![
+            ("success", Llsd::Boolean(true)),
+            ("parcel_id", Llsd::Integer(1)),
+            (
+                "environment",
+                map(vec![
+                    ("is_default", Llsd::Boolean(true)),
+                    ("parcel_id", Llsd::Integer(1)),
+                ]),
+            ),
+        ]);
+        assert!(matches!(
+            environment_reply_from_llsd(&inherited),
+            EnvironmentReply::Settings(settings) if settings.parcel_id == 1
+        ));
+        assert!(!environment_reply_needs_refetch(&inherited));
+
+        let set_on_opensim = map(vec![("success", Llsd::Boolean(true))]);
+        let reset_on_opensim = map(vec![
+            ("regionID", Llsd::Uuid(Uuid::from_u128(1))),
+            ("messageID", Llsd::Uuid(Uuid::nil())),
+            ("success", Llsd::Boolean(true)),
+        ]);
+        for accepted in [&set_on_opensim, &reset_on_opensim] {
+            assert_eq!(
+                environment_reply_from_llsd(accepted),
+                EnvironmentReply::Accepted
+            );
+            assert!(environment_reply_needs_refetch(accepted));
+        }
+
+        let refused = map(vec![
+            ("success", Llsd::Boolean(false)),
+            (
+                "message",
+                Llsd::String("Insufficient estate permissions".to_owned()),
+            ),
+        ]);
+        assert_eq!(
+            environment_reply_from_llsd(&refused),
+            EnvironmentReply::Refused("Insufficient estate permissions".to_owned())
+        );
+        assert_eq!(
+            environment_reply_from_llsd(&map(Vec::new())),
+            EnvironmentReply::Malformed
+        );
     }
 
     #[test]

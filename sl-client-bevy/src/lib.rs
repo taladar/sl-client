@@ -417,9 +417,9 @@ use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
     run_avatar_picker_search, run_caps_oneway, run_chat_session_fetch_history,
-    run_chat_session_request, run_delete_caps_llsd, run_experience_query, run_fetch_lsl_syntax,
-    run_get_caps_llsd, run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
-    run_remote_parcel_request,
+    run_chat_session_request, run_delete_caps_llsd, run_environment_change, run_experience_query,
+    run_fetch_lsl_syntax, run_get_caps_llsd, run_land_resources, run_patch_caps_llsd,
+    run_put_caps_llsd, run_remote_parcel_request,
 };
 use crate::inventory::{
     fetch_folder_contents, run_ais3_folder_fetches, run_group_members_fetch,
@@ -2713,9 +2713,14 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let url = environment_cap_url(&base, *parcel_id, *track_no);
+                let refetch = environment_cap_url(&base, *parcel_id, None);
                 let body = build_environment_update_request(update);
                 crate::log_context::spawn_thread(move || {
-                    run_put_caps_llsd(&url, body, CAP_EXT_ENVIRONMENT, &events_tx);
+                    run_environment_change(
+                        |reply_tx| run_put_caps_llsd(&url, body, CAP_EXT_ENVIRONMENT, reply_tx),
+                        &refetch,
+                        &events_tx,
+                    );
                 });
             }
         }
@@ -2728,8 +2733,13 @@ fn apply_command(
             {
                 let events_tx = caps.events_tx.clone();
                 let url = environment_cap_url(&base, *parcel_id, *track_no);
+                let refetch = environment_cap_url(&base, *parcel_id, None);
                 crate::log_context::spawn_thread(move || {
-                    run_delete_caps_llsd(&url, CAP_EXT_ENVIRONMENT, &events_tx);
+                    run_environment_change(
+                        |reply_tx| run_delete_caps_llsd(&url, CAP_EXT_ENVIRONMENT, reply_tx),
+                        &refetch,
+                        &events_tx,
+                    );
                 });
             }
         }

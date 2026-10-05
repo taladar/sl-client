@@ -140,6 +140,10 @@ const MINIMUM_PARCEL_AREA: LandArea = LandArea(128);
 /// The confirmation in front of a reset (the reference's `SettingsConfirmReset`).
 const RESET_CONFIRM: TemplateRef<OkCancel> = TemplateRef::new("SettingsConfirmReset");
 
+/// The alert a refused environment change raises (the reference's
+/// `WLRegionApplyFail`), carrying the grid's reason as `FAIL_REASON`.
+const APPLY_FAILED: &str = "WLRegionApplyFail";
+
 /// The confirmation in front of an estate parcel-override change.
 const OVERRIDE_CONFIRM: TemplateRef<OkCancel> = TemplateRef::new("EstateParcelEnvironmentOverride");
 
@@ -552,7 +556,8 @@ impl Plugin for LandEnvironmentPlugin {
                     resolve_land_confirmation,
                 )
                     .chain(),
-            );
+            )
+            .add_systems(Update, report_refused_environment_change);
     }
 }
 
@@ -1257,6 +1262,21 @@ const fn wire_scope(kind: LandPanelKind, subject: &LandEnvironmentSubject) -> Op
             Some(parcel_id) => Some(LandTarget::Parcel(parcel_id)),
             None => None,
         },
+    }
+}
+
+/// Tell the resident a set or a reset was refused, with the grid's reason — the
+/// reference's `coroUpdateEnvironment` / `coroResetEnvironment` do the same on
+/// a reply that says `success: false`. Not tied to a panel: the refusal names
+/// no land, and it is the session's whoever asked.
+fn report_refused_environment_change(
+    mut events: MessageReader<SlEvent>,
+    mut notify: MessageWriter<ShowNotification>,
+) {
+    for event in events.read() {
+        if let SlSessionEvent::EnvironmentChangeRefused { message } = &event.0 {
+            notify.write(ShowNotification::new(APPLY_FAILED).arg("FAIL_REASON", message.as_str()));
+        }
     }
 }
 

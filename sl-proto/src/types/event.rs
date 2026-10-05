@@ -213,6 +213,15 @@ pub enum Event {
     /// or a parcel, parsed from the `ExtEnvironment` capability (the reply to
     /// [`Command::RequestEnvironment`](crate::Command::RequestEnvironment)).
     Environment(Box<EnvironmentSettings>),
+    /// The grid refused an environment change — a
+    /// [`Command::SetEnvironment`](crate::Command::SetEnvironment) or
+    /// [`Command::ResetEnvironment`](crate::Command::ResetEnvironment) whose
+    /// `ExtEnvironment` reply said `success: false`. The reference viewer
+    /// shows `message` in its `WLRegionApplyFail` alert.
+    EnvironmentChangeRefused {
+        /// The grid's reason, empty when it gave none.
+        message: String,
+    },
     /// An **experience** has pushed an environment at the agent — the
     /// `PushExpEnvironment` generic message an `llSetEnvironment` script sends,
     /// decoded by [`sl_wire::parse_environment_push`].

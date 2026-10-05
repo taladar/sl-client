@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 136 |
 | ready | 365 |
-| blocked | 111 |
+| blocked | 110 |
 | in-progress | 20 |
 | bugs | 29 |
-| done | 1318 |
+| done | 1319 |
 | deferred | 29 |
 | wont-do | 17 |
 | **total** | **2025** |
@@ -1073,6 +1073,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-fake-grid-parcel-divide-join`](ready/server-fake-grid-parcel-divide-join.md)
   — Fake grid — divide and join parcels
+- [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
+  — Fake grid — push the parcel an agent walks onto, and serve parcel
+  environments
 - [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
   size-proportional call costs and the region's script budget on aditi
 - [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
@@ -1107,8 +1110,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   AvatarRenderInfo and AttachmentResources on each grid
 - [`gridspec-circuit`](ready/gridspec-circuit.md) — Circuit behaviour: acks,
   resends, pings, inactivity, packet quirks and throttles
-- [`gridspec-environment`](ready/gridspec-environment.md) — Region and parcel
-  environments (EEP) on each grid
 - [`gridspec-estate`](ready/gridspec-estate.md) — Estate info, access, covenant
   and estate actions on each grid
 - [`gridspec-experiences`](ready/gridspec-experiences.md) — Experience records,
@@ -1200,7 +1201,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-world-map`](ready/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 
-## blocked (111)
+## blocked (110)
 
 ### protocol
 
@@ -1430,10 +1431,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fake grid — enforce parcel access and push ban lines (blocked by
   `gridspec-parcel-access-and-ban-lines`, `server-fake-grid-parcel-on-movement`,
   `server-world-agent-movement`)
-- [`server-fake-grid-parcel-on-movement`](blocked/server-fake-grid-parcel-on-movement.md)
-  — Fake grid — push the parcel an agent walks onto, and serve parcel
-  environments (blocked by `gridspec-environment`, `gridspec-parcel-properties`
-  (done))
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles`, `protocol-sim-profile-messages`)
@@ -1684,7 +1681,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1318)
+## done (1319)
 
 ### protocol
 
@@ -4598,6 +4595,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### gridspec
 
+- [`gridspec-environment`](done/gridspec-environment.md) — Region and parcel
+  environments (EEP) on each grid
 - [`gridspec-infra-fake-flavour-conformance`](done/gridspec-infra-fake-flavour-conformance.md)
   — Run every conformance case against both fake-grid flavours, beside the live
   grids

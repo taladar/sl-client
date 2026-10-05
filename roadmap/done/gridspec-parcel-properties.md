@@ -37,7 +37,7 @@ Both transports; current parcel tracked from pushes.
 
 - **Discover.** `parcel-properties` records the whole decoded record, and the
   tokio client logs each raw event-queue body at trace level
-  (`sl_client_tokio::caps=trace`), which is what the field tables were read
+  (`sl_client_tokio::wire=trace`), which is what the field tables were read
   from. New case `parcel-crossing` finds the nearest parcel line by querying
   outwards, flies over it and back, and records every pushed parcel (OpenSim:
   the estate owner divides the region first and joins it back).

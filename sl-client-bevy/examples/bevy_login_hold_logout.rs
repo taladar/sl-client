@@ -286,6 +286,7 @@ fn on_events(
             | SlSessionEvent::ParcelDetails(_)
             | SlSessionEvent::RemoteParcelId { .. }
             | SlSessionEvent::Environment(_)
+            | SlSessionEvent::EnvironmentChangeRefused { .. }
             | SlSessionEvent::ExperienceEnvironmentPush(_)
             | SlSessionEvent::ExperienceEvent(_)
             | SlSessionEvent::MoneyBalance(_)

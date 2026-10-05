@@ -523,6 +523,31 @@ pub(crate) fn run_put_caps_llsd(
     }
 }
 
+/// Runs an `ExtEnvironment` PUT or DELETE (`change`, which delivers its reply
+/// to the sender it is given) and forwards that reply to `caps_tx` — or, when
+/// the grid took the change without saying what the land has now, GETs
+/// `refetch_url` and forwards that instead. OpenSim answers a set with a bare
+/// `{success: true}`; a caller is owed the stored settings on either grid.
+/// Mirrors the tokio `settle_environment_change`.
+pub(crate) fn run_environment_change(
+    change: impl FnOnce(&Sender<(String, Llsd)>),
+    refetch_url: &str,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let (reply_tx, reply_rx) = crossbeam_channel::unbounded();
+    change(&reply_tx);
+    drop(reply_tx);
+    for (message, body) in reply_rx.try_iter() {
+        if message == sl_proto::CAP_EXT_ENVIRONMENT
+            && sl_proto::environment_reply_needs_refetch(&body)
+        {
+            run_get_caps_llsd(refetch_url, sl_proto::CAP_EXT_ENVIRONMENT, caps_tx);
+        } else {
+            deliver(caps_tx, (message, body));
+        }
+    }
+}
+
 /// Sends an HTTP PATCH of `body` to an AIS3 inventory capability URL (a folder /
 /// item update or move) and forwards the LLSD reply to `caps_tx` tagged `cap`.
 pub(crate) fn run_patch_caps_llsd(

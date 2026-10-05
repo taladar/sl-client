@@ -2928,8 +2928,10 @@ mod test {
     }
 
     /// The `ExtEnvironment` GET serves the region entry (`?parcelid=-1` and
-    /// no query at all), a stored parcel override, and falls back to the
-    /// region entry for a parcel without one.
+    /// no query at all), a stored parcel override, and — for a parcel without
+    /// one — the parcel's own `is_default` answer with no day in it, as both
+    /// live grids do: the viewer shows such a parcel the region's environment,
+    /// the grid does not send it again.
     #[test]
     fn environment_get_serves_region_and_parcel_with_fallback() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -2942,8 +2944,8 @@ mod test {
             (None, -1, 14400),
             (Some("parcelid=-1"), -1, 14400),
             (Some("parcelid=3"), 3, 7200),
-            // Parcel 9 has no override: it inherits the region entry.
-            (Some("parcelid=9"), -1, 14400),
+            // Parcel 9 has no override: it is answered as itself, dayless.
+            (Some("parcelid=9"), 9, 0),
         ] {
             let events = fold_into_client(
                 &mut caps,
@@ -3147,9 +3149,9 @@ mod test {
                     "the parcel's own environment survived the reset"
                 );
                 assert_eq!(
-                    environment.day_length,
-                    sim_region_day_length(&mut caps, &mut sim, &path)?,
-                    "a reset parcel should be answered with the region's environment"
+                    (environment.parcel_id, environment.day_length),
+                    (3, 0),
+                    "a reset parcel should be answered as one that only inherits"
                 );
             }
             other => return Err(format!("expected Environment, got {other:?}").into()),
@@ -3165,24 +3167,6 @@ mod test {
             other => return Err(format!("expected EnvironmentReset, got {other:?}").into()),
         }
         Ok(())
-    }
-
-    /// The day length the region entry is serving, read back through the
-    /// capability.
-    fn sim_region_day_length(
-        caps: &mut SimCaps,
-        sim: &mut SimSession,
-        path: &str,
-    ) -> Result<i32, TestError> {
-        let (status, body) = respond(caps, sim, &get(path, Some("parcelid=-1")))?;
-        assert_eq!(status, 200);
-        let llsd = parse_llsd_xml(&body)?;
-        let day_length = llsd
-            .get("environment")
-            .and_then(|environment| environment.get("day_length"))
-            .and_then(sl_wire::Llsd::as_i32)
-            .ok_or("the region environment reply carries no day_length")?;
-        Ok(day_length)
     }
 
     /// A `day_asset`-only PUT answers the reference's graceful failure —

@@ -134,6 +134,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "seed-capabilities",
     "object-update-decode",
     "parcel-properties",
+    "environment",
     "terrain-raw-transfer-download",
     "terrain-layerdata",
     "map-blocks-items",

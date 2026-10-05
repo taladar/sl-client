@@ -83,6 +83,7 @@ mod test {
         seed_capabilities => "seed-capabilities" [fake_sl, fake_opensim],
         object_update_decode => "object-update-decode" [fake_sl, fake_opensim],
         parcel_properties => "parcel-properties" [fake_sl, fake_opensim],
+        environment => "environment" [fake_sl, fake_opensim],
         terrain_raw_transfer_download => "terrain-raw-transfer-download" [fake_sl, fake_opensim],
         terrain_layerdata => "terrain-layerdata" [fake_sl, fake_opensim],
         map_blocks_items => "map-blocks-items" [fake_sl, fake_opensim],

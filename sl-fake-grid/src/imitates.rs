@@ -232,6 +232,48 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid labels the day of a region nobody set an environment on:
+    /// the cycle's name and the environment version it reports.
+    ///
+    /// OpenSim's is called `Default` and is version 0. Second Life's default
+    /// has no one name to measure — the aditi region reached serves a named
+    /// day somebody chose, at version 1 — so its flavour keeps the fake grid's
+    /// own name at version 1. Both grids' default day is 14 400 s long, offset
+    /// 57 600 s, with eight sky keyframes on the ground track and one water
+    /// frame; the fake grid's stays a single keyframe on purpose, so a render
+    /// capture does not depend on the region clock
+    /// (`EnvironmentSettings::default_region`).
+    #[must_use]
+    pub const fn stock_day(self) -> StockDay {
+        match self {
+            Self::SecondLife => StockDay {
+                name: "Default Daycycle",
+                env_version: 1,
+            },
+            Self::OpenSim => StockDay {
+                name: "Default",
+                env_version: 0,
+            },
+        }
+    }
+
+    /// What this grid answers an accepted `ExtEnvironment` set or reset with.
+    ///
+    /// OpenSim sends a bare verdict: `{success: true}` to a PUT, the region and message ids
+    /// beside it to a DELETE (measured by `environment` as the local grid's
+    /// estate owner, 2026-10-05, `book/src/gridspec/environment.md`). A client
+    /// that waits for the stored settings in the reply waits for ever there.
+    /// Second Life's answer to an accepted change is unmeasured — the aditi
+    /// test avatars may change no land — and is taken to be the stored
+    /// settings the reference viewer reads from it.
+    #[must_use]
+    pub const fn environment_change_reply(self) -> EnvironmentChangeReply {
+        match self {
+            Self::SecondLife => EnvironmentChangeReply::Settings,
+            Self::OpenSim => EnvironmentChangeReply::Bare,
+        }
+    }
+
     /// How this grid answers the About Land traffic where the two disagree —
     /// measured by `parcel-edit` and `parcel-edit-refused` on aditi and the
     /// local OpenSim (2026-10-05, `book/src/gridspec/land.md`).
@@ -495,6 +537,25 @@ pub const OPENSIM_MAX_AGENT_GROUPS: u32 = 42;
 /// The sequence id Second Life gives the parcel it pushes back after an edit:
 /// the reference viewer's `SELECTED_PARCEL_SEQ_ID`.
 pub const SELECTED_PARCEL_SEQUENCE_ID: i32 = -10_000;
+
+/// How a grid labels a region's default day ([`ImitatedGrid::stock_day`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StockDay {
+    /// The day cycle's name.
+    pub name: &'static str,
+    /// The environment version reported with it.
+    pub env_version: i32,
+}
+
+/// What a grid answers an accepted environment set or reset with
+/// ([`ImitatedGrid::environment_change_reply`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvironmentChangeReply {
+    /// The environment now in force.
+    Settings,
+    /// A verdict and nothing else.
+    Bare,
+}
 
 /// What one region holds ([`ImitatedGrid::region_capacity`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -769,6 +830,11 @@ mod test {
             opensim_parcels.owners_reply_over_event_queue
         );
         assert_ne!(sl_parcels.wire_types, opensim_parcels.wire_types);
+        assert_ne!(
+            sl.environment_change_reply(),
+            opensim.environment_change_reply()
+        );
+        assert_ne!(sl.stock_day(), opensim.stock_day());
         assert_ne!(
             sl.region_capacity(sl_proto::ProductType::FullRegion),
             opensim.region_capacity(sl_proto::ProductType::FullRegion)

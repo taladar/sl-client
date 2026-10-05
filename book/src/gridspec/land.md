@@ -33,9 +33,10 @@ extended-flag blocks, so a grid that sent it would lose them; neither does.
 
 ### Parcel properties: the fields
 
-Read from the raw event (`RUST_LOG=sl_client_tokio::caps=trace` logs each
-event-queue body before it is decoded). Both grids send the **same keys** in
-the same five blocks — `ParcelData` (52 keys), `MediaData`,
+Read from the raw event (`RUST_LOG=sl_client_tokio::wire=trace` logs each
+event-queue event and capability reply before it is decoded). Both grids
+send the **same keys** in the same five blocks — `ParcelData` (52 keys),
+`MediaData`,
 `AgeVerificationBlock`, `RegionAllowAccessBlock`, `ParcelEnvironmentBlock` —
 and Second Life a sixth, `ParcelExtendedFlags`. Six fields differ in their
 LLSD type:

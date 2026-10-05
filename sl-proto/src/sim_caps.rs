@@ -1902,9 +1902,7 @@ impl SimCaps {
             return CapsResponse::bad_request();
         };
         match request.method {
-            "GET" => CapsResponse::llsd_xml(
-                environment_to_llsd(&sim.environment(parcel_id)).to_llsd_xml(),
-            ),
+            "GET" => CapsResponse::llsd_xml(sim.environment_body(parcel_id).to_llsd_xml()),
             "PUT" => {
                 let Ok(track_no) = parse_track_no_query(request.query) else {
                     return CapsResponse::bad_request();
@@ -1922,14 +1920,30 @@ impl SimCaps {
                     ));
                 }
                 let stored = sim.apply_environment_update(parcel_id, track_no, update);
+                if sim.bare_environment_replies() {
+                    return CapsResponse::llsd_xml(
+                        Llsd::Map(HashMap::from([("success".to_owned(), Llsd::Boolean(true))]))
+                            .to_llsd_xml(),
+                    );
+                }
                 CapsResponse::llsd_xml(environment_to_llsd(&stored).to_llsd_xml())
             }
             "DELETE" => {
                 let Ok(track_no) = parse_track_no_query(request.query) else {
                     return CapsResponse::bad_request();
                 };
-                let inherited = sim.reset_environment(parcel_id, track_no);
-                CapsResponse::llsd_xml(environment_to_llsd(&inherited).to_llsd_xml())
+                let _inherited = sim.reset_environment(parcel_id, track_no);
+                if sim.bare_environment_replies() {
+                    return CapsResponse::llsd_xml(
+                        Llsd::Map(HashMap::from([
+                            ("messageID".to_owned(), Llsd::Uuid(Uuid::nil())),
+                            ("regionID".to_owned(), Llsd::Uuid(sim.region_id())),
+                            ("success".to_owned(), Llsd::Boolean(true)),
+                        ]))
+                        .to_llsd_xml(),
+                    );
+                }
+                CapsResponse::llsd_xml(sim.environment_body(parcel_id).to_llsd_xml())
             }
             _ => CapsResponse::method_not_allowed(),
         }

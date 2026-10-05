@@ -2,11 +2,10 @@
 id: server-fake-grid-parcel-on-movement
 title: Fake grid — push the parcel an agent walks onto, and serve parcel environments
 topic: server
-status: blocked
+status: ready
 origin: test-e2e-sweep-environment (2026-10-01)
 points: 5
 refs: [test-e2e-environment-parcel-layer, viewer-environment-personal-lighting]
-blocked_by: [gridspec-environment, gridspec-parcel-properties]
 ---
 
 Context: [context/testing.md](../context/testing.md).
@@ -45,3 +44,16 @@ grids (`book/src/gridspec/land.md` § the pushes). Build the push to it:
   the fake flavours to `parcel-crossing`'s grids so its `CROSSING_PUSH`
   constant holds them.
 - Result `Single`, no snap, on both.
+
+## Measured (2026-10-05, [[gridspec-environment]])
+
+`book/src/gridspec/environment.md`. For the parcel environments this task
+serves:
+
+- OpenSim stores a parcel environment whatever the estate says, and **serves**
+  it only while the estate allows parcel environments
+  (`RegionAllowEnvironmentOverride`); otherwise a read answers `is_default`.
+  The `FakeOpensim` flavour serves it regardless today. Second Life is
+  unmeasured.
+- A parcel with no environment of its own already answers `is_default` with no
+  day on both flavours, and `environment` holds them to it.

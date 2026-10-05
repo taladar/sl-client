@@ -357,6 +357,7 @@ fn on_events(
             | SlSessionEvent::MarketplaceError { .. }
             | SlSessionEvent::Ping { .. }
             | SlSessionEvent::Environment(_)
+            | SlSessionEvent::EnvironmentChangeRefused { .. }
             | SlSessionEvent::ExperienceEnvironmentPush(_)
             | SlSessionEvent::ExperienceEvent(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),

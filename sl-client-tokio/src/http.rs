@@ -507,6 +507,34 @@ pub(crate) async fn put_caps_llsd(
     }
 }
 
+/// Forwards the reply of an `ExtEnvironment` PUT or DELETE (read from
+/// `reply_rx`, where the request's own helper delivered it) to `caps_tx` — or,
+/// when the grid took the change without saying what the land has now, GETs
+/// `refetch_url` and forwards that instead. OpenSim answers a set with a bare
+/// `{success: true}`; a caller is owed the stored settings on either grid.
+pub(crate) async fn settle_environment_change(
+    mut reply_rx: mpsc::Receiver<(String, Llsd)>,
+    refetch_url: String,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    while let Some((message, body)) = reply_rx.recv().await {
+        if message == sl_proto::CAP_EXT_ENVIRONMENT
+            && sl_proto::environment_reply_needs_refetch(&body)
+        {
+            get_caps_llsd(
+                refetch_url.clone(),
+                sl_proto::CAP_EXT_ENVIRONMENT,
+                http.clone(),
+                caps_tx.clone(),
+            )
+            .await;
+        } else {
+            deliver(&caps_tx, (message, body)).await;
+        }
+    }
+}
+
 /// Sends an HTTP PATCH of `body` to an AIS3 inventory capability URL (a folder /
 /// item update or move) and forwards the LLSD reply to `caps_tx` tagged `cap`.
 pub(crate) async fn patch_caps_llsd(

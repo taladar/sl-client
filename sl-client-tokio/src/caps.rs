@@ -241,9 +241,6 @@ pub(crate) async fn run_event_queue(
         };
         ack = Some(parsed.id);
         for event in parsed.events {
-            // The body as the grid sent it, before any decode: what a gridspec
-            // probe reads to see every field and its wire type.
-            tracing::trace!(message = %event.message, body = ?event.body, "event queue: event");
             if caps_tx.send((event.message, event.body)).await.is_err() {
                 return;
             }

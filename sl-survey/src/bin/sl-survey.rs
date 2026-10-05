@@ -829,6 +829,7 @@ impl Survey {
             | Event::MarketplaceError { .. }
             | Event::Ping { .. }
             | Event::Environment(_)
+            | Event::EnvironmentChangeRefused { .. }
             | Event::ExperienceEnvironmentPush(_)
             | Event::ExperienceEvent(_) => {}
         }

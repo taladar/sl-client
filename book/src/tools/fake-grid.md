@@ -943,6 +943,14 @@ queue or UDP. Each region's parcels are dressed to the flavour when the grid
 starts, and again after every edit, so a block the imitated grid does not
 have never reaches a client.
 
+So does the `ExtEnvironment` capability, as measured in
+[Environment](../gridspec/environment.md): the OpenSim flavour answers a set
+or a reset with a bare verdict (`ImitatedGrid::environment_change_reply`), so
+a client has to ask for what the land has now, and each flavour labels its
+default day as its grid does (`ImitatedGrid::stock_day`). On both, a parcel
+with no environment of its own is answered with an `is_default` body and no
+day.
+
 What a region holds follows it as well (`ImitatedGrid::region_capacity`):
 Second Life's budget and agent limit are its product's
 (`RegionConfig::product` — Openspace, Homestead, Full Region), OpenSim's are
