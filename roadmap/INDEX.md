@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 366 |
+| ready | 365 |
 | blocked | 111 |
 | in-progress | 20 |
 | bugs | 29 |
-| done | 1317 |
+| done | 1318 |
 | deferred | 29 |
 | wont-do | 17 |
 | **total** | **2025** |
@@ -352,7 +352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (366)
+## ready (365)
 
 ### protocol
 
@@ -1171,8 +1171,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Parcel access and ban lists, enforcement and ban lines on each grid
 - [`gridspec-parcel-info-dwell`](ready/gridspec-parcel-info-dwell.md) — Parcel
   info, dwell and the remote parcel id on each grid
-- [`gridspec-parcel-properties`](ready/gridspec-parcel-properties.md) —
-  ParcelProperties transport, fields and pushes on each grid
 - [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
   classifieds, notes and display names on each grid
 - [`gridspec-region-arrival`](ready/gridspec-region-arrival.md) — Region
@@ -1434,7 +1432,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-agent-movement`)
 - [`server-fake-grid-parcel-on-movement`](blocked/server-fake-grid-parcel-on-movement.md)
   — Fake grid — push the parcel an agent walks onto, and serve parcel
-  environments (blocked by `gridspec-environment`, `gridspec-parcel-properties`)
+  environments (blocked by `gridspec-environment`, `gridspec-parcel-properties`
+  (done))
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles`, `protocol-sim-profile-messages`)
@@ -1685,7 +1684,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1317)
+## done (1318)
 
 ### protocol
 
@@ -4606,6 +4605,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   options list and get_grid_info on each grid
 - [`gridspec-parcel-management`](done/gridspec-parcel-management.md) — Parcel
   edits, divide/join, object owners and return on each grid
+- [`gridspec-parcel-properties`](done/gridspec-parcel-properties.md) —
+  ParcelProperties transport, fields and pushes on each grid
 - [`gridspec-seed-capabilities`](done/gridspec-seed-capabilities.md) — Which
   capabilities each grid grants from the seed, and to whom
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi

@@ -165,6 +165,12 @@ impl GridTest for ParcelProperties {
                     parcel.see_avs, parcel.any_av_sounds, parcel.group_av_sounds
                 ),
             );
+            // The whole decoded record, the bitmap aside (512 bytes of it): the
+            // raw event, every key and its wire type, is in the trace log
+            // (`sl_client_tokio::caps=trace`).
+            let mut shown = parcel.clone();
+            shown.bitmap = Vec::new();
+            metrics.set("record", format!("{shown:?}"));
             metrics.set("parcel_name", parcel.name);
             Ok(())
         })

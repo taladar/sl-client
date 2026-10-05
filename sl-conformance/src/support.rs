@@ -602,7 +602,7 @@ pub async fn settle_scene(
     let arrived = if within(&from, &build, ARRIVAL_RADIUS_M) {
         from
     } else {
-        let arrived = walk_within_region(session, from, &build).await?;
+        let arrived = walk_within_region(session, from, &build, |_event| {}).await?;
         drain_scene(session, window, idle, &mut seen, |_object| {}).await?;
         arrived
     };
@@ -665,11 +665,12 @@ async fn drain_scene(
 }
 
 /// Moves the avatar from `from` towards `position` in its current region the
-/// way a viewer's autopilot does, until it is within [`ARRIVAL_RADIUS_M`], and
-/// returns where it stopped: face
+/// way a viewer's autopilot does, until it is within `ARRIVAL_RADIUS_M`, and
+/// returns where it stopped, showing every event that arrives on the way to
+/// `observe` (the steering's own waits would otherwise discard them): face
 /// the target ([`Command::SetRotation`]), fly forwards
 /// ([`Command::SetControls`]) — at a nudge's pace for the last
-/// [`SLOWDOWN_RADIUS_M`], or the flight overshoots between two updates —
+/// `SLOWDOWN_RADIUS_M`, or the flight overshoots between two updates —
 /// re-aim on every update of our own avatar, and let go.
 ///
 /// Not a teleport: a region with a telehub (Mauve on aditi) or a parcel with a
@@ -678,10 +679,17 @@ async fn drain_scene(
 /// message either: Second Life ignores it (the reference viewer's autopilot is
 /// its own steering, `LLAgent::autoPilot`). Flying keeps the route clear of
 /// whatever stands on the ground in between.
-async fn walk_within_region(
+///
+/// # Errors
+///
+/// Returns [`TestFailure::Assertion`] when the login reported no agent id or
+/// the avatar is still short of `position` after the walk's time budget, and
+/// propagates the sends' and waits' failures.
+pub async fn walk_within_region(
     session: &mut Session,
     from: Vector,
     position: &Vector,
+    mut observe: impl FnMut(&Event),
 ) -> Result<Vector, TestFailure> {
     let agent = session
         .agent_id()
@@ -742,13 +750,16 @@ async fn walk_within_region(
             ))
             .await?;
         match session
-            .wait_for(STEER_INTERVAL, |event| match event {
-                Event::ObjectUpdated(object) | Event::ObjectAdded(object)
-                    if object.full_id.uuid() == agent =>
-                {
-                    Some(object.motion.position.clone())
+            .wait_for(STEER_INTERVAL, |event| {
+                observe(event);
+                match event {
+                    Event::ObjectUpdated(object) | Event::ObjectAdded(object)
+                        if object.full_id.uuid() == agent =>
+                    {
+                        Some(object.motion.position.clone())
+                    }
+                    _ => None,
                 }
-                _ => None,
             })
             .await
         {

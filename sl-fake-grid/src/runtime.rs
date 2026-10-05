@@ -113,6 +113,14 @@ pub struct RegionConfig {
     /// for the fake grid's own name and version. Two regions given two
     /// versions are how a test sees the line follow a teleport.
     pub simulator_version: Option<String>,
+    /// Which product the region is — a Full Region, a Homestead or an
+    /// Openspace. On a grid that has products it decides what the region holds
+    /// ([`ImitatedGrid::region_capacity`]).
+    pub product: ProductType,
+    /// What the region holds, when it is not its product's usual: Second
+    /// Life's Full Regions share one product name over a range of land impact
+    /// and agent limits. `None` for the product's own on the imitated grid.
+    pub capacity: Option<crate::imitates::RegionCapacity>,
 }
 
 impl RegionConfig {
@@ -168,6 +176,8 @@ impl Default for RegionConfig {
             neighbours: NeighbourPolicy::default(),
             withheld_caps: Vec::new(),
             simulator_version: None,
+            product: ProductType::FullRegion,
+            capacity: None,
         }
     }
 }
@@ -247,9 +257,16 @@ impl RegionEntry {
             region_flags_extended: 0,
             region_protocols,
             maturity: self.config.maturity,
-            product: ProductType::FullRegion,
+            product: self.config.product,
             product_sku: String::new(),
-            product_name: "Fake Region".to_owned(),
+            // The name is what a viewer classifies the product from; the stock
+            // Full Region keeps the fake grid's own.
+            product_name: match self.config.product {
+                ProductType::Homestead => "Estate / Homestead",
+                ProductType::Openspace => "Estate / Openspace",
+                _ => "Fake Region",
+            }
+            .to_owned(),
             cpu_class_id: 0,
             cpu_ratio: 1,
             sim_owner: estate_owner.uuid(),
@@ -725,6 +742,7 @@ impl GridCore {
         sim.set_secure_session_id(ids.secure_session_id);
         sim.set_region_id(region.region_id);
         sim.set_update_completion_names_item(self.update_completion_item.names_item());
+        sim.set_parcel_dialect(self.parcel_policy.wire_types);
         if let Some(arrival) = arrival {
             sim.set_arrival_position(arrival.position, arrival.look_at);
         } else {
@@ -1824,6 +1842,11 @@ impl FakeGridBuilder {
                 for parcel in &mut fixtures.parcels {
                     self.imitates.parcel_policy().dress(parcel);
                 }
+                let capacity = config
+                    .capacity
+                    .unwrap_or_else(|| self.imitates.region_capacity(config.product));
+                capacity.allot(&mut fixtures.parcels);
+                fixtures.capacity = Some(capacity);
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 RegionEntry {

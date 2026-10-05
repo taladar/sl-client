@@ -3029,6 +3029,9 @@ pub struct SimSession {
     /// behaviour. Defaults to `false`, the stricter (Second Life) answer; see
     /// [`SimSession::set_update_completion_names_item`].
     update_completion_names_item: bool,
+    /// Which grid's wire types the event-queue `ParcelProperties` uses; see
+    /// [`SimSession::set_parcel_dialect`].
+    parcel_dialect: crate::ParcelLlsdDialect,
     /// The region handle this simulator serves (echoed in `AgentMovementComplete`).
     region_handle: RegionHandle,
     /// The channel/version string reported in `AgentMovementComplete`.
@@ -3390,6 +3393,7 @@ impl SimSession {
         Self {
             state: SimState::AwaitingCircuit,
             update_completion_names_item: false,
+            parcel_dialect: crate::ParcelLlsdDialect::SecondLife,
             region_handle,
             channel_version: b"sl-proto SimSession".to_vec(),
             client_addr: None,
@@ -3843,6 +3847,14 @@ impl SimSession {
     /// cannot know it.
     pub const fn set_update_completion_names_item(&mut self, names: bool) {
         self.update_completion_names_item = names;
+    }
+
+    /// Sets which grid's LLSD types
+    /// [`enqueue_parcel_properties`](Self::enqueue_parcel_properties) writes
+    /// (default Second Life's). The grids send the same keys as different
+    /// types, so a grid imitating one of them sends its types.
+    pub const fn set_parcel_dialect(&mut self, dialect: crate::ParcelLlsdDialect) {
+        self.parcel_dialect = dialect;
     }
 
     /// Registers (or replaces) a material in the store the `RenderMaterials`
@@ -6658,7 +6670,10 @@ impl SimSession {
     /// [`send_parcel_properties`](Self::send_parcel_properties) that Second
     /// Life (and OpenSim) deliver parcel records through.
     pub fn enqueue_parcel_properties(&mut self, info: &ParcelInfo) {
-        self.enqueue_caps_event("ParcelProperties", parcel_properties_to_llsd(info));
+        self.enqueue_caps_event(
+            "ParcelProperties",
+            parcel_properties_to_llsd(info, self.parcel_dialect),
+        );
     }
 
     /// Sends one `ParcelOverlay` chunk: `sequence_id` is the chunk index, and

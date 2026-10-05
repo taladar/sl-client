@@ -189,6 +189,49 @@ impl ImitatedGrid {
         }
     }
 
+    /// What a region of `product` holds on this grid: its land impact budget
+    /// and how many agents it admits.
+    ///
+    /// Second Life's limits start from the product. A Homestead holds 7 500
+    /// land impact and 20 agents, an Openspace 1 000 and 15. A Full Region is
+    /// one product name over a range — most commonly 20 000 to 30 000 land
+    /// impact and 33 to 44 agents on small mainland regions, up to 175 on event
+    /// regions — so this answers with the common low end and a region that is
+    /// something else says so itself ([`RegionConfig::capacity`](crate::RegionConfig::capacity)).
+    /// These are the product limits as the grid's residents know them,
+    /// not a measurement: the aditi test avatars can reach one sandbox, whose
+    /// parcel reports its own prim bonus. OpenSim has no products: every region
+    /// is `RegionInfo`'s default 15 000 prims and 40 agents (the same local
+    /// measurement the price list's `object_capacity` comes from).
+    #[must_use]
+    pub const fn region_capacity(self, product: sl_proto::ProductType) -> RegionCapacity {
+        match self {
+            Self::SecondLife => match product {
+                sl_proto::ProductType::Homestead => RegionCapacity {
+                    land_impact: 7_500,
+                    max_agents: 20,
+                    hard_max_agents: 20,
+                },
+                sl_proto::ProductType::Openspace => RegionCapacity {
+                    land_impact: 1_000,
+                    max_agents: 15,
+                    hard_max_agents: 15,
+                },
+                // A Full Region, and anything this crate does not know yet.
+                _ => RegionCapacity {
+                    land_impact: 20_000,
+                    max_agents: 40,
+                    hard_max_agents: 100,
+                },
+            },
+            Self::OpenSim => RegionCapacity {
+                land_impact: 15_000,
+                max_agents: 40,
+                hard_max_agents: 100,
+            },
+        }
+    }
+
     /// How this grid answers the About Land traffic where the two disagree —
     /// measured by `parcel-edit` and `parcel-edit-refused` on aditi and the
     /// local OpenSim (2026-10-05, `book/src/gridspec/land.md`).
@@ -203,6 +246,7 @@ impl ImitatedGrid {
                 sends_extended_blocks: true,
                 parcel_return_reads_task_ids: true,
                 owners_reply_over_event_queue: true,
+                wire_types: sl_proto::ParcelLlsdDialect::SecondLife,
             },
             Self::OpenSim => ParcelPolicy {
                 answers_request_by_id: false,
@@ -212,6 +256,7 @@ impl ImitatedGrid {
                 sends_extended_blocks: false,
                 parcel_return_reads_task_ids: false,
                 owners_reply_over_event_queue: false,
+                wire_types: sl_proto::ParcelLlsdDialect::OpenSim,
             },
         }
     }
@@ -451,6 +496,46 @@ pub const OPENSIM_MAX_AGENT_GROUPS: u32 = 42;
 /// the reference viewer's `SELECTED_PARCEL_SEQ_ID`.
 pub const SELECTED_PARCEL_SEQUENCE_ID: i32 = -10_000;
 
+/// What one region holds ([`ImitatedGrid::region_capacity`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegionCapacity {
+    /// The region's land impact budget — `RegionInfo`'s object limit, and what
+    /// its parcels' prim allowances add up to.
+    pub land_impact: u32,
+    /// How many agents the region admits.
+    pub max_agents: u32,
+    /// How many the estate could raise that to.
+    pub hard_max_agents: u32,
+}
+
+impl RegionCapacity {
+    /// Gives a region's parcels their share of the budget, by area: each
+    /// parcel's own allowance, and for each owner the total over every parcel
+    /// they hold in the region (the two numbers About Land's Objects tab shows
+    /// as the parcel's and the region's).
+    pub(crate) fn allot(self, parcels: &mut [sl_proto::ParcelInfo]) {
+        /// The area of a standard region, in square metres.
+        const REGION_AREA: u64 = 256 * 256;
+        let share = |area: u64| {
+            i32::try_from(u64::from(self.land_impact).saturating_mul(area) / REGION_AREA)
+                .unwrap_or(i32::MAX)
+        };
+        let held: Vec<(sl_types::key::OwnerKey, u64)> = parcels
+            .iter()
+            .map(|parcel| (parcel.owner, u64::from(parcel.area.0)))
+            .collect();
+        for parcel in parcels {
+            parcel.max_prims = share(u64::from(parcel.area.0));
+            parcel.sim_wide_max_prims = share(
+                held.iter()
+                    .filter(|(owner, _)| *owner == parcel.owner)
+                    .map(|(_, area)| *area)
+                    .sum(),
+            );
+        }
+    }
+}
+
 /// How a grid answers the About Land traffic ([`ImitatedGrid::parcel_policy`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[expect(
@@ -493,6 +578,9 @@ pub struct ParcelPolicy {
     /// does, or as the UDP message, as OpenSim's does
     /// (`LLClientView.SendLandObjectOwners`).
     pub owners_reply_over_event_queue: bool,
+    /// Which LLSD types the event-queue `ParcelProperties` writes the six
+    /// fields the grids disagree about in ([`sl_proto::ParcelLlsdDialect`]).
+    pub wire_types: sl_proto::ParcelLlsdDialect,
 }
 
 impl ParcelPolicy {
@@ -575,6 +663,57 @@ mod test {
         assert_eq!(ImitatedGrid::default(), ImitatedGrid::SecondLife);
     }
 
+    /// A region's budget is its product's on Second Life and one number on
+    /// OpenSim, and its parcels share it by area — each owner's total being
+    /// what they hold across the region.
+    #[test]
+    fn a_regions_budget_follows_its_product_and_is_shared_by_area() {
+        use sl_proto::{LandArea, ProductType, RegionLocalParcelId};
+        use sl_types::key::{AgentKey, OwnerKey};
+
+        let sl = ImitatedGrid::SecondLife;
+        assert_eq!(
+            sl.region_capacity(ProductType::FullRegion).land_impact,
+            20_000
+        );
+        assert_eq!(
+            sl.region_capacity(ProductType::Homestead).land_impact,
+            7_500
+        );
+        assert_eq!(sl.region_capacity(ProductType::Openspace).max_agents, 15);
+        for product in [ProductType::Homestead, ProductType::Openspace] {
+            assert_eq!(
+                ImitatedGrid::OpenSim.region_capacity(product).land_impact,
+                15_000,
+                "OpenSim has no products"
+            );
+        }
+
+        let owner = |id: u128| OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(id)));
+        let parcel = |id: i32, area: u32, held_by: u128| {
+            let mut parcel =
+                crate::world::region_wide_parcel(RegionLocalParcelId(id), owner(held_by), "Land");
+            parcel.area = LandArea(area);
+            parcel
+        };
+        // A quarter and a half for one owner, the last quarter for another.
+        let mut parcels = vec![
+            parcel(1, 128 * 128, 1),
+            parcel(2, 128 * 256, 1),
+            parcel(3, 128 * 128, 2),
+        ];
+        sl.region_capacity(ProductType::FullRegion)
+            .allot(&mut parcels);
+        let allowances: Vec<(i32, i32)> = parcels
+            .iter()
+            .map(|parcel| (parcel.max_prims, parcel.sim_wide_max_prims))
+            .collect();
+        assert_eq!(
+            allowances,
+            vec![(5_000, 15_000), (10_000, 15_000), (5_000, 5_000)]
+        );
+    }
+
     /// The two grids take opposite sides of every knob derived here. That is
     /// not a coincidence worth asserting for its own sake — it is the check
     /// that a knob added later actually *decides* something, rather than
@@ -628,6 +767,11 @@ mod test {
         assert_ne!(
             sl_parcels.owners_reply_over_event_queue,
             opensim_parcels.owners_reply_over_event_queue
+        );
+        assert_ne!(sl_parcels.wire_types, opensim_parcels.wire_types);
+        assert_ne!(
+            sl.region_capacity(sl_proto::ProductType::FullRegion),
+            opensim.region_capacity(sl_proto::ProductType::FullRegion)
         );
     }
 

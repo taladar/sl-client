@@ -1123,6 +1123,35 @@ pub struct ParcelAccessEntry {
 // existing `sl_proto::…` path is unchanged.
 pub use sl_types::parcel::ParcelReturnType;
 
+/// Which grid's wire types a simulator's event-queue `ParcelProperties` uses.
+///
+/// The two grids send the same keys but six of them as different LLSD types
+/// (measured by `parcel-properties`, `book/src/gridspec/land.md`): Second Life
+/// writes `MediaAutoScale`, `MediaLoop`, `ObscureMedia` and `ObscureMusic` as
+/// integers, `AuctionID` as 4-byte binary and `ClaimDate` as an integer
+/// `time_t`; OpenSim writes the flags as booleans, `AuctionID` as an integer and
+/// `ClaimDate` as a `date`. A client has to read both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParcelLlsdDialect {
+    /// Second Life's types (the default).
+    #[default]
+    SecondLife,
+    /// OpenSim's types.
+    OpenSim,
+}
+
+impl ParcelLlsdDialect {
+    /// A flag field in this dialect: an integer on Second Life, a boolean on
+    /// OpenSim.
+    #[must_use]
+    pub const fn flag(self, value: bool) -> sl_wire::Llsd {
+        match self {
+            Self::SecondLife => sl_wire::Llsd::Integer(if value { 1 } else { 0 }),
+            Self::OpenSim => sl_wire::Llsd::Boolean(value),
+        }
+    }
+}
+
 /// The settings to apply to a parcel via
 /// [`Session::update_parcel`](crate::Session::update_parcel)
 /// (`ParcelPropertiesUpdate`).

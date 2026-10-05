@@ -26,6 +26,8 @@ sl-rlv = { path = "../sl-rlv", version = "0.1.0" }
 sl-types = { workspace = true }
 sl-wire = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
+# Formats a `ClaimDate` as OpenSim writes it; already in the tree via sl-llsd.
+time = { workspace = true, features = ["formatting"] }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }
 uuid = { workspace = true, features = ["serde"] }

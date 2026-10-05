@@ -141,9 +141,9 @@ const FALLBACK_FPS: f32 = 30.0;
 /// The reference uses one constant here (`SELECTED_PARCEL_SEQ_ID`, -10000)
 /// because it has exactly one selection, which leaves it unable to tell a late
 /// reply to a superseded selection from the current one. Counting downward from
-/// that constant keeps the ids in the same negative range — clear of About
-/// Land's counter, which runs upward from 1 — while making each request
-/// distinguishable.
+/// that constant keeps the ids in the same negative range — clear of the
+/// grid's own pushes (0 and up on Second Life) and of About Land's counter,
+/// which runs down from -100000 — while making each request distinguishable.
 const LAND_SELECTION_SEQ_ID: i32 = -10_000;
 
 /// The smallest area, in m², that counts as a land selection worth joining —

@@ -943,6 +943,13 @@ queue or UDP. Each region's parcels are dressed to the flavour when the grid
 starts, and again after every edit, so a block the imitated grid does not
 have never reaches a client.
 
+What a region holds follows it as well (`ImitatedGrid::region_capacity`):
+Second Life's budget and agent limit are its product's
+(`RegionConfig::product` — Openspace, Homestead, Full Region), OpenSim's are
+one number for every region. A Full Region that is not the common 20000 says
+so with `RegionConfig::capacity`. The budget is shared among the region's
+parcels by area when the grid starts.
+
 That second one is small and it immediately earned its keep. Turning it on
 by default broke a fake-grid end-to-end test that expected
 `map-server-url` in the login response — and the test was right to expect

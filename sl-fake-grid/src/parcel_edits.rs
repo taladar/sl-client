@@ -33,7 +33,7 @@ use sl_types::map::RegionCoordinates;
 use sl_types::money::LindenAmount;
 
 use crate::imitates::{EditEcho, ParcelPolicy};
-use crate::world::{AvatarIdentity, RegionChange, SceneFixtures, region_limits};
+use crate::world::{AvatarIdentity, RegionChange, SceneFixtures};
 
 /// The sequence id of an unsolicited parcel push — what a simulator re-sends a
 /// changed parcel under, and what the arrival burst already uses.
@@ -278,7 +278,7 @@ pub(crate) fn answer_parcel_edit(
             }
         }
         ServerEvent::RequestRegionInfo => {
-            if let Err(error) = sim.send_region_info(&region_limits(region), now) {
+            if let Err(error) = sim.send_region_info(&world.limits(region), now) {
                 tracing::warn!("answering a region info request failed: {error}");
             }
         }

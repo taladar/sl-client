@@ -206,7 +206,10 @@ pub(crate) async fn run_event_queue(
             .await
         {
             Ok(response) => response,
-            Err(_error) => {
+            // A long poll the grid holds past the client's timeout ends here
+            // every idle minute, so this is not worth more than a debug line.
+            Err(error) => {
+                tracing::debug!(%event_queue_url, "event queue: the poll failed: {error}");
                 tokio::time::sleep(POLL_ERROR_BACKOFF).await;
                 continue;
             }
@@ -222,20 +225,25 @@ pub(crate) async fn run_event_queue(
         // broken `200` spins this task as fast as the network allows.
         let text = match response.text().await {
             Ok(text) => text,
-            Err(_error) => {
+            Err(error) => {
+                tracing::warn!(%event_queue_url, "event queue: the reply body could not be read: {error}");
                 tokio::time::sleep(POLL_ERROR_BACKOFF).await;
                 continue;
             }
         };
         let parsed = match parse_event_queue_response(&text) {
             Ok(parsed) => parsed,
-            Err(_error) => {
+            Err(error) => {
+                tracing::warn!(%event_queue_url, "event queue: the reply did not parse: {error}");
                 tokio::time::sleep(POLL_ERROR_BACKOFF).await;
                 continue;
             }
         };
         ack = Some(parsed.id);
         for event in parsed.events {
+            // The body as the grid sent it, before any decode: what a gridspec
+            // probe reads to see every field and its wire type.
+            tracing::trace!(message = %event.message, body = ?event.body, "event queue: event");
             if caps_tx.send((event.message, event.body)).await.is_err() {
                 return;
             }

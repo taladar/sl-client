@@ -180,13 +180,13 @@ impl GridTest for ParcelDivideJoin {
 /// A `Drop` cannot await, so it queues the command on the session's channel
 /// ([`Commander`]) instead; the run loop is still up at that point and transmits
 /// it ahead of the logout the runner queues next.
-struct RestoreOnDrop {
+pub(crate) struct RestoreOnDrop {
     /// The primary session's command channel.
-    commander: Commander,
+    pub(crate) commander: Commander,
     /// Whether the join still needs to be issued. Cleared once the awaited
     /// cleanup on the normal path has run, so the guard fires only when the body
     /// never got there.
-    armed: bool,
+    pub(crate) armed: bool,
 }
 
 impl Drop for RestoreOnDrop {
@@ -225,7 +225,7 @@ impl Drop for RestoreOnDrop {
 ///
 /// Propagates a [`Session::send`] failure (a closed channel or a session that
 /// has already gone down).
-async fn restore_single_parcel(session: &Session) -> Result<(), TestFailure> {
+pub(crate) async fn restore_single_parcel(session: &Session) -> Result<(), TestFailure> {
     session
         .send(Command::JoinParcels {
             west: WHOLE_REGION.west,

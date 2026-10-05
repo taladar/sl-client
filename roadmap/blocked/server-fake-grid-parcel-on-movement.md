@@ -31,3 +31,17 @@ moves when it is told.
   whether to ask.
 - A teeth test at the session level: walk an agent over a line, and the second
   parcel's properties arrive; walk back, and the first's.
+
+## Measured (2026-10-05, [[gridspec-parcel-properties]])
+
+`parcel-crossing` walks an avatar over a parcel line and back on both live
+grids (`book/src/gridspec/land.md` § the pushes). Build the push to it:
+
+- OpenSim pushes each crossing under sequence 0, about a second after the
+  line. Second Life **counts its unsolicited pushes up for the session**: 0 on
+  arrival, 1 on the first crossing, 2 on the next. The count is per session and
+  belongs to this task's push: add it to `ParcelPolicy` and use it for every
+  unsolicited push on the Second Life flavour (the arrival stays 0), then add
+  the fake flavours to `parcel-crossing`'s grids so its `CROSSING_PUSH`
+  constant holds them.
+- Result `Single`, no snap, on both.

@@ -8,8 +8,8 @@ themselves are described in
 
 Measured on 2026-10-05 on Second Life's beta grid (aditi) and the local
 OpenSim standalone by the conformance cases `parcel-properties`,
-`parcel-edit`, `parcel-edit-refused`, `parcel-divide-join` and
-`parcel-object-owners`. Each case holds both grids, and both fake-grid
+`parcel-crossing`, `parcel-edit`, `parcel-edit-refused`, `parcel-divide-join`
+and `parcel-object-owners`. Each case holds both grids, and both fake-grid
 flavours, to these answers as `Measured` constants. The aditi test accounts
 own no land and there is no known way for a resident to get some there
 (`gridspec-aditi-test-land`), so on Second Life only what a resident without
@@ -30,6 +30,67 @@ A viewer that refetches a parcel by its region-local id waits forever on
 OpenSim. The rectangle form (`ParcelPropertiesRequest`) is answered on both
 grids. The UDP `ParcelProperties` message has no room for the media and
 extended-flag blocks, so a grid that sent it would lose them; neither does.
+
+### Parcel properties: the fields
+
+Read from the raw event (`RUST_LOG=sl_client_tokio::caps=trace` logs each
+event-queue body before it is decoded). Both grids send the **same keys** in
+the same five blocks — `ParcelData` (52 keys), `MediaData`,
+`AgeVerificationBlock`, `RegionAllowAccessBlock`, `ParcelEnvironmentBlock` —
+and Second Life a sixth, `ParcelExtendedFlags`. Six fields differ in their
+LLSD type:
+
+| field | Second Life | OpenSim |
+| --- | --- | --- |
+| `ParcelData.AuctionID` | 4-byte binary | integer |
+| `ParcelData.ClaimDate` | integer (`time_t`) | `date` (`2026-05-28T18:28:29Z`) |
+| `ParcelData.MediaAutoScale` | integer 0 / 1 | boolean |
+| `MediaData.MediaLoop` | integer 0 / 1 | boolean |
+| `MediaData.ObscureMedia` | integer 0 / 1 | boolean |
+| `MediaData.ObscureMusic` | integer 0 / 1 | boolean |
+
+`ParcelFlags` and `ParcelExtendedFlags.Flags` are 4-byte big-endian binary on
+both. The client reads either form of each (`parcel_info_from_llsd`), and each
+fake flavour writes its grid's (`sl_proto::ParcelLlsdDialect`, set per flavour
+through `ParcelPolicy::wire_types`).
+
+Prim limits are the region's and the parcel's own, not a grid constant. The
+aditi sandbox measured (Mauve, 9008 m²) reports `MaxPrims` 3094,
+`SimWideMaxPrims` 44019 and `ParcelPrimBonus` 10; OpenSim's region-wide parcel
+reports 15000 for both and a bonus of 1.
+
+| what a region holds | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| Openspace | 1000 land impact, 15 agents | no products: every region is 15000 prims, 40 agents (`RegionInfo` defaults) | as its grid, by `RegionConfig::product` |
+| Homestead | 7500 land impact, 20 agents | the same 15000 / 40 | as its grid |
+| Full Region | one product name over a range: commonly 20000–30000 land impact, 33–44 agents on small mainland regions, up to 175 on event regions | the same 15000 / 40 | `FakeSl` 20000 and 40 (raisable to 100) unless the region sets its own (`RegionConfig::capacity`) |
+
+The Second Life rows are the product limits as residents know them, not a
+measurement. On the fake grid a region's budget is shared among its parcels by
+area — `MaxPrims` the parcel's share, `SimWideMaxPrims` the owner's total over
+the region — and `RegionInfo` reports the same budget and agent limits
+(`ImitatedGrid::region_capacity`).
+
+### Parcel properties: the pushes
+
+A grid sends the parcel under the agent without being asked. `parcel-crossing`
+walks the avatar over a parcel line and back and records what comes.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| on arrival | pushed, sequence 0 | pushed, sequence 0 | pushed, sequence 0, both flavours |
+| on crossing a parcel line | pushed, 1.4 s into a 16 m flight | pushed, 1.0 s into an 8 m flight | not pushed: the fake grid simulates no movement (`server-fake-grid-parcel-on-movement`) |
+| the push's sequence id | **counts up** for the session: 0 on arrival, then 1, 2, … | always 0 | always 0 (the count belongs with the movement push) |
+| the push's result and snap | `Single`, no snap | `Single`, no snap | the same |
+| crossing back | pushed again | pushed again | — |
+
+Second Life's push ids are small positive numbers, so a client that numbers
+its own `ParcelPropertiesRequest`s upward from 1 cannot tell the answer to its
+question from the next parcel the agent walks onto. The reference viewer keeps
+its own ids negative (`SELECTED_PARCEL_SEQ_ID` -10000 and below); so does this
+viewer since 2026-10-05 — About Land counts down from -100000, the land tool
+from -10000. The session finds the agent's parcel from its position and the
+pushed parcels' bitmaps, not from the sequence id.
 
 ## Managing a parcel
 

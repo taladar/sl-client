@@ -158,6 +158,11 @@ pub struct SceneFixtures {
     /// Lazily written rather than stated, so a region nobody has reconfigured
     /// reports exactly what its own identity says and cannot drift from it.
     limits: Option<sl_proto::RegionLimits>,
+    /// What the region holds on the grid being imitated
+    /// ([`ImitatedGrid::region_capacity`](crate::ImitatedGrid::region_capacity)),
+    /// set when the grid starts; `None` in a world no grid has adopted, which
+    /// reports [`region_limits`]' own numbers.
+    pub(crate) capacity: Option<crate::imitates::RegionCapacity>,
     /// The region's terrain textures and blend heights as an estate manager has
     /// changed them, or [`None`] while they are still the identity's.
     ///
@@ -557,6 +562,7 @@ impl SceneFixtures {
             parcel_access: BTreeMap::new(),
             estate: EstateFixture::default(),
             limits: None,
+            capacity: None,
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
         }
@@ -823,13 +829,26 @@ impl SceneFixtures {
     pub fn limits(&self, identity: &RegionIdentity) -> sl_proto::RegionLimits {
         self.limits
             .clone()
-            .unwrap_or_else(|| region_limits(identity))
+            .unwrap_or_else(|| self.stock_limits(identity))
+    }
+
+    /// The limits nobody has edited: `identity`'s, holding what the imitated
+    /// grid's region of this product holds.
+    fn stock_limits(&self, identity: &RegionIdentity) -> sl_proto::RegionLimits {
+        let mut limits = region_limits(identity);
+        if let Some(capacity) = self.capacity {
+            limits.max_agents = capacity.max_agents;
+            limits.hard_max_agents = capacity.hard_max_agents;
+            limits.hard_max_objects = capacity.land_impact;
+        }
+        limits
     }
 
     /// The region's configuration and limits, to change — filled in from
     /// `identity` the first time somebody does.
     pub fn limits_mut(&mut self, identity: &RegionIdentity) -> &mut sl_proto::RegionLimits {
-        self.limits.get_or_insert_with(|| region_limits(identity))
+        let stock = self.stock_limits(identity);
+        self.limits.get_or_insert(stock)
     }
 
     /// The region's terrain textures and blend heights as they stand.
@@ -2181,7 +2200,9 @@ const HARD_MAX_AGENTS: u32 = 100;
 
 /// The region's object budget, matching the prim allowance
 /// [`region_wide_parcel`] states for its parcel — one region, one number, or a
-/// viewer's land panel and its region panel disagree.
+/// viewer's land panel and its region panel disagree. A region a grid has
+/// adopted reports the imitated grid's instead, and its parcels their share of
+/// it ([`ImitatedGrid::region_capacity`](crate::ImitatedGrid::region_capacity)).
 const HARD_MAX_OBJECTS: u32 = 15_000;
 
 /// How far a terraform may raise or lower the ground from its baked height, in

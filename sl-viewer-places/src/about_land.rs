@@ -347,16 +347,36 @@ struct AboutLandState {
 /// Per-window counters would hand two windows the same id, and the id is the
 /// only thing that says which window's question a `ParcelProperties` reply
 /// answers.
-#[derive(Resource, Debug, Default)]
+///
+/// The ids count **down** from [`ABOUT_LAND_SEQ_ID`]. Second Life numbers the
+/// parcel pushes it sends the agent unasked 0, 1, 2, … for the session
+/// (measured by `parcel-crossing`, `book/src/gridspec/land.md`), so an About
+/// Land counter running up from 1 met them, and a parcel crossing could answer
+/// a window's question with the wrong parcel. The reference viewer keeps its
+/// own requests negative for the same reason.
+#[derive(Resource, Debug)]
 struct LandSequence(i32);
+
+impl Default for LandSequence {
+    fn default() -> Self {
+        Self(ABOUT_LAND_SEQ_ID)
+    }
+}
 
 impl LandSequence {
     /// The next sequence id — never repeated while the session lives.
     const fn next(&mut self) -> i32 {
-        self.0 = self.0.wrapping_add(1);
-        self.0
+        let id = self.0;
+        self.0 = self.0.wrapping_sub(1);
+        id
     }
 }
+
+/// The first About Land `ParcelPropertiesRequest` sequence id: below the land
+/// tool's range (which counts down from -10000) and the reference viewer's
+/// own constants (down to -50000), and clear of the grid's unsolicited pushes
+/// (0 and up).
+const ABOUT_LAND_SEQ_ID: i32 = -100_000;
 
 /// How long a window's object-owner tally may stay unanswered before the next
 /// window's request goes out, in seconds.
@@ -4608,7 +4628,7 @@ fn set_check_marker(commands: &mut Commands, entity: Entity, is_ticked: bool, on
 
 #[cfg(test)]
 mod tests {
-    use super::{AboutLandState, ParcelUpdate, TallyStatus, merge_access_reply};
+    use super::{AboutLandState, LandSequence, ParcelUpdate, TallyStatus, merge_access_reply};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{ParcelAccessEntry, ParcelAccessFlags, Uuid};
 
@@ -4745,6 +4765,22 @@ mod tests {
         assert_eq!(
             state.draft.description, "Theirs",
             "an Apply now carries their change forward instead of reverting it"
+        );
+    }
+
+    /// About Land's request ids never meet the grid's own pushes: Second Life
+    /// numbers those 0, 1, 2, … for the session, so an id of ours in that range
+    /// would let a parcel crossing answer a window's question.
+    #[test]
+    fn request_ids_stay_clear_of_the_grids_pushes() {
+        let mut sequence = LandSequence::default();
+        let ids: Vec<i32> = std::iter::repeat_with(|| sequence.next())
+            .take(1000)
+            .collect();
+        assert!(ids.iter().all(|id| *id < 0), "an id met the push range");
+        assert!(
+            ids.windows(2).all(|pair| pair.first() > pair.last()),
+            "the ids repeat or do not count down"
         );
     }
 

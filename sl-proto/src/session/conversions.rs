@@ -20,12 +20,13 @@ use crate::types::{
     LandStatScore, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
     Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
     NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo,
-    ParcelCategory, ParcelInfo, ParcelMediaData, ParcelMediaSharing, ParcelObjectOwner,
-    ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation, PrimShapeParams,
-    ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings, RegionCombatSettings,
-    RegionIdentity, RegionLimits, RegionTerrainComposition, RequiredVoiceVersion, RestoreItem,
-    SaleType, Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply,
-    SkySettings, TRACK_MAX, TaskInventoryItem, WaterSettings, avatar_texture,
+    ParcelCategory, ParcelInfo, ParcelLlsdDialect, ParcelMediaData, ParcelMediaSharing,
+    ParcelObjectOwner, ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation,
+    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
+    RegionCombatSettings, RegionIdentity, RegionLimits, RegionTerrainComposition,
+    RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, SetDisplayNameReply, SkySettings, TRACK_MAX, TaskInventoryItem,
+    WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -3770,6 +3771,17 @@ pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
         .checked_sub(719_468)
 }
 
+/// Formats a Unix timestamp as the ISO-8601 UTC form the LLSD wire's `date`
+/// carries (`YYYY-MM-DDThh:mm:ssZ`) — the inverse of
+/// [`parse_iso8601_to_unix`]. `None` for a timestamp outside the calendar's
+/// range.
+pub(crate) fn unix_to_iso8601(seconds: i64) -> Option<String> {
+    time::OffsetDateTime::from_unix_timestamp(seconds)
+        .ok()?
+        .format(&time::format_description::well_known::Rfc3339)
+        .ok()
+}
+
 /// Reads a three-component vector (`[x, y, z]` reals) from an LLSD array.
 pub(crate) fn vec3_from_llsd(value: Option<&Llsd>) -> (f32, f32, f32) {
     let component = |index: usize| {
@@ -6266,7 +6278,7 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
             Llsd::Array(vec![parcel_environment]),
         ),
     ];
-    blocks.extend(caps_only_parcel_blocks(info));
+    blocks.extend(caps_only_parcel_blocks(info, ParcelLlsdDialect::OpenSim));
     Ok(llsd_map(blocks))
 }
 
@@ -7286,7 +7298,11 @@ fn caps_only_parcel_data(info: &ParcelInfo) -> Vec<(&'static str, Llsd)> {
 /// no room for — `MediaData`, `MediaLinkSharing` and `ParcelExtendedFlags` —
 /// each only when present. Shared by [`parcel_info_to_llsd`] and
 /// [`parcel_properties_to_llsd`].
-fn caps_only_parcel_blocks(info: &ParcelInfo) -> Vec<(&'static str, Llsd)> {
+fn caps_only_parcel_blocks(
+    info: &ParcelInfo,
+    dialect: ParcelLlsdDialect,
+) -> Vec<(&'static str, Llsd)> {
+    let flag = |value: bool| dialect.flag(value);
     let mut blocks = Vec::new();
     if let Some(media) = &info.media_data {
         blocks.push((
@@ -7296,9 +7312,9 @@ fn caps_only_parcel_blocks(info: &ParcelInfo) -> Vec<(&'static str, Llsd)> {
                 ("MediaType", Llsd::String(media.media_type.clone())),
                 ("MediaWidth", Llsd::Integer(media.width)),
                 ("MediaHeight", Llsd::Integer(media.height)),
-                ("MediaLoop", Llsd::Boolean(media.looping)),
-                ("ObscureMedia", Llsd::Boolean(false)),
-                ("ObscureMusic", Llsd::Boolean(false)),
+                ("MediaLoop", flag(media.looping)),
+                ("ObscureMedia", flag(false)),
+                ("ObscureMusic", flag(false)),
             ])]),
         ));
     }
@@ -7334,11 +7350,11 @@ fn caps_only_parcel_blocks(info: &ParcelInfo) -> Vec<(&'static str, Llsd)> {
 /// Encodes a [`ParcelInfo`] as a CAPS `ParcelProperties` event body — the
 /// inverse of [`parcel_info_from_llsd`]. The `ParcelData` block and the three
 /// trailing single-blocks are each a one-element array holding a map, as the
-/// event-queue form mirrors the UDP message's block layout. The `uint` fields
-/// go out as big-endian binary (OpenSim's convention), `ClaimDate` as an
-/// integer `time_t` (Second Life's).
+/// event-queue form mirrors the UDP message's block layout. `ParcelFlags` goes
+/// out as big-endian binary on both grids; the fields whose wire type differs
+/// by grid follow `dialect` ([`ParcelLlsdDialect`]).
 #[must_use]
-pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo) -> Llsd {
+pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo, dialect: ParcelLlsdDialect) -> Llsd {
     let for_sale = info.flags().contains(sl_wire::ParcelFlags::FOR_SALE);
     let linden = |amount: &sl_types::money::LindenAmount| {
         Llsd::Integer(i32::try_from(amount.0).unwrap_or(i32::MAX))
@@ -7357,8 +7373,23 @@ pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo) -> Llsd {
             "IsGroupOwned",
             Llsd::Boolean(matches!(info.owner, sl_types::key::OwnerKey::Group(_))),
         ),
-        ("AuctionID", llsd_u32_binary(info.auction_id)),
-        ("ClaimDate", Llsd::Integer(info.claim_date)),
+        (
+            "AuctionID",
+            match dialect {
+                ParcelLlsdDialect::SecondLife => llsd_u32_binary(info.auction_id),
+                ParcelLlsdDialect::OpenSim => {
+                    Llsd::Integer(i32::from_ne_bytes(info.auction_id.to_ne_bytes()))
+                }
+            },
+        ),
+        (
+            "ClaimDate",
+            match dialect {
+                ParcelLlsdDialect::SecondLife => Llsd::Integer(info.claim_date),
+                ParcelLlsdDialect::OpenSim => unix_to_iso8601(i64::from(info.claim_date))
+                    .map_or(Llsd::Integer(info.claim_date), Llsd::Date),
+            },
+        ),
         ("ClaimPrice", linden(&info.claim_price)),
         ("RentPrice", linden(&info.rent_price)),
         ("AABBMin", region_coords_to_llsd(info.aabb_min)),
@@ -7410,7 +7441,7 @@ pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo) -> Llsd {
                 k.uuid()
             })),
         ),
-        ("MediaAutoScale", Llsd::Boolean(info.media_auto_scale)),
+        ("MediaAutoScale", dialect.flag(info.media_auto_scale)),
         (
             "GroupID",
             Llsd::Uuid(crate::types::group_to_wire(info.group)),
@@ -7484,7 +7515,7 @@ pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo) -> Llsd {
             ])]),
         ),
     ];
-    blocks.extend(caps_only_parcel_blocks(info));
+    blocks.extend(caps_only_parcel_blocks(info, dialect));
     llsd_map(blocks)
 }
 
@@ -7582,11 +7613,12 @@ mod caps_serializer_tests {
 
     use super::ServerHistoryMessage;
     use super::{
-        CapsTeleportFinish, CrossedRegionInfo, agent_list_voice_updates_from_llsd,
-        agent_list_voice_updates_to_llsd, ais_inventory_update_from_llsd,
-        ais_inventory_update_to_llsd, ais_updated_category_versions,
-        bulk_update_inventory_from_llsd, bulk_update_inventory_to_llsd, chat_session_request_body,
-        chat_session_request_from_llsd, chat_session_roster_from_llsd, chat_session_roster_to_llsd,
+        CapsTeleportFinish, CrossedRegionInfo, ParcelLlsdDialect,
+        agent_list_voice_updates_from_llsd, agent_list_voice_updates_to_llsd,
+        ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
+        ais_updated_category_versions, bulk_update_inventory_from_llsd,
+        bulk_update_inventory_to_llsd, chat_session_request_body, chat_session_request_from_llsd,
+        chat_session_roster_from_llsd, chat_session_roster_to_llsd,
         chatterbox_invitation_from_llsd, chatterbox_invitation_to_llsd, created_category_from_llsd,
         created_category_to_llsd, crossed_region_from_caps_llsd, crossed_region_to_caps_llsd,
         enable_simulator_from_caps_llsd, enable_simulator_to_caps_llsd,
@@ -8567,8 +8599,10 @@ mod caps_serializer_tests {
             Some(info.clone())
         );
         // The simulator's encoder carries the same CAPS-only fields: a fake
-        // grid that sent them through the other one lost them silently.
-        let caps_only = |parcel: ParcelInfo| {
+        // grid that sent them through the other one lost them silently. And it
+        // writes each grid's own wire types, all of which the client reads back
+        // to the same record.
+        let read_back = |parcel: ParcelInfo| {
             (
                 parcel.see_avs,
                 parcel.any_av_sounds,
@@ -8576,12 +8610,40 @@ mod caps_serializer_tests {
                 parcel.media_data,
                 parcel.media_sharing,
                 parcel.obscure_moap,
+                parcel.claim_date,
+                parcel.auction_id,
+                parcel.media_auto_scale,
             )
         };
-        assert_eq!(
-            parcel_info_from_llsd(&parcel_properties_to_llsd(&info)).map(caps_only),
-            Some(caps_only(info))
-        );
+        for dialect in [ParcelLlsdDialect::SecondLife, ParcelLlsdDialect::OpenSim] {
+            let body = parcel_properties_to_llsd(&info, dialect);
+            assert_eq!(
+                parcel_info_from_llsd(&body).map(read_back),
+                Some(read_back(info.clone())),
+                "{dialect:?}"
+            );
+            let data = body.get("ParcelData").and_then(|block| block.index(0));
+            let field = |key: &str| data.and_then(|data| data.get(key)).cloned();
+            let media = body.get("MediaData").and_then(|block| block.index(0));
+            let media_loop = media.and_then(|media| media.get("MediaLoop")).cloned();
+            match dialect {
+                ParcelLlsdDialect::SecondLife => {
+                    assert_eq!(field("ClaimDate"), Some(Llsd::Integer(1_700_000_000)));
+                    assert_eq!(field("MediaAutoScale"), Some(Llsd::Integer(1)));
+                    assert_eq!(media_loop, Some(Llsd::Integer(1)));
+                    assert!(matches!(field("AuctionID"), Some(Llsd::Binary(_))));
+                }
+                ParcelLlsdDialect::OpenSim => {
+                    assert_eq!(
+                        field("ClaimDate"),
+                        Some(Llsd::Date("2023-11-14T22:13:20Z".to_owned()))
+                    );
+                    assert_eq!(field("MediaAutoScale"), Some(Llsd::Boolean(true)));
+                    assert_eq!(media_loop, Some(Llsd::Boolean(true)));
+                    assert!(matches!(field("AuctionID"), Some(Llsd::Integer(_))));
+                }
+            }
+        }
         Ok(())
     }
 
