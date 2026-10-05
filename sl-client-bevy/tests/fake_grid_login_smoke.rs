@@ -82,6 +82,16 @@ mod test {
 
         /// [`start`](Self::start) against a grid serving `region`.
         fn start_in(channel: &str, region: RegionConfig) -> Result<Self, TestError> {
+            Self::start_requesting(channel, region, None)
+        }
+
+        /// [`start_in`](Self::start_in), with the plugin's seed requests
+        /// asking for `requested` instead of the client's own list.
+        fn start_requesting(
+            channel: &str,
+            region: RegionConfig,
+            requested: Option<std::sync::Arc<[String]>>,
+        ) -> Result<Self, TestError> {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?;
@@ -116,6 +126,7 @@ mod test {
                     background_inventory_fetch: false,
                     fetch_server_chat_history: false,
                     offline: false,
+                    requested_capabilities: requested,
                 })
                 .init_resource::<Recorded>()
                 // After the plugin's `(drive, maintain_world)` chain so a
@@ -474,6 +485,34 @@ mod test {
     /// bakes in their avatar-texture slots, its animation is listed, and the
     /// box it wears arrives parented to it. This is the plugin-tier half of
     /// NPC support; drawing the avatar is the full-stack tier's business.
+    /// The plugin's seed request asks for the list it was given, not the
+    /// client's own: the region's map holds the names asked for and nothing
+    /// else — the override a capability survey runs on, as the tokio client's
+    /// `set_requested_capabilities` is.
+    #[test]
+    fn bevy_client_asks_for_the_capabilities_it_was_given() -> Result<(), TestError> {
+        let requested: std::sync::Arc<[String]> = ["EventQueueGet", "SimulatorFeatures"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let mut harness = Harness::start_requesting(
+            "sl-fake-grid-bevy-requested",
+            RegionConfig::default(),
+            Some(std::sync::Arc::clone(&requested)),
+        )?;
+        let granted = harness.step_until("the capability map", |app| {
+            app.world()
+                .resource::<Recorded>()
+                .capabilities
+                .first()
+                .cloned()
+        })?;
+        let mut names: Vec<&str> = granted.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["EventQueueGet", "SimulatorFeatures"]);
+        Ok(())
+    }
+
     #[test]
     fn bevy_client_sees_the_catalogue_npc() -> Result<(), TestError> {
         use sl_fake_grid::fixtures::catalogue::{

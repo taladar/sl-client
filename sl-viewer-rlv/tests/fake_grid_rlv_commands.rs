@@ -222,6 +222,7 @@ mod test {
                     background_inventory_fetch: false,
                     fetch_server_chat_history: false,
                     offline: false,
+                    requested_capabilities: None,
                 })
                 .insert_resource(settings)
                 .init_resource::<RlvSession>()

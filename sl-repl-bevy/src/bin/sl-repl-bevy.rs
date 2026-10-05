@@ -710,6 +710,7 @@ fn run_session(
             background_inventory_fetch: true,
             fetch_server_chat_history,
             offline: false,
+            requested_capabilities: None,
         })
         .insert_resource(ReplState {
             ctx: SessionContext::new(),

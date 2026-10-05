@@ -2,6 +2,7 @@
 
 use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
@@ -29,16 +30,17 @@ use sl_proto::{
     CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
     Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, NeighbourCaps,
-    NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, Session, SessionMessage, UserInfoUpdate,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
-    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_environment_update_request,
-    build_modify_material_params_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_properties_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_render_materials_put_request, build_send_user_report,
+    NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session,
+    SessionMessage, UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, associate_inventory_request,
+    avatar_picker_search_query, build_agent_preferences_request, build_ais_create_category_body,
+    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_environment_update_request, build_modify_material_params_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_properties_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_render_materials_put_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
     build_update_script_task_request, build_update_task_item_asset_request,
@@ -537,6 +539,12 @@ pub struct SlClientPlugin {
     /// by whatever writes synthetic [`SlEvent`]s instead (the viewer's
     /// avatar-state **replay** mode). Default `false` (the normal live login).
     pub offline: bool,
+    /// The capability names every seed request asks for, or `None` for
+    /// [`REQUESTED_CAPABILITIES`] — the same override as the tokio client's
+    /// `set_requested_capabilities`, for a survey of what a grid grants rather
+    /// than for ordinary use: a capability the session relies on and the list
+    /// leaves out is one it will not have.
+    pub requested_capabilities: Option<Arc<[String]>>,
 }
 
 /// The points in a frame that a consumer of the session's output orders itself
@@ -579,6 +587,12 @@ impl Plugin for SlClientPlugin {
                 background_inventory_fetch: self.background_inventory_fetch,
                 fetch_server_chat_history: self.fetch_server_chat_history,
                 offline: self.offline,
+                requested_capabilities: self.requested_capabilities.clone().unwrap_or_else(|| {
+                    REQUESTED_CAPABILITIES
+                        .iter()
+                        .map(|name| (*name).to_owned())
+                        .collect()
+                }),
             })
             .init_resource::<SlIdentity>()
             .init_resource::<SlAgentParcel>()
@@ -698,6 +712,8 @@ struct SlConfig {
     fetch_server_chat_history: bool,
     /// Whether to run offline (skip login; feed the session synthetic events).
     offline: bool,
+    /// The capability names every seed request asks for.
+    requested_capabilities: Arc<[String]>,
 }
 
 /// The driver's runtime state resource: the channel pair to the session's
@@ -758,6 +774,8 @@ struct NetThreadConfig {
     account_dirs: Option<AccountDirsConfig>,
     /// The inventory disk-cache configuration (default off).
     inventory_cache_config: InventoryCacheConfig,
+    /// The capability names every seed request asks for.
+    requested_capabilities: Arc<[String]>,
 }
 
 /// The running session's owned state, stepped once per network-thread tick by
@@ -786,6 +804,9 @@ struct RunningSession {
     /// The neighbouring regions' capability maps, and the object-addressed
     /// capability requests waiting for one.
     neighbours: Box<NeighbourCaps>,
+    /// The capability names every seed request asks for — kept for a CAPS
+    /// subsystem started after login, and for neighbours' seeds.
+    requested_capabilities: Arc<[String]>,
 }
 
 /// The `LSLSyntax` state carried across ticks: the by-id disk cache plus the
@@ -834,6 +855,9 @@ pub(crate) struct Caps {
     /// Dropping the [`Caps`] closes this channel, so the worker exits after its
     /// current poll.
     pub(crate) command_tx: crossbeam_channel::Sender<crate::caps::EqCommand>,
+    /// The capability names every seed request asks for, the neighbours'
+    /// included.
+    pub(crate) requested: Arc<[String]>,
 }
 
 /// How long one network-thread tick blocks in `recv_from` waiting for a
@@ -866,6 +890,7 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
         directories: config.directories.clone(),
         account_dirs: config.account_dirs.clone(),
         inventory_cache_config: config.inventory_cache_config,
+        requested_capabilities: Arc::clone(&config.requested_capabilities),
     };
     // In the tracing context of the App that logged in, so every line of this
     // session is attributable to its viewer (see `log_context`).
@@ -1189,7 +1214,7 @@ fn login_phase(
                             circuit_id: session.root_circuit_id(),
                         })),
                     );
-                    let caps = start_caps(&session);
+                    let caps = start_caps(&session, &config.requested_capabilities);
                     // Resolve the per-avatar directory now that the login
                     // response has yielded the agent UUID — inline, before
                     // any disk feature is built, so nothing races.
@@ -1224,6 +1249,7 @@ fn login_phase(
                         lsl_syntax,
                         agent_parcel: SlAgentParcel::default(),
                         neighbours: Box::default(),
+                        requested_capabilities: Arc::clone(&config.requested_capabilities),
                     })
                 }
                 Err(()) => {
@@ -1399,6 +1425,7 @@ fn advance_running(
         mut lsl_syntax,
         mut agent_parcel,
         mut neighbours,
+        requested_capabilities,
     } = state;
     // Wait for inbound data with ONE blocking receive (its [`NET_TICK`] read
     // timeout is the thread's tick cadence — a datagram wakes the tick
@@ -1696,6 +1723,7 @@ fn advance_running(
                     fetch_neighbour_caps(
                         *sim,
                         seed_capability.clone(),
+                        Arc::clone(&caps.requested),
                         caps.neighbour_map_tx.clone(),
                     );
                 }
@@ -1704,6 +1732,7 @@ fn advance_running(
                 None => fetch_neighbour_caps(
                     *sim,
                     seed_capability.clone(),
+                    Arc::clone(&requested_capabilities),
                     crossbeam_channel::unbounded().0,
                 ),
             },
@@ -1766,7 +1795,7 @@ fn advance_running(
         // it now.
         match caps.as_mut() {
             Some(existing) => existing.switch_to(&session),
-            None => caps = start_caps(&session),
+            None => caps = start_caps(&session, &requested_capabilities),
         }
     }
 
@@ -1802,6 +1831,7 @@ fn advance_running(
         lsl_syntax,
         agent_parcel,
         neighbours,
+        requested_capabilities,
     })
 }
 

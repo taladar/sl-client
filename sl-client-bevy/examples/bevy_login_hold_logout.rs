@@ -61,6 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             background_inventory_fetch: false,
             fetch_server_chat_history: true,
             offline: false,
+            requested_capabilities: None,
         })
         .insert_resource(HoldState {
             hold: Duration::from_secs(hold_secs),

@@ -19,8 +19,9 @@ Measured and written up in `book/src/gridspec/capabilities.md`.
   root, region-change and neighbour seed requests) and reports neighbours'
   capability maps (`Client::set_neighbour_caps_reporter`). The conformance
   `Session` carries both (`relogin_requesting_capabilities`,
-  `capability_names`, `neighbour_capability_names`). The bevy client has no
-  override: only the conformance harness, which runs on tokio, needs one.
+  `capability_names`, `neighbour_capability_names`). The bevy client gained
+  the same override for parity on 2026-10-05
+  (`SlClientPlugin::requested_capabilities`).
 - **The `seed-capabilities` case** logs in with our list, then with ours plus
   Firestorm's 116. aditi refuses only `ObjectAnimation` and
   `UploadBakedTexture` and grants 48 of the 51 reference-only names; OpenSim

@@ -20,11 +20,12 @@ use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError, unboun
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, transient_backoff};
 use sl_proto::{
-    Llsd, REQUESTED_CAPABILITIES, Session, build_event_queue_request, build_seed_request,
-    parse_event_queue_response, parse_seed_response,
+    Llsd, Session, build_event_queue_request, build_seed_request, parse_event_queue_response,
+    parse_seed_response,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// The reserved `(message, body)` key a CAPS helper sends over the events
@@ -73,7 +74,7 @@ pub(crate) enum EqCommand {
 /// background worker thread that fetches the capability map (reported over
 /// `map_rx`) and long-polls `EventQueueGet`, re-targeting on
 /// [`Caps::switch_to`]. Returns `None` if no seed is known yet.
-pub(crate) fn start_caps(session: &Session) -> Option<Caps> {
+pub(crate) fn start_caps(session: &Session, requested: &Arc<[String]>) -> Option<Caps> {
     let Some(seed) = session.seed_capability().map(url::Url::to_owned) else {
         tracing::warn!("start_caps: no seed capability yet — event queue NOT started");
         return None;
@@ -85,9 +86,16 @@ pub(crate) fn start_caps(session: &Session) -> Option<Caps> {
     let (neighbour_map_tx, neighbour_map_rx) = unbounded();
     let thread_events = events_tx.clone();
     let initial = seed.clone();
+    let worker_requested = Arc::clone(requested);
     tracing::info!(%seed, "start_caps: event-queue worker starting for the root region");
     crate::log_context::spawn_thread(move || {
-        run_event_queue(initial, &command_rx, &thread_events, &map_tx);
+        run_event_queue(
+            initial,
+            worker_requested,
+            &command_rx,
+            &thread_events,
+            &map_tx,
+        );
     });
     Some(Caps {
         events_rx,
@@ -99,6 +107,7 @@ pub(crate) fn start_caps(session: &Session) -> Option<Caps> {
         neighbour_map_rx,
         neighbour_map_tx,
         command_tx,
+        requested: Arc::clone(requested),
     })
 }
 
@@ -139,6 +148,7 @@ pub(crate) type NeighbourMapOutcome = (SocketAddr, Result<HashMap<String, String
 pub(crate) fn fetch_neighbour_caps(
     sim: SocketAddr,
     seed_url: url::Url,
+    requested: Arc<[String]>,
     map_tx: Sender<NeighbourMapOutcome>,
 ) {
     crate::log_context::spawn_thread(move || {
@@ -147,14 +157,14 @@ pub(crate) fn fetch_neighbour_caps(
             .build()
         {
             Ok(http) => {
-                let mut outcome = post_seed(&http, &seed_url);
+                let mut outcome = post_seed(&http, &seed_url, &requested);
                 for attempt in 0..MAX_SEED_FETCH_RETRIES {
                     let Err(reason) = &outcome else {
                         break;
                     };
                     tracing::warn!(%sim, %seed_url, attempt, "neighbour seed-capabilities fetch failed: {reason}");
                     std::thread::sleep(transient_backoff(attempt));
-                    outcome = post_seed(&http, &seed_url);
+                    outcome = post_seed(&http, &seed_url, &requested);
                 }
                 outcome
             }
@@ -169,11 +179,13 @@ pub(crate) fn fetch_neighbour_caps(
 fn post_seed(
     http: &ReqwestBlockingClient,
     seed_url: &url::Url,
+    requested: &[String],
 ) -> Result<HashMap<String, String>, String> {
+    let names: Vec<&str> = requested.iter().map(String::as_str).collect();
     let response = http
         .post(seed_url.clone())
         .header("Content-Type", "application/llsd+xml")
-        .body(build_seed_request(REQUESTED_CAPABILITIES))
+        .body(build_seed_request(&names))
         .send()
         .map_err(|error| format!("the seed-capabilities request failed: {error}"))?;
     let text = response.text().map_err(|error| {
@@ -201,9 +213,10 @@ enum SeedOutcome {
 fn fetch_caps(
     http: &ReqwestBlockingClient,
     seed_url: &url::Url,
+    requested: &[String],
     map_tx: &Sender<Result<HashMap<String, String>, String>>,
 ) -> SeedOutcome {
-    let capabilities = match post_seed(http, seed_url) {
+    let capabilities = match post_seed(http, seed_url, requested) {
         Ok(capabilities) => capabilities,
         Err(reason) => {
             tracing::warn!(%seed_url, "event queue: {reason} — no queue for this region");
@@ -258,6 +271,8 @@ struct EventQueueWorker {
     /// once one succeeds. Drives the retry backoff in [`run_event_queue`], so a
     /// transient failure does not cost the region its event queue outright.
     seed_failures: u32,
+    /// The capability names every seed fetch asks for.
+    requested: Arc<[String]>,
 }
 
 impl EventQueueWorker {
@@ -265,6 +280,7 @@ impl EventQueueWorker {
     /// URL. `None` if the HTTP client could not be built.
     fn new(
         seed: url::Url,
+        requested: Arc<[String]>,
         map_tx: &Sender<Result<HashMap<String, String>, String>>,
     ) -> Option<Self> {
         let http = match crate::http_proxy::blocking_client_builder()
@@ -280,13 +296,14 @@ impl EventQueueWorker {
                 return None;
             }
         };
-        let outcome = fetch_caps(&http, &seed, map_tx);
+        let outcome = fetch_caps(&http, &seed, &requested, map_tx);
         let mut worker = Self {
             http,
             seed,
             event_queue_url: None,
             ack: None,
             seed_failures: 0,
+            requested,
         };
         worker.apply_seed(outcome);
         if let Some(url) = &worker.event_queue_url {
@@ -329,7 +346,7 @@ impl EventQueueWorker {
             failures = self.seed_failures,
             "event queue: retrying the seed-capabilities fetch"
         );
-        let outcome = fetch_caps(&self.http, &self.seed, map_tx);
+        let outcome = fetch_caps(&self.http, &self.seed, &self.requested, map_tx);
         self.apply_seed(outcome);
         if let Some(url) = &self.event_queue_url {
             tracing::info!(%url, "event queue: polling started after a seed retry");
@@ -361,7 +378,7 @@ impl EventQueueWorker {
         // A new region starts with a fresh retry budget: the old region's
         // failures say nothing about this one's.
         self.seed_failures = 0;
-        let outcome = fetch_caps(&self.http, &self.seed, map_tx);
+        let outcome = fetch_caps(&self.http, &self.seed, &self.requested, map_tx);
         self.apply_seed(outcome);
         if let Some(url) = &self.event_queue_url {
             tracing::info!(%url, "event queue: re-targeted to the new region");
@@ -446,11 +463,12 @@ impl EventQueueWorker {
 /// channel closes (the [`Caps`] was dropped) or the events receiver is gone.
 fn run_event_queue(
     initial_seed: url::Url,
+    requested: Arc<[String]>,
     command_rx: &Receiver<EqCommand>,
     caps_tx: &Sender<(String, Llsd)>,
     map_tx: &Sender<Result<HashMap<String, String>, String>>,
 ) {
-    let Some(mut worker) = EventQueueWorker::new(initial_seed, map_tx) else {
+    let Some(mut worker) = EventQueueWorker::new(initial_seed, requested, map_tx) else {
         return;
     };
     loop {
@@ -533,6 +551,7 @@ mod tests {
             event_queue_url: None,
             ack: None,
             seed_failures: 0,
+            requested: std::sync::Arc::from(Vec::<String>::new()),
         }
     }
 

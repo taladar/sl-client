@@ -751,6 +751,7 @@ impl ViewerAppBuilder {
             background_inventory_fetch: true,
             fetch_server_chat_history,
             offline,
+            requested_capabilities: None,
         });
         // The six plugin groups (`crate::viewer_plugins`): the interface first
         // (the world group's pie menus need its scaffold), then input, the render

@@ -740,7 +740,9 @@ existed inverse-paired from the voice service-pairing task.
 >
 > - The capability **name** constants are in `sl-proto/src/session.rs`, exported
 >   as `CAP_GET_TEXTURE`, `CAP_FETCH_INVENTORY`, `CAP_PROVISION_VOICE_ACCOUNT`,
->   etc.; `REQUESTED_CAPABILITIES` is the list the client asks the seed for.
+>   etc.; `REQUESTED_CAPABILITIES` is the list the client asks the seed for
+>   (a survey replaces it: `Client::set_requested_capabilities` on tokio,
+>   `SlClientPlugin::requested_capabilities` on Bevy).
 > - The seed round-trip is built/parsed by `build_seed_request` /
 >   `parse_seed_response`, and the long-poll by `build_event_queue_request` /
 >   `parse_event_queue_response` (all in `sl-wire/src/llsd.rs`, re-exported from
