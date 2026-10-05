@@ -275,6 +275,16 @@ impl GridTest for ParcelEdit {
             )?;
 
             // 5. Put both back the way they were found.
+            //
+            //    This case never reads the parcel's *listing*
+            //    (`ParcelInfoReply`), and should not start to without care: on
+            //    the live OpenSim a listing is served from a cache that lives
+            //    30 s past its last read, so one read after the rename above
+            //    may still carry the old name — or, read before the restore
+            //    below, keep `NEW_NAME` alive for whichever case asks next
+            //    (`parcel-info-dwell` compares the two records). See
+            //    `LISTING_CACHE_WAIT` there and `book/src/gridspec/land.md`,
+            //    § Parcel info.
             session
                 .send(Command::UpdateParcelAccessList {
                     local_id: scoped,

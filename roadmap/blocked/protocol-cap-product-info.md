@@ -30,3 +30,8 @@ and Firestorm references: `book/src/comms/caps-reference.md`.
 This capability is adopted inside that gridspec task, which measures the
 feature on both grids over both paths, makes the fake grid serve the
 capability per flavour, and checks the viewer. Claim that task.
+
+## Already in place (2026-10-05)
+
+The event-queue `DirLandReply` is decoded (`dir_land_reply_from_caps_llsd`,
+[[gridspec-parcel-info-dwell]]); its `ProductSKU` is read past, not carried.

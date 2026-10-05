@@ -90,6 +90,9 @@ Three dedicated queries cover the remaining directory tabs:
 - **`DirLandQuery`** → `Event::DirLandReply` — land for sale or auction,
   filtered by `LandSearchType`, price and area. Results (`DirLandResult`) give
   the parcel id, name, auction/for-sale flags, sale price and area.
+  Second Life sends the reply over the event queue rather than UDP; both
+  arrive as the same event
+  ([Grid Behaviour → Land](../gridspec/land.md#land-search-on-second-life)).
 - **`DirClassifiedQuery`** → `Event::DirClassifiedReply` — classified ads,
   filtered by a `ClassifiedCategory` (`AnyCategory` for any). Results
   (`DirClassifiedResult`) give the

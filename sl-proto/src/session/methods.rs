@@ -9,11 +9,12 @@ use super::conversions::{
     avatar_properties, benefits_of, bulk_update_folder, bulk_update_inventory_from_llsd,
     bulk_update_item, chat_message, chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
     chatterbox_session_start_reply_from_llsd, classified_info, cof_version_increment_from_llsd,
-    created_category_from_llsd, crossed_region_from_caps_llsd, display_name_update_from_llsd,
-    economy_data, enable_simulator_from_caps_llsd, environment_reply_from_llsd,
-    establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
-    fetch_inventory_items_from_llsd, friend, grid_coordinates_from_handle, group_account_details,
-    group_account_summary, group_account_transactions, group_active_proposal_item, group_member,
+    created_category_from_llsd, crossed_region_from_caps_llsd, dir_land_reply_from_caps_llsd,
+    display_name_update_from_llsd, economy_data, enable_simulator_from_caps_llsd,
+    environment_reply_from_llsd, establish_agent_communication_from_llsd,
+    estate_access_from_params, estate_info_from_params, fetch_inventory_items_from_llsd, friend,
+    grid_coordinates_from_handle, group_account_details, group_account_summary,
+    group_account_transactions, group_active_proposal_item, group_member,
     group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
@@ -77,18 +78,18 @@ use crate::types::{
     NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
     ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
-    ParcelOverlayInfo, ParcelRect, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
-    PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
-    RegionDebugUpdate, RegionInfoUpdate, RegionStats, RegionTerrainUpdate, Reliability,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
-    ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage,
-    ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest,
-    ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
-    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType, XferListing,
+    ParcelListingFlags, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
+    ParcelObjectOwnersPart, ParcelOverlayInfo, ParcelRect, ParcelReturnType, ParcelUpdate,
+    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams,
+    ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionInfoUpdate, RegionStats,
+    RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo,
+    ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions,
+    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
+    SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply,
+    TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle,
+    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, Wearable, WearableType, XferListing,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -464,7 +465,7 @@ impl Session {
     ) -> Result<(), Error> {
         tracing::trace!(event = message, "inbound CAPS event");
         let Some(event) = CapsEvent::from_tag(message) else {
-            tracing::trace!(event = message, "unhandled CAPS event");
+            tracing::trace!(event = message, ?body, "unhandled CAPS event");
             self.push_diagnostic(Diagnostic::UnknownCapsEvent {
                 message: message.to_owned(),
             });
@@ -534,6 +535,16 @@ impl Session {
                     self.caps_decode_failed(message);
                 }
             }
+            // The event-queue form of a land search's results: Second Life
+            // answers a `DirLandQuery` here, never over UDP.
+            CapsEvent::DirLandReply => match dir_land_reply_from_caps_llsd(body) {
+                Ok(Some((query_id, results))) => {
+                    self.events
+                        .push_back(Event::DirLandReply { query_id, results });
+                }
+                Ok(None) => self.caps_decode_failed(message),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // A parcel's object-owner tally. The message is `UDPDeprecated`: a
             // simulator with an event queue answers a `ParcelObjectOwnersRequest`
             // over it, as one document — and only this form carries the
@@ -3665,6 +3676,7 @@ impl Session {
             }
             AnyMessage::ParcelInfoReply(reply) => {
                 let data = &reply.data;
+                let flags = ParcelListingFlags::from_bits(data.flags);
                 self.events.push_back(Event::ParcelDetails(ParcelDetails {
                     parcel_id: ParcelKey::from(data.parcel_id),
                     owner_id: data.owner_id,
@@ -3675,7 +3687,7 @@ impl Session {
                         "BillableArea",
                         data.billable_area,
                     )?,
-                    flags: data.flags,
+                    flags,
                     global_position: GlobalCoordinates::new(
                         f64::from(data.global_x),
                         f64::from(data.global_y),
@@ -3687,9 +3699,11 @@ impl Session {
                     )?,
                     snapshot_id: crate::types::optional_key_from_wire(data.snapshot_id),
                     dwell: data.dwell,
-                    // The packed parcel flags byte carries PARCEL_FOR_SALE (0x04).
+                    // The field is filled whether or not the parcel is for sale
+                    // (a parcel off the market still carries its last price), so
+                    // only the listing's own for-sale bit makes it a price.
                     sale_price: crate::types::linden_price_from_wire(
-                        data.flags & 0x04 != 0,
+                        flags.is_for_sale(),
                         "SalePrice",
                         data.sale_price,
                     )?,

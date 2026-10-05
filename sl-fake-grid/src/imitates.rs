@@ -33,6 +33,7 @@
 //! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 33 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger |
 //! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
+//! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
 //!
 //! **The inventory rows are the divergence a viewer is most likely to trip
 //! over**, which is why they are three rows rather than one setting. An
@@ -289,6 +290,7 @@ impl ImitatedGrid {
                 parcel_return_reads_task_ids: true,
                 owners_reply_over_event_queue: true,
                 wire_types: sl_proto::ParcelLlsdDialect::SecondLife,
+                adult_listing_bits: sl_proto::AdultListingBits::AdultAndMature,
             },
             Self::OpenSim => ParcelPolicy {
                 answers_request_by_id: false,
@@ -299,6 +301,7 @@ impl ImitatedGrid {
                 parcel_return_reads_task_ids: false,
                 owners_reply_over_event_queue: false,
                 wire_types: sl_proto::ParcelLlsdDialect::OpenSim,
+                adult_listing_bits: sl_proto::AdultListingBits::AdultOnly,
             },
         }
     }
@@ -642,6 +645,13 @@ pub struct ParcelPolicy {
     /// Which LLSD types the event-queue `ParcelProperties` writes the six
     /// fields the grids disagree about in ([`sl_proto::ParcelLlsdDialect`]).
     pub wire_types: sl_proto::ParcelLlsdDialect,
+    /// Which maturity bits a `ParcelInfoReply` listing carries for a parcel in
+    /// an adult region: Second Life sets the mature bit beside the adult one
+    /// (measured by `parcel-info-dwell` on aditi, 2026-10-05), OpenSim the
+    /// adult bit alone (`Util.ConvertAccessLevelToMaturity`, read from source:
+    /// the local grid has no adult region). The rest of the byte — group-owned
+    /// `0x04`, for-sale `0x80` — the two pack alike.
+    pub adult_listing_bits: sl_proto::AdultListingBits,
 }
 
 impl ParcelPolicy {

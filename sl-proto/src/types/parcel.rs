@@ -10,8 +10,8 @@ use sl_wire::{Direction, GlobalCoordinates};
 use sl_wire::{RegionHandle, RegionLocalObjectId, RegionLocalParcelId};
 use uuid::Uuid;
 
-use crate::types::LandArea;
 use crate::types::merge::merge_unedited;
+use crate::types::{LandArea, Maturity};
 
 /// How many parcels a `ParcelProperties` reply describes, the `RequestResult`
 /// field. A "not found / no access" reply arrives as [`NoData`](Self::NoData)
@@ -1495,6 +1495,135 @@ pub struct LandStatExtended {
     pub timestamp: u32,
 }
 
+/// The packed flags byte of a `ParcelInfoReply` listing: the parcel's maturity
+/// rating, whether a group owns it, and whether it is for sale.
+///
+/// This is **not** the parcel-flags bitfield of a `ParcelProperties`
+/// ([`ParcelFlags`](sl_wire::ParcelFlags)) cut down to a byte. It is a packing
+/// of its own, and the two share a bit value with different meanings: `0x04`
+/// is [`GROUP_OWNED`](Self::GROUP_OWNED) here and `PARCEL_FOR_SALE` there.
+///
+/// Both grids pack it alike except for an adult rating: Second Life sets both
+/// maturity bits (`0x03`), OpenSim only [`ADULT`](Self::ADULT) (`0x02`) —
+/// [`AdultListingBits`]. [`maturity`](Self::maturity) reads either, the way the
+/// reference viewer does (the adult bit first). Measured by `parcel-info-dwell`
+/// (2026-10-05, `book/src/gridspec/land.md`).
+///
+/// The byte is kept whole, so a bit this type does not name survives a decode
+/// and can still be read with [`bits`](Self::bits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ParcelListingFlags(pub u8);
+
+/// Which maturity bits a grid sets in a [`ParcelListingFlags`] for a parcel in
+/// an adult region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdultListingBits {
+    /// The adult and the mature bit together (`0x03`), as Second Life does.
+    AdultAndMature,
+    /// The adult bit alone (`0x02`), as OpenSim does.
+    AdultOnly,
+}
+
+impl ParcelListingFlags {
+    /// No flags set: a general-rated parcel an agent owns, not for sale.
+    pub const NONE: Self = Self(0);
+    /// The parcel's region is rated moderate ("mature") — or adult, on a grid
+    /// that sets both bits for one ([`AdultListingBits::AdultAndMature`]).
+    pub const MATURE: Self = Self(0x01);
+    /// The parcel's region is rated adult.
+    pub const ADULT: Self = Self(0x02);
+    /// A group owns the parcel, so the listing's owner id is a group's.
+    pub const GROUP_OWNED: Self = Self(0x04);
+    /// The parcel is for sale, and the listing's sale price is its price. A
+    /// listing without this bit still carries a number in that field — the
+    /// price the parcel was last set to — which means nothing.
+    pub const FOR_SALE: Self = Self(0x80);
+
+    /// Wraps a raw flags byte.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Self {
+        Self(bits)
+    }
+
+    /// The raw flags byte.
+    #[must_use]
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// Combines two sets of flags.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Whether every bit of `other` is set in `self`.
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// These flags with the for-sale bit set or cleared.
+    #[must_use]
+    pub const fn with_for_sale(self, for_sale: bool) -> Self {
+        if for_sale {
+            Self(self.0 | Self::FOR_SALE.0)
+        } else {
+            Self(self.0 & !Self::FOR_SALE.0)
+        }
+    }
+
+    /// The flags of a listing with this rating, ownership and sale state, with
+    /// an adult rating packed the way `adult` says the grid packs it. An
+    /// [`Unknown`](Maturity::Unknown) rating packs as general, which is what a
+    /// byte with neither bit reads back as.
+    #[must_use]
+    pub const fn new(
+        maturity: Maturity,
+        group_owned: bool,
+        for_sale: bool,
+        adult: AdultListingBits,
+    ) -> Self {
+        let rating = match (maturity, adult) {
+            (Maturity::Pg | Maturity::Unknown, _) => Self::NONE,
+            (Maturity::Mature, _) => Self::MATURE,
+            (Maturity::Adult, AdultListingBits::AdultOnly) => Self::ADULT,
+            (Maturity::Adult, AdultListingBits::AdultAndMature) => Self::ADULT.union(Self::MATURE),
+        };
+        let owned = if group_owned {
+            Self::GROUP_OWNED
+        } else {
+            Self::NONE
+        };
+        rating.union(owned).with_for_sale(for_sale)
+    }
+
+    /// The maturity rating: adult if the adult bit is set (whatever the mature
+    /// bit says), moderate if only the mature bit is, general otherwise.
+    #[must_use]
+    pub const fn maturity(self) -> Maturity {
+        if self.contains(Self::ADULT) {
+            Maturity::Adult
+        } else if self.contains(Self::MATURE) {
+            Maturity::Mature
+        } else {
+            Maturity::Pg
+        }
+    }
+
+    /// Whether a group owns the parcel.
+    #[must_use]
+    pub const fn is_group_owned(self) -> bool {
+        self.contains(Self::GROUP_OWNED)
+    }
+
+    /// Whether the parcel is for sale.
+    #[must_use]
+    pub const fn is_for_sale(self) -> bool {
+        self.contains(Self::FOR_SALE)
+    }
+}
+
 /// Basic parcel information from a `ParcelInfoReply` — the condensed listing the
 /// places/search panels show for a parcel id (distinct from the full geometry
 /// and flags of [`ParcelInfo`], which a `ParcelProperties` carries). Requested by
@@ -1516,9 +1645,9 @@ pub struct ParcelDetails {
     pub actual_area: LandArea,
     /// The billable area in m².
     pub billable_area: LandArea,
-    /// The packed parcel flags byte (a condensed subset of the full
-    /// [`ParcelFlags`](sl_wire::ParcelFlags)).
-    pub flags: u8,
+    /// The listing's packed flags: maturity, group ownership and whether the
+    /// parcel is for sale.
+    pub flags: ParcelListingFlags,
     /// The parcel anchor's global position, in metres.
     pub global_position: GlobalCoordinates,
     /// The containing region's name, or `None` when the grid sent an empty
@@ -1528,7 +1657,10 @@ pub struct ParcelDetails {
     pub snapshot_id: Option<TextureKey>,
     /// The parcel's dwell (traffic) value.
     pub dwell: f32,
-    /// The sale price in L$ (when for sale).
+    /// The sale price in L$, or `None` when the parcel is not for sale —
+    /// that is, when [`flags`](Self::flags) lacks
+    /// [`FOR_SALE`](ParcelListingFlags::FOR_SALE). A for-sale parcel may be
+    /// free (`Some(LindenAmount(0))`).
     pub sale_price: Option<LindenAmount>,
     /// The auction id (non-zero when the parcel is up for auction).
     pub auction_id: i32,
@@ -1543,7 +1675,7 @@ impl Default for ParcelDetails {
             description: String::new(),
             actual_area: LandArea(0),
             billable_area: LandArea(0),
-            flags: 0,
+            flags: ParcelListingFlags::NONE,
             global_position: GlobalCoordinates::new(0.0, 0.0, 0.0),
             sim_name: None,
             snapshot_id: None,
@@ -1862,5 +1994,50 @@ mod tests {
         };
         assert!(form.merge_unedited(&base, &later));
         assert_eq!(form.name, "Later");
+    }
+
+    /// An adult rating packs two ways and reads back as adult from both: the
+    /// reference tests the adult bit first, so the mature bit Second Life sets
+    /// beside it does not turn the parcel moderate.
+    #[test]
+    fn an_adult_listing_reads_as_adult_however_the_grid_packed_it() {
+        use super::{AdultListingBits, ParcelListingFlags};
+        use crate::types::Maturity;
+
+        let second_life = ParcelListingFlags::new(
+            Maturity::Adult,
+            true,
+            true,
+            AdultListingBits::AdultAndMature,
+        );
+        assert_eq!(second_life.bits(), 0x87);
+        let opensim =
+            ParcelListingFlags::new(Maturity::Adult, true, true, AdultListingBits::AdultOnly);
+        assert_eq!(opensim.bits(), 0x86);
+        for flags in [second_life, opensim] {
+            assert_eq!(flags.maturity(), Maturity::Adult);
+            assert!(flags.is_group_owned());
+            assert!(flags.is_for_sale());
+        }
+        assert_eq!(
+            ParcelListingFlags::new(
+                Maturity::Mature,
+                false,
+                false,
+                AdultListingBits::AdultAndMature
+            ),
+            ParcelListingFlags::MATURE
+        );
+        assert_eq!(ParcelListingFlags::NONE.maturity(), Maturity::Pg);
+    }
+
+    /// Taking a listing off the market clears only the for-sale bit.
+    #[test]
+    fn the_for_sale_bit_is_set_and_cleared_alone() {
+        use super::ParcelListingFlags;
+
+        let listed = ParcelListingFlags::GROUP_OWNED.with_for_sale(true);
+        assert_eq!(listed.bits(), 0x84);
+        assert_eq!(listed.with_for_sale(false), ParcelListingFlags::GROUP_OWNED);
     }
 }

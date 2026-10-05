@@ -38,7 +38,7 @@ use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AgentKey, AssetKey, AssetType, Command, GroupKey, InventoryKey, ItemInfo, OwnerKey,
+    AgentKey, AssetKey, AssetType, Command, GroupKey, InventoryKey, ItemInfo, Maturity, OwnerKey,
     ParcelDetails, ParcelKey, RegionCoordinates, RegionHandle, RegionName, SlCommand, SlEvent,
     SlIdentity, SlSessionEvent, TextureKey, Uuid,
 };
@@ -847,7 +847,7 @@ pub fn spawn_about_landmark_specimen(
     let nodes = spawn_landmark_content(commands, parent, cx.font_size, Uuid::nil(), true, seed);
     commands
         .entity(nodes.maturity_text)
-        .insert(Translated::new(maturity_key(0x1)));
+        .insert(Translated::new(maturity_key(Maturity::Mature)));
     commands
         .entity(nodes.snapshot_label)
         .insert(Translated::new("about-landmark-no-image"));
@@ -1038,7 +1038,7 @@ fn apply_details(
     set_node_text(
         texts,
         ui.maturity_text,
-        &translator.get(maturity_key(details.flags)),
+        &translator.get(maturity_key(details.flags.maturity())),
     );
     set_node_text(
         texts,
@@ -1047,7 +1047,7 @@ fn apply_details(
     );
     // Ask for the owner's name if unresolved; `refresh_names` rewrites the row
     // when the reply lands.
-    if is_group_owned(details.flags) {
+    if details.flags.is_group_owned() {
         groups.request_name(GroupKey::from(details.owner_id), sl_commands);
     } else if !details.owner_id.is_nil() {
         let owner = AgentKey::from(details.owner_id);
@@ -1264,7 +1264,7 @@ fn parcel_owner_label(
     if details.owner_id.is_nil() {
         return String::new();
     }
-    if is_group_owned(details.flags) {
+    if details.flags.is_group_owned() {
         let group = GroupKey::from(details.owner_id);
         groups
             .group_name(group)
@@ -1278,22 +1278,15 @@ fn parcel_owner_label(
 // Pure helpers.
 // ---------------------------------------------------------------------------
 
-/// The Fluent key for a `ParcelInfoReply` flags byte's maturity rating
-/// (`0x2` adult, `0x1` mature, else general — the reference's decode).
-const fn maturity_key(flags: u8) -> &'static str {
-    if flags & 0x2 != 0 {
-        "about-landmark-maturity-adult"
-    } else if flags & 0x1 != 0 {
-        "about-landmark-maturity-mature"
-    } else {
-        "about-landmark-maturity-pg"
+/// The Fluent key for a parcel listing's maturity rating. A listing is rated
+/// one of three ways — a flags byte with neither rating bit is general — so
+/// the last arm is only there for the type.
+const fn maturity_key(maturity: Maturity) -> &'static str {
+    match maturity {
+        Maturity::Adult => "about-landmark-maturity-adult",
+        Maturity::Mature => "about-landmark-maturity-mature",
+        _ => "about-landmark-maturity-pg",
     }
-}
-
-/// Whether a `ParcelInfoReply` flags byte marks the parcel group-owned
-/// (`0x4`, the reference's decode).
-const fn is_group_owned(flags: u8) -> bool {
-    flags & 0x4 != 0
 }
 
 /// The region line: `Name (x, y, z)` once the region name is known, the raw
@@ -1354,11 +1347,13 @@ const fn local_coord_u16(value: f32) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_group_owned, landmark_slurl, maturity_key, parcel_owner_label, region_line};
+    use super::{landmark_slurl, maturity_key, parcel_owner_label, region_line};
     use crate::social::GroupsModel;
     use crate::world_api::{AvatarState, NameAlias};
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{AgentKey, DisplayName, ParcelDetails, RegionName, Uuid};
+    use sl_client_bevy::{
+        AgentKey, DisplayName, GroupKey, ParcelDetails, ParcelListingFlags, RegionName, Uuid,
+    };
 
     /// The owner row shows the name the rest of the viewer shows — the display
     /// name, and the user's own pseudonym over it — not the grid's legacy name
@@ -1369,8 +1364,8 @@ mod tests {
         let agent = AgentKey::from(owner);
         let details = ParcelDetails {
             owner_id: owner,
-            // No `0x4`: agent-owned, so the avatar cache answers.
-            flags: 0x0,
+            // Not group-owned, so the avatar cache answers.
+            flags: ParcelListingFlags::NONE,
             ..ParcelDetails::default()
         };
         let groups = GroupsModel::default();
@@ -1407,25 +1402,44 @@ mod tests {
         assert_eq!(parcel_owner_label(&details, &avatars, &groups), "Landlord");
     }
 
-    /// The maturity flag bits map like the reference: adult wins over mature,
-    /// no bits means general.
+    /// The listing's rating picks the label whichever way the grid packed an
+    /// adult one (Second Life sets the mature bit beside it, OpenSim does not),
+    /// and the other flags do not disturb it.
     #[test]
-    fn maturity_maps_flag_bits() {
-        assert_eq!(maturity_key(0x0), "about-landmark-maturity-pg");
-        assert_eq!(maturity_key(0x1), "about-landmark-maturity-mature");
-        assert_eq!(maturity_key(0x2), "about-landmark-maturity-adult");
-        assert_eq!(maturity_key(0x3), "about-landmark-maturity-adult");
-        // Group-owned does not affect the rating.
-        assert_eq!(maturity_key(0x4), "about-landmark-maturity-pg");
+    fn the_maturity_row_follows_the_listing_flags() {
+        let key = |bits: u8| maturity_key(ParcelListingFlags::from_bits(bits).maturity());
+        assert_eq!(key(0x00), "about-landmark-maturity-pg");
+        assert_eq!(key(0x01), "about-landmark-maturity-mature");
+        assert_eq!(key(0x02), "about-landmark-maturity-adult");
+        assert_eq!(key(0x03), "about-landmark-maturity-adult");
+        // Group-owned and for-sale do not affect the rating.
+        assert_eq!(key(0x84), "about-landmark-maturity-pg");
+        assert_eq!(key(0x87), "about-landmark-maturity-adult");
     }
 
-    /// The group-owned bit is `0x4` alone.
+    /// A group-owned listing's owner id is a group's: the owner row asks the
+    /// groups model, not the avatar cache, and shows the id while unresolved.
     #[test]
-    fn group_owned_reads_bit_2() {
-        assert!(is_group_owned(0x4));
-        assert!(is_group_owned(0x7));
-        assert!(!is_group_owned(0x3));
-        assert!(!is_group_owned(0x0));
+    fn a_group_owned_listing_names_a_group() {
+        let owner = Uuid::from_u128(0x6e);
+        let details = ParcelDetails {
+            owner_id: owner,
+            // For sale as well: the for-sale bit must not hide the ownership.
+            flags: ParcelListingFlags::GROUP_OWNED.union(ParcelListingFlags::FOR_SALE),
+            ..ParcelDetails::default()
+        };
+        let mut avatars = AvatarState::default();
+        // An agent of the same id would be the wrong answer.
+        avatars.seed_name_fields(
+            AgentKey::from(owner),
+            Some("Not".to_owned()),
+            Some("AGroup".to_owned()),
+            None,
+        );
+        assert_eq!(
+            parcel_owner_label(&details, &avatars, &GroupsModel::default()),
+            format!("({})", GroupKey::from(owner))
+        );
     }
 
     /// The SLURL uses the maps-URL form, escapes the region name and clamps

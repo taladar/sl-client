@@ -74,10 +74,11 @@ async fn query<T>(
 ///   query is the anchor: the Linden-category search returns the grid's Linden
 ///   hubs. The case asserts a `DirPlacesReply` arrives; if the beta search
 ///   backend answers none over UDP, it marks the run partial rather than
-///   failing. Land and classifieds are recorded but not asserted, because the
-///   two diverge even on Second Life (confirmed live): the places search returns
-///   the Linden hubs and the classifieds search replies (empty on the beta
-///   grid), but the land-for-sale query draws **no** `DirLandReply` at all.
+///   failing. Land and classifieds are recorded but not asserted: the
+///   classifieds search replies empty on the beta grid, and the land search is
+///   answered over the **event queue**, not UDP — a `DirLandReply` event this
+///   client dropped until 2026-10-05, which is why this case long recorded no
+///   answer to it (`book/src/gridspec/land.md`, *Land search on Second Life*).
 #[derive(Debug)]
 pub struct DirPlacesLandClassified;
 

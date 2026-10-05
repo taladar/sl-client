@@ -71,6 +71,12 @@ impl Plugin for ParcelNamesPlugin {
     }
 }
 
+// A name in this cache is as old as the listing it came from, and on OpenSim a
+// listing can itself be up to ~40 s behind the parcel: the simulator caches
+// each one for 30 s past its last read. So a parcel link that keeps its old
+// name after a rename on the live OpenSim is the grid's cache first, this one
+// second (`book/src/gridspec/land.md`, § Parcel info). The fake grid has no
+// such lag.
 #[cfg(test)]
 mod tests {
     use super::ParcelNames;

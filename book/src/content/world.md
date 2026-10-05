@@ -193,6 +193,12 @@ over UDP (`Command::RequestParcelInfo` → `Event::ParcelDetails`). This is
 distinct from the rich `ParcelProperties` above: it is the condensed, by-id form
 the search results show.
 
+The listing's flags byte is a packing of its own (`ParcelListingFlags`): the
+region's rating, whether a group owns the parcel, and whether it is for sale.
+Its sale-price field is filled either way, so `ParcelDetails::sale_price` is
+`Some` only when the for-sale bit is set. What each grid puts in the byte is in
+[Grid Behaviour → Land](../gridspec/land.md#parcel-info).
+
 ## Avatars in the region
 
 Other avatars are simply objects with the **avatar** pcode, so they arrive

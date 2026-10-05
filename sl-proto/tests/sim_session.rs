@@ -31,11 +31,11 @@ mod test {
         MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
         NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
         ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails,
-        ParcelInfo, ParcelKey, ParcelObjectOwner, ParcelRect, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, Permissions, Permissions5, PingId, PlacesResult,
-        PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, QueryId, RegionCoordinates,
-        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
-        RegionTerrainComposition, RejectionReason, RequiredVoiceVersion, RestoreItem,
+        ParcelInfo, ParcelKey, ParcelListingFlags, ParcelObjectOwner, ParcelRect,
+        ParcelRequestResult, ParcelReturnType, ParcelStatus, Permissions, Permissions5, PingId,
+        PlacesResult, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType, QueryId,
+        RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
+        RegionStats, RegionTerrainComposition, RejectionReason, RequiredVoiceVersion, RestoreItem,
         RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId,
         ScriptControl, ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus,
         ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
@@ -1526,7 +1526,9 @@ mod test {
                 description: "A nice spot".to_owned(),
                 actual_area: LandArea(512),
                 billable_area: LandArea(480),
-                flags: 0x4,
+                // Built without the for-sale bit: the encoder derives it from
+                // the price, so the two cannot disagree on the wire.
+                flags: ParcelListingFlags::GROUP_OWNED,
                 global_position: GlobalCoordinates::new(256_000.0, 257_024.0, 23.5),
                 sim_name: region("Default Region"),
                 snapshot_id: Some(TextureKey::from(uuid::Uuid::from_u128(0x77))),
@@ -1566,6 +1568,10 @@ mod test {
             ParcelKey::from(uuid::Uuid::from_u128(0x00C0_FFEE))
         );
         assert_eq!(details.sale_price, Some(LindenAmount(1000)));
+        assert_eq!(
+            details.flags,
+            ParcelListingFlags::GROUP_OWNED.union(ParcelListingFlags::FOR_SALE)
+        );
         let dwell = client_events
             .iter()
             .find_map(|e| match e {

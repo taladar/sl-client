@@ -10,9 +10,9 @@ use crate::types::{
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties,
     ChatAudible, ChatMessage, ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo,
     CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, DayNames, DensityLayer,
-    DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate,
-    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails,
-    GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+    DirLandResult, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
+    EnvironmentUpdate, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow,
+    GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
     GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
     GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
@@ -5376,6 +5376,62 @@ pub(crate) fn land_stat_reply_from_caps_llsd(
             .collect()
     });
     Some((report_type, request_flags, total_object_count, items))
+}
+
+/// Decodes a CAPS `DirLandReply` event body: the event-queue form of a land
+/// search's results, which is how Second Life answers a `DirLandQuery`.
+///
+/// The body mirrors the UDP message block for block —
+/// `{ AgentData: [ { AgentID } ], QueryData: [ { QueryID } ],
+///    QueryReplies: [ { ParcelID, Name, Auction, ForSale, SalePrice,
+///                      ActualArea, ProductSKU } ] }`
+/// — with the land type's `ProductSKU`, which the UDP template leaves out, on
+/// every row. A search that matched nothing carries no `QueryReplies`.
+///
+/// `QueryData` is required: without the query id nothing can tell which search
+/// the rows answer, so `Ok(None)` refuses the body.
+///
+/// # Errors
+///
+/// A row whose price or area is negative, as on the UDP path.
+pub(crate) fn dir_land_reply_from_caps_llsd(
+    body: &Llsd,
+) -> Result<Option<(Uuid, Vec<DirLandResult>)>, sl_wire::WireError> {
+    let Some(query_id) = body
+        .get("QueryData")
+        .and_then(|data| data.index(0))
+        .and_then(|query| query.get("QueryID"))
+        .and_then(Llsd::as_uuid)
+    else {
+        return Ok(None);
+    };
+    let rows = body.get("QueryReplies").and_then(Llsd::as_array);
+    let results = rows.map_or_else(
+        || Ok(Vec::new()),
+        |rows| {
+            rows.iter()
+                .map(|row| {
+                    let for_sale = row.get("ForSale").and_then(Llsd::as_bool).unwrap_or(false);
+                    Ok(DirLandResult {
+                        parcel_id: ParcelKey::from(uuid_member(row, "ParcelID")),
+                        name: string_member(row, "Name"),
+                        auction: row.get("Auction").and_then(Llsd::as_bool).unwrap_or(false),
+                        for_sale,
+                        sale_price: crate::types::linden_price_from_wire(
+                            for_sale,
+                            "SalePrice",
+                            i32_member(row, "SalePrice"),
+                        )?,
+                        actual_area: crate::types::land_area_from_wire(
+                            "ActualArea",
+                            i32_member(row, "ActualArea"),
+                        )?,
+                    })
+                })
+                .collect::<Result<Vec<_>, sl_wire::WireError>>()
+        },
+    )?;
+    Ok(Some((query_id, results)))
 }
 
 /// Decodes one `DataExtended` entry of a CAPS `LandStatReply`.

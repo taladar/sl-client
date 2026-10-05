@@ -1405,6 +1405,10 @@ pushing one those three surfaces cannot answer:
   of the parcel record, the id and dwell out of the listing — so the two
   records cannot drift into describing different land, which is a drift a
   live grid cannot have because both come out of its one land record.
+  The listing's flags byte is derived the same way: the region's rating,
+  group ownership from the parcel's owner, for-sale from its sale price,
+  with an adult rating packed as the imitated grid packs it
+  ([Grid Behaviour → Land](../gridspec/land.md#the-listings-flags-byte)).
 
 A parcel with no listing is still served: it simply has no grid-wide
 identity, so a location inside it resolves to nothing and its dwell and

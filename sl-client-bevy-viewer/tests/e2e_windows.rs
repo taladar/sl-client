@@ -27,12 +27,12 @@ mod test {
     use serde_json::json;
     use sl_automation_proto::{Bounds, InventoryRoot, Locator, Probe, Role};
     use sl_e2e::{BodyError, Need, Stage, StageBuilder};
-    use sl_fake_grid::RegionConfig;
     use sl_fake_grid::scenario::{Scenario, class_folder};
+    use sl_fake_grid::{ImitatedGrid, RegionConfig};
     use sl_proto::{
-        AgentKey, AssetKey, AssetType, InventoryItem, InventoryKey, InventoryType, ObjectKey,
-        OwnerKey, Permissions, Permissions5, RegionCoordinates, RegionLocalObjectId, ServerEvent,
-        TextureKey, Uuid, WearableType, landmark_to_wire,
+        AgentKey, AssetKey, AssetType, GroupKey, InventoryItem, InventoryKey, InventoryType,
+        Maturity, ObjectKey, OwnerKey, Permissions, Permissions5, RegionCoordinates,
+        RegionLocalObjectId, ServerEvent, TextureKey, Uuid, WearableType, landmark_to_wire,
     };
     use sl_test_assets::inventory::fixture_id;
     use sl_viewer_driver::{UiLocator, Viewer};
@@ -237,6 +237,26 @@ mod test {
             region_id: Some(Uuid::from_u128(NEIGHBOUR_ID)),
             ..home
         }
+    }
+
+    /// The group that owns the parcel of [`adult_group_home`].
+    const LANDLORD_GROUP: u128 = 0x57A6_E160_0003;
+
+    /// [`home`] rated adult, its parcel owned by [`LANDLORD_GROUP`]: the two
+    /// things a parcel listing's flags byte says that its other fields do not.
+    fn adult_group_home() -> RegionConfig {
+        let mut region = home();
+        region.maturity = Maturity::Adult;
+        if let Some(parcel) = region
+            .scenario
+            .as_mut()
+            .and_then(|scenario| scenario.world.parcels.first_mut())
+        {
+            let group = GroupKey::from(Uuid::from_u128(LANDLORD_GROUP));
+            parcel.owner = OwnerKey::Group(group);
+            parcel.group = Some(group);
+        }
+        region
     }
 
     // ---- Helpers ----------------------------------------------------------
@@ -869,6 +889,18 @@ mod test {
     }
 
     // ---- About Landmark ---------------------------------------------------
+    //
+    // The parcel rows of this window (name, rating, owner, traffic, area) come
+    // from the parcel's *listing* (`ParcelInfoReply`). These tests need
+    // `Need::GridControl`, so they run against the fake grid only, which
+    // answers a listing from the live parcel record. If one is ever ported to
+    // the live OpenSim (`SL_E2E_GRID=opensim`) and a row shows the parcel as
+    // it was before an edit, that is OpenSim's listing cache — an entry lives
+    // 30 s past its last read, so reopening the window to look again keeps the
+    // stale answer alive. Wait ~45 s without opening anything that asks for
+    // the listing. Measured by the `parcel-info-dwell` conformance case
+    // (`LISTING_CACHE_WAIT`); written up in `book/src/gridspec/land.md`,
+    // § Parcel info.
 
     /// The About Landmark window of the seeded landmark.
     fn about_landmark(alpha: &Viewer) -> UiLocator {
@@ -901,6 +933,48 @@ mod test {
             _ => false,
         };
         written.then_some(())
+    }
+
+    /// **About Landmark, the listing's flags**: a landmark onto a group's
+    /// parcel in an adult region is rated Adult and owned by the group on
+    /// either grid. The two pack an adult rating differently in the listing's
+    /// flags byte — Second Life sets the moderate bit beside the adult one,
+    /// OpenSim does not — and group ownership is the bit this viewer once took
+    /// for "for sale" (`gridspec-parcel-info-dwell`).
+    #[test]
+    fn about_landmark_reads_the_rating_and_the_group_owner_on_each_grid() -> Result<(), TestError> {
+        for (name, flavour) in [
+            ("about_landmark_flags_second_life", ImitatedGrid::SecondLife),
+            ("about_landmark_flags_opensim", ImitatedGrid::OpenSim),
+        ] {
+            stage(name)
+                .region(adult_group_home())
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .needs(Need::GridControl)
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    inventory_item_menu(alpha, "Landmarks", LANDMARK.1, "menu-inv-about-landmark")
+                        .await?;
+                    let window = about_landmark(alpha);
+                    let _shown = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+                    let _rated = alpha
+                        .expect(&window.get(Locator::role(Role::Text).named("Adult")))
+                        .timeout(WAIT)
+                        .to_be_visible()
+                        .await?;
+                    // No grid here knows the group's name, so the row shows its
+                    // id the way an unresolved group is shown — in brackets,
+                    // which an agent of that id never is.
+                    let group = GroupKey::from(Uuid::from_u128(LANDLORD_GROUP));
+                    let _owned = alpha
+                        .expect(&window.get(Locator::role(Role::Text).named(format!("({group})"))))
+                        .timeout(WAIT)
+                        .to_be_visible()
+                        .await?;
+                    Ok(())
+                })?;
+        }
+        Ok(())
     }
 
     /// **About Landmark**: opened from the inventory row's About Landmark

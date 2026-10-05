@@ -6,14 +6,14 @@ floater, the land tool and the objects panel change it. The messages
 themselves are described in
 [Region & Estate Information](../content/region.md).
 
-Measured on 2026-10-05 on Second Life's beta grid (aditi) and the local
-OpenSim standalone by the conformance cases `parcel-properties`,
-`parcel-crossing`, `parcel-edit`, `parcel-edit-refused`, `parcel-divide-join`
-and `parcel-object-owners`. Each case holds both grids, and both fake-grid
-flavours, to these answers as `Measured` constants. The aditi test accounts
-own no land and there is no known way for a resident to get some there
-(`gridspec-aditi-test-land`), so on Second Life only what a resident without
-land rights sees is measured.
+Measured on 2026-10-05 on Second Life's beta grid (aditi) and the local OpenSim
+standalone by the conformance cases `parcel-properties`, `parcel-crossing`,
+`parcel-edit`, `parcel-edit-refused`, `parcel-divide-join`,
+`parcel-object-owners` and `parcel-info-dwell`. Each case holds both grids, and
+both fake-grid flavours, to these answers as `Measured` constants. The aditi
+test accounts own no land and there is no known way for a resident to get some
+there (`gridspec-aditi-test-land`), so on Second Life only what a resident
+without land rights sees is measured.
 
 ## Reading a parcel
 
@@ -92,6 +92,71 @@ its own ids negative (`SELECTED_PARCEL_SEQ_ID` -10000 and below); so does this
 viewer since 2026-10-05 — About Land counts down from -100000, the land tool
 from -10000. The session finds the agent's parcel from its position and the
 pushed parcels' bitmaps, not from the sequence id.
+
+## Parcel info
+
+The condensed listing a place profile, a landmark and a search result show for
+a parcel **id** (`ParcelInfoRequest` → `ParcelInfoReply`), the id itself
+(`RemoteParcelRequest`), and the parcel's dwell (`ParcelDwellRequest`).
+Measured by `parcel-info-dwell` on 2026-10-05: on aditi as a resident without
+land, in an adult sandbox region whose centre parcel a group owns, and over the
+listings of the first rows of a land search and a places search; on OpenSim as
+the estate owner, who also put the parcel up for sale and took it off again.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `RemoteParcelRequest` for a location | a parcel id | a parcel id that encodes the region handle and the position (`Util.BuildFakeParcelID`) | the parcel's fixture id, both flavours |
+| `ParcelInfoReply` transport | UDP | UDP | UDP |
+| a listing for a parcel in another region | answered | answered through the grid's land service (from source) | only the region's own parcels |
+| `ParcelDwellReply` | answered, 0 | answered, 0 on a region nobody visits | answered with the fixture's dwell |
+| the listing's `Dwell` | 0 for every parcel sampled, busy places included | the dwell module's value | the fixture's dwell |
+| `ActualArea` | the parcel's area | the parcel's area | the parcel's area |
+| `BillableArea` | the area on some parcels, **0** on others (13 of 16 search rows) | always the area | always the area |
+| `SalePrice` of a parcel that is not for sale | still filled: 1, 10000 and 29958 seen on the wire (an `sl-repl` probe) | the stored price | 0 |
+| `AuctionID` | 0 on every parcel sampled | the stored id | the parcel's |
+| a listing after an edit | not measured (no land) | **stale**: cached for 30 s past its last read, swept every 10 s | follows the edit at once, both flavours |
+
+### The listing's flags byte
+
+`ParcelInfoReply.Data.Flags` is a packing of its own, not the parcel-flags
+field of `ParcelProperties` cut down to a byte. The reference viewer reads the
+rating and the ownership out of it (`llpanelplaceprofile.cpp`,
+`llpanellandmarkinfo.cpp`) and never the sale state.
+
+| bit | meaning | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- | --- |
+| `0x01` | region rated moderate | set; **also set for an adult region** | set for moderate only | as its grid |
+| `0x02` | region rated adult | set (so adult reads `0x03`) | set (adult reads `0x02`; from source — the local grid has no adult region) | as its grid (`ParcelPolicy::adult_listing_bits`) |
+| `0x04` | a group owns the parcel | set (checked against the parcel's own `ParcelProperties`) | set (from source, `LLClientView.SendParcelInfo`) | set when the fixture's owner is a group |
+| `0x80` | the parcel is for sale | set on all 8 land-search rows sampled, each at the row's price | set while the estate owner had the parcel for sale, cleared after | set while the parcel carries a sale price |
+
+Every listing's rating was compared with its region's rating on the world map
+(`MapNameRequest`) where the map knew the region: on aditi 3 adult (rating bits
+`0x03`), 2 moderate (`0x01`) and 2 general (`0x00`). The rows of aditi's places
+search name regions its map no longer has, so those were not compared.
+
+`0x04` is also the value the *parcel* flags use for "for sale", which is how
+this client read the byte until 2026-10-05: a group-owned parcel was given the
+stale price in its `SalePrice` field and a parcel for sale was given none. The
+byte is now `ParcelListingFlags`, and `ParcelDetails::sale_price` is `Some`
+exactly when `0x80` is set.
+
+OpenSim's cache is keyed by parcel id and each read pushes its expiry out, so
+a viewer that polls a listing after an edit never sees the edit. The fake grid
+does not imitate it: the wait would cost every offline run a minute and a half
+for a lag a viewer cannot act on.
+
+### Land search on Second Life
+
+Aditi answers a `DirLandQuery` over the **event queue**, never over UDP: a
+`DirLandReply` event whose body mirrors the UDP message block for block
+(`AgentData`, `QueryData`, `QueryReplies`), with a `ProductSKU` string on every
+row that the UDP template has no field for (`023` and `024` seen). The client
+decodes it into the same `Event::DirLandReply` since 2026-10-05; before that
+the event was dropped and a land search on Second Life showed nothing. The SKU
+is not carried yet (`protocol-cap-product-info`). OpenSim's standalone answers
+a land search with nothing at all, and so does the fake grid
+(`server-fake-grid-directory-search`).
 
 ## Managing a parcel
 

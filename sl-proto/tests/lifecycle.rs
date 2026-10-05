@@ -14289,7 +14289,8 @@ mod test {
                 desc: with_nul_bytes("A nice spot"),
                 actual_area: 512,
                 billable_area: 480,
-                flags: 0x4,
+                // Adult the way Second Life packs it, group-owned, for sale.
+                flags: 0x87,
                 global_x: 256_000.0,
                 global_y: 257_024.0,
                 global_z: 23.5,
@@ -14317,7 +14318,178 @@ mod test {
         assert_eq!(details.sim_name, region_name("Default Region"));
         assert_eq!(details.actual_area, LandArea(512));
         assert_eq!(details.sale_price, Some(LindenAmount(1000)));
+        assert!(details.flags.is_for_sale());
+        assert!(details.flags.is_group_owned());
+        assert_eq!(details.flags.maturity(), Maturity::Adult);
+        assert_eq!(details.flags.bits(), 0x87);
         assert_eq!(details.global_position.z().to_bits(), 23.5_f64.to_bits());
+        Ok(())
+    }
+
+    /// The listing's sale-price field is filled whether or not the parcel is
+    /// for sale — aditi sends the price a parcel was last set to — so a listing
+    /// without the for-sale bit has no price, whatever the field holds. The
+    /// group-owned bit (`0x04`) is the same value as the *parcel-flags*
+    /// for-sale bit and must not be read as it.
+    #[test]
+    fn a_parcel_listing_off_the_market_has_no_price() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let reply = AnyMessage::ParcelInfoReply(ParcelInfoReply {
+            agent_data: ParcelInfoReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            data: ParcelInfoReplyDataBlock {
+                parcel_id: uuid::Uuid::from_u128(0x00C0_FFEE),
+                owner_id: uuid::Uuid::from_u128(0x55),
+                name: with_nul_bytes("Group Hall"),
+                desc: Vec::new(),
+                actual_area: 416,
+                billable_area: 0,
+                // Group-owned, general, not for sale.
+                flags: 0x04,
+                global_x: 256_000.0,
+                global_y: 257_024.0,
+                global_z: 23.5,
+                sim_name: with_nul_bytes("Default Region"),
+                snapshot_id: uuid::Uuid::nil(),
+                dwell: 0.0,
+                sale_price: 10_000,
+                auction_id: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, true)?, now)?;
+
+        let details = drain_events(&mut session)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ParcelDetails(details) => Some(details),
+                _ => None,
+            })
+            .ok_or("expected a ParcelDetails event")?;
+        assert_eq!(details.sale_price, None);
+        assert!(!details.flags.is_for_sale());
+        assert!(details.flags.is_group_owned());
+        assert_eq!(details.flags.maturity(), Maturity::Pg);
+        Ok(())
+    }
+
+    /// Second Life answers a land search over the event queue, as an LLSD
+    /// mirror of the UDP `DirLandReply` with a `ProductSKU` on every row; it
+    /// surfaces as the same event the UDP message does. A row that is not for
+    /// sale (an auction) has no price.
+    #[test]
+    fn dir_land_reply_caps_surfaces_the_search_results() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>AgentData</key><array><map>",
+            "<key>AgentID</key><uuid>00000000-0000-0000-0000-000000000001</uuid>",
+            "</map></array>",
+            "<key>QueryData</key><array><map>",
+            "<key>QueryID</key><uuid>00000000-0000-0000-0000-00000000d1a0</uuid>",
+            "</map></array>",
+            "<key>QueryReplies</key><array>",
+            "<map>",
+            "<key>ParcelID</key><uuid>00000000-0000-0000-0000-0000000000a1</uuid>",
+            "<key>Name</key><string>Flat Meadow</string>",
+            "<key>Auction</key><boolean>0</boolean>",
+            "<key>ForSale</key><boolean>1</boolean>",
+            "<key>SalePrice</key><integer>3920</integer>",
+            "<key>ActualArea</key><integer>768</integer>",
+            "<key>ProductSKU</key><string>024</string>",
+            "</map>",
+            "<map>",
+            "<key>ParcelID</key><uuid>00000000-0000-0000-0000-0000000000a2</uuid>",
+            "<key>Name</key><string>Auction Lot</string>",
+            "<key>Auction</key><boolean>1</boolean>",
+            "<key>ForSale</key><boolean>0</boolean>",
+            "<key>SalePrice</key><integer>55</integer>",
+            "<key>ActualArea</key><integer>16</integer>",
+            "<key>ProductSKU</key><string>023</string>",
+            "</map>",
+            "</array>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("DirLandReply", &body, now)?;
+
+        let (query_id, results) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::DirLandReply { query_id, results } => Some((query_id, results)),
+                _ => None,
+            })
+            .ok_or("expected a DirLandReply event")?;
+        assert_eq!(query_id, uuid::Uuid::from_u128(0xd1a0));
+        assert_eq!(results.len(), 2);
+        let first = results.first().ok_or("first row")?;
+        assert_eq!(
+            first.parcel_id,
+            ParcelKey::from(uuid::Uuid::from_u128(0xa1))
+        );
+        assert_eq!(first.name, "Flat Meadow");
+        assert!(first.for_sale);
+        assert!(!first.auction);
+        assert_eq!(first.sale_price, Some(LindenAmount(3920)));
+        assert_eq!(first.actual_area, LandArea(768));
+        let second = results.get(1).ok_or("second row")?;
+        assert!(second.auction);
+        assert_eq!(second.sale_price, None);
+        Ok(())
+    }
+
+    /// A land search that matched nothing carries no rows and is still an
+    /// answer; a body without the query id is not one.
+    #[test]
+    fn dir_land_reply_caps_needs_its_query_id_and_not_its_rows() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        session.set_diagnostics(true);
+        drain_diagnostics(&mut session);
+
+        let empty = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>QueryData</key><array><map>",
+            "<key>QueryID</key><uuid>00000000-0000-0000-0000-00000000d1a0</uuid>",
+            "</map></array>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("DirLandReply", &empty, now)?;
+        let results = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::DirLandReply { results, .. } => Some(results),
+                _ => None,
+            })
+            .ok_or("expected a DirLandReply event")?;
+        assert!(results.is_empty());
+
+        let headless = parse_llsd_xml("<llsd><map></map></llsd>")?;
+        session.handle_caps_event("DirLandReply", &headless, now)?;
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::DirLandReply { .. })),
+            "a body with no query id answers no search"
+        );
+        assert!(
+            drain_diagnostics(&mut session)
+                .iter()
+                .any(|diagnostic| matches!(
+                    diagnostic,
+                    Diagnostic::CapsDecodeFailed { message, .. } if message == "DirLandReply"
+                )),
+            "the refused body is reported"
+        );
         Ok(())
     }
 

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 365 |
+| ready | 364 |
 | blocked | 110 |
 | in-progress | 20 |
-| bugs | 29 |
-| done | 1319 |
+| bugs | 28 |
+| done | 1321 |
 | deferred | 29 |
 | wont-do | 17 |
 | **total** | **2025** |
@@ -352,7 +352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (365)
+## ready (364)
 
 ### protocol
 
@@ -1170,8 +1170,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Current Outfit Folder and wearables on each grid
 - [`gridspec-parcel-access-and-ban-lines`](ready/gridspec-parcel-access-and-ban-lines.md)
   — Parcel access and ban lists, enforcement and ban lines on each grid
-- [`gridspec-parcel-info-dwell`](ready/gridspec-parcel-info-dwell.md) — Parcel
-  info, dwell and the remote parcel id on each grid
 - [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
   classifieds, notes and display names on each grid
 - [`gridspec-region-arrival`](ready/gridspec-region-arrival.md) — Region
@@ -1607,7 +1605,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (29)
+## bugs (28)
 
 ### protocol
 
@@ -1618,8 +1616,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   bits
 - [`protocol-logout-reply-sometimes-missing-on-opensim`](bugs/protocol-logout-reply-sometimes-missing-on-opensim.md)
   — A logout on the local OpenSim sometimes gets no LogoutReply
-- [`protocol-parcel-info-reply-flags-misread`](bugs/protocol-parcel-info-reply-flags-misread.md)
-  — ParcelInfoReply's packed flags byte is read as the parcel-flags field
 - [`protocol-region-flag-deny-ageunverified-value`](bugs/protocol-region-flag-deny-ageunverified-value.md)
   — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
   are split
@@ -1681,7 +1677,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1319)
+## done (1321)
 
 ### protocol
 
@@ -1883,6 +1879,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — max-agent-groups is never requested at login but is gated on the option
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
+- [`protocol-parcel-info-reply-flags-misread`](done/protocol-parcel-info-reply-flags-misread.md)
+  — ParcelInfoReply's packed flags byte is read as the parcel-flags field
 - [`protocol-reference-capabilities`](done/protocol-reference-capabilities.md) —
   Request and use the capabilities the reference viewer asks for and the grids
   grant
@@ -4602,6 +4600,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grids
 - [`gridspec-login`](done/gridspec-login.md) — Login response fields, the
   options list and get_grid_info on each grid
+- [`gridspec-parcel-info-dwell`](done/gridspec-parcel-info-dwell.md) — Parcel
+  info, dwell and the remote parcel id on each grid
 - [`gridspec-parcel-management`](done/gridspec-parcel-management.md) — Parcel
   edits, divide/join, object owners and return on each grid
 - [`gridspec-parcel-properties`](done/gridspec-parcel-properties.md) —

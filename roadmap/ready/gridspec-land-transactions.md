@@ -31,3 +31,10 @@ Small in this task: passes, overlay re-send after ownership change. Charging:
 ## Viewer
 
 Helper URLs per grid; no L$ prompts for free land.
+
+## Left for here by [[gridspec-parcel-info-dwell]] (2026-10-05)
+
+A listing's group-owned bit (`0x04`) is measured on aditi and only read from
+source on OpenSim. Once this task deeds the local parcel to a group, read its
+`ParcelInfoReply` too — after leaving it alone for 45 s, since OpenSim caches
+a listing for 30 s past its last read.

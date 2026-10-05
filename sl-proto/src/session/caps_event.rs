@@ -49,6 +49,8 @@ pub(crate) enum CapsEvent {
     LandStatReply,
     /// A parcel's object-owner tally.
     ParcelObjectOwnersReply,
+    /// The results of a land search.
+    DirLandReply,
     /// The destination region of a teleport that is going through.
     TeleportFinish,
     /// A neighbour region the simulator wants a child circuit to.
@@ -186,6 +188,7 @@ impl CapsEvent {
             "ScriptRunningReply" => Self::ScriptRunningReply,
             "LandStatReply" => Self::LandStatReply,
             "ParcelObjectOwnersReply" => Self::ParcelObjectOwnersReply,
+            "DirLandReply" => Self::DirLandReply,
             "TeleportFinish" => Self::TeleportFinish,
             "EnableSimulator" => Self::EnableSimulator,
             "EstablishAgentCommunication" => Self::EstablishAgentCommunication,

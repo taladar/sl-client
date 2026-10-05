@@ -22,3 +22,11 @@ Implement the behaviour the discovery task measured and the book's
 `sl-fake-grid/src/imitates.rs` for every divergence), and hold it to the
 measurement with the discovery task's conformance cases run against
 `FakeSl` and `FakeOpensim`. See `roadmap/context/gridspec.md`.
+
+## Measured since (2026-10-05)
+
+Second Life's land-search answer is the event-queue `DirLandReply`, not the UDP
+message ([[gridspec-parcel-info-dwell]], `book/src/gridspec/land.md`), so the
+Second Life flavour has to send it that way. `parcel-info-dwell` reads the
+listings of a land search's rows wherever the search is answered, and will
+start exercising the fake grid's index as soon as there is one.

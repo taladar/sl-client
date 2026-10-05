@@ -468,11 +468,22 @@ impl ParcelListing {
     /// description, owner, area and flags, anchored at the parcel's
     /// south-west corner in `region`.
     ///
+    /// The listing's flags byte is its own packing, not the parcel's flags cut
+    /// down ([`ParcelListingFlags`](sl_proto::ParcelListingFlags)): the
+    /// region's rating, whether a group owns the parcel, and whether it is for
+    /// sale. `adult` is how the imitated grid packs an adult rating
+    /// ([`ParcelPolicy::adult_listing_bits`](crate::imitates::ParcelPolicy::adult_listing_bits)).
+    ///
     /// Derived rather than stated so the two records cannot disagree about
     /// the parcel they both describe — the drift a live grid cannot have,
     /// because both come out of its one land record.
     #[must_use]
-    pub fn details(&self, parcel: &ParcelInfo, region: &RegionIdentity) -> ParcelDetails {
+    pub fn details(
+        &self,
+        parcel: &ParcelInfo,
+        region: &RegionIdentity,
+        adult: sl_proto::AdultListingBits,
+    ) -> ParcelDetails {
         let (global_x, global_y) = region.region_handle.global_coordinates();
         ParcelDetails {
             parcel_id: self.parcel_id,
@@ -481,10 +492,12 @@ impl ParcelListing {
             description: parcel.description.clone(),
             actual_area: parcel.area,
             billable_area: parcel.area,
-            // The condensed byte a listing carries is not the full parcel
-            // bitfield: the reference viewer reads only the mature/adult bit
-            // out of it, and a listing of a general-rated parcel is zero.
-            flags: 0,
+            flags: sl_proto::ParcelListingFlags::new(
+                region.maturity,
+                parcel.owner.is_group(),
+                parcel.sale_price.is_some(),
+                adult,
+            ),
             global_position: GlobalCoordinates::new(
                 f64::from(global_x) + f64::from(parcel.aabb_min.x()),
                 f64::from(global_y) + f64::from(parcel.aabb_min.y()),
@@ -2163,6 +2176,14 @@ pub(crate) fn answer_world_request(
         // The search listing behind a parcel *id* — the id a viewer got from
         // the `RemoteParcelRequest` capability, a landmark or a place profile,
         // never from the region-local record.
+        //
+        // Answered from the live record on both flavours. That is a known,
+        // deliberate difference from OpenSim, which answers from a cache that
+        // lives 30 s past its last read (`m_parcelInfoCache`): a listing read
+        // straight after an edit is stale there and fresh here. A test that
+        // passes against `FakeOpensim` and fails against the live grid on a
+        // listing's name, price or flags after an edit is seeing that cache,
+        // not a client bug (`book/src/gridspec/land.md`, § Parcel info).
         ServerEvent::RequestParcelInfo { parcel_id } => {
             let Some((listing, parcel)) = world.listing_by_parcel_id(*parcel_id) else {
                 tracing::debug!(
@@ -2170,7 +2191,8 @@ pub(crate) fn answer_world_request(
                 );
                 return Vec::new();
             };
-            if let Err(error) = sim.send_parcel_info_reply(&listing.details(parcel, region), now) {
+            let details = listing.details(parcel, region, parcels.adult_listing_bits);
+            if let Err(error) = sim.send_parcel_info_reply(&details, now) {
                 tracing::warn!("answering a parcel info request failed: {error}");
             }
         }
@@ -3307,6 +3329,11 @@ mod test {
     /// a `ParcelInfoRequest` answers with are the ones the
     /// `ParcelProperties` reply carries, and the id and dwell are the ones
     /// only the listing knows.
+    // The listing below is derived from the parcel as it stands at the moment
+    // it is asked for. The live OpenSim caches a listing for 30 s past its last
+    // read instead, and the fake grid does not imitate that — see the
+    // `RequestParcelInfo` arm above before trusting this test as a model of
+    // what a live read-after-edit returns.
     #[test]
     fn a_parcel_carries_its_grid_wide_half() -> Result<(), String> {
         let parcel_id = ParcelKey::from(uuid::Uuid::from_u128(0xBEEF));
@@ -3334,7 +3361,10 @@ mod test {
         // The region's south-west corner is at (1000, 1000) regions =
         // (256_000, 256_000) metres, and the parcel starts at the corner.
         let region = test_region("Fake Region", 1000, 1000);
-        let details = listing.details(parcel, &region);
+        let details = listing.details(parcel, &region, sl_proto::AdultListingBits::AdultAndMature);
+        // An agent's general-rated parcel that is not for sale: no flag at all.
+        assert_eq!(details.flags, sl_proto::ParcelListingFlags::NONE);
+        assert_eq!(details.sale_price, None);
         assert_eq!(details.parcel_id, parcel_id);
         assert_eq!(details.name, "Sunny Plaza");
         assert_eq!(details.owner_id, agent(7).uuid());

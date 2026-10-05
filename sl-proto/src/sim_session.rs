@@ -6621,7 +6621,12 @@ impl SimSession {
                     "BillableArea",
                     &details.billable_area,
                 )?,
-                flags: details.flags,
+                // One fact, stated once: the listing is for sale exactly when
+                // it carries a price, whatever the flags were built with.
+                flags: details
+                    .flags
+                    .with_for_sale(details.sale_price.is_some())
+                    .bits(),
                 global_x: global_to_f32(details.global_position.x()),
                 global_y: global_to_f32(details.global_position.y()),
                 global_z: global_to_f32(details.global_position.z()),
