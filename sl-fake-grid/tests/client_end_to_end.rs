@@ -5328,7 +5328,10 @@ mod test {
         // The first resident renames the parcel.
         let mut renamed = opened_first.to_update();
         renamed.name = "First's Land".to_owned();
-        first.commands.send(Command::UpdateParcel(renamed)).await?;
+        first
+            .commands
+            .send(Command::UpdateParcel(Box::new(renamed)))
+            .await?;
         let echoed = next_parcel(&mut first).await?;
         assert_eq!(echoed.name, "First's Land");
 
@@ -5348,7 +5351,10 @@ mod test {
         // read at open re-asserts the old name and undoes the rename.
         let mut stale = opened_second.to_update();
         stale.description = "Second's description".to_owned();
-        second.commands.send(Command::UpdateParcel(stale)).await?;
+        second
+            .commands
+            .send(Command::UpdateParcel(Box::new(stale)))
+            .await?;
         let reverted = next_parcel(&mut second).await?;
         assert_eq!(
             reverted.description, "Second's description",
@@ -5367,13 +5373,90 @@ mod test {
         converged.name = "First's Land".to_owned();
         first
             .commands
-            .send(Command::UpdateParcel(converged))
+            .send(Command::UpdateParcel(Box::new(converged)))
             .await?;
         let settled = next_parcel(&mut first).await?;
         assert_eq!(settled.name, "First's Land");
         assert_eq!(
             settled.description, "Second's description",
             "a save from the pushed record reverted a field it never touched"
+        );
+        Ok(())
+    }
+
+    /// An About Land save on an OpenSim-flavoured grid goes over the
+    /// `ParcelPropertiesUpdate` capability and keeps the parcel's media type,
+    /// and the region's echo of it carries the sequence id of the client's last
+    /// parcel request, as OpenSim's does.
+    ///
+    /// The teeth are the flavour's: an edit over the UDP message empties the
+    /// media type there, as live OpenSim nulls it (and then refuses every later
+    /// database commit of the region). A client that fell back to UDP where the
+    /// capability is granted fails the media assertion.
+    #[tokio::test]
+    async fn an_about_land_save_keeps_the_media_type_on_opensim() -> Result<(), TestError> {
+        const SEQUENCE_ID: i32 = 77;
+        let mut running =
+            start_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
+        running
+            .commands
+            .send(Command::RequestParcelProperties {
+                west: 124.0,
+                south: 124.0,
+                east: 128.0,
+                north: 128.0,
+                sequence_id: SEQUENCE_ID,
+                snap_selection: false,
+            })
+            .await?;
+        let mut opened = None;
+        running
+            .wait_until("the parcel at the region centre", |event| match event {
+                Event::ParcelProperties(parcel) if parcel.sequence_id == SEQUENCE_ID => {
+                    opened = Some((**parcel).clone());
+                    true
+                }
+                _ => false,
+            })
+            .await?;
+        let opened = opened.ok_or("the parcel reply was not kept")?;
+        let media_type =
+            |parcel: &sl_client_tokio::ParcelInfo| parcel.media_data.clone().map(|m| m.media_type);
+        assert_eq!(
+            media_type(&opened),
+            Some("none/none".to_owned()),
+            "the OpenSim flavour did not send the media block OpenSim sends"
+        );
+        assert_eq!(
+            opened.obscure_moap, None,
+            "the OpenSim flavour sent the extended flags OpenSim does not"
+        );
+
+        let mut renamed = opened.to_update();
+        renamed.name = "Renamed".to_owned();
+        running
+            .commands
+            .send(Command::UpdateParcel(Box::new(renamed)))
+            .await?;
+        let mut echoed = None;
+        running
+            .wait_until("the echo of the save", |event| match event {
+                Event::ParcelProperties(parcel) if parcel.name == "Renamed" => {
+                    echoed = Some((**parcel).clone());
+                    true
+                }
+                _ => false,
+            })
+            .await?;
+        let echoed = echoed.ok_or("the echo was not kept")?;
+        assert_eq!(
+            media_type(&echoed),
+            Some("none/none".to_owned()),
+            "the save lost the media type: it went out over UDP"
+        );
+        assert_eq!(
+            echoed.sequence_id, SEQUENCE_ID,
+            "the echo did not carry the last request's sequence id"
         );
         Ok(())
     }

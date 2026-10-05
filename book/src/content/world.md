@@ -376,10 +376,11 @@ None of these has a reply; the client just acts on them.
 >   `sl-proto/src/session/circuit.rs`; the simulator side decodes each into a
 >   `ServerEvent` and answers `RequestParcelObjectOwners` / `RequestParcelInfo`
 >   with `SimSession::send_parcel_object_owners_reply` /
->   `send_parcel_info_reply`. `ParcelObjectOwnersReply` is `UDPDeprecated`: a
->   region with an event queue answers it there instead
+>   `send_parcel_info_reply`. `ParcelObjectOwnersReply` is `UDPDeprecated`:
+>   Second Life answers it on the event queue
 >   (`SimSession::enqueue_parcel_object_owners_reply`, decoded by the client's
->   `handle_caps_event`).
+>   `handle_caps_event`), while OpenSim still sends the UDP message, so the
+>   client takes both ([Land](../gridspec/land.md)).
 > - `RequestRemoteParcelId` posts the `RemoteParcelRequest` capability
 >   (`sl-wire/src/remote_parcel.rs`), decoded into `Event::RemoteParcelId`.
 > - The world map's three queries are `Command::RequestMapBlocks` /

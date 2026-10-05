@@ -20,12 +20,12 @@ use crate::types::{
     LandStatScore, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
     Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
     NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo,
-    ParcelCategory, ParcelInfo, ParcelObjectOwner, ParcelRequestResult, ParcelStatus, PickInfo,
-    PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId,
-    RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
-    RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings, TRACK_MAX,
-    TaskInventoryItem, WaterSettings, avatar_texture,
+    ParcelCategory, ParcelInfo, ParcelMediaData, ParcelMediaSharing, ParcelObjectOwner,
+    ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation, PrimShapeParams,
+    ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings, RegionCombatSettings,
+    RegionIdentity, RegionLimits, RegionTerrainComposition, RequiredVoiceVersion, RestoreItem,
+    SaleType, Scale, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply,
+    SkySettings, TRACK_MAX, TaskInventoryItem, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -2037,6 +2037,9 @@ pub(crate) fn parcel_info(msg: &ParcelProperties) -> Result<ParcelInfo, sl_wire:
         see_avs: None,
         any_av_sounds: None,
         group_av_sounds: None,
+        media_data: None,
+        media_sharing: None,
+        obscure_moap: None,
     })
 }
 
@@ -3633,6 +3636,47 @@ pub(crate) fn parcel_info_from_llsd(body: &Llsd) -> Option<ParcelInfo> {
         see_avs: data.get("SeeAVs").and_then(Llsd::as_bool),
         any_av_sounds: data.get("AnyAVSounds").and_then(Llsd::as_bool),
         group_av_sounds: data.get("GroupAVSounds").and_then(Llsd::as_bool),
+        media_data: block("MediaData").map(|media| ParcelMediaData {
+            description: media
+                .get("MediaDesc")
+                .and_then(Llsd::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            media_type: media
+                .get("MediaType")
+                .and_then(Llsd::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            width: media.get("MediaWidth").and_then(Llsd::as_i32).unwrap_or(0),
+            height: media.get("MediaHeight").and_then(Llsd::as_i32).unwrap_or(0),
+            looping: media
+                .get("MediaLoop")
+                .and_then(Llsd::as_bool)
+                .unwrap_or(false),
+        }),
+        media_sharing: block("MediaLinkSharing").map(|sharing| ParcelMediaSharing {
+            current_url: sharing
+                .get("MediaCurrentURL")
+                .and_then(Llsd::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            allow_navigate: sharing
+                .get("MediaAllowNavigate")
+                .and_then(Llsd::as_bool)
+                .unwrap_or(false),
+            prevent_camera_zoom: sharing
+                .get("MediaPreventCameraZoom")
+                .and_then(Llsd::as_bool)
+                .unwrap_or(false),
+            url_timeout: sharing
+                .get("MediaURLTimeout")
+                .and_then(Llsd::as_f32)
+                .unwrap_or(0.0),
+        }),
+        // A `u32` the reference reads as "obscure MOAP" when non-zero.
+        obscure_moap: block("ParcelExtendedFlags")
+            .and_then(|flags| flags.get("Flags"))
+            .map(|flags| llsd_u32(flags) != 0),
     })
 }
 
@@ -6191,15 +6235,7 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
             Llsd::Boolean(info.region_deny_transacted),
         ),
     ];
-    if let Some(see_avs) = info.see_avs {
-        data.push(("SeeAVs", Llsd::Boolean(see_avs)));
-    }
-    if let Some(any_av_sounds) = info.any_av_sounds {
-        data.push(("AnyAVSounds", Llsd::Boolean(any_av_sounds)));
-    }
-    if let Some(group_av_sounds) = info.group_av_sounds {
-        data.push(("GroupAVSounds", Llsd::Boolean(group_av_sounds)));
-    }
+    data.extend(caps_only_parcel_data(info));
     let age_verification = llsd_map(vec![(
         "RegionDenyAgeUnverified",
         Llsd::Boolean(info.region_deny_age_unverified),
@@ -6218,7 +6254,7 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
             Llsd::Boolean(info.region_allow_environment_override),
         ),
     ]);
-    Ok(llsd_map(vec![
+    let mut blocks = vec![
         ("ParcelData", Llsd::Array(vec![llsd_map(data)])),
         ("AgeVerificationBlock", Llsd::Array(vec![age_verification])),
         (
@@ -6229,7 +6265,9 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
             "ParcelEnvironmentBlock",
             Llsd::Array(vec![parcel_environment]),
         ),
-    ]))
+    ];
+    blocks.extend(caps_only_parcel_blocks(info));
+    Ok(llsd_map(blocks))
 }
 
 /// Serializes offline IMs as a `ReadOfflineMsgs` capability reply body — an
@@ -7227,6 +7265,72 @@ fn llsd_u32_binary(value: u32) -> Llsd {
     ])
 }
 
+/// The `ParcelData` fields of a CAPS `ParcelProperties` body the UDP message
+/// has no room for — the avatar-visibility booleans — each only when present.
+/// Shared by [`parcel_info_to_llsd`] and [`parcel_properties_to_llsd`].
+fn caps_only_parcel_data(info: &ParcelInfo) -> Vec<(&'static str, Llsd)> {
+    let mut data = Vec::new();
+    if let Some(see_avs) = info.see_avs {
+        data.push(("SeeAVs", Llsd::Boolean(see_avs)));
+    }
+    if let Some(any_av_sounds) = info.any_av_sounds {
+        data.push(("AnyAVSounds", Llsd::Boolean(any_av_sounds)));
+    }
+    if let Some(group_av_sounds) = info.group_av_sounds {
+        data.push(("GroupAVSounds", Llsd::Boolean(group_av_sounds)));
+    }
+    data
+}
+
+/// The trailing blocks of a CAPS `ParcelProperties` body the UDP message has
+/// no room for — `MediaData`, `MediaLinkSharing` and `ParcelExtendedFlags` —
+/// each only when present. Shared by [`parcel_info_to_llsd`] and
+/// [`parcel_properties_to_llsd`].
+fn caps_only_parcel_blocks(info: &ParcelInfo) -> Vec<(&'static str, Llsd)> {
+    let mut blocks = Vec::new();
+    if let Some(media) = &info.media_data {
+        blocks.push((
+            "MediaData",
+            Llsd::Array(vec![llsd_map(vec![
+                ("MediaDesc", Llsd::String(media.description.clone())),
+                ("MediaType", Llsd::String(media.media_type.clone())),
+                ("MediaWidth", Llsd::Integer(media.width)),
+                ("MediaHeight", Llsd::Integer(media.height)),
+                ("MediaLoop", Llsd::Boolean(media.looping)),
+                ("ObscureMedia", Llsd::Boolean(false)),
+                ("ObscureMusic", Llsd::Boolean(false)),
+            ])]),
+        ));
+    }
+    if let Some(sharing) = &info.media_sharing {
+        blocks.push((
+            "MediaLinkSharing",
+            Llsd::Array(vec![llsd_map(vec![
+                ("MediaCurrentURL", Llsd::String(sharing.current_url.clone())),
+                ("MediaAllowNavigate", Llsd::Boolean(sharing.allow_navigate)),
+                (
+                    "MediaPreventCameraZoom",
+                    Llsd::Boolean(sharing.prevent_camera_zoom),
+                ),
+                (
+                    "MediaURLTimeout",
+                    Llsd::Real(f64::from(sharing.url_timeout)),
+                ),
+            ])]),
+        ));
+    }
+    if let Some(obscure_moap) = info.obscure_moap {
+        blocks.push((
+            "ParcelExtendedFlags",
+            Llsd::Array(vec![llsd_map(vec![(
+                "Flags",
+                u32_to_llsd(u32::from(obscure_moap)),
+            )])]),
+        ));
+    }
+    blocks
+}
+
 /// Encodes a [`ParcelInfo`] as a CAPS `ParcelProperties` event body — the
 /// inverse of [`parcel_info_from_llsd`]. The `ParcelData` block and the three
 /// trailing single-blocks are each a one-element array holding a map, as the
@@ -7240,7 +7344,7 @@ pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo) -> Llsd {
         Llsd::Integer(i32::try_from(amount.0).unwrap_or(i32::MAX))
     };
     let optional_key = |uuid: Uuid| Llsd::Uuid(uuid);
-    let data = llsd_map(vec![
+    let mut data = vec![
         ("SequenceID", Llsd::Integer(info.sequence_id)),
         ("RequestResult", Llsd::Integer(info.request_result.to_i32())),
         ("SnapSelection", Llsd::Boolean(info.snap_selection)),
@@ -7348,9 +7452,10 @@ pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo) -> Llsd {
             "RegionDenyTransacted",
             Llsd::Boolean(info.region_deny_transacted),
         ),
-    ]);
-    llsd_map(vec![
-        ("ParcelData", Llsd::Array(vec![data])),
+    ];
+    data.extend(caps_only_parcel_data(info));
+    let mut blocks = vec![
+        ("ParcelData", Llsd::Array(vec![llsd_map(data)])),
         (
             "AgeVerificationBlock",
             Llsd::Array(vec![llsd_map(vec![(
@@ -7378,7 +7483,9 @@ pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo) -> Llsd {
                 ),
             ])]),
         ),
-    ])
+    ];
+    blocks.extend(caps_only_parcel_blocks(info));
+    llsd_map(blocks)
 }
 
 /// Encodes an [`Object`] as a full `ObjectUpdate` object-data block — the
@@ -7487,9 +7594,10 @@ mod caps_serializer_tests {
         group_members_from_caps_llsd, group_members_to_caps_llsd, group_memberships_from_caps_llsd,
         group_memberships_to_caps_llsd, inventory_descendents_from_llsd,
         inventory_descendents_to_llsd, offline_messages_from_llsd, offline_messages_to_llsd,
-        parcel_info_from_llsd, parcel_info_to_llsd, server_appearance_update_from_llsd,
-        server_appearance_update_to_llsd, session_history_from_llsd, session_history_to_llsd,
-        teleport_finish_from_llsd, teleport_finish_to_llsd,
+        parcel_info_from_llsd, parcel_info_to_llsd, parcel_properties_to_llsd,
+        server_appearance_update_from_llsd, server_appearance_update_to_llsd,
+        session_history_from_llsd, session_history_to_llsd, teleport_finish_from_llsd,
+        teleport_finish_to_llsd,
     };
     use super::{
         STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo,
@@ -8439,10 +8547,40 @@ mod caps_serializer_tests {
             see_avs: Some(true),
             any_av_sounds: Some(false),
             group_av_sounds: Some(true),
+            media_data: Some(crate::ParcelMediaData {
+                description: "A film".to_owned(),
+                media_type: "video/mp4".to_owned(),
+                width: 640,
+                height: 480,
+                looping: true,
+            }),
+            media_sharing: Some(crate::ParcelMediaSharing {
+                current_url: "http://media/now".to_owned(),
+                allow_navigate: true,
+                prevent_camera_zoom: false,
+                url_timeout: 1.5,
+            }),
+            obscure_moap: Some(true),
         };
         assert_eq!(
             parcel_info_from_llsd(&parcel_info_to_llsd(&info)?),
-            Some(info)
+            Some(info.clone())
+        );
+        // The simulator's encoder carries the same CAPS-only fields: a fake
+        // grid that sent them through the other one lost them silently.
+        let caps_only = |parcel: ParcelInfo| {
+            (
+                parcel.see_avs,
+                parcel.any_av_sounds,
+                parcel.group_av_sounds,
+                parcel.media_data,
+                parcel.media_sharing,
+                parcel.obscure_moap,
+            )
+        };
+        assert_eq!(
+            parcel_info_from_llsd(&parcel_properties_to_llsd(&info)).map(caps_only),
+            Some(caps_only(info))
         );
         Ok(())
     }

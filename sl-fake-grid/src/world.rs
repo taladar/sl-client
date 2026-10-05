@@ -756,6 +756,14 @@ impl SceneFixtures {
             .find(|parcel| parcel.contains_point(x, y))
     }
 
+    /// The first parcel whose bitmap covers the region-local point, to edit in
+    /// place — a request's answer notes the sequence id it went out under.
+    pub(crate) fn parcel_at_mut(&mut self, x: f32, y: f32) -> Option<&mut ParcelInfo> {
+        self.parcels
+            .iter_mut()
+            .find(|parcel| parcel.contains_point(x, y))
+    }
+
     /// The parcel with the given region-local id.
     #[must_use]
     pub fn parcel_by_local_id(&self, local_id: RegionLocalParcelId) -> Option<&ParcelInfo> {
@@ -1099,6 +1107,9 @@ pub fn region_wide_parcel(
         see_avs: None,
         any_av_sounds: None,
         group_av_sounds: None,
+        media_data: None,
+        media_sharing: None,
+        obscure_moap: None,
     }
 }
 
@@ -1450,9 +1461,7 @@ pub(crate) fn push_arrival_world(
     if let Some(parcel) = world.parcel_at(arrival.x, arrival.y) {
         let mut record = parcel.clone();
         record.sequence_id = UNSOLICITED_SEQUENCE_ID;
-        if let Err(error) = sim.send_parcel_properties(&record, now) {
-            tracing::warn!("pushing the agent's parcel failed: {error}");
-        }
+        sim.enqueue_parcel_properties(&record);
     }
     push_terrain(terrain, sim, now);
     if !world.objects.is_empty()
@@ -1727,6 +1736,8 @@ pub(crate) struct WorldPolicies<'a> {
     pub(crate) object_assets: crate::assets::ObjectAssetPolicy,
     /// How a new inventory item is announced to the client.
     pub(crate) announcement: crate::inventory::InventoryAnnouncement,
+    /// How the About Land traffic is answered.
+    pub(crate) parcels: crate::imitates::ParcelPolicy,
     /// Where the simulator's own ids come from.
     pub(crate) mint: &'a dyn Fn() -> uuid::Uuid,
 }
@@ -1780,6 +1791,7 @@ pub(crate) fn answer_world_request(
         region,
         object_assets,
         announcement,
+        parcels,
         mint,
     } = policies;
     // The object and parcel edit families are bodies of work of their own; each
@@ -1791,7 +1803,7 @@ pub(crate) fn answer_world_request(
         return changes;
     }
     if let Some(changes) =
-        crate::parcel_edits::answer_parcel_edit(world, region, identity, sim, event, now)
+        crate::parcel_edits::answer_parcel_edit(world, (region, identity), parcels, sim, event, now)
     {
         return changes;
     }
@@ -2085,24 +2097,34 @@ pub(crate) fn answer_world_request(
             // answered from its centre.
             let x = west.midpoint(*east);
             let y = south.midpoint(*north);
-            let record = world.parcel_at(x, y).map(|parcel| {
+            let record = world.parcel_at_mut(x, y).map(|parcel| {
+                // The stored record's own sequence id is the id it was last
+                // sent under — what OpenSim's post-edit push reuses
+                // ([`EditEcho::LastSequence`](crate::EditEcho::LastSequence)).
+                parcel.sequence_id = *sequence_id;
                 let mut record = parcel.clone();
-                record.sequence_id = *sequence_id;
                 record.snap_selection = *snap_selection;
                 record
             });
-            send_parcel_or_no_data(sim, record, *sequence_id, now);
+            send_parcel_or_no_data(sim, record, *sequence_id);
         }
         ServerEvent::RequestParcelPropertiesById {
             local_id,
             sequence_id,
         } => {
-            let record = world.parcel_by_local_id(*local_id).map(|parcel| {
-                let mut record = parcel.clone();
-                record.sequence_id = *sequence_id;
-                record
+            if !parcels.answers_request_by_id {
+                // OpenSim has no handler for the message: "Unhandled packet
+                // ParcelPropertiesRequestByID … Ignoring."
+                tracing::debug!(
+                    "ignoring a by-id request for parcel {local_id:?}, as OpenSim does"
+                );
+                return Vec::new();
+            }
+            let record = world.parcel_mut(*local_id).map(|parcel| {
+                parcel.sequence_id = *sequence_id;
+                parcel.clone()
             });
-            send_parcel_or_no_data(sim, record, *sequence_id, now);
+            send_parcel_or_no_data(sim, record, *sequence_id);
         }
         // The parcel's traffic score. A parcel with no grid-wide listing is
         // left unanswered rather than answered with a zero dwell: "no such
@@ -3001,12 +3023,7 @@ pub(crate) fn push_seated_avatar(
 
 /// Sends `record`, or the "no such parcel" reply (an empty record whose
 /// `RequestResult` is [`ParcelRequestResult::NoData`]) when there is none.
-fn send_parcel_or_no_data(
-    sim: &mut SimSession,
-    record: Option<ParcelInfo>,
-    sequence_id: i32,
-    now: Instant,
-) {
+fn send_parcel_or_no_data(sim: &mut SimSession, record: Option<ParcelInfo>, sequence_id: i32) {
     let record = record.unwrap_or_else(|| {
         let mut none = region_wide_parcel(
             RegionLocalParcelId(-1),
@@ -3020,9 +3037,9 @@ fn send_parcel_or_no_data(
         none.raw_parcel_flags = 0;
         none
     });
-    if let Err(error) = sim.send_parcel_properties(&record, now) {
-        tracing::warn!("answering a parcel request failed: {error}");
-    }
+    // Over the event queue, as both live grids answer: the UDP message has no
+    // room for the media and extended-flag blocks.
+    sim.enqueue_parcel_properties(&record);
 }
 
 #[cfg(test)]

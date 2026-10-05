@@ -2,10 +2,9 @@
 id: server-fake-grid-parcel-divide-join
 title: Fake grid — divide and join parcels
 topic: server
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey]
-blocked_by: [gridspec-parcel-management]
 ---
 
 Context: [context/server.md](../context/server.md).
@@ -22,3 +21,8 @@ Implement the behaviour the discovery task measured and the book's
 `sl-fake-grid/src/imitates.rs` for every divergence), and hold it to the
 measurement with the discovery task's conformance cases run against
 `FakeSl` and `FakeOpensim`. See `roadmap/context/gridspec.md`.
+
+## Measured (2026-10-05, [[gridspec-parcel-management]])
+
+OpenSim answers neither message: it re-sends the overlay, nothing else.
+Second Life is unmeasured. `book/src/gridspec/land.md` § Dividing and joining.

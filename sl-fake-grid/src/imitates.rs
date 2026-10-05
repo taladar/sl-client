@@ -189,6 +189,33 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid answers the About Land traffic where the two disagree —
+    /// measured by `parcel-edit` and `parcel-edit-refused` on aditi and the
+    /// local OpenSim (2026-10-05, `book/src/gridspec/land.md`).
+    #[must_use]
+    pub const fn parcel_policy(self) -> ParcelPolicy {
+        match self {
+            Self::SecondLife => ParcelPolicy {
+                answers_request_by_id: true,
+                edit_echo: EditEcho::Fixed(SELECTED_PARCEL_SEQUENCE_ID),
+                udp_edit_nulls_media_type: false,
+                unset_media_loops: true,
+                sends_extended_blocks: true,
+                parcel_return_reads_task_ids: true,
+                owners_reply_over_event_queue: true,
+            },
+            Self::OpenSim => ParcelPolicy {
+                answers_request_by_id: false,
+                edit_echo: EditEcho::LastSequence,
+                udp_edit_nulls_media_type: true,
+                unset_media_loops: false,
+                sends_extended_blocks: false,
+                parcel_return_reads_task_ids: false,
+                owners_reply_over_event_queue: false,
+            },
+        }
+    }
+
     /// The login response's fields that differ by grid **whatever the
     /// `options` list asked for** — measured by `login-options` on aditi and
     /// the local OpenSim (2026-10-04, `book/src/gridspec/login.md`).
@@ -420,6 +447,97 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
 /// `MaxAgentGroups` default, which the local grid answered (2026-10-04).
 pub const OPENSIM_MAX_AGENT_GROUPS: u32 = 42;
 
+/// The sequence id Second Life gives the parcel it pushes back after an edit:
+/// the reference viewer's `SELECTED_PARCEL_SEQ_ID`.
+pub const SELECTED_PARCEL_SEQUENCE_ID: i32 = -10_000;
+
+/// How a grid answers the About Land traffic ([`ImitatedGrid::parcel_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent measured behaviour of a live grid, not a state machine"
+)]
+pub struct ParcelPolicy {
+    /// Whether a `ParcelPropertiesRequestByID` is answered at all. OpenSim has
+    /// no handler for it and logs "Unhandled packet"; a client that refetches
+    /// by id there waits forever.
+    pub answers_request_by_id: bool,
+    /// The sequence id of the parcel pushed back to the editing agent after a
+    /// `ParcelPropertiesUpdate` — the push the update's `flags` ask for.
+    pub edit_echo: EditEcho,
+    /// Whether an edit over the UDP message (which has no media type) wipes
+    /// the parcel's media type. OpenSim stores the missing field as `NULL`,
+    /// which its own database then refuses on every later commit of the region
+    /// — the fake keeps the record and empties the type, which a client reads
+    /// back as the loss it is.
+    pub udp_edit_nulls_media_type: bool,
+    /// The loop flag of a parcel nobody set media on. Both grids send the
+    /// `MediaData` block for it, typed `none/none` and sized 0×0; Second Life
+    /// has it loop and OpenSim does not.
+    pub unset_media_loops: bool,
+    /// Whether the grid has the newer blocks at all: `ParcelExtendedFlags`
+    /// (`obscure_moap`), which Second Life sends for every parcel, and
+    /// `MediaLinkSharing`, which it sends for none without media. OpenSim's
+    /// encoder writes neither, and an edit that carries them changes nothing a
+    /// client can read back.
+    pub sends_extended_blocks: bool,
+    /// Whether a return addressed to a parcel takes the objects it names one
+    /// by one. OpenSim's `LandObject.ReturnLandObjects` matches by class and
+    /// owner only and never reads the task list (a whole-region return, the
+    /// top-objects window's, does). Second Life is unmeasured — the test
+    /// avatars own no land on aditi — and keeps the reference viewer's reading
+    /// that a named object is returned.
+    pub parcel_return_reads_task_ids: bool,
+    /// Whether the object-owner tally (`ParcelObjectOwnersReply`) comes over
+    /// the event queue, as the template's `UDPDeprecated` says Second Life's
+    /// does, or as the UDP message, as OpenSim's does
+    /// (`LLClientView.SendLandObjectOwners`).
+    pub owners_reply_over_event_queue: bool,
+}
+
+impl ParcelPolicy {
+    /// Fills in what the imitated grid sends for a parcel its fixture or an
+    /// edit left unset: the media block of a parcel without media, the
+    /// avatar-visibility booleans, and the extended flags where the grid has
+    /// them — and drops the newer blocks where it does not. A value that was
+    /// set and that the grid has is kept.
+    pub(crate) fn dress(self, parcel: &mut sl_proto::ParcelInfo) {
+        if parcel.media_data.is_none() {
+            parcel.media_data = Some(sl_proto::ParcelMediaData {
+                description: String::new(),
+                media_type: "none/none".to_owned(),
+                width: 0,
+                height: 0,
+                looping: self.unset_media_loops,
+            });
+        }
+        // Both grids send the avatar-visibility booleans, and an unset parcel
+        // shows its avatars and their sounds.
+        parcel.see_avs = parcel.see_avs.or(Some(true));
+        parcel.any_av_sounds = parcel.any_av_sounds.or(Some(true));
+        parcel.group_av_sounds = parcel.group_av_sounds.or(Some(true));
+        if self.sends_extended_blocks {
+            parcel.obscure_moap = parcel.obscure_moap.or(Some(false));
+        } else {
+            parcel.obscure_moap = None;
+            parcel.media_sharing = None;
+        }
+    }
+}
+
+/// Which sequence id a grid's post-edit push carries ([`ParcelPolicy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditEcho {
+    /// Always this id: Second Life's
+    /// [`SELECTED_PARCEL_SEQUENCE_ID`], measured on an edit it refused (the
+    /// test avatars own no land on aditi, so an accepted edit is unmeasured).
+    Fixed(i32),
+    /// The id the parcel was last sent under: OpenSim's `LandObject` keeps
+    /// `m_lastSeqId` and reuses it for a snap-selection push with sequence 0,
+    /// so the echo carries the id of the client's last properties request.
+    LastSequence,
+}
+
 /// The login response's fields a grid sends or omits regardless of the
 /// request's `options` list ([`ImitatedGrid::login_fields`]).
 ///
@@ -484,6 +602,32 @@ mod test {
         assert_ne!(
             sl.describes_account_entitlements(),
             opensim.describes_account_entitlements()
+        );
+        let (sl_parcels, opensim_parcels) = (sl.parcel_policy(), opensim.parcel_policy());
+        assert_ne!(
+            sl_parcels.answers_request_by_id,
+            opensim_parcels.answers_request_by_id
+        );
+        assert_ne!(sl_parcels.edit_echo, opensim_parcels.edit_echo);
+        assert_ne!(
+            sl_parcels.udp_edit_nulls_media_type,
+            opensim_parcels.udp_edit_nulls_media_type
+        );
+        assert_ne!(
+            sl_parcels.unset_media_loops,
+            opensim_parcels.unset_media_loops
+        );
+        assert_ne!(
+            sl_parcels.sends_extended_blocks,
+            opensim_parcels.sends_extended_blocks
+        );
+        assert_ne!(
+            sl_parcels.parcel_return_reads_task_ids,
+            opensim_parcels.parcel_return_reads_task_ids
+        );
+        assert_ne!(
+            sl_parcels.owners_reply_over_event_queue,
+            opensim_parcels.owners_reply_over_event_queue
         );
     }
 

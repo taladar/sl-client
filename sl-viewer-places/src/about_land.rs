@@ -535,11 +535,11 @@ impl AboutLandState {
     /// only the sequence-zero pushes another resident's save produces. Three
     /// things arrive on this path and the merge is the right answer to all of
     /// them, which is why none of them is special-cased: a foreign push (carry
-    /// their change), the read-back this floater requests after its own
-    /// **Apply** (agrees with the draft, so nothing moves), and an ordinary
-    /// refresh. Telling them apart is not possible anyway — `apply_draft`
-    /// requests its read-back with `sequence_id: 0`, the very value that marks
-    /// an unsolicited push.
+    /// their change), the echo of this floater's own **Apply** (agrees with
+    /// the draft, so nothing moves), and an ordinary refresh. Telling them
+    /// apart is not possible anyway — the echo the update's `flags` ask for
+    /// comes back with `sequence_id: 0`, the very value that marks an
+    /// unsolicited push.
     fn merge_parcel(&mut self, parcel: &ParcelInfo) -> bool {
         self.merge_update(parcel.to_update())
     }
@@ -3829,7 +3829,14 @@ fn apply_draft(
     commit_draft(state, scoped, commands);
 }
 
-/// Post the draft as it stands and ask for the parcel back.
+/// Post the draft as it stands.
+///
+/// There is no read-back request: the update itself asks the region to push
+/// the parcel back (its `flags`, as the reference's
+/// `LLViewerParcelMgr::sendParcelPropertiesUpdate` sets them), and that push
+/// reaches [`AboutLandState::merge_parcel`]. A by-id request would add nothing
+/// on Second Life, and OpenSim ignores `ParcelPropertiesRequestByID`
+/// altogether.
 ///
 /// Split out of [`apply_draft`] for the group **Set…**, which commits on the
 /// pick rather than waiting for Apply — as the reference does
@@ -3843,11 +3850,9 @@ fn commit_draft(
     commands: &mut MessageWriter<SlCommand>,
 ) {
     state.draft.local_id = scoped.id();
-    commands.write(SlCommand(Command::UpdateParcel(state.draft.clone())));
-    commands.write(SlCommand(Command::RequestParcelPropertiesById {
-        local_id: scoped,
-        sequence_id: 0,
-    }));
+    commands.write(SlCommand(Command::UpdateParcel(Box::new(
+        state.draft.clone(),
+    ))));
 }
 
 /// Append an agent to an access list and commit it.
@@ -4744,8 +4749,8 @@ mod tests {
     }
 
     /// Merging advances the base, so the floater settles instead of re-applying
-    /// the same record forever — and the read-back the floater requests after
-    /// its own **Apply** comes through this path too.
+    /// the same record forever — and the echo the region pushes after the
+    /// floater's own **Apply** comes through this path too.
     #[test]
     fn merging_advances_the_base_so_a_repeat_is_not_a_change() {
         let opened = ParcelUpdate::default();

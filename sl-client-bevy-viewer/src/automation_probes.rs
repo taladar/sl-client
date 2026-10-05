@@ -910,7 +910,26 @@ mod full_stack {
         });
         let mut seen: Vec<TeleportState> = Vec::new();
         let mut last_region = None;
+        // Which teleport events each sampled frame delivered: a frame that
+        // brought the start and the finish together left the readout no
+        // frame to show a phase in, however right it is.
+        let mut cursor = before_teleport;
+        let mut one_frame_teleport = false;
         let arrival = harness.run_until("the teleport's success in the far region", |harness| {
+            let page = harness.world().resource::<EventLog>().read(
+                cursor,
+                &[LogStream::Event],
+                usize::MAX,
+            );
+            cursor = page.next;
+            let kinds: Vec<&str> = page
+                .entries
+                .iter()
+                .map(|entry| entry.kind.as_str())
+                .collect();
+            if kinds.contains(&"TeleportStarted") && kinds.contains(&"TeleportFinished") {
+                one_frame_teleport = true;
+            }
             let agent = read_agent(harness.app_world_mut());
             if let Some(state) = agent.teleport.map(|teleport| teleport.state)
                 && seen.last() != Some(&state)
@@ -958,11 +977,12 @@ mod full_stack {
             "the teleport went through a failure: {seen:?}"
         );
         assert!(
-            seen.iter().any(|state| matches!(
-                state,
-                TeleportState::Requested | TeleportState::InProgress | TeleportState::Arriving
-            )),
-            "the readout jumped straight to the end: {seen:?}"
+            one_frame_teleport
+                || seen.iter().any(|state| matches!(
+                    state,
+                    TeleportState::Requested | TeleportState::InProgress | TeleportState::Arriving
+                )),
+            "the readout jumped straight to the end over several frames: {seen:?}"
         );
         assert_eq!(
             read_status(harness.app_world_mut()).region.as_deref(),

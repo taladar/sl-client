@@ -1574,6 +1574,14 @@ fn build_parcel_update(args: &Args, ctx: &dyn ReplContext) -> Result<ParcelUpdat
             .opt_vector(ctx, "user_look_at", 16)?
             .map_or(Direction::ZERO, |v| Direction::new(v.x, v.y, v.z)),
         landing_type: args.parse_or(ctx, "landing_type", 17, "u8", 0)?,
+        // Not settable here: a raw record from keywords. Over the capability
+        // they go out as the reference viewer's defaults.
+        media_data: None,
+        media_sharing: None,
+        see_avs: None,
+        any_av_sounds: None,
+        group_av_sounds: None,
+        obscure_moap: None,
     })
 }
 
@@ -3619,7 +3627,11 @@ fn all_specs() -> Vec<CommandSpec> {
         CommandSpec {
             name: "update_parcel",
             usage: "local_id=<id> [name=] [sale_price=] …",
-            build: |args, ctx| Ok(Command::UpdateParcel(build_parcel_update(args, ctx)?)),
+            build: |args, ctx| {
+                Ok(Command::UpdateParcel(Box::new(build_parcel_update(
+                    args, ctx,
+                )?)))
+            },
         },
         CommandSpec {
             name: "request_parcel_access_list",

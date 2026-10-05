@@ -2,7 +2,7 @@
 id: parcel-properties-update-via-udp-poisons-opensim
 title: Parcel updates go over UDP, not the ParcelPropertiesUpdate CAP
 topic: protocol
-status: bugs
+status: done
 origin: found while live-testing viewer-menu-touch-object (2026-09-27)
 refs: [viewer-parcel-config-missing-writes]
 ---
@@ -49,3 +49,12 @@ Firestorm never hits this on OpenSim because it uses the
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Fixed (2026-10-05)
+
+Parcel edits use the capability on every region that grants it, which both
+grids do ([[protocol-cap-parcel-properties-update]]). Verified live: after
+`parcel-edit` on OpenSim `land.MediaType` is still `none/none`. The
+OpenSim-flavoured fake grid wipes the media type on a UDP edit, and the fake
+grid's `an_about_land_save_keeps_the_media_type_on_opensim` fails if the client
+falls back where the capability is granted.

@@ -33,9 +33,9 @@ Found on the way, not yet placed in a tier (2026-09-27, all while testing
 the worn-object Touch):
 
 - `parcel-properties-update-via-udp-poisons-opensim` (**bug**, under *Land*
-  in tier 3). Parcel edits go over UDP. On OpenSim one edit breaks every
-  later save in the region, rezzing and attaching included, so it goes
-  before any further live testing that rezzes on OpenSim.
+  in tier 3). Parcel edits went over UDP. On OpenSim one edit broke every
+  later save in the region, rezzing and attaching included. Fixed
+  2026-10-05: edits use the `ParcelPropertiesUpdate` capability.
 - `viewer-rlv-send-side-consumers` (under *RLV* in tier 3). Nothing in the
   viewer asks the RLV façade.
 - `viewer-object-moved-region-reuse`. An object that changes region is
@@ -407,11 +407,11 @@ unverified on a live grid), `viewer-land-holdings`,
 `viewer-neighbor-region-parcels` (About Land cannot act on a neighbour
 region at all), `viewer-land-access-list-export-import`.
 `parcel-properties-update-via-udp-poisons-opensim` (a bug, filed
-2026-09-27) comes before any of the parcel-writing ones. Parcel edits go
-over UDP rather than the `ParcelPropertiesUpdate` capability. On OpenSim
-one edit left the region unable to save anything, rezzing and attaching
-included, until a restart. The capability's body is also what
-`viewer-parcel-config-missing-writes` is waiting on.
+2026-09-27, fixed 2026-10-05) came before any of the parcel-writing ones:
+parcel edits went over UDP rather than the `ParcelPropertiesUpdate`
+capability, and on OpenSim one edit left the region unable to save anything
+until a restart. The capability's body, now sent, is what
+`viewer-parcel-config-missing-writes` was waiting on.
 
 **People and social.** `viewer-recent-people`,
 `viewer-people-lists-multi-select`, `viewer-display-name-set`,

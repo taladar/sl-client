@@ -133,6 +133,46 @@ pub(crate) fn post_llsd_oneway(cap_url: &str, body: String, what: &str) {
     }
 }
 
+/// POSTs `body` to the `cap` capability URL (blocking), ignoring the reply as
+/// the reference viewer does, but reporting a POST that could not be sent or
+/// was rejected as a failure of `cap` (over `caps_tx`), so an edit the grid
+/// refused is not mistaken for one it took. Mirrors the tokio
+/// `post_caps_reporting`.
+pub(crate) fn run_caps_reporting(
+    cap_url: &str,
+    body: String,
+    cap: &str,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let http = match crate::http_proxy::blocking_client_builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    {
+        Ok(http) => http,
+        Err(error) => {
+            tracing::warn!("could not build the HTTP client for the {cap} POST: {error}");
+            report_caps_failure(caps_tx, cap);
+            return;
+        }
+    };
+    match http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    {
+        Ok(response) if response.status().is_success() => {}
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "the {cap} POST was rejected");
+            report_caps_failure(caps_tx, cap);
+        }
+        Err(error) => {
+            tracing::warn!("the {cap} POST could not be sent: {error}");
+            report_caps_failure(caps_tx, cap);
+        }
+    }
+}
+
 /// POSTs `body` to a capability URL and ignores the reply (blocking) — a
 /// fire-and-forget capability call where the simulator returns only an HTTP
 /// status (e.g. the `SendUserReport` abuse-report cap). There is no event.

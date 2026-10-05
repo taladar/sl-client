@@ -25,12 +25,14 @@ use std::time::Instant;
 
 use sl_proto::{
     LandStatExtended, LandStatItem, LandStatReportType, ParcelInfo, ParcelObjectOwner,
-    ParcelStatus, RegionIdentity, RegionLocalParcelId, ServerEvent, SimSession, pcode,
+    ParcelReturnType, ParcelStatus, ParcelUpdate, RegionIdentity, RegionLocalParcelId, ServerEvent,
+    SimSession, pcode,
 };
 use sl_types::key::{AgentKey, OwnerKey};
 use sl_types::map::RegionCoordinates;
 use sl_types::money::LindenAmount;
 
+use crate::imitates::{EditEcho, ParcelPolicy};
 use crate::world::{AvatarIdentity, RegionChange, SceneFixtures, region_limits};
 
 /// The sequence id of an unsolicited parcel push — what a simulator re-sends a
@@ -44,8 +46,8 @@ const UNSOLICITED_SEQUENCE_ID: i32 = 0;
 /// on looking.
 pub(crate) fn answer_parcel_edit(
     world: &mut SceneFixtures,
-    region: &RegionIdentity,
-    agent: &AvatarIdentity,
+    (region, agent): (&RegionIdentity, &AvatarIdentity),
+    policy: ParcelPolicy,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
@@ -63,24 +65,12 @@ pub(crate) fn answer_parcel_edit(
                 );
                 return Some(Vec::new());
             };
-            parcel.raw_parcel_flags = update.parcel_flags.bits();
-            parcel.sale_price.clone_from(&update.sale_price);
-            parcel.name.clone_from(&update.name);
-            parcel.description.clone_from(&update.description);
-            parcel.music_url.clone_from(&update.music_url);
-            parcel.media_url.clone_from(&update.media_url);
-            parcel.media_id = update.media_id;
-            parcel.media_auto_scale = update.media_auto_scale;
-            parcel.group = update.group_id;
-            parcel.pass_price.clone_from(&update.pass_price);
-            parcel.pass_hours = update.pass_hours;
-            parcel.category = update.category;
-            parcel.auth_buyer_id = update.auth_buyer_id;
-            parcel.snapshot_id = update.snapshot_id;
-            parcel.user_location = update.user_location;
-            parcel.user_look_at = update.user_look_at;
-            parcel.landing_type = sl_proto::LandingType::from_u8(update.landing_type);
-            return Some(push_parcel(world, update.local_id, sim, now));
+            apply_update(parcel, update, policy);
+            let echo = match policy.edit_echo {
+                EditEcho::Fixed(sequence_id) => sequence_id,
+                EditEcho::LastSequence => parcel.sequence_id,
+            };
+            return Some(echo_parcel(world, update.local_id, echo, sim));
         }
         // A purchase: the buyer owns it and it comes off the market. The fake
         // grid charges nobody — its economy is a price list, not a ledger — so
@@ -96,7 +86,7 @@ pub(crate) fn answer_parcel_edit(
                 _ => OwnerKey::Agent(agent.agent_id),
             };
             set_owner(world, *local_id, owner, ParcelStatus::Leased);
-            return Some(push_parcel(world, *local_id, sim, now));
+            return Some(push_parcel(world, *local_id, sim));
         }
         ServerEvent::ParcelDeededToGroup { local_id, group_id } => {
             set_owner(
@@ -105,7 +95,7 @@ pub(crate) fn answer_parcel_edit(
                 OwnerKey::Group(*group_id),
                 ParcelStatus::Leased,
             );
-            return Some(push_parcel(world, *local_id, sim, now));
+            return Some(push_parcel(world, *local_id, sim));
         }
         // Abandoning hands the land back to the estate: the region's owner
         // holds it, and its status says nobody chose to.
@@ -116,7 +106,7 @@ pub(crate) fn answer_parcel_edit(
                 OwnerKey::Agent(AgentKey::from(region.sim_owner)),
                 ParcelStatus::Abandoned,
             );
-            return Some(push_parcel(world, *local_id, sim, now));
+            return Some(push_parcel(world, *local_id, sim));
         }
         // Reclaiming is the estate manager taking abandoned land back into use.
         ServerEvent::ParcelReclaimed { local_id } => {
@@ -126,7 +116,7 @@ pub(crate) fn answer_parcel_edit(
                 OwnerKey::Agent(AgentKey::from(region.sim_owner)),
                 ParcelStatus::Leased,
             );
-            return Some(push_parcel(world, *local_id, sim, now));
+            return Some(push_parcel(world, *local_id, sim));
         }
         // A return takes the objects out of the world. A real grid also files
         // each one into its owner's Lost and Found; the fake grid has one
@@ -134,20 +124,21 @@ pub(crate) fn answer_parcel_edit(
         // is observable — and what is done here — is the removal.
         ServerEvent::ParcelObjectsReturned {
             local_id,
+            return_type,
             task_ids,
             owner_ids,
-            ..
         } => {
+            let request = ReturnRequest {
+                local_id: *local_id,
+                return_type: *return_type,
+                task_ids,
+                owner_ids,
+            };
             let doomed: Vec<sl_proto::RegionLocalObjectId> = world
                 .objects
                 .iter()
                 .filter(|object| on_scope(world, object, *local_id))
-                .filter(|object| {
-                    task_ids.contains(&object.full_id)
-                        || owner_ids
-                            .iter()
-                            .any(|owner| owner.uuid() == object.owner_id)
-                })
+                .filter(|object| returned(world, object, &request, policy))
                 .map(|object| object.local_id)
                 .collect();
             let mut changes = Vec::new();
@@ -275,11 +266,16 @@ pub(crate) fn answer_parcel_edit(
         // A parcel's object-owner tally, from the scene: one row per owner,
         // counting the prims of every linkset whose root stands on the parcel
         // (a simulator's `primsOverMe`, tallied by `PrimCount`). Over the event
-        // queue for the same reason as the report above — the message is
-        // `UDPDeprecated`, and only the queue's form is whole in one document,
-        // which is what lets a viewer end its turn on the reply.
+        // queue where the imitated grid uses it — the message is
+        // `UDPDeprecated`, and only the queue's form is whole in one document
+        // — and as the UDP message on OpenSim, which still sends that.
         ServerEvent::RequestParcelObjectOwners { local_id } => {
-            sim.enqueue_parcel_object_owners_reply(&parcel_object_owners(world, *local_id));
+            let owners = parcel_object_owners(world, *local_id);
+            if policy.owners_reply_over_event_queue {
+                sim.enqueue_parcel_object_owners_reply(&owners);
+            } else if let Err(error) = sim.send_parcel_object_owners_reply(&owners, now) {
+                tracing::warn!("answering an object-owners request failed: {error}");
+            }
         }
         ServerEvent::RequestRegionInfo => {
             if let Err(error) = sim.send_region_info(&region_limits(region), now) {
@@ -330,6 +326,63 @@ fn parcel_object_owners(
         }
     }
     tally
+}
+
+/// A `ParcelReturnObjects` as the client sent it.
+struct ReturnRequest<'a> {
+    /// The parcel, or [`WHOLE_REGION`].
+    local_id: RegionLocalParcelId,
+    /// The classes of object to return (`RT_*`, a bitfield).
+    return_type: ParcelReturnType,
+    /// The objects named one by one.
+    task_ids: &'a [sl_types::key::ObjectKey],
+    /// The owners named for [`ParcelReturnType::LIST`].
+    owner_ids: &'a [OwnerKey],
+}
+
+/// Whether a return takes `object`, which is already in scope.
+///
+/// Addressed to the whole region it takes exactly the named objects — the
+/// top-objects window's return, which both grids honour. Addressed to a parcel
+/// it takes the classes the return type names, measured against the parcel's
+/// owner and group: `RT_OWNER` the parcel owner's objects, `RT_GROUP` the
+/// group's other than the owner's, `RT_OTHER` everybody else's, `RT_LIST` the
+/// named owners'. OpenSim stops there (`LandObject.ReturnLandObjects` never
+/// reads the task list), so on its flavour naming one object on a parcel
+/// returns nothing ([`ParcelPolicy::parcel_return_reads_task_ids`]).
+fn returned(
+    world: &SceneFixtures,
+    object: &sl_proto::Object,
+    request: &ReturnRequest<'_>,
+    policy: ParcelPolicy,
+) -> bool {
+    let named = request.task_ids.contains(&object.full_id);
+    if request.local_id == WHOLE_REGION {
+        return named;
+    }
+    if named && policy.parcel_return_reads_task_ids {
+        return true;
+    }
+    let Some(parcel) = world.parcel_by_local_id(request.local_id) else {
+        return false;
+    };
+    let properties = world.properties_of(object.local_id);
+    let owner = properties.as_ref().map_or_else(
+        || OwnerKey::Agent(AgentKey::from(object.owner_id)),
+        |properties| properties.owner,
+    );
+    let group = properties.and_then(|properties| properties.group);
+    let land_owners = owner == parcel.owner;
+    let land_group = parcel.group.is_some() && group == parcel.group;
+    let wants = |class: ParcelReturnType| request.return_type.0 & class.0 != 0;
+    (wants(ParcelReturnType::OWNER) && land_owners)
+        || (wants(ParcelReturnType::GROUP) && land_group && !land_owners)
+        || (wants(ParcelReturnType::OTHER) && !land_owners && !land_group)
+        || (wants(ParcelReturnType::LIST)
+            && request
+                .owner_ids
+                .iter()
+                .any(|named| named.uuid() == owner.uuid()))
 }
 
 /// Whether an object is in scope for a return or a disable addressed to
@@ -505,6 +558,72 @@ fn set_owner(
     parcel.auth_buyer_id = None;
 }
 
+/// Writes an About Land save into the stored record. Every field the form
+/// carries is re-asserted, so the record is rewritten rather than patched.
+fn apply_update(parcel: &mut ParcelInfo, update: &ParcelUpdate, policy: ParcelPolicy) {
+    parcel.raw_parcel_flags = update.parcel_flags.bits();
+    parcel.sale_price.clone_from(&update.sale_price);
+    parcel.name.clone_from(&update.name);
+    parcel.description.clone_from(&update.description);
+    parcel.music_url.clone_from(&update.music_url);
+    parcel.media_url.clone_from(&update.media_url);
+    parcel.media_id = update.media_id;
+    parcel.media_auto_scale = update.media_auto_scale;
+    parcel.group = update.group_id;
+    parcel.pass_price.clone_from(&update.pass_price);
+    parcel.pass_hours = update.pass_hours;
+    parcel.category = update.category;
+    parcel.auth_buyer_id = update.auth_buyer_id;
+    parcel.snapshot_id = update.snapshot_id;
+    parcel.user_location = update.user_location;
+    parcel.user_look_at = update.user_look_at;
+    parcel.landing_type = sl_proto::LandingType::from_u8(update.landing_type);
+    // What only the capability form carries: taken when sent. An edit
+    // over UDP has no media block, and the record keeps its own —
+    // except where the imitated grid is OpenSim, which nulls the type
+    // ([`ParcelPolicy::udp_edit_nulls_media_type`]).
+    match (&update.media_data, &mut parcel.media_data) {
+        (Some(media), stored) => *stored = Some(media.clone()),
+        (None, Some(stored)) if policy.udp_edit_nulls_media_type => {
+            stored.media_type.clear();
+        }
+        (None, _) => {}
+    }
+    if let Some(sharing) = &update.media_sharing {
+        parcel.media_sharing = Some(sharing.clone());
+    }
+    parcel.see_avs = update.see_avs.or(parcel.see_avs);
+    parcel.any_av_sounds = update.any_av_sounds.or(parcel.any_av_sounds);
+    parcel.group_av_sounds = update.group_av_sounds.or(parcel.group_av_sounds);
+    parcel.obscure_moap = update.obscure_moap.or(parcel.obscure_moap);
+    // What the grid does not have, it does not keep.
+    policy.dress(parcel);
+}
+
+/// Pushes the edited parcel back to the editing agent under `sequence_id` —
+/// the echo the update's `flags` ask for, under the id the imitated grid uses
+/// ([`EditEcho`]) — and returns the record under the sequence id of an
+/// unsolicited push as the change the parcel's other occupants have to be told
+/// about.
+fn echo_parcel(
+    world: &SceneFixtures,
+    local_id: RegionLocalParcelId,
+    sequence_id: i32,
+    sim: &mut SimSession,
+) -> Vec<RegionChange> {
+    let Some(parcel) = world.parcel_by_local_id(local_id) else {
+        return Vec::new();
+    };
+    let mut echo: ParcelInfo = parcel.clone();
+    echo.sequence_id = sequence_id;
+    // Over the event queue, as both live grids deliver a parcel record; the
+    // UDP message has no room for the media and extended-flag blocks.
+    sim.enqueue_parcel_properties(&echo);
+    let mut record = echo;
+    record.sequence_id = UNSOLICITED_SEQUENCE_ID;
+    vec![RegionChange::ParcelChanged(Box::new(record))]
+}
+
 /// Re-sends a changed parcel's whole record to the editing client, under the
 /// sequence id of an unsolicited push — the only message a parcel's fields
 /// travel in — and returns the same record as the change the parcel's other
@@ -513,15 +632,190 @@ fn push_parcel(
     world: &SceneFixtures,
     local_id: RegionLocalParcelId,
     sim: &mut SimSession,
-    now: Instant,
 ) -> Vec<RegionChange> {
-    let Some(parcel) = world.parcel_by_local_id(local_id) else {
-        return Vec::new();
-    };
-    let mut record: ParcelInfo = parcel.clone();
-    record.sequence_id = UNSOLICITED_SEQUENCE_ID;
-    if let Err(error) = sim.send_parcel_properties(&record, now) {
-        tracing::warn!("re-sending an edited parcel failed: {error}");
+    echo_parcel(world, local_id, UNSOLICITED_SEQUENCE_ID, sim)
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use sl_proto::{ParcelMediaData, ParcelReturnType, ParcelUpdate, RegionLocalParcelId};
+    use sl_types::key::{AgentKey, ObjectKey, OwnerKey};
+
+    use super::{ReturnRequest, WHOLE_REGION, apply_update, returned};
+    use crate::imitates::ImitatedGrid;
+    use crate::world::{SceneFixtures, box_prim, region_wide_parcel};
+
+    /// A parcel with media set, as both grids store it.
+    fn parcel_with_media() -> sl_proto::ParcelInfo {
+        let mut parcel = region_wide_parcel(
+            RegionLocalParcelId(1),
+            OwnerKey::Agent(AgentKey::from(uuid::Uuid::nil())),
+            "Land",
+        );
+        parcel.media_data = Some(ParcelMediaData {
+            media_type: "video/mp4".to_owned(),
+            ..ParcelMediaData::default()
+        });
+        parcel
     }
-    vec![RegionChange::ParcelChanged(Box::new(record))]
+
+    /// The teeth of the OpenSim flavour: an edit over UDP, which has no media
+    /// block, empties the media type there — so a client that falls back to
+    /// UDP where the capability is granted loses it, as it does live — and
+    /// leaves it alone on the Second Life flavour.
+    #[test]
+    fn a_udp_edit_wipes_the_media_type_only_on_opensim() {
+        for (imitates, expected) in [
+            (ImitatedGrid::OpenSim, ""),
+            (ImitatedGrid::SecondLife, "video/mp4"),
+        ] {
+            let mut parcel = parcel_with_media();
+            let udp = ParcelUpdate {
+                local_id: parcel.local_id,
+                media_data: None,
+                ..parcel.to_update()
+            };
+            apply_update(&mut parcel, &udp, imitates.parcel_policy());
+            assert_eq!(
+                parcel.media_data.map(|media| media.media_type),
+                Some(expected.to_owned()),
+                "{imitates:?}"
+            );
+        }
+    }
+
+    /// A region-wide parcel owned by [`land_owner`] holding one box of the land
+    /// owner's and one of a resident's, as a [`ReturnRequest`] sees them.
+    fn returnable_scene() -> (SceneFixtures, sl_proto::Object, sl_proto::Object) {
+        let mut world = SceneFixtures::new();
+        world.parcels.push(region_wide_parcel(
+            RegionLocalParcelId(1),
+            OwnerKey::Agent(land_owner()),
+            "Land",
+        ));
+        let at = |x: f32| sl_proto::Vector {
+            x,
+            y: 128.0,
+            z: 25.0,
+        };
+        let unit = sl_proto::Vector {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        };
+        let owners = box_prim(
+            sl_proto::RegionLocalObjectId(10),
+            ObjectKey::from(uuid::Uuid::from_u128(10)),
+            land_owner(),
+            at(100.0),
+            unit.clone(),
+        );
+        let residents = box_prim(
+            sl_proto::RegionLocalObjectId(11),
+            ObjectKey::from(uuid::Uuid::from_u128(11)),
+            resident(),
+            at(140.0),
+            unit,
+        );
+        world.objects.push(owners.clone());
+        world.objects.push(residents.clone());
+        (world, owners, residents)
+    }
+
+    /// The owner of the region-wide parcel in [`returnable_scene`].
+    fn land_owner() -> AgentKey {
+        AgentKey::from(uuid::Uuid::from_u128(1))
+    }
+
+    /// The resident whose box stands on [`land_owner`]'s parcel.
+    fn resident() -> AgentKey {
+        AgentKey::from(uuid::Uuid::from_u128(2))
+    }
+
+    /// A return on a parcel takes the classes its type names, measured against
+    /// the parcel's owner — on both flavours.
+    #[test]
+    fn a_parcel_return_takes_the_classes_its_type_names() {
+        let (world, owners, residents) = returnable_scene();
+        for imitates in [ImitatedGrid::OpenSim, ImitatedGrid::SecondLife] {
+            let policy = imitates.parcel_policy();
+            let takes = |return_type, owner_ids: &[OwnerKey], object: &sl_proto::Object| {
+                let request = ReturnRequest {
+                    local_id: RegionLocalParcelId(1),
+                    return_type,
+                    task_ids: &[],
+                    owner_ids,
+                };
+                returned(&world, object, &request, policy)
+            };
+            assert!(takes(ParcelReturnType::OWNER, &[], &owners), "{imitates:?}");
+            assert!(
+                !takes(ParcelReturnType::OWNER, &[], &residents),
+                "{imitates:?}"
+            );
+            assert!(
+                takes(ParcelReturnType::OTHER, &[], &residents),
+                "{imitates:?}"
+            );
+            assert!(
+                !takes(ParcelReturnType::OTHER, &[], &owners),
+                "{imitates:?}"
+            );
+            let named_owner = [OwnerKey::Agent(resident())];
+            assert!(
+                takes(ParcelReturnType::LIST, &named_owner, &residents),
+                "{imitates:?}"
+            );
+            assert!(
+                !takes(ParcelReturnType::LIST, &named_owner, &owners),
+                "{imitates:?}"
+            );
+        }
+    }
+
+    /// Naming one object in a return addressed to a parcel takes it on the
+    /// Second Life flavour and nothing on OpenSim's, which never reads the task
+    /// list there; addressed to the whole region, both take it.
+    #[test]
+    fn only_a_whole_region_return_reads_the_task_list_on_opensim() {
+        let (world, _, residents) = returnable_scene();
+        let named = [residents.full_id];
+        for (imitates, on_a_parcel) in [
+            (ImitatedGrid::OpenSim, false),
+            (ImitatedGrid::SecondLife, true),
+        ] {
+            let policy = imitates.parcel_policy();
+            for (local_id, expected) in
+                [(RegionLocalParcelId(1), on_a_parcel), (WHOLE_REGION, true)]
+            {
+                let request = ReturnRequest {
+                    local_id,
+                    return_type: ParcelReturnType::NONE,
+                    task_ids: &named,
+                    owner_ids: &[],
+                };
+                assert_eq!(
+                    returned(&world, &residents, &request, policy),
+                    expected,
+                    "{imitates:?} on {local_id:?}"
+                );
+            }
+        }
+    }
+
+    /// The capability form carries the media block, and both flavours keep it.
+    #[test]
+    fn a_capability_edit_keeps_the_media_type_on_both_flavours() {
+        for imitates in [ImitatedGrid::OpenSim, ImitatedGrid::SecondLife] {
+            let mut parcel = parcel_with_media();
+            let edit = parcel.to_update();
+            apply_update(&mut parcel, &edit, imitates.parcel_policy());
+            assert_eq!(
+                parcel.media_data.map(|media| media.media_type),
+                Some("video/mp4".to_owned()),
+                "{imitates:?}"
+            );
+        }
+    }
 }

@@ -932,6 +932,17 @@ introduces itself" below, the inventory pair under "How this grid does
 inventory", the bakes under "Who bakes an avatar", and the last two under
 "Policy: what the grid charges, permits and refuses".
 
+The About Land traffic follows it too, as one `ParcelPolicy`
+(`ImitatedGrid::parcel_policy`, measured in [Land](../gridspec/land.md)):
+whether a by-id parcel request is answered at all (OpenSim ignores it), the
+sequence id of the parcel pushed back after an edit, whether a UDP edit
+empties the media type (OpenSim's `NULL` poisoning), the media block and
+extended flags a parcel nobody set carries, whether a return on a parcel
+reads its task list, and whether the object-owner tally comes over the event
+queue or UDP. Each region's parcels are dressed to the flavour when the grid
+starts, and again after every edit, so a block the imitated grid does not
+have never reaches a client.
+
 That second one is small and it immediately earned its keep. Turning it on
 by default broke a fake-grid end-to-end test that expected
 `map-server-url` in the login response — and the test was right to expect
@@ -1242,8 +1253,12 @@ region's own lock:
   abandons and reclaims. A parcel has **one** record and a
   `ParcelPropertiesUpdate` carries the whole of it, so an edit is "read the
   parcel, change one field, send it all back" (`ParcelInfo::to_update` is
-  that read). A changed parcel is re-sent as a sequence-zero
-  `ParcelProperties`, the unsolicited form the arrival burst already uses.
+  that read). The edit arrives as the `ParcelPropertiesUpdate` capability's
+  LLSD body or, from a client without it, as the UDP message; the editing
+  client is sent the parcel back under the flavour's echo sequence id, and
+  everyone else on the parcel as a sequence-zero `ParcelProperties`, the
+  unsolicited form the arrival burst already uses. Every parcel record goes
+  over the event queue, as both live grids send it.
   The access lists are the one parcel record that does not travel in the
   properties reply — they have their own request and reply, and live beside
   the parcels rather than on them.

@@ -46,6 +46,36 @@ pub(crate) async fn post_llsd_oneway(
     }
 }
 
+/// POSTs `body` to the `cap` capability URL, ignoring the reply as the
+/// reference viewer does, but reporting a POST that could not be sent or was
+/// rejected as a failure of `cap` (over `caps_tx`), so an edit the grid
+/// refused is not mistaken for one it took.
+pub(crate) async fn post_caps_reporting(
+    cap_url: String,
+    body: String,
+    cap: &'static str,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    match http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {}
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "the {cap} POST was rejected");
+            report_caps_failure(&caps_tx, cap).await;
+        }
+        Err(error) => {
+            tracing::warn!("the {cap} POST could not be sent: {error}");
+            report_caps_failure(&caps_tx, cap).await;
+        }
+    }
+}
+
 /// POSTs `body` to a capability URL and ignores the reply — a fire-and-forget
 /// capability call where the simulator returns only an HTTP status (e.g. the
 /// `SendUserReport` abuse-report cap). There is no event.

@@ -7,11 +7,14 @@ one, a UDP message or nothing where it does not. How the seed works is in
 [Capabilities](../comms/caps.md).
 
 Measured on 2026-10-04 by the conformance case `seed-capabilities`: one login
-with the client's own list (`REQUESTED_CAPABILITIES`, 67 names), then a
+with the client's own list (`REQUESTED_CAPABILITIES`, then 67 names), then a
 relogin asking for that list together with the reference viewer's
 (Firestorm's `LLViewerRegionImpl::buildCapabilityNames`, 116 names). The case
 holds each live grid to exactly the refused set below, and each fake flavour
-to refusing at least that set.
+to refusing at least that set. Each capability adopted since is granted by
+both grids and re-measured on adoption: with `ParcelPropertiesUpdate`
+(2026-10-05) the list is 68 names, aditi grants 66 and OpenSim 35, and the
+refused sets are unchanged.
 
 ## The client's own list
 
@@ -45,9 +48,9 @@ neither grid offers.
 
 ## What only the reference viewer asks for
 
-Of the 51 names Firestorm requests that our list does not, **aditi grants 48**
-— among them `AgentProfile`, `SetDisplayName`, `HomeLocation`,
-`ParcelPropertiesUpdate`, `DispatchRegionInfo`, `EstateAccess`,
+Of the 51 names Firestorm requested that our list did not on 2026-10-04,
+**aditi grants 48** — among them `AgentProfile`, `SetDisplayName`,
+`HomeLocation`, `ParcelPropertiesUpdate`, `DispatchRegionInfo`, `EstateAccess`,
 `EnvironmentSettings`, `RequestTaskInventory`, `ViewerBenefits`,
 `InterestList`, `GroupAPIv1`, `UpdateAgentInformation`, `UpdateAgentLanguage`,
 `UpdateGestureTaskInventory`, `UpdateMaterialTaskInventory`,

@@ -2,10 +2,9 @@
 id: protocol-cap-parcel-properties-update
 title: Edit parcels over the ParcelPropertiesUpdate capability
 topic: protocol
-status: blocked
+status: done
 origin: protocol-reference-capabilities triage (2026-10-04)
 refs: [protocol-reference-capabilities, parcel-properties-update-via-udp-poisons-opensim, viewer-parcel-config-missing-writes, gridspec-parcel-management]
-blocked_by: [gridspec-parcel-management]
 ---
 
 Context: [context/protocol.md](../context/protocol.md).
@@ -36,3 +35,12 @@ and Firestorm references: `book/src/comms/caps-reference.md`.
 This capability is adopted inside that gridspec task, which measures the
 feature on both grids over both paths, makes the fake grid serve the
 capability per flavour, and checks the viewer. Claim that task.
+
+## Done (2026-10-05)
+
+`Command::UpdateParcel` POSTs `build_parcel_properties_update_request` to the
+capability where granted (both runtimes, failures reported as a capability
+failure) and falls back to UDP otherwise; `ParcelUpdate` carries the media
+block, link sharing, visibility flags and `obscure_moap` as `Option`s. The fake
+grid serves the capability (`parse_parcel_properties_update_request`). Done
+inside [[gridspec-parcel-management]].

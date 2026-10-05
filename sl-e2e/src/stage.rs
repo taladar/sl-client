@@ -1084,13 +1084,21 @@ impl Stage {
                 .timeout(LOGIN)
                 .to_be_present();
             tokio::select! {
-                logged_in = logged_in => {
-                    let _held = logged_in.map_err(|source| StageError::Driver {
-                        viewer: label.clone(),
-                        source,
-                    })?;
-                    return Ok(());
-                }
+                logged_in = logged_in => match logged_in {
+                    Ok(_held) => return Ok(()),
+                    // The app closed the link on its way out — a second factor
+                    // stops it — and the probe can see that before the host
+                    // reports the exit. The exit, awaited here, says why.
+                    Err(sl_viewer_driver::DriverError::Closed { .. }) => {
+                        host.exited(handle).await?;
+                    }
+                    Err(source) => {
+                        return Err(StageError::Driver {
+                            viewer: label.clone(),
+                            source,
+                        });
+                    }
+                },
                 exited = host.exited(handle) => exited?,
             }
             viewer.running(ViewerRun::InProcess(None));

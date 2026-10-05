@@ -24,12 +24,13 @@ use sl_proto::{
     CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3,
     CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
     CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
-    CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET,
-    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
     INVENTORY_FETCH_MAX_IN_FLIGHT, NeighbourCaps, NewFileAgentInventoryRequest, RECV_BUFFER_SIZE,
     Session, UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url,
@@ -39,18 +40,18 @@ use sl_proto::{
     build_ais_update_item_body, build_create_inventory_category_request,
     build_environment_update_request, build_modify_material_params_request,
     build_new_file_agent_inventory_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_send_user_report, build_set_experience_permission_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_update_script_agent_request, build_update_script_task_request,
-    build_update_task_item_asset_request, build_upload_baked_texture_request,
-    build_user_info_update, build_voice_signaling_request, chat_session_agents_body,
-    chat_session_request_body, copy_inventory_from_notecard_body, create_listing_request,
-    delete_listing_request, display_names_query, environment_cap_url, experience_id_query,
-    experience_info_query, experience_query, find_experience_query, forget_experience_query,
-    group_experiences_query, group_invite_response_body, listing_request, listings_request,
-    merchant_status_request, parse_login_response, update_listing_request,
+    build_object_media_update_request, build_parcel_properties_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_send_user_report,
+    build_set_experience_permission_request, build_update_experience_request,
+    build_update_item_asset_request, build_update_script_agent_request,
+    build_update_script_task_request, build_update_task_item_asset_request,
+    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
+    chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
+    create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
+    experience_id_query, experience_info_query, experience_query, find_experience_query,
+    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
+    listings_request, merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -1799,7 +1800,15 @@ impl Client {
                             self.session.redo_objects(&local_ids, Instant::now())?;
                         }
                         Some(Command::UpdateParcel(update)) => {
-                            self.session.update_parcel(&update, Instant::now())?;
+                            // The capability where the region grants it, as the
+                            // reference viewer does: it carries the whole parcel,
+                            // and on OpenSim the UDP form nulls the media type.
+                            if let Some(url) = caps.get(CAP_PARCEL_PROPERTIES_UPDATE).cloned() {
+                                let body = build_parcel_properties_update_request(&update);
+                                tokio::spawn(http::post_caps_reporting(url, body, CAP_PARCEL_PROPERTIES_UPDATE, http.clone(), caps_tx.clone()));
+                            } else {
+                                self.session.update_parcel(&update, Instant::now())?;
+                            }
                         }
                         Some(Command::RequestParcelAccessList { local_id, scope }) => {
                             self.session.request_parcel_access_list(local_id, scope, Instant::now())?;

@@ -2,7 +2,7 @@
 id: viewer-parcel-config-missing-writes
 title: About Land — the controls that have no protocol write path yet
 topic: viewer
-status: deferred
+status: ready
 origin: About Land floater follow-up (2026-07-28)
 refs: [viewer-parcel-options-general, viewer-parcel-options-access-media]
 ---
@@ -45,3 +45,16 @@ the read exists (`ParcelInfo.see_avs`, `sl-proto/src/types/parcel.rs`)
 but `ParcelUpdate` lacks the field — the same caps-side
 ParcelPropertiesUpdate class as the avatar-sound toggles this task
 already lists, so it belongs here.
+
+## Write path (2026-10-05)
+
+The `ParcelPropertiesUpdate` capability now carries the media type,
+description, size and loop (`ParcelUpdate::media_data`), the link-sharing
+fields (`media_sharing`), `see_avs`, `any_av_sounds`, `group_av_sounds` and
+`obscure_moap` ([[protocol-cap-parcel-properties-update]]); `ParcelInfo` reads
+all of them from the event-queue record. The media, sound, see-avatars and
+obscure-MOAP controls can become editable: set the `Option` from the control,
+leave it `None` for a field the floater did not show. OpenSim has no link
+sharing or `obscure_moap` (`book/src/gridspec/land.md`), so those controls
+change nothing there. The experiences and environment tabs still have no write
+path.

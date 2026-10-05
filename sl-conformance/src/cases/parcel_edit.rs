@@ -18,15 +18,26 @@
 //!    [`Command::RequestParcelProperties`] carrying a distinctive sequence id,
 //!    so the reply is this query's answer and not the unsolicited one an
 //!    arrival pushes.
-//! 2. Save an About Land form built from that record with the name, description
-//!    and category changed, and re-read the parcel **by its region-local id**
-//!    ([`Command::RequestParcelPropertiesById`]) — the refetch that proves the
-//!    write reached the region rather than only the floater.
-//! 3. Read the ban list ([`Command::RequestParcelAccessList`]), add an entry,
+//! 2. Ask for the same parcel by its region-local id
+//!    ([`Command::RequestParcelPropertiesById`]) and record whether the grid
+//!    answers at all (`by_id_answered`): OpenSim ignores the message.
+//! 3. Save an About Land form built from that record with the name, description
+//!    and category changed, and wait for the parcel the region pushes back —
+//!    the update's `flags` ask for it, as the reference viewer's do, so no
+//!    refetch is sent. The push proves the write reached the region rather than
+//!    only the floater; its sequence id is recorded (`edit_echo_sequence_id`).
+//! 4. Read the ban list ([`Command::RequestParcelAccessList`]), add an entry,
 //!    re-read it, then restore it to exactly what it held. An empty list
 //!    travels as a single nil-agent placeholder, which the client drops on
 //!    decode, so an empty list reads as zero entries.
-//! 4. Save the original form back and confirm the name returned to what it was.
+//! 5. Save the original form back and confirm the name returned to what it was.
+//!
+//! The edit travels over the region's `ParcelPropertiesUpdate` capability
+//! where the region grants it, as the reference viewer's does, and over the UDP
+//! message only where it does not; `edit_transport` records which. The
+//! capability's body carries the media block (type, size, loop) the UDP message
+//! has no room for, so the round trip also checks that block comes back as it
+//! went out — the UDP form nulls the media type on OpenSim.
 //!
 //! `1av`, `[both]`, and **offline**. Editing land needs land rights, so a live
 //! run has to be the **estate-owner** avatar (`--avatar estate-owner`), the same
@@ -35,7 +46,7 @@
 //! answers the first query with no data — the agent is standing on land nobody
 //! has parcelled — is recorded `partial` rather than failed.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
     Command, Event, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
@@ -44,6 +55,7 @@ use sl_client_tokio::{
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
+use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, check_eq, secs_metric};
 
@@ -60,6 +72,29 @@ const SQUARE_EAST_NORTH: f32 = 128.0;
 /// arrival produces. Distinct from every other case's ids so the two never
 /// alias.
 const SEQUENCE_ID: i32 = 5361;
+
+/// How long the by-id probe waits for an answer before recording that the grid
+/// ignored it.
+const BY_ID_WINDOW: Duration = Duration::from_secs(5);
+
+/// Whether a grid answers `ParcelPropertiesRequestByID`.
+pub(crate) const BY_ID_ANSWERED: Measured<bool> = Measured {
+    second_life: true,
+    opensim: false,
+    source: "parcel-edit-refused on aditi, parcel-edit on OpenSim (2026-10-05, \
+             book/src/gridspec/land.md)",
+};
+
+/// The sequence id of the parcel a grid pushes back after an accepted edit:
+/// Second Life's is the reference viewer's `SELECTED_PARCEL_SEQ_ID` (measured
+/// on a refused edit — the test avatars own no land on aditi), OpenSim's the
+/// id of the client's last parcel request, which here is the first query's.
+const EDIT_ECHO_SEQUENCE_ID: Measured<i32> = Measured {
+    second_life: -10_000,
+    opensim: SEQUENCE_ID,
+    source: "parcel-edit on OpenSim, parcel-edit-refused on aditi (2026-10-05, \
+             book/src/gridspec/land.md)",
+};
 
 /// The name the edit gives the parcel.
 const NEW_NAME: &str = "SLClientParcelEditTest";
@@ -91,6 +126,7 @@ impl GridTest for ParcelEdit {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
+            let ctx_grid = ctx.grid();
             let session = ctx.primary();
             session.wait_for_region(REGION_TIMEOUT).await?;
             let circuit = session.circuit_id().ok_or_else(|| {
@@ -123,17 +159,47 @@ impl GridTest for ParcelEdit {
             let local_id = original.local_id;
             let scoped = ScopedParcelId::new(circuit, local_id);
 
-            // 2. The edit: the record as read, with three fields changed. Every
+            // 2. The by-id form of the same query, which not every grid answers.
+            session
+                .send(Command::RequestParcelPropertiesById {
+                    local_id: scoped,
+                    sequence_id: SEQUENCE_ID + 1,
+                })
+                .await?;
+            let by_id_answered = match session
+                .wait_for(BY_ID_WINDOW, |event| match event {
+                    Event::ParcelProperties(parcel) if parcel.sequence_id == SEQUENCE_ID + 1 => {
+                        Some(())
+                    }
+                    _ => None,
+                })
+                .await
+            {
+                Ok(()) => true,
+                Err(TestFailure::Timeout(_)) => false,
+                Err(other) => return Err(other),
+            };
+            BY_ID_ANSWERED.check("by-id parcel request answered", ctx_grid, &by_id_answered)?;
+
+            // 3. The edit: the record as read, with three fields changed. Every
             //    other field goes back exactly as it came, which is what makes
-            //    the refetch below a test of the record and not of one field.
+            //    the echo below a test of the record and not of one field.
+            let transport = if session.cap("ParcelPropertiesUpdate").is_some() {
+                "capability"
+            } else {
+                "udp"
+            };
             let edit_started = Instant::now();
             let mut edited = original.to_update();
             NEW_NAME.clone_into(&mut edited.name);
             NEW_DESCRIPTION.clone_into(&mut edited.description);
             edited.category = ParcelCategory::Residential;
-            session.send(Command::UpdateParcel(edited)).await?;
-            let saved = refetch(session, scoped, SEQUENCE_ID + 1).await?;
+            session
+                .send(Command::UpdateParcel(Box::new(edited)))
+                .await?;
+            let saved = await_echo(session, local_id).await?;
             let edit_rtt = edit_started.elapsed();
+            EDIT_ECHO_SEQUENCE_ID.check("edit echo sequence id", ctx_grid, &saved.sequence_id)?;
             check_eq("edited parcel name", &saved.name, &NEW_NAME.to_owned())?;
             check_eq(
                 "edited parcel description",
@@ -158,8 +224,27 @@ impl GridTest for ParcelEdit {
                 &saved.raw_parcel_flags,
                 &original.raw_parcel_flags,
             )?;
+            check_eq(
+                "re-asserted media block",
+                &saved.media_data,
+                &original.media_data,
+            )?;
+            check_eq(
+                "re-asserted avatar visibility",
+                &(saved.see_avs, saved.any_av_sounds, saved.group_av_sounds),
+                &(
+                    original.see_avs,
+                    original.any_av_sounds,
+                    original.group_av_sounds,
+                ),
+            )?;
+            check_eq(
+                "re-asserted media-on-a-prim obscuring",
+                &saved.obscure_moap,
+                &original.obscure_moap,
+            )?;
 
-            // 3. The ban list, which is the one parcel record that does not
+            // 4. The ban list, which is the one parcel record that does not
             //    travel in the properties reply.
             let ban_started = Instant::now();
             let initial_ban = read_access_list(session, scoped, local_id).await?;
@@ -189,7 +274,7 @@ impl GridTest for ParcelEdit {
                 "the banned agent was not on the ban list after the update",
             )?;
 
-            // 4. Put both back the way they were found.
+            // 5. Put both back the way they were found.
             session
                 .send(Command::UpdateParcelAccessList {
                     local_id: scoped,
@@ -204,12 +289,15 @@ impl GridTest for ParcelEdit {
             )?;
 
             session
-                .send(Command::UpdateParcel(original.to_update()))
+                .send(Command::UpdateParcel(Box::new(original.to_update())))
                 .await?;
-            let restored = refetch(session, scoped, SEQUENCE_ID + 2).await?;
+            let restored = await_echo(session, local_id).await?;
             check_eq("restored parcel name", &restored.name, &original.name)?;
 
             let metrics = ctx.metrics();
+            metrics.set("edit_transport", transport);
+            metrics.set("by_id_answered", by_id_answered);
+            metrics.set("edit_echo_sequence_id", i64::from(saved.sequence_id));
             metrics.set("parcel_local_id", i64::from(local_id.0));
             metrics.set("parcel_name", original.name.clone());
             metrics.set(
@@ -223,23 +311,17 @@ impl GridTest for ParcelEdit {
     }
 }
 
-/// Re-reads the parcel by its region-local id under `sequence_id`, waiting for
-/// the reply that echoes it — the refetch that says the write reached the
-/// region rather than only the floater.
-async fn refetch(
+/// Waits for the parcel the region pushes back after an update — the echo the
+/// update's `flags` ask for. It carries a sequence id the client never sent (0
+/// to an agent standing on the parcel), so it is matched by the parcel's
+/// region-local id alone.
+pub(crate) async fn await_echo(
     session: &mut Session,
-    local_id: ScopedParcelId,
-    sequence_id: i32,
+    local_id: RegionLocalParcelId,
 ) -> Result<ParcelInfo, TestFailure> {
     session
-        .send(Command::RequestParcelPropertiesById {
-            local_id,
-            sequence_id,
-        })
-        .await?;
-    session
         .wait_for(LONG_TIMEOUT, |event| match event {
-            Event::ParcelProperties(parcel) if parcel.sequence_id == sequence_id => {
+            Event::ParcelProperties(parcel) if parcel.local_id == local_id => {
                 Some((**parcel).clone())
             }
             _ => None,

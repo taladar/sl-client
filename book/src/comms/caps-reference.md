@@ -43,7 +43,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `ModifyRegion` | yes | — | current | task `viewer-pbr-terrain` |
 | `NavMeshGenerationStatus` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `ObjectNavMeshProperties` | yes | — | current | task `viewer-pathfinding-floaters` |
-| `ParcelPropertiesUpdate` | yes | yes | current | task `protocol-cap-parcel-properties-update` (UDP today) |
+| `ParcelPropertiesUpdate` | yes | yes | current | **used** since 2026-10-05; UDP where not granted |
 | `ProductInfoRequest` | yes | — | current | task `protocol-cap-product-info` |
 | `RegionObjects` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `RegionSchedule` | yes | — | current | task `viewer-region-restart-schedule` |
@@ -144,9 +144,14 @@ auto_scale, media_loop, media_current_url, obscure_media, obscure_music,
 media_id, media_allow_navigate, media_prevent_camera_zoom, media_url_timeout,
 group_id, pass_price, pass_hours, category, auth_buyer_id, snapshot_id,
 user_location, user_look_at, landing_type, see_avs, group_av_sounds,
-any_av_sounds, obscure_moap`, plus `flags`. The UDP `ParcelPropertiesUpdate`
-lacks `media_type` and the last four; on OpenSim, leaving `media_type` unset
-corrupts the parcel's stored record.
+any_av_sounds, obscure_moap`, plus `flags` (`0x01`, "push the parcel back").
+`flags` and `parcel_flags` are 4-byte big-endian binary. The reply is ignored;
+the grid pushes the parcel back instead (or does not: what each grid answers
+is in [Land](../gridspec/land.md)). The UDP `ParcelPropertiesUpdate` lacks
+`media_type` and the last four; on OpenSim, leaving `media_type` unset corrupts
+the parcel's stored record. The client builds the body in `sl-proto`'s
+`build_parcel_properties_update_request`, and the fake grid parses it with
+`parse_parcel_properties_update_request`.
 
 **`HomeLocation`** (`llagent.cpp`). POST `{HomeLocation:{LocationId,
 LocationPos:{X,Y,Z}, LocationLookAt:{X,Y,Z}}}` → `{success,

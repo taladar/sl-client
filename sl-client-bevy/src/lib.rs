@@ -21,11 +21,12 @@ use sl_proto::{
     CAP_GET_EXPERIENCES, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3,
     CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
     CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO,
-    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE,
+    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
     Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, NeighbourCaps,
     NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, Session, SessionMessage, UserInfoUpdate,
@@ -35,9 +36,9 @@ use sl_proto::{
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_environment_update_request,
     build_modify_material_params_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_render_materials_put_request, build_send_user_report,
+    build_object_media_update_request, build_parcel_properties_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_render_materials_put_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
     build_update_script_task_request, build_update_task_item_asset_request,
@@ -2971,7 +2972,28 @@ fn apply_command(
             session.redo_objects(local_ids, now)?;
         }
         Command::UpdateParcel(update) => {
-            session.update_parcel(update, now)?;
+            // The capability where the region grants it, as the reference
+            // viewer does: it carries the whole parcel, and on OpenSim the UDP
+            // form nulls the media type.
+            match caps.and_then(|caps| {
+                caps.map
+                    .get(CAP_PARCEL_PROPERTIES_UPDATE)
+                    .cloned()
+                    .map(|url| (url, caps.events_tx.clone()))
+            }) {
+                Some((url, events_tx)) => {
+                    let body = build_parcel_properties_update_request(update);
+                    crate::log_context::spawn_thread(move || {
+                        crate::http::run_caps_reporting(
+                            &url,
+                            body,
+                            CAP_PARCEL_PROPERTIES_UPDATE,
+                            &events_tx,
+                        );
+                    });
+                }
+                None => session.update_parcel(update, now)?,
+            }
         }
         Command::RequestParcelAccessList { local_id, scope } => {
             session.request_parcel_access_list(*local_id, *scope, now)?;

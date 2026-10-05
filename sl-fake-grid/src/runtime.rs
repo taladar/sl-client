@@ -445,6 +445,9 @@ pub(crate) struct GridCore {
     /// The capabilities the imitated grid's seed refuses
     /// ([`ImitatedGrid::withheld_capabilities`]).
     pub(crate) withheld_capabilities: &'static [&'static str],
+    /// How the region answers the About Land traffic
+    /// ([`ImitatedGrid::parcel_policy`]).
+    pub(crate) parcel_policy: crate::imitates::ParcelPolicy,
     /// The spatial-voice backend every region serves ([`VoiceBackend`]).
     pub(crate) voice_backend: VoiceBackend,
     /// The clock every session machine is stamped from.
@@ -870,6 +873,7 @@ impl GridCore {
             caps,
             assets: self.assets.clone(),
             object_assets: self.object_assets,
+            parcel_policy: self.parcel_policy,
             inventory_announcement: self.inventory_announcement,
             upload_announcements: self.upload_announcements,
             bakes: self.bakes,
@@ -1816,7 +1820,11 @@ impl FakeGridBuilder {
                     .scenario
                     .clone()
                     .unwrap_or_else(|| self.scenario.clone());
-                let world = Arc::new(parking_lot::Mutex::new(scenario.world.clone()));
+                let mut fixtures = scenario.world.clone();
+                for parcel in &mut fixtures.parcels {
+                    self.imitates.parcel_policy().dress(parcel);
+                }
+                let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 RegionEntry {
                     config,
@@ -1891,6 +1899,7 @@ impl FakeGridBuilder {
             account_entitlements: self.imitates.describes_account_entitlements(),
             login_fields: self.imitates.login_fields(),
             withheld_capabilities: self.imitates.withheld_capabilities(),
+            parcel_policy: self.imitates.parcel_policy(),
             packages: self
                 .packages
                 .unwrap_or_else(crate::benefits::second_life_packages),

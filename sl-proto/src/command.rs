@@ -972,7 +972,7 @@ pub enum Command {
     /// Undo the last terraform edit (`UndoLand`).
     UndoLand,
     /// Edit a parcel's settings (`ParcelPropertiesUpdate`).
-    UpdateParcel(ParcelUpdate),
+    UpdateParcel(Box<ParcelUpdate>),
     /// Request a parcel's allow or ban list (`ParcelAccessListRequest`); the
     /// reply arrives as [`Event::ParcelAccessList`](crate::Event::ParcelAccessList).
     RequestParcelAccessList {

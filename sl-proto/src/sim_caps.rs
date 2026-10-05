@@ -92,18 +92,18 @@ use crate::{
     CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
     CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
-    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
-    CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event,
-    InventoryFolder, InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal,
-    offline_messages_to_llsd,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
+    CHAT_SESSION_START_CONFERENCE, Event, InventoryFolder, InventoryItem, InventoryListing,
+    ServerEvent, VoiceProvisionRefusal, offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -201,6 +201,7 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_LSL_SYNTAX,
     CAP_EXT_ENVIRONMENT,
     CAP_REMOTE_PARCEL_REQUEST,
+    CAP_PARCEL_PROPERTIES_UPDATE,
     CAP_GET_OBJECT_COST,
     CAP_GET_OBJECT_PHYSICS_DATA,
     CAP_RESOURCE_COST_SELECTED,
@@ -308,6 +309,10 @@ pub enum CapHandler {
     /// The `RemoteParcelRequest` location→parcel-id lookup POST, resolved
     /// against the session's parcel-cover store ([`SimSession::add_parcel`]).
     RemoteParcel,
+    /// The `ParcelPropertiesUpdate` parcel-edit POST, routed to the driver as
+    /// the same [`ServerEvent::ParcelPropertiesUpdated`](crate::ServerEvent::ParcelPropertiesUpdated)
+    /// the UDP message raises.
+    ParcelUpdate,
     /// The `GetObjectCost` per-object cost POST
     /// ([`SimSession::set_object_cost`]).
     ObjectCost,
@@ -661,6 +666,7 @@ impl SimCaps {
             CAP_LSL_SYNTAX => Some(CapHandler::LslSyntax),
             CAP_EXT_ENVIRONMENT => Some(CapHandler::Environment),
             CAP_REMOTE_PARCEL_REQUEST => Some(CapHandler::RemoteParcel),
+            CAP_PARCEL_PROPERTIES_UPDATE => Some(CapHandler::ParcelUpdate),
             CAP_GET_OBJECT_COST => Some(CapHandler::ObjectCost),
             CAP_GET_OBJECT_PHYSICS_DATA => Some(CapHandler::ObjectPhysics),
             CAP_RESOURCE_COST_SELECTED => Some(CapHandler::ResourceCostSelected),
@@ -838,6 +844,9 @@ impl SimCaps {
                 }
                 Some(CapHandler::RemoteParcel) => {
                     CapsDispatch::Response(Self::dispatch_remote_parcel(sim, request))
+                }
+                Some(CapHandler::ParcelUpdate) => {
+                    CapsDispatch::Response(Self::dispatch_parcel_update(sim, request))
                 }
                 Some(CapHandler::ObjectCost) => {
                     CapsDispatch::Response(Self::dispatch_object_cost(sim, request))
@@ -1948,6 +1957,26 @@ impl SimCaps {
         }
     }
 
+    /// Serves one `ParcelPropertiesUpdate` POST: reads the parcel record and
+    /// hands it to the driver as
+    /// [`ServerEvent::ParcelPropertiesUpdated`](crate::ServerEvent::ParcelPropertiesUpdated),
+    /// the event the UDP message raises, so both forms land in one place. The
+    /// reply is an empty map; the reference viewer ignores it. Wrong method →
+    /// `405`, malformed body → `400`.
+    fn dispatch_parcel_update(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(update) = crate::parse_parcel_properties_update_request(&body) else {
+            return CapsResponse::bad_request();
+        };
+        sim.push_parcel_update(update);
+        CapsResponse::llsd_xml(Llsd::Map(HashMap::new()).to_llsd_xml())
+    }
+
     /// Serves one `GetObjectCost` POST: the stored costs of the requested
     /// objects ([`SimSession::set_object_cost`]); unknown ids are omitted
     /// (the "no such object" signal). Wrong method → `405`, malformed body →
@@ -2594,6 +2623,7 @@ mod tests {
             ("GetDisplayNames", CapStatus::Served),
             ("AvatarPickerSearch", CapStatus::Served),
             ("RemoteParcelRequest", CapStatus::Served),
+            ("ParcelPropertiesUpdate", CapStatus::Served),
             ("SimulatorFeatures", CapStatus::Served),
             ("LSLSyntax", CapStatus::Served),
             ("AgentPreferences", CapStatus::Served),

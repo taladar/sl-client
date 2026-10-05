@@ -21,6 +21,11 @@
 //!    assert it carries real data (not [`ParcelRequestResult::NoData`]) with a
 //!    positive area.
 //!
+//! The reply also carries what only the event-queue form has room for: the
+//! `MediaData`, `MediaLinkSharing` and `ParcelExtendedFlags` blocks and the
+//! avatar-visibility booleans. Which of them each grid sends is held to the
+//! measurement (`BLOCKS`), because a client must send them back on an edit.
+//!
 //! `1av`, `[both, fake]`. The query rectangle is region-relative and
 //! independent of the avatar's exact position, so no fixed start location is
 //! needed — the reply describes whichever parcel occupies the region centre of
@@ -31,6 +36,7 @@ use sl_client_tokio::{Command, Event, ParcelInfo, ParcelRequestResult};
 
 use crate::context::TestContext;
 use crate::grid::Grid;
+use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, secs_metric};
 
@@ -47,6 +53,15 @@ const SQUARE_EAST_NORTH: f32 = 128.0;
 /// `ParcelProperties` is *our* query's answer and not an unsolicited one the
 /// simulator sends on region entry.
 const SEQUENCE_ID: i32 = 5150;
+
+/// Which of the event-queue-only parts the reply for a parcel without media
+/// carries: `MediaData`, `MediaLinkSharing`, `ParcelExtendedFlags`, and the
+/// avatar-visibility booleans.
+const BLOCKS: Measured<[bool; 4]> = Measured {
+    second_life: [true, false, true, true],
+    opensim: [true, false, false, true],
+    source: "parcel-properties on aditi and OpenSim (2026-10-05, book/src/gridspec/land.md)",
+};
 
 /// Requests parcel properties for the region-centre square and records the
 /// parcel's geometry and prim limits.
@@ -104,6 +119,17 @@ impl GridTest for ParcelProperties {
                 &format!("parcel area was not positive (area: {})", parcel.area.0),
             )?;
 
+            BLOCKS.check(
+                "event-queue-only parts (media, link sharing, extended flags, visibility)",
+                ctx.grid(),
+                &[
+                    parcel.media_data.is_some(),
+                    parcel.media_sharing.is_some(),
+                    parcel.obscure_moap.is_some(),
+                    parcel.see_avs.is_some(),
+                ],
+            )?;
+
             let metrics = ctx.metrics();
             metrics.set_timing(&secs_metric("parcel_properties"), elapsed);
             metrics.set("area", i64::from(parcel.area.0));
@@ -113,6 +139,31 @@ impl GridTest for ParcelProperties {
             metrics.set(
                 "request_result",
                 request_result_label(parcel.request_result),
+            );
+            // The blocks only the event-queue form carries, and what each grid
+            // puts in them: a client must send them back on an edit, so which
+            // a grid sends is what a `ParcelPropertiesUpdate` can preserve.
+            metrics.set(
+                "media_data",
+                parcel
+                    .media_data
+                    .as_ref()
+                    .map_or_else(|| "absent".to_owned(), |media| format!("{media:?}")),
+            );
+            metrics.set(
+                "media_sharing",
+                parcel
+                    .media_sharing
+                    .as_ref()
+                    .map_or_else(|| "absent".to_owned(), |sharing| format!("{sharing:?}")),
+            );
+            metrics.set("obscure_moap", format!("{:?}", parcel.obscure_moap));
+            metrics.set(
+                "avatar_visibility",
+                format!(
+                    "see={:?} any_sounds={:?} group_sounds={:?}",
+                    parcel.see_avs, parcel.any_av_sounds, parcel.group_av_sounds
+                ),
             );
             metrics.set("parcel_name", parcel.name);
             Ok(())

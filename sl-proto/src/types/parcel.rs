@@ -285,6 +285,65 @@ pub struct ParcelInfo {
     /// Whether group members' avatar sounds play on the parcel
     /// (`GroupAVSounds`); `None` when not provided (the UDP path omits it).
     pub group_av_sounds: Option<bool>,
+    /// The parcel media's description, type, size and looping (the
+    /// `MediaData` block); `None` when not provided (the UDP path omits it).
+    pub media_data: Option<ParcelMediaData>,
+    /// The parcel media's shared-browsing settings (the `MediaLinkSharing`
+    /// block); `None` when not provided — the UDP path omits it, and a stock
+    /// OpenSim never sends it.
+    pub media_sharing: Option<ParcelMediaSharing>,
+    /// Whether media on a prim outside the parcel is hidden from avatars on it
+    /// (`ParcelExtendedFlags`, the "obscure MOAP" bit); `None` when not
+    /// provided — the UDP path omits it, and a stock OpenSim never sends it.
+    pub obscure_moap: Option<bool>,
+}
+
+/// A parcel's media description, type, size and looping — the `MediaData`
+/// block of a CAPS `ParcelProperties`, and the matching fields of a
+/// `ParcelPropertiesUpdate` capability body.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ParcelMediaData {
+    /// The media description (`MediaDesc` / `media_desc`).
+    pub description: String,
+    /// The media MIME type (`MediaType` / `media_type`), e.g. `text/html`.
+    pub media_type: String,
+    /// The media width in pixels, `0` for the media's own size.
+    pub width: i32,
+    /// The media height in pixels, `0` for the media's own size.
+    pub height: i32,
+    /// Whether the media loops.
+    pub looping: bool,
+}
+
+impl ParcelMediaData {
+    /// What a viewer assumes when a grid sent no `MediaData` block: the
+    /// reference viewer's legacy QuickTime type, looping, and no description.
+    #[must_use]
+    pub fn legacy_default() -> Self {
+        Self {
+            description: String::new(),
+            media_type: "video/vnd.secondlife.qt.legacy".to_owned(),
+            width: 0,
+            height: 0,
+            looping: true,
+        }
+    }
+}
+
+/// A parcel media's shared-browsing settings — the `MediaLinkSharing` block of
+/// a CAPS `ParcelProperties`, and the matching fields of a
+/// `ParcelPropertiesUpdate` capability body.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ParcelMediaSharing {
+    /// The URL the media is currently showing (`MediaCurrentURL`), which may
+    /// differ from the home `media_url` once someone navigated.
+    pub current_url: String,
+    /// Whether residents may navigate the media away from its home URL.
+    pub allow_navigate: bool,
+    /// Whether clicking the media leaves the camera where it is.
+    pub prevent_camera_zoom: bool,
+    /// Seconds after which the media returns to its home URL, `0` for never.
+    pub url_timeout: f32,
 }
 
 impl ParcelInfo {
@@ -327,6 +386,12 @@ impl ParcelInfo {
             user_location: self.user_location,
             user_look_at: self.user_look_at,
             landing_type: self.landing_type.to_u8(),
+            media_data: self.media_data.clone(),
+            media_sharing: self.media_sharing.clone(),
+            see_avs: self.see_avs,
+            any_av_sounds: self.any_av_sounds,
+            group_av_sounds: self.group_av_sounds,
+            obscure_moap: self.obscure_moap,
         }
     }
 
@@ -1105,6 +1170,24 @@ pub struct ParcelUpdate {
     pub user_look_at: Direction,
     /// The landing type (`0` = blocked, `1` = landing point, `2` = anywhere).
     pub landing_type: u8,
+    /// The media description, type, size and looping. Only the capability
+    /// form carries it; `None` = not sent, which leaves the grid's value alone.
+    pub media_data: Option<ParcelMediaData>,
+    /// The media's shared-browsing settings; capability form only, `None` = not
+    /// sent.
+    pub media_sharing: Option<ParcelMediaSharing>,
+    /// Whether avatars on the parcel are visible from outside it; capability
+    /// form only, `None` = not sent.
+    pub see_avs: Option<bool>,
+    /// Whether anyone's avatar sounds play on the parcel; capability form
+    /// only, `None` = not sent.
+    pub any_av_sounds: Option<bool>,
+    /// Whether group members' avatar sounds play on the parcel; capability
+    /// form only, `None` = not sent.
+    pub group_av_sounds: Option<bool>,
+    /// Whether media on a prim outside the parcel is hidden from avatars on
+    /// it; capability form only, `None` = not sent.
+    pub obscure_moap: Option<bool>,
 }
 
 impl Default for ParcelUpdate {
@@ -1128,6 +1211,12 @@ impl Default for ParcelUpdate {
             user_location: RegionCoordinates::new(0.0, 0.0, 0.0),
             user_look_at: Direction::ZERO,
             landing_type: 0,
+            media_data: None,
+            media_sharing: None,
+            see_avs: None,
+            any_av_sounds: None,
+            group_av_sounds: None,
+            obscure_moap: None,
         }
     }
 }
@@ -1166,6 +1255,12 @@ merge_unedited! {
         user_location,
         user_look_at,
         landing_type,
+        media_data,
+        media_sharing,
+        see_avs,
+        any_av_sounds,
+        group_av_sounds,
+        obscure_moap,
     }
 }
 

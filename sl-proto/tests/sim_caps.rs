@@ -152,9 +152,10 @@ mod test {
         // UpdateAvatarAppearance), the seven inventory caps (the two
         // descendents fetches, the two per-item fetches, AISv3 agent +
         // Library, CreateInventoryCategory), the nine
-        // region/object-information caps, the thirteen experience caps, and
-        // the three voice signalling caps.
-        assert_eq!(granted.len(), 61);
+        // region/object-information caps, the parcel edit
+        // (ParcelPropertiesUpdate), the thirteen experience caps, and the three
+        // voice signalling caps.
+        assert_eq!(granted.len(), 62);
         Ok(())
     }
 

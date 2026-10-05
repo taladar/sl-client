@@ -2266,7 +2266,8 @@ pub enum ServerEvent {
     /// About Land floater able to revert somebody else's change without either
     /// of them noticing.
     ParcelPropertiesUpdated {
-        /// The complete record the client is asserting.
+        /// The complete record the client is asserting. From the UDP message
+        /// the fields only the capability form carries are `None`.
         update: Box<ParcelUpdate>,
     },
     /// The client changed a parcel's allow or ban list
@@ -3701,6 +3702,15 @@ impl SimSession {
         if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
             chat_session.log(message);
         }
+    }
+
+    /// Routes a parcel edit received over the `ParcelPropertiesUpdate`
+    /// capability to the driver as [`ServerEvent::ParcelPropertiesUpdated`] —
+    /// the same event the UDP `ParcelPropertiesUpdate` raises.
+    pub(crate) fn push_parcel_update(&mut self, update: ParcelUpdate) {
+        self.events.push_back(ServerEvent::ParcelPropertiesUpdated {
+            update: Box::new(update),
+        });
     }
 
     /// Routes an abuse report received over the modern `SendUserReport`
@@ -10743,6 +10753,14 @@ impl SimSession {
                             data.user_look_at.z,
                         ),
                         landing_type: data.landing_type,
+                        // The UDP block carries none of these: not sent, so a
+                        // driver applying the edit leaves them as they were.
+                        media_data: None,
+                        media_sharing: None,
+                        see_avs: None,
+                        any_av_sounds: None,
+                        group_av_sounds: None,
+                        obscure_moap: None,
                     }),
                 });
             }

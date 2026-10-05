@@ -8105,6 +8105,9 @@ mod test {
             see_avs: None,
             any_av_sounds: None,
             group_av_sounds: None,
+            media_data: None,
+            media_sharing: None,
+            obscure_moap: None,
         })
     }
 

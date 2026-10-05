@@ -405,6 +405,26 @@ impl LandSelection {
         self.pending = None;
     }
 
+    /// Select `rect` and ask the simulator what it holds: the request whose
+    /// reply fills [`parcel`](Self::parcel). `snap` asks the simulator to grow
+    /// the selection out to the whole parcel under it.
+    fn select(&mut self, rect: LandRect, snap: bool) -> Command {
+        let sequence_id = self.next_sequence();
+        self.rect = Some(rect);
+        self.parcel = None;
+        self.whole_parcel = false;
+        self.multiple_owners = false;
+        self.pending = Some(sequence_id);
+        Command::RequestParcelProperties {
+            west: rect.west,
+            south: rect.south,
+            east: rect.east,
+            north: rect.north,
+            sequence_id,
+            snap_selection: snap,
+        }
+    }
+
     /// The sequence id for the next `ParcelPropertiesRequest`, never repeated
     /// while the session lives.
     const fn next_sequence(&mut self) -> i32 {
@@ -873,20 +893,7 @@ fn handle_land_pointer(
             selection.clear();
             return;
         }
-        let sequence_id = selection.next_sequence();
-        selection.rect = Some(rect);
-        selection.parcel = None;
-        selection.whole_parcel = false;
-        selection.multiple_owners = false;
-        selection.pending = Some(sequence_id);
-        commands.write(SlCommand(Command::RequestParcelProperties {
-            west: rect.west,
-            south: rect.south,
-            east: rect.east,
-            north: rect.north,
-            sequence_id,
-            snap_selection: click,
-        }));
+        commands.write(SlCommand(selection.select(rect, click)));
     }
 }
 
@@ -1625,10 +1632,18 @@ fn apply_brush_to_selection(
 }
 
 /// Send the `ParcelDivide` / `ParcelJoin` once the user answers the warning,
-/// against the rectangle the warning was raised for.
+/// against the rectangle the warning was raised for, then ask again what the
+/// rectangle holds.
+///
+/// Neither grid answers a divide or a join: OpenSim re-sends the overlay and
+/// nothing else (measured by `parcel-divide-join`), so a selection left as it
+/// was keeps describing the parcel that no longer exists. The reference sends
+/// and forgets; here the selection is re-requested — the divided piece is the
+/// new parcel, and a join snaps out to the merged one.
 fn apply_land_confirmations(
     mut responses: MessageReader<NotificationResponse>,
     mut pending: ResMut<PendingLandConfirm>,
+    mut selection: ResMut<LandSelection>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     for response in responses.read() {
@@ -1668,6 +1683,7 @@ fn apply_land_confirmations(
             }
         };
         commands.write(SlCommand(command));
+        commands.write(SlCommand(selection.select(rect, !divide)));
     }
 }
 
@@ -1679,7 +1695,37 @@ mod tests {
     };
     use bevy::prelude::Vec2;
     use pretty_assertions::{assert_eq, assert_ne};
+    use sl_client_bevy::Command;
     use sl_client_bevy::LandBrushAction;
+
+    /// Re-selecting after a divide or join forgets the parcel the old answer
+    /// described and waits on a fresh sequence id, so the answer to the new
+    /// question is the one that fills the selection.
+    #[test]
+    fn a_reselect_forgets_the_old_parcel_and_awaits_a_new_answer() {
+        let rect = LandRect::snapped_from_corners(Vec2::new(64.0, 64.0), Vec2::new(80.0, 80.0));
+        let mut selection = LandSelection::default();
+        let Command::RequestParcelProperties {
+            sequence_id: first, ..
+        } = selection.select(rect, false)
+        else {
+            unreachable!("a selection asks for parcel properties");
+        };
+        selection.whole_parcel = true;
+        let Command::RequestParcelProperties {
+            sequence_id: second,
+            snap_selection,
+            ..
+        } = selection.select(rect, true)
+        else {
+            unreachable!("a selection asks for parcel properties");
+        };
+        assert_ne!(first, second);
+        assert_eq!(selection.pending, Some(second));
+        assert!(snap_selection);
+        assert!(selection.parcel.is_none());
+        assert!(!selection.whole_parcel);
+    }
 
     /// A click — a press and release on the same ground point — selects the
     /// single 4 m parcel square under the cursor, not an empty rectangle.

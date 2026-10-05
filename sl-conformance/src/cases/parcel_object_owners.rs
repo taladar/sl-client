@@ -1,55 +1,56 @@
 //! Request a parcel's per-owner object tally, then return objects to their owner.
 //!
 //! A land owner's "Objects" land-panel has two halves this case exercises against
-//! the region-centre parcel, run as the **estate-owner** avatar
-//! (`--avatar estate-owner`) who owns the region-wide parcel on the local grid
-//! (both the object-owners request and the return need land rights):
+//! the region-centre parcel. The **primary** avatar is the land owner — the
+//! **estate-owner** on the local grid (`--avatar estate-owner`), who owns the
+//! region-wide parcel — because both halves need land rights. The **secondary**
+//! avatar is the resident whose object is tallied and returned; on the local
+//! grid that is a dedicated account that owns nothing anywhere (`--secondary
+//! resident` in the credentials file), since every other test avatar has
+//! long-lived objects on the region-centre parcel:
 //!
 //! - **Request object owners** — [`Command::RequestParcelObjectOwners`]
 //!   (`ParcelObjectOwnersRequest`, keyed on a [`ScopedParcelId`]) asks the
 //!   simulator for one row per avatar/group with objects sitting on the parcel;
-//!   the reply arrives as [`Event::ParcelObjectOwners`] (a `ParcelObjectOwnersReply`
-//!   over UDP), each row a [`ParcelObjectOwner`] carrying the owner, a prim count,
-//!   and an online flag. This is the data behind the panel's "Returnable objects"
-//!   owner list.
+//!   the reply arrives as [`Event::ParcelObjectOwners`], each row a
+//!   [`ParcelObjectOwner`] carrying the owner, a prim count, and an online flag.
+//!   This is the data behind the panel's "Returnable objects" owner list.
 //! - **Return objects** — [`Command::ReturnParcelObjects`] (`ParcelReturnObjects`)
-//!   returns every object on the parcel owned by the listed owners to their owner's
-//!   inventory. Using [`ParcelReturnType::LIST`] scoped to a single owner id mirrors
-//!   the viewer's "Return objects owned by \<selected owner\>" button (the viewer
-//!   sends the owner ids in the `OwnerIDs` block; the reference simulator
-//!   `LandObject.ReturnLandObjects` matches `primsOverMe` by owner id).
+//!   returns every object on the parcel owned by the listed owners to their
+//!   owner's inventory. [`ParcelReturnType::LIST`] scoped to one owner id mirrors
+//!   the viewer's "Return objects owned by \<selected owner\>" button (the
+//!   reference simulator `LandObject.ReturnLandObjects` matches `primsOverMe` by
+//!   owner id).
 //!
-//! Neither the request-reply nor the return alters anything permanently that the
-//! case does not restore, so it runs as a self-contained rez-tally-return-tally
-//! cycle that leaves the region as found:
+//! Why the object is the secondary's and not the land owner's: a return by owner
+//! takes **everything** that owner has on the parcel, and a land owner's parcel is
+//! where its scene lives — the local grid's estate owner has a few dozen
+//! long-lived test objects on it. OpenSim has no narrower return: it matches
+//! by owner only and ignores the task list. A resident with nothing on the
+//! parcel gives a return that touches only the cube this case rezzes.
 //!
-//! 1. Wait for the region, learn the region-centre parcel's region-local id and
-//!    owner from a `ParcelPropertiesRequest` reply (as in
-//!    [`parcel_properties`](super::parcel_properties)),
-//!    and confirm we own it.
-//! 2. Request the object owners as a **baseline** and assert we own no objects on
-//!    the parcel yet — the return below returns objects *by owner*, so a clean
-//!    owner baseline guarantees the cycle touches only the throwaway object this
-//!    case rezzes and nothing pre-existing.
-//! 3. Rez a throwaway cube ([`Command::RezObject`], `ObjectAdd`) at the region
-//!    centre; its arrival is the first [`Event::ObjectAdded`] with an id not seen
-//!    while the initial scene settled.
-//! 4. Request the object owners again and assert our owner now appears with a prim
-//!    count one higher than the baseline — the tally reflects the new object.
-//! 5. Return our objects on the parcel ([`Command::ReturnParcelObjects`],
-//!    `ParcelReturnType::LIST` scoped to our owner id), confirmed by the
-//!    [`Event::ObjectRemoved`] (`KillObject`) for the rezzed object's id.
-//! 6. Request the object owners a final time and assert our owner is back to the
-//!    baseline (no objects), leaving the parcel as found.
+//! 1. Both avatars wait for the region; the primary learns the region-centre
+//!    parcel's region-local id and owner from a `ParcelPropertiesRequest` reply
+//!    and confirms it owns it.
+//! 2. The primary requests the object owners as a **baseline** and asserts the
+//!    secondary owns nothing on the parcel yet.
+//! 3. The secondary rezzes a throwaway cube ([`Command::RezObject`], `ObjectAdd`)
+//!    at the region centre; its arrival is the first of its own
+//!    [`Event::ObjectAdded`]s with an id not seen while the scene settled.
+//! 4. The primary requests the object owners again and asserts the secondary now
+//!    tallies one prim.
+//! 5. The primary returns the secondary's objects on the parcel
+//!    ([`Command::ReturnParcelObjects`], `ParcelReturnType::LIST` scoped to the
+//!    secondary's id), confirmed by the secondary's [`Event::ObjectRemoved`]
+//!    (`KillObject`) for the cube.
+//! 6. The primary requests the object owners a final time and asserts the
+//!    secondary is back to none, leaving the parcel as found (the cube is in the
+//!    secondary's Lost and Found — inventory residue of one item per run, fine on
+//!    a throwaway grid).
 //!
-//! `1av`, `[both]`. On OpenSim the avatar is forced to the "Default Region" centre
-//! so the rez lands within terrain/parcel range; the single region-wide parcel is
-//! owned by the estate owner, who starts with no objects on it, so the baseline is
-//! empty, the cube tallies as one prim, and the return removes exactly that cube
-//! (returning it to the estate owner's Lost and Found — inventory residue bounded
-//! to one item per run, acceptable on a throwaway grid). Second Life enforces the
-//! same message flow. The aditi run is deferred with the batch — it needs a
-//! **full owned region** (the rez assumes we own the region centre), like
+//! `2av`, `[both]`. On OpenSim both avatars start at the "Default Region" centre
+//! so the rez lands on the parcel. The aditi run is deferred with the batch — it
+//! needs land the primary owns, like
 //! [`parcel_divide_join`](super::parcel_divide_join).
 
 use std::collections::HashSet;
@@ -128,6 +129,10 @@ impl GridTest for ParcelObjectOwners {
         &[Grid::Opensim, Grid::Aditi]
     }
 
+    fn accounts(&self) -> u8 {
+        2
+    }
+
     fn rezzes_objects(&self) -> bool {
         true
     }
@@ -142,9 +147,17 @@ impl GridTest for ParcelObjectOwners {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
+            let resident = {
+                let secondary = ctx.secondary().ok_or_else(|| {
+                    TestFailure::Assertion("this case needs a secondary avatar".to_owned())
+                })?;
+                secondary.wait_for_region(REGION_TIMEOUT).await?;
+                secondary.agent_id().ok_or_else(|| {
+                    TestFailure::Assertion("the secondary's login reported no agent id".to_owned())
+                })?
+            };
             let session = ctx.primary();
             session.wait_for_region(REGION_TIMEOUT).await?;
-
             let agent = session
                 .agent_id()
                 .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
@@ -152,8 +165,8 @@ impl GridTest for ParcelObjectOwners {
                 TestFailure::Assertion("login established no root circuit id".to_owned())
             })?;
 
-            // 1. Learn the region-centre parcel's local id and owner; confirm we
-            //    own it (the object-owners request and the return need land rights).
+            // 1. Learn the region-centre parcel's local id and owner; confirm the
+            //    primary owns it (the tally and the return need land rights).
             let parcel = query_parcel(session, SEQ_CENTRE).await?;
             let local_id = parcel.local_id;
             let scoped_parcel = ScopedParcelId::new(circuit, local_id);
@@ -163,30 +176,31 @@ impl GridTest for ParcelObjectOwners {
                 &agent.uuid(),
             )?;
 
-            // 2. Baseline object owners. The return below returns objects by owner,
-            //    so require that we own nothing on the parcel yet — then the cycle
-            //    touches only the cube this case rezzes.
+            // 2. Baseline: the return below takes everything the resident has on
+            //    the parcel, so require that to be nothing.
             let baseline = request_object_owners(session, scoped_parcel).await?;
-            let owner_before = owner_count(&baseline, agent.uuid());
-            check_eq(
-                "the estate owner starts with no objects on the parcel",
-                &owner_before,
-                &0,
+            let owner_before = owner_count(&baseline, resident.uuid());
+            check(
+                owner_before == 0,
+                &format!(
+                    "the resident ({resident:?}) starts with objects on the parcel: {baseline:?}"
+                ),
             )?;
 
-            // Settle the initial scene: record every region-local id already
-            // present so the object we rez is recognisable as new.
-            let mut seen = settle_scene(session).await?;
-
-            // 3. Rez a throwaway cube (`ObjectAdd`) at the region centre.
+            // 3. The resident rezzes a throwaway cube (`ObjectAdd`) at the region
+            //    centre, recognised as new against the settled scene.
+            let secondary = ctx.secondary().ok_or_else(|| {
+                TestFailure::Assertion("this case needs a secondary avatar".to_owned())
+            })?;
+            let mut seen = settle_scene(secondary).await?;
             let rez_started = Instant::now();
-            session
+            secondary
                 .send(Command::RezObject {
                     shape: PrimShape::cube(REZ_POSITION),
                     group_id: None,
                 })
                 .await?;
-            let created = wait_for_own_new_object(session, &seen, STEP_TIMEOUT)
+            let created = wait_for_own_new_object(secondary, &seen, STEP_TIMEOUT)
                 .await?
                 .map_err(|reason| {
                     TestFailure::Assertion(format!(
@@ -197,10 +211,11 @@ impl GridTest for ParcelObjectOwners {
             let created_id = created.scoped_id();
             seen.insert(created_id);
 
-            // 4. Re-request the object owners: our owner should now tally one prim.
+            // 4. The tally: the resident now has one prim on the parcel.
             tokio::time::sleep(TALLY_SETTLE).await;
+            let session = ctx.primary();
             let after_rez = request_object_owners(session, scoped_parcel).await?;
-            let owner_after_rez = owner_count(&after_rez, agent.uuid());
+            let owner_after_rez = owner_count(&after_rez, resident.uuid());
             let expected_after_rez = owner_before.checked_add(1).ok_or_else(|| {
                 TestFailure::Assertion("baseline owner count overflowed i32".to_owned())
             })?;
@@ -210,18 +225,21 @@ impl GridTest for ParcelObjectOwners {
                 &expected_after_rez,
             )?;
 
-            // 5. Return our objects on the parcel to their owner (the estate owner),
-            //    scoped to our owner id, and watch for the cube's removal.
+            // 5. The land owner returns the resident's objects on the parcel, and
+            //    the resident watches its cube go.
             let return_started = Instant::now();
             session
                 .send(Command::ReturnParcelObjects {
                     local_id: scoped_parcel,
                     return_type: ParcelReturnType::LIST,
-                    owner_ids: vec![OwnerKey::Agent(agent)],
+                    owner_ids: vec![OwnerKey::Agent(resident)],
                     task_ids: Vec::new(),
                 })
                 .await?;
-            let removed = session
+            let secondary = ctx.secondary().ok_or_else(|| {
+                TestFailure::Assertion("this case needs a secondary avatar".to_owned())
+            })?;
+            let removed = secondary
                 .wait_for(STEP_TIMEOUT, |event| match event {
                     Event::ObjectRemoved { local_id, .. } if *local_id == created_id => {
                         Some(*local_id)
@@ -235,19 +253,19 @@ impl GridTest for ParcelObjectOwners {
                 "the removed object id did not match the returned cube",
             )?;
 
-            // 6. Final object owners: our owner is back to the baseline (no objects).
+            // 6. Final tally: the resident is back to none.
             tokio::time::sleep(TALLY_SETTLE).await;
+            let session = ctx.primary();
             let after_return = request_object_owners(session, scoped_parcel).await?;
-            let owner_after_return = owner_count(&after_return, agent.uuid());
+            let owner_after_return = owner_count(&after_return, resident.uuid());
             check_eq(
-                "the estate owner has no objects on the parcel again after the return",
+                "the resident has no objects on the parcel again after the return",
                 &owner_after_return,
                 &owner_before,
             )?;
 
             let metrics = ctx.metrics();
             metrics.set("parcel_local_id", i64::from(local_id.0));
-            metrics.set("owner_id", agent.uuid().to_string());
             metrics.set("rezzed_object", created.full_id.to_string());
             metrics.set("owner_count_before", i64::from(owner_before));
             metrics.set("owner_count_after_rez", i64::from(owner_after_rez));

@@ -1021,7 +1021,7 @@ async fn execute(
         Action::ChangeParcel { local_id, edit } => {
             let (local_id, edit) = (*local_id, Arc::clone(edit));
             shared
-                .with_region(move |world, sim, now| {
+                .with_region(move |world, sim, _now| {
                     let Some(parcel) = world.parcel_mut(local_id) else {
                         tracing::warn!(
                             "a scripted parcel edit named {local_id:?}, which this region does \
@@ -1031,9 +1031,7 @@ async fn execute(
                     };
                     edit(parcel);
                     let record = parcel.clone();
-                    if let Err(error) = sim.send_parcel_properties(&record, now) {
-                        tracing::warn!("a scripted parcel push failed to send: {error}");
-                    }
+                    sim.enqueue_parcel_properties(&record);
                     ((), vec![RegionChange::ParcelChanged(Box::new(record))])
                 })
                 .await;

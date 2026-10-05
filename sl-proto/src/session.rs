@@ -529,6 +529,17 @@ pub const EXPERIENCE_QUERY_TAG: &str = "ExperienceQuery/reply";
 /// ([`Session::request_parcel_info`]) for the parcel's listing.
 pub const CAP_REMOTE_PARCEL_REQUEST: &str = "RemoteParcelRequest";
 
+/// The HTTP capability that **edits a parcel** (`ParcelPropertiesUpdate`): a
+/// POST of the whole parcel record as LLSD
+/// ([`build_parcel_properties_update_request`](crate::build_parcel_properties_update_request)),
+/// the reply ignored. Both grids grant it; the runtimes send
+/// [`Command::UpdateParcel`](crate::Command::UpdateParcel) over it where the
+/// region does and over the UDP `ParcelPropertiesUpdate` where it does not.
+/// The capability carries what the UDP block cannot — the media type and size,
+/// who sees and hears avatars — and on OpenSim the UDP form leaves the
+/// parcel's media type null, which breaks every later save of the region.
+pub const CAP_PARCEL_PROPERTIES_UPDATE: &str = "ParcelPropertiesUpdate";
+
 /// The HTTP capability for the region's **feature flags** (`SimulatorFeatures`):
 /// a GET returning the simulator's mesh/physics/attachment/GLTF switches and
 /// limits (plus, on OpenSim, a nested `OpenSimExtras` map). The runtimes GET it
@@ -721,6 +732,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_GET_DISPLAY_NAMES,
     CAP_AVATAR_PICKER_SEARCH,
     CAP_REMOTE_PARCEL_REQUEST,
+    CAP_PARCEL_PROPERTIES_UPDATE,
     CAP_SIMULATOR_FEATURES,
     CAP_LSL_SYNTAX,
     CAP_AGENT_PREFERENCES,

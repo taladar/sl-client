@@ -39,6 +39,9 @@ pub(crate) struct SimState {
     /// ([`crate::assets::ObjectAssetPolicy`]). Grid-wide, like the store it
     /// decides between.
     pub(crate) object_assets: crate::assets::ObjectAssetPolicy,
+    /// How the region answers the About Land traffic where the live grids
+    /// disagree ([`crate::ImitatedGrid::parcel_policy`]).
+    pub(crate) parcel_policy: crate::imitates::ParcelPolicy,
     /// How this grid announces an inventory item it just created — the legacy
     /// UDP message or an event-queue `BulkUpdateInventory`
     /// ([`crate::InventoryAnnouncement`]). Grid-wide, because it is a property
@@ -370,6 +373,7 @@ impl SharedSim {
                         region: &state.identity,
                         object_assets: state.object_assets,
                         announcement: state.inventory_announcement,
+                        parcels: state.parcel_policy,
                         mint: &move || minter.uuid(),
                     },
                     &event,
@@ -645,7 +649,8 @@ pub(crate) async fn run_region_watcher(
                                         if !stands_on(state, parcel.local_id) {
                                             return;
                                         }
-                                        state.sim.send_parcel_properties(parcel, now)
+                                        state.sim.enqueue_parcel_properties(parcel);
+                                        Ok(())
                                     }
                                     RegionChange::RegionConfigured(limits) => {
                                         state.sim.send_region_info(limits, now)

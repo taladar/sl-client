@@ -12,12 +12,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 365 |
-| blocked | 113 |
+| ready | 366 |
+| blocked | 111 |
 | in-progress | 20 |
-| bugs | 30 |
-| done | 1314 |
-| deferred | 30 |
+| bugs | 29 |
+| done | 1317 |
+| deferred | 29 |
 | wont-do | 17 |
 | **total** | **2025** |
 
@@ -352,7 +352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (365)
+## ready (366)
 
 ### protocol
 
@@ -783,6 +783,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the current outfit, save to My Outfits
 - [`viewer-parcel-ban-duration`](ready/viewer-parcel-ban-duration.md) — Parcel
   ban duration picker
+- [`viewer-parcel-config-missing-writes`](ready/viewer-parcel-config-missing-writes.md)
+  — About Land — the controls that have no protocol write path yet
 - [`viewer-parcel-grid-flood-fill`](ready/viewer-parcel-grid-flood-fill.md) —
   Flood-fill the parcel-overlay grid into per-parcel footprints
 - [`viewer-parcel-icon-hover-tips`](ready/viewer-parcel-icon-hover-tips.md) —
@@ -1069,6 +1071,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-parcel-divide-join`](ready/server-fake-grid-parcel-divide-join.md)
+  — Fake grid — divide and join parcels
 - [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
   size-proportional call costs and the region's script budget on aditi
 - [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
@@ -1167,8 +1171,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Parcel access and ban lists, enforcement and ban lines on each grid
 - [`gridspec-parcel-info-dwell`](ready/gridspec-parcel-info-dwell.md) — Parcel
   info, dwell and the remote parcel id on each grid
-- [`gridspec-parcel-management`](ready/gridspec-parcel-management.md) — Parcel
-  edits, divide/join, object owners and return on each grid
 - [`gridspec-parcel-properties`](ready/gridspec-parcel-properties.md) —
   ParcelProperties transport, fields and pushes on each grid
 - [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
@@ -1200,7 +1202,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-world-map`](ready/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 
-## blocked (113)
+## blocked (111)
 
 ### protocol
 
@@ -1228,9 +1230,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-cap-offline-friendship-answers`](blocked/protocol-cap-offline-friendship-answers.md)
   — Answer offline friendship offers over AcceptFriendship / DeclineFriendship
   (blocked by `gridspec-friends-presence`)
-- [`protocol-cap-parcel-properties-update`](blocked/protocol-cap-parcel-properties-update.md)
-  — Edit parcels over the ParcelPropertiesUpdate capability (blocked by
-  `gridspec-parcel-management`)
 - [`protocol-cap-product-info`](blocked/protocol-cap-product-info.md) — Land
   type names over ProductInfoRequest (blocked by `gridspec-search-directory`)
 - [`protocol-request-task-inventory-cap`](blocked/protocol-request-task-inventory-cap.md)
@@ -1433,9 +1432,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fake grid — enforce parcel access and push ban lines (blocked by
   `gridspec-parcel-access-and-ban-lines`, `server-fake-grid-parcel-on-movement`,
   `server-world-agent-movement`)
-- [`server-fake-grid-parcel-divide-join`](blocked/server-fake-grid-parcel-divide-join.md)
-  — Fake grid — divide and join parcels (blocked by
-  `gridspec-parcel-management`)
 - [`server-fake-grid-parcel-on-movement`](blocked/server-fake-grid-parcel-on-movement.md)
   — Fake grid — push the parcel an agent walks onto, and serve parcel
   environments (blocked by `gridspec-environment`, `gridspec-parcel-properties`)
@@ -1615,12 +1611,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (30)
+## bugs (29)
 
 ### protocol
 
-- [`parcel-properties-update-via-udp-poisons-opensim`](bugs/parcel-properties-update-via-udp-poisons-opensim.md)
-  — Parcel updates go over UDP, not the ParcelPropertiesUpdate CAP
 - [`protocol-agent-list-voice-transition-lossy`](bugs/protocol-agent-list-voice-transition-lossy.md)
   — Agent-list voice updates collapse ENTER/LEAVE and can-voice into one bool
 - [`protocol-classified-query-wrong-flag-space`](bugs/protocol-classified-query-wrong-flag-space.md)
@@ -1691,10 +1685,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1314)
+## done (1317)
 
 ### protocol
 
+- [`parcel-properties-update-via-udp-poisons-opensim`](done/parcel-properties-update-via-udp-poisons-opensim.md)
+  — Parcel updates go over UDP, not the ParcelPropertiesUpdate CAP
 - [`protocol-1`](done/protocol-1-local-chat.md) — Local chat
 - [`protocol-10`](done/protocol-10-seamless-teleport-via-child-agent-circuits.md)
   — Seamless teleport via child-agent circuits
@@ -1879,6 +1875,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   failure
 - [`protocol-audit-wire-error-contract`](done/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-cap-parcel-properties-update`](done/protocol-cap-parcel-properties-update.md)
+  — Edit parcels over the ParcelPropertiesUpdate capability
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
   — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-experience-parcel-recheck`](done/protocol-experience-parcel-recheck.md)
@@ -4606,12 +4604,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grids
 - [`gridspec-login`](done/gridspec-login.md) — Login response fields, the
   options list and get_grid_info on each grid
+- [`gridspec-parcel-management`](done/gridspec-parcel-management.md) — Parcel
+  edits, divide/join, object owners and return on each grid
 - [`gridspec-seed-capabilities`](done/gridspec-seed-capabilities.md) — Which
   capabilities each grid grants from the seed, and to whom
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
 
-## deferred (30)
+## deferred (29)
 
 ### protocol
 
@@ -4667,8 +4667,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-os-native-integration-windows`](deferred/viewer-os-native-integration-windows.md)
   — Windows native OS integration (file dialogs, OpenURI, notifications)
   (blocked by `viewer-os-portals-linux`)
-- [`viewer-parcel-config-missing-writes`](deferred/viewer-parcel-config-missing-writes.md)
-  — About Land — the controls that have no protocol write path yet
 - [`viewer-perf-gpu-particle-sim`](deferred/viewer-perf-gpu-particle-sim.md) —
   GPU compute particle simulation (+ raising the particle cap)
 - [`viewer-perf-media-upload-budget`](deferred/viewer-perf-media-upload-budget.md)
