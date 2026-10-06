@@ -246,7 +246,10 @@ pub use xfer::{
     XFER_CHUNK_SIZE, XFER_EOF_FLAG, XferChunk, XferOutgoingPacket, XferPacketId, decode_xfer_chunk,
     encode_xfer_chunk, next_xfer_chunk,
 };
-pub use zerocode::{decode as zero_decode, encode as zero_encode, ends_in_zero_run};
+pub use zerocode::{
+    decode as zero_decode, encode as zero_encode, encode_short_tail as zero_encode_short_tail,
+    ends_in_zero_run,
+};
 
 /// Combines two UUIDs the way Second Life derives a legacy upload's asset id:
 /// `MD5(a's 16 bytes ++ b's 16 bytes)` (LL's `LLUUID::combine` /
@@ -281,7 +284,7 @@ mod test {
         parse_object_media_request, parse_update_avatar_appearance_request,
         parse_update_item_asset_request, parse_update_script_agent_request,
         parse_update_script_task_request, parse_update_task_item_asset_request, zero_decode,
-        zero_encode,
+        zero_encode, zero_encode_short_tail,
     };
 
     #[test]
@@ -389,6 +392,30 @@ mod test {
             assert_eq!(r.zero_filled(), 0);
         }
         assert_eq!(Reader::new(&[0x02]).variable_block_count(), 2);
+    }
+
+    #[test]
+    fn a_short_tail_drops_one_zero_from_the_final_run() -> Result<(), WireError> {
+        // Three trailing zeros are counted as two; the rest is exact.
+        let body = [0x07, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00];
+        let encoded = zero_encode_short_tail(&body);
+        assert_eq!(encoded, vec![0x07, 0x00, 0x02, 0x09, 0x00, 0x02]);
+        assert!(ends_in_zero_run(&encoded));
+        assert_eq!(
+            zero_decode(&encoded)?,
+            vec![0x07, 0x00, 0x00, 0x09, 0x00, 0x00]
+        );
+        // A final run of one cannot be counted short, and a body ending in a
+        // literal has no final run: both are encoded exactly.
+        assert_eq!(
+            zero_encode_short_tail(&[0x07, 0x00]),
+            zero_encode(&[0x07, 0x00])
+        );
+        assert_eq!(
+            zero_encode_short_tail(&[0x00, 0x00, 0x07]),
+            zero_encode(&[0x00, 0x00, 0x07])
+        );
+        Ok(())
     }
 
     #[test]

@@ -38,6 +38,7 @@ use sl_proto::AssetUpdateLocation;
 use sl_proto::ChatChannel;
 use sl_proto::ChatSessionKind;
 use sl_proto::CircuitId;
+use sl_proto::CircuitProbe;
 use sl_proto::ClassifiedKey;
 use sl_proto::Direction;
 use sl_proto::DiscardLevel;
@@ -3320,6 +3321,27 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| Ok(Command::SetDiagnostics(args.req_bool(ctx, "enabled", 0)?)),
         },
         CommandSpec {
+            name: "probe_circuits",
+            usage: "<level> (off|observe|withhold_acks|silent)",
+            build: |args, ctx| {
+                let level = args.req_str(ctx, "level", 0)?;
+                let probe = match level.as_str() {
+                    "off" => CircuitProbe::Off,
+                    "observe" => CircuitProbe::Observe,
+                    "withhold_acks" => CircuitProbe::WithholdAcks,
+                    "silent" => CircuitProbe::Silent,
+                    _ => {
+                        return Err(ReplError::InvalidArg {
+                            field: "level".to_owned(),
+                            value: level,
+                            expected: "off, observe, withhold_acks or silent".to_owned(),
+                        });
+                    }
+                };
+                Ok(Command::ProbeCircuits(probe))
+            },
+        },
+        CommandSpec {
             name: "set_chat_log_config",
             usage: "[enabled=nearby,im,group,conference] [legacy_im_names=] [date_suffix=] \
                     [timestamp=none|time|datetime] [clock=24|12] [seconds=] [recall_window=] \
@@ -6324,6 +6346,7 @@ fn byte_range(args: &Args, ctx: &dyn ReplContext) -> Result<Option<(u32, u32)>, 
 mod tests {
     use std::collections::BTreeMap;
 
+    use sl_proto::CircuitProbe;
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, ChatChannel, ChatType,
         CircuitId, ClockStyle, Command, ControlFlags, DirFindFlags, DirectoryVisibility,
@@ -7846,6 +7869,30 @@ mod tests {
             build("set_render_materials 7 2 clear=true"),
             Ok(Command::SetRenderMaterials { updates })
                 if updates.first().is_some_and(|put| put.material.is_none())
+        ));
+    }
+
+    #[test]
+    fn probe_circuits_parses_each_level_and_refuses_another() {
+        assert!(matches!(
+            build("probe_circuits silent"),
+            Ok(Command::ProbeCircuits(CircuitProbe::Silent))
+        ));
+        assert!(matches!(
+            build("probe_circuits withhold_acks"),
+            Ok(Command::ProbeCircuits(CircuitProbe::WithholdAcks))
+        ));
+        assert!(matches!(
+            build("probe_circuits observe"),
+            Ok(Command::ProbeCircuits(CircuitProbe::Observe))
+        ));
+        assert!(matches!(
+            build("probe_circuits off"),
+            Ok(Command::ProbeCircuits(CircuitProbe::Off))
+        ));
+        assert!(matches!(
+            build("probe_circuits loud"),
+            Err(ReplError::InvalidArg { .. })
         ));
     }
 

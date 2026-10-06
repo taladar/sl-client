@@ -2753,6 +2753,14 @@ pub enum Command {
     /// client that surfaces diagnostics behind a developer switch flips it here
     /// instead of paying for them unconditionally.
     SetDiagnostics(bool),
+    /// Probe the session's circuits
+    /// ([`Session::probe_circuits`](crate::Session::probe_circuits)): report
+    /// every inbound datagram as a
+    /// [`Diagnostic::Datagram`](crate::Diagnostic::Datagram) and, at the
+    /// stronger levels, withhold acknowledgements or stop transmitting
+    /// altogether — the way to measure how a grid treats a circuit that has
+    /// stopped answering. Consumed by the runtime shell.
+    ProbeCircuits(crate::CircuitProbe),
     /// Update the agent's account contact preferences (`UpdateUserInfo`).
     UpdateUserInfo {
         /// Whether offline instant messages are forwarded to the agent's email.
@@ -3243,6 +3251,7 @@ impl Command {
             Self::RequestUserInfo => "RequestUserInfo",
             Self::SetChatLogConfig(..) => "SetChatLogConfig",
             Self::SetDiagnostics(..) => "SetDiagnostics",
+            Self::ProbeCircuits(..) => "ProbeCircuits",
             Self::UpdateUserInfo { .. } => "UpdateUserInfo",
             Self::TriggerSound { .. } => "TriggerSound",
             Self::RequestGodlikePowers { .. } => "RequestGodlikePowers",

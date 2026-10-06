@@ -141,6 +141,16 @@ the client would otherwise silently drop is surfaced and logged:
 Diagnostics are rendered *without* symbolization — they are about raw bytes, so
 they are shown raw.
 
+`probe_circuits <off|observe|withhold_acks|silent>` turns the session's circuits
+into an instrument for measuring the simulator (`Command::ProbeCircuits`). At
+every level but `off` each inbound datagram is printed as a `Datagram`
+diagnostic — its circuit, sequence number, flags, length and message name,
+retransmissions included. `withhold_acks` additionally acknowledges nothing, so
+the simulator shows how often and how many times it resends; `silent` transmits
+nothing at all, so it shows how long it waits for a client that has gone, and
+what it says then. What both live grids answered is in
+[Grid Behaviour → Session](../gridspec/session.md#circuits).
+
 ## Logging and recording
 
 Two logging layers are **always on**:

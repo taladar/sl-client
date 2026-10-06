@@ -131,6 +131,8 @@ pub const OFFLINE_CASES: &[&str] = &[
     "login-refusals",
     "keepalive-ping",
     "throttle-set",
+    "circuit-unacked-resend",
+    "circuit-silence",
     "simulator-features",
     "seed-capabilities",
     "object-update-decode",

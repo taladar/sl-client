@@ -34,6 +34,8 @@
 //! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
 //! | how a login is refused, and a second login of an avatar in world ([`login_refusals`](ImitatedGrid::login_refusals)) | `key` with a localisation key, its (empty) arguments and an incident id; the second login is admitted and the first session kicked | `key` with a text and nothing else; the second login is refused as `presence` and the first session kicked all the same |
 //! | whether a logout is answered ([`logout_reply`](ImitatedGrid::logout_reply)) | a `LogoutReply`, always | none: the session closes with the request unanswered and unacknowledged, which is what the live grid does six times in seven |
+//! | a circuit the client stops answering ([`circuit_policy`](ImitatedGrid::circuit_policy)) | an unacknowledged packet is sent four times, a second apart, and given up; a silent client is dropped after 100 s without a word | an unacknowledged packet is resent for as long as the circuit lasts; a silent client is kicked after 60 s |
+//! | how an `ObjectUpdate` is put on the wire ([`CircuitPolicy::short_zero_tails`]) | zero-coded, its final run of zeros one short | as encoded |
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
 //!
@@ -106,6 +108,8 @@
 //! grid is being imitated. It is not protocol behaviour — it is what Firestorm's
 //! grid manager reads to decide whether it will add the grid at all, and a fake
 //! grid nothing can log into tests nothing.
+
+use std::time::Duration;
 
 use crate::assets::ObjectAssetPolicy;
 use crate::bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH};
@@ -387,6 +391,50 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid runs a circuit — measured by `keepalive-ping`,
+    /// `circuit-unacked-resend` and `circuit-silence` on aditi and the local
+    /// OpenSim (2026-10-06, `book/src/gridspec/session.md` § Circuits).
+    ///
+    /// Second Life's simulators ran on the reference library's numbers: an
+    /// unacknowledged reliable packet went out four times, a second apart,
+    /// and was then given up with the circuit none the worse; a client that
+    /// stopped transmitting was pinged every five seconds for 95 more and
+    /// dropped at 100 without a word. OpenSim resent the same packet 140
+    /// times in 45 seconds and would not have stopped — its retransmission
+    /// timeout is five times the last ping, held between 250 ms and 3 s
+    /// (`LLUDPClient.UpdateRoundTrip`), and nothing counts the resends — and
+    /// kicked the silent client at 60 seconds (`AckTimeout`).
+    #[must_use]
+    pub const fn circuit_policy(self) -> CircuitPolicy {
+        match self {
+            Self::SecondLife => CircuitPolicy {
+                link: sl_proto::LinkTuning {
+                    inactivity_timeout: Duration::from_secs(100),
+                    // Twelve seconds after an arrival the resends were already
+                    // a second apart, which the reference's one-second initial
+                    // average takes most of a minute to decay to: the
+                    // simulator's starts low.
+                    ping_initial: Duration::from_millis(100),
+                    ..sl_proto::LinkTuning::REFERENCE
+                },
+                timeout_kick: None,
+                short_zero_tails: true,
+            },
+            Self::OpenSim => CircuitPolicy {
+                link: sl_proto::LinkTuning {
+                    inactivity_timeout: Duration::from_secs(60),
+                    max_transmissions: None,
+                    resend_floor: Duration::from_millis(250),
+                    ping_initial: Duration::from_millis(50),
+                    ping_min: Duration::from_millis(50),
+                    ping_max: Duration::from_millis(600),
+                },
+                timeout_kick: Some("Simulator logged you out due to connection timeout."),
+                short_zero_tails: false,
+            },
+        }
+    }
+
     /// Whether this grid's `SimulatorFeatures` carries the `OpenSimExtras`
     /// block.
     ///
@@ -618,6 +666,23 @@ pub enum EnvironmentChangeReply {
     Settings,
     /// A verdict and nothing else.
     Bare,
+}
+
+/// How a grid runs a circuit ([`ImitatedGrid::circuit_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CircuitPolicy {
+    /// When silence closes the circuit, and how often and how many times an
+    /// unacknowledged reliable packet is sent again.
+    pub link: sl_proto::LinkTuning,
+    /// What a root agent is told as its circuit is closed for silence: the
+    /// reason of a `KickUser`, or `None` for a grid that just stops sending.
+    pub timeout_kick: Option<&'static str>,
+    /// Whether an `ObjectUpdate` goes out zero-coded with its final run of
+    /// zeros counted one short, as Second Life's simulators send it a few
+    /// times per login — the message a client must zero-fill to read
+    /// (`viewer-objectupdate-truncated-block-drops-message`). A flavour that
+    /// does sends *every* one so, so that no test of it can miss the case.
+    pub short_zero_tails: bool,
 }
 
 /// What a grid answers a `LogoutRequest` with
@@ -967,6 +1032,7 @@ mod test {
         );
         assert_ne!(sl.stock_day(), opensim.stock_day());
         assert_ne!(sl.logout_reply(), opensim.logout_reply());
+        assert_ne!(sl.circuit_policy(), opensim.circuit_policy());
         assert_ne!(
             sl.region_capacity(sl_proto::ProductType::FullRegion),
             opensim.region_capacity(sl_proto::ProductType::FullRegion)

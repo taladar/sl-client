@@ -2231,6 +2231,25 @@ against that flavour takes that much longer to log out. Both flavours send
 `DisableSimulator` down the avatar's child circuits, and a reply carries one
 `InventoryData` block holding the nil id, as both live grids' do.
 
+### The circuit, as each grid runs it
+
+`ImitatedGrid::circuit_policy` (measured in
+[Session](../gridspec/session.md#circuits)) sets what a session's
+`SimSession` does about a client that stops answering. A Second-Life-flavoured
+grid sends an unacknowledged packet four times a second apart and gives it up,
+drops a silent client after 100 seconds without a word, and zero-codes every
+`ObjectUpdate` with its final run of zeros one short. An OpenSim-flavoured one
+resends an unacknowledged packet every quarter of a second for as long as the
+circuit lasts and kicks a silent client after 60 seconds. The numbers are a
+`sl_proto::LinkTuning`, which `SimSession::set_link_tuning` takes; the client's
+own link always runs on `LinkTuning::REFERENCE`.
+
+`FakeGridBuilder::link_latency` holds every datagram back by a fixed time in
+each direction, so a client measures a round trip of twice that — the one
+thing a loopback grid cannot otherwise be: far away. The capabilities are not
+delayed. Throttles are accepted and not honoured
+(`server-world-update-scheduling`).
+
 ## Policy: what the grid charges, permits and refuses
 
 Not every answer is content. Three of them are policy, and they live apart

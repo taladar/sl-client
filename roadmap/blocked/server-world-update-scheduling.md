@@ -55,3 +55,11 @@ Acceptance: a script moving a prim every tick produces one terse update
 per tick per session and no full updates; a script setting three
 properties in one handler produces one full update; and the offline
 conformance cases that count updates still pass.
+
+What the live grids do with a throttle, and with object state nobody
+acknowledged, is measured in `book/src/gridspec/session.md` § Circuits
+([[gridspec-circuit]]): OpenSim holds a category to its rate and resends
+the same packet until it is acknowledged; Second Life sends less when
+asked for less, never retransmits an object update, and sends the state
+again as a new packet instead. The fake grid does neither yet — it accepts
+a throttle and ignores it, and retransmits whatever it sent.

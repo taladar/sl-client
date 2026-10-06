@@ -177,7 +177,9 @@ real grid.
 >   the driver crates (`sl-client-tokio`, `sl-client-bevy`).
 > - The diagnostic type is `Diagnostic` in `sl-proto/src/types/diagnostic.rs`
 >   (`DecodeFailed`, `UnhandledMessage`, `HandlerFailed`, `UnknownCapsEvent`,
->   `CapsDecodeFailed`, `ExpectedReplyMissing`) — a separate enum from `Event`.
+>   `CapsDecodeFailed`, `ExpectedReplyMissing`, and `Datagram` — one per
+>   inbound datagram while `Session::probe_circuits` is on) — a separate enum
+>   from `Event`.
 >   `Session` gates it with `set_diagnostics(bool)` (default off), queues into a
 >   `VecDeque`, and hands them out via `poll_diagnostic()`.
 > - The drivers surface diagnostics for parity: `sl-client-tokio`'s

@@ -62,7 +62,7 @@ pub use sl_proto::{
     AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
     AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_UI_SOUNDS, Camera, CameraError,
     ChatAudible, ChatChannel, ChatLogConfig, ChatMessage, ChatSessionKind, ChatSource,
-    ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
+    ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId, CircuitProbe,
     ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
     ClientDirectories, ClockStyle, CloudPosDensity, CoarseLocation, Color, ColorAlpha, Command,
     ControlFlags, ConversationKind, CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE,
@@ -100,7 +100,7 @@ pub use sl_proto::{
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
     Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
     ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation, ObjectProperties,
-    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey,
+    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags,
     ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelCollision,
     ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell,
@@ -4635,6 +4635,9 @@ fn apply_command(
         }
         Command::SetDiagnostics(enabled) => {
             session.set_diagnostics(*enabled);
+        }
+        Command::ProbeCircuits(probe) => {
+            session.probe_circuits(*probe);
         }
         Command::TriggerSound {
             sound,

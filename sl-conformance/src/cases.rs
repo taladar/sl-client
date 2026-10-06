@@ -23,6 +23,8 @@ pub mod chat_hear_other;
 pub mod chat_invite_accept_decline;
 pub mod chat_self_echo;
 pub mod chat_whisper_shout_range;
+pub mod circuit_silence;
+pub mod circuit_unacked_resend;
 pub mod current_outfit_folder;
 pub mod dir_find_people_groups_events;
 pub mod dir_places_land_classified;

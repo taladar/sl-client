@@ -49,6 +49,7 @@ pub use command::Command;
 pub use error::Error;
 pub use extra_params::{decode_extra_params, encode_extra_params};
 pub use j2c::{DiscardLevel, MAX_DISCARD_LEVEL};
+pub use link::LinkTuning;
 pub use marketplace::{
     AssociateInventory, CreateListing, Listing, ListingId, MarketplaceApiError,
     MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceBuildRequestError,
@@ -159,7 +160,7 @@ pub use types::{
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarPickerResult,
     AvatarProperties, BUILTIN_BUMPMAP_TEXTURES, BUILTIN_ENVIRONMENT_TEXTURES, BUILTIN_UI_SOUNDS,
     BUILTIN_VIEWER_TEXTURES, BUILTIN_WATER_PLANE_TEXTURES, Camera, CameraError, ChatAudible,
-    ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child,
+    ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitProbe,
     ClassifiedCategory, ClassifiedInfo, ClassifiedUpdate, ClickAction, CloudPosDensity,
     CoarseLocation, Color, ColorAlpha, CreateGroupParams, DEFAULT_BLOOM_TEXTURE,
     DEFAULT_CLOUD_TEXTURE, DEFAULT_GRIDS_PER_EDGE, DEFAULT_HALO_TEXTURE, DEFAULT_LSL_SCRIPT,
@@ -251,7 +252,7 @@ pub use sl_wire::{
     MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MaterialOverrideUpdate, MediaEntry,
     MessageId, MessageStatus, MfaChallenge, NewFileAgentInventoryRequest, NewUserConfig,
     ObjectCost, ObjectMediaResponse, ObjectPermMasks, ObjectPhysicsData, OpenSimExtras,
-    ParcelFlags, ParcelScriptResources, ParcelVoiceInfo, Permissions, Permissions5,
+    PacketFlags, ParcelFlags, ParcelScriptResources, ParcelVoiceInfo, Permissions, Permissions5,
     PhysicsShapeType, PhysicsShapeTypes, ReflectionProbeFlags, RegionFlags, RegionHandle,
     RegionLocalObjectId, RegionLocalParcelId, RemoteParcelAnswer, RemoteParcelRequest,
     RenderMaterialEntry, ResourceAmount, ResourceSummary, ScriptedObjectInfo,

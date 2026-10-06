@@ -63,12 +63,12 @@ pub use sl_proto::{
     AvatarInterests, AvatarPick, AvatarProperties, BUILTIN_UI_SOUNDS, Camera, CameraError,
     ChatAudible, ChatChannel, ChatLifecycleView, ChatLogConfig, ChatMessage, ChatSessionInfo,
     ChatSessionKind, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode,
-    CircuitId, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
-    ClientDirectories, ClockStyle, Color, ColorAlpha, Command, ControlFlags, ConversationKind,
-    CreateGroupParams, CreateListing, DEFAULT_PRIM_TEXTURE, DayCycle, DayCycleFrame,
-    DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility,
-    DiscardLevel, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData,
-    EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, EstateAccessDelta,
+    CircuitId, CircuitProbe, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate,
+    ClickAction, ClientDirectories, ClockStyle, Color, ColorAlpha, Command, ControlFlags,
+    ConversationKind, CreateGroupParams, CreateListing, DEFAULT_PRIM_TEXTURE, DayCycle,
+    DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirFindFlags, Direction,
+    DirectoryVisibility, DiscardLevel, DisconnectReason, DisplayName, DisplayNameUpdate, Distance,
+    EconomyData, EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, EstateAccessDelta,
     EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, Event,
     ExperienceEnvironmentPush, ExperienceEvent, ExperienceEventPermission, ExperienceInfo,
     ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
@@ -94,7 +94,7 @@ pub use sl_proto::{
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
     Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
     ObjectPermMasks, ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily, ObjectTransform,
-    OpenRegionInfo, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+    OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry, ParcelAccessFlags,
     ParcelAccessScope, ParcelCategory, ParcelCollision, ParcelDetails, ParcelFlags, ParcelInfo,
     ParcelKey, ParcelListingFlags, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
     ParcelObjectOwnersPart, ParcelOverlayCell, ParcelOverlayGrid, ParcelOverlayInfo,
@@ -2786,6 +2786,9 @@ impl Client {
                         }
                         Some(Command::SetDiagnostics(enabled)) => {
                             self.session.set_diagnostics(enabled);
+                        }
+                        Some(Command::ProbeCircuits(probe)) => {
+                            self.session.probe_circuits(probe);
                         }
                         Some(Command::TriggerSound { sound, gain, region_handle, position }) => {
                             self.session.trigger_sound(sound, gain, region_handle, position, Instant::now())?;

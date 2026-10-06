@@ -48,7 +48,8 @@ mod test {
         parse_event_queue_response,
     };
     use sl_proto::{
-        AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
+        AgentPresence, FlowMirrorStatus, LinkTuning, SESSION_FLOW_COVERAGE, SimChatSessionKind,
+        UserRightsEntry,
     };
     use sl_proto::{
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
@@ -5102,6 +5103,150 @@ mod test {
         Ok(())
     }
 
+    /// A simulator imitating OpenSim never gives a reliable packet up: with
+    /// no acknowledgement it is sent again every retransmission timeout for as
+    /// long as the circuit lasts, where the reference stops at four
+    /// transmissions and carries on without it.
+    #[test]
+    fn an_unbounded_tuning_resends_until_the_circuit_ends() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        sim.set_link_tuning(
+            LinkTuning {
+                inactivity_timeout: Duration::from_secs(60),
+                max_transmissions: None,
+                resend_floor: Duration::from_millis(250),
+                ping_initial: Duration::from_millis(200),
+                ping_min: Duration::from_millis(50),
+                ping_max: Duration::from_millis(600),
+            },
+            now,
+        );
+        drain_server(&mut sim);
+        drain_client(&mut client);
+        while sim.poll_transmit().is_some() {}
+
+        sim.send_alert_message("nobody will acknowledge this", &[], &[], now)?;
+        let mut transmissions = 0_u32;
+        let mut step = now;
+        // Fifty seconds a second at a time, the client never heard from again.
+        for _second in 0..50 {
+            while let Some(transmit) = sim.poll_transmit() {
+                if matches!(decode(&transmit)?, AnyMessage::AlertMessage(_)) {
+                    transmissions = transmissions.saturating_add(1);
+                }
+            }
+            step = after(step, 1_000)?;
+            sim.handle_timeout(step);
+        }
+        assert!(
+            transmissions > 10,
+            "an unacknowledged packet is still being resent after {transmissions} transmissions"
+        );
+        assert!(
+            !drain_server(&mut sim)
+                .iter()
+                .any(|event| matches!(event, ServerEvent::ReliableGiveUp { .. })),
+            "nothing is ever given up"
+        );
+        assert!(!sim.is_closed(), "the circuit has ten seconds left");
+        sim.handle_timeout(after(now, 61_000)?);
+        assert!(sim.is_closed(), "sixty seconds of silence close it");
+        Ok(())
+    }
+
+    /// A simulator told to say so kicks a root agent whose circuit it closes
+    /// for silence — OpenSim's "connection timeout" — and the kick is the last
+    /// thing it sends.
+    #[test]
+    fn a_timeout_kick_is_sent_as_the_circuit_closes() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        sim.set_timeout_kick(Some("connection timeout".to_owned()));
+        drain_client(&mut client);
+        while sim.poll_transmit().is_some() {}
+
+        let later = after(now, 46_000)?;
+        sim.handle_timeout(later);
+        assert!(sim.is_closed());
+        let mut kicked = false;
+        while let Some(transmit) = sim.poll_transmit() {
+            kicked |= matches!(decode(&transmit)?, AnyMessage::KickUser(_));
+            client.handle_datagram(sim_addr(), &transmit.payload, later)?;
+        }
+        assert!(kicked, "the closing circuit carries a KickUser");
+        let reason = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::Kicked(kick) => Some(kick.reason),
+                _ => None,
+            })
+            .ok_or("expected a Kicked client event")?;
+        assert_eq!(reason, "connection timeout");
+        Ok(())
+    }
+
+    /// Without the setting — Second Life's way — the circuit closes without a
+    /// word, and a child agent's does so on either grid.
+    #[test]
+    fn a_silent_timeout_sends_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+        while sim.poll_transmit().is_some() {}
+        sim.handle_timeout(after(now, 46_000)?);
+        assert!(sim.is_closed());
+        assert_eq!(sim.poll_transmit().map(|transmit| transmit.payload), None);
+
+        let (_client, mut child) = setup(now)?;
+        child.set_timeout_kick(Some("connection timeout".to_owned()));
+        child.make_child_agent();
+        while child.poll_transmit().is_some() {}
+        child.handle_timeout(after(now, 46_000)?);
+        assert!(child.is_closed());
+        assert_eq!(child.poll_transmit().map(|transmit| transmit.payload), None);
+        Ok(())
+    }
+
+    /// Second Life's simulators send an `ObjectUpdate` zero-coded with its
+    /// final run of zeros counted one short. The client reads the missing
+    /// byte as the zero it was and the object arrives whole.
+    #[test]
+    fn a_short_zero_tail_object_update_still_arrives() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        sim.set_short_zero_tails(true);
+        drain_client(&mut client);
+        pump(&mut client, &mut sim, now)?;
+
+        let position = sl_proto::Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let prim = box_prim(0x31, 0x3131, position.clone());
+        sim.send_object_update(std::slice::from_ref(&prim), 0xFFFF, now)?;
+        let mut short = false;
+        while let Some(transmit) = sim.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if parsed.flags.contains(PacketFlags::ZEROCODED) {
+                short |= sl_wire::ends_in_zero_run(parsed.body);
+            }
+            client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+        }
+        assert!(short, "the update went out zero-coded, ending in a run");
+        let arrived = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ObjectAdded(object) if object.local_id == RegionLocalObjectId(0x31) => {
+                    Some(object)
+                }
+                _ => None,
+            })
+            .ok_or("the short update did not arrive")?;
+        assert_eq!(arrived.motion.position, position);
+        Ok(())
+    }
+
     #[test]
     fn inactivity_times_out() -> Result<(), TestError> {
         let now = Instant::now();
@@ -8507,6 +8652,43 @@ mod test {
         ));
         // Nothing to send is not an error, with or without a circuit.
         sim.send_terrain(&[], now)?;
+        Ok(())
+    }
+
+    /// A refetch of more objects than one message can name — its block count
+    /// is a single byte — goes out as several, and every id arrives. It used
+    /// to fail to encode, which a driver treated as the end of the session.
+    #[test]
+    fn a_refetch_of_more_objects_than_one_message_holds_is_split() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+
+        let asked: Vec<ScopedObjectId> = (1..=600_u32)
+            .map(|id| ScopedObjectId::new(circuit, RegionLocalObjectId(id)))
+            .collect();
+        client.request_objects(&asked, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let batches: Vec<Vec<RegionLocalObjectId>> = drain_server(&mut sim)
+            .into_iter()
+            .filter_map(|event| match event {
+                ServerEvent::RequestObjects { objects } => {
+                    Some(objects.into_iter().map(|(id, _)| id).collect())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            batches.iter().map(Vec::len).collect::<Vec<_>>(),
+            vec![255, 255, 90]
+        );
+        assert_eq!(
+            batches.concat(),
+            (1..=600_u32).map(RegionLocalObjectId).collect::<Vec<_>>()
+        );
         Ok(())
     }
 

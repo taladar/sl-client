@@ -170,7 +170,8 @@ use crate::bookkeeping_ids::{
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::link::{
-    ExhaustedPacket, PING_INTERVAL, ReliableLink, ReliableSeverity, deadline, merge_deadline,
+    BodyCoding, ExhaustedPacket, LinkTuning, PING_INTERVAL, ReliableLink, ReliableSeverity,
+    deadline, merge_deadline,
 };
 use crate::object_update::TerseUpdate;
 use crate::session::{
@@ -3039,6 +3040,12 @@ pub struct SimSession {
     bare_environment_replies: bool,
     /// [`SimSession::set_withholds_logout_reply`].
     withholds_logout_reply: bool,
+    /// What a root agent is told when its circuit times out; see
+    /// [`SimSession::set_timeout_kick`].
+    timeout_kick: Option<String>,
+    /// How an `ObjectUpdate` body is put on the wire; see
+    /// [`SimSession::set_short_zero_tails`].
+    object_update_coding: BodyCoding,
     /// The region handle this simulator serves (echoed in `AgentMovementComplete`).
     region_handle: RegionHandle,
     /// The channel/version string reported in `AgentMovementComplete`.
@@ -3403,6 +3410,8 @@ impl SimSession {
             parcel_dialect: crate::ParcelLlsdDialect::SecondLife,
             bare_environment_replies: false,
             withholds_logout_reply: false,
+            timeout_kick: None,
+            object_update_coding: BodyCoding::Plain,
             region_handle,
             channel_version: b"sl-proto SimSession".to_vec(),
             client_addr: None,
@@ -4004,6 +4013,45 @@ impl SimSession {
     /// on its own timeout.
     pub const fn set_withholds_logout_reply(&mut self, withholds: bool) {
         self.withholds_logout_reply = withholds;
+    }
+
+    /// Replaces the numbers this session's circuit runs its reliability on —
+    /// when silence from the client closes it, how often and how many times
+    /// an unacknowledged packet is sent again ([`LinkTuning`]). The default is
+    /// [`LinkTuning::REFERENCE`], which is also what Second Life's simulators
+    /// were measured doing in everything but the inactivity timeout.
+    pub fn set_link_tuning(&mut self, tuning: LinkTuning, now: Instant) {
+        self.link.set_tuning(tuning, now);
+    }
+
+    /// The numbers this session's circuit runs its reliability on.
+    #[must_use]
+    pub const fn link_tuning(&self) -> LinkTuning {
+        self.link.tuning()
+    }
+
+    /// Sets what a **root** agent is told when its circuit is closed for
+    /// silence: a `KickUser` carrying `reason`, or nothing (the default).
+    ///
+    /// OpenSim kicks — "Simulator logged you out due to connection timeout."
+    /// — though the client it says it to has, by definition, not been heard
+    /// from for a minute; Second Life just stops sending. A child agent's
+    /// circuit is closed without a word on both.
+    pub fn set_timeout_kick(&mut self, reason: Option<String>) {
+        self.timeout_kick = reason;
+    }
+
+    /// Sets whether an `ObjectUpdate` goes out zero-coded with its final run
+    /// of zeros counted one short (default `false`) — how Second Life's
+    /// simulators send it. A client has to read the missing byte as the zero
+    /// it was, as the reference viewer does
+    /// ([`Reader::with_zero_tail`](sl_wire::Reader::with_zero_tail)).
+    pub const fn set_short_zero_tails(&mut self, short: bool) {
+        self.object_update_coding = if short {
+            BodyCoding::ZeroCodedShortTail
+        } else {
+            BodyCoding::Plain
+        };
     }
 
     /// Whether [`set_bare_environment_replies`](Self::set_bare_environment_replies)
@@ -4761,8 +4809,13 @@ impl SimSession {
         if self.is_closed() {
             return Ok(());
         }
+        let coding = if matches!(message, AnyMessage::ObjectUpdate(_)) {
+            self.object_update_coding
+        } else {
+            BodyCoding::Plain
+        };
         self.link
-            .send(message, reliability, severity_of(message), now)
+            .send_coded(message, reliability, severity_of(message), coding, now)
     }
 
     /// Pushes a server message to the client with the given reliability. This is
@@ -12064,7 +12117,7 @@ impl SimSession {
             return;
         }
         if now >= self.link.inactivity_deadline() {
-            self.close(ServerEvent::Disconnected);
+            self.close_for_silence(now);
             return;
         }
         if let Some(at) = self.link.ack_flush_deadline()
@@ -12110,6 +12163,23 @@ impl SimSession {
             self.ping = Some(deadline(now, PING_INTERVAL));
             let _result = self.start_ping_check(now);
         }
+    }
+
+    /// Closes a circuit the client has gone silent on, telling a root agent
+    /// so first when the grid being imitated does
+    /// ([`set_timeout_kick`](Self::set_timeout_kick)).
+    fn close_for_silence(&mut self, now: Instant) {
+        if let (Some(reason), Some(agent), AgentPresence::Root) = (
+            self.timeout_kick.clone(),
+            self.agent_id,
+            self.agent_presence,
+        ) && let Err(error) = self.send_kick_user(&Kick { agent, reason }, now)
+        {
+            // The close happens either way; a kick that cannot be encoded is
+            // a kick the client does not get, which is where it already was.
+            tracing::warn!(%error, "failed to tell the client its circuit timed out");
+        }
+        self.close(ServerEvent::Disconnected);
     }
 
     /// Surfaces each reliable packet that has run out of retransmissions as a

@@ -78,6 +78,61 @@ mod test {
         Ok((grid, client, agent))
     }
 
+    /// A grid told to hold every datagram back is as far away as it says: the
+    /// client's own ping round trip comes out at twice the one-way latency,
+    /// where a stock grid answers in well under a millisecond.
+    #[tokio::test]
+    async fn an_injected_latency_is_the_round_trip_the_client_measures() -> Result<(), TestError> {
+        let one_way = Duration::from_millis(40);
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("Test", "User", "password"))
+            .region(RegionConfig::default())
+            .event_queue_hold(Duration::from_secs(2))
+            .link_latency(one_way)
+            .start()
+            .await?;
+        let client = Client::connect(LoginParams {
+            login_uri: grid.login_uri(),
+            request: LoginRequest::new(
+                "Test",
+                "User",
+                "password",
+                StartLocation::Last,
+                "sl-fake-grid-e2e",
+                "0.0",
+            ),
+        })
+        .await?;
+        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+        let (_command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        let rtt = tokio::time::timeout(WAIT, async {
+            loop {
+                match event_rx.recv().await {
+                    Some(Event::Ping {
+                        child: false, rtt, ..
+                    }) => break Some(rtt),
+                    Some(_other) => {}
+                    None => break None,
+                }
+            }
+        })
+        .await?
+        .ok_or("the client's event stream ended before a ping came back")?;
+        run.abort();
+        assert!(
+            rtt >= one_way.saturating_mul(2),
+            "a ping across an 80 ms round trip came back in {rtt:?}"
+        );
+        assert!(
+            rtt < Duration::from_millis(500),
+            "a ping across an 80 ms round trip took {rtt:?}"
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn full_stack_login_chat_and_event_queue() -> Result<(), TestError> {
         let (grid, client, agent) = connect().await?;

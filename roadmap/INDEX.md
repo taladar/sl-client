@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 137 |
-| ready | 365 |
+| ideas | 138 |
+| ready | 364 |
 | blocked | 111 |
 | in-progress | 20 |
-| bugs | 28 |
-| done | 1325 |
+| bugs | 29 |
+| done | 1326 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2032** |
+| **total** | **2034** |
 
-## ideas (137)
+## ideas (138)
 
 ### protocol
 
@@ -182,6 +182,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Say what a snapshot is a picture of
 - [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
   Linearize the star field like the sky / clouds
+- [`viewer-statistics-ping`](ideas/viewer-statistics-ping.md) — Show the ping to
+  the simulator, and its packet loss, in the viewer
 - [`viewer-status-bar-toggle-options`](ideas/viewer-status-bar-toggle-options.md)
   — Status/menu-bar display toggles
 - [`viewer-udp-connection-port`](ideas/viewer-udp-connection-port.md) — Fixed
@@ -357,7 +359,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (365)
+## ready (364)
 
 ### protocol
 
@@ -1117,8 +1119,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   avatars in the region: full updates, coarse locations and kills
 - [`gridspec-avatar-render-info`](ready/gridspec-avatar-render-info.md) —
   AvatarRenderInfo and AttachmentResources on each grid
-- [`gridspec-circuit`](ready/gridspec-circuit.md) — Circuit behaviour: acks,
-  resends, pings, inactivity, packet quirks and throttles
 - [`gridspec-estate`](ready/gridspec-estate.md) — Estate info, access, covenant
   and estate actions on each grid
 - [`gridspec-experiences`](ready/gridspec-experiences.md) — Experience records,
@@ -1485,7 +1485,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `protocol-sim-script-messages`, `gridspec-touch-grab`)
 - [`server-world-update-scheduling`](blocked/server-world-update-scheduling.md)
   — Batch world changes into per-tick update bursts (blocked by
-  `server-world-heartbeat`, `server-world-ecs-store`, `gridspec-circuit`,
+  `server-world-heartbeat`, `server-world-ecs-store`, `gridspec-circuit` (done),
   `gridspec-object-update-stream`)
 
 ### gridspec
@@ -1615,7 +1615,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (28)
+## bugs (29)
 
 ### protocol
 
@@ -1627,6 +1627,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-region-flag-deny-ageunverified-value`](bugs/protocol-region-flag-deny-ageunverified-value.md)
   — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
   are split
+- [`protocol-variable-block-lists-over-255`](bugs/protocol-variable-block-lists-over-255.md)
+  — A request listing more than 255 objects fails to encode and ends the session
 - [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
   — A voice accept on a 1:1 session is folded into a phantom conference
 
@@ -1688,7 +1690,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1325)
+## done (1326)
 
 ### protocol
 
@@ -4606,6 +4608,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### gridspec
 
+- [`gridspec-circuit`](done/gridspec-circuit.md) — Circuit behaviour: acks,
+  resends, pings, inactivity, packet quirks and throttles
 - [`gridspec-environment`](done/gridspec-environment.md) — Region and parcel
   environments (EEP) on each grid
 - [`gridspec-infra-fake-flavour-conformance`](done/gridspec-infra-fake-flavour-conformance.md)

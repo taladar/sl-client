@@ -29,6 +29,11 @@
 //!   the session without a word, not even an acknowledgement
 //!   (`book/src/gridspec/session.md` § Logout). The viewer leaves cleanly
 //!   either way: on the reply, or on the session's own logout timeout.
+//! - **A distant grid.** A loopback grid answers a ping in a fraction of a
+//!   millisecond; Second Life's beta grid takes about 170 ms
+//!   (`book/src/gridspec/session.md` § Circuits). The login, the Library and
+//!   the quit are run again with every datagram held 85 ms each way, on both
+//!   flavours — each with its own retransmission rule on the other end.
 
 #[cfg(test)]
 mod test {
@@ -284,6 +289,44 @@ mod test {
     #[test]
     fn an_opensim_flavoured_quit_exits_cleanly() -> Result<(), TestError> {
         stage("quit_opensim", ImitatedGrid::OpenSim).run(quits)?;
+        Ok(())
+    }
+
+    /// How long a datagram takes each way on a distant stage: half the 170 ms
+    /// round trip measured to Second Life's beta grid.
+    const ONE_WAY: Duration = Duration::from_millis(85);
+
+    /// [`stage`], with every datagram held [`ONE_WAY`] in each direction.
+    fn distant_stage(name: &str, flavour: ImitatedGrid) -> StageBuilder {
+        StageBuilder::new(name)
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .region(RegionConfig::default())
+            .configure_grid(move |grid| grid.imitates(flavour).link_latency(ONE_WAY))
+    }
+
+    /// Log in, load the Library and quit.
+    async fn loads_then_quits(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        library_loads(alpha).await?;
+        quits(stage).await
+    }
+
+    /// **A distant Second-Life-flavoured grid**: the viewer arrives, fetches
+    /// and leaves over a 170 ms round trip.
+    #[test]
+    fn a_distant_second_life_flavoured_grid_is_logged_into_and_left() -> Result<(), TestError> {
+        distant_stage("distant_second_life", ImitatedGrid::SecondLife).run(loads_then_quits)?;
+        Ok(())
+    }
+
+    /// **A distant OpenSim-flavoured grid**: the same, against a simulator
+    /// that resends what is not acknowledged within a quarter of a second
+    /// and never stops.
+    #[test]
+    fn a_distant_opensim_flavoured_grid_is_logged_into_and_left() -> Result<(), TestError> {
+        distant_stage("distant_opensim", ImitatedGrid::OpenSim).run(loads_then_quits)?;
         Ok(())
     }
 

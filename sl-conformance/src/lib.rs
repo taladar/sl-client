@@ -32,6 +32,7 @@
 //! - [`cases`] — the concrete test implementations.
 
 pub mod cases;
+pub mod circuit;
 pub mod context;
 pub mod fake;
 pub mod fixtures;

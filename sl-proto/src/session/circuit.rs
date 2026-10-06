@@ -344,6 +344,11 @@ const fn severity_of(message: &AnyMessage) -> ReliableSeverity {
     }
 }
 
+/// The most entries one message's variable block list can carry: its count is
+/// a single byte on the wire. A request naming more than this is split across
+/// messages; one that is not fails to encode.
+const MAX_VARIABLE_BLOCKS: usize = 255;
+
 /// The reference viewer's `LL_PATH_CACHE` (`ELLPath` in `lldir.h`), the remote
 /// path it names in every `RequestXfer` for a file the simulator generated.
 const XFER_PATH_CACHE: u8 = 4;
@@ -4442,27 +4447,33 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
-    /// Queues a `RequestMultipleObjects` reliably, asking the simulator to (re)send
+    /// Queues `RequestMultipleObjects` reliably, asking the simulator to (re)send
     /// the full `ObjectUpdate` for each local id (cache-miss type "full" = 0).
+    ///
+    /// A message's block count is one byte, so the ids go out
+    /// [`MAX_VARIABLE_BLOCKS`] to a message — as many messages as it takes.
     pub(crate) fn send_request_multiple_objects(
         &mut self,
         local_ids: &[RegionLocalObjectId],
         now: Instant,
     ) -> Result<(), WireError> {
-        let message = AnyMessage::RequestMultipleObjects(RequestMultipleObjects {
-            agent_data: RequestMultipleObjectsAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            object_data: local_ids
-                .iter()
-                .map(|id| RequestMultipleObjectsObjectDataBlock {
-                    cache_miss_type: 0,
-                    id: id.0,
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        for batch in local_ids.chunks(MAX_VARIABLE_BLOCKS) {
+            let message = AnyMessage::RequestMultipleObjects(RequestMultipleObjects {
+                agent_data: RequestMultipleObjectsAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                object_data: batch
+                    .iter()
+                    .map(|id| RequestMultipleObjectsObjectDataBlock {
+                        cache_miss_type: 0,
+                        id: id.0,
+                    })
+                    .collect(),
+            });
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues an `ObjectSelect` reliably for the given local ids. Selecting an

@@ -473,6 +473,8 @@ pub(crate) struct GridCore {
     pub(crate) environment_change_reply: crate::imitates::EnvironmentChangeReply,
     /// Whether a logout is answered ([`ImitatedGrid::logout_reply`]).
     pub(crate) logout_reply: crate::imitates::LogoutReply,
+    /// How a circuit is run ([`ImitatedGrid::circuit_policy`]).
+    pub(crate) circuit_policy: crate::imitates::CircuitPolicy,
     /// How a region's default day is labelled ([`ImitatedGrid::stock_day`]).
     pub(crate) stock_day: crate::imitates::StockDay,
     /// The spatial-voice backend every region serves ([`VoiceBackend`]).
@@ -481,6 +483,9 @@ pub(crate) struct GridCore {
     pub(crate) clock: Now,
     /// How long an empty `EventQueueGet` poll is held before the 502.
     pub(crate) eq_hold: Duration,
+    /// How long a datagram spends on the way to or from a client
+    /// ([`FakeGridBuilder::link_latency`]).
+    pub(crate) link_latency: Duration,
     /// Overrides how long the grid waits for a client to complete its movement
     /// into a handover destination, or `None` for each path's own budget
     /// ([`TELEPORT_ARRIVAL_TIMEOUT`](crate::TELEPORT_ARRIVAL_TIMEOUT),
@@ -757,6 +762,9 @@ impl GridCore {
             self.logout_reply,
             crate::imitates::LogoutReply::Withheld
         ));
+        sim.set_link_tuning(self.circuit_policy.link, now);
+        sim.set_timeout_kick(self.circuit_policy.timeout_kick.map(str::to_owned));
+        sim.set_short_zero_tails(self.circuit_policy.short_zero_tails);
         sim.set_bare_environment_replies(matches!(
             self.environment_change_reply,
             crate::imitates::EnvironmentChangeReply::Bare
@@ -954,6 +962,7 @@ impl GridCore {
             socket,
             self.shutdown_tx.subscribe(),
             Arc::clone(&self.clock),
+            self.link_latency,
         );
         Ok(PreparedSession {
             seq,
@@ -1374,6 +1383,8 @@ pub struct FakeGridBuilder {
     stale_presence: bool,
     /// The `EventQueueGet` hold before the 502 re-poll answer.
     eq_hold: Duration,
+    /// See [`FakeGridBuilder::link_latency`].
+    link_latency: Duration,
     /// An override for the handover arrival budget (see the builder method).
     handover_timeout: Option<Duration>,
     /// The TCP port to bind, `0` for an ephemeral one.
@@ -1448,6 +1459,7 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("upload_announcements", &self.upload_announcements)
             .field("bakes", &self.bakes)
             .field("eq_hold", &self.eq_hold)
+            .field("link_latency", &self.link_latency)
             .field("handover_timeout", &self.handover_timeout)
             .field("http_port", &self.http_port)
             .field("identity", &self.identity)
@@ -1502,6 +1514,7 @@ impl FakeGridBuilder {
             gates: LoginGates::default(),
             stale_presence: false,
             eq_hold: Duration::from_secs(30),
+            link_latency: Duration::ZERO,
             handover_timeout: None,
             http_port: 0,
             identity: GridIdentity::default(),
@@ -1661,6 +1674,23 @@ impl FakeGridBuilder {
     #[must_use]
     pub const fn event_queue_hold(mut self, hold: Duration) -> Self {
         self.eq_hold = hold;
+        self
+    }
+
+    /// Delays every datagram by `latency` in **each** direction, so a client
+    /// measures a ping round trip of twice that. Zero — the default — delays
+    /// nothing.
+    ///
+    /// A loopback grid answers in a fraction of a millisecond, which no real
+    /// grid does: Second Life's beta grid was measured at about 170 ms from
+    /// this workspace (`book/src/gridspec/session.md` § Circuits). Everything
+    /// a viewer does on a timer the round trip feeds — its retransmission
+    /// timeout above all — has only ever run at its floor against a loopback
+    /// grid. The capabilities are not delayed: they are HTTP, and their
+    /// latency is a different one.
+    #[must_use]
+    pub const fn link_latency(mut self, latency: Duration) -> Self {
+        self.link_latency = latency;
         self
     }
 
@@ -1950,6 +1980,7 @@ impl FakeGridBuilder {
             parcel_policy: self.imitates.parcel_policy(),
             environment_change_reply: self.imitates.environment_change_reply(),
             logout_reply: self.imitates.logout_reply(),
+            circuit_policy: self.imitates.circuit_policy(),
             stock_day: self.imitates.stock_day(),
             packages: self
                 .packages
@@ -1959,6 +1990,7 @@ impl FakeGridBuilder {
                 .unwrap_or_else(|| self.imitates.voice_backend()),
             clock: self.clock,
             eq_hold: self.eq_hold,
+            link_latency: self.link_latency,
             handover_timeout: self.handover_timeout,
             http_port,
             login_uri,

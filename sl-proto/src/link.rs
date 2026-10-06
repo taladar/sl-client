@@ -28,7 +28,10 @@ use crate::ack_flush::send_ack_packets;
 use crate::bookkeeping_ids::PingId;
 use crate::types::Reliability;
 use sl_wire::messages::{StartPingCheck, StartPingCheckPingIDBlock};
-use sl_wire::{AnyMessage, PacketFlags, SequenceNumber, WireError, Writer, encode_datagram};
+use sl_wire::{
+    AnyMessage, PacketFlags, SequenceNumber, WireError, Writer, encode_datagram,
+    zero_encode_short_tail,
+};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -125,6 +128,64 @@ pub(crate) enum ReliableSeverity {
     /// (`LL_ERR_TCP_TIMEOUT`) and leaves the circuit alone — a dead link is
     /// detected by the inactivity timeout, not by one lost message.
     BestEffort,
+}
+
+/// The numbers a link's reliability runs on: when silence means the peer is
+/// gone, how long an unacknowledged packet waits before it is sent again, and
+/// how many times.
+///
+/// [`Self::REFERENCE`] is the reference implementation's set — what a viewer
+/// uses, and what Second Life's simulators were measured doing
+/// (`book/src/gridspec/session.md` § Circuits). A client link always runs on
+/// it; a [`SimSession`](crate::SimSession) standing in for another grid takes
+/// that grid's ([`SimSession::set_link_tuning`](crate::SimSession::set_link_tuning)).
+///
+/// The retransmission timeout is five times the averaged ping round trip,
+/// with the average held inside [`Self::ping_min`] ..= [`Self::ping_max`] and
+/// the product no lower than [`Self::resend_floor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkTuning {
+    /// How long the link may go without any inbound datagram before it is
+    /// declared dead.
+    pub inactivity_timeout: Duration,
+    /// How many times a reliable packet is sent — the first transmission
+    /// included — before it is given up. `None` never gives up: the packet is
+    /// resent until it is acknowledged or the link ends.
+    pub max_transmissions: Option<u32>,
+    /// The floor on the retransmission timeout.
+    pub resend_floor: Duration,
+    /// The round trip assumed before any ping has been answered.
+    pub ping_initial: Duration,
+    /// The floor the averaged round trip is held to.
+    pub ping_min: Duration,
+    /// The ceiling the averaged round trip is held to.
+    pub ping_max: Duration,
+}
+
+impl LinkTuning {
+    /// The reference implementation's numbers (`llcircuit.cpp`,
+    /// `llpacketack.h`): four transmissions, a second apart at the least, on a
+    /// ping average held between 100 ms and 2 s; and this client's own
+    /// 45-second inactivity timeout, kept under OpenSim's 60.
+    pub const REFERENCE: Self = Self {
+        inactivity_timeout: INACTIVITY_TIMEOUT,
+        max_transmissions: Some(MAX_RESEND_ATTEMPTS),
+        resend_floor: MINIMUM_RESEND_TIMEOUT,
+        ping_initial: INITIAL_PING_AVERAGE,
+        ping_min: PING_AVERAGE_MIN,
+        ping_max: PING_AVERAGE_MAX,
+    };
+}
+
+/// How a message body is put on the wire ([`ReliableLink::send_coded`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BodyCoding {
+    /// As encoded, with no packet flag saying otherwise.
+    Plain,
+    /// Zero-coded with its final run of zeros counted one short, flagged
+    /// `ZEROCODED` — how Second Life's simulators send a message that ends in
+    /// zeros ([`sl_wire::zero_encode_short_tail`]).
+    ZeroCodedShortTail,
 }
 
 /// A reliable packet that has run out of retransmissions, reported by
@@ -234,6 +295,8 @@ pub(crate) struct ReliableLink {
     inactivity: Instant,
     /// When to flush owed acknowledgements, if any are pending.
     ack_flush: Option<Instant>,
+    /// The numbers the link's reliability runs on.
+    tuning: LinkTuning,
 }
 
 impl ReliableLink {
@@ -243,14 +306,33 @@ impl ReliableLink {
             next_sequence: SequenceNumber::FIRST,
             next_ping_id: PingId::default(),
             outstanding_ping: None,
-            ping_average: INITIAL_PING_AVERAGE,
+            ping_average: LinkTuning::REFERENCE.ping_initial,
             pending_acks: Vec::new(),
             unacked: BTreeMap::new(),
             seen: SeenWindow::default(),
             out: VecDeque::new(),
             inactivity: deadline(now, INACTIVITY_TIMEOUT),
             ack_flush: None,
+            tuning: LinkTuning::REFERENCE,
         }
+    }
+
+    /// Replaces the numbers the link's reliability runs on, re-arming the
+    /// inactivity timer from `now` and holding the ping average to the new
+    /// bounds. Before any ping has been answered the average restarts from the
+    /// new tuning's initial value.
+    pub(crate) fn set_tuning(&mut self, tuning: LinkTuning, now: Instant) {
+        if self.ping_average == self.tuning.ping_initial {
+            self.ping_average = tuning.ping_initial;
+        }
+        self.ping_average = self.ping_average.clamp(tuning.ping_min, tuning.ping_max);
+        self.tuning = tuning;
+        self.inactivity = deadline(now, tuning.inactivity_timeout);
+    }
+
+    /// The numbers the link's reliability runs on.
+    pub(crate) const fn tuning(&self) -> LinkTuning {
+        self.tuning
     }
 
     /// The sequence number the next packet sent on this link will carry,
@@ -282,15 +364,38 @@ impl ReliableLink {
         severity: ReliableSeverity,
         now: Instant,
     ) -> Result<(), WireError> {
+        self.send_coded(message, reliability, severity, BodyCoding::Plain, now)
+    }
+
+    /// [`Self::send`], with the message body put on the wire in `coding`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a wire error if the message fails to encode.
+    pub(crate) fn send_coded(
+        &mut self,
+        message: &AnyMessage,
+        reliability: Reliability,
+        severity: ReliableSeverity,
+        coding: BodyCoding,
+        now: Instant,
+    ) -> Result<(), WireError> {
         let mut writer = Writer::new();
         message.id().encode(&mut writer)?;
         message.encode_body(&mut writer)?;
-        let body = writer.into_bytes();
+        let plain = writer.into_bytes();
 
         let sequence = self.next_sequence();
-        let flags = match reliability {
+        let reliable = match reliability {
             Reliability::Reliable => PacketFlags::RELIABLE,
             Reliability::Unreliable => PacketFlags::EMPTY,
+        };
+        let (flags, body) = match coding {
+            BodyCoding::Plain => (reliable, plain),
+            BodyCoding::ZeroCodedShortTail => (
+                reliable.with(PacketFlags::ZEROCODED),
+                zero_encode_short_tail(&plain),
+            ),
         };
         let datagram = encode_datagram(flags, sequence, &body);
 
@@ -343,7 +448,7 @@ impl ReliableLink {
 
     /// Records that a datagram was received, resetting the inactivity timer.
     pub(crate) fn note_received(&mut self, now: Instant) {
-        self.inactivity = deadline(now, INACTIVITY_TIMEOUT);
+        self.inactivity = deadline(now, self.tuning.inactivity_timeout);
     }
 
     /// When the link is declared dead for lack of inbound traffic.
@@ -407,7 +512,7 @@ impl ReliableLink {
     fn resend_timeout(&self) -> Duration {
         self.ping_average
             .mul_f32(RELIABLE_TIMEOUT_FACTOR)
-            .max(MINIMUM_RESEND_TIMEOUT)
+            .max(self.tuning.resend_floor)
     }
 
     /// Folds a round-trip `sample` into the ping average with the reference
@@ -420,7 +525,7 @@ impl ReliableLink {
         self.ping_average = attacked
             .mul_f32(PING_AVERAGE_DECAY)
             .saturating_add(sample.mul_f32(PING_AVERAGE_ALPHA))
-            .clamp(PING_AVERAGE_MIN, PING_AVERAGE_MAX);
+            .clamp(self.tuning.ping_min, self.tuning.ping_max);
     }
 
     /// Queues a keep-alive `StartPingCheck` unreliably, recording it as the
@@ -498,6 +603,7 @@ impl ReliableLink {
     /// nothing exhausted this tick.
     pub(crate) fn process_resends(&mut self, now: Instant) -> Vec<ExhaustedPacket> {
         let timeout = self.resend_timeout();
+        let max_transmissions = self.tuning.max_transmissions;
         let mut exhausted = Vec::new();
         let mut to_send = Vec::new();
         for (sequence, packet) in &mut self.unacked {
@@ -508,7 +614,7 @@ impl ReliableLink {
             if now < deadline(packet.sent_at, timeout) {
                 continue;
             }
-            if packet.attempts >= MAX_RESEND_ATTEMPTS {
+            if max_transmissions.is_some_and(|max| packet.attempts >= max) {
                 exhausted.push(ExhaustedPacket {
                     sequence: *sequence,
                     name: packet.name,

@@ -1,7 +1,160 @@
 # Session
 
-What each grid does with a session that is ending. The session's states are
-described in [Sessions](../comms/sessions.md).
+What each grid does with a session's circuits while it lasts, and with the
+session when it ends. The session's states are described in
+[Sessions](../comms/sessions.md), the circuit and its reliability in
+[Circuits](../comms/circuits.md) and
+[LLUDP transport](../comms/lludp-transport.md).
+
+## Circuits
+
+Both ends of a circuit ping each other, acknowledge each other's reliable
+packets and send again what was not acknowledged. What a simulator does when
+the client stops doing its half can only be seen by a client that stops and
+keeps listening, so the session can be told to: `Command::ProbeCircuits`
+(`probe_circuits` in the REPL) reports every inbound datagram as a
+`Diagnostic::Datagram` and, at its stronger levels, withholds every
+acknowledgement or transmits nothing at all.
+
+Measured on 2026-10-06 on Second Life's beta grid (aditi) and the local
+OpenSim standalone (a 2×2 block of regions), by:
+
+- `keepalive-ping`, which watches both ends' pings for 32 seconds — on aditi
+  from the sandbox region (no neighbours) and from a region with five;
+- `circuit-unacked-resend`, which settles for twelve seconds, withholds every
+  acknowledgement for 45, asks for a `RegionInfo` and counts its arrivals
+  (aditi twice, OpenSim once);
+- `circuit-silence`, which settles, transmits nothing until the simulator has
+  been quiet for 30 seconds, then speaks again, and finally logs in afresh
+  (aditi from both regions, OpenSim three times);
+- `throttle-set`, which asks for up to 300 of the region's prims again under
+  the 1000 kbps and the 50 kbps throttle preset and measures the object
+  updates that come back.
+
+All four hold aditi, OpenSim and both fake flavours to these answers, except
+where a row says the fake grid does not model it.
+
+### Pings
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the client's ping round trip | 0.17–0.18 s | 0.2 ms | 0.15 ms; `FakeGridBuilder::link_latency` adds a delay each way |
+| the simulator's `StartPingCheck` on the root circuit | every 5.1 s (gaps of 4.8–5.25 s) | every 5.28 s, to the hundredth | every 5.00 s, on both |
+| on a child circuit | every 5.0 s, on each of five | every 5.28 s, on each of three | every 5.00 s |
+| pings to a client that answers none | go on at the same cadence until the circuit is given up | the same | the same |
+
+OpenSim's five seconds are ten half-second ticks of its outgoing-packet loop,
+each of which runs a little long (`LLUDPServer.OutgoingPacketHandler`).
+
+### A reliable packet nobody acknowledges
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| transmissions of the unacknowledged `RegionInfo` | **four**: the first and three more, then given up | **140 in 45 s**, and still going when acknowledgements resumed | `FakeSl` four; `FakeOpensim` without limit |
+| the gap between them | 1.00–1.32 s | 0.30–0.42 s (median 0.32 s) | `FakeSl` 1.00 s; `FakeOpensim` 0.25 s on loopback |
+| how a retransmission is marked | the same sequence number, the `RESENT` flag | the same | the same |
+| the circuit afterwards | unaffected: it answered the next ping | unaffected | unaffected |
+| which reliable packets are retransmitted at all | **few**: of 5,844 sent reliably in the 45 s, six — `RegionInfo` and `SimulatorViewerTimeMessage` (and `KillObject`, in the silent runs) | every one: all 13 | every one |
+| unacknowledged object traffic | never retransmitted under its sequence number; the state is sent again as new packets — `AvatarAnimation` 1,435 times in the 45 s, against 74 in 32 s with acknowledgements flowing | retransmitted like anything else (`ImprovedTerseObjectUpdate`, `LayerData`) | not modelled: the fake grid resends what it sent |
+
+Second Life's numbers are the reference library's
+(`LL_DEFAULT_RELIABLE_RETRIES` 3, `LL_MINIMUM_RELIABLE_TIMEOUT_SECONDS` 1),
+which is also what the session uses for its own packets. Its resends were a
+second apart twelve seconds after an arrival, though, which the reference's
+one-second initial ping average would not yet have decayed to: the
+simulator's estimate starts lower.
+
+OpenSim's retransmission timeout is five times the last ping round trip,
+held between 250 ms and 3 s (`LLUDPClient.UpdateRoundTrip`), checked on a
+100 ms tick, and nothing counts the resends (`LLUDPServer.ResendUnacked`): a
+packet is resent until it is acknowledged or the client is timed out. A
+client that takes its time acknowledging is sent the same packet three times
+a second meanwhile, and has to discard the copies — which the session does,
+by sequence number.
+
+### A client that goes silent
+
+The silence is of the circuits only: the event queue is HTTP and went on being
+polled throughout.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| pings during the silence | every 5.1 s, 19 of them, the last at 93–94 s | every 5.28 s, 11 or 12, the last at 54–58 s | the same cadence to the end, on both |
+| other traffic during the silence | goes on: about 23 datagrams every ten seconds once the scene has arrived (`CoarseLocationUpdate`, `LayerData`, the time message) | goes on, and grows: every unacknowledged packet is resent three times a second (160–170 transmissions of one packet) | pings only |
+| the simulator's last datagram on the root circuit | at 97.5–98.9 s | at 59.1 s | `FakeSl` 98.0 s; `FakeOpensim` 59.0 s |
+| what it says as it gives up | **nothing**: no `KickUser`, no `DisableSimulator`, no `CloseCircuit` | **`KickUser`**, "Simulator logged you out due to connection timeout." | each flavour's own |
+| the child circuits | pinged until 98.3 s, last datagram at 98.5 s, nothing said | last datagram within 50 ms of the kick, nothing said on them | closed with the root's, nothing said |
+| the client speaking again afterwards | no answer in 15 s | — (the kick ended the session) | no answer from `FakeSl` |
+| a login five seconds later | admitted (after the two-minute login cooldown the harness keeps on aditi) | admitted | admitted on both |
+| a login in the same instant | not measured | **refused** as `presence`, once: the close had not finished | not modelled |
+
+So Second Life times a circuit out 100 seconds after the last datagram it
+received (the silence began about a second after the client's last one), and
+OpenSim after 60 (`AckTimeout`, `LLUDPServer.HandleUnacked`), measured from the
+last packet received and not, despite the name, from anything unacknowledged.
+OpenSim's kick is addressed to a client it has just decided is not there; a
+client whose uplink alone has failed does receive it. Second Life's client
+finds out from the silence: the session declares a circuit dead 45 seconds
+after the last datagram it received, and reports `Disconnected(Timeout)`.
+
+The refusal of an immediate login is the race described under
+[Login](login.md#a-second-login-of-an-avatar-that-is-in-world): OpenSim's
+close runs on another thread, and the login service still held the presence.
+
+### Throttles
+
+Both grids acknowledge an `AgentThrottle` and answer it with nothing.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| object updates under the 1000 kbps preset (task rate 310 kbps) | 539 KB in 15 s — 288 kbps, with the sandbox's scene still arriving | 109 prims, 12.7 KB, half of it within 0.20 s | at once |
+| under the 50 kbps preset (task rate 10 kbps) | 256 KB in 30 s — **68 kbps** | 15.2 KB in four times as many datagrams, half of it after 6.6 s — **9.2 kbps** | at once: throttles are not honoured (`server-world-update-scheduling`) |
+
+OpenSim holds a category to the rate it was given (its token buckets are in
+`LLUDPClient.cs` and `TokenBucket.cs`) and cuts its datagrams smaller to do
+it. Second Life sends less when asked for less, but did not go down to what
+the preset asked for.
+
+### The short zero-coded tail
+
+A few times per login, Second Life's simulators zero-code an `ObjectUpdate`
+with its final run of zeros counted one byte short (usually an encoded body
+ending `00 42` where the block's trailing fields need 67 zeros), and the
+reference reader zero-fills what is missing. The session reads such a body
+the same way ([LLUDP transport](../comms/lludp-transport.md#zero-coding)).
+`FakeSl` sends **every** `ObjectUpdate` that way
+(`CircuitPolicy::short_zero_tails`) — more often than the live grid, so that
+each test which sees an object on that flavour is sure to read one;
+`FakeOpensim` sends them as encoded.
+
+### What the viewer does with it
+
+- The session discards a retransmission it has already processed and
+  acknowledges it again, on both grids' cadences; `circuit-unacked-resend`
+  runs against both fake flavours on every `cargo test`.
+- A circuit timed out by OpenSim reaches the viewer as a kick, and one timed
+  out by Second Life as the session's own `Disconnected(Timeout)`; the viewer
+  exits on either (`viewer-disconnect-screen` keeps the window open instead).
+- The e2e tests `a_distant_second_life_flavoured_grid_is_logged_into_and_left`
+  and `a_distant_opensim_flavoured_grid_is_logged_into_and_left`
+  (`e2e_login.rs`) log in, load the Library and quit with every datagram held
+  85 ms each way — the round trip measured to aditi.
+- `Command::RequestObjects` for more than 255 objects used to fail to encode
+  — a message's block count is one byte — and the driver ended the session
+  over it. It is split across messages now. The same limit applies to every
+  other request that lists objects (`protocol-variable-block-lists-over-255`).
+
+### Not measured
+
+| behaviour | why |
+| --- | --- |
+| a silence that includes the event queue | the probe holds the circuits; the driver's HTTP goes on |
+| a child circuit that goes silent while the root answers | the probe holds every circuit of the session |
+| whether Second Life lets a dropped avatar log in at once | the harness waits out aditi's two-minute login cooldown first |
+| OpenSim's longer timeout for a paused agent | from source only: 300 s after an `AgentPause` (`PausedAckTimeout`) |
+| how far down Second Life's throttle goes, and per category | one burst under two presets; the scene was still arriving under both |
+| which messages each grid zero-codes besides `ObjectUpdate` | the probe reports a datagram's flags, but the cases do not tally them |
+| loss, reordering and duplication on the way | the probes drop the client's own traffic, never the simulator's |
 
 ## Logout
 

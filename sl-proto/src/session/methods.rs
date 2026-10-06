@@ -62,34 +62,34 @@ use crate::terrain;
 use crate::types::EventId;
 use crate::types::{
     AlertInfo, Arrival, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
-    AvatarPickerResult, Camera, ChatType, Child, ClassifiedCategory, ClassifiedUpdate, ClickAction,
-    CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, Diagnostic,
-    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason, EjectAction,
-    EstateAccessDelta, EstateCovenant, EstateInfoUpdate, Event, EventInfo, FeatureDisabled,
-    FolderInfo, FolderType, FollowCamProperty, FollowCamPropertyValue, FreezeAction, Friend,
-    FriendRights, GenericMessage, GenericStreamingMessage, GestureActivation, GodRegionUpdate,
-    GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange,
-    ImDialog, ImageCodec, InterestsUpdate, InventoryCursor, InventoryFolder, InventoryItem,
-    InventoryItemMove, InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType, LandStatItem,
-    LandStatReportType, LandStatScore, LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams,
-    MapItemType, Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType,
-    MovementMode, MuteEntry, MuteFlags, MuteType, NeighborInfo, NewInventoryItem, NewInventoryLink,
-    NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-    ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo,
-    ParcelListingFlags, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
-    ParcelObjectOwnersPart, ParcelOverlayInfo, ParcelRect, ParcelReturnType, ParcelUpdate,
-    PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams,
-    ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionInfoUpdate, RegionStats,
-    RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-    SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo,
-    ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions,
-    ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
-    SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply,
-    TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle,
-    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, Wearable, WearableType, XferListing,
+    AvatarPickerResult, Camera, ChatType, Child, CircuitProbe, ClassifiedCategory,
+    ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams, DeRezDestination,
+    DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
+    DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason,
+    EjectAction, EstateAccessDelta, EstateCovenant, EstateInfoUpdate, Event, EventInfo,
+    FeatureDisabled, FolderInfo, FolderType, FollowCamProperty, FollowCamPropertyValue,
+    FreezeAction, Friend, FriendRights, GenericMessage, GenericStreamingMessage, GestureActivation,
+    GodRegionUpdate, GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember,
+    GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryCursor, InventoryFolder,
+    InventoryItem, InventoryItemMove, InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType,
+    LandStatItem, LandStatReportType, LandStatScore, LoadUrlRequest, LoginAccount,
+    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
+    MeanCollisionType, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
+    NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
+    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelInfo, ParcelListingFlags, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo, ParcelRect, ParcelReturnType,
+    ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape,
+    PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionInfoUpdate,
+    RegionStats, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
+    ScriptGrantInfo, ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus,
+    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
+    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, XferListing,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -101,17 +101,17 @@ use sl_types::map::{Distance, GridCoordinates, RegionCoordinates};
 use sl_types::money::LindenAmount;
 use sl_wire::{
     AbuseReport, AnyMessage, CircuitCode, ControlFlags, GLTF_MATERIAL_OVERRIDE_METHOD, Llsd,
-    MessageId, ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5,
-    Reader, RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
-    VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request, ends_in_zero_run,
-    message_name, parse_agent_preferences, parse_attachment_resources, parse_avatar_picker_search,
-    parse_datagram, parse_display_names, parse_experience_ids, parse_experience_infos,
-    parse_experience_permissions, parse_experience_query_reply, parse_experience_search_page,
-    parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
-    parse_land_resource_detail, parse_land_resource_summary, parse_land_resources_reply,
-    parse_lsl_syntax, parse_object_physics_properties, parse_region_experiences,
-    parse_remote_parcel_answer, parse_resource_cost_selected, parse_simulator_features,
-    parse_user_info_reply, zero_decode,
+    MessageId, ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, ParsedDatagram, Permissions,
+    Permissions5, Reader, RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId,
+    SequenceNumber, VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request,
+    ends_in_zero_run, message_name, parse_agent_preferences, parse_attachment_resources,
+    parse_avatar_picker_search, parse_datagram, parse_display_names, parse_experience_ids,
+    parse_experience_infos, parse_experience_permissions, parse_experience_query_reply,
+    parse_experience_search_page, parse_get_object_cost, parse_get_object_physics_data,
+    parse_gltf_material_override, parse_land_resource_detail, parse_land_resource_summary,
+    parse_land_resources_reply, parse_lsl_syntax, parse_object_physics_properties,
+    parse_region_experiences, parse_remote_parcel_answer, parse_resource_cost_selected,
+    parse_simulator_features, parse_user_info_reply, zero_decode,
 };
 use sl_wire::{
     Direction, GlobalCoordinates, XFER_CHUNK_SIZE, XferPacketId, combine_uuids, decode_xfer_chunk,
@@ -256,7 +256,19 @@ impl Session {
             events: VecDeque::new(),
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
+            circuit_probe: CircuitProbe::Off,
         }
+    }
+
+    /// Sets what the session does to its circuits to measure the simulator at
+    /// the other end — see [`CircuitProbe`]. Takes effect with the next
+    /// datagram in either direction; going back to [`CircuitProbe::Off`]
+    /// resumes normal service on whatever circuits the simulator has kept.
+    ///
+    /// The reports are [`Diagnostic::Datagram`]s, so they need
+    /// [`Session::set_diagnostics`] as every diagnostic does.
+    pub const fn probe_circuits(&mut self, probe: CircuitProbe) {
+        self.circuit_probe = probe;
     }
 
     /// Enables or disables protocol-diagnostic collection.
@@ -2114,6 +2126,7 @@ impl Session {
 
         let parsed = parse_datagram(datagram)?;
 
+        let withhold_acks = matches!(self.circuit_probe, CircuitProbe::WithholdAcks);
         let process = {
             let Some(circuit) = self.circuit_in_role(role, from) else {
                 return Ok(());
@@ -2121,12 +2134,27 @@ impl Session {
             circuit.note_received(now);
             circuit.record_acks(&parsed.acks);
             if parsed.flags.contains(PacketFlags::RELIABLE) {
-                circuit.queue_ack(parsed.sequence, now);
+                if !withhold_acks {
+                    circuit.queue_ack(parsed.sequence, now);
+                }
                 circuit.mark_seen(parsed.sequence)
             } else {
                 true
             }
         };
+        if self.circuit_probe.observes() && self.diagnostics_enabled {
+            self.push_diagnostic(Diagnostic::Datagram {
+                at: now,
+                from,
+                child: matches!(role, CircuitRole::Child),
+                flags: parsed.flags,
+                sequence: parsed.sequence,
+                acks: parsed.acks.len(),
+                len: datagram.len(),
+                name: datagram_message_name(&parsed),
+                duplicate: !process,
+            });
+        }
         if !process {
             return Ok(());
         }
@@ -14154,6 +14182,19 @@ impl Session {
     /// therefore stops retransmitting rather than retransmitting into its own
     /// backlog.
     pub fn poll_transmit(&mut self) -> Option<Transmit> {
+        if matches!(self.circuit_probe, CircuitProbe::Silent) {
+            // Collected and thrown away rather than left queued: the
+            // retransmission clocks run as they would on a link that loses
+            // everything, and nothing is waiting to burst out when the probe
+            // ends.
+            while self.next_transmit().is_some() {}
+            return None;
+        }
+        self.next_transmit()
+    }
+
+    /// The next queued datagram of any circuit, root first.
+    fn next_transmit(&mut self) -> Option<Transmit> {
         if let Some(circuit) = self.circuit.as_mut()
             && let Some(payload) = circuit.pop_outbound()
         {
@@ -14236,4 +14277,22 @@ impl Session {
             self.events.push_back(Event::Disconnected(reason));
         }
     }
+}
+
+/// The name of the message a parsed datagram carries, read without decoding
+/// the body: what a [`Diagnostic::Datagram`] reports, and all it can report of
+/// a retransmission the session will not decode a second time.
+///
+/// `None` for a body whose zero-coding cannot be undone, whose id cannot be
+/// read, or whose id names no message this client knows.
+fn datagram_message_name(parsed: &ParsedDatagram<'_>) -> Option<&'static str> {
+    let decoded;
+    let body = if parsed.flags.contains(PacketFlags::ZEROCODED) {
+        decoded = zero_decode(parsed.body).ok()?;
+        decoded.as_slice()
+    } else {
+        parsed.body
+    };
+    let id = MessageId::decode(&mut Reader::new(body)).ok()?;
+    message_name(id)
 }

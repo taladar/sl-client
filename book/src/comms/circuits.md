@@ -68,6 +68,9 @@ A [teleport](../content/teleport.md) to a distant region is similar but
 deliberate rather than incidental. Either way, the multi-circuit machinery is
 what makes seamless movement across a contiguous grid possible.
 
+How each grid pings a circuit, resends on it and gives it up is measured in
+[Grid Behaviour → Session](../gridspec/session.md#circuits).
+
 > **Note (`AddCircuitCode`).** There is also a server-to-server `AddCircuitCode`
 > message used between simulators to pre-authorize an incoming agent's circuit.
 > A client never sends it, but you will see it in the message template.

@@ -80,6 +80,8 @@ mod test {
         login_refusals => "login-refusals" [fake_sl, fake_opensim],
         keepalive_ping => "keepalive-ping" [fake_sl, fake_opensim],
         throttle_set => "throttle-set" [fake_sl, fake_opensim],
+        circuit_unacked_resend => "circuit-unacked-resend" [fake_sl, fake_opensim],
+        circuit_silence => "circuit-silence" [fake_sl, fake_opensim],
         simulator_features => "simulator-features" [fake_sl, fake_opensim],
         seed_capabilities => "seed-capabilities" [fake_sl, fake_opensim],
         object_update_decode => "object-update-decode" [fake_sl, fake_opensim],

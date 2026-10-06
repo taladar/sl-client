@@ -6,7 +6,8 @@ use crate::link::{ReliableLink, deadline, merge_deadline};
 use crate::mute::MuteList;
 use crate::scoped_id::CircuitId;
 use crate::types::{
-    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Throttle,
+    AssetType, Camera, CircuitProbe, Diagnostic, Event, Friend, ImageCodec, LoginAccount,
+    LoginParams, Throttle,
 };
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
@@ -1871,6 +1872,10 @@ pub struct Session {
     /// Pending [`Diagnostic`]s for the driver, populated only while
     /// `diagnostics_enabled`. Drained by [`Session::poll_diagnostic`].
     diagnostics: VecDeque<Diagnostic>,
+    /// What the session is doing to its circuits to measure the simulator
+    /// ([`Session::probe_circuits`]). [`CircuitProbe::Off`] on every normal
+    /// session.
+    circuit_probe: CircuitProbe,
 }
 
 mod caps_event;

@@ -809,6 +809,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::UpdateUserInfo { .. } => "update_user_info",
         Command::SetChatLogConfig(_) => "set_chat_log_config",
         Command::SetDiagnostics(_) => "set_diagnostics",
+        Command::ProbeCircuits(_) => "probe_circuits",
         Command::TriggerSound { .. } => "trigger_sound",
         Command::RequestGodlikePowers { .. } => "request_godlike_powers",
         Command::EjectUser { .. } => "eject_user",

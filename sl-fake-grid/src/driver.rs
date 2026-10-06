@@ -6,12 +6,14 @@
 //! flush sequence so queued transmits, [`ServerEvent`]s, timer deadlines and
 //! event-queue wakeups can never be stranded inside the state machine.
 
+use std::collections::VecDeque;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sl_proto::{RegionIdentity, ServerEvent, SimCaps, SimSession, Transmit};
 use tokio::net::UdpSocket;
-use tokio::sync::{Mutex, Notify, broadcast, watch};
+use tokio::sync::{Mutex, Notify, broadcast, mpsc, watch};
 
 use crate::assets::GridAssets;
 use crate::runtime::{SessionIds, SessionRole};
@@ -180,6 +182,13 @@ pub(crate) struct SharedSim {
     /// crossing hands it a script ([`crate::timeline::hand_over`]). A permit is
     /// stored, so a hand-over that lands before the runner parks is not lost.
     pub(crate) timeline_notify: Arc<Notify>,
+    /// How long a datagram spends on the way to or from the client
+    /// ([`FakeGridBuilder::link_latency`](crate::FakeGridBuilder::link_latency)).
+    /// Zero on a stock grid, where nothing is delayed.
+    pub(crate) latency: Duration,
+    /// Where an outbound datagram waits out [`Self::latency`] before it is
+    /// sent; `None` when there is none to wait out.
+    delayed_tx: Option<mpsc::UnboundedSender<(tokio::time::Instant, Transmit)>>,
 }
 
 /// What a locked flush gathered; applied after the state lock is released so
@@ -453,16 +462,13 @@ impl SharedSim {
     /// waiting.
     pub(crate) async fn finish_flush(&self, outcome: FlushOutcome) {
         for transmit in outcome.transmits {
-            if let Err(error) = self
-                .socket
-                .send_to(&transmit.payload, transmit.destination)
-                .await
-            {
-                tracing::warn!(
-                    "sending {} bytes to {} failed: {error}",
-                    transmit.payload.len(),
-                    transmit.destination
-                );
+            if let Some(delayed) = &self.delayed_tx {
+                // The line is gone only once its sender task is, which is
+                // once the session is: nothing is left to deliver to.
+                let due = due_after(self.latency);
+                let _gone = delayed.send((due, transmit));
+            } else {
+                send_datagram(&self.socket, &transmit).await;
             }
         }
         if outcome.wake_event_queue {
@@ -481,17 +487,60 @@ impl SharedSim {
     }
 }
 
+/// The instant a datagram held back by `latency` is due: now plus the latency,
+/// or now on (impossible) overflow.
+fn due_after(latency: Duration) -> tokio::time::Instant {
+    let now = tokio::time::Instant::now();
+    now.checked_add(latency).unwrap_or(now)
+}
+
+/// Puts one datagram on the wire, logging a failure rather than returning it:
+/// a datagram that cannot be sent is a datagram lost, which the protocol
+/// already survives.
+async fn send_datagram(socket: &UdpSocket, transmit: &Transmit) {
+    if let Err(error) = socket
+        .send_to(&transmit.payload, transmit.destination)
+        .await
+    {
+        tracing::warn!(
+            "sending {} bytes to {} failed: {error}",
+            transmit.payload.len(),
+            transmit.destination
+        );
+    }
+}
+
+/// The outbound half of an injected link latency: sends each datagram once it
+/// is due, in the order the session queued them. Ends when the session's last
+/// handle is dropped.
+async fn run_delayed_sender(
+    socket: Arc<UdpSocket>,
+    mut delayed: mpsc::UnboundedReceiver<(tokio::time::Instant, Transmit)>,
+) {
+    while let Some((due, transmit)) = delayed.recv().await {
+        tokio::time::sleep_until(due).await;
+        send_datagram(&socket, &transmit).await;
+    }
+}
+
 /// Builds the wake-up channels for a new session around its already-bound
-/// socket and initial state, returning the shared handle.
+/// socket and initial state, returning the shared handle. A non-zero
+/// `latency` also starts the task that holds outbound datagrams back by it.
 pub(crate) fn new_shared_sim(
     state: SimState,
     socket: Arc<UdpSocket>,
     shutdown_rx: watch::Receiver<bool>,
     clock: Now,
+    latency: Duration,
 ) -> SharedSim {
     let (events_tx, _) = broadcast::channel(EVENTS_CHANNEL_CAPACITY);
     let (timeout_tx, _) = watch::channel(state.sim.poll_timeout());
     let (closed_tx, _) = watch::channel(false);
+    let delayed_tx = (!latency.is_zero()).then(|| {
+        let (delayed_tx, delayed_rx) = mpsc::unbounded_channel();
+        tokio::spawn(run_delayed_sender(Arc::clone(&socket), delayed_rx));
+        delayed_tx
+    });
     SharedSim {
         state: Arc::new(Mutex::new(state)),
         socket,
@@ -502,6 +551,8 @@ pub(crate) fn new_shared_sim(
         closed_tx,
         clock,
         timeline_notify: Arc::new(Notify::new()),
+        latency,
+        delayed_tx,
     }
 }
 
@@ -514,14 +565,21 @@ const RECV_ERROR_BACKOFF: Duration = Duration::from_millis(50);
 
 /// The UDP pump: receive datagrams into the machine and flush, until the
 /// grid shuts down or the session closes.
+///
+/// With a link latency injected, a received datagram waits it out in arrival
+/// order before the machine is handed it — the inbound half of the delay
+/// whose outbound half is [`run_delayed_sender`].
 pub(crate) async fn run_udp_pump(shared: SharedSim) {
     let mut shutdown_rx = shared.shutdown_rx.clone();
     let mut closed_rx = shared.closed_tx.subscribe();
     let mut buffer = vec![0_u8; RECV_BUFFER_BYTES];
+    // Datagrams received and not yet due, oldest first.
+    let mut held: VecDeque<(tokio::time::Instant, SocketAddr, Vec<u8>)> = VecDeque::new();
     // Consecutive receive failures, to keep a broken socket from flooding
     // the log at the backoff rate.
     let mut failures: u32 = 0;
     loop {
+        let next_due = held.front().map(|(due, _, _)| *due);
         tokio::select! {
             changed = closed_rx.changed() => {
                 if changed.is_err() || *closed_rx.borrow() {
@@ -547,19 +605,19 @@ pub(crate) async fn run_udp_pump(shared: SharedSim) {
                     }
                 };
                 let datagram = buffer.get(..length).unwrap_or_default();
-                let closed = {
-                    let mut guard = shared.state.lock().await;
-                    if let Err(error) = guard.sim.handle_datagram(from, datagram, shared.now()) {
-                        tracing::debug!("datagram from {from} rejected: {error}");
+                if shared.latency.is_zero() {
+                    if deliver_datagram(&shared, from, datagram).await {
+                        break;
                     }
-                    let outcome = shared.flush_locked(&mut guard);
-                    let closed = guard.sim.is_closed();
-                    drop(guard);
-                    shared.finish_flush(outcome).await;
-                    closed
-                };
-                if closed {
-                    tracing::info!("session closed; UDP pump exiting");
+                } else {
+                    let due = due_after(shared.latency);
+                    held.push_back((due, from, datagram.to_vec()));
+                }
+            }
+            () = sleep_until_due(next_due) => {
+                if let Some((_due, from, datagram)) = held.pop_front()
+                    && deliver_datagram(&shared, from, &datagram).await
+                {
                     break;
                 }
             }
@@ -570,6 +628,31 @@ pub(crate) async fn run_udp_pump(shared: SharedSim) {
             }
         }
     }
+}
+
+/// Sleeps until `due`, or forever when nothing is held.
+async fn sleep_until_due(due: Option<tokio::time::Instant>) {
+    match due {
+        Some(instant) => tokio::time::sleep_until(instant).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Hands one received datagram to the machine and flushes what it answered;
+/// `true` once the session has closed.
+async fn deliver_datagram(shared: &SharedSim, from: SocketAddr, datagram: &[u8]) -> bool {
+    let mut guard = shared.state.lock().await;
+    if let Err(error) = guard.sim.handle_datagram(from, datagram, shared.now()) {
+        tracing::debug!("datagram from {from} rejected: {error}");
+    }
+    let outcome = shared.flush_locked(&mut guard);
+    let closed = guard.sim.is_closed();
+    drop(guard);
+    shared.finish_flush(outcome).await;
+    if closed {
+        tracing::info!("session closed; UDP pump exiting");
+    }
+    closed
 }
 
 /// The `audible` byte of a line heard in full: OpenSim's

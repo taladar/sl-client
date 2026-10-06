@@ -1,6 +1,49 @@
 //! Protocol-level diagnostics: anomalies the session noticed in inbound data.
 
-use sl_wire::{MessageId, MessageStatus, SequenceNumber, WireError};
+use sl_wire::{MessageId, MessageStatus, PacketFlags, SequenceNumber, WireError};
+use std::net::SocketAddr;
+use std::time::Instant;
+
+/// What a session does to its own circuits in order to measure the simulator
+/// at the other end of them ([`Session::probe_circuits`](crate::Session::probe_circuits)).
+///
+/// Everything a grid does about a circuit that stops behaving — how often it
+/// pings, how many times and how far apart it sends a reliable packet nobody
+/// acknowledges, when it gives the circuit up — can only be seen by a client
+/// that stops behaving and keeps listening. Each level past [`Self::Off`]
+/// reports every inbound datagram as a [`Diagnostic::Datagram`] (while
+/// diagnostics are on); the last two also hold part of the session's own
+/// traffic back.
+///
+/// The hold covers every circuit of the session, root and child, and nothing
+/// but the circuits: the capabilities and the event queue are the driver's
+/// HTTP and go on as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum CircuitProbe {
+    /// The circuits run normally and no datagram is reported.
+    #[default]
+    Off,
+    /// The circuits run normally; every inbound datagram is reported.
+    Observe,
+    /// Inbound reliable packets are processed but never acknowledged, so the
+    /// simulator retransmits them for as long as it cares to. Everything else
+    /// — ping replies, `AgentUpdate`s, the session's own reliable packets —
+    /// is still sent.
+    WithholdAcks,
+    /// Nothing at all is transmitted: every datagram the session queues is
+    /// discarded instead of being handed to the driver. To the simulator the
+    /// client has vanished; the session goes on listening.
+    Silent,
+}
+
+impl CircuitProbe {
+    /// Whether inbound datagrams are reported under this probe.
+    #[must_use]
+    pub const fn observes(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
 
 /// A protocol-level anomaly the session noticed while processing inbound data.
 ///
@@ -103,6 +146,35 @@ pub enum Diagnostic {
         /// known (`None` for operation-level timeouts).
         sequence: Option<SequenceNumber>,
     },
+    /// A datagram arrived on a circuit that is being probed
+    /// ([`CircuitProbe`]): its framing, before the session read anything out
+    /// of it. Unlike every other diagnostic this is not an anomaly but a
+    /// measurement — one per inbound datagram, duplicates included, which is
+    /// the point: a retransmission the session discards is exactly what a
+    /// probe counts.
+    Datagram {
+        /// When the session was handed the datagram.
+        at: Instant,
+        /// The simulator that sent it.
+        from: SocketAddr,
+        /// Whether it arrived on a child-agent circuit (a neighbouring region)
+        /// rather than the root circuit.
+        child: bool,
+        /// The packet flags (`RELIABLE`, `RESENT`, `ZEROCODED`, `ACK`).
+        flags: PacketFlags,
+        /// The simulator's sequence number for it.
+        sequence: SequenceNumber,
+        /// How many acknowledgements were appended to it.
+        acks: usize,
+        /// The datagram's length on the wire, in bytes.
+        len: usize,
+        /// The message name (`None` for an unrecognised id, or for a body
+        /// whose zero-coding or id could not be read).
+        name: Option<&'static str>,
+        /// Whether the session had seen this reliable sequence number before
+        /// — a retransmission of something it already processed.
+        duplicate: bool,
+    },
 }
 
 impl std::fmt::Display for Diagnostic {
@@ -170,6 +242,24 @@ impl std::fmt::Display for Diagnostic {
                 }
                 None => write!(f, "ExpectedReplyMissing request={request} sequence=-"),
             },
+            Self::Datagram {
+                at: _at,
+                from,
+                child,
+                flags,
+                sequence,
+                acks,
+                len,
+                name,
+                duplicate,
+            } => {
+                let displayed_name = name.unwrap_or("?");
+                write!(
+                    f,
+                    "Datagram from={from} child={child} sequence={sequence} flags={flags:?} \
+                     acks={acks} len={len} name={displayed_name} duplicate={duplicate}"
+                )
+            }
         }
     }
 }

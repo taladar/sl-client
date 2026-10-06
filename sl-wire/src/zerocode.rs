@@ -87,6 +87,29 @@ pub fn encode(body: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Zero-codes `body` the way Second Life's simulators do: as [`encode`] does,
+/// except that a final run of zeros is counted **one short**.
+///
+/// The result decodes to `body` less its last zero byte, which is the short
+/// message [`ends_in_zero_run`] describes and
+/// [`Reader::with_zero_tail`](crate::Reader::with_zero_tail) reads. A body
+/// that does not end in at least two zeros is encoded exactly: a run of one
+/// counted short would be a run of none, which is not a run a decoder can
+/// recognise.
+///
+/// This exists for a grid imitating Second Life, so that a client is tested
+/// against the messages that grid really sends.
+#[must_use]
+pub fn encode_short_tail(body: &[u8]) -> Vec<u8> {
+    let mut out = encode(body);
+    if let [.., ZERO_MARKER, count] = out.as_mut_slice()
+        && *count >= 2
+    {
+        *count = count.saturating_sub(1);
+    }
+    out
+}
+
 /// Narrows a run-length chunk (guaranteed `1..=255`) to its count byte.
 fn chunk_to_byte(chunk: usize) -> u8 {
     u8::try_from(chunk).unwrap_or(u8::MAX)
