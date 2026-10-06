@@ -9242,6 +9242,22 @@ impl SimSession {
         Ok(())
     }
 
+    /// Kicks the agent off this circuit: sends the `KickUser`
+    /// ([`send_kick_user`](Self::send_kick_user)) and closes the session with
+    /// [`ServerEvent::Disconnected`], so the driver's pumps exit once the
+    /// datagram has gone out. What a simulator does to the session an avatar
+    /// already had when the same account logs in again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode; the session stays open in that case.
+    pub fn kick(&mut self, kick: &Kick, now: Instant) -> Result<(), Error> {
+        self.send_kick_user(kick, now)?;
+        self.close(ServerEvent::Disconnected);
+        Ok(())
+    }
+
     /// Abandons the session: closes it with [`ServerEvent::Disconnected`]
     /// without sending anything — for a teleport destination the client never
     /// reached (the arrival timed out), where there is no circuit to retire.

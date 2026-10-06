@@ -412,6 +412,10 @@ pub struct MfaChallenge {
     pub mfa_hash: Option<String>,
     /// The human-readable challenge message.
     pub message: String,
+    /// The name of every top-level field the challenge carried, sorted — what
+    /// the grid sent, including members this struct does not model. Empty on
+    /// a challenge built here rather than parsed; a builder ignores it.
+    pub response_fields: Vec<String>,
 }
 
 /// The fields of a successful login needed to bring up the UDP circuit.
@@ -1115,6 +1119,14 @@ pub struct LoginFailure {
     /// (`message_args`, e.g. `TIME` for a suspension end, `VERSION` for a
     /// required update). Empty when the grid sent none.
     pub message_args: BTreeMap<String, String>,
+    /// The incident id Second Life stamps on a refusal (`Linden_Error_Code`,
+    /// e.g. `1-6ac4a1fd-51ced1496259a40040a39316`) — different on every
+    /// response, and what its support asks for. OpenSim sends none.
+    pub error_code: Option<String>,
+    /// The name of every top-level field the refusal carried, sorted — what
+    /// the grid sent, including members this struct does not model. Empty on
+    /// a failure built here rather than parsed; a builder ignores it.
+    pub response_fields: Vec<String>,
 }
 
 /// A coarse classification of a [`LoginFailure`], so callers can react to the
@@ -1175,6 +1187,8 @@ impl LoginFailure {
             message: message.into(),
             message_id: None,
             message_args: BTreeMap::new(),
+            error_code: None,
+            response_fields: Vec::new(),
         }
     }
 
@@ -1273,6 +1287,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, WireError> {
             return Ok(LoginResponse::MfaChallenge(MfaChallenge {
                 mfa_hash: members.get("mfa_hash").cloned(),
                 message,
+                response_fields: member_names(response_struct),
             }));
         }
         return Ok(LoginResponse::Failure(LoginFailure {
@@ -1280,6 +1295,8 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, WireError> {
             message,
             message_id: members.get("message_id").cloned(),
             message_args: parse_message_args(response_struct),
+            error_code: members.get("Linden_Error_Code").cloned(),
+            response_fields: member_names(response_struct),
         }));
     }
 
@@ -2116,8 +2133,11 @@ pub fn build_login_response(response: &LoginResponse) -> String {
             push_string_member(&mut out, "login", "false");
             push_string_member(&mut out, "reason", &failure.reason);
             push_string_member(&mut out, "message", &failure.message);
+            push_opt_string_member(&mut out, "Linden_Error_Code", failure.error_code.as_deref());
             push_opt_string_member(&mut out, "message_id", failure.message_id.as_deref());
-            if !failure.message_args.is_empty() {
+            // Second Life sends the arguments with every localisation key,
+            // as an empty struct when the text takes none.
+            if failure.message_id.is_some() || !failure.message_args.is_empty() {
                 out.push_str("<member><name>message_args</name><value><struct>");
                 for (key, value) in &failure.message_args {
                     push_string_member(&mut out, key, value);
@@ -2727,6 +2747,7 @@ impl LoginServer {
             return Some(LoginResponse::MfaChallenge(MfaChallenge {
                 mfa_hash: Some(mfa.mfa_hash.clone()),
                 message: mfa.challenge_message.clone(),
+                response_fields: Vec::new(),
             }));
         }
         if gates.already_logged_in {

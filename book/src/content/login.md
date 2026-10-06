@@ -50,9 +50,12 @@ response.
 
 A login can fail (bad credentials, region down, account on hold). The response
 then carries a machine-readable `reason` and a human-readable `message` —
-plus, when the request asked for `extended_errors`, a `message_id`
-localization key and its `message_args` substitutions (a suspension-end
-`TIME`, a required-update `VERSION`). Failures surface as
+plus, on Second Life, a `message_id` localization key and its `message_args`
+substitutions (a suspension-end `TIME`, a required-update `VERSION`), which
+it sends whether or not the request set `extended_errors`, and an incident id
+(`Linden_Error_Code`). What each grid answers a wrong password, an unknown
+account and a second login with is in
+[Grid Behaviour → Login](../gridspec/login.md#refusals). Failures surface as
 `DisconnectReason::LoginFailed`.
 
 Several rejections are really *gates* the client can clear by re-sending the

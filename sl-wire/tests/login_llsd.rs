@@ -259,6 +259,17 @@ mod test {
         failure.message_args = [("TIME".to_owned(), "December 12, 2026".to_owned())]
             .into_iter()
             .collect();
+        // A parse lists the fields it was handed; a builder ignores the list.
+        // Second Life's incident id, a field of its own beside the key.
+        failure.error_code = Some("1-6ac4a1fd-51ced1496259a40040a39316".to_owned());
+        failure.response_fields = vec![
+            "Linden_Error_Code".to_owned(),
+            "login".to_owned(),
+            "message".to_owned(),
+            "message_args".to_owned(),
+            "message_id".to_owned(),
+            "reason".to_owned(),
+        ];
         let body = build_login_response_llsd(&LoginResponse::Failure(failure.clone()));
         let LoginResponse::Failure(parsed) = parse_login_response_llsd(&body)? else {
             return Err("expected a failure".into());
@@ -272,6 +283,13 @@ mod test {
         let challenge = MfaChallenge {
             mfa_hash: Some("challengehash".to_owned()),
             message: "Enter your token".to_owned(),
+            // A parse lists the fields it was handed; a builder ignores the list.
+            response_fields: vec![
+                "login".to_owned(),
+                "message".to_owned(),
+                "mfa_hash".to_owned(),
+                "reason".to_owned(),
+            ],
         };
         let body = build_login_response_llsd(&LoginResponse::MfaChallenge(challenge.clone()));
         let LoginResponse::MfaChallenge(parsed) = parse_login_response_llsd(&body)? else {

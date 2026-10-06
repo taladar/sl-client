@@ -39,7 +39,7 @@ use crate::need::{Need, unmet};
 pub const FIRST_NAME: &str = "Stage";
 
 /// The password every stage account shares on the fake grid.
-const PASSWORD: &str = "password";
+pub const PASSWORD: &str = "password";
 
 /// The `[avatars.<key>]` the credentials file a process viewer on the fake
 /// grid is handed names.

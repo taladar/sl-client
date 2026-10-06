@@ -84,10 +84,10 @@ pub use sl_proto::{
     LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact,
     LandSearchType, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType,
     LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd,
-    LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams, LoginRejectKind, LoginRequest,
-    LoginResponse, LoginSuccess, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
-    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
-    MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
+    LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
+    LoginRequest, LoginResponse, LoginSuccess, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
+    MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
     MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
     MediaEntry, MerchantStatus, MeshKey, MessageCursor, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
@@ -302,15 +302,17 @@ pub enum Error {
     #[error("protocol error: {0}")]
     Proto(#[from] sl_proto::Error),
     /// The grid rejected the login.
-    #[error("login rejected: {reason} ({message})")]
+    #[error("login rejected: {} ({})", .failure.reason, .failure.message)]
     LoginRejected {
         /// A coarse classification of the rejection, so a caller can recognise
-        /// the retryable "already logged in" case without matching on `reason`.
+        /// the retryable "already logged in" case without matching on the
+        /// reason code.
         kind: LoginRejectKind,
-        /// The machine-readable reason code.
-        reason: String,
-        /// The human-readable message.
-        message: String,
+        /// The refusal as the grid sent it: the reason code and text, the
+        /// localization key and its arguments, Second Life's incident id, and
+        /// the name of every field the response carried. Boxed to keep the
+        /// error small.
+        failure: Box<LoginFailure>,
     },
     /// The grid requires a multi-factor one-time code. Retry [`Client::connect`]
     /// with a [`LoginRequest`] prepared via `LoginRequest::with_mfa`.
@@ -432,8 +434,7 @@ impl Client {
                 LoginResponse::Failure(failure) => {
                     return Err(Error::LoginRejected {
                         kind: failure.kind(),
-                        reason: failure.reason,
-                        message: failure.message,
+                        failure: Box::new(failure),
                     });
                 }
             }

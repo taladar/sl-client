@@ -52,8 +52,9 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use imitates::{
-    EditEcho, EnvironmentChangeReply, ImitatedGrid, LoginFields, OPENSIM_MAX_AGENT_GROUPS,
-    ParcelPolicy, RegionCapacity, SELECTED_PARCEL_SEQUENCE_ID, StockDay,
+    EditEcho, EnvironmentChangeReply, ImitatedGrid, LoginFields, LoginRefusals,
+    OPENSIM_MAX_AGENT_GROUPS, ParcelPolicy, RegionCapacity, SELECTED_PARCEL_SEQUENCE_ID,
+    SecondLogin, StockDay,
 };
 pub use inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,

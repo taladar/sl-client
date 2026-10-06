@@ -77,6 +77,7 @@ mod test {
     offline_cases! {
         login_handshake => "login-handshake" [fake_sl, fake_opensim],
         login_options => "login-options" [fake_sl, fake_opensim],
+        login_refusals => "login-refusals" [fake_sl, fake_opensim],
         keepalive_ping => "keepalive-ping" [fake_sl, fake_opensim],
         throttle_set => "throttle-set" [fake_sl, fake_opensim],
         simulator_features => "simulator-features" [fake_sl, fake_opensim],

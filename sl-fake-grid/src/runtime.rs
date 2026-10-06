@@ -459,6 +459,9 @@ pub(crate) struct GridCore {
     /// The login response's fields that differ by flavour whatever the
     /// `options` list asked for ([`ImitatedGrid::login_fields`]).
     pub(crate) login_fields: crate::imitates::LoginFields,
+    /// How a login is refused, and what a second login of an avatar in world
+    /// does ([`ImitatedGrid::login_refusals`]).
+    pub(crate) login_refusals: crate::imitates::LoginRefusals,
     /// The capabilities the imitated grid's seed refuses
     /// ([`ImitatedGrid::withheld_capabilities`]).
     pub(crate) withheld_capabilities: &'static [&'static str],
@@ -1936,6 +1939,7 @@ impl FakeGridBuilder {
                 .unwrap_or_else(|| self.imitates.advertises_open_sim_extras()),
             account_entitlements: self.imitates.describes_account_entitlements(),
             login_fields: self.imitates.login_fields(),
+            login_refusals: self.imitates.login_refusals(),
             withheld_capabilities: self.imitates.withheld_capabilities(),
             parcel_policy: self.imitates.parcel_policy(),
             environment_change_reply: self.imitates.environment_change_reply(),

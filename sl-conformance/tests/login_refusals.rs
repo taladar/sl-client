@@ -4,8 +4,10 @@
 //! [`tests/offline.rs`](offline) runs the registered conformance cases, and
 //! every one of them starts from a login that **succeeded** — a
 //! [`sl_conformance::context::TestContext`] is assembled out of live sessions,
-//! so a case cannot be the one that asserts a login was refused. This file is
-//! the other half: no registry, no context, one
+//! so a case can only ask about the refusals a grid gives an account that can
+//! also get in (`login-refusals` does: a wrong password, an unknown account, a
+//! second login). This file is the other half, the refusals a grid has to be
+//! *built* to give: no registry, no context, one
 //! [`sl_fake_grid::FakeGridBuilder`] built per case with exactly the gate under
 //! test set, driving [`sl_client_tokio::Client::connect`] straight at it.
 //!
@@ -113,11 +115,11 @@ mod test {
             CHANNEL,
             "0.0",
         );
-        let Error::LoginRejected { kind, reason, .. } = refusal(&grid, request).await? else {
+        let Error::LoginRejected { kind, failure } = refusal(&grid, request).await? else {
             return Err("a wrong password is a rejection, not any other failure".into());
         };
         assert_eq!(kind, LoginRejectKind::BadCredentials);
-        assert_eq!(reason, "key");
+        assert_eq!(failure.reason, "key");
         Ok(())
     }
 
@@ -143,14 +145,14 @@ mod test {
             CHANNEL,
             "0.0",
         );
-        let (Error::LoginRejected { kind, reason, .. }, Error::LoginRejected { kind: other, .. }) = (
+        let (Error::LoginRejected { kind, failure }, Error::LoginRejected { kind: other, .. }) = (
             refusal(&grid, unknown).await?,
             refusal(&grid, wrong_password).await?,
         ) else {
             return Err("both attempts are rejections".into());
         };
         assert_eq!(kind, LoginRejectKind::BadCredentials);
-        assert_eq!(reason, "key");
+        assert_eq!(failure.reason, "key");
         assert_eq!(kind, other, "the two answers must not be told apart");
         Ok(())
     }
@@ -171,17 +173,16 @@ mod test {
             None,
         )
         .await?;
-        let Error::LoginRejected {
-            kind,
-            reason,
-            message,
-        } = refusal(&grid, unaccepting_request()).await?
+        let Error::LoginRejected { kind, failure } = refusal(&grid, unaccepting_request()).await?
         else {
             return Err("a pending ToS is a rejection".into());
         };
         assert_eq!(kind, LoginRejectKind::Tos);
-        assert_eq!(reason, "tos");
-        assert_eq!(message, TOS, "the refusal carries the text to agree to");
+        assert_eq!(failure.reason, "tos");
+        assert_eq!(
+            failure.message, TOS,
+            "the refusal carries the text to agree to"
+        );
 
         let accepted = LoginRequest {
             agree_to_tos: true,
@@ -204,17 +205,13 @@ mod test {
             None,
         )
         .await?;
-        let Error::LoginRejected {
-            kind,
-            reason,
-            message,
-        } = refusal(&grid, unaccepting_request()).await?
+        let Error::LoginRejected { kind, failure } = refusal(&grid, unaccepting_request()).await?
         else {
             return Err("a pending critical message is a rejection".into());
         };
         assert_eq!(kind, LoginRejectKind::CriticalMessage);
-        assert_eq!(reason, "critical");
-        assert_eq!(message, NOTICE);
+        assert_eq!(failure.reason, "critical");
+        assert_eq!(failure.message, NOTICE);
 
         let acknowledged = LoginRequest {
             read_critical: true,
@@ -237,19 +234,16 @@ mod test {
             None,
         )
         .await?;
-        let Error::LoginRejected {
-            kind,
-            reason,
-            message,
-        } = refusal(&grid, unaccepting_request()).await?
+        let Error::LoginRejected { kind, failure } = refusal(&grid, unaccepting_request()).await?
         else {
             return Err("an already-logged-in account is a rejection".into());
         };
         assert_eq!(kind, LoginRejectKind::AlreadyLoggedIn);
-        assert_eq!(reason, "presence");
+        assert_eq!(failure.reason, "presence");
         assert!(
-            message.to_lowercase().contains("already logged in"),
-            "the classifier reads the message, so the message has to say it: {message}"
+            failure.message.to_lowercase().contains("already logged in"),
+            "the classifier reads the message, so the message has to say it: {}",
+            failure.message
         );
         Ok(())
     }

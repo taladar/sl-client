@@ -60,6 +60,7 @@ pub mod library_tree_fetch;
 pub mod login_buddy_list;
 pub mod login_handshake;
 pub mod login_options;
+pub mod login_refusals;
 pub mod logout_clean;
 pub mod map_blocks_items;
 pub mod marketplace_direct_delivery;

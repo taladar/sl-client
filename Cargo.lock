@@ -8832,6 +8832,7 @@ dependencies = [
  "sl-automation-proto",
  "sl-cef",
  "sl-client-bevy",
+ "sl-client-tokio",
  "sl-e2e",
  "sl-fake-grid",
  "sl-l10n",

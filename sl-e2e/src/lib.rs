@@ -53,5 +53,5 @@ pub use backend::{BACKEND_VARIABLE, Backend};
 pub use error::{BodyError, StageError};
 pub use grid::{GRID_VARIABLE, Grid};
 pub use need::Need;
-pub use stage::{FIRST_NAME, Stage, StageBuilder};
+pub use stage::{FIRST_NAME, PASSWORD, Stage, StageBuilder};
 pub use watch::WATCH_VARIABLE;

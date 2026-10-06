@@ -83,6 +83,12 @@ pub(crate) async fn announce_neighbours(core: &Arc<GridCore>, shared: &SharedSim
         return;
     };
     for neighbour in core.neighbours_of(region_index) {
+        // A root that ended meanwhile — logged out, or kicked by a second
+        // login — has no client left to announce a neighbour to, and a child
+        // session opened for it now would outlive the login it belonged to.
+        if shared.is_closed() {
+            return;
+        }
         if core.session_of(agent_id, neighbour).await.is_some() {
             continue;
         }

@@ -128,6 +128,7 @@ pub const EAST_REGION: &str = "Fake Region East";
 pub const OFFLINE_CASES: &[&str] = &[
     "login-handshake",
     "login-options",
+    "login-refusals",
     "keepalive-ping",
     "throttle-set",
     "simulator-features",

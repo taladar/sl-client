@@ -2173,10 +2173,13 @@ See the *conformance testing* chapter.
 ### The logins that are refused
 
 Every conformance case starts from a login that *succeeded* — a `TestContext`
-is assembled out of live sessions — so no case can be the one that asserts a
-login was declined. `sl-conformance/tests/login_refusals.rs` is the other half,
-and it uses no registry at all: one grid built per case with exactly the gate
-under test set, driving `sl_client_tokio::Client::connect` straight at it.
+is assembled out of live sessions — so a case can only ask about the refusals
+a grid gives an account that can also get in: `login-refusals` keeps its
+session and makes a wrong-password, an unknown-account and a second login
+beside it, on the live grids and both flavours. What a grid has to be *built*
+to refuse is `sl-conformance/tests/login_refusals.rs`, which uses no registry
+at all: one grid built per case with exactly the gate under test set, driving
+`sl_client_tokio::Client::connect` straight at it.
 
 `FakeGridBuilder::gates` and `AccountConfig::mfa` between them cover every
 reason a real grid declines a correctly-addressed login, and each has to reach
@@ -2206,6 +2209,15 @@ whole reason a driver may retry such a rejection at all, and the conformance
 runner's retry branch — the only production code in this workspace that reacts
 to an `AlreadyLoggedIn` — had no way to be exercised until a grid could both
 refuse and then relent.
+
+The words and the second login are the flavour's
+(`ImitatedGrid::login_refusals`, measured in
+[Login](../gridspec/login.md#refusals)): a Second-Life-flavoured grid refuses
+bad credentials with a `message_id`, an empty `message_args` and a fresh
+`Linden_Error_Code`, and **admits** a login of an avatar that is in world; an
+OpenSim-flavoured one sends a reason and a text, and **refuses** that login as
+`presence`. Both kick the session the avatar already had, in the live grid's
+own words, so two sessions of one avatar never share a region.
 
 ## Policy: what the grid charges, permits and refuses
 

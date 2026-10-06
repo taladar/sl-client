@@ -546,6 +546,116 @@ impl Session {
         .await?;
         Ok(())
     }
+
+    /// One login attempt in this session's avatar's name, made **beside** the
+    /// session rather than in place of it — which is how a case asks a grid
+    /// what it refuses: a wrong password, a name it has never heard of, a
+    /// second login of an avatar that is already in world.
+    ///
+    /// The attempt is exactly one request and is never retried: a challenge or
+    /// a refusal is the answer, handed back whole. On a grid that rate-limits
+    /// logins the per-avatar cooldown is waited out first, as
+    /// [`Session::relogin`] does, except for an attempt that
+    /// [answers a challenge](LoginAttempt::answers_challenge) — the second half
+    /// of one login, which a viewer sends at once.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`TestFailure`] if the request cannot be built, the cooldown
+    /// stamp cannot be written, or the attempt fails for a reason that is not
+    /// the grid's answer (HTTP, an unparsable response, the circuit).
+    pub async fn attempt_login(&self, attempt: &LoginAttempt) -> Result<LoginAnswer, TestFailure> {
+        let spec = LoginSpec {
+            grid: self.grid,
+            avatar: &self.avatar,
+            channel: &self.channel,
+            version: &self.version,
+            start_location: &self.start_location,
+            cooldown: &self.cooldown,
+            force: self.force,
+            cache_dir: None,
+            options: self.options.clone(),
+            capabilities: self.capabilities.clone(),
+        };
+        let (login_uri, mut request) = login_request(&spec)?;
+        if let Some((first, last)) = &attempt.name {
+            request.first_name.clone_from(first);
+            request.last_name.clone_from(last);
+        }
+        if let Some(password) = &attempt.password {
+            request.password.clone_from(password);
+        }
+        if let Some((token, mfa_hash)) = &attempt.mfa {
+            request = request.with_mfa(token.clone(), mfa_hash.clone());
+        }
+        if self.grid.needs_cooldown() && !attempt.answers_challenge {
+            let label = format!("{} {}", request.first_name, request.last_name);
+            wait_out_cooldown(&self.cooldown, &label, self.force).await?;
+        }
+        match Client::connect(LoginParams { login_uri, request }).await {
+            Ok(client) => Ok(LoginAnswer::Admitted(Box::new(spawn_session(client, spec)))),
+            Err(sl_client_tokio::Error::MfaChallenge(challenge)) => {
+                Ok(LoginAnswer::Challenged(challenge))
+            }
+            Err(sl_client_tokio::Error::LoginRejected { kind, failure }) => {
+                Ok(LoginAnswer::Refused {
+                    kind,
+                    failure: *failure,
+                })
+            }
+            Err(other) => Err(TestFailure::Client(other)),
+        }
+    }
+
+    /// A one-time code for this session's avatar, from the credentials'
+    /// `mfa_command`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TestFailure::MfaRequired`] if the avatar has no command, or
+    /// [`TestFailure::Auth`] if it fails.
+    pub fn acquire_mfa_token(&self) -> Result<String, TestFailure> {
+        Ok(self
+            .avatar
+            .acquire_mfa()
+            .map_err(|error| TestFailure::Auth(error.to_string()))?
+            .ok_or(TestFailure::MfaRequired)?
+            .expose()
+            .to_owned())
+    }
+}
+
+/// What one [`Session::attempt_login`] sends differently from the session's own
+/// login. The default is the avatar's own name and password with no
+/// multi-factor answer.
+#[derive(Debug, Clone, Default)]
+pub struct LoginAttempt {
+    /// A first and last name to log in as instead of the avatar's.
+    pub name: Option<(String, String)>,
+    /// A password to send instead of the avatar's.
+    pub password: Option<String>,
+    /// A one-time code (possibly empty) and the `mfa_hash` to echo with it.
+    pub mfa: Option<(String, Option<String>)>,
+    /// Whether this attempt answers the challenge the previous one drew, so
+    /// the login cooldown is not waited out between the two.
+    pub answers_challenge: bool,
+}
+
+/// What a grid answered one [`Session::attempt_login`] with.
+#[derive(Debug)]
+pub enum LoginAnswer {
+    /// The grid let the login through; this is its live session, which the
+    /// case must log out.
+    Admitted(Box<Session>),
+    /// The grid asked for a one-time code.
+    Challenged(sl_client_tokio::MfaChallenge),
+    /// The grid refused.
+    Refused {
+        /// How the client classifies the refusal.
+        kind: LoginRejectKind,
+        /// The refusal as the grid sent it.
+        failure: sl_client_tokio::LoginFailure,
+    },
 }
 
 /// The stable per-avatar label used for cooldown stamps: the avatar's
@@ -617,17 +727,68 @@ pub async fn login(spec: LoginSpec<'_>) -> Result<Session, TestFailure> {
 /// Returns a [`TestFailure`] if the login URI is invalid, the start location
 /// cannot be parsed, MFA is required but unavailable, or the login fails.
 async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> {
+    let (login_uri, mut request) = login_request(&spec)?;
+    let grid = spec.grid;
+    let avatar = spec.avatar;
+    let mut already_logged_in_retries: u8 = 0;
+    let client = loop {
+        let params = LoginParams {
+            login_uri: login_uri.clone(),
+            request: request.clone(),
+        };
+        match Client::connect(params).await {
+            Ok(client) => break client,
+            Err(sl_client_tokio::Error::MfaChallenge(challenge)) => {
+                tracing::info!(
+                    "multi-factor authentication required: {}",
+                    challenge.message
+                );
+                let token = avatar
+                    .acquire_mfa()
+                    .map_err(|error| TestFailure::Auth(error.to_string()))?
+                    .ok_or(TestFailure::MfaRequired)?;
+                request = request.with_mfa(token.expose(), challenge.mfa_hash);
+            }
+            // A stale presence from a prior session that did not log out cleanly
+            // (the OpenSim no-`LogoutReply` quirk) rejects the next login as
+            // "already logged in" — but that rejected attempt evicts the ghost,
+            // so a retry succeeds. Only OpenSim: Second Life may flag rapid
+            // repeated login attempts as suspicious, so there we surface the
+            // rejection unchanged rather than retrying.
+            Err(sl_client_tokio::Error::LoginRejected {
+                kind: LoginRejectKind::AlreadyLoggedIn,
+                failure,
+            }) if grid == Grid::Opensim
+                && already_logged_in_retries < ALREADY_LOGGED_IN_MAX_RETRIES =>
+            {
+                already_logged_in_retries = already_logged_in_retries.saturating_add(1);
+                tracing::warn!(
+                    "login rejected as already-logged-in ({}: {}); the rejected \
+                     attempt evicts the stale presence — retrying (attempt {})",
+                    failure.reason,
+                    failure.message,
+                    already_logged_in_retries.saturating_add(1)
+                );
+                tokio::time::sleep(ALREADY_LOGGED_IN_RETRY_DELAY).await;
+            }
+            Err(other) => return Err(TestFailure::Client(other)),
+        }
+    };
+
+    Ok(spawn_session(client, spec))
+}
+
+/// The login endpoint and the request `spec` describes: the avatar's own name
+/// and password, the spec's start location, channel, version and options.
+fn login_request(spec: &LoginSpec<'_>) -> Result<(url::Url, LoginRequest), TestFailure> {
     let LoginSpec {
         grid,
         avatar,
         channel,
         version,
         start_location,
-        cooldown,
-        force,
-        cache_dir,
         options,
-        capabilities,
+        ..
     } = spec;
     // The avatar's own URI wins; otherwise the grid's fixed address. The fake
     // grid has none — it binds an ephemeral port, and the credentials
@@ -658,56 +819,30 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         avatar.last().to_owned(),
         avatar.password().expose().to_owned(),
         start,
-        channel.to_owned(),
-        version.to_owned(),
+        (*channel).to_owned(),
+        (*version).to_owned(),
     );
     if let Some(options) = options.as_ref() {
         request.options.clone_from(options);
     }
-    let mut already_logged_in_retries: u8 = 0;
-    let mut client = loop {
-        let params = LoginParams {
-            login_uri: login_uri.clone(),
-            request: request.clone(),
-        };
-        match Client::connect(params).await {
-            Ok(client) => break client,
-            Err(sl_client_tokio::Error::MfaChallenge(challenge)) => {
-                tracing::info!(
-                    "multi-factor authentication required: {}",
-                    challenge.message
-                );
-                let token = avatar
-                    .acquire_mfa()
-                    .map_err(|error| TestFailure::Auth(error.to_string()))?
-                    .ok_or(TestFailure::MfaRequired)?;
-                request = request.with_mfa(token.expose(), challenge.mfa_hash);
-            }
-            // A stale presence from a prior session that did not log out cleanly
-            // (the OpenSim no-`LogoutReply` quirk) rejects the next login as
-            // "already logged in" — but that rejected attempt evicts the ghost,
-            // so a retry succeeds. Only OpenSim: Second Life may flag rapid
-            // repeated login attempts as suspicious, so there we surface the
-            // rejection unchanged rather than retrying.
-            Err(sl_client_tokio::Error::LoginRejected {
-                kind: LoginRejectKind::AlreadyLoggedIn,
-                reason,
-                message,
-            }) if grid == Grid::Opensim
-                && already_logged_in_retries < ALREADY_LOGGED_IN_MAX_RETRIES =>
-            {
-                already_logged_in_retries = already_logged_in_retries.saturating_add(1);
-                tracing::warn!(
-                    "login rejected as already-logged-in ({reason}: {message}); the rejected \
-                     attempt evicts the stale presence — retrying (attempt {})",
-                    already_logged_in_retries.saturating_add(1)
-                );
-                tokio::time::sleep(ALREADY_LOGGED_IN_RETRY_DELAY).await;
-            }
-            Err(other) => return Err(TestFailure::Client(other)),
-        }
-    };
+    Ok((login_uri, request))
+}
 
+/// Spawn the run loop and its drains around a connected `client`, and
+/// assemble the live [`Session`] `spec` describes.
+fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
+    let LoginSpec {
+        grid,
+        avatar,
+        channel,
+        version,
+        start_location,
+        cooldown,
+        force,
+        cache_dir,
+        options,
+        capabilities,
+    } = spec;
     // Enable diagnostics so a case can observe protocol anomalies (e.g. a
     // logout that never received its `LogoutReply`); they are off by default.
     client.set_diagnostics(true);
@@ -798,7 +933,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         }
     });
     let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
-    Ok(Session {
+    Session {
         agent_id,
         login_account,
         login_success,
@@ -822,7 +957,7 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
         neighbour_caps,
         connected: true,
         caps,
-    })
+    }
 }
 
 /// The live session(s) and metrics collector handed to a test body.

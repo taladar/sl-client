@@ -32,6 +32,7 @@
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
 //! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 33 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger |
 //! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
+//! | how a login is refused, and a second login of an avatar in world ([`login_refusals`](ImitatedGrid::login_refusals)) | `key` with a localisation key, its (empty) arguments and an incident id; the second login is admitted and the first session kicked | `key` with a text and nothing else; the second login is refused as `presence` and the first session kicked all the same |
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
 //!
@@ -327,6 +328,41 @@ impl ImitatedGrid {
                 region_size: true,
                 max_agent_groups: Some(OPENSIM_MAX_AGENT_GROUPS),
                 sections: LoginSections::OPENSIM,
+            },
+        }
+    }
+
+    /// How this grid refuses a login, and what it does with a second login of
+    /// an avatar that is already in world — measured by `login-refusals` on
+    /// aditi and the local OpenSim (2026-10-06, `book/src/gridspec/login.md`
+    /// § Refusals).
+    #[must_use]
+    pub const fn login_refusals(self) -> LoginRefusals {
+        match self {
+            Self::SecondLife => LoginRefusals {
+                bad_credentials_message: "Sorry! We couldn't log you in.\n\nPlease check to make \
+                    sure you entered the right\n\n    * Username (like bobsmith12 or \
+                    steller.sunshine)\n\n    * Password\n\n    * Second Factor Token (if \
+                    enabled)\n\nAlso, please make sure your Caps Lock key is off. If you feel \
+                    this is an error, please contact support@secondlife.com.",
+                bad_credentials_message_id: Some("LoginFailedAuthenticationFailed"),
+                stamps_error_code: true,
+                already_logged_in_message: sl_wire::LoginServer::ALREADY_LOGGED_IN_MESSAGE,
+                second_login: SecondLogin::Admitted,
+                second_login_kick_reason: "The system has logged you out because you are \
+                    attempting to log in from another location.",
+            },
+            Self::OpenSim => LoginRefusals {
+                bad_credentials_message: "Could not authenticate your avatar. Please check your \
+                    username and password, and check the grid if problems persist.",
+                bad_credentials_message_id: None,
+                stamps_error_code: false,
+                // The doubled "a a" and the trailing space are OpenSim's own.
+                already_logged_in_message: "You appear to be already logged in. Please wait a a \
+                    minute or two and retry. If this takes longer than a few minutes please \
+                    contact the grid owner. ",
+                second_login: SecondLogin::Refused,
+                second_login_kick_reason: "New login detected",
             },
         }
     }
@@ -712,6 +748,44 @@ pub enum EditEcho {
     /// `m_lastSeqId` and reuses it for a snap-selection push with sequence 0,
     /// so the echo carries the id of the client's last properties request.
     LastSequence,
+}
+
+/// How a grid refuses a login ([`ImitatedGrid::login_refusals`]).
+///
+/// Both grids answer a wrong password and a name they have never heard of
+/// **identically**, with the reason `key`, so neither tells a caller which
+/// accounts exist; and both end the session an avatar already had when the
+/// same account logs in again. They differ in everything else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoginRefusals {
+    /// The text of a `key` refusal.
+    pub bad_credentials_message: &'static str,
+    /// The localisation key sent with it (`message_id`, and with it an empty
+    /// `message_args`). Second Life only.
+    pub bad_credentials_message_id: Option<&'static str>,
+    /// Whether a refusal carries a per-response incident id
+    /// (`Linden_Error_Code`). Second Life only.
+    pub stamps_error_code: bool,
+    /// The text of a `presence` refusal for an avatar the grid believes is
+    /// already logged in. OpenSim's was measured; Second Life never gave one
+    /// (it admits the second login), so its flavour keeps the wire crate's.
+    pub already_logged_in_message: &'static str,
+    /// What becomes of a login of an avatar that is in world.
+    pub second_login: SecondLogin,
+    /// The `KickUser` reason the session already in world is ended with —
+    /// which both grids do, whatever they answer the second login.
+    pub second_login_kick_reason: &'static str,
+}
+
+/// What a grid answers a login of an avatar that is already in world
+/// ([`LoginRefusals::second_login`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecondLogin {
+    /// The new login gets in and takes the avatar over. Second Life.
+    Admitted,
+    /// The new login is refused as `presence` — but the refusal clears the
+    /// way, so the next attempt gets in. OpenSim.
+    Refused,
 }
 
 /// The login response's fields a grid sends or omits regardless of the

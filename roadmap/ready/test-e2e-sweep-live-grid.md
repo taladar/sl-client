@@ -48,6 +48,10 @@ aditi:
 - [[test-group-notice]]: a group notice
   between two aditi avatars.
 - [[test-e2e-live-grids]]: the MFA challenge path, when one is issued.
+- [[gridspec-login-refusals]]: a `tos` or `critical` login refusal cannot be
+  provoked. When aditi answers a login with one, keep the whole response (the
+  `login-refusals` metrics list what a refusal's shape is) and write it into
+  `book/src/gridspec/login.md` § Refusals.
 - [[test-fake-grid-concurrent-edits]]: what Second Life does when two
   editors rename one prim — `two_residents_befriend_trade_rights_and_contest_
   one_prim` in `tests/e2e_two_avatars.rs` gets as far as the rez on aditi, at a

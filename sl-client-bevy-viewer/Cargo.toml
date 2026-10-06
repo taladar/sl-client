@@ -259,6 +259,9 @@ pretty_assertions = { workspace = true }
 serde_json = { workspace = true }
 # The vocabulary the automation sweep's snapshots are written in.
 sl-automation-proto = { workspace = true }
+# The second login "from another location" `tests/e2e_login.rs` makes of a
+# stage viewer's account, to see what the grid's answer does to the viewer.
+sl-client-tokio = { workspace = true }
 # The end-to-end stage the `tests/e2e_*.rs` tier builds: a fake grid and
 # several viewers, as processes or in process. A dev-dependency cycle (it
 # depends on this crate's library), which Cargo allows for integration tests.

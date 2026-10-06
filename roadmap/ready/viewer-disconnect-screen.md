@@ -37,3 +37,17 @@ disconnect is the smallest hook.
 Reference (Firestorm, read-only): `LLAppViewer::forceDisconnect` /
 `LLViewerWindow` disconnect grey-out, the "you have been logged out" /
 `LLAppViewer::disconnectViewer` notification.
+
+## Measured kick texts (2026-10-06, [[gridspec-login-refusals]])
+
+A second login of the same account kicks the session already in world on both
+grids, as a `KickUser` (`Disconnected(Kicked { reason })`):
+
+- Second Life: "The system has logged you out because you are attempting to
+  log in from another location."
+- OpenSim: "New login detected".
+
+`sl-client-bevy-viewer`'s `e2e_login` tests
+`a_second_life_flavoured_second_login_kicks_the_viewer` and its OpenSim twin
+pin today's clean exit; this task changes them to expect the dialog with the
+text.

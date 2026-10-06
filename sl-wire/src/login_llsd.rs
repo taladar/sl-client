@@ -198,7 +198,13 @@ pub fn build_login_response_llsd(response: &LoginResponse) -> String {
             if let Some(message_id) = &failure.message_id {
                 map.insert("message_id".to_owned(), Llsd::String(message_id.clone()));
             }
-            if !failure.message_args.is_empty() {
+            if let Some(error_code) = &failure.error_code {
+                map.insert(
+                    "Linden_Error_Code".to_owned(),
+                    Llsd::String(error_code.clone()),
+                );
+            }
+            if failure.message_id.is_some() || !failure.message_args.is_empty() {
                 map.insert(
                     "message_args".to_owned(),
                     Llsd::Map(
@@ -264,10 +270,13 @@ pub fn parse_login_response_llsd(body: &str) -> Result<LoginResponse, WireError>
     if login != "true" {
         let reason = llsd_string(&map, "reason");
         let message = llsd_string(&map, "message");
+        let mut response_fields: Vec<String> = map.keys().cloned().collect();
+        response_fields.sort_unstable();
         if reason == "mfa_challenge" {
             return Ok(LoginResponse::MfaChallenge(MfaChallenge {
                 mfa_hash: map.get("mfa_hash").and_then(llsd_scalar_string),
                 message,
+                response_fields,
             }));
         }
         return Ok(LoginResponse::Failure(LoginFailure {
@@ -283,6 +292,8 @@ pub fn parse_login_response_llsd(body: &str) -> Result<LoginResponse, WireError>
                         .collect()
                 })
                 .unwrap_or_default(),
+            error_code: map.get("Linden_Error_Code").and_then(llsd_scalar_string),
+            response_fields,
         }));
     }
     parse_success_members(&map).map(|success| LoginResponse::Success(Box::new(success)))

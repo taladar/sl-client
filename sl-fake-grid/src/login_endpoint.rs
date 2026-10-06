@@ -11,6 +11,7 @@ use sl_wire::{
 };
 
 use crate::http_answer::HttpAnswer;
+use crate::imitates::SecondLogin;
 use crate::runtime::{GridCore, LoginNotice};
 
 /// The XML-RPC login content type.
@@ -63,23 +64,27 @@ pub(crate) async fn handle_login(
 /// Maps a parsed login request to the [`LoginResponse`], creating and
 /// activating a session when the login server lets it through.
 async fn respond(core: &Arc<GridCore>, parsed: &ParsedLoginRequest) -> LoginResponse {
-    // An unknown account answers exactly like a wrong password, so the
-    // endpoint does not leak which accounts exist.
+    // An unknown account answers exactly like a wrong password, as on both
+    // live grids, so the endpoint does not leak which accounts exist.
     let Some(account) = core.accounts.iter().find(|account| {
         account.config.first_name == parsed.first_name
             && account.config.last_name == parsed.last_name
     }) else {
-        return LoginResponse::Failure(LoginFailure::new(
-            LoginServer::BAD_CREDENTIALS_REASON,
-            "Could not authenticate your avatar. Please check your username and password.",
-        ));
+        return LoginResponse::Failure(bad_credentials(core));
     };
     let account = account.clone();
     // The password, the gates and MFA decide before anything is minted: a
     // wrong-password POST must not bind a socket, consume a session sequence
     // number and deep clone the scenario only to throw all of it away.
-    if let Some(rejection) = LoginServer::rejection(parsed, &account.credential, &core.gates) {
-        return rejection;
+    match LoginServer::rejection(parsed, &account.credential, &core.gates) {
+        // The decision is the login server's; the words are the grid's.
+        Some(LoginResponse::Failure(failure))
+            if failure.reason == LoginServer::BAD_CREDENTIALS_REASON =>
+        {
+            return LoginResponse::Failure(bad_credentials(core));
+        }
+        Some(rejection) => return rejection,
+        None => {}
     }
     // The ghost: a presence left behind by a session that did not log out
     // cleanly. It is checked here rather than through `LoginGates` because it
@@ -98,7 +103,22 @@ async fn respond(core: &Arc<GridCore>, parsed: &ParsedLoginRequest) -> LoginResp
         );
         return LoginResponse::Failure(LoginFailure::new(
             LoginServer::PRESENCE_REASON,
-            LoginServer::ALREADY_LOGGED_IN_MESSAGE,
+            core.login_refusals.already_logged_in_message,
+        ));
+    }
+    // The avatar is in world already. Both live grids end that session; what
+    // they tell the new login differs.
+    if kick_live_sessions(core, account.agent_id).await
+        && core.login_refusals.second_login == SecondLogin::Refused
+    {
+        tracing::info!(
+            "login: {} {} refused as already-logged-in; the session it had is kicked",
+            account.config.first_name,
+            account.config.last_name,
+        );
+        return LoginResponse::Failure(LoginFailure::new(
+            LoginServer::PRESENCE_REASON,
+            core.login_refusals.already_logged_in_message,
         ));
     }
     let Some(region) = core.start_region(&account) else {
@@ -166,4 +186,52 @@ async fn respond(core: &Arc<GridCore>, parsed: &ParsedLoginRequest) -> LoginResp
         drop(core.logins_tx.send(notice));
     }
     response
+}
+
+/// The refusal for a wrong password or an unknown name, as the imitated grid
+/// words it.
+fn bad_credentials(core: &GridCore) -> LoginFailure {
+    let refusals = core.login_refusals;
+    let mut failure = LoginFailure::new(
+        LoginServer::BAD_CREDENTIALS_REASON,
+        refusals.bad_credentials_message,
+    );
+    failure.message_id = refusals.bad_credentials_message_id.map(str::to_owned);
+    if refusals.stamps_error_code {
+        // The shape of Second Life's incident ids: `1-`, eight hex digits,
+        // twenty-four more, different on every response.
+        let unique = uuid::Uuid::new_v4().simple().to_string();
+        let (head, tail) = unique.split_at(8);
+        failure.error_code = Some(format!("1-{head}-{tail}"));
+    }
+    failure
+}
+
+/// Ends every session `agent_id` has, root and child, and reports whether the
+/// avatar was **in world** — whether one of them was its root.
+///
+/// The children alone do not put an avatar in world: a root that logged out a
+/// moment ago can leave a neighbour's session behind it for a while, and that
+/// must not refuse the login that follows. They are ended all the same, since
+/// the new login is about to be given neighbours of its own.
+async fn kick_live_sessions(core: &Arc<GridCore>, agent_id: sl_proto::AgentKey) -> bool {
+    let in_world = core.root_session_of(agent_id).await.is_some();
+    let kick = sl_proto::Kick {
+        agent: agent_id,
+        reason: core.login_refusals.second_login_kick_reason.to_owned(),
+    };
+    for shared in core.sessions_of(agent_id).await {
+        shared
+            .with_sim(|sim| {
+                // A session nobody opened a circuit to — a neighbour the
+                // client has not reached yet — cannot be told, and ends all
+                // the same.
+                if let Err(error) = sim.kick(&kick, shared.now()) {
+                    tracing::debug!("a session with no circuit to kick is abandoned: {error}");
+                    sim.abandon();
+                }
+            })
+            .await;
+    }
+    in_world
 }

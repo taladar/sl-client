@@ -108,6 +108,58 @@ Firestorm's grid manager adds a grid it does not know, so a fake grid that
 refused it could not be logged into at all. It says `platform: OpenSim` for
 the same reason. Second Life's own grids are built into the viewers.
 
+## Refusals
+
+Measured on 2026-10-06 by `login-refusals`, which keeps one avatar in world
+and makes, beside it, the logins a grid declines — one request each, never
+retried — and by one direct HTTP request for an account that does not exist.
+The case holds both grids and both fake flavours to these answers.
+
+### A wrong password and an unknown account
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `reason` | `key` | `key` | `key` on both |
+| told apart from each other | no: the same answer, field for field | no | no, on both |
+| `message` | "Sorry! We couldn't log you in." and, over several lines, a list to check: username, password, "Second Factor Token (if enabled)", Caps Lock, then the support address | "Could not authenticate your avatar. Please check your username and password, and check the grid if problems persist." | each flavour's text, word for word |
+| `message_id` | `LoginFailedAuthenticationFailed` | absent | `FakeSl` only |
+| `message_args` | sent, an empty struct | absent | `FakeSl` only, empty |
+| `Linden_Error_Code` | an incident id, different on every response (`1-6ac4a1fd-51ced1496259a40040a39316`: `1-`, 8 hex digits, 24 more) | absent | `FakeSl` mints one per refusal |
+| the fields without `extended_errors` in the request | the same six | the same three | the same |
+
+Second Life sends `message_id` and `message_args` whether or not the request
+asked for `extended_errors`. `LoginFailure` keeps the incident id as
+`error_code`, and the name of every field a refusal carried as
+`response_fields`.
+
+### A second login of an avatar that is in world
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the second login | **admitted** | **refused**: `reason: presence`, three fields | `FakeSl` admits, `FakeOpensim` refuses |
+| the refusal's `message` | — | "You appear to be already logged in. Please wait a a minute or two and retry. If this takes longer than a few minutes please contact the grid owner. " (the doubled "a" and the trailing space are OpenSim's) | `FakeOpensim`, word for word |
+| the session already in world | kicked: `KickUser`, "The system has logged you out because you are attempting to log in from another location." | kicked: `KickUser`, "New login detected" | kicked on both, in each grid's words |
+| the login after that | admitted | admitted: the refusal marked the avatar logged out | admitted on both |
+
+So on Second Life the newcomer wins outright, and on OpenSim nobody is in
+world after the attempt: the first session is gone and the second was turned
+away. The client classifies OpenSim's refusal as `AlreadyLoggedIn`, the one
+`presence` refusal worth retrying, and the retry is what gets in.
+
+A presence nobody is behind — a session that ended without a logout — is
+refused the same way on OpenSim (the fake grid's `stale_presence`). Second
+Life was not seen refusing a login as `presence` at all; `FakeSl` keeps the
+wire crate's own text for a scenario that asks for it.
+
+### Not measured
+
+| behaviour | why |
+| --- | --- |
+| the multi-factor challenge on Second Life, and whether a remembered `mfa_hash` gets past it | aditi did not challenge the test account on any of seven logins on 2026-10-06, although it has a second factor and its credentials carry the command for one; a bare login with neither a code nor a hash was admitted, and no success carried an `mfa_hash`. The shape the client and the fake grid use (`reason: mfa_challenge`, a `message`, an `mfa_hash`) is the one from the 2026-06-25 logins |
+| `tos` and `critical` | cannot be provoked; to be recorded when aditi sends one (`test-e2e-sweep-live-grid`) |
+| a suspended, unverified or restricted account, and a required update | no such account; OpenSim's texts for the `presence` and `key` variants are in `LLLoginResponse.cs` |
+| a repeated wrong password (a lockout) | deliberately: one wrong password a run is all the case sends |
+
 ## What the viewer does with it
 
 - It asks for every option it reads, `max-agent-groups` and `map-server-url`
@@ -120,3 +172,10 @@ the same reason. Second Life's own grids are built into the viewers.
   requirement is recorded on `viewer-image-upload`.
 - The e2e test `e2e_login` logs in on both fake flavours, through a second
   factor, and past a terms-of-service and a critical-message gate.
+- A refused login ends the run with the grid's reason and text, word for
+  word; there is no login screen to show it on yet (`viewer-login-screen`).
+  It does not read `message_id`, so Second Life's text is shown in English
+  whatever the locale (`viewer-login-refusal-localised-text`).
+- A viewer kicked by a second login exits cleanly, with the grid's reason in
+  its log; `viewer-disconnect-screen` is what shows it. `e2e_login` holds
+  both to each fake flavour: the refusal's words, and the kick.

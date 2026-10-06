@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 136 |
 | ready | 365 |
-| blocked | 110 |
+| blocked | 111 |
 | in-progress | 20 |
 | bugs | 29 |
-| done | 1322 |
+| done | 1323 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2028** |
+| **total** | **2030** |
 
 ## ideas (136)
 
@@ -1138,8 +1138,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the home location on each grid
 - [`gridspec-local-chat`](ready/gridspec-local-chat.md) — Local chat and typing
   on each grid
-- [`gridspec-login-refusals`](ready/gridspec-login-refusals.md) — Login refusal
-  codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-logout`](ready/gridspec-logout.md) — Logout reply, timing and what
   logout does to seats and child circuits
 - [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
@@ -1184,6 +1182,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   placement, refusals and alerts on each grid
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
   down when Second Life pushes a ban line
+- [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
+  Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 - [`gridspec-task-inventory`](ready/gridspec-task-inventory.md) — Task inventory
   reads and writes on each grid
 - [`gridspec-teleport`](ready/gridspec-teleport.md) — Teleport phases, flags,
@@ -1201,7 +1201,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-world-map`](ready/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 
-## blocked (110)
+## blocked (111)
 
 ### protocol
 
@@ -1265,6 +1265,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
   `viewer-input-conflict-detection`, `viewer-ui-text-input-widget` (done),
   `viewer-ui-settings-binding` (done))
+- [`viewer-login-refusal-localised-text`](blocked/viewer-login-refusal-localised-text.md)
+  — Show a login refusal in the user's language from its message_id (blocked by
+  `viewer-login-screen`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
@@ -1682,7 +1685,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1322)
+## done (1323)
 
 ### protocol
 
@@ -4605,6 +4608,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grids
 - [`gridspec-login`](done/gridspec-login.md) — Login response fields, the
   options list and get_grid_info on each grid
+- [`gridspec-login-refusals`](done/gridspec-login-refusals.md) — Login refusal
+  codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-parcel-access-and-ban-lines`](done/gridspec-parcel-access-and-ban-lines.md)
   — Parcel access and ban lists, enforcement and ban lines on each grid
 - [`gridspec-parcel-info-dwell`](done/gridspec-parcel-info-dwell.md) — Parcel
