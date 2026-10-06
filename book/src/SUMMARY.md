@@ -48,6 +48,7 @@
 
 - [Overview](gridspec/index.md)
 - [Login](gridspec/login.md)
+- [Session](gridspec/session.md)
 - [Capabilities](gridspec/capabilities.md)
 - [Land](gridspec/land.md)
 - [Environment](gridspec/environment.md)

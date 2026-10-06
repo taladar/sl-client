@@ -46,7 +46,9 @@ through these states:
 - **Teleporting** — a [teleport](../content/teleport.md) is in progress; the
   client is waiting for the destination to confirm.
 - **LoggingOut** — a `LogoutRequest` was sent; the client is waiting for the
-  `LogoutReply` so it can shut down cleanly.
+  `LogoutReply` so it can shut down cleanly. A grid may never send one —
+  OpenSim usually does not — so after five seconds the session closes
+  anyway: see [Grid Behaviour → Session](../gridspec/session.md#logout).
 - **Closed** — finished.
 
 If things go wrong, the session reports *why* it ended rather than silently

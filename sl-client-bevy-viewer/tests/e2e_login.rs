@@ -25,6 +25,10 @@
 //!   tell the newcomer: Second Life admits it, OpenSim refuses it. The viewer
 //!   that was kicked exits cleanly either way. That too is today's behaviour:
 //!   [[viewer-disconnect-screen]] keeps the window open and shows the reason.
+//! - **A quit.** Second Life answers a `LogoutRequest`; OpenSim usually closes
+//!   the session without a word, not even an acknowledgement
+//!   (`book/src/gridspec/session.md` § Logout). The viewer leaves cleanly
+//!   either way: on the reply, or on the session's own logout timeout.
 
 #[cfg(test)]
 mod test {
@@ -240,6 +244,46 @@ mod test {
         if !ended {
             return Err("the session the viewer had was not kicked".into());
         }
+        Ok(())
+    }
+
+    /// Quit `Alpha` with the menu's chord, once it is in world, and wait until
+    /// the grid has heard the logout. The stage's teardown then holds the
+    /// viewer to having exited cleanly and the grid to holding no session.
+    async fn quits(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        let mut heard = stage.agent("Alpha").await?.events();
+        stage.expect_quit("Alpha")?;
+        alpha.press("Ctrl+Q").await?;
+        let logged_out = tokio::time::timeout(WAIT, async {
+            loop {
+                match heard.recv().await {
+                    Ok(ServerEvent::LoggedOut) => break true,
+                    Ok(ServerEvent::Disconnected) | Err(_) => break false,
+                    Ok(_other) => {}
+                }
+            }
+        })
+        .await?;
+        if !logged_out {
+            return Err("the viewer's session ended without a logout".into());
+        }
+        Ok(())
+    }
+
+    /// **A quit on Second Life's flavour**, which answers the logout.
+    #[test]
+    fn a_second_life_flavoured_quit_exits_cleanly() -> Result<(), TestError> {
+        stage("quit_second_life", ImitatedGrid::SecondLife).run(quits)?;
+        Ok(())
+    }
+
+    /// **A quit on OpenSim's flavour**, which closes the session without
+    /// answering: the viewer leaves on the session's own logout timeout.
+    #[test]
+    fn an_opensim_flavoured_quit_exits_cleanly() -> Result<(), TestError> {
+        stage("quit_opensim", ImitatedGrid::OpenSim).run(quits)?;
         Ok(())
     }
 

@@ -4,7 +4,7 @@ title: Sitting and standing: placement, refusals and alerts on each grid
 topic: gridspec
 status: ready
 origin: gridspec survey (2026-10-03)
-refs: [gridspec-survey, viewer-sit-stand-actions]
+refs: [gridspec-survey, viewer-sit-stand-actions, gridspec-logout]
 ---
 
 Context: [context/gridspec.md](../context/gridspec.md).
@@ -14,6 +14,20 @@ Context: [context/gridspec.md](../context/gridspec.md).
 A child-region sit is refused: SL with the named alert
 `SitFailNotSameRegion`, OpenSim the same text unnamed. The fake grid seats at
 a fixed offset and silently ignores unknown seats.
+
+From [[gridspec-logout]] (2026-10-06): OpenSim sets `AutoPilot` on **every**
+`AvatarSitResponse` (`ScenePresence.SendSitResponse` passes `true`), a seat
+1.5 m away included. A logout while seated unseats there: the next login at
+`last` stands 1 m from the seat.
+
+**Aditi did not answer the sit at all**: three `logout-seated` runs rezzed a
+0.5 m cube 1.5 m from the avatar (at its height, then at ground level), both
+avatars saw it, and the `AgentRequestSit` for it drew neither an
+`AvatarSitResponse` nor an alert before the session's sit timeout. Start
+here: compare our `AgentRequestSit` with the reference viewer's on aditi
+(`sl-conformance-trace`), and try a seat rezzed by somebody else and a seat
+with a sit target. `logout-seated` passes on OpenSim and waits on this for
+its Second Life half.
 
 ## Discover
 

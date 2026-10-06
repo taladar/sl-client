@@ -33,6 +33,7 @@
 //! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 33 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger |
 //! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
 //! | how a login is refused, and a second login of an avatar in world ([`login_refusals`](ImitatedGrid::login_refusals)) | `key` with a localisation key, its (empty) arguments and an incident id; the second login is admitted and the first session kicked | `key` with a text and nothing else; the second login is refused as `presence` and the first session kicked all the same |
+//! | whether a logout is answered ([`logout_reply`](ImitatedGrid::logout_reply)) | a `LogoutReply`, always | none: the session closes with the request unanswered and unacknowledged, which is what the live grid does six times in seven |
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
 //!
@@ -367,6 +368,25 @@ impl ImitatedGrid {
         }
     }
 
+    /// Whether this grid answers a `LogoutRequest` — measured by
+    /// `logout-clean` and a run of REPL probes on aditi and the local OpenSim
+    /// (2026-10-06, `book/src/gridspec/session.md` § Logout).
+    ///
+    /// Second Life answered every logout, in about 0.17 s. OpenSim's answer is
+    /// a race it usually loses: it queues the reply and closes the agent, which
+    /// clears the queue — the reply reached the wire in 5 of 35 logouts, and in
+    /// none of the 15 made within two seconds of arriving. The flavour takes the
+    /// usual outcome, which is also the one a client has to be built for: with
+    /// the reply the two grids look alike, without it the client is on its own
+    /// timeout.
+    #[must_use]
+    pub const fn logout_reply(self) -> LogoutReply {
+        match self {
+            Self::SecondLife => LogoutReply::Sent,
+            Self::OpenSim => LogoutReply::Withheld,
+        }
+    }
+
     /// Whether this grid's `SimulatorFeatures` carries the `OpenSimExtras`
     /// block.
     ///
@@ -598,6 +618,16 @@ pub enum EnvironmentChangeReply {
     Settings,
     /// A verdict and nothing else.
     Bare,
+}
+
+/// What a grid answers a `LogoutRequest` with
+/// ([`ImitatedGrid::logout_reply`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogoutReply {
+    /// A `LogoutReply`.
+    Sent,
+    /// Nothing: the session closes, and the request is not even acknowledged.
+    Withheld,
 }
 
 /// What one region holds ([`ImitatedGrid::region_capacity`]).
@@ -936,6 +966,7 @@ mod test {
             opensim.environment_change_reply()
         );
         assert_ne!(sl.stock_day(), opensim.stock_day());
+        assert_ne!(sl.logout_reply(), opensim.logout_reply());
         assert_ne!(
             sl.region_capacity(sl_proto::ProductType::FullRegion),
             opensim.region_capacity(sl_proto::ProductType::FullRegion)

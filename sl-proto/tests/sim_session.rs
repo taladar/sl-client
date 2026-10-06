@@ -4803,6 +4803,53 @@ mod test {
         Ok(())
     }
 
+    /// A grid that closes on a `LogoutRequest` without answering it — OpenSim,
+    /// more often than not — leaves the client to end the session itself: no
+    /// `LogoutReply`, and no acknowledgement of the request either, until the
+    /// logout timeout says so.
+    #[test]
+    fn a_withheld_logout_reply_ends_on_the_client_timeout() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        sim.set_withholds_logout_reply(true);
+        drain_server(&mut sim);
+        drain_client(&mut client);
+        client.set_diagnostics(true);
+
+        client.initiate_logout(now);
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_server(&mut sim);
+        assert!(
+            events.iter().any(|e| matches!(e, ServerEvent::LoggedOut)),
+            "expected LoggedOut, got {events:?}"
+        );
+        assert!(sim.is_closed());
+        assert!(
+            !client.is_closed(),
+            "nothing came back, so the client is still waiting"
+        );
+        assert_eq!(sim.poll_transmit().map(|transmit| transmit.payload), None);
+
+        client.handle_timeout(after(now, 6_000)?);
+        assert!(client.is_closed());
+        let events = drain_client(&mut client);
+        assert!(
+            events.iter().any(|e| matches!(e, Event::LoggedOut)),
+            "the timeout ends the session as a logout, got {events:?}"
+        );
+        let mut missing = false;
+        while let Some(diagnostic) = client.poll_diagnostic() {
+            missing |= matches!(
+                &diagnostic,
+                sl_proto::Diagnostic::ExpectedReplyMissing { request, .. }
+                    if request == sl_proto::Diagnostic::LOGOUT_REQUEST
+            );
+        }
+        assert!(missing, "the missing reply is reported as a diagnostic");
+        Ok(())
+    }
+
     /// The seam a driver uses to order two messages the client would otherwise
     /// be free to see in either order: read the sequence a `send_*` is about to
     /// take, then wait for the client's acknowledgement of exactly that packet.

@@ -24,8 +24,16 @@ use uuid::Uuid;
 
 /// How often an `AgentUpdate` is sent to keep the agent active.
 const AGENT_UPDATE_INTERVAL: Duration = Duration::from_millis(1000);
-/// How long to wait for a `LogoutReply` before giving up on a clean logout.
-const LOGOUT_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the session waits for a `LogoutReply` before it ends the logout
+/// itself, as [`Event::LoggedOut`](crate::Event::LoggedOut) with a
+/// [`Diagnostic::ExpectedReplyMissing`](crate::Diagnostic::ExpectedReplyMissing).
+///
+/// A grid may never answer — OpenSim usually does not — so this timeout *is*
+/// the logout there. A driver that puts its own deadline around a quit has to
+/// make it longer than this, or it cuts the session off before the session
+/// has ended (and before whatever the driver does when it ends, such as
+/// saving the inventory cache).
+pub const LOGOUT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long to wait for a `TeleportFinish` before declaring the teleport failed.
 const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long to wait for an `AvatarSitResponse` before giving up on a sit

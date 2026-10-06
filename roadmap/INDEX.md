@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 136 |
+| ideas | 137 |
 | ready | 365 |
 | blocked | 111 |
 | in-progress | 20 |
-| bugs | 29 |
-| done | 1323 |
+| bugs | 28 |
+| done | 1325 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2030** |
+| **total** | **2032** |
 
-## ideas (136)
+## ideas (137)
 
 ### protocol
 
@@ -223,6 +223,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Typed setting keys and enum-valued settings
 - [`idiomatic-typed-ui-actions-and-menu-conditions`](ideas/idiomatic-typed-ui-actions-and-menu-conditions.md)
   — Typed actions and conditions for menus, pies and UiAction dispatch
+
+### inventory
+
+- [`inventory-logout-reply-items`](ideas/inventory-logout-reply-items.md) — Read
+  the inventory items a LogoutReply names
 
 ### test
 
@@ -871,6 +876,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-quick-preferences-editor`](ready/viewer-quick-preferences-editor.md)
   — Quick-preferences in-viewer editor (blocked by `viewer-quick-preferences`
   (done))
+- [`viewer-quit-progress`](ready/viewer-quit-progress.md) — Show that the viewer
+  is logging out while a quit waits for the grid
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
 - [`viewer-recent-people`](ready/viewer-recent-people.md) — Recent People — the
@@ -1138,8 +1145,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the home location on each grid
 - [`gridspec-local-chat`](ready/gridspec-local-chat.md) — Local chat and typing
   on each grid
-- [`gridspec-logout`](ready/gridspec-logout.md) — Logout reply, timing and what
-  logout does to seats and child circuits
 - [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
   committed LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](ready/gridspec-marketplace.md) — Marketplace direct
@@ -1610,7 +1615,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (29)
+## bugs (28)
 
 ### protocol
 
@@ -1619,8 +1624,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-classified-query-wrong-flag-space`](bugs/protocol-classified-query-wrong-flag-space.md)
   — DirClassifiedQuery sends DirFind maturity bits instead of classified-query
   bits
-- [`protocol-logout-reply-sometimes-missing-on-opensim`](bugs/protocol-logout-reply-sometimes-missing-on-opensim.md)
-  — A logout on the local OpenSim sometimes gets no LogoutReply
 - [`protocol-region-flag-deny-ageunverified-value`](bugs/protocol-region-flag-deny-ageunverified-value.md)
   — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
   are split
@@ -1685,7 +1688,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1323)
+## done (1325)
 
 ### protocol
 
@@ -1885,6 +1888,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Carry the experience search's paging URLs through to the viewer
 - [`protocol-login-options-max-agent-groups-unrequested`](done/protocol-login-options-max-agent-groups-unrequested.md)
   — max-agent-groups is never requested at login but is gated on the option
+- [`protocol-logout-reply-sometimes-missing-on-opensim`](done/protocol-logout-reply-sometimes-missing-on-opensim.md)
+  — A logout on the local OpenSim sometimes gets no LogoutReply
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-parcel-info-reply-flags-misread`](done/protocol-parcel-info-reply-flags-misread.md)
@@ -4610,6 +4615,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   options list and get_grid_info on each grid
 - [`gridspec-login-refusals`](done/gridspec-login-refusals.md) — Login refusal
   codes and texts, MFA, TOS/critical and presence on each grid
+- [`gridspec-logout`](done/gridspec-logout.md) — Logout reply, timing and what
+  logout does to seats and child circuits
 - [`gridspec-parcel-access-and-ban-lines`](done/gridspec-parcel-access-and-ban-lines.md)
   — Parcel access and ban lists, enforcement and ban lines on each grid
 - [`gridspec-parcel-info-dwell`](done/gridspec-parcel-info-dwell.md) — Parcel

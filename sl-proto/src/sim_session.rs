@@ -64,10 +64,11 @@ use sl_wire::messages::{
     EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
     EstateOwnerMessageParamListBlock, EventInfoReply, EventInfoReplyAgentDataBlock,
     EventInfoReplyEventDataBlock, FindAgent, FindAgentAgentBlockBlock, FindAgentLocationBlockBlock,
-    LogoutReply, LogoutReplyAgentDataBlock, PlacesReply, PlacesReplyAgentDataBlock,
-    PlacesReplyQueryDataBlock, PlacesReplyTransactionDataBlock, UUIDGroupNameReply,
-    UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
-    ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+    LogoutReply, LogoutReplyAgentDataBlock, LogoutReplyInventoryDataBlock, PlacesReply,
+    PlacesReplyAgentDataBlock, PlacesReplyQueryDataBlock, PlacesReplyTransactionDataBlock,
+    UUIDGroupNameReply, UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply,
+    UUIDNameReplyUUIDNameBlockBlock, ViewerEffect as ViewerEffectMessage,
+    ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
     AgentWearablesUpdate, AgentWearablesUpdateAgentDataBlock,
@@ -3036,6 +3037,8 @@ pub struct SimSession {
     /// verdict in place of the settings now in force; see
     /// [`SimSession::set_bare_environment_replies`].
     bare_environment_replies: bool,
+    /// [`SimSession::set_withholds_logout_reply`].
+    withholds_logout_reply: bool,
     /// The region handle this simulator serves (echoed in `AgentMovementComplete`).
     region_handle: RegionHandle,
     /// The channel/version string reported in `AgentMovementComplete`.
@@ -3399,6 +3402,7 @@ impl SimSession {
             update_completion_names_item: false,
             parcel_dialect: crate::ParcelLlsdDialect::SecondLife,
             bare_environment_replies: false,
+            withholds_logout_reply: false,
             region_handle,
             channel_version: b"sl-proto SimSession".to_vec(),
             client_addr: None,
@@ -3990,6 +3994,16 @@ impl SimSession {
     /// (default `false`). A client talking to such a grid has to ask for them.
     pub const fn set_bare_environment_replies(&mut self, bare: bool) {
         self.bare_environment_replies = bare;
+    }
+
+    /// Sets whether a `LogoutRequest` closes the session **without** its
+    /// `LogoutReply` (default `false`) — what OpenSim does more often than
+    /// not: it queues the reply and then closes the agent, which clears the
+    /// queue and the acknowledgements it owed. The client is left with a
+    /// request that is neither answered nor acknowledged, and ends the session
+    /// on its own timeout.
+    pub const fn set_withholds_logout_reply(&mut self, withholds: bool) {
+        self.withholds_logout_reply = withholds;
     }
 
     /// Whether [`set_bare_environment_replies`](Self::set_bare_environment_replies)
@@ -11984,7 +11998,12 @@ impl SimSession {
                 });
             }
             AnyMessage::LogoutRequest(_) => {
-                self.send_logout_reply(now)?;
+                // Closing drops the acknowledgements still owed, the
+                // `LogoutRequest`'s among them: a withheld reply leaves the
+                // request unacknowledged too, as it is on OpenSim.
+                if !self.withholds_logout_reply {
+                    self.send_logout_reply(now)?;
+                }
                 self.close(ServerEvent::LoggedOut);
             }
             other => {
@@ -12020,14 +12039,19 @@ impl SimSession {
         self.send(&message, Reliability::Reliable, now)
     }
 
-    /// Replies to `LogoutRequest` with a `LogoutReply` (no inventory items).
+    /// Replies to `LogoutRequest` with a `LogoutReply` naming no inventory
+    /// items — which on the wire is one `InventoryData` block holding the nil
+    /// id, not an empty list: that is what both Second Life and OpenSim send,
+    /// and what the reference viewer reads as "nothing changed".
     fn send_logout_reply(&mut self, now: Instant) -> Result<(), WireError> {
         let message = AnyMessage::LogoutReply(LogoutReply {
             agent_data: LogoutReplyAgentDataBlock {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
                 session_id: self.session_id.unwrap_or_else(Uuid::nil),
             },
-            inventory_data: Vec::new(),
+            inventory_data: vec![LogoutReplyInventoryDataBlock {
+                item_id: Uuid::nil(),
+            }],
         });
         self.send(&message, Reliability::Reliable, now)
     }

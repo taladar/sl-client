@@ -5,7 +5,7 @@ topic: gridspec
 status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, test-handover-distant-and-vehicle-aditi,
-  viewer-seated-region-crossing]
+  viewer-seated-region-crossing, gridspec-logout]
 ---
 
 Context: [context/gridspec.md](../context/gridspec.md).
@@ -16,6 +16,14 @@ OpenSim sends no kill to the crossing agent's own viewer, and delivers
 `EnableSimulator` / `CrossedRegion` / `TeleportFinish` over the event queue.
 The fake grid crosses only when scripted. SL's unsit/resit on a vehicle
 crossing is assumed, not measured.
+
+From [[gridspec-logout]] (2026-10-06): at a logout OpenSim sends
+`DisableSimulator` down every child circuit within 70 ms; Second Life sends
+nothing down them before its `LogoutReply`. The session drops a child circuit
+on `DisableSimulator` (its objects and coarse dots go) but reports no event
+for the region itself, so `sl-client-bevy`'s region index keeps a retired
+neighbour until the next world reset — decide here whether that needs an
+event.
 
 ## Discover
 

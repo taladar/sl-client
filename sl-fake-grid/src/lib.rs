@@ -52,7 +52,7 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use imitates::{
-    EditEcho, EnvironmentChangeReply, ImitatedGrid, LoginFields, LoginRefusals,
+    EditEcho, EnvironmentChangeReply, ImitatedGrid, LoginFields, LoginRefusals, LogoutReply,
     OPENSIM_MAX_AGENT_GROUPS, ParcelPolicy, RegionCapacity, SELECTED_PARCEL_SEQUENCE_ID,
     SecondLogin, StockDay,
 };

@@ -62,6 +62,7 @@ pub mod login_handshake;
 pub mod login_options;
 pub mod login_refusals;
 pub mod logout_clean;
+pub mod logout_seated;
 pub mod map_blocks_items;
 pub mod marketplace_direct_delivery;
 pub mod mesh_fetch_http;

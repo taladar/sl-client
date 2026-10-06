@@ -15,8 +15,8 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    Camera, Command, ControlFlags, CreateGroupParams, Event, GroupKey, InventoryItem, InventoryKey,
-    LindenAmount, Object, ObjectKey, RegionLocalObjectId, Rotation, ScopedObjectId,
+    Camera, Command, ControlFlags, CreateGroupParams, Diagnostic, Event, GroupKey, InventoryItem,
+    InventoryKey, LindenAmount, Object, ObjectKey, RegionLocalObjectId, Rotation, ScopedObjectId,
     TaskInventoryItem, Uuid, Vector, XferListing, pcode, prim_flags,
 };
 
@@ -569,6 +569,37 @@ pub async fn settle_scene(
     window: Duration,
     idle: Duration,
 ) -> Result<(HashSet<ScopedObjectId>, Option<Vector>), TestFailure> {
+    let settled = settle_scene_with_avatar(session, grid, build_position, window, idle).await?;
+    Ok((settled.seen, settled.anchor))
+}
+
+/// What [`settle_scene_with_avatar`] found.
+#[derive(Debug, Clone)]
+pub struct SettledScene {
+    /// Every scoped id sighted while the scene settled.
+    pub seen: HashSet<ScopedObjectId>,
+    /// The anchor to rez against (see [`settle_scene`]).
+    pub anchor: Option<Vector>,
+    /// Where our own avatar stands once the scene has settled — after the
+    /// move to the build location, where there was one. `None` when the
+    /// avatar never appeared in the object stream.
+    pub avatar: Option<Vector>,
+}
+
+/// [`settle_scene`], also reporting where our own avatar ended up — for a
+/// case that places something *beside the avatar* rather than against the
+/// anchor.
+///
+/// # Errors
+///
+/// As [`settle_scene`].
+pub async fn settle_scene_with_avatar(
+    session: &mut Session,
+    grid: Grid,
+    build_position: Option<Vector>,
+    window: Duration,
+    idle: Duration,
+) -> Result<SettledScene, TestFailure> {
     let own = session.agent_id().map(|agent| agent.uuid());
     let mut seen = HashSet::new();
     let mut anchor: Option<Vector> = None;
@@ -588,7 +619,11 @@ pub async fn settle_scene(
     })
     .await?;
     let Some(build) = build_position else {
-        return Ok((seen, anchor));
+        return Ok(SettledScene {
+            seen,
+            anchor,
+            avatar,
+        });
     };
     // The build location: rez right there. When the login did not land the
     // avatar on it (a telehub or a landing point redirects a login — Mauve's
@@ -629,7 +664,11 @@ pub async fn settle_scene(
         )))
         .await?;
     drain_scene(session, window, idle, &mut seen, |_object| {}).await?;
-    Ok((seen, Some(spot)))
+    Ok(SettledScene {
+        seen,
+        anchor: Some(spot),
+        avatar: Some(arrived),
+    })
 }
 
 /// Records every [`Event::ObjectAdded`] into `seen` (and shows it to
@@ -756,8 +795,25 @@ pub async fn steer_towards(
         to_y = position.y,
         "steering the avatar"
     );
-    let mut current = from;
+    // The last update of our own avatar, its velocity, and when it came. A
+    // grid sends none while the velocity holds — Second Life went three
+    // seconds without one at 14 m/s — so, as a viewer does, the position
+    // between updates is reckoned from the last one.
+    let mut reported = from;
+    let mut velocity = Vector {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    let mut reported_at = Instant::now();
     loop {
+        let since = reported_at.elapsed().as_secs_f32();
+        let current = Vector {
+            x: velocity.x.mul_add(since, reported.x),
+            y: velocity.y.mul_add(since, reported.y),
+            z: velocity.z.mul_add(since, reported.z),
+        };
+        let speed = velocity.x.hypot(velocity.y);
         let arrived = within(&current, position, ARRIVAL_RADIUS_M);
         if arrived || started.elapsed() >= budget {
             tracing::info!(
@@ -786,10 +842,17 @@ pub async fn steer_towards(
                 head: facing,
             })
             .await?;
-        let forwards = if within(&current, position, SLOWDOWN_RADIUS_M) {
-            ControlFlags::NUDGE_AT_POS
-        } else {
+        // Near the target the avatar is nudged — and, while it is still
+        // carrying the speed of the approach, not pushed at all: a flight
+        // arrives at a dozen metres a second, a nudge on top of that does not
+        // slow it, and it then crosses the arrival radius between two updates
+        // and swings back and forth over the spot until the budget runs out.
+        let forwards = if !within(&current, position, SLOWDOWN_RADIUS_M) {
             ControlFlags::AT_POS
+        } else if speed > NUDGE_BELOW_M_PER_S {
+            ControlFlags::empty()
+        } else {
+            ControlFlags::NUDGE_AT_POS
         };
         let off_height = current.z - position.z;
         let controls = match gait {
@@ -810,16 +873,21 @@ pub async fn steer_towards(
                     Event::ObjectUpdated(object) | Event::ObjectAdded(object)
                         if object.full_id.uuid() == agent =>
                     {
-                        Some(object.motion.position.clone())
+                        Some((
+                            object.motion.position.clone(),
+                            object.motion.velocity.clone(),
+                        ))
                     }
                     _ => None,
                 }
             })
             .await
         {
-            Ok(moved) => {
+            Ok((moved, moving)) => {
                 tracing::debug!(x = moved.x, y = moved.y, z = moved.z, "the avatar moved");
-                current = moved;
+                reported = moved;
+                velocity = moving;
+                reported_at = Instant::now();
             }
             Err(TestFailure::Timeout(_)) => {}
             Err(other) => return Err(other),
@@ -835,6 +903,10 @@ const STEER_INTERVAL: Duration = Duration::from_millis(250);
 
 /// How close to the build location the walk slows to a nudge.
 const SLOWDOWN_RADIUS_M: f32 = 15.0;
+
+/// The horizontal speed, in metres a second, above which an avatar inside the
+/// slowdown radius is left to coast rather than nudged on.
+const NUDGE_BELOW_M_PER_S: f32 = 2.0;
 
 /// How close to the build location the walk has to bring the avatar before it
 /// rezzes there.
@@ -1227,4 +1299,66 @@ mod tests {
         );
         Ok(())
     }
+}
+
+/// How long to let the diagnostic channel settle after `LoggedOut` arrives, so
+/// a `LogoutReply`-timeout diagnostic (recorded on a background task in the
+/// same run-loop tick) is visible before it is read.
+const DIAGNOSTIC_GRACE: Duration = Duration::from_millis(500);
+
+/// What one logout looked like from the client.
+#[derive(Debug, Clone, Copy)]
+pub struct Logout {
+    /// From the request to [`Event::LoggedOut`], in seconds.
+    pub seconds: f64,
+    /// Whether the grid sent a `LogoutReply` (rather than the client timing
+    /// out).
+    pub reply_received: bool,
+}
+
+/// Request a logout on `session` and watch it through to [`Event::LoggedOut`].
+///
+/// Both a real `LogoutReply` and the client's logout-timeout fallback surface
+/// the same [`Event::LoggedOut`]; only a
+/// [`Diagnostic::ExpectedReplyMissing`] for `"Logout"` distinguishes them, so
+/// this reads the diagnostics the logout added to tell them apart.
+///
+/// The session's run loop has ended when this returns; the caller still owns
+/// the session (the runner logs the primary out, which is then a no-op).
+///
+/// # Errors
+///
+/// Propagates the send's failure and [`Session::wait_for`]'s — a logout
+/// answered by a bare disconnect, or by nothing within [`REPLY_TIMEOUT`].
+pub async fn log_out(session: &mut Session) -> Result<Logout, TestFailure> {
+    let already = session.diagnostics().len();
+    let started = Instant::now();
+    session.send(Command::Logout).await?;
+    // `wait_for` treats an intervening `Disconnected` as a failure unless the
+    // predicate consumes it, so a logout answered by a bare unsolicited
+    // disconnect (rather than a clean `LoggedOut`) fails.
+    session
+        .wait_for(REPLY_TIMEOUT, |event| {
+            matches!(event, Event::LoggedOut).then_some(())
+        })
+        .await?;
+    let seconds = started.elapsed().as_secs_f64();
+    // The timeout-fallback diagnostic is recorded just before `LoggedOut` on a
+    // separate task; let it settle before reading.
+    tokio::time::sleep(DIAGNOSTIC_GRACE).await;
+    let reply_received = !session
+        .diagnostics()
+        .iter()
+        .skip(already)
+        .any(|diagnostic| {
+            matches!(
+                diagnostic,
+                Diagnostic::ExpectedReplyMissing { request, .. }
+                    if request == Diagnostic::LOGOUT_REQUEST
+            )
+        });
+    Ok(Logout {
+        seconds,
+        reply_received,
+    })
 }

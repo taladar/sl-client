@@ -570,7 +570,7 @@ impl Session {
             avatar: &self.avatar,
             channel: &self.channel,
             version: &self.version,
-            start_location: &self.start_location,
+            start_location: attempt.start.as_deref().unwrap_or(&self.start_location),
             cooldown: &self.cooldown,
             force: self.force,
             cache_dir: None,
@@ -639,6 +639,10 @@ pub struct LoginAttempt {
     /// Whether this attempt answers the challenge the previous one drew, so
     /// the login cooldown is not waited out between the two.
     pub answers_challenge: bool,
+    /// A `start` wire string to log in at instead of the session's own — how a
+    /// case that was placed at a fixed spot asks where the grid itself puts
+    /// the avatar's next login (`"last"`).
+    pub start: Option<String>,
 }
 
 /// What a grid answered one [`Session::attempt_login`] with.
@@ -1094,6 +1098,16 @@ impl TestContext {
     /// The secondary session, if this is a two-account test.
     pub const fn secondary(&mut self) -> Option<&mut Session> {
         self.secondary.as_mut()
+    }
+
+    /// Both sessions of a two-account test at once, for a case that has to
+    /// watch one avatar *while* the other acts — a wait on one session after
+    /// the other has finished can say what arrived, but not when.
+    pub const fn primary_and_secondary(&mut self) -> Option<(&mut Session, &mut Session)> {
+        match self.secondary.as_mut() {
+            Some(secondary) => Some((&mut self.primary, secondary)),
+            None => None,
+        }
     }
 
     /// The tertiary session, if this is a three-account test.

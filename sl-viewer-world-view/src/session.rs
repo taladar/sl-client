@@ -10,9 +10,10 @@
 //!   agent's avatar object arrives;
 //! - on a quit request — Avatar ▸ Quit (picked, or reached by the `Ctrl+Q`
 //!   accelerator drawn against it), the window's close button, or a termination
-//!   signal — request a clean logout, then exit once the grid acknowledges it
-//!   (or after a short grace, so a lost `LogoutReply` can never wedge the window
-//!   open);
+//!   signal — request a clean logout, then exit once the session reports it:
+//!   on the grid's `LogoutReply`, or on the session's own timeout where a grid
+//!   sends none (or after a grace beyond that, so a session that has stopped
+//!   reporting can never wedge the window open);
 //! - exit on any `LoggedOut` / `Disconnected`.
 //!
 //! Rendering the scene (terrain, prims, meshes, sculpts, avatars, chat) lands
@@ -21,7 +22,8 @@
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowCloseRequested};
 use sl_client_bevy::{
-    AnimationKey, Camera, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
+    AnimationKey, Camera, Command, Distance, LOGOUT_TIMEOUT, SlCommand, SlEvent, SlIdentity,
+    SlSessionEvent,
 };
 use sl_settings::SettingValue;
 
@@ -57,9 +59,18 @@ pub fn register_settings(settings: &mut ViewerSettings) {
     );
 }
 
-/// How long, in seconds, to wait for a clean `LoggedOut` after a quit request
-/// before forcing the exit anyway.
-const QUIT_GRACE_SECS: f32 = 3.0;
+/// How long to wait for a `LoggedOut` after a quit request before forcing the
+/// exit anyway.
+///
+/// Longer than the session's own [`LOGOUT_TIMEOUT`] on purpose. A grid that
+/// never answers the `LogoutRequest` — OpenSim, more often than not
+/// (`book/src/gridspec/session.md` § Logout) — is logged out *by that
+/// timeout*: the session reports `LoggedOut` and saves the inventory cache on
+/// its way down. A grace shorter than it (this was three seconds) ended every
+/// such quit by force instead, before the session had finished. So the forced
+/// exit is only for a session that has stopped reporting altogether.
+const QUIT_GRACE: core::time::Duration =
+    LOGOUT_TIMEOUT.saturating_add(core::time::Duration::from_secs(2));
 
 /// Viewer-side session bookkeeping not already tracked by the plugin.
 #[derive(Debug, Resource, Default)]
@@ -514,7 +525,7 @@ pub(crate) fn request_logout(
         return;
     }
     commands.write(SlCommand(Command::Logout));
-    session.quit_deadline = Some(now + QUIT_GRACE_SECS);
+    session.quit_deadline = Some(now + QUIT_GRACE.as_secs_f32());
 }
 
 /// Persist the settings store when the app is actually exiting, so a tuned value
@@ -754,6 +765,49 @@ mod tests {
         assert_eq!(app.world().resource::<Sent>().count, 3);
         assert_eq!(app.world().resource::<Sent>().last, Some(256.0));
         Ok(())
+    }
+
+    /// A quit is not forced while the session's own logout timeout is still
+    /// running: a grid that never answers the `LogoutRequest` is logged out by
+    /// that timeout, and the forced exit is only for a session that does not
+    /// report even then.
+    #[test]
+    fn a_quit_is_not_forced_before_the_session_gives_up_on_the_reply() {
+        use sl_client_bevy::LOGOUT_TIMEOUT;
+
+        use super::{ViewerSession, enforce_quit_deadline, request_logout};
+
+        /// Ask for the logout (idempotent, so every frame may).
+        fn quit(
+            mut session: ResMut<ViewerSession>,
+            mut commands: MessageWriter<SlCommand>,
+            time: Res<Time>,
+        ) {
+            request_logout(&mut session, &mut commands, time.elapsed_secs());
+        }
+
+        let mut app = App::new();
+        app.add_message::<SlCommand>()
+            .init_resource::<Time>()
+            .init_resource::<ViewerSession>()
+            .add_systems(Update, (quit, enforce_quit_deadline).chain());
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(LOGOUT_TIMEOUT);
+        app.update();
+        assert_eq!(
+            app.should_exit(),
+            None,
+            "the session is only now giving up on the reply"
+        );
+
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(core::time::Duration::from_secs(3));
+        app.update();
+        assert_eq!(app.should_exit(), Some(AppExit::Success));
     }
 
     /// The interest camera is the viewpoint the simulator builds the agent's

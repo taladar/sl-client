@@ -2,10 +2,28 @@
 id: protocol-logout-reply-sometimes-missing-on-opensim
 title: A logout on the local OpenSim sometimes gets no LogoutReply
 topic: protocol
-status: bugs
+status: done
 origin: OpenSim control runs while verifying viewer-sit-on-neighbour-object-uses-root-circuit (2026-09-17)
-refs: [viewer-sit-on-neighbour-object-uses-root-circuit]
+refs: [viewer-sit-on-neighbour-object-uses-root-circuit, gridspec-logout]
 ---
+
+## Resolved (2026-10-06): OpenSim's race, not ours
+
+Explained by [[gridspec-logout]] and written up in
+`book/src/gridspec/session.md` § Logout. OpenSim queues the `LogoutReply`
+and closes the agent in the same call; the close clears the outbox and the
+pending acknowledgements, so the reply — and the `LogoutRequest`'s
+acknowledgement with it — reaches the wire only when the outgoing-packet
+thread wins the race. Measured: never within two seconds of arriving, one
+logout in four after that. The request did reach the simulator every
+time (its log shows the logout and the close), and the next login always got
+in.
+
+Nothing in the client was wrong: it resends, sometimes reports the request's
+retransmissions exhausted just before its five-second logout timeout, and
+ends the session as a logout. What did change is the viewer, whose
+three-second quit deadline cut that timeout short; and the fake grid's
+OpenSim flavour now withholds the reply so both are exercised.
 
 ## Observation
 

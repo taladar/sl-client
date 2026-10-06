@@ -2219,6 +2219,18 @@ OpenSim-flavoured one sends a reason and a text, and **refuses** that login as
 `presence`. Both kick the session the avatar already had, in the live grid's
 own words, so two sessions of one avatar never share a region.
 
+### The logout that is not answered
+
+`ImitatedGrid::logout_reply` (measured in
+[Session](../gridspec/session.md#logout)): a Second-Life-flavoured grid
+answers a `LogoutRequest` with a `LogoutReply`; an OpenSim-flavoured one
+closes the session without it, and without acknowledging the request — the
+live grid's usual outcome, and the one a client has to be built for. The
+client then ends the session on its own five-second logout timeout, so a run
+against that flavour takes that much longer to log out. Both flavours send
+`DisableSimulator` down the avatar's child circuits, and a reply carries one
+`InventoryData` block holding the nil id, as both live grids' do.
+
 ## Policy: what the grid charges, permits and refuses
 
 Not every answer is content. Three of them are policy, and they live apart

@@ -471,6 +471,8 @@ pub(crate) struct GridCore {
     /// What an accepted environment set or reset is answered with
     /// ([`ImitatedGrid::environment_change_reply`]).
     pub(crate) environment_change_reply: crate::imitates::EnvironmentChangeReply,
+    /// Whether a logout is answered ([`ImitatedGrid::logout_reply`]).
+    pub(crate) logout_reply: crate::imitates::LogoutReply,
     /// How a region's default day is labelled ([`ImitatedGrid::stock_day`]).
     pub(crate) stock_day: crate::imitates::StockDay,
     /// The spatial-voice backend every region serves ([`VoiceBackend`]).
@@ -751,6 +753,10 @@ impl GridCore {
         sim.set_region_id(region.region_id);
         sim.set_update_completion_names_item(self.update_completion_item.names_item());
         sim.set_parcel_dialect(self.parcel_policy.wire_types);
+        sim.set_withholds_logout_reply(matches!(
+            self.logout_reply,
+            crate::imitates::LogoutReply::Withheld
+        ));
         sim.set_bare_environment_replies(matches!(
             self.environment_change_reply,
             crate::imitates::EnvironmentChangeReply::Bare
@@ -1943,6 +1949,7 @@ impl FakeGridBuilder {
             withheld_capabilities: self.imitates.withheld_capabilities(),
             parcel_policy: self.imitates.parcel_policy(),
             environment_change_reply: self.imitates.environment_change_reply(),
+            logout_reply: self.imitates.logout_reply(),
             stock_day: self.imitates.stock_day(),
             packages: self
                 .packages
