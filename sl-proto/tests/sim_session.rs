@@ -9487,6 +9487,84 @@ mod test {
         Ok(())
     }
 
+    /// A list longer than one message holds crosses in both directions as
+    /// several: the client's update in sections under one transaction, each
+    /// saying which it is, and the simulator's reply as packets a viewer
+    /// unions. Before 2026-10-05 the client put every entry into one
+    /// `ParcelAccessListUpdate`, which at Second Life's 300-entry limit is a
+    /// 7 kB datagram.
+    #[test]
+    fn a_long_parcel_access_list_travels_in_sections() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+        let parcel_id = RegionLocalParcelId(7);
+        let parcel = ScopedParcelId::new(circuit, parcel_id);
+        let per_packet = sl_proto::PARCEL_ACCESS_ENTRIES_PER_PACKET;
+        let count = per_packet * 2 + 5;
+        let entries: Vec<sl_proto::ParcelAccessEntry> = (0..count)
+            .map(|index| sl_proto::ParcelAccessEntry {
+                id: uuid::Uuid::from_u128(0x1000 + u128::try_from(index).unwrap_or(0)),
+                time: 0,
+                flags: sl_proto::ParcelAccessFlags::NONE,
+            })
+            .collect();
+
+        client.update_parcel_access_list(
+            parcel,
+            sl_proto::ParcelAccessScope::Ban,
+            &entries,
+            uuid::Uuid::from_u128(0x7B),
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let sections: Vec<(i32, i32, usize, sl_proto::TransactionId)> = drain_server(&mut sim)
+            .into_iter()
+            .filter_map(|event| match event {
+                ServerEvent::ParcelAccessListUpdated {
+                    entries,
+                    sequence_id,
+                    sections,
+                    transaction_id,
+                    ..
+                } => Some((sequence_id, sections, entries.len(), transaction_id)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            sections
+                .iter()
+                .map(|(sequence_id, sections, entries, _)| (*sequence_id, *sections, *entries))
+                .collect::<Vec<_>>(),
+            vec![(1, 3, per_packet), (2, 3, per_packet), (3, 3, 5)]
+        );
+        assert!(
+            sections
+                .iter()
+                .all(|section| Some(&section.3) == sections.first().map(|first| &first.3)),
+            "the sections of one update share its transaction id: {sections:?}"
+        );
+
+        sim.send_parcel_access_list_reply(
+            parcel_id,
+            sl_proto::ParcelAccessScope::Ban,
+            0,
+            &entries,
+            sl_proto::ParcelAccessFlags::NONE,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let packets: Vec<usize> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::ParcelAccessList { entries, .. } => Some(entries.len()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(packets, vec![per_packet, per_packet, 5]);
+        Ok(())
+    }
+
     /// A parcel's ban list and the region's own configuration reach the client
     /// — the two answers the parcel and region edit surfaces are read back
     /// through. An empty list travels as one nil-agent placeholder, which is a
@@ -9508,6 +9586,7 @@ mod test {
                 time: 0,
                 flags: sl_proto::ParcelAccessFlags::NONE,
             }],
+            sl_proto::ParcelAccessFlags::NONE,
             now,
         )?;
         pump(&mut client, &mut sim, now)?;
@@ -9534,6 +9613,9 @@ mod test {
             sl_proto::ParcelAccessScope::Access,
             4,
             &[],
+            // OpenSim's placeholder names its list; it is no more a member
+            // for that.
+            sl_proto::ParcelAccessFlags(1),
             now,
         )?;
         pump(&mut client, &mut sim, now)?;

@@ -689,8 +689,61 @@ pub async fn walk_within_region(
     session: &mut Session,
     from: Vector,
     position: &Vector,
-    mut observe: impl FnMut(&Event),
+    observe: impl FnMut(&Event),
 ) -> Result<Vector, TestFailure> {
+    let (stopped, arrived) =
+        steer_towards(session, from, position, Gait::Flying, WALK_TIMEOUT, observe).await?;
+    if arrived {
+        Ok(stopped)
+    } else {
+        Err(TestFailure::Assertion(format!(
+            "could not move the avatar to the build location {:.0}/{:.0} (stuck at {:.0}/{:.0})",
+            position.x, position.y, stopped.x, stopped.y
+        )))
+    }
+}
+
+/// How [`steer_towards`] moves the avatar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gait {
+    /// Fly, steering on the region plane only and letting the height be what
+    /// it becomes. On Second Life a forward flight climbs several metres a
+    /// second.
+    Flying,
+    /// Fly, pushing down when more than `HEIGHT_SLACK_M` above the target's
+    /// height and up when as far below it — for a case whose answer depends on
+    /// the height.
+    FlyingLevel,
+    /// Walk. Whatever stands on the ground in between is in the way, so this
+    /// is for a short stretch a case has to cover on foot — a parcel line, say,
+    /// which a grid may treat differently for an avatar on the ground.
+    Walking,
+}
+
+/// How far from its target's height a [`Gait::FlyingLevel`] flight may drift
+/// before it corrects.
+const HEIGHT_SLACK_M: f32 = 1.5;
+
+/// Moves the avatar from `from` towards `position` for at most `budget`,
+/// steering the way [`walk_within_region`] does, and returns where it stopped
+/// and whether that is within `ARRIVAL_RADIUS_M` of `position`.
+///
+/// Not arriving is an answer here rather than a failure: this is the journey
+/// of a case that measures what stops an avatar — a ban line, a parcel that
+/// turns it back — so it steers for the whole budget, lets go, and reports.
+///
+/// # Errors
+///
+/// Returns [`TestFailure::Assertion`] when the login reported no agent id, and
+/// propagates the sends' and waits' failures.
+pub async fn steer_towards(
+    session: &mut Session,
+    from: Vector,
+    position: &Vector,
+    gait: Gait,
+    budget: Duration,
+    mut observe: impl FnMut(&Event),
+) -> Result<(Vector, bool), TestFailure> {
     let agent = session
         .agent_id()
         .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?
@@ -701,31 +754,24 @@ pub async fn walk_within_region(
         from_y = from.y,
         to_x = position.x,
         to_y = position.y,
-        "moving the avatar to the build location"
+        "steering the avatar"
     );
     let mut current = from;
     loop {
-        if within(&current, position, ARRIVAL_RADIUS_M) {
+        let arrived = within(&current, position, ARRIVAL_RADIUS_M);
+        if arrived || started.elapsed() >= budget {
             tracing::info!(
                 x = current.x,
                 y = current.y,
                 z = current.z,
+                arrived,
                 secs = started.elapsed().as_secs_f32(),
-                "the avatar reached the build location"
+                "the avatar's journey ended"
             );
             session
                 .send(Command::SetControls(ControlFlags::empty()))
                 .await?;
-            return Ok(current);
-        }
-        if started.elapsed() >= WALK_TIMEOUT {
-            session
-                .send(Command::SetControls(ControlFlags::empty()))
-                .await?;
-            return Err(TestFailure::Assertion(format!(
-                "could not move the avatar to the build location {:.0}/{:.0} (stuck at {:.0}/{:.0})",
-                position.x, position.y, current.x, current.y
-            )));
+            return Ok((current, arrived));
         }
         let half_yaw = (position.y - current.y).atan2(position.x - current.x) / 2.0;
         let facing = Rotation {
@@ -740,15 +786,23 @@ pub async fn walk_within_region(
                 head: facing,
             })
             .await?;
-        session
-            .send(Command::SetControls(
-                if within(&current, position, SLOWDOWN_RADIUS_M) {
-                    ControlFlags::FLY | ControlFlags::NUDGE_AT_POS
-                } else {
-                    ControlFlags::FLY | ControlFlags::AT_POS
-                },
-            ))
-            .await?;
+        let forwards = if within(&current, position, SLOWDOWN_RADIUS_M) {
+            ControlFlags::NUDGE_AT_POS
+        } else {
+            ControlFlags::AT_POS
+        };
+        let off_height = current.z - position.z;
+        let controls = match gait {
+            Gait::Walking => forwards,
+            Gait::FlyingLevel if off_height > HEIGHT_SLACK_M => {
+                forwards | ControlFlags::FLY | ControlFlags::UP_NEG
+            }
+            Gait::FlyingLevel if off_height < -HEIGHT_SLACK_M => {
+                forwards | ControlFlags::FLY | ControlFlags::UP_POS
+            }
+            Gait::FlyingLevel | Gait::Flying => forwards | ControlFlags::FLY,
+        };
+        session.send(Command::SetControls(controls)).await?;
         match session
             .wait_for(STEER_INTERVAL, |event| {
                 observe(event);
@@ -763,7 +817,10 @@ pub async fn walk_within_region(
             })
             .await
         {
-            Ok(moved) => current = moved,
+            Ok(moved) => {
+                tracing::debug!(x = moved.x, y = moved.y, z = moved.z, "the avatar moved");
+                current = moved;
+            }
             Err(TestFailure::Timeout(_)) => {}
             Err(other) => return Err(other),
         }

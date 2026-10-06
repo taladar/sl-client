@@ -152,7 +152,10 @@ A region's land is subdivided into **parcels**, each with its own ownership,
 rules, and media. A parcel's data includes its geometry (an axis-aligned
 bounding box and an ownership bitmap over the region grid), ownership (owner,
 group, group owned, status — leased / pending / abandoned), prim limits, dwell,
-access lists, and [media](sound-media.md) settings.
+access lists, and [media](sound-media.md) settings. How each grid answers the
+access-list messages, and what an avatar the lists keep out meets at the
+parcel's edge, is measured in
+[Grid Behaviour → Land](../gridspec/land.md#access).
 
 A protocol subtlety: while there are UDP messages for parcels, the **rich parcel
 data (`ParcelProperties`) is delivered through the

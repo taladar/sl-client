@@ -110,6 +110,7 @@ mod test {
         object_properties => "object-properties" [fake_sl, fake_opensim],
         object_rez_derez => "object-rez-derez" [fake_sl, fake_opensim],
         parcel_edit => "parcel-edit" [fake_sl, fake_opensim],
+        parcel_access_list => "parcel-access-list" [fake_sl, fake_opensim],
         region_info => "region-info" [fake_sl, fake_opensim],
         estate_info => "estate-info" [fake_sl, fake_opensim],
         estate_access => "estate-access" [fake_sl, fake_opensim],

@@ -938,8 +938,12 @@ whether a by-id parcel request is answered at all (OpenSim ignores it), the
 sequence id of the parcel pushed back after an edit, whether a UDP edit
 empties the media type (OpenSim's `NULL` poisoning), the media block and
 extended flags a parcel nobody set carries, whether a return on a parcel
-reads its task list, and whether the object-owner tally comes over the event
-queue or UDP. Each region's parcels are dressed to the flavour when the grid
+reads its task list, whether the object-owner tally comes over the event
+queue or UDP, whether saving an allow or ban list switches the parcel's own
+`USE_ACCESS_LIST` / `USE_BAN_LIST` flag (OpenSim's does), and what the
+placeholder of an empty list carries. Nobody is kept out of a parcel yet: the
+lists are stored and answered, not enforced. Each region's parcels are dressed
+to the flavour when the grid
 starts, and again after every edit, so a block the imitated grid does not
 have never reaches a client.
 

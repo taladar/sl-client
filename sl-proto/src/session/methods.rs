@@ -2184,6 +2184,10 @@ impl Session {
             );
         }
         tracing::trace!(?id, name = message.name(), %from, "inbound message");
+        // The message as the grid sent it, every block and field, before the
+        // session reads anything out of it — what a gridspec probe greps for a
+        // reply's exact shape (`RUST_LOG=sl_proto::wire=trace`).
+        tracing::trace!(target: "sl_proto::wire", name = message.name(), %from, ?message, "UDP message");
         let handled = match role {
             CircuitRole::Root => self.dispatch(from, &message, now),
             CircuitRole::Child => self.dispatch_child(from, &message, now),

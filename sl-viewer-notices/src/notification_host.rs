@@ -1990,24 +1990,75 @@ pub fn ingest_alert_messages(
                     show.write(request);
                     continue;
                 }
-                if !message.is_empty() {
-                    show.write(ShowNotification::new("SystemMessage").with_body(message.clone()));
+                match named_server_alert(message) {
+                    NamedAlert::Catalogued(name) => {
+                        show.write(ShowNotification::new(name));
+                    }
+                    NamedAlert::Plain(text) if !text.is_empty() => {
+                        show.write(
+                            ShowNotification::new("SystemMessage").with_body(text.to_owned()),
+                        );
+                    }
+                    NamedAlert::Plain(_empty) => {}
                 }
             }
             SlSessionEvent::AgentAlertMessage { modal, message, .. } => {
-                if message.is_empty() {
-                    continue;
+                match named_server_alert(message) {
+                    NamedAlert::Catalogued(name) => {
+                        show.write(ShowNotification::new(name));
+                    }
+                    NamedAlert::Plain(text) if !text.is_empty() => {
+                        let template_name = if *modal {
+                            "GenericAlert"
+                        } else {
+                            "SystemMessage"
+                        };
+                        show.write(ShowNotification::new(template_name).with_body(text.to_owned()));
+                    }
+                    NamedAlert::Plain(_empty) => {}
                 }
-                let template_name = if *modal {
-                    "GenericAlert"
-                } else {
-                    "SystemMessage"
-                };
-                show.write(ShowNotification::new(template_name).with_body(message.clone()));
             }
             _other => {}
         }
     }
+}
+
+/// The prefix a simulator puts before the *name* of an alert-channel
+/// notification it wants raised, instead of a text to show (the reference's
+/// `process_alert_core`, `ALERT_PREFIX`).
+const ALERT_NAME_PREFIX: &str = "ALERT: ";
+
+/// The same for a notification-channel one (`NOTIFY_PREFIX`). Second Life
+/// refuses entry to a closed parcel this way: `NOTIFY: Cannot enter parcel:
+/// not a group member`, measured on aditi on 2026-10-05.
+const NOTIFY_NAME_PREFIX: &str = "NOTIFY: ";
+
+/// What a plain alert string asks the viewer to show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NamedAlert<'a> {
+    /// The string names this catalogue template; its own text is shown.
+    Catalogued(&'static str),
+    /// The string is the text to show.
+    Plain(&'a str),
+}
+
+/// Reads a plain alert string the way the reference's `process_alert_core`
+/// does: one that begins `ALERT: ` or `NOTIFY: ` names a notification rather
+/// than being one, so that a simulator's alerts can be translated.
+///
+/// A name the catalogue does not have is shown as the text it is, without the
+/// prefix — the simulator said *something*, and a raw `NOTIFY: ` in front of
+/// it helps nobody.
+fn named_server_alert(message: &str) -> NamedAlert<'_> {
+    let Some(name) = message
+        .strip_prefix(ALERT_NAME_PREFIX)
+        .or_else(|| message.strip_prefix(NOTIFY_NAME_PREFIX))
+    else {
+        return NamedAlert::Plain(message);
+    };
+    template(name).map_or(NamedAlert::Plain(name), |known| {
+        NamedAlert::Catalogued(known.name)
+    })
 }
 
 /// Whether `key`'s last raise is at least [`COMMAND_FAILURE_COOLDOWN`] old,
@@ -2459,6 +2510,44 @@ mod tests {
             form: TEST_FORM,
             input: None,
         }
+    }
+
+    /// A plain alert that begins `NOTIFY: ` or `ALERT: ` names a catalogue
+    /// notification — Second Life's refusal at a closed parcel's line, as
+    /// aditi sent it — and is raised as that notification rather than shown as
+    /// its own name. Anything else is the text to show, and a name the
+    /// catalogue lacks is shown without the prefix.
+    #[test]
+    fn a_prefixed_server_alert_names_a_notification() {
+        use super::{NamedAlert, named_server_alert};
+        for name in [
+            "Cannot enter parcel: not a group member",
+            "Cannot enter parcel: banned",
+            "Cannot enter parcel: not on access list",
+        ] {
+            assert_eq!(
+                named_server_alert(&format!("NOTIFY: {name}")),
+                NamedAlert::Catalogued(name)
+            );
+            assert_eq!(
+                named_server_alert(&format!("ALERT: {name}")),
+                NamedAlert::Catalogued(name)
+            );
+        }
+        // OpenSim's refusal is a sentence, not a name.
+        assert_eq!(
+            named_server_alert("You are banned from parcel"),
+            NamedAlert::Plain("You are banned from parcel")
+        );
+        assert_eq!(
+            named_server_alert("NOTIFY: NoSuchNotificationAnywhere"),
+            NamedAlert::Plain("NoSuchNotificationAnywhere")
+        );
+        // The prefix counts at the start only.
+        assert_eq!(
+            named_server_alert("He said NOTIFY: Cannot enter parcel: banned"),
+            NamedAlert::Plain("He said NOTIFY: Cannot enter parcel: banned")
+        );
     }
 
     /// The default-response kinds auto-answer with the form's default button;

@@ -50,6 +50,11 @@
 //! # sandbox or a parcel the avatar may build on. Absent, such a case keeps
 //! # the last location and records `partial` when the rez is refused.
 //! build_location = "uri:Some Sandbox&128&128&25"
+//!
+//! # Regions the `parcel-ban-line` case visits, in order, when the region it
+//! # logged in to has no parcel that keeps strangers out. Absent, only the
+//! # login region is looked at.
+//! ban_line_regions = ["Some Mainland Region", "Another One"]
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -84,6 +89,9 @@ pub struct Fixtures {
     /// [`start_location`](crate::registry::GridTest::start_location) — see
     /// [`GridTest::rezzes_objects`](crate::registry::GridTest::rezzes_objects).
     build_location: Option<String>,
+    /// The regions the `parcel-ban-line` case visits, in order, looking for a
+    /// parcel that keeps strangers out, when its login region has none.
+    ban_line_regions: Vec<String>,
 }
 
 /// The raw TOML shape, before ids are parsed into typed keys.
@@ -109,6 +117,9 @@ struct RawFixtures {
     /// The build location, verbatim ([`Fixtures::build_location`]).
     #[serde(default)]
     build_location: Option<String>,
+    /// The region names, verbatim ([`Fixtures::ban_line_regions`]).
+    #[serde(default)]
+    ban_line_regions: Vec<String>,
 }
 
 /// Why a fixtures file could not be turned into [`Fixtures`].
@@ -264,6 +275,7 @@ impl Fixtures {
             mesh_asset,
             experience,
             build_location: raw.build_location,
+            ban_line_regions: raw.ban_line_regions,
         })
     }
 
@@ -272,6 +284,13 @@ impl Fixtures {
     #[must_use]
     pub fn build_location(&self) -> Option<&str> {
         self.build_location.as_deref()
+    }
+
+    /// The regions the `parcel-ban-line` case visits after its login region,
+    /// in order, looking for a parcel that keeps strangers out.
+    #[must_use]
+    pub fn ban_line_regions(&self) -> &[String] {
+        &self.ban_line_regions
     }
 
     /// The region-local position named by [`build_location`](Self::build_location)
@@ -382,6 +401,7 @@ mod tests {
             mesh_asset: None,
             experience: None,
             build_location: None,
+            ban_line_regions: Vec::new(),
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.premade_group(0).is_some());
@@ -405,6 +425,7 @@ mod tests {
             mesh_asset: None,
             experience: None,
             build_location: None,
+            ban_line_regions: Vec::new(),
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.other_avatar().is_some());
@@ -421,6 +442,7 @@ mod tests {
             mesh_asset: Some("44444444-5555-6666-7777-888888888888".to_owned()),
             experience: None,
             build_location: None,
+            ban_line_regions: Vec::new(),
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.mesh_asset().is_some());
@@ -437,6 +459,7 @@ mod tests {
             mesh_asset: Some("not-a-uuid".to_owned()),
             experience: None,
             build_location: None,
+            ban_line_regions: Vec::new(),
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -456,6 +479,7 @@ mod tests {
             mesh_asset: None,
             experience: None,
             build_location: None,
+            ban_line_regions: Vec::new(),
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -476,6 +500,7 @@ mod tests {
             mesh_asset: None,
             experience: None,
             build_location: None,
+            ban_line_regions: Vec::new(),
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -496,6 +521,7 @@ mod tests {
             mesh_asset: None,
             experience: Some("55555555-6666-7777-8888-999999999999".to_owned()),
             build_location: None,
+            ban_line_regions: Vec::new(),
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.experience().is_some());
@@ -512,6 +538,7 @@ mod tests {
             mesh_asset: None,
             experience: Some("not-a-uuid".to_owned()),
             build_location: None,
+            ban_line_regions: Vec::new(),
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -533,6 +560,7 @@ mod tests {
                 mesh_asset: None,
                 experience: None,
                 build_location: Some(location.to_owned()),
+                ban_line_regions: Vec::new(),
             })
         };
         let position = with("uri:Mauve&48&64&30")?.build_position();

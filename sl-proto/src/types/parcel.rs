@@ -64,6 +64,53 @@ impl ParcelRequestResult {
     }
 }
 
+/// Why a grid pushed a parcel the agent is about to collide with — the three
+/// *ban line* sequence ids of an unsolicited `ParcelProperties` (the reference
+/// viewer's `COLLISION_*_PARCEL_SEQ_ID`, `llparcel.h`).
+///
+/// A simulator sends such a record as the agent nears a parcel it may not
+/// enter. It describes that parcel, not the one the agent stands on, and its
+/// [`bitmap`](ParcelInfo::bitmap) is where the ban lines are drawn. See
+/// [`ParcelInfo::collision`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum ParcelCollision {
+    /// The parcel admits only its group, and the agent is not in it
+    /// (`COLLISION_NOT_IN_GROUP_PARCEL_SEQ_ID`, `-20000`).
+    NotInGroup,
+    /// The agent is on the parcel's ban list
+    /// (`COLLISION_BANNED_PARCEL_SEQ_ID`, `-30000`).
+    Banned,
+    /// The parcel admits only its allow list, and the agent is not on it
+    /// (`COLLISION_NOT_ON_LIST_PARCEL_SEQ_ID`, `-40000`).
+    NotOnList,
+}
+
+impl ParcelCollision {
+    /// Classifies a `ParcelProperties` sequence id, `None` for any id that is
+    /// not a ban-line push.
+    #[must_use]
+    pub const fn from_sequence_id(sequence_id: i32) -> Option<Self> {
+        match sequence_id {
+            -20_000 => Some(Self::NotInGroup),
+            -30_000 => Some(Self::Banned),
+            -40_000 => Some(Self::NotOnList),
+            _ => None,
+        }
+    }
+
+    /// The `ParcelProperties` sequence id a simulator sends this push under
+    /// (inverse of [`from_sequence_id`](Self::from_sequence_id)).
+    #[must_use]
+    pub const fn sequence_id(self) -> i32 {
+        match self {
+            Self::NotInGroup => -20_000,
+            Self::Banned => -30_000,
+            Self::NotOnList => -40_000,
+        }
+    }
+}
+
 /// A parcel's ownership status, the `Status` field of `ParcelProperties` (the
 /// viewer's `LLParcel::EOwnershipStatus`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -427,6 +474,15 @@ impl ParcelInfo {
     pub const fn create_group_objects(&self) -> bool {
         self.flags()
             .contains(sl_wire::ParcelFlags::CREATE_GROUP_OBJECTS)
+    }
+
+    /// Why the grid pushed this record, when it is a *ban line* push: a parcel
+    /// the agent is about to collide with and may not enter, rather than the
+    /// parcel it stands on or one it asked about. `None` for every other
+    /// record.
+    #[must_use]
+    pub const fn collision(&self) -> Option<ParcelCollision> {
+        ParcelCollision::from_sequence_id(self.sequence_id)
     }
 
     /// A ban list is in effect (banlines).
@@ -1054,6 +1110,13 @@ impl ParcelCategory {
         }
     }
 }
+
+/// How many entries one `ParcelAccessListUpdate` or `ParcelAccessListReply`
+/// carries before the list continues in the next message: the reference
+/// viewer's `PARCEL_MAX_ENTRIES_PER_PACKET` (`llparcel.h`). 48 entries of 24
+/// bytes keep the message under the 1200-byte packet the protocol assumes,
+/// and it is where OpenSim was measured cutting a 60-entry reply (48 + 12).
+pub const PARCEL_ACCESS_ENTRIES_PER_PACKET: usize = 48;
 
 /// Which parcel access list to query or modify: the allow list or the ban list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1695,7 +1758,25 @@ mod tests {
 
     use pretty_assertions::assert_eq;
 
-    use super::{ParcelUpdate, bitmap_contains_point};
+    use super::{ParcelCollision, ParcelUpdate, bitmap_contains_point};
+
+    /// The three ban-line sequence ids are the reference viewer's, and every
+    /// other id — an arrival's `0`, a crossing's small count, a selection's
+    /// `-10000`, a hover's `-50000` — is not a ban line.
+    #[test]
+    fn only_the_collision_sequence_ids_are_ban_lines() {
+        for (sequence_id, kind) in [
+            (-20_000, ParcelCollision::NotInGroup),
+            (-30_000, ParcelCollision::Banned),
+            (-40_000, ParcelCollision::NotOnList),
+        ] {
+            assert_eq!(ParcelCollision::from_sequence_id(sequence_id), Some(kind));
+            assert_eq!(kind.sequence_id(), sequence_id);
+        }
+        for sequence_id in [0, 1, 7, -1, -10_000, -50_000, 5152] {
+            assert_eq!(ParcelCollision::from_sequence_id(sequence_id), None);
+        }
+    }
 
     /// A 64×64-block (standard 256 m region) membership bitmap with a single block
     /// set at `(block_x, block_y)`; the 4096-bit map is 512 bytes.

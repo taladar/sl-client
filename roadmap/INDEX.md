@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 136 |
-| ready | 364 |
+| ready | 365 |
 | blocked | 110 |
 | in-progress | 20 |
-| bugs | 28 |
-| done | 1321 |
+| bugs | 29 |
+| done | 1322 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2025** |
+| **total** | **2028** |
 
 ## ideas (136)
 
@@ -352,7 +352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (364)
+## ready (365)
 
 ### protocol
 
@@ -783,6 +783,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the current outfit, save to My Outfits
 - [`viewer-parcel-ban-duration`](ready/viewer-parcel-ban-duration.md) — Parcel
   ban duration picker
+- [`viewer-parcel-ban-lines-on-refusal`](ready/viewer-parcel-ban-lines-on-refusal.md)
+  — Draw a parcel's ban line when the grid refuses entry
 - [`viewer-parcel-config-missing-writes`](ready/viewer-parcel-config-missing-writes.md)
   — About Land — the controls that have no protocol write path yet
 - [`viewer-parcel-grid-flood-fill`](ready/viewer-parcel-grid-flood-fill.md) —
@@ -1168,8 +1170,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Object update forms, the interest list and kills on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
   Current Outfit Folder and wearables on each grid
-- [`gridspec-parcel-access-and-ban-lines`](ready/gridspec-parcel-access-and-ban-lines.md)
-  — Parcel access and ban lists, enforcement and ban lines on each grid
 - [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
   classifieds, notes and display names on each grid
 - [`gridspec-region-arrival`](ready/gridspec-region-arrival.md) — Region
@@ -1182,6 +1182,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   full SimulatorFeatures map on each grid
 - [`gridspec-sit-stand`](ready/gridspec-sit-stand.md) — Sitting and standing:
   placement, refusals and alerts on each grid
+- [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
+  down when Second Life pushes a ban line
 - [`gridspec-task-inventory`](ready/gridspec-task-inventory.md) — Task inventory
   reads and writes on each grid
 - [`gridspec-teleport`](ready/gridspec-teleport.md) — Teleport phases, flags,
@@ -1427,8 +1429,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   does (blocked by `gridspec-object-update-stream`)
 - [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
   — Fake grid — enforce parcel access and push ban lines (blocked by
-  `gridspec-parcel-access-and-ban-lines`, `server-fake-grid-parcel-on-movement`,
-  `server-world-agent-movement`)
+  `gridspec-parcel-access-and-ban-lines` (done),
+  `server-fake-grid-parcel-on-movement`, `server-world-agent-movement`)
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles`, `protocol-sim-profile-messages`)
@@ -1605,7 +1607,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (28)
+## bugs (29)
 
 ### protocol
 
@@ -1626,6 +1628,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`prim-path-curve-byte-ignores-reference-mask`](bugs/prim-path-curve-byte-ignores-reference-mask.md)
   — PathCurve::from_byte matches the exact byte where the reference masks 0xf0
+- [`viewer-about-land-list-save-leaves-flags-stale`](bugs/viewer-about-land-list-save-leaves-flags-stale.md)
+  — Saving an allow or ban list on OpenSim leaves About Land's access flags
+  stale
 - [`viewer-bespoke-card-responses-lose-the-button`](bugs/viewer-bespoke-card-responses-lose-the-button.md)
   — Bespoke notification cards resolve every click as "no choice"
 - [`viewer-build-phantom-flag-wrong-bit`](bugs/viewer-build-phantom-flag-wrong-bit.md)
@@ -1677,7 +1682,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1321)
+## done (1322)
 
 ### protocol
 
@@ -4600,6 +4605,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grids
 - [`gridspec-login`](done/gridspec-login.md) — Login response fields, the
   options list and get_grid_info on each grid
+- [`gridspec-parcel-access-and-ban-lines`](done/gridspec-parcel-access-and-ban-lines.md)
+  — Parcel access and ban lists, enforcement and ban lines on each grid
 - [`gridspec-parcel-info-dwell`](done/gridspec-parcel-info-dwell.md) — Parcel
   info, dwell and the remote parcel id on each grid
 - [`gridspec-parcel-management`](done/gridspec-parcel-management.md) — Parcel

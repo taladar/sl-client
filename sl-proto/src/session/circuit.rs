@@ -3798,6 +3798,13 @@ impl Circuit {
     /// selected by `flags`). An empty list clears it (sent as one empty entry, as
     /// the reference viewer does).
     ///
+    /// A list longer than
+    /// [`PARCEL_ACCESS_ENTRIES_PER_PACKET`](crate::PARCEL_ACCESS_ENTRIES_PER_PACKET)
+    /// goes out as
+    /// several messages — *sections* — under one transaction id, each saying
+    /// which section it is and how many there are; a simulator replaces the
+    /// list with the first and appends the rest.
+    ///
     /// `transaction_id` groups the packets of one logical update and, on the
     /// reference simulator, triggers a clear-before-add of the existing entries
     /// for `flags` when it differs from the previous update's id — so a caller
@@ -3811,37 +3818,46 @@ impl Circuit {
         transaction_id: Uuid,
         now: Instant,
     ) -> Result<(), WireError> {
-        let list = if entries.is_empty() {
-            vec![ParcelAccessListUpdateListBlock {
+        let sections: Vec<Vec<ParcelAccessListUpdateListBlock>> = if entries.is_empty() {
+            vec![vec![ParcelAccessListUpdateListBlock {
                 id: Uuid::nil(),
                 time: 0,
                 flags: 0,
-            }]
+            }]]
         } else {
             entries
-                .iter()
-                .map(|entry| ParcelAccessListUpdateListBlock {
-                    id: entry.id,
-                    time: entry.time,
-                    flags: flags | entry.flags.0,
+                .chunks(crate::PARCEL_ACCESS_ENTRIES_PER_PACKET)
+                .map(|section| {
+                    section
+                        .iter()
+                        .map(|entry| ParcelAccessListUpdateListBlock {
+                            id: entry.id,
+                            time: entry.time,
+                            flags: flags | entry.flags.0,
+                        })
+                        .collect()
                 })
                 .collect()
         };
-        let message = AnyMessage::ParcelAccessListUpdate(ParcelAccessListUpdate {
-            agent_data: ParcelAccessListUpdateAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            data: ParcelAccessListUpdateDataBlock {
-                flags,
-                local_id: local_id.0,
-                transaction_id,
-                sequence_id: 1,
-                sections: 1,
-            },
-            list,
-        });
-        self.send(&message, Reliability::Reliable, now)
+        let count = i32::try_from(sections.len()).unwrap_or(i32::MAX);
+        for (sequence_id, list) in (1_i32..).zip(sections) {
+            let message = AnyMessage::ParcelAccessListUpdate(ParcelAccessListUpdate {
+                agent_data: ParcelAccessListUpdateAgentDataBlock {
+                    agent_id: self.agent_id.uuid(),
+                    session_id: self.session_id,
+                },
+                data: ParcelAccessListUpdateDataBlock {
+                    flags,
+                    local_id: local_id.0,
+                    transaction_id,
+                    sequence_id,
+                    sections: count,
+                },
+                list,
+            });
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `ParcelDwellRequest` reliably. The reply is a `ParcelDwellReply`.

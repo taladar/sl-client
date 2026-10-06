@@ -1,73 +1,134 @@
-//! Read a parcel's access (allow) list, add an entry, then restore it.
+//! Read a parcel's allow and ban lists, replace them, and record what the grid
+//! answers at each step — the list half of
+//! `gridspec-parcel-access-and-ban-lines`.
 //!
-//! A parcel's *access list* (the AL_ACCESS "allow" list) and its *ban list*
-//! (AL_BAN) are the two per-avatar lists a land owner keeps to gate entry. The
-//! viewer reads either with a UDP `ParcelAccessListRequest`
-//! ([`Command::RequestParcelAccessList`]) — selecting the list by
-//! [`ParcelAccessScope`] — answered by a `ParcelAccessListReply`
-//! ([`Event::ParcelAccessList`]); and replaces a whole list with a
-//! `ParcelAccessListUpdate` ([`Command::UpdateParcelAccessList`]), where an empty
-//! entry set clears it.
+//! A parcel keeps two per-avatar lists that gate entry: the *access* (allow)
+//! list (`AL_ACCESS`) and the *ban* list (`AL_BAN`). A viewer reads either with
+//! a UDP `ParcelAccessListRequest` ([`Command::RequestParcelAccessList`]),
+//! answered by one or more `ParcelAccessListReply` packets
+//! ([`Event::ParcelAccessList`]), and replaces a whole list with a
+//! `ParcelAccessListUpdate` ([`Command::UpdateParcelAccessList`]), which a grid
+//! does not answer at all.
 //!
-//! Updating a parcel's lists needs land-edit rights, so this case runs as the
-//! **estate-owner** avatar (`--avatar estate-owner`), who owns the region-wide
-//! parcel on the local grid. The flow is a read-modify-verify-restore cycle that
-//! leaves the parcel exactly as it found it:
+//! What the case does depends on whether the agent may edit the parcel at the
+//! region centre.
 //!
-//! 1. Wait for the region to become active.
-//! 2. Learn the region-centre parcel's *region-local* id (and confirm we own it)
-//!    from a `ParcelPropertiesRequest` reply.
-//! 3. Read the current allow list *and* ban list (the two [`ParcelAccessScope`]s)
-//!    and record their sizes.
-//! 4. Add one entry (a known other avatar) to the allow list and re-read it,
-//!    asserting the entry is now present.
-//! 5. Restore the allow list to exactly its original entries and re-read it,
-//!    asserting the added entry is gone again.
+//! **Everyone** reads both lists and the record says whether each request was
+//! answered, in how many packets, and what the entries carry.
 //!
-//! Each `ParcelAccessListUpdate` *replaces* the whole list for its scope, so the
-//! runtime mints a fresh transaction id per update; without that the reference
-//! simulator would append to the list instead of clearing it first (the runtime
-//! handling of [`Command::UpdateParcelAccessList`]), and neither the add nor the
-//! restore would round-trip cleanly.
+//! **An agent with land rights** (the estate owner on OpenSim, the primary
+//! avatar on the fake grid, which enforces no rights):
 //!
-//! A simulator represents an *empty* list as a single nil-agent placeholder
-//! block, which the client drops on decode (as the reference viewer does), so an
-//! empty list surfaces as zero entries here.
+//! 1. replaces the ban list with a permanent and a timed entry and the allow
+//!    list with one entry, then reads both back, with the parcel record, to see
+//!    what the grid kept of each entry (its flags, its expiry) and whether
+//!    saving a list switched the parcel's `USE_BAN_LIST` / `USE_ACCESS_LIST`
+//!    flags on;
+//! 2. replaces the ban list with `LONG_LIST` entries — more than one
+//!    `ParcelAccessListUpdate` holds — and reads it back, counting the reply's
+//!    packets;
+//! 3. restores both lists and, where the grid changed them, the parcel's flags.
 //!
-//! `1av`, `[both]`. On OpenSim's Default Region the single region-wide parcel is
-//! owned by the estate owner and starts with empty allow/ban lists, so the added
-//! entry is the list's only member and the restore clears it back to empty.
-//! Second Life enforces the same message flow.
+//! **An agent without land rights** (any resident on aditi) sends the same
+//! one-entry ban list and records what a refusal looks like: the alerts in the
+//! next seconds, whether the parcel is pushed back, and whether the list read
+//! afterwards holds the entry. A grid that took it means the avatar can edit
+//! the land after all; the case restores the list and records `partial`.
+//!
+//! Every entry is a synthetic id: a list is a list of ids and a simulator does
+//! not resolve them, so a real avatar would only add a fixture. The enforcement
+//! of the lists — what a banned avatar meets at the parcel line — is
+//! [`super::parcel_ban_enforcement`].
+//!
+//! `1av`, `[both]`, and offline against both fake flavours. A live OpenSim run
+//! has to be the **estate-owner** avatar to take the owner's path.
 
-use std::time::Instant;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use sl_client_tokio::{
-    AgentKey, Command, Event, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelInfo,
-    RegionLocalParcelId, ScopedParcelId,
+    Command, Event, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelInfo,
+    RegionLocalParcelId, ScopedParcelId, Uuid,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
+use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{
-    LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, fixtures, is_opensim, secs_metric,
-};
+use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, check_eq, is_fake};
 
 /// The western/southern edge of the queried square, in region metres — a 4×4 m
-/// square centred on the region centre (128, 128), so the reply describes the
-/// parcel at the middle of the region.
+/// square at the region centre, the parcel the other parcel cases read.
 const SQUARE_WEST_SOUTH: f32 = 124.0;
 
-/// The eastern/northern edge of the queried square, in region metres (see
-/// [`SQUARE_WEST_SOUTH`]).
+/// The eastern/northern edge of the queried square, in region metres.
 const SQUARE_EAST_NORTH: f32 = 128.0;
 
-/// A distinctive sequence id, echoed back in the `ParcelProperties` reply so the
-/// awaited reply is *our* query's answer and not an unsolicited on-entry one.
-/// Distinct from the other Phase 10 cases' ids so the three never alias.
-const SEQUENCE_ID: i32 = 5152;
+/// The first sequence id of this case's parcel queries; each query takes the
+/// next. Distinct from every other case's ids so the replies never alias.
+const SEQUENCE_BASE: i32 = 5152;
 
-/// Reads and updates a parcel's access (allow) list, restoring it afterwards.
+/// How long a list request waits for its first reply packet before the record
+/// says the grid did not answer.
+const LIST_REPLY_WINDOW: Duration = Duration::from_secs(10);
+
+/// How long after a reply packet the case keeps collecting further packets of
+/// the same list.
+const LIST_PACKET_WINDOW: Duration = Duration::from_secs(2);
+
+/// How long to watch for alerts and parcel pushes after an update.
+const UPDATE_WATCH: Duration = Duration::from_secs(4);
+
+/// How many entries the long list holds: more than the 48 the reference viewer
+/// puts in one `ParcelAccessListUpdate` (`PARCEL_MAX_ENTRIES_PER_PACKET`), so
+/// the update goes out in two sections and the reply cannot fit one datagram.
+const LONG_LIST: usize = 60;
+
+/// How far in the future the timed ban expires, in seconds.
+const TIMED_BAN_SECS: i32 = 3600;
+
+/// The base of the synthetic agent ids the case puts on the lists; entry `n`
+/// is this plus `n`.
+const SYNTHETIC_BASE: u128 = 0x0000_0000_0000_4000_8000_0000_acce_5500;
+
+/// Whether a grid answers a list request from an agent with no rights over the
+/// parcel — (allow list, ban list).
+const ANSWERS_A_STRANGER: Measured<(bool, bool)> = Measured {
+    second_life: (true, true),
+    opensim: (true, true),
+    source: "parcel-access-list on aditi and OpenSim (2026-10-05, book/src/gridspec/land.md)",
+};
+
+/// The flags a grid returns on an entry of the (allow list, ban list): OpenSim
+/// stamps every entry with its list's own bit, whatever the update carried.
+const ENTRY_FLAGS: Measured<(u32, u32)> = Measured {
+    second_life: (0x1, 0x2),
+    opensim: (0x1, 0x2),
+    source: "parcel-access-list on OpenSim (2026-10-05, book/src/gridspec/land.md); \
+             Second Life is not measured (no land) and follows the reference viewer",
+};
+
+/// Whether saving a non-empty list switches the parcel's own
+/// (`USE_ACCESS_LIST`, `USE_BAN_LIST`) flag on. OpenSim does, and switches it
+/// off again when the list is emptied; a Second Life parcel's flags are the
+/// About Land checkboxes and nothing else.
+const UPDATE_SETS_THE_FLAG: Measured<(bool, bool)> = Measured {
+    second_life: (false, false),
+    opensim: (true, true),
+    source: "parcel-access-list on OpenSim (2026-10-05, book/src/gridspec/land.md); \
+             Second Life is not measured (no land) and follows the reference viewer",
+};
+
+/// What a refused update is answered with: whether any alert arrived, and
+/// whether the parcel was pushed back. Second Life says no in a plain
+/// `AlertMessage` ("You do not have permission to update the ban list on your
+/// group land." on a group's parcel); OpenSim drops the update silently.
+const REFUSAL: Measured<(bool, bool)> = Measured {
+    second_life: (true, false),
+    opensim: (false, false),
+    source: "parcel-access-list on aditi and OpenSim (2026-10-05, book/src/gridspec/land.md)",
+};
+
+/// Reads and replaces a parcel's allow and ban lists, recording each answer.
 #[derive(Debug)]
 pub struct ParcelAccessList;
 
@@ -77,35 +138,18 @@ impl GridTest for ParcelAccessList {
     }
 
     fn description(&self) -> &'static str {
-        "Read a parcel's access list, add an entry, then restore it"
+        "Read a parcel's allow and ban lists, replace them, and record each answer"
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
-            // Resolve the "other avatar" to place on the list. A configured
-            // fixture wins (the Second Life path); OpenSim falls back to the
-            // local secondary test avatar. With neither, the dataset is
-            // legitimately incomplete (an aditi run with no fixture) → partial.
             let grid = ctx.grid();
-            let entry_agent: AgentKey = match ctx.other_avatar() {
-                Some(other) => other,
-                None if is_opensim(grid) => fixtures::opensim_secondary_avatar()?,
-                None => {
-                    ctx.mark_partial(
-                        "no other-avatar fixture configured for this grid \
-                         (set `other_avatar` in fixtures.<grid>.toml)",
-                    );
-                    return Ok(());
-                }
-            };
-
             let session = ctx.primary();
             session.wait_for_region(REGION_TIMEOUT).await?;
-
             let circuit = session.circuit_id().ok_or_else(|| {
                 TestFailure::Assertion("login established no root circuit id".to_owned())
             })?;
@@ -113,156 +157,443 @@ impl GridTest for ParcelAccessList {
                 .agent_id()
                 .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
 
-            // 1. Learn the parcel's region-local id and owner from a
-            //    ParcelProperties reply (the access-list requests are keyed on the
-            //    region-local id, and the update needs us to own the parcel).
-            session
-                .send(Command::RequestParcelProperties {
-                    west: SQUARE_WEST_SOUTH,
-                    south: SQUARE_WEST_SOUTH,
-                    east: SQUARE_EAST_NORTH,
-                    north: SQUARE_EAST_NORTH,
-                    sequence_id: SEQUENCE_ID,
-                    snap_selection: false,
-                })
-                .await?;
-            let parcel: ParcelInfo = session
-                .wait_for(LONG_TIMEOUT, |event| match event {
-                    Event::ParcelProperties(parcel) if parcel.sequence_id == SEQUENCE_ID => {
-                        Some((**parcel).clone())
-                    }
-                    _ => None,
-                })
-                .await?;
-            check(
-                parcel.request_result.has_data(),
-                &format!(
-                    "parcel query returned no data (request_result: {:?})",
-                    parcel.request_result
-                ),
-            )?;
-            let local_id = parcel.local_id;
-            let scoped = ScopedParcelId::new(circuit, local_id);
-            check_eq(
-                "parcel owner is the logged-in (estate-owner) avatar",
-                &parcel.owner.uuid(),
-                &agent.uuid(),
-            )?;
-
-            // 2. Read the current allow and ban lists.
-            let allow_start = Instant::now();
-            let initial_allow =
-                read_access_list(session, scoped, local_id, ParcelAccessScope::Access).await?;
-            let allow_read_elapsed = allow_start.elapsed().as_secs_f64();
-            let initial_ban =
-                read_access_list(session, scoped, local_id, ParcelAccessScope::Ban).await?;
-            check(
-                !initial_allow
-                    .iter()
-                    .any(|entry| entry.id == entry_agent.uuid()),
-                "the other avatar is already on the allow list before the test added it",
-            )?;
-
-            // 3. Add the other avatar to the allow list, then re-read it and
-            //    assert the entry landed.
-            let added_entry = ParcelAccessEntry {
-                id: entry_agent.uuid(),
-                // Never expires.
-                time: 0,
-                // Just the list scope; no experience sub-flags.
-                flags: ParcelAccessFlags::NONE,
+            let mut sequence = SEQUENCE_BASE;
+            let parcel = read_parcel(session, next(&mut sequence)).await?;
+            if !parcel.request_result.has_data() {
+                ctx.mark_partial("the agent is standing on land the region has no parcel for");
+                return Ok(());
+            }
+            let lists = Lists {
+                scoped: ScopedParcelId::new(circuit, parcel.local_id),
+                local_id: parcel.local_id,
             };
-            let update_start = Instant::now();
-            session
-                .send(Command::UpdateParcelAccessList {
-                    local_id: scoped,
-                    scope: ParcelAccessScope::Access,
-                    entries: vec![added_entry],
-                })
-                .await?;
-            let after_add =
-                read_access_list(session, scoped, local_id, ParcelAccessScope::Access).await?;
-            let update_elapsed = update_start.elapsed().as_secs_f64();
-            check(
-                after_add.iter().any(|entry| entry.id == entry_agent.uuid()),
-                "the added avatar was not on the allow list after the update",
-            )?;
+            // The fake grid enforces no land rights, so its avatar edits any
+            // parcel.
+            let may_edit = is_fake(grid) || parcel.owner.uuid() == agent.uuid();
 
-            // 4. Restore the allow list to exactly its original entries (an empty
-            //    original clears it) and confirm the added entry is gone.
-            session
-                .send(Command::UpdateParcelAccessList {
-                    local_id: scoped,
-                    scope: ParcelAccessScope::Access,
-                    entries: initial_allow.clone(),
-                })
-                .await?;
-            let after_restore =
-                read_access_list(session, scoped, local_id, ParcelAccessScope::Access).await?;
-            check(
-                !after_restore
-                    .iter()
-                    .any(|entry| entry.id == entry_agent.uuid()),
-                "the added avatar was still on the allow list after the restore",
-            )?;
-            check_eq(
-                "allow list size restored to its original",
-                &after_restore.len(),
-                &initial_allow.len(),
-            )?;
-
+            // What anyone may read.
+            let allow = lists.read(session, ParcelAccessScope::Access).await?;
+            let ban = lists.read(session, ParcelAccessScope::Ban).await?;
             let metrics = ctx.metrics();
-            metrics.set_timing(&secs_metric("access_list_read"), allow_read_elapsed);
-            metrics.set_timing(&secs_metric("access_list_update"), update_elapsed);
-            metrics.set("local_id", i64::from(local_id.0));
+            metrics.set("may_edit", may_edit);
             metrics.set("owner_id", parcel.owner.uuid().to_string());
-            metrics.set(
-                "initial_allow_count",
-                i64::try_from(initial_allow.len()).unwrap_or(-1),
-            );
-            metrics.set(
-                "initial_ban_count",
-                i64::try_from(initial_ban.len()).unwrap_or(-1),
-            );
-            metrics.set(
-                "after_add_count",
-                i64::try_from(after_add.len()).unwrap_or(-1),
-            );
-            metrics.set(
-                "after_restore_count",
-                i64::try_from(after_restore.len()).unwrap_or(-1),
-            );
-            Ok(())
+            metrics.set("initial_allow", allow.describe());
+            metrics.set("initial_ban", ban.describe());
+            metrics.set("initial_flags", describe_flags(&parcel));
+
+            if may_edit {
+                check(
+                    allow.answered && ban.answered,
+                    "the grid did not answer the land owner's list requests",
+                )?;
+                let outcome = edit(ctx, &lists, &mut sequence).await;
+                // Whatever the edit legs did, the lists and the flags go back.
+                let restored = restore(ctx.primary(), &lists, &parcel, &allow, &ban).await;
+                outcome.and(restored)
+            } else {
+                ANSWERS_A_STRANGER.check(
+                    "list requests of an agent without land rights answered (allow, ban)",
+                    grid,
+                    &(allow.answered, ban.answered),
+                )?;
+                refused(ctx, &lists, &ban).await
+            }
         })
     }
 }
 
-/// Requests a parcel's `scope` (allow or ban) list and returns its entries.
+/// The owner's legs: a short list on each scope, then a long ban list.
 ///
 /// # Errors
 ///
-/// Propagates the send / [`Session::wait_for`] failures, or times out if the
-/// simulator never answers with a matching [`Event::ParcelAccessList`].
-async fn read_access_list(
+/// Returns a [`TestFailure`] for a send or wait failure, a list that does not
+/// read back as it was written, or an answer that differs from the measured
+/// one.
+async fn edit(ctx: &mut TestContext, lists: &Lists, sequence: &mut i32) -> Result<(), TestFailure> {
+    let grid = ctx.grid();
+    let session = ctx.primary();
+    let expiry = unix_now().saturating_add(TIMED_BAN_SECS);
+    let permanent = entry(0, 0);
+    let timed = entry(1, expiry);
+    let allowed = entry(2, 0);
+
+    // 1. A short list on each scope.
+    lists
+        .write(session, ParcelAccessScope::Ban, vec![permanent, timed])
+        .await?;
+    lists
+        .write(session, ParcelAccessScope::Access, vec![allowed])
+        .await?;
+    let (alerts, pushed) = watch(session, lists.local_id).await?;
+    let ban = lists.read(session, ParcelAccessScope::Ban).await?;
+    let allow = lists.read(session, ParcelAccessScope::Access).await?;
+    let after = read_parcel(session, next(sequence)).await?;
+    let kept_permanent = ban.entry(permanent.id);
+    let kept_timed = ban.entry(timed.id);
+    let kept_allowed = allow.entry(allowed.id);
+
+    // 2. A list longer than one update message holds.
+    let long: Vec<ParcelAccessEntry> = (0..LONG_LIST)
+        .map(|index| entry(u128::try_from(index).unwrap_or(0).saturating_add(100), 0))
+        .collect();
+    lists
+        .write(session, ParcelAccessScope::Ban, long.clone())
+        .await?;
+    let long_read = lists.read(session, ParcelAccessScope::Ban).await?;
+
+    let metrics = ctx.metrics();
+    metrics.set("update_alerts", alerts.join(" | "));
+    metrics.set("update_pushed_parcel", pushed);
+    metrics.set("ban_after_update", ban.describe());
+    metrics.set("allow_after_update", allow.describe());
+    metrics.set("flags_after_update", describe_flags(&after));
+    metrics.set(
+        "timed_ban_expiry_offset",
+        kept_timed.map_or_else(
+            || "missing".to_owned(),
+            |kept| kept.time.saturating_sub(expiry).to_string(),
+        ),
+    );
+    metrics.set("long_list_read", long_read.describe());
+
+    check_eq("ban list size after the update", &ban.entries.len(), &2)?;
+    check_eq("allow list size after the update", &allow.entries.len(), &1)?;
+    let (Some(kept_permanent), Some(kept_timed), Some(kept_allowed)) =
+        (kept_permanent, kept_timed, kept_allowed)
+    else {
+        return Err(TestFailure::Assertion(
+            "an entry the update wrote did not read back".to_owned(),
+        ));
+    };
+    check_eq("the permanent ban's expiry", &kept_permanent.time, &0)?;
+    check_eq("the timed ban's expiry", &kept_timed.time, &expiry)?;
+    ENTRY_FLAGS.check(
+        "entry flags read back (allow list, ban list)",
+        grid,
+        &(kept_allowed.flags.0, kept_permanent.flags.0),
+    )?;
+    UPDATE_SETS_THE_FLAG.check(
+        "saving a list switched the parcel flag on (access list, ban list)",
+        grid,
+        &(after.use_access_list(), after.use_ban_list()),
+    )?;
+    check_eq(
+        "long ban list size read back",
+        &long_read.entries.len(),
+        &LONG_LIST,
+    )?;
+    check(
+        long.iter()
+            .all(|written| long_read.entry(written.id).is_some()),
+        "an entry of the long ban list did not read back",
+    )
+}
+
+/// Puts both lists back as they were read, and the parcel's flags where the
+/// grid changed them on the way.
+///
+/// # Errors
+///
+/// Returns a [`TestFailure`] for a send or wait failure, or a list that does
+/// not read back at its original size.
+async fn restore(
     session: &mut Session,
+    lists: &Lists,
+    original: &ParcelInfo,
+    allow: &ListRead,
+    ban: &ListRead,
+) -> Result<(), TestFailure> {
+    lists
+        .write(session, ParcelAccessScope::Ban, ban.entries.clone())
+        .await?;
+    lists
+        .write(session, ParcelAccessScope::Access, allow.entries.clone())
+        .await?;
+    let ban_now = lists.read(session, ParcelAccessScope::Ban).await?;
+    let allow_now = lists.read(session, ParcelAccessScope::Access).await?;
+    check_eq(
+        "ban list size restored",
+        &ban_now.entries.len(),
+        &ban.entries.len(),
+    )?;
+    check_eq(
+        "allow list size restored",
+        &allow_now.entries.len(),
+        &allow.entries.len(),
+    )?;
+    let now = read_parcel(session, SEQUENCE_BASE.saturating_add(90)).await?;
+    if now.raw_parcel_flags != original.raw_parcel_flags {
+        session
+            .send(Command::UpdateParcel(Box::new(original.to_update())))
+            .await?;
+        let echoed = super::parcel_edit::await_echo(session, lists.local_id).await?;
+        check_eq(
+            "parcel flags restored",
+            &echoed.raw_parcel_flags,
+            &original.raw_parcel_flags,
+        )?;
+    }
+    Ok(())
+}
+
+/// The stranger's leg: send a ban list the grid should refuse, and record what
+/// comes back.
+///
+/// # Errors
+///
+/// Returns a [`TestFailure`] for a send or wait failure or an answer that
+/// differs from the measured one.
+async fn refused(
+    ctx: &mut TestContext,
+    lists: &Lists,
+    ban_before: &ListRead,
+) -> Result<(), TestFailure> {
+    let grid = ctx.grid();
+    let session = ctx.primary();
+    let unwanted = entry(0, 0);
+    let mut attempted = ban_before.entries.clone();
+    attempted.push(unwanted);
+    lists
+        .write(session, ParcelAccessScope::Ban, attempted)
+        .await?;
+    let (alerts, pushed) = watch(session, lists.local_id).await?;
+    let ban_after = lists.read(session, ParcelAccessScope::Ban).await?;
+    let taken = ban_after.entry(unwanted.id).is_some();
+    let metrics = ctx.metrics();
+    metrics.set("refused_alerts", alerts.join(" | "));
+    metrics.set("refused_pushed_parcel", pushed);
+    metrics.set("ban_after_refusal", ban_after.describe());
+    if taken {
+        let session = ctx.primary();
+        lists
+            .write(session, ParcelAccessScope::Ban, ban_before.entries.clone())
+            .await?;
+        ctx.mark_partial("the grid took the list: the avatar can edit this land");
+        return Ok(());
+    }
+    REFUSAL.check(
+        "refused list update (an alert arrived, the parcel was pushed back)",
+        grid,
+        &(!alerts.is_empty(), pushed),
+    )
+}
+
+/// The parcel whose lists the case reads and writes.
+struct Lists {
+    /// The parcel's id, scoped to the root circuit.
     scoped: ScopedParcelId,
+    /// The parcel's region-local id, to match replies by.
     local_id: RegionLocalParcelId,
-    scope: ParcelAccessScope,
-) -> Result<Vec<ParcelAccessEntry>, TestFailure> {
+}
+
+impl Lists {
+    /// Requests the `scope` list and collects every packet of the answer.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the send and wait failures other than the waits' own
+    /// expected timeouts.
+    async fn read(
+        &self,
+        session: &mut Session,
+        scope: ParcelAccessScope,
+    ) -> Result<ListRead, TestFailure> {
+        session
+            .send(Command::RequestParcelAccessList {
+                local_id: self.scoped,
+                scope,
+            })
+            .await?;
+        let mut read = ListRead::default();
+        let mut window = LIST_REPLY_WINDOW;
+        loop {
+            let packet = session
+                .wait_for(window, |event| match event {
+                    Event::ParcelAccessList {
+                        local_id,
+                        scope: reply_scope,
+                        entries,
+                    } if local_id.id() == self.local_id && *reply_scope == scope => {
+                        Some(entries.clone())
+                    }
+                    _ => None,
+                })
+                .await;
+            match packet {
+                Ok(entries) => {
+                    read.answered = true;
+                    read.packets = read.packets.saturating_add(1);
+                    for entry in entries {
+                        if !read.entries.iter().any(|held| held.id == entry.id) {
+                            read.entries.push(entry);
+                        }
+                    }
+                    window = LIST_PACKET_WINDOW;
+                }
+                Err(TestFailure::Timeout(_)) => return Ok(read),
+                Err(other) => return Err(other),
+            }
+        }
+    }
+
+    /// Replaces the `scope` list with `entries`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the send failure.
+    async fn write(
+        &self,
+        session: &Session,
+        scope: ParcelAccessScope,
+        entries: Vec<ParcelAccessEntry>,
+    ) -> Result<(), TestFailure> {
+        session
+            .send(Command::UpdateParcelAccessList {
+                local_id: self.scoped,
+                scope,
+                entries,
+            })
+            .await
+    }
+}
+
+/// One list as a grid answered it.
+#[derive(Default)]
+struct ListRead {
+    /// Whether any reply packet arrived.
+    answered: bool,
+    /// How many reply packets arrived.
+    packets: usize,
+    /// The entries of every packet, by first arrival.
+    entries: Vec<ParcelAccessEntry>,
+}
+
+impl ListRead {
+    /// The entry for `id`, if the list holds one.
+    fn entry(&self, id: Uuid) -> Option<ParcelAccessEntry> {
+        self.entries.iter().find(|entry| entry.id == id).copied()
+    }
+
+    /// The read as the record shows it: `unanswered`, or the entry and packet
+    /// counts with the distinct entry flags.
+    fn describe(&self) -> String {
+        if !self.answered {
+            return "unanswered".to_owned();
+        }
+        let mut flags: Vec<u32> = self.entries.iter().map(|entry| entry.flags.0).collect();
+        flags.sort_unstable();
+        flags.dedup();
+        format!(
+            "{} entries in {} packets, entry flags {flags:?}",
+            self.entries.len(),
+            self.packets
+        )
+    }
+}
+
+/// Collects the text of every alert that arrives in [`UPDATE_WATCH`], and
+/// whether the parcel `local_id` was pushed in it. The predicate never
+/// matches, so the wait always ends in its own timeout.
+///
+/// # Errors
+///
+/// Propagates the wait's failures other than that timeout.
+async fn watch(
+    session: &mut Session,
+    local_id: RegionLocalParcelId,
+) -> Result<(Vec<String>, bool), TestFailure> {
+    let mut alerts = Vec::new();
+    let mut pushed = false;
+    let outcome = session
+        .wait_for(UPDATE_WATCH, |event| {
+            match event {
+                Event::ParcelProperties(parcel) if parcel.local_id == local_id => pushed = true,
+                Event::AlertMessage {
+                    message,
+                    alert_info,
+                    ..
+                } => {
+                    // A keyed-only alert has an empty plain message; its first
+                    // structured id says what arrived.
+                    let text = if message.trim().is_empty() {
+                        alert_info
+                            .first()
+                            .map(|info| info.message.clone())
+                            .unwrap_or_default()
+                    } else {
+                        message.clone()
+                    };
+                    alerts.push(text);
+                }
+                Event::AgentAlertMessage { message, .. } => alerts.push(message.clone()),
+                _ => {}
+            }
+            None::<()>
+        })
+        .await;
+    match outcome {
+        Ok(()) | Err(TestFailure::Timeout(_)) => Ok((alerts, pushed)),
+        Err(other) => Err(other),
+    }
+}
+
+/// Reads the parcel at the region centre under `sequence_id`, waiting for the
+/// reply that echoes it.
+///
+/// # Errors
+///
+/// Propagates the send and wait failures.
+async fn read_parcel(session: &mut Session, sequence_id: i32) -> Result<ParcelInfo, TestFailure> {
     session
-        .send(Command::RequestParcelAccessList {
-            local_id: scoped,
-            scope,
+        .send(Command::RequestParcelProperties {
+            west: SQUARE_WEST_SOUTH,
+            south: SQUARE_WEST_SOUTH,
+            east: SQUARE_EAST_NORTH,
+            north: SQUARE_EAST_NORTH,
+            sequence_id,
+            snap_selection: false,
         })
         .await?;
     session
-        .wait_for(REPLY_TIMEOUT, |event| match event {
-            Event::ParcelAccessList {
-                local_id: reply_id,
-                scope: reply_scope,
-                entries,
-            } if reply_id.id() == local_id && *reply_scope == scope => Some(entries.clone()),
+        .wait_for(LONG_TIMEOUT, |event| match event {
+            Event::ParcelProperties(parcel) if parcel.sequence_id == sequence_id => {
+                Some((**parcel).clone())
+            }
             _ => None,
         })
         .await
+}
+
+/// The synthetic list entry `index`, expiring at `time` (`0` for never).
+const fn entry(index: u128, time: i32) -> ParcelAccessEntry {
+    ParcelAccessEntry {
+        id: Uuid::from_u128(SYNTHETIC_BASE.saturating_add(index)),
+        time,
+        flags: ParcelAccessFlags::NONE,
+    }
+}
+
+/// The two list flags of a parcel, as the record shows them.
+fn describe_flags(parcel: &ParcelInfo) -> String {
+    format!(
+        "use_access_list={} use_ban_list={}",
+        parcel.use_access_list(),
+        parcel.use_ban_list()
+    )
+}
+
+/// The current Unix time in seconds, as a list entry's expiry counts it.
+fn unix_now() -> i32 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|elapsed| i32::try_from(elapsed.as_secs()).ok())
+        .unwrap_or(i32::MAX)
+}
+
+/// Takes the next sequence id.
+const fn next(sequence: &mut i32) -> i32 {
+    let id = *sequence;
+    *sequence = sequence.wrapping_add(1);
+    id
 }

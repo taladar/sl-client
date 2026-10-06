@@ -9,7 +9,8 @@ themselves are described in
 Measured on 2026-10-05 on Second Life's beta grid (aditi) and the local OpenSim
 standalone by the conformance cases `parcel-properties`, `parcel-crossing`,
 `parcel-edit`, `parcel-edit-refused`, `parcel-divide-join`,
-`parcel-object-owners` and `parcel-info-dwell`. Each case holds both grids, and
+`parcel-object-owners`, `parcel-info-dwell`, `parcel-access-list`,
+`parcel-ban-enforcement` and `parcel-ban-line`. Each case holds both grids, and
 both fake-grid flavours, to these answers as `Measured` constants. The aditi
 test accounts own no land and there is no known way for a resident to get some
 there (`gridspec-aditi-test-land`), so on Second Life only what a resident
@@ -211,3 +212,103 @@ A return on OpenSim cannot take one object: it takes everything its owner has
 on the parcel. `parcel-object-owners` therefore rezzes and returns the object
 of an account that owns nothing anywhere on the local grid, and tallies and
 returns it as the land owner.
+
+## Access
+
+Who may enter a parcel: its **allow list** (`AL_ACCESS`) and **ban list**
+(`AL_BAN`), read with `ParcelAccessListRequest` and replaced whole with
+`ParcelAccessListUpdate`, and what an avatar the lists keep out meets at the
+parcel's edge. Measured on 2026-10-05 by `parcel-access-list` (aditi as a
+resident without land, on a group's sandbox parcel; OpenSim as the estate owner
+and as a resident; both fake flavours), `parcel-ban-enforcement` (OpenSim: the
+estate owner bans a second avatar that holds no estate rights) and
+`parcel-ban-line` (aditi: a resident walks into somebody else's closed parcel).
+The UDP shapes are read from the raw messages: `RUST_LOG=sl_proto::wire=trace`
+logs every inbound message, each block and field, before the session reads
+anything out of it.
+
+### The lists
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `ParcelAccessListReply` transport | UDP | UDP | UDP |
+| a request from an agent with no rights over the parcel | answered | answered, with the entries (a banned resident reads the ban on itself) | answered, both flavours |
+| the reply's `SequenceID` | 0 | 0 | the request's, which a viewer sends as 0 |
+| an empty list | one block: nil id, `Time` 0, `Flags` **0** | one block: nil id, `Time` 0, `Flags` **the list's bit** | as its grid (`ParcelPolicy::empty_list_placeholder_names_its_list`) |
+| an entry's `Flags` | not measured (no land) | the list's bit — `0x1` allow, `0x2` ban — whatever the update carried | what the update carried, which from this client is the list's bit |
+| an entry's `Time` | not measured | the expiry as written, a Unix time; 0 for never | the same |
+| a list longer than one packet | not measured | several replies under the same header: 60 entries came as 48 + 12 | split at 48, both flavours |
+| a `ParcelAccessListUpdate` | not measured | not answered: no reply, no alert, no parcel pushed | the same |
+| saving a non-empty list | not measured | **switches the parcel's `USE_ACCESS_LIST` / `USE_BAN_LIST` flag on**; emptying the list switches it off | `FakeOpensim` the same; `FakeSl` leaves the flags alone (`ParcelPolicy::list_update_sets_use_flag`) |
+| an update from an agent with no rights | refused with a plain `AlertMessage`: "You do not have permission to update the ban list on your group land." | dropped silently | — (the fake grid enforces no land rights) |
+
+A viewer unions the packets of a reply and empties its copy when it *asks*,
+not when a packet lands; the reference does the same (`unpackAccessEntries`
+inserts into a map `sendParcelAccessListRequest` cleared). In the other
+direction the reference cuts a long list into **sections** of 48 entries
+(`PARCEL_MAX_ENTRIES_PER_PACKET`), numbered from 1 under one transaction id,
+and a simulator replaces the list with the first and appends the rest. This
+client sent every entry in one message until 2026-10-05, which at Second
+Life's 300-entry limit is a 7 kB datagram; it sends sections now.
+
+OpenSim's flag side effect has teeth. Adding one resident to a parcel's allow
+list **closes the parcel to everybody else** without the About Land checkbox
+being touched, and nothing tells the viewer: its "anyone can visit" box stays
+ticked, and the next About Land save writes that stale flag back and opens the
+parcel again (`viewer-about-land-list-save-leaves-flags-stale`).
+
+`USE_ACCESS_GROUP` on its own closes nothing. The flag *admits* the parcel's
+group to a parcel that `USE_ACCESS_LIST` has closed; an aditi parcel with only
+the group flag let a stranger walk in, and OpenSim reads it the same way
+(`LandObject.IsRestrictedFromLand`).
+
+### At the parcel's edge
+
+What an avatar the lists keep out meets. On OpenSim every row is
+`parcel-ban-enforcement`; on Second Life `parcel-ban-line`, against a 64 m²
+parcel on aditi flagged `USE_ACCESS_LIST` and `USE_ACCESS_GROUP`. A *ban* on
+Second Life is not measured: it needs land to ban somebody from.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| who is never kept out | not measured | the parcel's owner, estate owner and managers, administrators (`LandObject.IsBannedFromLand`) | — nobody is kept out (`server-fake-grid-parcel-access-enforcement`) |
+| the refusal | `AlertMessage` naming a notification: `NOTIFY: Cannot enter parcel: not a group member` | `AlertMessage` with the text: "You are banned from parcel" / "You do not have access to the parcel" | — |
+| walking in | stopped at the line; stays there while it keeps walking | — (flown, below) | — |
+| flying in | stopped, then **lifted** straight up — 40 m in two seconds — and let across above the line's top, about 50 m over the ground | crosses the line, is alerted and put back just outside it, again and again while it keeps flying | — |
+| teleporting in | not measured | the teleport lands (`TeleportLocal` to the spot asked for); the avatar is alerted and moved out | — |
+| banned while standing on the parcel | not measured | nothing until it moves; then alerted and put outside | — |
+| after the ban is lifted | not measured | walks in at once | — |
+| how high the line reaches | about 50 m above the ground for an allow list (the lifted avatar crossed at 80 m over ground at 35 m; the reference viewer's `PARCEL_HEIGHT` is 50 m); a ban's is not measured — the reference draws 5000 m (`BAN_HEIGHT`) | 100 m above the ground, ban and allow list alike (`BanLineSafeHeight`, from the source, `EnforceBans`) | — |
+
+### The ban line
+
+The fence a viewer draws is not a message of its own. It is an ordinary
+`ParcelProperties` for the parcel the avatar may not enter — every block and
+field of a normal record — under one of three **sequence ids** the reference
+viewer reserves (`COLLISION_*_PARCEL_SEQ_ID`), with `SnapSelection` false and
+`RequestResult` 0. Its `Bitmap` is the closed parcel's own squares, which is
+where the fence goes. The client reads the three ids as
+`ParcelInfo::collision()`.
+
+| sequence id | meaning | Second Life | OpenSim |
+| --- | --- | --- | --- |
+| `-20000` | not in the parcel's group | sent, for a parcel flagged for both list and group | never sent: OpenSim has only the other two |
+| `-30000` | banned | not measured | sent |
+| `-40000` | not on the allow list | not measured | sent |
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| transport | event queue | event queue | — |
+| when it is pushed | **not pinned down.** Four records 0.4–0.5 s apart, starting 0.2 s after the arrival push, on two of four logins 7–12 m from the parcel; none on a dozen approaches by air and on foot, refused ones included (`gridspec-sl-ban-line-trigger`) | on every significant movement near a parcel that keeps the avatar out, nearest parcel only (`SendOutNearestBanLine`): one or two before the avatar reaches the line, another each time it is put back | — |
+| off-switch | — | `ShowParcelBansLines` and `DisableParcelBans` in `[LandManagement]`; never on a tax-free estate | — |
+
+A viewer therefore cannot wait for a ban line to learn that it was refused:
+the alert is the refusal, and on Second Life the line may not come at all. The
+reference viewer works the same way round — a ban line that arrives is kept,
+and it is the "Cannot enter parcel" alert that shows the fence for ten seconds
+(`process_alert_message`, `ShowBanLines` in its collision mode).
+
+This viewer raises Second Life's named refusals as the notifications they
+name since 2026-10-05; before that it showed the raw
+`NOTIFY: Cannot enter parcel: …` string. It does not draw the fence yet
+(`viewer-parcel-ban-lines-on-refusal`).

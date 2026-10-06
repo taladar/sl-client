@@ -80,6 +80,8 @@ pub mod object_update_decode;
 pub mod offline_msg_fetch;
 pub mod open_region_info;
 pub mod parcel_access_list;
+pub mod parcel_ban_enforcement;
+pub mod parcel_ban_line;
 pub mod parcel_crossing;
 pub mod parcel_divide_join;
 pub mod parcel_edit;

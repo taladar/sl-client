@@ -24,9 +24,9 @@
 use std::time::Instant;
 
 use sl_proto::{
-    LandStatExtended, LandStatItem, LandStatReportType, ParcelInfo, ParcelObjectOwner,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, RegionIdentity, RegionLocalParcelId, ServerEvent,
-    SimSession, pcode,
+    LandStatExtended, LandStatItem, LandStatReportType, ParcelAccessFlags, ParcelAccessScope,
+    ParcelInfo, ParcelObjectOwner, ParcelReturnType, ParcelStatus, ParcelUpdate, RegionIdentity,
+    RegionLocalParcelId, ServerEvent, SimSession, pcode,
 };
 use sl_types::key::{AgentKey, OwnerKey};
 use sl_types::map::RegionCoordinates;
@@ -210,9 +210,19 @@ pub(crate) fn answer_parcel_edit(
             sequence_id,
         } => {
             let entries = world.access_list(*local_id, *scope).to_vec();
-            if let Err(error) =
-                sim.send_parcel_access_list_reply(*local_id, *scope, *sequence_id, &entries, now)
-            {
+            let placeholder_flags = if policy.empty_list_placeholder_names_its_list {
+                ParcelAccessFlags(scope.to_u32())
+            } else {
+                ParcelAccessFlags::NONE
+            };
+            if let Err(error) = sim.send_parcel_access_list_reply(
+                *local_id,
+                *scope,
+                *sequence_id,
+                &entries,
+                placeholder_flags,
+                now,
+            ) {
                 tracing::warn!("answering a parcel access list request failed: {error}");
             }
         }
@@ -232,6 +242,22 @@ pub(crate) fn answer_parcel_edit(
                 held.clear();
             }
             held.extend(entries.iter().copied());
+            let in_use = !held.is_empty();
+            // OpenSim keeps the parcel's own flag in step with the list: on
+            // while the list holds anybody, off once it is emptied.
+            if policy.list_update_sets_use_flag
+                && let Some(parcel) = world.parcel_mut(*local_id)
+            {
+                let flag = match scope {
+                    ParcelAccessScope::Access => sl_proto::ParcelFlags::USE_ACCESS_LIST,
+                    ParcelAccessScope::Ban => sl_proto::ParcelFlags::USE_BAN_LIST,
+                };
+                parcel.raw_parcel_flags = if in_use {
+                    parcel.raw_parcel_flags | flag.bits()
+                } else {
+                    parcel.raw_parcel_flags & !flag.bits()
+                };
+            }
         }
         // The top-scripts / top-colliders report, built from what the scene
         // says its objects cost ([`ObjectCost`]). A fake region runs no scripts

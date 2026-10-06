@@ -95,6 +95,12 @@ are streamed by where the camera is), and rezzes there. Absent, the case
 keeps its own start location and records `partial` with the grid's refusal
 when the rez is refused.
 
+`parcel-ban-line` reads `ban_line_regions`, a list of region names. The case
+needs a parcel that is closed to strangers and looks for one where the login
+lands; a region without one is left for the next name on the list, by a map
+lookup and a teleport to its middle. Absent, only the login region is looked
+at, and a run that finds no such parcel is recorded `partial`.
+
 A case recognises the object it rezzed by its ownership — the per-viewer
 `OBJECT_YOU_OWNER` flag, since Second Life sends a plain prim's owner id as
 nil — never as "the next object that appeared": a sandbox streams other

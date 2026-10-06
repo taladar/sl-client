@@ -540,12 +540,13 @@ pub use object::{
 pub use open_region::OpenRegionInfo;
 pub use parcel::{
     AdultListingBits, DEFAULT_GRIDS_PER_EDGE, LandStatExtended, LandStatItem, LandStatReportType,
-    LandStatScore, LandingType, PARCEL_GRID_STEP_METRES, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelListingFlags,
-    ParcelLlsdDialect, ParcelMediaCommand, ParcelMediaData, ParcelMediaSharing,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell,
-    ParcelOverlayError, ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect,
-    ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+    LandStatScore, LandingType, PARCEL_ACCESS_ENTRIES_PER_PACKET, PARCEL_GRID_STEP_METRES,
+    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelCollision,
+    ParcelDetails, ParcelInfo, ParcelListingFlags, ParcelLlsdDialect, ParcelMediaCommand,
+    ParcelMediaData, ParcelMediaSharing, ParcelMediaUpdateInfo, ParcelObjectOwner,
+    ParcelObjectOwnersPart, ParcelOverlayCell, ParcelOverlayError, ParcelOverlayGrid,
+    ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult, ParcelReturnType,
+    ParcelStatus, ParcelUpdate,
 };
 pub use pathfinding::{NavMeshBuildStatus, NavMeshStatus};
 pub use region::{

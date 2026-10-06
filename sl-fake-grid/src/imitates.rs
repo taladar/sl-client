@@ -291,6 +291,8 @@ impl ImitatedGrid {
                 owners_reply_over_event_queue: true,
                 wire_types: sl_proto::ParcelLlsdDialect::SecondLife,
                 adult_listing_bits: sl_proto::AdultListingBits::AdultAndMature,
+                list_update_sets_use_flag: false,
+                empty_list_placeholder_names_its_list: false,
             },
             Self::OpenSim => ParcelPolicy {
                 answers_request_by_id: false,
@@ -302,6 +304,8 @@ impl ImitatedGrid {
                 owners_reply_over_event_queue: false,
                 wire_types: sl_proto::ParcelLlsdDialect::OpenSim,
                 adult_listing_bits: sl_proto::AdultListingBits::AdultOnly,
+                list_update_sets_use_flag: true,
+                empty_list_placeholder_names_its_list: true,
             },
         }
     }
@@ -652,6 +656,19 @@ pub struct ParcelPolicy {
     /// the local grid has no adult region). The rest of the byte — group-owned
     /// `0x04`, for-sale `0x80` — the two pack alike.
     pub adult_listing_bits: sl_proto::AdultListingBits,
+    /// Whether saving a non-empty allow or ban list switches the parcel's own
+    /// `USE_ACCESS_LIST` / `USE_BAN_LIST` flag on, and emptying it switches the
+    /// flag off again. OpenSim's `LandObject.UpdateAccessList` does both
+    /// (measured by `parcel-access-list`, 2026-10-05), so giving a parcel an
+    /// allow list there closes it to everybody else without the About Land
+    /// checkbox being touched. Second Life is unmeasured — the test avatars
+    /// own no land on aditi — and keeps the reference viewer's reading that
+    /// the flags are the checkboxes and nothing else.
+    pub list_update_sets_use_flag: bool,
+    /// Whether the nil-agent placeholder a grid answers an empty list with
+    /// carries the list's own bit in its `Flags`. OpenSim's does; Second
+    /// Life's is `0` (both measured by `parcel-access-list`, 2026-10-05).
+    pub empty_list_placeholder_names_its_list: bool,
 }
 
 impl ParcelPolicy {

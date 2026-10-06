@@ -6302,7 +6302,13 @@ impl SimSession {
     /// An **empty** list goes out as a single nil-agent placeholder block rather
     /// than as no blocks at all, which is what a simulator does and what a
     /// viewer reads as "this list is empty" — a reply with no blocks reads as no
-    /// reply.
+    /// reply. `placeholder_flags` is that block's `Flags`: Second Life writes
+    /// `0`, OpenSim the list's own bit.
+    ///
+    /// A list longer than
+    /// [`PARCEL_ACCESS_ENTRIES_PER_PACKET`](crate::PARCEL_ACCESS_ENTRIES_PER_PACKET)
+    /// goes out as several replies under the same header, which a viewer
+    /// unions into one list.
     ///
     /// # Errors
     ///
@@ -6314,37 +6320,45 @@ impl SimSession {
         scope: ParcelAccessScope,
         sequence_id: i32,
         entries: &[ParcelAccessEntry],
+        placeholder_flags: ParcelAccessFlags,
         now: Instant,
     ) -> Result<(), Error> {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let list: Vec<ParcelAccessListReplyListBlock> = if entries.is_empty() {
-            vec![ParcelAccessListReplyListBlock {
+        let packets: Vec<Vec<ParcelAccessListReplyListBlock>> = if entries.is_empty() {
+            vec![vec![ParcelAccessListReplyListBlock {
                 id: Uuid::nil(),
                 time: 0,
-                flags: 0,
-            }]
+                flags: placeholder_flags.0,
+            }]]
         } else {
             entries
-                .iter()
-                .map(|entry| ParcelAccessListReplyListBlock {
-                    id: entry.id,
-                    time: entry.time,
-                    flags: entry.flags.0,
+                .chunks(crate::PARCEL_ACCESS_ENTRIES_PER_PACKET)
+                .map(|packet| {
+                    packet
+                        .iter()
+                        .map(|entry| ParcelAccessListReplyListBlock {
+                            id: entry.id,
+                            time: entry.time,
+                            flags: entry.flags.0,
+                        })
+                        .collect()
                 })
                 .collect()
         };
-        let message = AnyMessage::ParcelAccessListReply(ParcelAccessListReply {
-            data: ParcelAccessListReplyDataBlock {
-                agent_id: self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid()),
-                sequence_id,
-                flags: scope.to_u32(),
-                local_id: local_id.0,
-            },
-            list,
-        });
-        self.send(&message, Reliability::Reliable, now)?;
+        for list in packets {
+            let message = AnyMessage::ParcelAccessListReply(ParcelAccessListReply {
+                data: ParcelAccessListReplyDataBlock {
+                    agent_id: self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid()),
+                    sequence_id,
+                    flags: scope.to_u32(),
+                    local_id: local_id.0,
+                },
+                list,
+            });
+            self.send(&message, Reliability::Reliable, now)?;
+        }
         Ok(())
     }
 

@@ -944,6 +944,13 @@ impl TestContext {
         self.fixtures.experience()
     }
 
+    /// The regions the `parcel-ban-line` case visits after its login region,
+    /// if the operator named any.
+    #[must_use]
+    pub fn ban_line_regions(&self) -> &[String] {
+        self.fixtures.ban_line_regions()
+    }
+
     /// The primary session.
     pub const fn primary(&mut self) -> &mut Session {
         &mut self.primary
