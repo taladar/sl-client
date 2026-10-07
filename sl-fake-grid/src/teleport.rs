@@ -48,8 +48,8 @@ use tokio::sync::{broadcast, watch};
 use crate::driver::SharedSim;
 use crate::error::Error;
 use crate::imitates::{
-    CancelAnswer, LocalLookAt, MATURITY_REFUSAL_ALERT, MATURITY_REFUSAL_REASON, RefusalTransport,
-    TeleportPolicy,
+    CancelAnswer, FinishFlags, LocalLookAt, MATURITY_REFUSAL_ALERT, MATURITY_REFUSAL_REASON,
+    RefusalTransport, TeleportPolicy,
 };
 use crate::runtime::{GridCore, TeleportNotice};
 
@@ -106,6 +106,10 @@ pub(crate) struct TeleportRequest {
 pub(crate) struct Refusal {
     /// The flags of the `TeleportStart` and progress lines.
     flags: u32,
+    /// Whether a grid that starts a teleport before refusing it had started
+    /// this one. Second Life refuses a lure into a region above the agent's
+    /// maturity preference with the failure alone.
+    started: bool,
     /// The progress lines sent ahead of the failure (event-queue refusals
     /// only: a UDP refusal is sent in place of the start).
     progress: Vec<&'static str>,
@@ -121,6 +125,7 @@ impl Refusal {
     fn plain(flags: u32, progress: Vec<&'static str>, reason: &str) -> Self {
         Self {
             flags,
+            started: true,
             progress,
             reason: reason.to_owned(),
             alert: None,
@@ -199,6 +204,14 @@ pub(crate) async fn teleport_session(
                 let now = source.now();
                 let sim = &mut state.sim;
                 sim.send_teleport_start(flags, now)?;
+                // An accepted lure is the one local teleport Second Life puts a
+                // line into. (A home or landmark teleport that turns out to be
+                // local was never measured, so its kind line is not sent.)
+                if request.flags & TeleportFlags::VIA_LURE != 0
+                    && let Some(line) = policy.lure_line
+                {
+                    sim.send_teleport_progress(line, flags, now)?;
+                }
                 // Where the agent now stands: what the region measures chat
                 // range from, and what a later movement completes to.
                 sim.set_arrival_position(request.arrival.position, request.arrival.look_at.clone());
@@ -230,15 +243,21 @@ pub(crate) async fn teleport_session(
     if policy.names_the_kind {
         lines.extend(request.kind_line);
     }
+    if request.flags & TeleportFlags::VIA_LURE != 0 {
+        lines.extend(policy.lure_line);
+    }
     lines.extend_from_slice(policy.progress);
 
     // A region rated above what the agent has said it wants to see is refused
     // by a grid that checks, once it has got as far as sending the agent — so
-    // after every line. Only a location request: the home teleport of an agent
-    // set to General into an Adult home region went through on aditi.
+    // after every line. Only a location request or an accepted lure: the home
+    // teleport of an agent set to General into an Adult home region went
+    // through on aditi. The lure is refused with the failure alone — no
+    // start, no line.
+    let via_lure = request.flags & TeleportFlags::VIA_LURE != 0;
     if policy.enforces_maturity_preference
         && request.client_requested
-        && request.flags & TeleportFlags::VIA_LOCATION != 0
+        && (via_lure || request.flags & TeleportFlags::VIA_LOCATION != 0)
     {
         let stored = source
             .with_sim(|sim| sim.agent_preferences().max_access_pref.clone())
@@ -249,7 +268,8 @@ pub(crate) async fn teleport_session(
         if !matches!(preference, sl_proto::Maturity::Unknown) && !wanted.permitted_by(preference) {
             let refusal = Refusal {
                 flags: request.flags,
-                progress: lines,
+                started: !via_lure,
+                progress: if via_lure { Vec::new() } else { lines },
                 reason: MATURITY_REFUSAL_REASON.to_owned(),
                 alert: Some(AlertInfo {
                     message: MATURITY_REFUSAL_ALERT.to_owned(),
@@ -339,7 +359,12 @@ pub(crate) async fn teleport_session(
         region_handle: dest_handle,
         seed: dest_seed,
         sim_access,
-        teleport_flags: request.flags,
+        teleport_flags: match policy.finish_flags {
+            FinishFlags::TheKind => request.flags,
+            FinishFlags::ViaLocation => {
+                TeleportFlags::VIA_LOCATION | (request.flags & TeleportFlags::IS_FLYING)
+            }
+        },
         region_size: policy.finish_states_region_size.then_some((
             sl_proto::STANDARD_REGION_SIZE_METRES,
             sl_proto::STANDARD_REGION_SIZE_METRES,
@@ -653,30 +678,24 @@ async fn resolve_request(
                     }
                 }
             };
-            // A lure's refusal is not measured yet (roadmap
-            // `gridspec-teleport-lures`): the key the grid always sent, by
-            // the flavour's transport.
-            Some(target.map_or_else(
-                || {
-                    Err(Refusal::plain(
-                        flags,
-                        first_line(None),
-                        teleport_strings::NO_HOST,
-                    ))
+            // A lure the grid cannot honour: OpenSim refuses it as it refuses
+            // any region that does not exist, and Second Life says nothing at
+            // all — the client's own deadline is what ends that teleport.
+            let Some((region, position)) = target else {
+                return policy
+                    .unknown_lure
+                    .map(|reason| Err(Refusal::plain(flags, Vec::new(), reason)));
+            };
+            Some(Ok(TeleportRequest {
+                region,
+                arrival: ArrivalPlacement {
+                    position,
+                    look_at: ArrivalPlacement::default().look_at,
                 },
-                |(region, position)| {
-                    Ok(TeleportRequest {
-                        region,
-                        arrival: ArrivalPlacement {
-                            position,
-                            look_at: ArrivalPlacement::default().look_at,
-                        },
-                        flags,
-                        kind_line: None,
-                        client_requested: true,
-                    })
-                },
-            ))
+                flags,
+                kind_line: None,
+                client_requested: true,
+            }))
         }
         _ => None,
     }
@@ -867,7 +886,7 @@ fn send_failure(
 /// that overtook its own `TeleportStart` would leave the client starting a
 /// teleport that had already ended.
 async fn report_refusal(shared: &SharedSim, policy: &TeleportPolicy, refusal: &Refusal) {
-    let narrated = if matches!(policy.refusals, RefusalTransport::EventQueue) {
+    let narrated = if refusal.started && matches!(policy.refusals, RefusalTransport::EventQueue) {
         shared
             .with_sim(|sim| {
                 let now = shared.now();

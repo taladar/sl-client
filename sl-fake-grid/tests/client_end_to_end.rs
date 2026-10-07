@@ -4039,10 +4039,243 @@ mod test {
         Ok(())
     }
 
+    /// The `VIA_LURE` flag every accepted lure carries.
+    const VIA_LURE: u32 = sl_client_tokio::TeleportFlags::VIA_LURE;
+
+    /// A lure id naming `position` in the region `handle`, packed the OpenSim
+    /// way. The fake grid reads it on either flavour: it holds no lures of its
+    /// own to look an opaque one up in.
+    fn lure_to(handle: sl_client_tokio::RegionHandle, x: u16, y: u16, z: u16) -> Command {
+        let place = sl_proto::FakeParcelId {
+            region_handle: handle,
+            x,
+            y,
+            z,
+        };
+        Command::AcceptTeleportLure {
+            lure_id: sl_client_tokio::LureId::from(place.to_uuid()),
+        }
+    }
+
+    /// A lure id no grid issued, and which does not read as a place either.
+    fn unheld_lure() -> Command {
+        Command::AcceptTeleportLure {
+            lure_id: sl_client_tokio::LureId::from(sl_proto::Uuid::from_u128(
+                0x3b6b_7c62_8f8f_4e34_9c1a_79c2_e2ba_0fd1,
+            )),
+        }
+    }
+
+    /// Second Life's accepted lures, as measured on aditi (2026-10-07): the
+    /// line `completing` comes first, ahead of the two every teleport to a
+    /// location has; a lure within the region carries it too, flagged
+    /// `WITHIN_REGION`; the finish says `VIA_LURE`; and a lure the grid does
+    /// not hold is answered with nothing at all.
+    #[tokio::test]
+    async fn a_second_life_lure_opens_with_completing_and_an_unheld_one_is_not_answered()
+    -> Result<(), TestError> {
+        let mut running = start_configured(
+            vec![RegionConfig::default(), east_region()],
+            None,
+            ImitatedGrid::SecondLife,
+        )
+        .await?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+
+        running.commands.send(lure_to(east, 40, 50, 60)).await?;
+        let mut starts = Vec::new();
+        let mut lines = Vec::new();
+        let finished = running
+            .wait_for(|event| match event {
+                Event::TeleportStarted { flags } => {
+                    starts.push(flags.0);
+                    None
+                }
+                Event::TeleportProgress {
+                    message,
+                    teleport_flags,
+                } => {
+                    lines.push((message.clone(), *teleport_flags));
+                    None
+                }
+                Event::TeleportFinished { flags, .. } => Some(flags.0),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(starts, [VIA_LURE]);
+        assert_eq!(
+            lines,
+            [
+                ("completing".to_owned(), VIA_LURE),
+                ("resolving".to_owned(), VIA_LURE),
+                ("Sending to destination.".to_owned(), VIA_LURE),
+            ]
+        );
+        assert_eq!(finished, VIA_LURE);
+        running
+            .wait_for(|event| match event {
+                Event::RegionChanged { region_handle, .. } if *region_handle == east => Some(()),
+                _ => None,
+            })
+            .await?;
+
+        // A lure to somewhere in the region the agent already stands in.
+        running.commands.send(lure_to(east, 70, 80, 60)).await?;
+        let local = teleport_trace(&mut running).await?;
+        let within = VIA_LURE | sl_client_tokio::TeleportFlags::WITHIN_REGION;
+        assert_eq!(local.starts, [within]);
+        assert_eq!(local.progress, ["completing"]);
+        assert_eq!(local.local, Some(within));
+
+        // A lure the grid does not hold: silence. (Last, because the client is
+        // left waiting out its own deadline.)
+        running.commands.send(unheld_lure()).await?;
+        let answered = tokio::time::timeout(
+            Duration::from_secs(2),
+            running.wait_for(|event| {
+                matches!(
+                    event,
+                    Event::TeleportStarted { .. }
+                        | Event::TeleportProgress { .. }
+                        | Event::TeleportFailed { .. }
+                )
+                .then_some(())
+            }),
+        )
+        .await;
+        assert!(
+            answered.is_err(),
+            "a Second-Life-flavoured grid answered a lure it does not hold"
+        );
+        Ok(())
+    }
+
+    /// OpenSim's accepted lures, as measured on the local grid (2026-10-07):
+    /// no line; a `TeleportFinish` that says `VIA_LOCATION`, as OpenSim's says
+    /// of every teleport; and a lure it cannot read as a place refused as a
+    /// region that does not exist, instead of starting.
+    #[tokio::test]
+    async fn an_open_sim_lure_finishes_via_location_and_an_unreadable_one_names_no_region()
+    -> Result<(), TestError> {
+        let mut running = start_configured(
+            vec![RegionConfig::default(), east_region()],
+            None,
+            ImitatedGrid::OpenSim,
+        )
+        .await?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+
+        running.commands.send(unheld_lure()).await?;
+        let refused = teleport_trace(&mut running).await?;
+        assert_eq!(refused.starts, Vec::<u32>::new());
+        assert_eq!(
+            refused.failed,
+            Some((
+                "The region you tried to teleport to was not found".to_owned(),
+                None
+            ))
+        );
+
+        running.commands.send(lure_to(east, 40, 50, 60)).await?;
+        let mut starts = Vec::new();
+        let mut lines = Vec::new();
+        let finished = running
+            .wait_for(|event| match event {
+                Event::TeleportStarted { flags } => {
+                    starts.push(flags.0);
+                    None
+                }
+                Event::TeleportProgress { message, .. } => {
+                    lines.push(message.clone());
+                    None
+                }
+                Event::TeleportFinished { flags, .. } => Some(flags.0),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(starts, [VIA_LURE]);
+        assert_eq!(lines, Vec::<String>::new());
+        assert_eq!(finished, VIA_LOCATION);
+
+        // A lure within the region: the request's flag and nothing more.
+        running
+            .wait_for(|event| match event {
+                Event::RegionChanged { region_handle, .. } if *region_handle == east => Some(()),
+                _ => None,
+            })
+            .await?;
+        running.commands.send(lure_to(east, 70, 80, 60)).await?;
+        let local = teleport_trace(&mut running).await?;
+        assert_eq!(local.starts, [VIA_LURE]);
+        assert_eq!(local.progress, Vec::<String>::new());
+        assert_eq!(local.local, Some(VIA_LURE));
+        Ok(())
+    }
+
+    /// A lure into a region rated above the agent's maturity preference:
+    /// Second Life refuses it as it refuses a location teleport there, but
+    /// with the failure alone — no start and no line — and OpenSim lets the
+    /// agent in.
+    #[tokio::test]
+    async fn a_lure_above_the_maturity_preference_is_refused_without_a_start()
+    -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let mut running = start_configured(
+                vec![
+                    RegionConfig::default(),
+                    RegionConfig {
+                        maturity: sl_proto::Maturity::Mature,
+                        ..east_region()
+                    },
+                ],
+                None,
+                imitates,
+            )
+            .await?;
+            let east = running
+                ._grid
+                .region_handle("Fake Region East")
+                .ok_or("no east region")?;
+            running
+                .commands
+                .send(Command::SetAgentPreferences(Box::new(
+                    sl_client_tokio::AgentPreferences {
+                        max_access_pref: Some("PG".to_owned()),
+                        ..sl_client_tokio::AgentPreferences::default()
+                    },
+                )))
+                .await?;
+            running
+                .wait_for(|event| matches!(event, Event::AgentPreferences(_)).then_some(()))
+                .await?;
+            running.commands.send(lure_to(east, 40, 50, 60)).await?;
+            let trace = teleport_trace(&mut running).await?;
+            match imitates {
+                ImitatedGrid::SecondLife => {
+                    assert_eq!(trace.starts, Vec::<u32>::new());
+                    assert_eq!(trace.progress, Vec::<String>::new());
+                    let (reason, alert) = trace.failed.ok_or("the lure was not refused")?;
+                    assert!(reason.contains("maturity Rating"), "{reason}");
+                    assert_eq!(
+                        alert.map(|alert| alert.message).as_deref(),
+                        Some("RegionTPAccessBlocked")
+                    );
+                }
+                ImitatedGrid::OpenSim => assert!(trace.moved, "{trace:?}"),
+            }
+        }
+        Ok(())
+    }
+
     /// Accepting a lure whose id packs the destination the OpenSim way (a
     /// fake parcel id: handle + position) lands the agent there, with the
-    /// lure flag echoed; an opaque lure id naming nobody online is refused
-    /// with `no_host`.
+    /// lure flag echoed.
     #[tokio::test]
     async fn lure_acceptance_decodes_the_fake_parcel_id() -> Result<(), TestError> {
         let mut running = start_in(vec![RegionConfig::default(), east_region()]).await?;
@@ -4052,33 +4285,7 @@ mod test {
             .region_handle("Fake Region East")
             .ok_or("no east region")?;
 
-        let opaque = sl_client_tokio::LureId::from(sl_proto::Uuid::from_u128(
-            0x3b6b_7c62_8f8f_4e34_9c1a_79c2_e2ba_0fd1,
-        ));
-        running
-            .commands
-            .send(Command::AcceptTeleportLure { lure_id: opaque })
-            .await?;
-        let reason = running
-            .wait_for(|event| match event {
-                Event::TeleportFailed { reason, .. } => Some(reason.clone()),
-                _ => None,
-            })
-            .await?;
-        assert_eq!(reason, "no_host");
-
-        let place = sl_proto::FakeParcelId {
-            region_handle: east,
-            x: 40,
-            y: 50,
-            z: 60,
-        };
-        running
-            .commands
-            .send(Command::AcceptTeleportLure {
-                lure_id: sl_client_tokio::LureId::from(place.to_uuid()),
-            })
-            .await?;
+        running.commands.send(lure_to(east, 40, 50, 60)).await?;
         let (landed, flags) = running
             .wait_for(|event| match event {
                 Event::TeleportFinished {

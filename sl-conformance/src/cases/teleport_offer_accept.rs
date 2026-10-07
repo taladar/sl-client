@@ -1,103 +1,122 @@
-//! The primary offers a teleport lure to the secondary; the secondary accepts
-//! it and teleports to the offerer, arriving in the offerer's region.
-//!
-//! Where [`super::teleport_local_phases`] and [`super::teleport_cross_region`]
-//! prove a *self-initiated* teleport walks its phase sequence, this two-avatar
-//! case proves the *invited* teleport: one avatar offers a lure and another
-//! accepts it, driving the same teleport handover but provoked by the offer
-//! rather than a `TeleportLocationRequest` the accepter chose itself.
-//!
-//! A lure offer is a `StartLure` from the offerer, which the grid delivers to
-//! the target as an `ImprovedInstantMessage` with the
-//! [`ImDialog::LureUser`] dialog. The offer IM's
-//! [`id`](sl_client_tokio::InstantMessage::id) is the
-//! lure id (on OpenSim a *fake parcel id* encoding the offerer's region handle
-//! and position — `LureModule.OnStartLure` builds it from the offerer's
-//! `AbsolutePosition`), which the target quotes back in a `TeleportLureRequest`
-//! to accept. OpenSim's `LureModule.OnTeleportLureRequest` parses that fake
-//! parcel id back into a region handle + position and calls
-//! `RequestTeleportLocation`, so the accepter teleports to the offerer's
-//! location — an intra-region `TeleportLocal` when the two avatars share a
-//! region (the OpenSim default, both logging in to the same region) or a
-//! cross-region handover when they do not.
-//!
-//! Sequence (primary = offerer, secondary = accepter):
-//!
-//! 1. Both avatars log in and become active.
-//! 2. The primary [`Command::OfferTeleport`]s the secondary with a distinct
-//!    per-run message.
-//! 3. The secondary — a separate session — observes the matching
-//!    [`Event::InstantMessageReceived`] with [`ImDialog::LureUser`], attributed
-//!    to the primary and carrying the exact message, and takes the lure id from
-//!    its [`id`](sl_client_tokio::InstantMessage::id).
-//! 4. The secondary [`Command::AcceptTeleportLure`]s that lure id, collects the
-//!    teleport phases until arrival, and asserts the sequence opens with
-//!    *Starting* and ends at a terminal arrival phase (`TeleportLocal` for the
-//!    shared-region case, or a `RegionChanged` handover otherwise).
-//! 5. The case confirms the secondary's current region handle is now the
-//!    primary's region — it teleported *to the offerer*, the point the lure id
-//!    encodes.
-//!
-//! OpenSim's `OnTeleportLureRequest` sends the offerer nothing back (no
-//! `IM_LURE_ACCEPTED`), so the acceptance is observable only on the accepter
-//! side, as the completed teleport. Records the offer-delivery latency, the
-//! observed phase sequence and progress-update count, the arrival kind
-//! (`local` / `region-changed`), and the request-to-arrival time.
-//!
-//! `2av`. `[opensim]` only; the Aditi variant is deferred to Phase Z pending
-//! its Aditi run. The flow is plain LLUDP `StartLure` /
-//! `ImprovedInstantMessage` / `TeleportLureRequest`, and no new client code —
-//! the [`Command::OfferTeleport`] / [`Command::AcceptTeleportLure`] surface and
-//! the lure-accept teleport handover already existed from earlier IM and
-//! teleport work.
+//! One avatar offers another a teleport and the other accepts it — once from
+//! within the offerer's region and once from the region next door — and the
+//! whole exchange is recorded: the offer as it was delivered, the teleport it
+//! led to, and what the offerer was told.
 
 use std::time::Instant;
 
-use sl_client_tokio::{Command, Event, ImDialog, LureId, RegionHandle};
+use sl_client_tokio::{Command, GridCoordinates, RegionHandle, TeleportFlags};
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
+use crate::lure::{
+    NOTICE_WINDOW, id_kind, offer_and_receive, offered_id, record_im, record_notices, watch_notices,
+};
+use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, count_metric, secs_metric};
+use crate::support::{REGION_TIMEOUT, check, check_eq, secs_metric};
+use crate::teleport_trace::{neighbouring_region, request_teleport, watch_teleport};
 
-/// One teleport phase observed on the accepter's circuit between the accepted
-/// lure and arrival — mirroring the phases [`super::teleport_local_phases`]
-/// models. The arrival is `TeleportLocal` when the two avatars share a region
-/// or a `RegionChanged` handover when the lure crosses a boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Phase {
-    /// The simulator acknowledged the request and began the teleport
-    /// (`TeleportStart` → [`Event::TeleportStarted`]).
-    Started,
-    /// A progress update arrived mid-teleport (`TeleportProgress`).
-    Progress,
-    /// The intra-region teleport completed without a circuit change
-    /// (`TeleportLocal`).
-    Local,
-    /// The destination region's handshake completed after a border crossing
-    /// ([`Event::RegionChanged`]).
-    RegionChanged,
-}
+/// Where each answer below is written down.
+const SOURCE: &str = "book/src/gridspec/teleport.md (teleport-offer-accept, 2026-10-07)";
 
-impl Phase {
-    /// The short label recorded in the `phase_sequence` metric.
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Started => "started",
-            Self::Progress => "progress",
-            Self::Local => "local",
-            Self::RegionChanged => "region-changed",
-        }
-    }
+/// Where both avatars log in on OpenSim: one spot of the region the grid's
+/// other three border.
+const OPENSIM_START: &str = "uri:Default Region&128&128&30";
 
-    /// Whether this phase terminates the teleport (arrival), ending observation.
-    const fn is_terminal(self) -> bool {
-        matches!(self, Self::Local | Self::RegionChanged)
-    }
-}
+/// Where the accepter asks to land in the neighbouring region before the second
+/// offer.
+const NEXT_DOOR: (f32, f32, f32) = (128.0, 128.0, 30.0);
 
-/// Offers a teleport lure from the primary to the secondary, accepts it, and
-/// asserts the accepter teleports to the offerer's region.
+/// How a lure id reads: OpenSim packs the offerer's region and position into
+/// it, Second Life's says nothing.
+pub(crate) const LURE_ID_KIND: Measured<&str> = Measured {
+    second_life: "opaque",
+    opensim: "place",
+    source: SOURCE,
+};
+
+/// The order of the messages of an accepted lure from within the offerer's
+/// region. Second Life puts a progress line between the start and the end.
+const LOCAL_SEQUENCE: Measured<&str> = Measured {
+    second_life: "started,progress,local",
+    opensim: "started,local",
+    source: SOURCE,
+};
+
+/// The flags of every message of an accepted lure from within the offerer's
+/// region.
+const LOCAL_FLAGS: Measured<u32> = Measured {
+    second_life: TeleportFlags::VIA_LURE | TeleportFlags::WITHIN_REGION,
+    opensim: TeleportFlags::VIA_LURE,
+    source: SOURCE,
+};
+
+/// The progress lines of an accepted lure from within the offerer's region.
+const LOCAL_LINES: Measured<&[&str]> = Measured {
+    second_life: &["completing"],
+    opensim: &[],
+    source: SOURCE,
+};
+
+/// The order of the messages of an accepted lure from another region.
+const REMOTE_SEQUENCE: Measured<&str> = Measured {
+    second_life: "started,progress,progress,progress,finished,region-changed",
+    opensim: "started,finished,region-changed",
+    source: SOURCE,
+};
+
+/// The progress lines of an accepted lure from another region: Second Life's
+/// `completing` comes *first*, ahead of the two lines every teleport to a
+/// location has.
+const REMOTE_LINES: Measured<&[&str]> = Measured {
+    second_life: &["completing", "resolving", "Sending to destination."],
+    opensim: &[],
+    source: SOURCE,
+};
+
+/// The flags of the `TeleportStart` and each progress line of an accepted lure
+/// from another region.
+const REMOTE_FLAGS: Measured<u32> = Measured {
+    second_life: TeleportFlags::VIA_LURE,
+    opensim: TeleportFlags::VIA_LURE,
+    source: SOURCE,
+};
+
+/// The flags of its `TeleportFinish`. OpenSim's says `VIA_LOCATION` whatever
+/// kind of teleport it finishes.
+const FINISH_FLAGS: Measured<u32> = Measured {
+    second_life: TeleportFlags::VIA_LURE,
+    opensim: TeleportFlags::VIA_LOCATION,
+    source: SOURCE,
+};
+
+/// What the offer's binary bucket holds: on Second Life the destination, as
+/// text; on OpenSim nothing.
+const OFFER_HAS_BUCKET: Measured<bool> = Measured {
+    second_life: true,
+    opensim: false,
+    source: SOURCE,
+};
+
+/// Offers a teleport, accepts it from the offerer's own region, then again from
+/// the region next door.
+///
+/// A lure offer is a `StartLure` from the offerer, which the grid delivers to
+/// the target as an `ImprovedInstantMessage` of dialog `IM_LURE_USER`. The
+/// message's id is the lure id the target quotes back in a `TeleportLureRequest`
+/// to accept. Everything else about the offer differs by grid — what the id is,
+/// what the binary bucket holds, whose position the message states — and so
+/// does the teleport an acceptance starts, which is an ordinary one flagged
+/// `VIA_LURE`.
+///
+/// The offerer (the primary) stays put; the accepter (the secondary) accepts
+/// once standing beside it, teleports to a neighbouring region, and accepts a
+/// second offer from there. After each acceptance the case watches the offerer
+/// for [`NOTICE_WINDOW`], since what a grid tells the *offerer* about an
+/// accepted lure is one of the things being measured.
+///
+/// `2av`.
 #[derive(Debug)]
 pub struct TeleportOfferAccept;
 
@@ -107,7 +126,7 @@ impl GridTest for TeleportOfferAccept {
     }
 
     fn description(&self) -> &'static str {
-        "Primary offers a teleport lure; secondary accepts and teleports to the offerer"
+        "Offer a teleport and accept it from the same region and from the next, recording both"
     }
 
     fn grids(&self) -> &'static [Grid] {
@@ -118,154 +137,166 @@ impl GridTest for TeleportOfferAccept {
         2
     }
 
+    fn start_location(&self, grid: Grid) -> &'static str {
+        match grid {
+            Grid::Aditi => super::teleport_cross_region::ADITI_START,
+            Grid::Opensim => OPENSIM_START,
+            Grid::FakeSl | Grid::FakeOpensim => "last",
+        }
+    }
+
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
-            // Both avatars must be logged in and active before a lure can be
-            // routed between them: the primary to offer, the secondary to accept.
-            ctx.primary().wait_for_region(REGION_TIMEOUT).await?;
-            let secondary = ctx.secondary().ok_or_else(|| {
+            let grid = ctx.grid();
+            let (primary, secondary) = ctx.primary_and_secondary().ok_or_else(|| {
                 TestFailure::Assertion("two-account test ran without a secondary".to_owned())
             })?;
+            primary.wait_for_region(REGION_TIMEOUT).await?;
             secondary.wait_for_region(REGION_TIMEOUT).await?;
-
-            // Capture the secondary's agent id while it is borrowed, then release
-            // the borrow before reborrowing the primary. The offer is addressed to
-            // the secondary and attributed to the primary; the accepter ends up in
-            // the primary's region, so capture that handle too.
-            let secondary_id = secondary.agent_id().ok_or_else(|| {
-                TestFailure::Assertion("secondary login did not report an agent id".to_owned())
+            let offerer_region = primary.region_handle().ok_or_else(|| {
+                TestFailure::Assertion("the offerer's login reported no region handle".to_owned())
             })?;
-            let primary = ctx.primary();
-            let primary_id = primary.agent_id().ok_or_else(|| {
-                TestFailure::Assertion("primary login did not report an agent id".to_owned())
-            })?;
-            let primary_handle = primary.region_handle().ok_or_else(|| {
-                TestFailure::Assertion("primary login reported no region handle".to_owned())
-            })?;
+            let started_together = secondary.region_handle() == Some(offerer_region);
+            let primary_id = crate::lure::agent_id(primary, "offerer")?;
 
-            // Distinct per-run message so a leftover lure from an aborted run
-            // cannot be mistaken for this run's, and concurrent runs do not
-            // collide. OpenSim forwards the message verbatim in the delivered IM.
-            let message = format!("sl-conformance teleport-offer-accept {primary_id}");
-
-            // --- Primary offers the teleport lure to the secondary; time the
-            // delivery of the resulting IM.
+            // --- The first offer, as the avatars stand.
+            let message = format!("sl-conformance teleport-offer-accept first {primary_id}");
             let offered_at = Instant::now();
-            primary
-                .send(Command::OfferTeleport {
-                    targets: vec![secondary_id],
-                    message: message.clone(),
-                })
-                .await?;
-
-            // --- Secondary observes the lure offer from the primary and takes the
-            // lure id from the offer IM. Filtering on the offering agent, the
-            // `LureUser` dialog, and the exact message ignores any unrelated
-            // background IM.
-            let match_message = message.clone();
-            let (lure_id, offer_message) = ctx
-                .secondary()
-                .ok_or_else(|| {
-                    TestFailure::Assertion("two-account test ran without a secondary".to_owned())
-                })?
-                .wait_for(REPLY_TIMEOUT, move |event| match event {
-                    Event::InstantMessageReceived(im)
-                        if im.from_agent_id == primary_id
-                            && im.dialog == ImDialog::LureUser
-                            && im.message == match_message =>
-                    {
-                        Some((LureId::from(im.id), im.message.clone()))
-                    }
-                    _ => None,
-                })
-                .await?;
+            let first_offer = offer_and_receive(primary, secondary, &message).await?;
             let offer_rtt = offered_at.elapsed();
+            let offerer_after_offer = watch_notices(primary, NOTICE_WINDOW).await?;
 
-            // The offer arrived attributed to the primary (matched by the
-            // predicate) and carried our exact message verbatim.
-            check_eq("offer message", &offer_message, &message)?;
-
-            // --- Secondary accepts the lure, driving the teleport handover, and
-            // collects the phases until it arrives (a terminal phase) or a
-            // TeleportFailed fails the case.
-            let secondary = ctx.secondary().ok_or_else(|| {
-                TestFailure::Assertion("two-account test ran without a secondary".to_owned())
-            })?;
             let accepted_at = Instant::now();
             secondary
-                .send(Command::AcceptTeleportLure { lure_id })
+                .send(Command::AcceptTeleportLure {
+                    lure_id: offered_id(&first_offer),
+                })
                 .await?;
+            let first = watch_teleport(secondary, REGION_TIMEOUT).await?;
+            let first_rtt = accepted_at.elapsed();
+            let after_first = secondary.region_handle();
+            let offerer_after_accept = watch_notices(primary, NOTICE_WINDOW).await?;
+            let accepter_after_accept = watch_notices(secondary, NOTICE_WINDOW).await?;
 
-            let mut phases: Vec<Phase> = Vec::new();
-            loop {
-                let phase = secondary
-                    .wait_for(REGION_TIMEOUT, |event| match event {
-                        Event::TeleportStarted { .. } => Some(Ok(Phase::Started)),
-                        Event::TeleportProgress { .. } => Some(Ok(Phase::Progress)),
-                        Event::TeleportLocal { .. } => Some(Ok(Phase::Local)),
-                        Event::RegionChanged { .. } => Some(Ok(Phase::RegionChanged)),
-                        Event::TeleportFailed { reason, .. } => Some(Err(reason.clone())),
-                        _ => None,
-                    })
-                    .await?;
-                match phase {
-                    Ok(phase) => {
-                        let terminal = phase.is_terminal();
-                        phases.push(phase);
-                        if terminal {
-                            break;
-                        }
-                    }
-                    Err(reason) => {
-                        return Err(TestFailure::Assertion(format!(
-                            "accepted lure teleport failed: {reason}"
-                        )));
-                    }
-                }
-            }
-            let teleport_rtt = accepted_at.elapsed();
+            // --- The accepter steps into the region next door, and is offered
+            // a teleport back.
+            let next_door =
+                neighbouring_region(secondary, GridCoordinates::from(offerer_region)).await?;
+            let next_door_handle = RegionHandle::from(next_door.grid_coordinates);
+            request_teleport(secondary, next_door_handle, NEXT_DOOR, (1.0, 0.0, 0.0)).await?;
+            let away = watch_teleport(secondary, REGION_TIMEOUT).await?;
+            // Nobody accepts a lure two milliseconds after arriving somewhere,
+            // and OpenSim cannot take it: the region just left is still
+            // waiting to see the agent settle in the new one, finds it gone
+            // again, and fails the *first* teleport twenty-five seconds later
+            // while the second hangs.
+            let settling = watch_notices(secondary, NOTICE_WINDOW).await?;
 
-            // The teleport must have opened with the Starting phase and ended at an
-            // arrival (TeleportLocal for the shared-region case, or a RegionChanged
-            // handover otherwise).
-            check(
-                phases.first() == Some(&Phase::Started),
-                "expected the accepted teleport to begin with a Starting (TeleportStart) phase",
-            )?;
-            let arrival = phases
-                .last()
-                .copied()
-                .ok_or_else(|| TestFailure::Assertion("no teleport phases observed".to_owned()))?;
-            check(
-                arrival.is_terminal(),
-                "expected the accepted teleport to end at an arrival phase \
-                 (TeleportLocal / RegionChanged)",
-            )?;
-
-            // The accepter teleported *to the offerer*: the lure id encodes the
-            // offerer's region handle, so the accepter's current region must now be
-            // the primary's.
-            let current: RegionHandle = secondary.region_handle().ok_or_else(|| {
-                TestFailure::Assertion("no region handle after the accepted teleport".to_owned())
-            })?;
-            check_eq("arrival_region_handle", &current, &primary_handle)?;
-
-            let progress_updates = phases.iter().filter(|p| **p == Phase::Progress).count();
-            let sequence = phases
-                .iter()
-                .map(|p| p.label())
-                .collect::<Vec<_>>()
-                .join(",");
+            let message = format!("sl-conformance teleport-offer-accept second {primary_id}");
+            let second_offer = offer_and_receive(primary, secondary, &message).await?;
+            let accepted_at = Instant::now();
+            secondary
+                .send(Command::AcceptTeleportLure {
+                    lure_id: offered_id(&second_offer),
+                })
+                .await?;
+            let second = watch_teleport(secondary, REGION_TIMEOUT).await?;
+            let second_rtt = accepted_at.elapsed();
+            let after_second = secondary.region_handle();
+            let offerer_after_second = watch_notices(primary, NOTICE_WINDOW).await?;
 
             let metrics = ctx.metrics();
-            metrics.set("phase_sequence", sequence);
-            metrics.set("arrival", arrival.label());
-            metrics.set(
-                &count_metric("progress_updates"),
-                i64::try_from(progress_updates).unwrap_or(-1),
-            );
+            metrics.set("started_together", started_together);
+            record_im("offer_", &first_offer, metrics);
+            record_im("second_offer_", &second_offer, metrics);
+            metrics.set("lure_ids_differ", first_offer.id != second_offer.id);
+            record_notices("offerer_after_offer", &offerer_after_offer, metrics);
+            record_notices("offerer_after_accept", &offerer_after_accept, metrics);
+            record_notices("accepter_after_accept", &accepter_after_accept, metrics);
+            record_notices("offerer_after_second", &offerer_after_second, metrics);
+            record_notices("accepter_settling_next_door", &settling, metrics);
+            first.record("first_", metrics);
+            away.record("away_", metrics);
+            second.record("second_", metrics);
             metrics.set_timing(&secs_metric("offer_rtt"), offer_rtt.as_secs_f64());
-            metrics.set_timing(&secs_metric("teleport"), teleport_rtt.as_secs_f64());
+            metrics.set_timing(&secs_metric("first_teleport"), first_rtt.as_secs_f64());
+            metrics.set_timing(&secs_metric("second_teleport"), second_rtt.as_secs_f64());
+
+            // Both acceptances brought the accepter to the offerer's region.
+            check(
+                first.failure.is_none(),
+                "the first accepted lure was refused",
+            )?;
+            check_eq(
+                "region after the first lure",
+                &after_first,
+                &Some(offerer_region),
+            )?;
+            check(
+                away.arrival.is_some(),
+                "the accepter did not reach the region next door",
+            )?;
+            check(
+                second.failure.is_none(),
+                "the second accepted lure was refused",
+            )?;
+            check_eq(
+                "region after the second lure",
+                &after_second,
+                &Some(offerer_region),
+            )?;
+
+            // The shape of each, which is what the grids are held to.
+            LURE_ID_KIND.check("how a lure id reads", grid, &id_kind(&first_offer))?;
+            if started_together {
+                LOCAL_SEQUENCE.check(
+                    "the messages of a lure accepted within the offerer's region",
+                    grid,
+                    &first.sequence().as_str(),
+                )?;
+                for flags in &first.starts {
+                    LOCAL_FLAGS.check("a local lure's TeleportStart flags", grid, flags)?;
+                }
+                for (_line, flags) in &first.progress {
+                    LOCAL_FLAGS.check("a local lure's TeleportProgress flags", grid, flags)?;
+                }
+                LOCAL_LINES.check(
+                    "a local lure's progress lines",
+                    grid,
+                    &first.lines().as_slice(),
+                )?;
+                if let Some(local) = &first.local {
+                    LOCAL_FLAGS.check("a local lure's TeleportLocal flags", grid, &local.flags)?;
+                }
+            }
+            REMOTE_SEQUENCE.check(
+                "the messages of a lure accepted from another region",
+                grid,
+                &second.sequence().as_str(),
+            )?;
+            REMOTE_LINES.check(
+                "a remote lure's progress lines",
+                grid,
+                &second.lines().as_slice(),
+            )?;
+            OFFER_HAS_BUCKET.check(
+                "whether an offer's binary bucket holds anything",
+                grid,
+                &!crate::lure::bucket_text(&first_offer).is_empty(),
+            )?;
+            check(
+                offerer_after_accept.is_empty() && offerer_after_second.is_empty(),
+                "the offerer was told something about an accepted lure",
+            )?;
+            for flags in &second.starts {
+                REMOTE_FLAGS.check("a remote lure's TeleportStart flags", grid, flags)?;
+            }
+            for (_line, flags) in &second.progress {
+                REMOTE_FLAGS.check("a remote lure's TeleportProgress flags", grid, flags)?;
+            }
+            if let Some(finish) = &second.finish {
+                FINISH_FLAGS.check("a remote lure's TeleportFinish flags", grid, &finish.flags)?;
+            }
             Ok(())
         })
     }

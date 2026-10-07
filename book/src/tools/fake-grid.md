@@ -1773,14 +1773,20 @@ landmark fixture; `None` = home = the account's start region),
 `TeleportLureRequest` through the OpenSim lure-id convention (a
 `FakeParcelId`: handle + position packed into the UUID; an opaque id is
 taken as the offering agent's id). A request that resolves nowhere is
-refused the way the flavour's grid refuses, so the viewer's teleport
-screen never hangs: on Second Life's a `TeleportStart`, the line it got
-to, then a `TeleportFailed` **over the event queue** with a key
-(`no_host`, `nolandmark_tport`) repeated in an alert; on OpenSim's a UDP
-`TeleportFailed` with a sentence, sent instead of a start. The Second
-Life flavour also refuses a location teleport into a region rated above
-the agent's stored maturity preference (`RegionTPAccessBlocked`), and
-answers a `TeleportCancel` that arrives before the finish with
+refused the way the flavour's grid refuses: on Second Life's a
+`TeleportStart`, the line it got to, then a `TeleportFailed` **over the
+event queue** with a key (`no_host`, `nolandmark_tport`) repeated in an
+alert; on OpenSim's a UDP `TeleportFailed` with a sentence, sent instead
+of a start. The one request left **unanswered** is a lure the Second
+Life flavour cannot resolve: aditi says nothing whatever to a lure it
+does not hold, and the client's own deadline is what ends that teleport,
+so a test of it waits thirty seconds or asserts the silence. An accepted
+lure opens with the line `completing` on that flavour, local or not, and
+OpenSim's `TeleportFinish` says `VIA_LOCATION` whatever kind it
+finishes. The Second Life flavour also refuses a location teleport into
+a region rated above the agent's stored maturity preference
+(`RegionTPAccessBlocked`) — and a lure there too, with the failure alone
+— and answers a `TeleportCancel` that arrives before the finish with
 `TPCancelled`; the OpenSim flavour does neither. A same-region request
 finishes as a `TeleportLocal`, flagged `WITHIN_REGION` and facing the
 region's origin on Second Life's flavour. The explicit

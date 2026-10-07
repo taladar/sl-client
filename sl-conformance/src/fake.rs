@@ -156,6 +156,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "teleport-failed",
     "teleport-cancel",
     "teleport-access-refused",
+    "teleport-lure-unknown",
     "region-crossing",
     "neighbour-child-circuits",
     "avatar-appearance-npc",

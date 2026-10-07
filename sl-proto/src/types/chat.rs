@@ -1,10 +1,12 @@
 //! Chat and instant messaging value types.
 
-use super::{AgentOrObjectKey, AssetType, InventoryItemOrFolderKey};
+use super::{AgentOrObjectKey, AssetType, InventoryItemOrFolderKey, Maturity};
 use sl_types::key::{
     AgentKey, GroupKey, GroupRoleKey, InventoryFolderKey, InventoryKey, ObjectKey,
 };
+use sl_types::lsl::Vector;
 use sl_types::map::RegionCoordinates;
+use sl_wire::RegionHandle;
 use uuid::Uuid;
 
 /// The kind of a chat message, from the `Type`/`ChatType` byte shared by
@@ -508,6 +510,48 @@ impl InstantMessage {
         })
     }
 
+    /// Decodes where a teleport offer ([`ImDialog::LureUser`]) leads, from the
+    /// text Second Life puts in the offer's binary bucket:
+    ///
+    /// ```text
+    /// global_x|global_y|x|y|z|look_x|look_y|look_z|rating
+    /// ```
+    ///
+    /// — the destination region's south-west corner in global metres, the
+    /// landing position and facing within it in whole metres, and the region's
+    /// rating as `PG`, `M` or `A` (padded with a space). The rating is what a
+    /// viewer warns with before the offer is accepted.
+    ///
+    /// Returns `None` for any other dialog and for a bucket that does not read
+    /// this way — OpenSim's offers carry an empty one, and state the place in
+    /// the lure id instead.
+    #[must_use]
+    pub fn lure_destination(&self) -> Option<LureDestination> {
+        if !matches!(self.dialog, ImDialog::LureUser) {
+            return None;
+        }
+        let text = core::str::from_utf8(&self.binary_bucket).ok()?;
+        let mut fields = text.trim_end_matches('\0').split('|');
+        let global_x: u32 = bucket_number(&mut fields)?;
+        let global_y: u32 = bucket_number(&mut fields)?;
+        // Whole metres within a region, then the components of a facing: all
+        // far inside the range an `f32` holds exactly.
+        let mut metres = || bucket_number::<i16>(&mut fields).map(f32::from);
+        let (x, y, z) = (metres()?, metres()?, metres()?);
+        let (look_x, look_y, look_z) = (metres()?, metres()?, metres()?);
+        let maturity = Maturity::from_login_access(fields.next().map(str::trim));
+        Some(LureDestination {
+            region_handle: RegionHandle::from_global(global_x, global_y),
+            position: RegionCoordinates::new(x, y, z),
+            look_at: Vector {
+                x: look_x,
+                y: look_y,
+                z: look_z,
+            },
+            maturity,
+        })
+    }
+
     /// Decodes a received **group notice** ([`ImDialog::GroupNotice`]) into the
     /// pieces a viewer displays: the posting group, the sender's name, the subject
     /// and body, the timestamp, and the optional inventory attachment descriptor.
@@ -756,6 +800,29 @@ pub struct GroupNoticeItem {
     pub item_name: String,
 }
 
+/// The next `|`-separated field of a teleport offer's binary bucket, as a
+/// number.
+fn bucket_number<'a, T: core::str::FromStr>(
+    fields: &mut impl Iterator<Item = &'a str>,
+) -> Option<T> {
+    fields.next()?.trim().parse().ok()
+}
+
+/// Where a teleport offer leads, as Second Life states it in the offer's binary
+/// bucket (see [`InstantMessage::lure_destination`]).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LureDestination {
+    /// The destination region.
+    pub region_handle: RegionHandle,
+    /// Where in it the accepter lands, to the metre.
+    pub position: RegionCoordinates,
+    /// Which way the accepter is to face, each component a whole number.
+    pub look_at: Vector,
+    /// The destination region's rating; [`Maturity::Unknown`] when the offer
+    /// does not state one.
+    pub maturity: Maturity,
+}
+
 /// An inventory offer received over IM, decoded from the binary bucket of an
 /// [`ImDialog::InventoryOffered`] / [`ImDialog::TaskInventoryOffered`]
 /// [`InstantMessage`] (see [`InstantMessage::inventory_offer`]). Reply with
@@ -803,6 +870,67 @@ mod tests {
         AgentOrObjectKey, AssetType, ChatSource, ChatType, ChatTypeNotAVolume, ImDialog,
         InstantMessage, InventoryItemOrFolderKey,
     };
+
+    /// A teleport offer whose binary bucket is `bucket`.
+    fn lure_im(bucket: &[u8]) -> InstantMessage {
+        InstantMessage {
+            dialog: ImDialog::LureUser,
+            from_group: false,
+            binary_bucket: bucket.to_vec(),
+            ..group_notice_im("Join me", Vec::new())
+        }
+    }
+
+    /// The bucket aditi sent with an offer made from a General region decodes
+    /// to that region, the offerer's spot, its facing and the rating — the
+    /// padding space and the terminator included.
+    #[test]
+    fn a_second_life_lure_bucket_names_its_destination() -> Result<(), String> {
+        let offer = lure_im(b"255232|256512|10|10|42|-1|0|-0|PG \0");
+        let destination = offer
+            .lure_destination()
+            .ok_or("the measured bucket should decode")?;
+        assert_eq!(
+            destination,
+            super::LureDestination {
+                region_handle: sl_wire::RegionHandle::from_grid(997, 1002),
+                position: RegionCoordinates::new(10.0, 10.0, 42.0),
+                look_at: sl_types::lsl::Vector {
+                    x: -1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                maturity: super::Maturity::Pg,
+            }
+        );
+        assert_eq!(
+            lure_im(b"255232|256512|10|10|42|-1|0|-0|A")
+                .lure_destination()
+                .map(|destination| destination.maturity),
+            Some(super::Maturity::Adult),
+            "a rating without the padding or the terminator reads the same"
+        );
+        Ok(())
+    }
+
+    /// OpenSim's offer carries an empty bucket, and the place is in its lure id:
+    /// there is nothing to decode, and garbage is not guessed at. Neither is the
+    /// bucket of a message that is no offer.
+    #[test]
+    fn a_bucket_that_names_no_destination_decodes_to_none() {
+        assert_eq!(lure_im(b"").lure_destination(), None);
+        assert_eq!(lure_im(b"\0").lure_destination(), None);
+        assert_eq!(lure_im(b"255232|256512|10").lure_destination(), None);
+        assert_eq!(
+            lure_im(b"x|256512|10|10|42|-1|0|0|PG").lure_destination(),
+            None
+        );
+        let request = InstantMessage {
+            dialog: ImDialog::TeleportRequest,
+            ..lure_im(b"255232|256512|10|10|42|-1|0|-0|PG")
+        };
+        assert_eq!(request.lure_destination(), None);
+    }
 
     /// A group-notice IM with the given message and binary bucket, for the
     /// [`InstantMessage::group_notice`] tests.

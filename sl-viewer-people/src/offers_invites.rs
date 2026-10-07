@@ -7,7 +7,7 @@
 //!
 //! `sl-proto` decodes each of these as an
 //! [`SlSessionEvent::InstantMessageReceived`] with a distinguishing
-//! [`ImDialog`]. This host reads the event stream and, for each of the four
+//! [`ImDialog`]. This host reads the event stream and, for each of the
 //! offer / invite dialogs, raises a card into the **shared notification-host
 //! channel** ([`crate::notification_host`]) — top-trailing, priority-ordered,
 //! overflow-cycled, so it stacks alongside the catalogue toasts and the sibling
@@ -18,8 +18,14 @@
 //!   item name, with **Accept** (file it into the type-appropriate folder),
 //!   **Decline** (route it to Trash) and **Block** (mute the giver + decline).
 //! - **Teleport offer / lure** ([`ImDialog::LureUser`]): "{offerer} has offered
-//!   to teleport you", the offer message, with **Teleport** (accept the lure) and
-//!   **Decline**.
+//!   to teleport you", the offer message, the destination's rating when the
+//!   offer states one (Second Life's do, in the binary bucket; OpenSim's do
+//!   not), with **Teleport** (accept the lure) and **Decline**.
+//! - **Teleport request** ([`ImDialog::TeleportRequest`]): "{requester} is
+//!   requesting to be teleported to your location", the request's message,
+//!   with **Offer Teleport** (answer with an ordinary offer) and **Decline**.
+//!   The protocol has no reply to a request on either grid: yes is an offer,
+//!   and no is silence, so Decline and the close **×** send nothing.
 //! - **Friendship offer** ([`ImDialog::FriendshipOffered`]): "{agent} is offering
 //!   to be your friend", any custom message, with **Accept** (file the calling
 //!   card) and **Decline**.
@@ -70,8 +76,9 @@ use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
 use sl_client_bevy::{
-    AssetType, Command, FolderType, FriendKey, ImDialog, InstantMessage, InventoryFolderKey,
-    InventoryOffer, LureId, MuteType, SlCommand, SlEvent, SlSessionEvent, TransactionId,
+    AgentKey, AssetType, Command, FolderType, FriendKey, ImDialog, InstantMessage,
+    InventoryFolderKey, InventoryOffer, LureId, Maturity, MuteType, SlCommand, SlEvent,
+    SlSessionEvent, TransactionId,
 };
 
 use crate::i18n::{TransArgs, Translator};
@@ -121,6 +128,10 @@ fn register_offers_settings(settings: Option<ResMut<crate::settings::ViewerSetti
 /// The template sentinel a teleport-offer card reports as, named for the
 /// reference `TeleportOffered` notification.
 const TELEPORT_OFFER_TEMPLATE: &str = "TeleportOffered";
+
+/// The template sentinel a teleport-request card reports as, named for the
+/// reference `TeleportRequest` notification.
+const TELEPORT_REQUEST_TEMPLATE: &str = "TeleportRequest";
 
 /// The template sentinel a friendship-offer card reports as, named for the
 /// reference `OfferFriendship` notification.
@@ -394,10 +405,22 @@ fn ingest_offers_invites(
                     im,
                 );
             }
-            ImDialog::LureUser | ImDialog::FriendshipOffered | ImDialog::GroupInvitation
+            ImDialog::LureUser
+            | ImDialog::TeleportRequest
+            | ImDialog::FriendshipOffered
+            | ImDialog::GroupInvitation
                 if busy =>
             {
                 deferred.held.push(im.clone());
+            }
+            ImDialog::TeleportRequest => {
+                spawn_teleport_request_card(
+                    &mut sinks.commands,
+                    &channel,
+                    &mut sinks.manager,
+                    &translator,
+                    im,
+                );
             }
             ImDialog::LureUser => {
                 spawn_lure_card(
@@ -872,6 +895,12 @@ fn spawn_lure_card(
     if !im.message.is_empty() {
         lines.push(im.message.clone());
     }
+    if let Some(rating) = lure_rating_key(im) {
+        lines.push(translator.format(
+            "offer-teleport-rating",
+            &TransArgs::new().text("rating", &translator.get(rating)),
+        ));
+    }
     let content = OfferContent {
         accent: LURE_ACCENT,
         glyph: LURE_GLYPH.to_owned(),
@@ -923,6 +952,100 @@ fn spawn_lure_card(
                 });
             },
         );
+    }
+}
+
+/// The locale key naming the rating of the region a teleport offer leads to,
+/// when the offer states one.
+///
+/// Second Life's offers do, in their binary bucket, and the reference viewer
+/// shows it on the offer so the user knows before pressing Teleport; OpenSim's
+/// bucket is empty and its offers say nothing of the destination.
+fn lure_rating_key(im: &InstantMessage) -> Option<&'static str> {
+    match im.lure_destination()?.maturity {
+        Maturity::Pg => Some("offer-rating-general"),
+        Maturity::Mature => Some("offer-rating-moderate"),
+        Maturity::Adult => Some("offer-rating-adult"),
+        _unrated => None,
+    }
+}
+
+/// Build and wire a **teleport-request** card: somebody asking to be offered a
+/// teleport. Offer Teleport answers with an ordinary offer to the requester.
+///
+/// Decline and the close × send **nothing**: there is no message that turns a
+/// request down, on either grid — the reference viewer's No button is silent
+/// too — so the card is simply dismissed.
+fn spawn_teleport_request_card(
+    commands: &mut Commands,
+    channel: &NotificationChannelRoot,
+    manager: &mut NotificationManager,
+    translator: &Translator,
+    im: &InstantMessage,
+) {
+    let requester = im.from_agent_id;
+    let lead = translator.format(
+        "offer-teleport-request-from",
+        &TransArgs::new().text("name", &im.from_agent_name),
+    );
+    let mut lines = vec![lead.clone()];
+    if !im.message.is_empty() {
+        lines.push(im.message.clone());
+    }
+    let content = OfferContent {
+        accent: LURE_ACCENT,
+        glyph: LURE_GLYPH.to_owned(),
+        heading: translator.get("offer-teleport-request-heading"),
+        lines,
+        accept_label: translator.get("offer-button-offer-teleport"),
+        decline_label: translator.get("offer-button-decline"),
+        block_label: None,
+    };
+    let card = build_offer_card(commands, &content);
+    adopt_offer_card(
+        commands,
+        channel,
+        manager,
+        &card,
+        &content,
+        TELEPORT_REQUEST_TEMPLATE,
+        lead,
+    );
+
+    let root = card.root;
+
+    // Accept: the answer to a request is an offer.
+    commands.entity(card.accept).observe(
+        move |_activate: On<Activate>,
+              mut sl: MessageWriter<SlCommand>,
+              mut resolves: MessageWriter<ResolveNotification>| {
+            sl.write(SlCommand(teleport_request_answer(requester)));
+            resolves.write(ResolveNotification {
+                toast: root,
+                button: None,
+            });
+        },
+    );
+
+    // Decline and the close ×: nothing to send.
+    for button in [Some(card.decline), Some(card.close)].into_iter().flatten() {
+        commands.entity(button).observe(
+            move |_activate: On<Activate>, mut resolves: MessageWriter<ResolveNotification>| {
+                resolves.write(ResolveNotification {
+                    toast: root,
+                    button: None,
+                });
+            },
+        );
+    }
+}
+
+/// What agreeing to a teleport request sends: an offer to the requester, with
+/// no message of its own.
+fn teleport_request_answer(requester: AgentKey) -> Command {
+    Command::OfferTeleport {
+        targets: vec![requester],
+        message: String::new(),
     }
 }
 
@@ -1328,7 +1451,9 @@ fn wire_specimen_actions(commands: &mut Commands, card: &OfferCard, element: &'s
 
 #[cfg(test)]
 mod tests {
-    use super::{decline_command, offer_class, uses_offline_cap};
+    use super::{
+        decline_command, lure_rating_key, offer_class, teleport_request_answer, uses_offline_cap,
+    };
     use crate::auto_reject::{OfferClass, RejectKind};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
@@ -1355,6 +1480,55 @@ mod tests {
             message: "come over".to_owned(),
             binary_bucket: Vec::new(),
         }
+    }
+
+    /// A Second Life offer names its destination's rating in the bucket, and
+    /// the card says so; an OpenSim offer's bucket is empty and the card says
+    /// nothing, as does a request, which has no destination.
+    #[test]
+    fn an_offer_that_rates_its_destination_shows_the_rating() {
+        let from = Uuid::from_u128(0x11);
+        let lure = |bucket: &[u8]| InstantMessage {
+            binary_bucket: bucket.to_vec(),
+            ..offer(ImDialog::LureUser, from, Uuid::from_u128(0x22))
+        };
+        assert_eq!(
+            lure_rating_key(&lure(b"255232|256512|10|10|42|-1|0|-0|PG \0")),
+            Some("offer-rating-general")
+        );
+        assert_eq!(
+            lure_rating_key(&lure(b"255232|256512|10|10|42|-1|0|-0|M \0")),
+            Some("offer-rating-moderate")
+        );
+        assert_eq!(
+            lure_rating_key(&lure(b"255232|256512|10|10|42|-1|0|-0|A \0")),
+            Some("offer-rating-adult")
+        );
+        assert_eq!(lure_rating_key(&lure(b"")), None);
+        assert_eq!(
+            lure_rating_key(&lure(b"255232|256512|10|10|42|-1|0|-0")),
+            None
+        );
+        let request = InstantMessage {
+            binary_bucket: b"255232|256512|10|10|42|-1|0|-0|A".to_vec(),
+            ..offer(ImDialog::TeleportRequest, from, Uuid::nil())
+        };
+        assert_eq!(lure_rating_key(&request), None);
+    }
+
+    /// Agreeing to a teleport request offers the requester a teleport, and
+    /// nobody else.
+    #[test]
+    fn agreeing_to_a_teleport_request_offers_the_requester_a_teleport() {
+        let requester = AgentKey::from(Uuid::from_u128(0x33));
+        assert!(
+            matches!(
+                teleport_request_answer(requester),
+                Command::OfferTeleport { ref targets, ref message }
+                    if targets.as_slice() == [requester] && message.is_empty()
+            ),
+            "expected an offer to the requester alone"
+        );
     }
 
     /// Every offer dialog a reject mode covers maps to its class; an inventory

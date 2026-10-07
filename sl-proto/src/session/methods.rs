@@ -5735,6 +5735,11 @@ impl Session {
         if let Some(circuit) = self.circuit.as_mut() {
             circuit.timers.teleport = None;
         }
+        tracing::warn!("teleport timed out: the grid neither carried it out nor refused it");
+        self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+            request: Diagnostic::TELEPORT_REQUEST.to_owned(),
+            sequence: None,
+        });
         self.events.push_back(Event::TeleportFailed {
             reason: "teleport timed out".to_owned(),
             alert_info: None,

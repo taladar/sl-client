@@ -479,7 +479,7 @@ pub use benefits::{AccountBenefits, MIN_2K_TEXTURE_AREA, packages_from_llsd};
 pub use chat::{
     ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume,
     GroupInvitationReceived, GroupNoticeItem, GroupNoticeReceived, ImDialog, InstantMessage,
-    InventoryOffer,
+    InventoryOffer, LureDestination,
 };
 pub use diagnostic::{CircuitProbe, Diagnostic, hexdump};
 pub use directory::{

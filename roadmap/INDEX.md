@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 363 |
 | blocked | 111 |
 | in-progress | 20 |
-| bugs | 32 |
-| done | 1329 |
+| bugs | 33 |
+| done | 1330 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2040** |
+| **total** | **2042** |
 
 ## ideas (139)
 
@@ -266,7 +266,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-avatar-presence`, `gridspec-animations`)
 - [`server-fake-grid-im-relay`](ideas/server-fake-grid-im-relay.md) — Fake grid
   — relay IMs and offers between its sessions (blocked by
-  `gridspec-teleport-lures`, `gridspec-instant-messages`)
+  `gridspec-teleport-lures` (done), `gridspec-instant-messages`)
 - [`server-fake-grid-object-undo`](ideas/server-fake-grid-object-undo.md) — Fake
   grid — keep an object's edit history for Undo / Redo (blocked by
   `gridspec-object-edit`)
@@ -997,6 +997,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Remaining table-widget migrations (inventory columns, full friends rights)
 - [`viewer-telemetry-opt-in`](ready/viewer-telemetry-opt-in.md) — Opt-in viewer
   telemetry, saying exactly what is sent
+- [`viewer-teleport-offer-maturity-prompt`](ready/viewer-teleport-offer-maturity-prompt.md)
+  — Ask before accepting a teleport offer rated above the maturity preference
 - [`viewer-terrain-land-cache-on-disk`](ready/viewer-terrain-land-cache-on-disk.md)
   — Persist the land-height cache to disk (ground floor available at login)
 - [`viewer-text-field-context-menu`](ready/viewer-text-field-context-menu.md) —
@@ -1195,8 +1197,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 - [`gridspec-task-inventory`](ready/gridspec-task-inventory.md) — Task inventory
   reads and writes on each grid
-- [`gridspec-teleport-lures`](ready/gridspec-teleport-lures.md) — Teleport
-  offers, requests and their answers on each grid
 - [`gridspec-terrain`](ready/gridspec-terrain.md) — Terrain, wind and cloud
   layers as each grid sends them
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
@@ -1617,7 +1617,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (32)
+## bugs (33)
 
 ### protocol
 
@@ -1628,6 +1628,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-classified-query-wrong-flag-space`](bugs/protocol-classified-query-wrong-flag-space.md)
   — DirClassifiedQuery sends DirFind maturity bits instead of classified-query
   bits
+- [`protocol-im-states-no-position`](bugs/protocol-im-states-no-position.md) —
+  Every instant message the session sends states position zero
 - [`protocol-neighbor-discovered-repeats`](bugs/protocol-neighbor-discovered-repeats.md)
   — NeighborDiscovered is reported again every time Second Life re-announces a
   neighbour
@@ -1700,7 +1702,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1329)
+## done (1330)
 
 ### protocol
 
@@ -4649,6 +4651,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   and OpenSim and make the fake grid be each
 - [`gridspec-teleport`](done/gridspec-teleport.md) — Teleport phases, flags,
   failures, cancel and access refusals on each grid
+- [`gridspec-teleport-lures`](done/gridspec-teleport-lures.md) — Teleport
+  offers, requests and their answers on each grid
 
 ## deferred (29)
 

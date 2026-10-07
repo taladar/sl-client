@@ -20,8 +20,13 @@
 //! - the minimap draws a resident and a tracking beacon in different colours;
 //! - an About Land window left open follows the owner's rename;
 //! - the viewer's own bake reaches the grid, and (OpenSim) the other viewer;
+//! - a teleport offer shows its destination's rating where the grid states
+//!   one, and each answer to an offer or a request reaches the grid as that
+//!   grid expects it;
 //! - two residents befriend each other with a message and trade rights
 //!   (live);
+//! - a teleport offer is declined without a word to the offerer, and a second
+//!   one is taken (live);
 //! - two editors of one prim: what the loser is told (live).
 
 #[cfg(test)]
@@ -177,6 +182,198 @@ mod test {
             }
             _ => None,
         }
+    }
+
+    // ---- Teleport offers and requests --------------------------------------
+
+    /// The template a teleport offer's card reports as.
+    const TELEPORT_OFFER: &str = "TeleportOffered";
+
+    /// The template a teleport request's card reports as.
+    const TELEPORT_REQUEST: &str = "TeleportRequest";
+
+    /// How the offer card's line about its destination's rating begins. (The
+    /// rating itself follows inside the isolation marks a translated
+    /// placeable is wrapped in, so the two are matched apart.)
+    const RATING_LINE: &str = "Destination rating:";
+
+    /// A teleport offer or request from the stranger to viewer `label`, with
+    /// the lure id and binary bucket a grid would give it.
+    fn lure_from_stranger(
+        stage: &Stage,
+        label: &str,
+        dialog: ImDialog,
+        id: Uuid,
+        bucket: &[u8],
+    ) -> Result<InstantMessage, BodyError> {
+        let stranger = AgentKey::from(Uuid::from_u128(STRANGER));
+        Ok(InstantMessage {
+            dialog,
+            id,
+            binary_bucket: bucket.to_vec(),
+            ..im_from(stage, label, stranger, STRANGER_NAME, "Join me")?
+        })
+    }
+
+    /// The one offer card on screen.
+    fn offer_card(viewer: &Viewer) -> UiLocator {
+        viewer.ui().test_id("offer-invite-card")
+    }
+
+    /// Press `button` of the one offer card on screen and wait for it to go.
+    async fn answer_offer(viewer: &Viewer, button: &str) -> Result<(), BodyError> {
+        let card = offer_card(viewer);
+        let _pressed = card
+            .test_id(&format!("offer-invite-action:{button}"))
+            .click()
+            .await?;
+        let _gone = viewer.expect(&card).timeout(WAIT).to_be_detached().await?;
+        Ok(())
+    }
+
+    /// **Teleport offers and requests**, as each grid words them
+    /// (`book/src/gridspec/teleport.md`). A Second Life offer carries an opaque
+    /// lure id and names its destination's rating in the binary bucket, which
+    /// the card shows; an OpenSim offer's id is the place and its bucket is
+    /// empty, and the card says nothing of a rating. Either way Decline sends
+    /// the `IM_LURE_DECLINED` naming the lure and Teleport sends the
+    /// `TeleportLureRequest` for it. A teleport *request* raises a card of its
+    /// own, whose Decline sends nothing — there is no message for it — and
+    /// whose Offer Teleport answers with a `StartLure` to the requester.
+    #[test]
+    fn a_teleport_offer_shows_its_rating_and_every_answer_reaches_the_grid() -> Result<(), TestError>
+    {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "lure_cards_second_life"),
+            (ImitatedGrid::OpenSim, "lure_cards_open_sim"),
+        ] {
+            stage(name, &["Alpha"])
+                .needs(Need::GridControl)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    let stranger = AgentKey::from(Uuid::from_u128(STRANGER));
+                    let home = stage
+                        .grid()?
+                        .region_handle(&RegionConfig::default().name)
+                        .ok_or("the stage has no home region")?;
+                    // The offer as each grid sends it.
+                    let (lure, bucket): (Uuid, &[u8]) = match flavour {
+                        ImitatedGrid::SecondLife => (
+                            Uuid::from_u128(0x3b6b_7c62_8f8f_4e34_9c1a_79c2_e2ba_0fd1),
+                            b"256000|256000|128|128|25|-1|0|-0|M \0",
+                        ),
+                        ImitatedGrid::OpenSim => (
+                            sl_proto::FakeParcelId {
+                                region_handle: home,
+                                x: 100,
+                                y: 100,
+                                z: 30,
+                            }
+                            .to_uuid(),
+                            b"",
+                        ),
+                    };
+                    let mut heard = stage.agent("Alpha").await?.events();
+
+                    // An offer, declined.
+                    deliver(
+                        stage,
+                        "Alpha",
+                        &lure_from_stranger(stage, "Alpha", ImDialog::LureUser, lure, bucket)?,
+                    )
+                    .await?;
+                    let _shown = alpha
+                        .expect_notification()
+                        .timeout(WAIT)
+                        .to_show(TELEPORT_OFFER)
+                        .await?;
+                    let rating = offer_card(alpha)
+                        .get(Locator::role(Role::Text).name_containing(RATING_LINE));
+                    match flavour {
+                        ImitatedGrid::SecondLife => {
+                            let _rated = alpha
+                                .expect(&rating)
+                                .timeout(WAIT)
+                                .to_contain_text("Moderate")
+                                .await?;
+                        }
+                        ImitatedGrid::OpenSim => assert_eq!(
+                            rating.count().await?,
+                            0,
+                            "an offer that states no rating shows none"
+                        ),
+                    }
+                    answer_offer(alpha, "Decline").await?;
+                    let _declined = grid_hears(&mut heard, "lure decline", |event| {
+                        matches!(event, ServerEvent::InstantMessage(im)
+                            if im.dialog == ImDialog::LureDeclined
+                                && im.to_agent_id == stranger
+                                && im.id == lure)
+                    })
+                    .await?;
+
+                    // A request: Decline is silent, Offer Teleport is an offer.
+                    let request = lure_from_stranger(
+                        stage,
+                        "Alpha",
+                        ImDialog::TeleportRequest,
+                        Uuid::nil(),
+                        b"",
+                    )?;
+                    deliver(stage, "Alpha", &request).await?;
+                    let _asked = alpha
+                        .expect_notification()
+                        .timeout(WAIT)
+                        .to_show(TELEPORT_REQUEST)
+                        .await?;
+                    let sent_before = logged(alpha, LogStream::Command, "OfferTeleport").await?;
+                    answer_offer(alpha, "Decline").await?;
+                    assert_eq!(
+                        logged(alpha, LogStream::Command, "OfferTeleport").await?,
+                        sent_before,
+                        "declining a teleport request sends nothing"
+                    );
+                    deliver(stage, "Alpha", &request).await?;
+                    let _asked_again = alpha
+                        .expect(&offer_card(alpha))
+                        .timeout(WAIT)
+                        .to_be_visible()
+                        .await?;
+                    answer_offer(alpha, "Accept").await?;
+                    let _offered = grid_hears(&mut heard, "answering offer", |event| {
+                        matches!(event, ServerEvent::ClientMessage(message)
+                            if matches!(&**message, AnyMessage::StartLure(offer)
+                                if offer.target_data.len() == 1
+                                    && offer.target_data.iter().all(|target|
+                                        target.target_id == stranger.uuid())))
+                    })
+                    .await?;
+
+                    // An offer, accepted: the lure it named is the one asked
+                    // for. (Last: a Second-Life-flavoured grid holds no such
+                    // lure and answers with nothing, as aditi does.)
+                    deliver(
+                        stage,
+                        "Alpha",
+                        &lure_from_stranger(stage, "Alpha", ImDialog::LureUser, lure, bucket)?,
+                    )
+                    .await?;
+                    let _offered_again = alpha
+                        .expect(&offer_card(alpha))
+                        .timeout(WAIT)
+                        .to_be_visible()
+                        .await?;
+                    answer_offer(alpha, "Accept").await?;
+                    let _accepted = grid_hears(&mut heard, "lure acceptance", |event| {
+                        matches!(event, ServerEvent::TeleportViaLure { lure_id, .. }
+                            if lure_id.get() == lure)
+                    })
+                    .await?;
+                    Ok(())
+                })?;
+        }
+        Ok(())
     }
 
     // ---- Friendship rights -------------------------------------------------
@@ -1320,36 +1517,56 @@ mod test {
             return Ok(());
         }
         let beta_name = shown_name(stage, alpha, "Beta").await?;
+        offer_teleport_from_radar(alpha, beta, &beta_name).await?;
+        take_offered_teleport(beta, region(&here)).await
+    }
+
+    /// Alpha offers the avatar its radar lists as `name` a teleport, and the
+    /// offer's card reaches `target`.
+    async fn offer_teleport_from_radar(
+        alpha: &Viewer,
+        target: &Viewer,
+        name: &str,
+    ) -> Result<(), BodyError> {
         open_radar(alpha).await?;
         let _listed = alpha
-            .expect(&radar_row(alpha, &beta_name))
+            .expect(&radar_row(alpha, name))
             .timeout(LIVE_WAIT)
             .to_be_visible()
             .await?;
-        radar_menu(alpha, &beta_name, "menu-radar-offer-teleport").await?;
+        radar_menu(alpha, name, "menu-radar-offer-teleport").await?;
         let _closed = alpha
             .ui()
             .window(RADAR)
             .test_id("floater-button:close")
             .click()
             .await?;
-        let _offered = beta
-            .expect(&beta.ui().test_id("offer-invite-action:Accept"))
+        let _offered = target
+            .expect(&target.ui().test_id("offer-invite-action:Accept"))
             .timeout(LIVE_WAIT)
             .to_be_visible()
             .await?;
-        let _taken = beta
+        Ok(())
+    }
+
+    /// `viewer` presses Teleport on the offer it is showing and arrives in
+    /// the region named `region`, its teleport over.
+    async fn take_offered_teleport(
+        viewer: &Viewer,
+        region: Option<String>,
+    ) -> Result<(), BodyError> {
+        let _taken = viewer
             .ui()
             .test_id("offer-invite-action:Accept")
             .click()
             .await?;
-        let _arrived = beta
+        let _arrived = viewer
             .expect_state(Probe::Agent)
             .at("/region/name")
             .timeout(LIVE_WAIT)
-            .to_equal(json!(region(&here)))
+            .to_equal(json!(region))
             .await?;
-        let _settled = beta
+        let _settled = viewer
             .expect_state(Probe::Agent)
             .at("/teleport/state")
             .timeout(LIVE_WAIT)
@@ -1401,6 +1618,64 @@ mod test {
             .await;
             resolved.map_err(|_elapsed| "an accepted offer's card stayed")??;
         }
+    }
+
+    /// How long the offerer is watched for word of an offer its target
+    /// declined. Neither grid sends any; the conformance cases watched as long.
+    const DECLINE_WATCH: Duration = Duration::from_secs(10);
+
+    /// How many notifications `viewer` has raised that say anything of a
+    /// teleport.
+    async fn teleport_notices(viewer: &Viewer) -> Result<usize, BodyError> {
+        Ok(viewer
+            .notifications()
+            .await?
+            .iter()
+            .filter(|notification| notification.template.contains("Teleport"))
+            .count())
+    }
+
+    /// **A teleport offer, live**: Alpha offers Beta a teleport from the
+    /// radar. Beta's card says how the destination is rated when the grid's
+    /// offers do (Second Life's; OpenSim's state no rating). Beta declines,
+    /// and Alpha is told nothing — neither grid passes a decline on. Alpha
+    /// offers again, Beta presses Teleport, and arrives beside Alpha.
+    #[test]
+    fn a_live_teleport_offer_is_declined_in_silence_and_then_taken() -> Result<(), TestError> {
+        stage("live_lure", &["Alpha", "Beta"])
+            .needs(RELAYED)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let beta = &stage.viewer("Beta")?;
+                gather(stage, alpha, beta).await?;
+                let beta_name = shown_name(stage, alpha, "Beta").await?;
+                let home = alpha.agent().await?.region.and_then(|region| region.name);
+
+                offer_teleport_from_radar(alpha, beta, &beta_name).await?;
+                let rated = offer_card(beta)
+                    .get(Locator::role(Role::Text).name_containing(RATING_LINE))
+                    .count()
+                    .await?;
+                let states_a_rating = std::env::var("SL_E2E_GRID").as_deref() == Ok("aditi");
+                assert_eq!(
+                    rated,
+                    usize::from(states_a_rating),
+                    "the card shows a rating exactly when the grid's offers state one"
+                );
+                let told_before = teleport_notices(alpha).await?;
+                answer_offer(beta, "Decline").await?;
+                tokio::time::sleep(DECLINE_WATCH).await;
+                assert_eq!(
+                    teleport_notices(alpha).await?,
+                    told_before,
+                    "the offerer is told nothing of a declined offer"
+                );
+
+                offer_teleport_from_radar(alpha, beta, &beta_name).await?;
+                take_offered_teleport(beta, home).await?;
+                Ok(())
+            })?;
+        Ok(())
     }
 
     /// The prim the two editors fight over.

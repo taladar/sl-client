@@ -441,7 +441,8 @@ impl ImitatedGrid {
     /// How this grid runs a teleport and how it refuses one — measured by
     /// scripted `sl-repl` probes and the `teleport-*` conformance cases on
     /// aditi and the local OpenSim (2026-10-07,
-    /// `book/src/gridspec/teleport.md`).
+    /// `book/src/gridspec/teleport.md`). The lure rows are from the
+    /// `teleport-offer-*` and `teleport-lure-*` cases of the same day.
     ///
     /// The two grids agree on the skeleton (`TeleportStart`, then either a
     /// `TeleportLocal` or an event-queue `TeleportFinish`) and on nothing
@@ -466,6 +467,9 @@ impl ImitatedGrid {
                 unknown_region: "no_host",
                 unknown_landmark: "nolandmark_tport",
                 no_home: sl_proto::teleport_strings::INVALID_TPORT,
+                unknown_lure: None,
+                lure_line: Some(sl_proto::teleport_strings::COMPLETING),
+                finish_flags: FinishFlags::TheKind,
                 cancel: CancelAnswer::Failed {
                     reason: "Teleport cancelled.",
                     alert: "TPCancelled",
@@ -483,6 +487,9 @@ impl ImitatedGrid {
                 unknown_region: "The region you tried to teleport to was not found",
                 unknown_landmark: "Could not find the landmark asset data",
                 no_home: "Home set not",
+                unknown_lure: Some("The region you tried to teleport to was not found"),
+                lure_line: None,
+                finish_flags: FinishFlags::ViaLocation,
                 cancel: CancelAnswer::Ignored,
                 enforces_maturity_preference: false,
             },
@@ -990,6 +997,20 @@ pub struct TeleportPolicy {
     /// Life's is not measured (every test avatar has a home) and stays the
     /// key the fake grid always sent.
     pub no_home: &'static str,
+    /// The reason given for accepting a lure the grid does not hold, or
+    /// `None` for a grid that answers it with nothing at all. Second Life
+    /// says nothing — a lure nobody offered and one its target had declined
+    /// both went unanswered, and the client's own deadline ended each (a lure
+    /// whose offerer had logged out was still honoured). OpenSim's lure id
+    /// *is* the destination, so the only lure it cannot honour is one naming
+    /// a region that does not exist.
+    pub unknown_lure: Option<&'static str>,
+    /// The progress line an accepted lure opens with, ahead of
+    /// [`progress`](Self::progress) and on a local one too. Second Life sends
+    /// `completing` — first, whatever the name suggests.
+    pub lure_line: Option<&'static str>,
+    /// Which flags a `TeleportFinish` carries.
+    pub finish_flags: FinishFlags,
     /// What a `TeleportCancel` that arrives before the finish is answered
     /// with.
     pub cancel: CancelAnswer,
@@ -1020,6 +1041,18 @@ impl TeleportPolicy {
              </integer></map></llsd>\n"
         )
     }
+}
+
+/// Which flags a `TeleportFinish` carries
+/// ([`TeleportPolicy::finish_flags`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinishFlags {
+    /// The flags of the teleport it finishes: its kind (Second Life).
+    TheKind,
+    /// `VIA_LOCATION` whatever kind of teleport it finishes, keeping only the
+    /// flying bit of the request's own flags (OpenSim:
+    /// `EventQueueGetHandlers.TeleportFinishEvent`).
+    ViaLocation,
 }
 
 /// Which way a `TeleportLocal` says the agent faces

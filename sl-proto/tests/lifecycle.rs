@@ -15965,6 +15965,7 @@ mod test {
     fn teleport_times_out() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
+        session.set_diagnostics(true);
         drain(&mut session)?;
         drain_events(&mut session);
 
@@ -15986,6 +15987,18 @@ mod test {
             })
             .ok_or("expected a TeleportFailed event")?;
         assert!(reason.contains("timed out"), "unexpected reason: {reason}");
+        // The reason is free text, as a grid's is: the diagnostic is what says
+        // this failure is the session's own deadline and not an answer.
+        assert!(
+            drain_diagnostics(&mut session)
+                .iter()
+                .any(|diagnostic| matches!(
+                    diagnostic,
+                    Diagnostic::ExpectedReplyMissing { request, sequence: None }
+                        if request == Diagnostic::TELEPORT_REQUEST
+                )),
+            "a teleport the grid never answered should be reported as a missing reply"
+        );
         Ok(())
     }
 

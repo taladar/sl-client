@@ -39,6 +39,7 @@ pub mod fixtures;
 pub mod gitinfo;
 pub mod grid;
 pub mod isolate;
+pub mod lure;
 pub mod measured;
 pub mod metrics;
 pub mod record;

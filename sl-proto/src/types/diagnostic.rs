@@ -268,7 +268,7 @@ impl Diagnostic {
     /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for a logout
     /// whose `LogoutReply` never arrived.
     ///
-    /// One of the two **operation** labels: `request` is otherwise an open
+    /// One of the **operation** labels: `request` is otherwise an open
     /// vocabulary — a wire message name, or (for a driver that reports a failed
     /// capability request this way) a capability name — so a consumer that
     /// treats operations differently from background traffic recognises them by
@@ -280,11 +280,24 @@ impl Diagnostic {
     /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for a sit whose
     /// `AvatarSitResponse` never arrived.
     ///
-    /// The other operation label (see [`Diagnostic::LOGOUT_REQUEST`]), and the
+    /// Another operation label (see [`Diagnostic::LOGOUT_REQUEST`]), and the
     /// one an agent can *feel*: the session keeps running and simply never sits,
     /// with nothing else surfaced, so a client that tells the user when an
     /// action did nothing reports this one.
     pub const SIT_REQUEST: &'static str = "Sit";
+
+    /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for a teleport
+    /// the grid neither carried out nor refused before the session's own
+    /// deadline.
+    ///
+    /// An operation label like [`Diagnostic::LOGOUT_REQUEST`], and like it
+    /// already surfaced as the operation's own event: an
+    /// [`Event::TeleportFailed`](crate::Event::TeleportFailed) follows
+    /// immediately. The diagnostic is what tells that failure from one the grid
+    /// sent — the event's reason is free text either way — and Second Life
+    /// answers some requests with nothing at all (a lure it does not hold, for
+    /// one), so the difference is a fact about the grid.
+    pub const TELEPORT_REQUEST: &'static str = "Teleport";
 
     /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for an inventory
     /// folder-contents fetch that stalled often enough for the background crawl

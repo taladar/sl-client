@@ -20,7 +20,7 @@ const DESTINATION: (f32, f32, f32) = (128.0, 128.0, 30.0);
 
 /// The region on aditi the case teleports into: the sandbox the test avatars
 /// build in, which is rated Adult.
-const ADITI_RATED_REGION: &str = "Mauve";
+pub(crate) const ADITI_RATED_REGION: &str = "Mauve";
 
 /// How a location teleport into a region rated above the agent's preference
 /// ends: refused on Second Life; OpenSim has no such check.
@@ -31,7 +31,7 @@ const OUTCOME: Measured<&str> = Measured {
 };
 
 /// The alert key Second Life refuses with.
-const REFUSAL_ALERT: &str = "RegionTPAccessBlocked";
+pub(crate) const REFUSAL_ALERT: &str = "RegionTPAccessBlocked";
 
 /// The LLSD key, in the alert's parameters, naming the refusing region's
 /// rating.
@@ -49,7 +49,7 @@ const PREFERENCE_ATTEMPTS: u8 = 6;
 /// The request is repeated until it is answered: straight after an arrival the
 /// new region's capabilities are still being fetched, and a preference set in
 /// that gap has no capability to go to.
-async fn set_preference(
+pub(crate) async fn set_preference(
     session: &mut Session,
     max_access: &str,
 ) -> Result<Option<String>, TestFailure> {
@@ -73,6 +73,17 @@ async fn set_preference(
             answered => return answered,
         }
     }
+}
+
+/// The maturity preference the login response stated, or the ceiling the agent
+/// is entitled to on a grid that states no preference.
+pub(crate) fn stated_preference(session: &Session) -> Option<String> {
+    session.login_success().and_then(|login| {
+        login
+            .agent_region_access
+            .clone()
+            .or_else(|| login.agent_access_max.clone())
+    })
 }
 
 /// Lowers the agent's maturity preference to General and teleports into a
@@ -140,12 +151,7 @@ impl GridTest for TeleportAccessRefused {
             // entitled to on a grid that states no preference. (Asking the
             // capability would be the direct way, and Second Life does not
             // answer a request that sets nothing.)
-            let before = session.login_success().and_then(|login| {
-                login
-                    .agent_region_access
-                    .clone()
-                    .or_else(|| login.agent_access_max.clone())
-            });
+            let before = stated_preference(session);
             let lowered = set_preference(session, "PG").await?;
             check_eq("lowered_preference", &lowered.as_deref(), &Some("PG"))?;
 

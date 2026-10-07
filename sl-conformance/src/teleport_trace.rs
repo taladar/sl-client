@@ -14,8 +14,8 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AlertInfo, Command, Event, GridCoordinates, MapRegionInfo, Maturity, RegionCoordinates,
-    RegionHandle, Vector,
+    AlertInfo, Command, Diagnostic, Event, GridCoordinates, MapRegionInfo, Maturity,
+    RegionCoordinates, RegionHandle, Vector,
 };
 
 use crate::context::{Session, TestFailure};
@@ -30,6 +30,10 @@ const BLOCK_MARGIN: u32 = 1;
 /// drained. OpenSim's world-map worker batches regions with a ~50 ms sleep
 /// between batches, so this stays comfortably above that cadence.
 const BLOCK_DRAIN_QUIET: Duration = Duration::from_secs(2);
+
+/// How long the diagnostic channel is given to deliver what the session
+/// recorded beside a failure.
+const DIAGNOSTIC_GRACE: Duration = Duration::from_millis(500);
 
 /// An intra-region teleport's completion (`TeleportLocal`).
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +78,9 @@ pub struct Failure {
     pub reason: String,
     /// The alert Second Life attaches; OpenSim sends none.
     pub alert: Option<AlertInfo>,
+    /// Whether the grid sent this failure. `false` is the session's own
+    /// deadline: the grid neither carried the teleport out nor refused it.
+    pub from_grid: bool,
 }
 
 /// Every teleport event one request produced, up to the one that ended it.
@@ -127,6 +134,18 @@ impl TeleportTrace {
         }
     }
 
+    /// How the grid answered: `local` or `moved` for a teleport it carried
+    /// out, `refused` for one it failed, and `unanswered` for one that ended on
+    /// the session's own deadline with the grid having said nothing.
+    #[must_use]
+    pub const fn answer(&self) -> &'static str {
+        match &self.failure {
+            Some(failure) if failure.from_grid => "refused",
+            Some(_deadline) => "unanswered",
+            None => self.outcome(),
+        }
+    }
+
     /// Record the whole trace under `prefix`: the order, every flags word in
     /// hexadecimal, the lines, and the fields of whatever ended it.
     pub fn record(&self, prefix: &str, metrics: &mut Metrics) {
@@ -134,6 +153,7 @@ impl TeleportTrace {
         let key = |name: &str| format!("{prefix}{name}");
         metrics.set(&key("sequence"), self.sequence());
         metrics.set(&key("outcome"), self.outcome());
+        metrics.set(&key("answer"), self.answer());
         metrics.set(
             &key("start_flags"),
             self.starts
@@ -178,6 +198,7 @@ impl TeleportTrace {
             metrics.set(&key("world_reset"), arrival.world_reset);
         }
         if let Some(failure) = &self.failure {
+            metrics.set(&key("failure_from_grid"), failure.from_grid);
             metrics.set(&key("failure_reason"), failure.reason.clone());
             metrics.set(
                 &key("failure_alert"),
@@ -211,6 +232,7 @@ pub async fn watch_teleport(
     timeout: Duration,
 ) -> Result<TeleportTrace, TestFailure> {
     let mut trace = TeleportTrace::default();
+    let diagnostics_before = session.diagnostics().len();
     session
         .wait_for(timeout, |event| match event {
             Event::TeleportStarted { flags } => {
@@ -259,6 +281,7 @@ pub async fn watch_teleport(
                 trace.failure = Some(Failure {
                     reason: reason.clone(),
                     alert: alert_info.clone(),
+                    from_grid: true,
                 });
                 Some(())
             }
@@ -279,6 +302,24 @@ pub async fn watch_teleport(
             _ => None,
         })
         .await?;
+    if let Some(failure) = trace.failure.as_mut() {
+        // The session's own deadline ends a teleport with the same event a
+        // grid's refusal does; the diagnostic it records beside it is the
+        // difference, and it reaches the harness on another task.
+        tokio::time::sleep(DIAGNOSTIC_GRACE).await;
+        failure.from_grid =
+            !session
+                .diagnostics()
+                .iter()
+                .skip(diagnostics_before)
+                .any(|diagnostic| {
+                    matches!(
+                        diagnostic,
+                        Diagnostic::ExpectedReplyMissing { request, .. }
+                            if request == Diagnostic::TELEPORT_REQUEST
+                    )
+                });
+    }
     Ok(trace)
 }
 

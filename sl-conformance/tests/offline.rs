@@ -96,6 +96,7 @@ mod test {
         teleport_failed => "teleport-failed" [fake_sl, fake_opensim],
         teleport_cancel => "teleport-cancel" [fake_sl, fake_opensim],
         teleport_access_refused => "teleport-access-refused" [fake_sl, fake_opensim],
+        teleport_lure_unknown => "teleport-lure-unknown" [fake_sl, fake_opensim],
         region_crossing => "region-crossing" [fake_sl, fake_opensim],
         neighbour_child_circuits => "neighbour-child-circuits" [fake_sl, fake_opensim],
         avatar_appearance_npc => "avatar-appearance-npc" [fake_sl, fake_opensim],

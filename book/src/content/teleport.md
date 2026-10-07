@@ -20,7 +20,11 @@ and the position/orientation within it. There are a few flavours:
   the offerer's region handle and position into the lure id (a *fake parcel
   id*, `sl_wire::FakeParcelId`), which gives an early destination hint; Second
   Life's lure id is opaque, so there is none and the handle only becomes known
-  when the teleport finishes.
+  when the teleport finishes. A Second Life offer names its destination
+  elsewhere — in the offer's binary bucket, with the region's rating — which
+  `InstantMessage::lure_destination` decodes. What each grid delivers, what
+  the offerer hears back (nothing) and how long a lure lasts are in
+  [Grid Behaviour → Teleport](../gridspec/teleport.md#offers-and-requests).
 - **Landmark teleport** (`Command::TeleportViaLandmark { landmark }`) teleports
   to a landmark inventory item's *asset* id; a `landmark` of `None` teleports to
   the agent's **home** location. Unlike a direct teleport the destination is
