@@ -570,7 +570,7 @@ impl Leg {
                 self.alerts.push(text);
             }
             Event::AgentAlertMessage { message, .. } => self.alerts.push(message.clone()),
-            Event::TeleportStarted => self.teleports.push("start".to_owned()),
+            Event::TeleportStarted { .. } => self.teleports.push("start".to_owned()),
             Event::TeleportLocal { position, .. } => {
                 self.position = Vector {
                     x: position.x(),

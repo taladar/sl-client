@@ -360,7 +360,7 @@ fn on_events(
             | SlSessionEvent::ParcelAccessList { .. }
             | SlSessionEvent::EstateInfo(_)
             | SlSessionEvent::EstateAccessList { .. }
-            | SlSessionEvent::TeleportStarted
+            | SlSessionEvent::TeleportStarted { .. }
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportFinished { .. }
             | SlSessionEvent::TeleportLocal { .. }

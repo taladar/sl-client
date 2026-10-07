@@ -44,7 +44,9 @@ use sl_viewer_ui_core::skin::text_role;
 use sl_viewer_ui_core::skin::{WARN_TEXT_CLASS, set_state_class, text_meaning};
 
 use sl_automation_proto::{TeleportReadout, TeleportState};
-use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
+use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent, TeleportFlags};
+
+use crate::i18n::Translator;
 
 use crate::intents::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::skin_palette::SkinPalette;
@@ -146,6 +148,10 @@ struct Entry {
     outcome: Outcome,
     /// Whether the soft watchdog has flagged this teleport as slow.
     stalled: bool,
+    /// Whether the simulator said this teleport may not be cancelled (the
+    /// `DISABLE_CANCEL` flag of its `TeleportStart` — a forced teleport home,
+    /// and every OpenSim teleport on a grid configured that way).
+    uncancellable: bool,
     /// The target to re-issue on Retry, if known.
     retry: Option<TeleportTarget>,
 }
@@ -170,6 +176,7 @@ impl TeleportFlow {
             destination,
             outcome: Outcome::Pending,
             stalled: false,
+            uncancellable: false,
             retry,
         });
     }
@@ -192,6 +199,7 @@ impl TeleportFlow {
             destination: None,
             outcome: Outcome::Pending,
             stalled: false,
+            uncancellable: false,
             retry: None,
         })
     }
@@ -424,9 +432,76 @@ fn ingest_begin(
     }
 }
 
+/// The Fluent key of the text for a progress line the simulator sent as a
+/// **key** — the reference viewer's `teleport_strings.xml` progress set, which
+/// Second Life uses (`resolving`, `sending_home`, …). `None` for anything else:
+/// OpenSim sends no progress line at all, and Second Life's second line is the
+/// finished sentence `Sending to destination.`, shown as it came.
+fn progress_text_key(message: &str) -> Option<&'static str> {
+    Some(match message {
+        "sending_dest" => "teleport-progress-sending-dest",
+        "redirecting" => "teleport-progress-redirecting",
+        "relaying" => "teleport-progress-relaying",
+        "sending_home" => "teleport-progress-sending-home",
+        "sending_landmark" => "teleport-progress-sending-landmark",
+        "completing" => "teleport-progress-completing",
+        "resolving" => "teleport-progress-resolving",
+        "contacting" => "teleport-progress-contacting",
+        "arriving" => "teleport-progress-arriving",
+        "requesting" => "teleport-progress-requesting",
+        "pending" => "teleport-progress-pending",
+        _other => return None,
+    })
+}
+
+/// The text a failed teleport is explained with.
+///
+/// The two grids say why differently. OpenSim's reason is an English sentence
+/// and is shown as it came. Second Life's is usually a **key** (`no_host`,
+/// `nolandmark_tport`), repeated in the alert — or, for a refusal with a text
+/// of its own, an alert key (`RegionTPAccessBlocked`) beside a sentence. A key
+/// the notification catalogue knows is shown as that entry's text, resolved by
+/// `resolve`; where the entry wants arguments this line does not have, the
+/// simulator's own sentence stands instead.
+fn failure_reason(
+    reason: &str,
+    alert_key: Option<&str>,
+    resolve: impl Fn(&'static str) -> String,
+) -> String {
+    let reason = reason.trim();
+    let known = alert_key
+        .into_iter()
+        .chain(core::iter::once(reason))
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .find_map(crate::notifications::template);
+    match known {
+        Some(entry) => {
+            let text = resolve(entry.message_key);
+            let reason_is_a_sentence =
+                !reason.is_empty() && crate::notifications::template(reason).is_none();
+            if text.contains('[') && reason_is_a_sentence {
+                reason.to_owned()
+            } else {
+                text
+            }
+        }
+        None if reason.is_empty() => "The teleport could not be completed.".to_owned(),
+        None => reason.to_owned(),
+    }
+}
+
+/// Whether a failure's alert key says the teleport ended because the client
+/// cancelled it — Second Life's answer to a `TeleportCancel` (OpenSim sends
+/// none: it either completes the teleport or drops it without a word).
+fn confirms_a_cancel(alert_key: Option<&str>) -> bool {
+    alert_key.is_some_and(|key| key.trim() == "TPCancelled")
+}
+
 /// Fold the incoming teleport events into the flow state.
 fn ingest_events(
     time: Res<Time>,
+    translator: Translator,
     mut events: MessageReader<SlEvent>,
     mut flow: ResMut<TeleportFlow>,
     mut ui_sound: MessageWriter<crate::ui_sounds::PlayUiSound>,
@@ -434,9 +509,10 @@ fn ingest_events(
     let now = time.elapsed_secs_f64();
     for event in events.read() {
         match &event.0 {
-            SlSessionEvent::TeleportStarted => {
+            SlSessionEvent::TeleportStarted { flags } => {
                 let entry = flow.pending_entry(now);
                 entry.phase = Phase::Requested;
+                entry.uncancellable = flags.contains(TeleportFlags::DISABLE_CANCEL);
                 entry.updated_at = now;
                 // The reference viewer's "teleport out" chime as the flow begins.
                 ui_sound.write(crate::ui_sounds::PlayUiSound(
@@ -446,7 +522,10 @@ fn ingest_events(
             SlSessionEvent::TeleportProgress { message, .. } => {
                 let entry = flow.pending_entry(now);
                 entry.phase = Phase::InProgress;
-                entry.message = (!message.is_empty()).then(|| message.clone());
+                entry.message = (!message.is_empty()).then(|| {
+                    progress_text_key(message)
+                        .map_or_else(|| message.clone(), |key| translator.get(key))
+                });
                 entry.updated_at = now;
             }
             SlSessionEvent::TeleportFinished { .. } => {
@@ -471,7 +550,18 @@ fn ingest_events(
                     entry.updated_at = now;
                 }
             }
+            SlSessionEvent::TeleportFailed { alert_info, .. }
+                if confirms_a_cancel(alert_info.as_ref().map(|info| info.message.as_str())) =>
+            {
+                // The grid's answer to a cancel is the cancel having worked,
+                // not a teleport having failed: the display the Cancel button
+                // closed stays closed, and one still open closes.
+                flow.entry = None;
+            }
             SlSessionEvent::TeleportFailed { reason, alert_info } => {
+                // The key and its parameters stay on the page under the text
+                // they resolved to: when a teleport fails, what the simulator
+                // actually said is the detail worth having.
                 let detail = alert_info.as_ref().and_then(|info| {
                     let params = info.extra_params.trim();
                     let key = info.message.trim();
@@ -482,13 +572,14 @@ fn ingest_events(
                         (false, false) => Some(format!("{key} ({params})")),
                     }
                 });
+                let text = failure_reason(
+                    reason,
+                    alert_info.as_ref().map(|info| info.message.as_str()),
+                    |key| translator.get(key),
+                );
                 let entry = flow.pending_entry(now);
                 entry.outcome = Outcome::Failed {
-                    reason: if reason.trim().is_empty() {
-                        "The teleport could not be completed.".to_owned()
-                    } else {
-                        reason.clone()
-                    },
+                    reason: text,
                     detail,
                 };
                 entry.updated_at = now;
@@ -702,7 +793,9 @@ fn render_overlay(time: Res<Time>, mut flow: ResMut<TeleportFlow>, parts: Overla
     // nothing on a fleeting success.
     for (kind, mut visibility) in &mut overlay_buttons {
         let wanted = match kind {
-            OverlayButton::Cancel => matches!(entry.outcome, Outcome::Pending),
+            OverlayButton::Cancel => {
+                matches!(entry.outcome, Outcome::Pending) && !entry.uncancellable
+            }
             OverlayButton::Dismiss => matches!(entry.outcome, Outcome::Failed { .. }),
             OverlayButton::Retry => {
                 matches!(entry.outcome, Outcome::Failed { .. }) && entry.retry.is_some()
@@ -768,8 +861,8 @@ fn message_line(entry: &Entry) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Entry, Outcome, Phase, TeleportFlow, detail_line, message_line, status_line,
-        teleport_readout,
+        Entry, Outcome, Phase, TeleportFlow, confirms_a_cancel, detail_line, failure_reason,
+        message_line, progress_text_key, status_line, teleport_readout,
     };
     use bevy::prelude::World;
     use pretty_assertions::assert_eq;
@@ -785,6 +878,7 @@ mod tests {
             destination: Some("Region (128, 128)".to_owned()),
             outcome: Outcome::Pending,
             stalled: false,
+            uncancellable: false,
             retry: None,
         }
     }
@@ -884,6 +978,67 @@ mod tests {
         assert_eq!(status_line(&entry), "Arriving at the destination region…");
         entry.outcome = Outcome::Succeeded;
         assert_eq!(status_line(&entry), "You have arrived.");
+    }
+
+    /// A failure the grid names by key reads as the catalogue's text for it,
+    /// whichever field carries the key; a sentence is shown as it came; and an
+    /// entry that wants arguments yields to the simulator's own sentence.
+    #[test]
+    fn a_keyed_failure_reads_as_its_catalogue_text() {
+        let key_of = |key: &'static str| key.to_owned();
+        // Second Life: the key as the reason and again as the alert.
+        assert_eq!(
+            failure_reason("no_host", Some("no_host"), key_of),
+            "notification-no-host"
+        );
+        // Second Life: a sentence, and the key in the alert alone.
+        assert_eq!(
+            failure_reason(
+                "You aren't allowed in that Region due to your maturity Rating.",
+                Some("RegionTPAccessBlocked"),
+                key_of
+            ),
+            "notification-region-tp-access-blocked"
+        );
+        // OpenSim: a sentence and no alert.
+        assert_eq!(
+            failure_reason("The region is full", None, key_of),
+            "The region is full"
+        );
+        // An entry whose text wants arguments this line cannot supply.
+        assert_eq!(
+            failure_reason("Home set not", Some("no_host"), |_key| {
+                "Could not reach [REGION]".to_owned()
+            }),
+            "Home set not"
+        );
+        assert_eq!(
+            failure_reason(" ", None, key_of),
+            "The teleport could not be completed."
+        );
+    }
+
+    /// Only the grid's own answer to a cancel is taken for one.
+    #[test]
+    fn only_the_cancel_alert_confirms_a_cancel() {
+        assert!(confirms_a_cancel(Some("TPCancelled")));
+        assert!(!confirms_a_cancel(Some("no_host")));
+        assert!(!confirms_a_cancel(None));
+    }
+
+    /// Every progress key the reference viewer knows has a text; a finished
+    /// sentence has none and is shown as it came.
+    #[test]
+    fn a_progress_key_has_a_text_and_a_sentence_does_not() {
+        assert_eq!(
+            progress_text_key("resolving"),
+            Some("teleport-progress-resolving")
+        );
+        assert_eq!(
+            progress_text_key("sending_landmark"),
+            Some("teleport-progress-sending-landmark")
+        );
+        assert_eq!(progress_text_key("Sending to destination."), None);
     }
 
     /// The detail line shows the destination and a live elapsed count while

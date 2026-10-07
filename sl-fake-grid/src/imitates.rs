@@ -39,6 +39,7 @@
 //! | how an `ObjectUpdate` is put on the wire ([`CircuitPolicy::short_zero_tails`]) | zero-coded, its final run of zeros one short | as encoded |
 //! | what a region says of itself on arrival ([`arrival_policy`](ImitatedGrid::arrival_policy)) | a product name, SKU and data centre; a `HealthMessage` and an `AgentStateUpdate`; two handshakes down each child circuit; `SimStats` every 2 s and the time every 10 s, with a sun direction | none of the three names; neither message; one handshake; `SimStats` every 3 s with six more statistics and the time every 2.55 s, with no sun direction |
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
+//! | how a teleport runs and how it is refused ([`teleport_policy`](ImitatedGrid::teleport_policy)) | `resolving` and `Sending to destination.` between the start and the finish; a refusal after the start, over the event queue, as a key with an `AlertInfo`; a cancel answered `TPCancelled`; a region above the maturity preference refused; a local teleport flagged `WITHIN_REGION` | no progress lines; a refusal before any start, over UDP, as a sentence with no alert; a cancel unanswered; no maturity check; the request's flags alone |
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
 //!
 //! **The inventory rows are the divergence a viewer is most likely to trip
@@ -433,6 +434,57 @@ impl ImitatedGrid {
                 },
                 timeout_kick: Some("Simulator logged you out due to connection timeout."),
                 short_zero_tails: false,
+            },
+        }
+    }
+
+    /// How this grid runs a teleport and how it refuses one — measured by
+    /// scripted `sl-repl` probes and the `teleport-*` conformance cases on
+    /// aditi and the local OpenSim (2026-10-07,
+    /// `book/src/gridspec/teleport.md`).
+    ///
+    /// The two grids agree on the skeleton (`TeleportStart`, then either a
+    /// `TeleportLocal` or an event-queue `TeleportFinish`) and on nothing
+    /// around it. Second Life narrates: `resolving`, then the literal sentence
+    /// `Sending to destination.`, after a `sending_home` / `sending_landmark`
+    /// for those two kinds. OpenSim sends no progress line at all. Second
+    /// Life refuses *after* the start and its first lines, over the event
+    /// queue, with a key (`no_host`, `nolandmark_tport`) repeated in an
+    /// `AlertInfo`; OpenSim refuses *instead of* starting, over UDP, with an
+    /// English sentence and no alert.
+    #[must_use]
+    pub const fn teleport_policy(self) -> TeleportPolicy {
+        match self {
+            Self::SecondLife => TeleportPolicy {
+                progress: &["resolving", "Sending to destination."],
+                names_the_kind: true,
+                local_flags: sl_types::map::TeleportFlags::WITHIN_REGION,
+                local_look_at: LocalLookAt::TowardsRegionOrigin,
+                finish_location_id: sl_proto::TELEPORT_FINISH_LOCATION_ID_SECOND_LIFE,
+                finish_states_region_size: false,
+                refusals: RefusalTransport::EventQueue,
+                unknown_region: "no_host",
+                unknown_landmark: "nolandmark_tport",
+                no_home: sl_proto::teleport_strings::INVALID_TPORT,
+                cancel: CancelAnswer::Failed {
+                    reason: "Teleport cancelled.",
+                    alert: "TPCancelled",
+                },
+                enforces_maturity_preference: true,
+            },
+            Self::OpenSim => TeleportPolicy {
+                progress: &[],
+                names_the_kind: false,
+                local_flags: 0,
+                local_look_at: LocalLookAt::Requested,
+                finish_location_id: sl_proto::TELEPORT_FINISH_LOCATION_ID,
+                finish_states_region_size: true,
+                refusals: RefusalTransport::Udp,
+                unknown_region: "The region you tried to teleport to was not found",
+                unknown_landmark: "Could not find the landmark asset data",
+                no_home: "Home set not",
+                cancel: CancelAnswer::Ignored,
+                enforces_maturity_preference: false,
             },
         }
     }
@@ -906,6 +958,116 @@ impl ArrivalPolicy {
     }
 }
 
+/// How a grid runs and refuses a teleport
+/// ([`ImitatedGrid::teleport_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TeleportPolicy {
+    /// The `TeleportProgress` lines sent between the `TeleportStart` and the
+    /// `TeleportFinish` of an inter-region teleport, in order. A refusal cuts
+    /// the list short where the grid found out: an unknown region after the
+    /// first, a region the agent may not enter after the last.
+    pub progress: &'static [&'static str],
+    /// Whether a home or landmark teleport opens with a line naming its kind
+    /// (`sending_home`, `sending_landmark`) ahead of
+    /// [`progress`](Self::progress).
+    pub names_the_kind: bool,
+    /// The flags added to the request's own on a local teleport's
+    /// `TeleportStart` and `TeleportLocal`.
+    pub local_flags: u32,
+    /// Which way a `TeleportLocal` says the agent faces.
+    pub local_look_at: LocalLookAt,
+    /// The `LocationID` of a `TeleportFinish`.
+    pub finish_location_id: u32,
+    /// Whether a `TeleportFinish` states the destination region's size.
+    pub finish_states_region_size: bool,
+    /// How a refusal reaches the client.
+    pub refusals: RefusalTransport,
+    /// The reason given for a region handle no region answers to.
+    pub unknown_region: &'static str,
+    /// The reason given for a landmark asset the grid does not hold.
+    pub unknown_landmark: &'static str,
+    /// The reason given for a home teleport by an agent with no home. Second
+    /// Life's is not measured (every test avatar has a home) and stays the
+    /// key the fake grid always sent.
+    pub no_home: &'static str,
+    /// What a `TeleportCancel` that arrives before the finish is answered
+    /// with.
+    pub cancel: CancelAnswer,
+    /// Whether a location teleport into a region rated above the agent's
+    /// maturity preference is refused. Second Life refuses it with
+    /// `RegionTPAccessBlocked` (a home teleport is let through); OpenSim has
+    /// no such check.
+    pub enforces_maturity_preference: bool,
+}
+
+/// The reason Second Life gives for refusing a region above the agent's
+/// maturity preference, and the alert key it repeats it under
+/// ([`TeleportPolicy::enforces_maturity_preference`]).
+pub const MATURITY_REFUSAL_REASON: &str = "You aren't allowed in that Region due to your \
+     maturity Rating. You may need to validate your age and/or install the latest Viewer. \
+     Please go to the Knowledge Base for details on accessing areas with this maturity Rating.";
+
+/// The alert key of a maturity refusal ([`MATURITY_REFUSAL_REASON`]).
+pub const MATURITY_REFUSAL_ALERT: &str = "RegionTPAccessBlocked";
+
+impl TeleportPolicy {
+    /// The `ExtraParams` of a maturity refusal's alert: an LLSD map naming the
+    /// refusing region's `SimAccess`, serialized as Second Life sends it.
+    #[must_use]
+    pub fn maturity_refusal_params(region_access: u8) -> String {
+        format!(
+            "<? LLSD/XML ?>\n<llsd><map><key>_region_access</key><integer>{region_access}\
+             </integer></map></llsd>\n"
+        )
+    }
+}
+
+/// Which way a `TeleportLocal` says the agent faces
+/// ([`TeleportPolicy::local_look_at`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalLookAt {
+    /// The direction the request asked for, flattened to the horizontal, and
+    /// east when that leaves nothing (OpenSim).
+    Requested,
+    /// The unit vector from the landing position towards the region's origin,
+    /// whatever the request asked for (Second Life: four teleports, four
+    /// look-ats equal to the negated, normalised position).
+    TowardsRegionOrigin,
+}
+
+/// How a teleport refusal reaches the client
+/// ([`TeleportPolicy::refusals`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusalTransport {
+    /// The UDP `TeleportFailed`, sent in place of a `TeleportStart`, its
+    /// reason an English sentence and no `AlertInfo` (OpenSim).
+    Udp,
+    /// A `TeleportFailed` event on the event queue, after the `TeleportStart`
+    /// and the progress lines sent so far, its reason repeated as the key of
+    /// an `AlertInfo` (Second Life).
+    EventQueue,
+}
+
+/// What a `TeleportCancel` ahead of the finish is answered with
+/// ([`TeleportPolicy::cancel`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelAnswer {
+    /// The teleport is abandoned and reported failed with this reason and
+    /// alert key (Second Life).
+    Failed {
+        /// The `Reason`.
+        reason: &'static str,
+        /// The `AlertInfo` key.
+        alert: &'static str,
+    },
+    /// The teleport goes through. OpenSim honours a cancel only between
+    /// creating the agent at the destination and sending the finish — tens of
+    /// milliseconds — and then abandons the teleport without a word; the
+    /// measured cancel, sent on the heels of its request, missed that window
+    /// and the agent arrived. The flavour takes the measured outcome.
+    Ignored,
+}
+
 /// How a grid runs a circuit ([`ImitatedGrid::circuit_policy`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CircuitPolicy {
@@ -1272,6 +1434,7 @@ mod test {
         assert_ne!(sl.logout_reply(), opensim.logout_reply());
         assert_ne!(sl.circuit_policy(), opensim.circuit_policy());
         assert_ne!(sl.arrival_policy(), opensim.arrival_policy());
+        assert_ne!(sl.teleport_policy(), opensim.teleport_policy());
         assert_ne!(
             sl.stock_simulator_features(),
             opensim.stock_simulator_features()

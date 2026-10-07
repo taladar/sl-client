@@ -27,8 +27,8 @@ use super::conversions::{
     region_limits, required_voice_version_from_llsd, script_dialog, script_permission_request,
     script_running_from_caps_llsd, server_appearance_update_from_llsd, session_history_from_llsd,
     set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
-    teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
-    windlight_refresh_from_llsd,
+    teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
+    voice_channel_info_from_llsd, windlight_refresh_from_llsd,
 };
 use super::transfers::Transfers;
 use super::world_cache::WorldCache;
@@ -575,6 +575,15 @@ impl Session {
                     self.caps_decode_failed(message);
                 }
             }
+            // Second Life reports a teleport it refused over the event queue;
+            // OpenSim sends the UDP message. Either way the teleport is over.
+            CapsEvent::TeleportFailed => {
+                if let Some((reason, alert_info)) = teleport_failed_from_caps_llsd(body) {
+                    self.teleport_refused(reason, alert_info);
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
             CapsEvent::TeleportFinish => {
                 if let Some(finish) = teleport_finish_from_llsd(body) {
                     // A finish without a start: the simulator decided on this
@@ -582,7 +591,9 @@ impl Session {
                     if !matches!(self.state, SessionState::Teleporting)
                         && self.enter_remote_teleport(now)
                     {
-                        self.events.push_back(Event::TeleportStarted);
+                        self.events.push_back(Event::TeleportStarted {
+                            flags: TeleportFlags(finish.teleport_flags),
+                        });
                     }
                     // The wire handle is authoritative (a lure or landmark
                     // teleport never knew its target); a server that omits it
@@ -4162,7 +4173,7 @@ impl Session {
                     layers: reply.layer_data.iter().map(map_layer).collect(),
                 });
             }
-            AnyMessage::TeleportStart(_) => {
+            AnyMessage::TeleportStart(start) => {
                 // A teleport we requested is already `Teleporting`. One we did
                 // not — `llTeleportAgent`, a god/estate "teleport home", a
                 // grid-side push — starts here: the reference viewer enters
@@ -4175,7 +4186,9 @@ impl Session {
                 // only — so nothing here misfires for a crossing.)
                 if matches!(self.state, SessionState::Teleporting) || self.enter_remote_teleport(now)
                 {
-                    self.events.push_back(Event::TeleportStarted);
+                    self.events.push_back(Event::TeleportStarted {
+                        flags: TeleportFlags(start.info.teleport_flags),
+                    });
                 } else {
                     tracing::debug!("ignoring TeleportStart in state {:?}", self.state);
                 }
@@ -4208,26 +4221,20 @@ impl Session {
                             local.info.position.z,
                         ),
                         look_at: local.info.look_at.clone(),
+                        flags: TeleportFlags(local.info.teleport_flags),
                     });
                 }
             }
             AnyMessage::TeleportFailed(failed) => {
-                if matches!(self.state, SessionState::Teleporting) {
-                    self.state = SessionState::Active;
-                    self.teleport = TeleportPhase::Idle;
-                    if let Some(circuit) = self.circuit.as_mut() {
-                        circuit.timers.teleport = None;
-                    }
-                }
                 // The wire strings are NUL-terminated; strip them like every
                 // other text field.
-                self.events.push_back(Event::TeleportFailed {
-                    reason: trimmed_string(&failed.info.reason),
-                    alert_info: failed.alert_info.first().map(|block| AlertInfo {
+                self.teleport_refused(
+                    trimmed_string(&failed.info.reason),
+                    failed.alert_info.first().map(|block| AlertInfo {
                         message: trimmed_string(&block.message),
                         extra_params: trimmed_string(&block.extra_params),
                     }),
-                });
+                );
             }
             AnyMessage::TeleportFinish(finish) => {
                 // The UDP TeleportFinish path (grids without an event queue).
@@ -13698,6 +13705,24 @@ impl Session {
         self.teleport = TeleportPhase::Requested { target: None };
         self.state = SessionState::Teleporting;
         true
+    }
+
+    /// The simulator refused or gave up on a teleport (`TeleportFailed`, over
+    /// UDP or the event queue): leaves the teleporting state, drops a handover
+    /// that was already under way and surfaces [`Event::TeleportFailed`]. The
+    /// event is surfaced even with no teleport in flight, since a simulator
+    /// also sends the message for a teleport it started itself.
+    fn teleport_refused(&mut self, reason: String, alert_info: Option<AlertInfo>) {
+        if matches!(self.state, SessionState::Teleporting) {
+            self.abort_pending_handover();
+            self.state = SessionState::Active;
+            self.teleport = TeleportPhase::Idle;
+            if let Some(circuit) = self.circuit.as_mut() {
+                circuit.timers.teleport = None;
+            }
+        }
+        self.events
+            .push_back(Event::TeleportFailed { reason, alert_info });
     }
 
     /// Requests an in-world teleport to `position` (region-local) in the region

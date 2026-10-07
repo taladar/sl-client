@@ -279,7 +279,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::MapBlock(..) => "map_block",
         Event::MapItems { .. } => "map_items",
         Event::MapLayers { .. } => "map_layers",
-        Event::TeleportStarted => "teleport_started",
+        Event::TeleportStarted { .. } => "teleport_started",
         Event::TeleportProgress { .. } => "teleport_progress",
         Event::TeleportLocal { .. } => "teleport_local",
         Event::TeleportFailed { .. } => "teleport_failed",

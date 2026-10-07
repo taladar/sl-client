@@ -6,7 +6,7 @@ use crate::GroupRoleKey;
 use crate::appearance;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::types::{
-    AccountBenefits, ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment,
+    AccountBenefits, ActiveGroup, AlertInfo, AssetType, AvatarAppearance, AvatarAttachment,
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties,
     ChatAudible, ChatMessage, ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo,
     CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, DayNames, DensityLayer,
@@ -3303,6 +3303,64 @@ pub(crate) fn teleport_finish_from_llsd(body: &Llsd) -> Option<CapsTeleportFinis
     })
 }
 
+/// Decodes a CAPS `TeleportFailed` event body — how Second Life reports a
+/// teleport it refused or gave up on (OpenSim sends the UDP message instead):
+/// `{ "Info": [ { "AgentID": <uuid>, "Reason": <string> } ], "AlertInfo":
+/// [ { "Message": <string>, "ExtraParams": <string> } ] }`. Returns the reason
+/// and the structured alert when the body carries one; `None` when the body
+/// has no `Info` block with a `Reason`.
+pub(crate) fn teleport_failed_from_caps_llsd(body: &Llsd) -> Option<(String, Option<AlertInfo>)> {
+    let reason = body
+        .get("Info")
+        .and_then(|info| info.index(0))
+        .and_then(|info| info.get("Reason"))
+        .and_then(Llsd::as_str)?
+        .to_owned();
+    let alert_info = body
+        .get("AlertInfo")
+        .and_then(|alert| alert.index(0))
+        .map(|alert| AlertInfo {
+            message: alert
+                .get("Message")
+                .and_then(Llsd::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            extra_params: alert
+                .get("ExtraParams")
+                .and_then(Llsd::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        });
+    Some((reason, alert_info))
+}
+
+/// Serializes a CAPS `TeleportFailed` event body (the inverse of
+/// `teleport_failed_from_caps_llsd`), as Second Life sends it: the `Info`
+/// block names the agent and the reason, and the `AlertInfo` block is present
+/// only when an alert is given.
+#[must_use]
+pub fn teleport_failed_to_caps_llsd(
+    agent_id: AgentKey,
+    reason: &str,
+    alert_info: Option<&AlertInfo>,
+) -> Llsd {
+    let info = llsd_map(vec![
+        ("AgentID", Llsd::Uuid(agent_id.uuid())),
+        ("Reason", Llsd::String(reason.to_owned())),
+    ]);
+    let mut body = vec![("Info", Llsd::Array(vec![info]))];
+    if let Some(alert) = alert_info {
+        body.push((
+            "AlertInfo",
+            Llsd::Array(vec![llsd_map(vec![
+                ("Message", Llsd::String(alert.message.clone())),
+                ("ExtraParams", Llsd::String(alert.extra_params.clone())),
+            ])]),
+        ));
+    }
+    llsd_map(body)
+}
+
 /// Extracts a neighbour's region handle and simulator address from a CAPS
 /// `EnableSimulator` event body: `{ "SimulatorInfo": [{ "Handle": <u64 binary>,
 /// "IP": <4 bytes>, "Port": <integer> }] }`. Unlike the UDP message the port is
@@ -5274,11 +5332,15 @@ pub(crate) const fn ipv4_octets(addr: SocketAddr) -> [u8; 4] {
 /// announcements unless it hosts a var-region.
 pub const STANDARD_REGION_SIZE_METRES: u32 = 256;
 
-/// The `LocationID` a simulator puts in `TeleportFinish`. The reference
-/// servers always send `4` (OpenSim's `TeleportFinishEvent` hard-codes it and
-/// the viewer ignores the value), so the constant documents the wire rather
-/// than a choice.
+/// The `LocationID` OpenSim puts in `TeleportFinish` (its
+/// `TeleportFinishEvent` hard-codes `4`). Second Life sends
+/// [`TELEPORT_FINISH_LOCATION_ID_SECOND_LIFE`]; the viewer ignores the value
+/// either way, so the constants document the wire rather than a choice.
 pub const TELEPORT_FINISH_LOCATION_ID: u32 = 4;
+
+/// The `LocationID` Second Life puts in `TeleportFinish` (measured on aditi,
+/// 2026-10-07, for location and home teleports alike).
+pub const TELEPORT_FINISH_LOCATION_ID_SECOND_LIFE: u32 = 3;
 
 /// What a simulator hands the client in a CAPS `TeleportFinish` — the
 /// complete record the reference event-queue builders emit
@@ -5291,8 +5353,8 @@ pub struct TeleportFinishInfo {
     /// The teleporting agent (`AgentID`); the viewer drops an event naming
     /// someone else.
     pub agent_id: AgentKey,
-    /// The `LocationID` (always [`TELEPORT_FINISH_LOCATION_ID`] on the
-    /// reference servers).
+    /// The `LocationID` ([`TELEPORT_FINISH_LOCATION_ID`] on OpenSim,
+    /// [`TELEPORT_FINISH_LOCATION_ID_SECOND_LIFE`] on Second Life).
     pub location_id: u32,
     /// The destination simulator's UDP address (`SimIP` + `SimPort`).
     pub dest: SocketAddr,
@@ -5305,18 +5367,19 @@ pub struct TeleportFinishInfo {
     /// The `TeleportFlags` bitfield (how the teleport happened).
     pub teleport_flags: u32,
     /// The destination region's size in metres (`RegionSizeX`, `RegionSizeY`).
-    pub region_size: (u32, u32),
+    /// OpenSim states it; Second Life sends neither key (`None`).
+    pub region_size: Option<(u32, u32)>,
 }
 
 /// Serializes a CAPS `TeleportFinish` event body (the element-by-element
 /// inverse of the `teleport_finish_from_llsd` parser, whose decoded
 /// `CapsTeleportFinish` is a private type — the parser tolerates the
-/// handle/size/agent fields being absent, the builder always emits them as
-/// the reference servers do).
+/// handle/size/agent fields being absent, the builder emits what each grid
+/// does: the size keys only when a size is given).
 #[must_use]
 pub fn teleport_finish_to_llsd(info: &TeleportFinishInfo) -> Llsd {
-    let (size_x, size_y) = info.region_size;
-    let info = llsd_map(vec![
+    let region_size = info.region_size;
+    let mut fields = vec![
         ("AgentID", Llsd::Uuid(info.agent_id.uuid())),
         ("LocationID", u32_to_llsd(info.location_id)),
         ("SimIP", Llsd::Binary(ipv4_octets(info.dest).to_vec())),
@@ -5325,10 +5388,12 @@ pub fn teleport_finish_to_llsd(info: &TeleportFinishInfo) -> Llsd {
         ("SeedCapability", Llsd::String(info.seed.clone())),
         ("SimAccess", Llsd::Integer(i32::from(info.sim_access))),
         ("TeleportFlags", u32_to_llsd(info.teleport_flags)),
-        ("RegionSizeX", u32_to_llsd(size_x)),
-        ("RegionSizeY", u32_to_llsd(size_y)),
-    ]);
-    llsd_map(vec![("Info", Llsd::Array(vec![info]))])
+    ];
+    if let Some((size_x, size_y)) = region_size {
+        fields.push(("RegionSizeX", u32_to_llsd(size_x)));
+        fields.push(("RegionSizeY", u32_to_llsd(size_y)));
+    }
+    llsd_map(vec![("Info", Llsd::Array(vec![llsd_map(fields)]))])
 }
 
 /// Decodes a CAPS `LandStatReply` event body — the region's top-scripts /
@@ -8438,7 +8503,7 @@ mod caps_serializer_tests {
             seed: "https://seed/tp".to_owned(),
             sim_access: 21,
             teleport_flags: 0x8000_00ff,
-            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+            region_size: Some((STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES)),
         };
         let llsd = teleport_finish_to_llsd(&info);
         assert_eq!(
@@ -8465,6 +8530,58 @@ mod caps_serializer_tests {
         assert_eq!(record.get("RegionSizeX").map(llsd_u32), Some(256));
         assert_eq!(record.get("RegionSizeY").map(llsd_u32), Some(256));
         Ok(())
+    }
+
+    /// Second Life's `TeleportFinish` states no region size, and the builder
+    /// leaves both keys out when it is given none.
+    #[test]
+    fn teleport_finish_without_a_region_size_omits_the_keys() -> Result<(), &'static str> {
+        let info = TeleportFinishInfo {
+            agent_id: AgentKey::from(Uuid::from_u128(0x7e1e)),
+            location_id: super::TELEPORT_FINISH_LOCATION_ID_SECOND_LIFE,
+            dest: addr(192, 168, 7, 9, 13_001),
+            region_handle: RegionHandle(0x0003_ec00_0003_e800),
+            seed: "https://seed/tp".to_owned(),
+            sim_access: 42,
+            teleport_flags: 16,
+            region_size: None,
+        };
+        let llsd = teleport_finish_to_llsd(&info);
+        let record = llsd
+            .get("Info")
+            .and_then(|info| info.index(0))
+            .ok_or("no Info record")?;
+        assert_eq!(record.get("LocationID").map(llsd_u32), Some(3));
+        assert!(record.get("RegionSizeX").is_none());
+        assert!(record.get("RegionSizeY").is_none());
+        assert!(teleport_finish_from_llsd(&llsd).is_some());
+        Ok(())
+    }
+
+    /// The event-queue `TeleportFailed` round-trips with and without its alert,
+    /// and a body with no reason is not a failure report.
+    #[test]
+    fn teleport_failed_caps_round_trips() {
+        let agent = AgentKey::from(Uuid::from_u128(0x7e1e));
+        let alert = crate::AlertInfo {
+            message: "RegionTPAccessBlocked".to_owned(),
+            extra_params: "<llsd><map><key>_region_access</key><integer>21</integer></map></llsd>"
+                .to_owned(),
+        };
+        let keyed = super::teleport_failed_to_caps_llsd(agent, "not allowed", Some(&alert));
+        assert_eq!(
+            super::teleport_failed_from_caps_llsd(&keyed),
+            Some(("not allowed".to_owned(), Some(alert)))
+        );
+        let plain = super::teleport_failed_to_caps_llsd(agent, "no_host", None);
+        assert_eq!(
+            super::teleport_failed_from_caps_llsd(&plain),
+            Some(("no_host".to_owned(), None))
+        );
+        assert_eq!(
+            super::teleport_failed_from_caps_llsd(&llsd_map(vec![])),
+            None
+        );
     }
 
     /// A `TeleportFinish` without a `RegionHandle` (older servers) or with a

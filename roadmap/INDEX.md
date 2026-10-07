@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 138 |
-| ready | 364 |
+| ideas | 139 |
+| ready | 363 |
 | blocked | 111 |
 | in-progress | 20 |
-| bugs | 30 |
-| done | 1328 |
+| bugs | 32 |
+| done | 1329 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2037** |
+| **total** | **2040** |
 
-## ideas (138)
+## ideas (139)
 
 ### protocol
 
@@ -270,6 +270,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-object-undo`](ideas/server-fake-grid-object-undo.md) — Fake
   grid — keep an object's edit history for Undo / Redo (blocked by
   `gridspec-object-edit`)
+- [`server-fake-grid-teleport-edges`](ideas/server-fake-grid-teleport-edges.md)
+  — Fake grid — the teleport edges each grid was measured handling and the fake
+  grid does not model
 - [`server-friends-service`](ideas/server-friends-service.md) — Friends service
   — relationships, rights, online fan-out
 - [`server-grid-service`](ideas/server-grid-service.md) — Grid service — region
@@ -359,7 +362,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (364)
+## ready (363)
 
 ### protocol
 
@@ -1192,8 +1195,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 - [`gridspec-task-inventory`](ready/gridspec-task-inventory.md) — Task inventory
   reads and writes on each grid
-- [`gridspec-teleport`](ready/gridspec-teleport.md) — Teleport phases, flags,
-  failures, cancel and access refusals on each grid
 - [`gridspec-teleport-lures`](ready/gridspec-teleport-lures.md) — Teleport
   offers, requests and their answers on each grid
 - [`gridspec-terrain`](ready/gridspec-terrain.md) — Terrain, wind and cloud
@@ -1616,12 +1617,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (30)
+## bugs (32)
 
 ### protocol
 
 - [`protocol-agent-list-voice-transition-lossy`](bugs/protocol-agent-list-voice-transition-lossy.md)
   — Agent-list voice updates collapse ENTER/LEAVE and can-voice into one bool
+- [`protocol-agent-preferences-read-unanswered-on-sl`](bugs/protocol-agent-preferences-read-unanswered-on-sl.md)
+  — Reading the agent preferences gets no answer on Second Life
 - [`protocol-classified-query-wrong-flag-space`](bugs/protocol-classified-query-wrong-flag-space.md)
   — DirClassifiedQuery sends DirFind maturity bits instead of classified-query
   bits
@@ -1631,6 +1634,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-region-flag-deny-ageunverified-value`](bugs/protocol-region-flag-deny-ageunverified-value.md)
   — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
   are split
+- [`protocol-teleport-start-after-failure-rearms`](bugs/protocol-teleport-start-after-failure-rearms.md)
+  — A TeleportStart that arrives after its own failure starts a teleport that
+  never ends
 - [`protocol-variable-block-lists-over-255`](bugs/protocol-variable-block-lists-over-255.md)
   — A request listing more than 255 objects fails to encode and ends the session
 - [`protocol-voice-accept-on-direct-session-becomes-conference`](bugs/protocol-voice-accept-on-direct-session-becomes-conference.md)
@@ -1694,7 +1700,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1328)
+## done (1329)
 
 ### protocol
 
@@ -4641,6 +4647,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   full SimulatorFeatures map on each grid
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
+- [`gridspec-teleport`](done/gridspec-teleport.md) — Teleport phases, flags,
+  failures, cancel and access refusals on each grid
 
 ## deferred (29)
 

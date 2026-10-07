@@ -122,7 +122,7 @@ impl GridTest for RegionCrossing {
                 crossing,
                 session.wait_for(CROSSING_TIMEOUT, |event| {
                     match event {
-                        Event::TeleportStarted
+                        Event::TeleportStarted { .. }
                         | Event::TeleportFinished { .. }
                         | Event::TeleportFailed { .. } => {
                             let _first = teleported.get_or_insert_with(|| format!("{event:?}"));

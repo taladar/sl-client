@@ -266,7 +266,9 @@ mod tests {
     fn a_cursor_read_returns_a_burst_in_order() {
         let mut log = EventLog::default();
         let cursor = log.cursor();
-        log.push(Logged::Event(SlSessionEvent::TeleportStarted));
+        log.push(Logged::Event(SlSessionEvent::TeleportStarted {
+            flags: sl_client_bevy::TeleportFlags(0),
+        }));
         log.push(Logged::Command(Command::Stand));
         log.push(action("inventory"));
         log.push(Logged::Sound(SoundRaised("radar_alert")));

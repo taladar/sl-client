@@ -1,8 +1,10 @@
 //! Inter-region teleport: the grid-side sequencing a sans-I/O
 //! [`SimSession`] deliberately leaves to its driver.
 //!
-//! The wire sequence mirrors OpenSim's `EntityTransferModule`
-//! (`TransferAgent_V2`): `TeleportStart` + progress on the source, a
+//! The skeleton is the one both live grids share, and OpenSim's
+//! `EntityTransferModule` (`TransferAgent_V2`) spells out: `TeleportStart` on
+//! the source (with the progress lines Second Life narrates and OpenSim does
+//! not — [`TeleportPolicy`](crate::imitates::TeleportPolicy)), a
 //! **second** session in the destination region (a `SimSession` has its
 //! region handle fixed at construction, so a teleport is always a new
 //! socket/session/CAPS triple), a `TeleportFinish` on the source's event
@@ -36,7 +38,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sl_proto::{
-    ArrivalPlacement, AssetSource as _, ServerEvent, SimSession, TeleportFinishInfo,
+    AlertInfo, ArrivalPlacement, AssetSource as _, ServerEvent, SimSession, TeleportFinishInfo,
     teleport_strings,
 };
 use sl_types::map::{RegionCoordinates, TeleportFlags};
@@ -45,6 +47,10 @@ use tokio::sync::{broadcast, watch};
 
 use crate::driver::SharedSim;
 use crate::error::Error;
+use crate::imitates::{
+    CancelAnswer, LocalLookAt, MATURITY_REFUSAL_ALERT, MATURITY_REFUSAL_REASON, RefusalTransport,
+    TeleportPolicy,
+};
 use crate::runtime::{GridCore, TeleportNotice};
 
 /// How long the grid waits for the client to complete its movement into the
@@ -84,9 +90,42 @@ pub(crate) struct TeleportRequest {
     pub(crate) arrival: ArrivalPlacement,
     /// The `TeleportFlags` bitfield (how the teleport happened).
     pub(crate) flags: u32,
-    /// The `TeleportProgress` key sent while the destination is prepared
-    /// (`sending_dest` / `sending_home` / `sending_landmark`).
-    pub(crate) progress: &'static str,
+    /// The `TeleportProgress` key naming the kind of teleport, on a grid that
+    /// names it (`sending_home` / `sending_landmark`); `None` for a teleport
+    /// to a location, which neither grid names.
+    pub(crate) kind_line: Option<&'static str>,
+    /// Whether the client asked for this teleport itself. Only such a
+    /// teleport can be cancelled or refused for the agent's maturity
+    /// preference; one the grid decided on is carried out.
+    pub(crate) client_requested: bool,
+}
+
+/// A teleport the grid refuses: what the client is told, and how much of the
+/// teleport it saw before the refusal on a grid that starts one first.
+#[derive(Debug, Clone)]
+pub(crate) struct Refusal {
+    /// The flags of the `TeleportStart` and progress lines.
+    flags: u32,
+    /// The progress lines sent ahead of the failure (event-queue refusals
+    /// only: a UDP refusal is sent in place of the start).
+    progress: Vec<&'static str>,
+    /// The failure reason.
+    reason: String,
+    /// The alert key and parameters, when they differ from "the reason
+    /// again, with no parameters".
+    alert: Option<AlertInfo>,
+}
+
+impl Refusal {
+    /// A refusal whose alert, on a grid that sends one, is its reason again.
+    fn plain(flags: u32, progress: Vec<&'static str>, reason: &str) -> Self {
+        Self {
+            flags,
+            progress,
+            reason: reason.to_owned(),
+            alert: None,
+        }
+    }
 }
 
 /// How a teleport ended.
@@ -94,6 +133,9 @@ pub(crate) enum TeleportOutcome {
     /// The destination was the agent's own region: a `TeleportLocal` moved it
     /// in place, no new session.
     Local,
+    /// The grid refused the teleport, or the client cancelled it in time; the
+    /// client has been told and the agent is where it was.
+    Refused,
     /// The agent arrived in the destination session; the source is retired.
     Moved(SharedSim),
 }
@@ -148,21 +190,19 @@ pub(crate) async fn teleport_session(
         .cloned()
         .ok_or(Error::UnknownAccount)?;
 
+    let policy = core.teleport_policy;
     if source_region == request.region {
+        let flags = request.flags | policy.local_flags;
+        let look_at = local_look_at(policy.local_look_at, &request.arrival);
         source
             .with_state(|state| {
                 let now = source.now();
                 let sim = &mut state.sim;
-                sim.send_teleport_start(request.flags, now)?;
+                sim.send_teleport_start(flags, now)?;
                 // Where the agent now stands: what the region measures chat
                 // range from, and what a later movement completes to.
                 sim.set_arrival_position(request.arrival.position, request.arrival.look_at.clone());
-                sim.send_teleport_local(
-                    request.arrival.position,
-                    request.arrival.look_at.clone(),
-                    request.flags,
-                    now,
-                )?;
+                sim.send_teleport_local(request.arrival.position, look_at, flags, now)?;
                 // The avatar has moved, and a simulator says so: OpenSim's
                 // `ScenePresence.Teleport` sends the presence's update to
                 // every client the moment it is placed. The fake grid runs no
@@ -184,17 +224,60 @@ pub(crate) async fn teleport_session(
         return Ok(TeleportOutcome::Local);
     }
 
+    // The lines this grid narrates the teleport with: the kind, on a grid
+    // that names it, then the grid's own.
+    let mut lines: Vec<&'static str> = Vec::new();
+    if policy.names_the_kind {
+        lines.extend(request.kind_line);
+    }
+    lines.extend_from_slice(policy.progress);
+
+    // A region rated above what the agent has said it wants to see is refused
+    // by a grid that checks, once it has got as far as sending the agent — so
+    // after every line. Only a location request: the home teleport of an agent
+    // set to General into an Adult home region went through on aditi.
+    if policy.enforces_maturity_preference
+        && request.client_requested
+        && request.flags & TeleportFlags::VIA_LOCATION != 0
+    {
+        let stored = source
+            .with_sim(|sim| sim.agent_preferences().max_access_pref.clone())
+            .await;
+        let preference = sl_proto::Maturity::from_login_access(stored.as_deref());
+        let wanted = dest_region.config.maturity;
+        // An agent that has stated no preference is not refused for one.
+        if !matches!(preference, sl_proto::Maturity::Unknown) && !wanted.permitted_by(preference) {
+            let refusal = Refusal {
+                flags: request.flags,
+                progress: lines,
+                reason: MATURITY_REFUSAL_REASON.to_owned(),
+                alert: Some(AlertInfo {
+                    message: MATURITY_REFUSAL_ALERT.to_owned(),
+                    extra_params: TeleportPolicy::maturity_refusal_params(sim_access),
+                }),
+            };
+            report_refusal(source, &policy, &refusal).await;
+            return Ok(TeleportOutcome::Refused);
+        }
+    }
+
     // The black screen goes up, and the viewer learns what is happening. The
-    // start's sequence number is kept so the finish can be held behind the
-    // client's acknowledgement of it ([`TELEPORT_START_ACK_TIMEOUT`]).
+    // sequence number of the last of these is kept so the finish can be held
+    // behind the client's acknowledgement of it
+    // ([`TELEPORT_START_ACK_TIMEOUT`]): the start, on a grid that narrates
+    // nothing, and otherwise the final line — a finish that overtook a
+    // progress line would hand the client the lines of a teleport it has
+    // already been told is over.
     let start_sequence = source
         .with_sim(|sim| {
             let now = source.now();
-            let sequence = sim.next_outgoing_sequence();
+            let mut last = sim.next_outgoing_sequence();
             sim.send_teleport_start(request.flags, now)?;
-            sim.send_teleport_progress(teleport_strings::RESOLVING, request.flags, now)?;
-            sim.send_teleport_progress(request.progress, request.flags, now)?;
-            Ok::<_, sl_proto::Error>(sequence)
+            for line in &lines {
+                last = sim.next_outgoing_sequence();
+                sim.send_teleport_progress(line, request.flags, now)?;
+            }
+            Ok::<_, sl_proto::Error>(last)
         })
         .await?;
 
@@ -241,21 +324,26 @@ pub(crate) async fn teleport_session(
                 )
             }
         };
+    // What the agent has told the grid about itself goes where the agent
+    // goes: the destination session answers the preferences capability next.
+    let preferences = source.with_sim(|sim| sim.agent_preferences().clone()).await;
+    dest.with_sim(|sim| sim.merge_agent_preferences(&preferences))
+        .await;
     // Subscribe before the finish goes out, or the arrival can slip past.
     let mut dest_events = dest.subscribe_events();
 
     let finish = TeleportFinishInfo {
         agent_id,
-        location_id: sl_proto::TELEPORT_FINISH_LOCATION_ID,
+        location_id: policy.finish_location_id,
         dest: dest_addr,
         region_handle: dest_handle,
         seed: dest_seed,
         sim_access,
         teleport_flags: request.flags,
-        region_size: (
+        region_size: policy.finish_states_region_size.then_some((
             sl_proto::STANDARD_REGION_SIZE_METRES,
             sl_proto::STANDARD_REGION_SIZE_METRES,
-        ),
+        )),
     };
     // Everything below reaches the client over the CAPS event queue, which
     // races the UDP `TeleportStart` above unless the client has already taken
@@ -268,9 +356,31 @@ pub(crate) async fn teleport_session(
         );
     }
 
+    // The last moment a cancel counts: the client's `TeleportCancel` for this
+    // request, if it sent one, was on the wire before its acknowledgement of
+    // the start. A grid that honours it abandons the teleport here and says
+    // so; one that does not carries on, and the client that cancelled is moved
+    // anyway.
+    if request.client_requested
+        && let CancelAnswer::Failed { reason, alert } = policy.cancel
+        && source.with_sim(SimSession::take_teleport_cancel).await
+    {
+        if opened_here {
+            core.remove_session(dest_seq).await;
+            dest.with_sim(SimSession::abandon).await;
+        }
+        let answer = AlertInfo {
+            message: alert.to_owned(),
+            extra_params: String::new(),
+        };
+        source
+            .with_sim(|sim| send_failure(sim, &policy, reason, Some(&answer), source.now()))
+            .await?;
+        return Ok(TeleportOutcome::Refused);
+    }
+
     source
         .with_sim(|sim| {
-            let now = source.now();
             // The destination is **not** announced first. `TransferAgent_V2`
             // sends the finish on its own — "New protocol: send TP Finish
             // directly, without prior ES or EAC. That's what happens in the
@@ -288,7 +398,6 @@ pub(crate) async fn teleport_session(
             // which is exactly how this grid made every distant teleport report
             // `world_reset = false`. See the roadmap task
             // `viewer-teleport-never-resets-the-world`.
-            sim.send_teleport_progress(teleport_strings::ARRIVING, request.flags, now)?;
             sim.enqueue_teleport_finish(&finish);
             Ok::<(), sl_proto::Error>(())
         })
@@ -309,7 +418,15 @@ pub(crate) async fn teleport_session(
             dest.with_sim(SimSession::abandon).await;
         }
         if let Err(error) = source
-            .with_sim(|sim| sim.send_teleport_failed(teleport_strings::TIMEOUT_TPORT, source.now()))
+            .with_sim(|sim| {
+                send_failure(
+                    sim,
+                    &policy,
+                    teleport_strings::TIMEOUT_TPORT,
+                    None,
+                    source.now(),
+                )
+            })
             .await
         {
             tracing::warn!("reporting the teleport timeout failed: {error}");
@@ -353,20 +470,75 @@ pub(crate) async fn teleport_session(
     Ok(TeleportOutcome::Moved(dest))
 }
 
+/// Which way a `TeleportLocal` says the agent faces, as each grid does.
+fn local_look_at(rule: LocalLookAt, arrival: &ArrivalPlacement) -> sl_types::lsl::Vector {
+    match rule {
+        // OpenSim flattens what was asked for (`lookAt.Z = 0f`) and faces east
+        // when nothing horizontal is left.
+        LocalLookAt::Requested => {
+            let asked = &arrival.look_at;
+            if asked.x.abs() < 0.01 && asked.y.abs() < 0.01 {
+                sl_types::lsl::Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                }
+            } else {
+                sl_types::lsl::Vector {
+                    x: asked.x,
+                    y: asked.y,
+                    z: 0.0,
+                }
+            }
+        }
+        LocalLookAt::TowardsRegionOrigin => {
+            let at = arrival.position;
+            let length = at
+                .x()
+                .mul_add(at.x(), at.y().mul_add(at.y(), at.z() * at.z()))
+                .sqrt();
+            if length > f32::EPSILON {
+                sl_types::lsl::Vector {
+                    x: -at.x() / length,
+                    y: -at.y() / length,
+                    z: -at.z() / length,
+                }
+            } else {
+                arrival.look_at.clone()
+            }
+        }
+    }
+}
+
 /// Resolves a client teleport request into a [`TeleportRequest`], or the
-/// `TeleportFailed` key to answer with.
+/// [`Refusal`] to answer with.
 async fn resolve_request(
     core: &GridCore,
     source: &SharedSim,
     event: &ServerEvent,
-) -> Option<Result<TeleportRequest, &'static str>> {
+) -> Option<Result<TeleportRequest, Refusal>> {
+    let policy = core.teleport_policy;
+    // What a grid that starts a teleport before refusing it had got to: the
+    // kind's own line, or the first of its lines for a location.
+    let first_line = |kind: Option<&'static str>| -> Vec<&'static str> {
+        match kind {
+            Some(kind) if policy.names_the_kind => vec![kind],
+            _unnamed => policy.progress.first().copied().into_iter().collect(),
+        }
+    };
     match event {
         ServerEvent::TeleportRequested {
             region_handle,
             position,
             look_at,
-        } => Some(core.region_by_handle(*region_handle).map_or(
-            Err(teleport_strings::INVALID_TPORT),
+        } => Some(core.region_by_handle(*region_handle).map_or_else(
+            || {
+                Err(Refusal::plain(
+                    TeleportFlags::VIA_LOCATION,
+                    first_line(None),
+                    policy.unknown_region,
+                ))
+            },
             |region| {
                 Ok(TeleportRequest {
                     region,
@@ -375,7 +547,8 @@ async fn resolve_request(
                         look_at: look_at.clone(),
                     },
                     flags: TeleportFlags::VIA_LOCATION,
-                    progress: teleport_strings::SENDING_DEST,
+                    kind_line: None,
+                    client_requested: true,
                 })
             },
         )),
@@ -385,14 +558,24 @@ async fn resolve_request(
             Some(
                 core.account_by_agent(agent_id)
                     .and_then(|account| core.start_region(account))
-                    .map_or(Err(teleport_strings::INVALID_TPORT), |region| {
-                        Ok(TeleportRequest {
-                            region,
-                            arrival: ArrivalPlacement::default(),
-                            flags: TeleportFlags::VIA_HOME,
-                            progress: teleport_strings::SENDING_HOME,
-                        })
-                    }),
+                    .map_or_else(
+                        || {
+                            Err(Refusal::plain(
+                                TeleportFlags::VIA_HOME,
+                                first_line(Some(teleport_strings::SENDING_HOME)),
+                                policy.no_home,
+                            ))
+                        },
+                        |region| {
+                            Ok(TeleportRequest {
+                                region,
+                                arrival: ArrivalPlacement::default(),
+                                flags: TeleportFlags::VIA_HOME,
+                                kind_line: Some(teleport_strings::SENDING_HOME),
+                                client_requested: true,
+                            })
+                        },
+                    ),
             )
         }
         ServerEvent::TeleportViaLandmark {
@@ -417,8 +600,14 @@ async fn resolve_request(
                 let position = asset.local_position()?;
                 Some((region, position))
             });
-            Some(resolved.map_or(
-                Err(teleport_strings::NOLANDMARK_TPORT),
+            Some(resolved.map_or_else(
+                || {
+                    Err(Refusal::plain(
+                        TeleportFlags::VIA_LANDMARK,
+                        first_line(Some(teleport_strings::SENDING_LANDMARK)),
+                        policy.unknown_landmark,
+                    ))
+                },
                 |(region, position)| {
                     Ok(TeleportRequest {
                         region,
@@ -427,7 +616,8 @@ async fn resolve_request(
                             look_at: ArrivalPlacement::default().look_at,
                         },
                         flags: TeleportFlags::VIA_LANDMARK,
-                        progress: teleport_strings::SENDING_LANDMARK,
+                        kind_line: Some(teleport_strings::SENDING_LANDMARK),
+                        client_requested: true,
                     })
                 },
             ))
@@ -463,8 +653,18 @@ async fn resolve_request(
                     }
                 }
             };
-            Some(
-                target.map_or(Err(teleport_strings::NO_HOST), |(region, position)| {
+            // A lure's refusal is not measured yet (roadmap
+            // `gridspec-teleport-lures`): the key the grid always sent, by
+            // the flavour's transport.
+            Some(target.map_or_else(
+                || {
+                    Err(Refusal::plain(
+                        flags,
+                        first_line(None),
+                        teleport_strings::NO_HOST,
+                    ))
+                },
+                |(region, position)| {
                     Ok(TeleportRequest {
                         region,
                         arrival: ArrivalPlacement {
@@ -472,10 +672,11 @@ async fn resolve_request(
                             look_at: ArrivalPlacement::default().look_at,
                         },
                         flags,
-                        progress: teleport_strings::SENDING_DEST,
+                        kind_line: None,
+                        client_requested: true,
                     })
-                }),
-            )
+                },
+            ))
         }
         _ => None,
     }
@@ -609,34 +810,100 @@ pub(crate) fn run_teleport_responder(
                     // The source session is retired (or the teleport was local):
                     // this responder's job is done either way for a move.
                     Ok(TeleportOutcome::Moved(_)) => break,
-                    // A local hop keeps this session; a timed-out move was
-                    // already reported to the client as `timeout_tport`.
-                    Ok(TeleportOutcome::Local) | Err(Error::TeleportTimedOut) => {}
+                    // A local hop keeps this session, and so does a refusal;
+                    // a timed-out move was already reported to the client as
+                    // `timeout_tport`.
+                    Ok(TeleportOutcome::Local | TeleportOutcome::Refused)
+                    | Err(Error::TeleportTimedOut) => {}
                     Err(error) => {
                         tracing::warn!("teleport failed: {error}");
                         let reason = match error {
                             Error::NotRootAgent => teleport_strings::INVALID_REGION_HANDOFF,
                             _ => teleport_strings::NO_HOST,
                         };
-                        report_failure(&shared, reason).await;
+                        let refusal = Refusal::plain(0, Vec::new(), reason);
+                        report_refusal(&shared, &core.teleport_policy, &refusal).await;
                     }
                 },
-                Err(reason) => report_failure(&shared, reason).await,
+                Err(refusal) => report_refusal(&shared, &core.teleport_policy, &refusal).await,
             }
         }
     })
 }
 
-/// Answers a refused request with `TeleportFailed` (after the `TeleportStart`
-/// a viewer expects before a failure).
-async fn report_failure(shared: &SharedSim, reason: &'static str) {
-    let result = shared
-        .with_sim(|sim| {
-            let now = shared.now();
-            sim.send_teleport_start(0, now)?;
-            sim.send_teleport_failed(reason, now)
-        })
-        .await;
+/// Sends one teleport failure the way this grid sends them: the UDP message
+/// with the bare reason, or the event-queue event with the reason and an
+/// alert — `alert` when the grid gives the failure a key of its own, the
+/// reason again otherwise.
+fn send_failure(
+    sim: &mut SimSession,
+    policy: &TeleportPolicy,
+    reason: &str,
+    alert: Option<&AlertInfo>,
+    now: std::time::Instant,
+) -> Result<(), sl_proto::Error> {
+    match policy.refusals {
+        RefusalTransport::Udp => sim.send_teleport_failed(reason, now),
+        RefusalTransport::EventQueue => {
+            let repeated = AlertInfo {
+                message: reason.to_owned(),
+                extra_params: String::new(),
+            };
+            sim.enqueue_teleport_failed(reason, Some(alert.unwrap_or(&repeated)));
+            Ok(())
+        }
+    }
+}
+
+/// Answers a refused request as this grid refuses: OpenSim with a
+/// `TeleportFailed` and nothing before it, Second Life with the
+/// `TeleportStart` and the progress lines it had reached, then the failure
+/// over the event queue.
+///
+/// The event-queue failure is held behind the client's acknowledgement of the
+/// last UDP line, for the reason the finish is
+/// ([`TELEPORT_START_ACK_TIMEOUT`]): the two transports race, the live grid's
+/// tenth of a second between them is what orders them there, and a failure
+/// that overtook its own `TeleportStart` would leave the client starting a
+/// teleport that had already ended.
+async fn report_refusal(shared: &SharedSim, policy: &TeleportPolicy, refusal: &Refusal) {
+    let narrated = if matches!(policy.refusals, RefusalTransport::EventQueue) {
+        shared
+            .with_sim(|sim| {
+                let now = shared.now();
+                let mut last = sim.next_outgoing_sequence();
+                sim.send_teleport_start(refusal.flags, now)?;
+                for line in &refusal.progress {
+                    last = sim.next_outgoing_sequence();
+                    sim.send_teleport_progress(line, refusal.flags, now)?;
+                }
+                Ok::<_, sl_proto::Error>(Some(last))
+            })
+            .await
+    } else {
+        Ok(None)
+    };
+    let result = match narrated {
+        Ok(last) => {
+            if let Some(last) = last
+                && !wait_for_start_ack(shared, last).await
+            {
+                tracing::debug!("a refused teleport's start went unacknowledged");
+            }
+            shared
+                .with_sim(|sim| {
+                    send_failure(
+                        sim,
+                        policy,
+                        &refusal.reason,
+                        refusal.alert.as_ref(),
+                        shared.now(),
+                    )
+                })
+                .await
+        }
+        Err(error) => Err(error),
+    };
     if let Err(error) = result {
         tracing::warn!("reporting a refused teleport failed: {error}");
     }

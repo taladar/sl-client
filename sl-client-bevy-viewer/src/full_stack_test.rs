@@ -2313,7 +2313,7 @@ mod tests {
             .filter(|event| {
                 matches!(
                     event,
-                    sl_client_bevy::SlSessionEvent::TeleportStarted
+                    sl_client_bevy::SlSessionEvent::TeleportStarted { .. }
                         | sl_client_bevy::SlSessionEvent::TeleportFinished { .. }
                         | sl_client_bevy::SlSessionEvent::TeleportFailed { .. }
                         | sl_client_bevy::SlSessionEvent::Disconnected { .. }

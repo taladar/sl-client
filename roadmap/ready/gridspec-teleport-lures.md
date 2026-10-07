@@ -32,3 +32,9 @@ Large — implemented with the IM relay, [[server-fake-grid-im-relay]].
 ## Viewer
 
 Accept / decline feedback as each grid gives it.
+
+## From gridspec-teleport (2026-10-07)
+
+A lure whose host is gone is refused by the fake grid with `no_host` on both
+flavours, over each flavour's transport; neither grid's own answer is
+measured. It is a row of `ImitatedGrid::teleport_policy`.

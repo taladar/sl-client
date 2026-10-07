@@ -7861,7 +7861,7 @@ mod test {
         assert!(
             client_events
                 .iter()
-                .any(|e| matches!(e, Event::TeleportStarted)),
+                .any(|e| matches!(e, Event::TeleportStarted { .. })),
             "expected TeleportStarted, got {client_events:?}"
         );
         assert!(
@@ -7870,6 +7870,7 @@ mod test {
                 Event::TeleportLocal {
                     position: got,
                     look_at,
+                    ..
                 } if *got == position
                     && (look_at.x - 1.0).abs() < f32::EPSILON
                     && look_at.y.abs() < f32::EPSILON
@@ -7927,6 +7928,66 @@ mod test {
             },
             now,
         )?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::TeleportRequested { .. })),
+            "expected the follow-up TeleportRequested, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// Second Life reports a failed teleport over the event queue, with the
+    /// reason key repeated in an alert. It ends the teleport exactly as the UDP
+    /// message does: the failure is surfaced with its alert and a fresh request
+    /// is accepted again.
+    #[test]
+    fn teleport_failed_over_the_event_queue_returns_client_to_active() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let position = RegionCoordinates::new(1.0, 2.0, 3.0);
+        let look_at = sl_types::lsl::Vector {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
+        client.teleport_to(RegionHandle(DEST_HANDLE), position, look_at.clone(), now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        sim.send_teleport_start(16, now)?;
+        sim.send_teleport_progress("resolving", 16, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let mut client_events = drain_client(&mut client);
+        sim.enqueue_teleport_failed(
+            "no_host",
+            Some(&sl_proto::AlertInfo {
+                message: "no_host".to_owned(),
+                extra_params: String::new(),
+            }),
+        );
+        client_events.extend(deliver_caps(&mut client, &mut sim, now)?);
+
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportStarted { flags } if flags.0 == 16
+            )),
+            "expected TeleportStarted carrying its flags, got {client_events:?}"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportFailed { reason, alert_info: Some(alert) }
+                    if reason == "no_host" && alert.message == "no_host"
+            )),
+            "expected the keyed TeleportFailed, got {client_events:?}"
+        );
+        // Back to active: a fresh request goes out again.
+        client.teleport_to(RegionHandle(REGION_HANDLE), position, look_at, now)?;
         pump(&mut client, &mut sim, now)?;
         let server_events = drain_server(&mut sim);
         assert!(
@@ -8022,7 +8083,7 @@ mod test {
             seed: "http://127.0.0.1:9001/seed".to_owned(),
             sim_access: 21,
             teleport_flags: 16,
-            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+            region_size: Some((STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES)),
         });
         let finish_events = deliver_caps(&mut client, &mut source, now)?;
         assert!(
@@ -8125,7 +8186,7 @@ mod test {
         assert!(
             client_events
                 .iter()
-                .any(|e| matches!(e, Event::TeleportStarted)),
+                .any(|e| matches!(e, Event::TeleportStarted { .. })),
             "a remote TeleportStart opens the teleport, got {client_events:?}"
         );
         assert!(
@@ -8150,7 +8211,7 @@ mod test {
             seed: "http://127.0.0.1:9001/seed".to_owned(),
             sim_access: 13,
             teleport_flags: sl_proto::TeleportFlags::VIA_LOCATION,
-            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+            region_size: Some((STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES)),
         });
         let caps_events = deliver_caps(&mut client, &mut source, now)?;
         assert!(
@@ -8196,13 +8257,13 @@ mod test {
             seed: "http://127.0.0.1:9002/seed".to_owned(),
             sim_access: 13,
             teleport_flags: sl_proto::TeleportFlags::VIA_LOCATION,
-            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+            region_size: Some((STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES)),
         });
         let caps_events = deliver_caps(&mut client, &mut dest, now)?;
         assert!(
             caps_events
                 .iter()
-                .any(|e| matches!(e, Event::TeleportStarted)),
+                .any(|e| matches!(e, Event::TeleportStarted { .. })),
             "a finish without a start opens the teleport, got {caps_events:?}"
         );
         pump_multi(

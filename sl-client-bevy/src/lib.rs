@@ -57,8 +57,8 @@ use sl_proto::{
 // Bevy's `Event` derive.
 pub use sl_proto::{
     ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, ActiveGroup, AdultListingBits, AgentKey,
-    AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey, AnyMessage, Arrival,
-    AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint,
+    AgentOrObjectKey, AgentPreferences, AlertInfo, AnimatedObjects, AnimationKey, AnyMessage,
+    Arrival, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint,
     AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
     AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_UI_SOUNDS, Camera, CameraError,
     ChatAudible, ChatChannel, ChatLogConfig, ChatMessage, ChatSessionKind, ChatSource,
@@ -120,9 +120,9 @@ pub use sl_proto::{
     ServerHistoryMessage, SetDisplayNameReply, SettingsKind, SimulatorFeatures, SkySettings,
     SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
     SurfaceInfo, TRACK_MAX, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TerraformArea, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry, TextureFace,
-    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
-    TransferId, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
+    TeleportFlags, TerraformArea, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
+    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
+    TransactionId, TransferId, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
     UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
     UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
     UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,

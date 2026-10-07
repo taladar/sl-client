@@ -1145,7 +1145,8 @@ async fn teleport_named(
         region: index,
         arrival: ArrivalPlacement { position, look_at },
         flags: TeleportFlags::VIA_LOCATION,
-        progress: sl_proto::teleport_strings::SENDING_DEST,
+        kind_line: None,
+        client_requested: false,
     };
     let _outcome = crate::teleport::teleport_session(core, shared, request).await?;
     Ok(())

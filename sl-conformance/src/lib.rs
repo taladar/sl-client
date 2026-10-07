@@ -45,6 +45,7 @@ pub mod record;
 pub mod registry;
 pub mod report;
 pub mod support;
+pub mod teleport_trace;
 pub mod trace;
 
 pub use grid::Grid;

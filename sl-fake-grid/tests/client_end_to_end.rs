@@ -2050,6 +2050,277 @@ mod test {
         Ok(())
     }
 
+    /// The teleport events one request produced, up to and including the one
+    /// that ended it: what a test of a grid's teleport *shape* compares.
+    #[derive(Debug, Default, PartialEq)]
+    struct TeleportTrace {
+        /// The flags of each `TeleportStart` seen.
+        starts: Vec<u32>,
+        /// The progress lines, in order.
+        progress: Vec<String>,
+        /// The flags of the `TeleportLocal`, for a local teleport.
+        local: Option<u32>,
+        /// The reason and alert of the failure, for a refused one.
+        failed: Option<(String, Option<sl_proto::AlertInfo>)>,
+        /// Whether the agent changed region.
+        moved: bool,
+    }
+
+    /// Collects the teleport events up to the one that ends the teleport: a
+    /// `TeleportLocal`, a failure, or the arrival in another region.
+    async fn teleport_trace(running: &mut Running) -> Result<TeleportTrace, TestError> {
+        let mut trace = TeleportTrace::default();
+        running
+            .wait_for(|event| match event {
+                Event::TeleportStarted { flags } => {
+                    trace.starts.push(flags.0);
+                    None
+                }
+                Event::TeleportProgress { message, .. } => {
+                    trace.progress.push(message.clone());
+                    None
+                }
+                Event::TeleportLocal { flags, .. } => {
+                    trace.local = Some(flags.0);
+                    Some(())
+                }
+                Event::TeleportFailed { reason, alert_info } => {
+                    trace.failed = Some((reason.clone(), alert_info.clone()));
+                    Some(())
+                }
+                Event::RegionChanged { .. } => {
+                    trace.moved = true;
+                    Some(())
+                }
+                _ => None,
+            })
+            .await?;
+        Ok(trace)
+    }
+
+    /// Asks for a teleport to `position` in the region `handle`.
+    async fn teleport_to(
+        running: &Running,
+        handle: sl_client_tokio::RegionHandle,
+        position: RegionCoordinates,
+    ) -> Result<(), TestError> {
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: handle,
+                position,
+                look_at: Vector {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.5,
+                },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// The `VIA_LOCATION` flag every location teleport carries.
+    const VIA_LOCATION: u32 = sl_client_tokio::TeleportFlags::VIA_LOCATION;
+
+    /// OpenSim's teleports, as measured on the local grid (2026-10-07): a
+    /// local one carries the request's flags and nothing more, an inter-region
+    /// one is narrated by no progress line at all, and a refusal is a UDP
+    /// sentence sent *instead of* a `TeleportStart`, with no alert.
+    #[tokio::test]
+    async fn an_open_sim_grid_narrates_nothing_and_refuses_without_starting()
+    -> Result<(), TestError> {
+        let mut running = start_configured(
+            vec![RegionConfig::default(), east_region()],
+            None,
+            ImitatedGrid::OpenSim,
+        )
+        .await?;
+        let home = running
+            ._grid
+            .region_handle("Fake Region")
+            .ok_or("no home region")?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+
+        teleport_to(&running, home, RegionCoordinates::new(100.0, 100.0, 30.0)).await?;
+        assert_eq!(
+            teleport_trace(&mut running).await?,
+            TeleportTrace {
+                starts: vec![VIA_LOCATION],
+                local: Some(VIA_LOCATION),
+                ..TeleportTrace::default()
+            }
+        );
+
+        teleport_to(
+            &running,
+            sl_client_tokio::RegionHandle::from_grid(2000, 2000),
+            RegionCoordinates::new(128.0, 128.0, 30.0),
+        )
+        .await?;
+        assert_eq!(
+            teleport_trace(&mut running).await?,
+            TeleportTrace {
+                failed: Some((
+                    "The region you tried to teleport to was not found".to_owned(),
+                    None
+                )),
+                ..TeleportTrace::default()
+            }
+        );
+
+        teleport_to(&running, east, RegionCoordinates::new(64.0, 32.0, 25.0)).await?;
+        assert_eq!(
+            teleport_trace(&mut running).await?,
+            TeleportTrace {
+                starts: vec![VIA_LOCATION],
+                moved: true,
+                ..TeleportTrace::default()
+            }
+        );
+        Ok(())
+    }
+
+    /// Second Life's local teleport adds `WITHIN_REGION` to the request's
+    /// flags and states a look-at of its own: the unit vector from the landing
+    /// position towards the region's origin, whatever was asked for.
+    #[tokio::test]
+    async fn a_second_life_local_teleport_is_flagged_within_the_region() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let home = running
+            ._grid
+            .region_handle("Fake Region")
+            .ok_or("no home region")?;
+        teleport_to(&running, home, RegionCoordinates::new(128.0, 128.0, 64.0)).await?;
+        let (look_at, flags) = running
+            .wait_for(|event| match event {
+                Event::TeleportLocal { look_at, flags, .. } => Some((look_at.clone(), flags.0)),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            flags,
+            VIA_LOCATION | sl_client_tokio::TeleportFlags::WITHIN_REGION
+        );
+        let expected = [-128.0_f32 / 192.0, -128.0 / 192.0, -64.0 / 192.0];
+        for (got, wanted) in [look_at.x, look_at.y, look_at.z].into_iter().zip(expected) {
+            assert!(
+                (got - wanted).abs() < 1.0e-5,
+                "look-at {look_at:?} is not towards the region origin"
+            );
+        }
+        Ok(())
+    }
+
+    /// A cancel on the heels of its request, as each grid was measured
+    /// answering it: Second Life abandons the teleport and reports it failed
+    /// as `TPCancelled`; OpenSim moves the agent regardless.
+    #[tokio::test]
+    async fn a_cancelled_teleport_ends_as_each_grid_ends_it() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let mut running =
+                start_configured(vec![RegionConfig::default(), east_region()], None, imitates)
+                    .await?;
+            let east = running
+                ._grid
+                .region_handle("Fake Region East")
+                .ok_or("no east region")?;
+            teleport_to(&running, east, RegionCoordinates::new(64.0, 32.0, 25.0)).await?;
+            running.commands.send(Command::CancelTeleport).await?;
+            let trace = teleport_trace(&mut running).await?;
+            match imitates {
+                ImitatedGrid::SecondLife => {
+                    assert_eq!(
+                        trace.failed,
+                        Some((
+                            "Teleport cancelled.".to_owned(),
+                            Some(sl_proto::AlertInfo {
+                                message: "TPCancelled".to_owned(),
+                                extra_params: String::new(),
+                            })
+                        )),
+                        "{trace:?}"
+                    );
+                    assert!(!trace.moved);
+                    // The grid really did stay put: the next teleport starts
+                    // from the same region and goes through.
+                    teleport_to(&running, east, RegionCoordinates::new(64.0, 32.0, 25.0)).await?;
+                    assert!(teleport_trace(&mut running).await?.moved);
+                }
+                ImitatedGrid::OpenSim => {
+                    assert!(trace.moved, "{trace:?}");
+                    assert_eq!(trace.failed, None);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A region rated above the agent's maturity preference: Second Life
+    /// refuses a location teleport into it, after narrating the whole
+    /// teleport, with `RegionTPAccessBlocked` and the region's rating in the
+    /// alert's parameters. OpenSim has no such check and lets the agent in.
+    #[tokio::test]
+    async fn a_region_above_the_maturity_preference_is_refused_only_on_second_life()
+    -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let mut running = start_configured(
+                vec![
+                    RegionConfig::default(),
+                    RegionConfig {
+                        maturity: sl_proto::Maturity::Mature,
+                        ..east_region()
+                    },
+                ],
+                None,
+                imitates,
+            )
+            .await?;
+            let east = running
+                ._grid
+                .region_handle("Fake Region East")
+                .ok_or("no east region")?;
+            running
+                .commands
+                .send(Command::SetAgentPreferences(Box::new(
+                    sl_client_tokio::AgentPreferences {
+                        max_access_pref: Some("PG".to_owned()),
+                        ..sl_client_tokio::AgentPreferences::default()
+                    },
+                )))
+                .await?;
+            running
+                .wait_for(|event| matches!(event, Event::AgentPreferences(_)).then_some(()))
+                .await?;
+            teleport_to(&running, east, RegionCoordinates::new(64.0, 32.0, 25.0)).await?;
+            let trace = teleport_trace(&mut running).await?;
+            match imitates {
+                ImitatedGrid::SecondLife => {
+                    assert_eq!(trace.starts, [VIA_LOCATION]);
+                    assert_eq!(trace.progress, ["resolving", "Sending to destination."]);
+                    let (reason, alert) = trace.failed.ok_or("the teleport was not refused")?;
+                    assert!(reason.contains("maturity Rating"), "{reason}");
+                    let alert = alert.ok_or("the refusal carried no alert")?;
+                    assert_eq!(alert.message, "RegionTPAccessBlocked");
+                    assert!(
+                        alert
+                            .extra_params
+                            .contains("<key>_region_access</key><integer>21</integer>"),
+                        "{}",
+                        alert.extra_params
+                    );
+                }
+                ImitatedGrid::OpenSim => {
+                    assert!(trace.moved, "{trace:?}");
+                    assert_eq!(trace.progress, Vec::<String>::new());
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// A distant second region for the teleport tests: ten regions east, so
     /// the hop is a genuine teleport (no neighbour adjacency) rather than a
     /// crossing.
@@ -2101,7 +2372,7 @@ mod test {
 
         // The teleport screen, then the progress keys the viewer localises.
         running
-            .wait_for(|event| matches!(event, Event::TeleportStarted).then_some(()))
+            .wait_for(|event| matches!(event, Event::TeleportStarted { .. }).then_some(()))
             .await?;
         // The destination's `RegionHandshake` only arrives once the client has
         // opened its circuit, which it does on the finish — but the client is
@@ -2134,10 +2405,9 @@ mod test {
                 _ => None,
             })
             .await?;
-        // UDP progress lines may outrun the CAPS finish; the keys are what
-        // matters, in order.
-        assert_eq!(progress.first().map(String::as_str), Some("resolving"));
-        assert_eq!(progress.get(1).map(String::as_str), Some("sending_dest"));
+        // The two lines Second Life narrates a location teleport with (aditi,
+        // 2026-10-07): a key, then a sentence that is not one.
+        assert_eq!(progress, ["resolving", "Sending to destination."]);
         assert!(dest_sim.ip().is_loopback());
         assert_eq!(finished_handle, dest_handle);
         assert!(
@@ -3100,7 +3370,7 @@ mod test {
         let mut phases: Vec<&'static str> = Vec::new();
         running
             .wait_until("the arrival in the east region", |event| match event {
-                Event::TeleportStarted => {
+                Event::TeleportStarted { .. } => {
                     phases.push("started");
                     false
                 }
@@ -3347,8 +3617,9 @@ mod test {
         Ok(())
     }
 
-    /// A request naming a region the grid does not serve is refused with the
-    /// `invalid_tport` key, and the client returns to its region intact.
+    /// A request naming a region the grid does not serve is refused the way
+    /// Second Life refuses it — `no_host`, over the event queue, the key
+    /// repeated in an alert — and the client returns to its region intact.
     #[tokio::test]
     async fn teleport_to_unknown_region_is_refused() -> Result<(), TestError> {
         let mut running = start().await?;
@@ -3364,13 +3635,19 @@ mod test {
                 },
             })
             .await?;
-        let reason = running
+        let (reason, alert) = running
             .wait_for(|event| match event {
-                Event::TeleportFailed { reason, .. } => Some(reason.clone()),
+                Event::TeleportFailed { reason, alert_info } => {
+                    Some((reason.clone(), alert_info.clone()))
+                }
                 _ => None,
             })
             .await?;
-        assert_eq!(reason, "invalid_tport");
+        assert_eq!(reason, "no_host");
+        assert_eq!(
+            alert.map(|alert| (alert.message, alert.extra_params)),
+            Some(("no_host".to_owned(), String::new()))
+        );
         // Still in the source region: a chat line from it arrives.
         running
             .agent
@@ -3471,10 +3748,13 @@ mod test {
     }
 
     /// A request for the agent's own region finishes as a `TeleportLocal`
-    /// at the requested position — no new session.
+    /// at the requested position — no new session. The grid is OpenSim's
+    /// flavour, which states the look-at it was asked for; Second Life's states
+    /// one of its own (`a_second_life_local_teleport_is_flagged_within_the_region`).
     #[tokio::test]
     async fn same_region_teleport_is_local() -> Result<(), TestError> {
-        let mut running = start().await?;
+        let mut running =
+            start_configured(vec![RegionConfig::default()], None, ImitatedGrid::OpenSim).await?;
         let handle = running
             ._grid
             .region_handle("Fake Region")
@@ -3493,7 +3773,9 @@ mod test {
             .await?;
         let (position, look_at) = running
             .wait_for(|event| match event {
-                Event::TeleportLocal { position, look_at } => Some((*position, look_at.clone())),
+                Event::TeleportLocal {
+                    position, look_at, ..
+                } => Some((*position, look_at.clone())),
                 _ => None,
             })
             .await?;

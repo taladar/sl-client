@@ -726,7 +726,7 @@ impl Survey {
             | Event::ServerAppearanceUpdate { .. }
             | Event::CofVersionIncremented { .. }
             | Event::CachedTextureResponse { .. }
-            | Event::TeleportStarted
+            | Event::TeleportStarted { .. }
             | Event::TeleportProgress { .. }
             | Event::TeleportFinished { .. }
             | Event::TeleportLocal { .. }

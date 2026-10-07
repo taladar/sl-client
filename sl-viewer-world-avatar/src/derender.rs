@@ -579,7 +579,7 @@ pub(crate) fn clear_friends_only_on_teleport(
 ) {
     let mut teleporting = false;
     for event in events.read() {
-        if matches!(&event.0, SlSessionEvent::TeleportStarted) {
+        if matches!(&event.0, SlSessionEvent::TeleportStarted { .. }) {
             teleporting = true;
         }
     }
@@ -658,7 +658,7 @@ pub(crate) fn clear_temporary_derenders(
         .unwrap_or(true);
     let mut teleporting = false;
     for event in events.read() {
-        if matches!(&event.0, SlSessionEvent::TeleportStarted) {
+        if matches!(&event.0, SlSessionEvent::TeleportStarted { .. }) {
             teleporting = true;
         }
     }

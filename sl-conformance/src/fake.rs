@@ -110,6 +110,15 @@ pub const START_REGION: &str = "Fake Region";
 /// `region-crossing` and `neighbour-child-circuits` live here and nowhere else.
 pub const EAST_REGION: &str = "Fake Region East";
 
+/// The name of a region far from [`START_REGION`], rated Moderate: somewhere a
+/// teleport is a distant one, and somewhere an agent whose maturity preference
+/// is General is not let into on a grid that checks (`teleport-access-refused`).
+pub const FAR_REGION: &str = "Fake Region Far";
+
+/// How many regions east of [`START_REGION`] [`FAR_REGION`] lies: well past any
+/// neighbour.
+const FAR_REGION_OFFSET: u32 = 10;
+
 /// The cases that run against the fake grid on every `cargo test`.
 ///
 /// Two rules decide membership. Each case's fixtures must all be **offline** —
@@ -144,6 +153,9 @@ pub const OFFLINE_CASES: &[&str] = &[
     "map-blocks-items",
     "teleport-local-phases",
     "teleport-cross-region",
+    "teleport-failed",
+    "teleport-cancel",
+    "teleport-access-refused",
     "region-crossing",
     "neighbour-child-circuits",
     "avatar-appearance-npc",
@@ -299,9 +311,18 @@ impl FakeGridHarness {
                 .saturating_add(1),
             ..sl_fake_grid::RegionConfig::default()
         };
+        let far = sl_fake_grid::RegionConfig {
+            name: FAR_REGION.to_owned(),
+            grid_x: sl_fake_grid::RegionConfig::default()
+                .grid_x
+                .saturating_add(FAR_REGION_OFFSET),
+            maturity: sl_client_tokio::Maturity::Mature,
+            ..sl_fake_grid::RegionConfig::default()
+        };
         let grid = builder
             .region(sl_fake_grid::catalogue().into_region(start))
             .region(sl_fake_grid::fixtures::border::border().into_region(east))
+            .region(far)
             .start()
             .await
             .map_err(|error| TestFailure::State(format!("the fake grid did not start: {error}")))?;

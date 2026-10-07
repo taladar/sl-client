@@ -21,11 +21,12 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use serde_json::json;
-    use sl_automation_proto::{Locator, Probe, Role};
+    use sl_automation_proto::{Locator, Probe, Role, TeleportState};
     use sl_e2e::{BodyError, Need, Stage, StageBuilder};
-    use sl_fake_grid::RegionConfig;
     use sl_fake_grid::fixtures::scenarios;
+    use sl_fake_grid::{ImitatedGrid, RegionConfig};
     use sl_proto::{AgentKey, AnyMessage, ObjectKey, RegionLocalObjectId, ServerEvent, prim_flags};
+    use sl_viewer_driver::Viewer;
 
     /// A failed stage, or a test that could not set one up.
     type TestError = Box<dyn core::error::Error>;
@@ -430,6 +431,127 @@ mod test {
                 );
                 Ok(())
             })?;
+        Ok(())
+    }
+
+    /// A region rated Moderate, ten regions east: a distant teleport, and one
+    /// a grid that checks refuses to an agent whose preference is General.
+    const RATED: &str = "Rated";
+
+    /// Search the world map for `region` and press its Teleport button.
+    async fn ask_the_map_for(alpha: &Viewer, region: &str) -> Result<(), BodyError> {
+        let _opened = alpha
+            .menu_path(&["menu-bar-world", "menu-bar-world-map"])
+            .await?;
+        let map = alpha.ui().window("worldmap");
+        let _typed = map
+            .test_id("worldmap:search")
+            .role(Role::Textbox)
+            .fill(region)
+            .await?;
+        let _picked = map
+            .get(Locator::role(Role::ListItem).named(region))
+            .timeout(WAIT)
+            .click()
+            .await?;
+        let _asked = map
+            .test_id("worldmap-button:teleport-selected")
+            .click()
+            .await?;
+        Ok(())
+    }
+
+    /// **A teleport ends the way the grid it is on ends it**: the same request
+    /// — an agent whose maturity preference is General asking the world map
+    /// for a region rated Moderate — is refused by a grid imitating Second
+    /// Life and carried out by one imitating OpenSim, and the viewer follows
+    /// both.
+    ///
+    /// The refusal is Second Life's whole shape: a start and two progress
+    /// lines over UDP, then a `TeleportFailed` over the **event queue** whose
+    /// reason is a sentence and whose alert is the key `RegionTPAccessBlocked`.
+    /// The progress display ends on the notification catalogue's text for that
+    /// key with the key itself beneath it, and the agent is where it was. On
+    /// the OpenSim flavour nothing narrates the teleport and nothing checks the
+    /// preference: the agent arrives.
+    #[test]
+    fn a_teleport_ends_as_the_grid_it_is_on_ends_it() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "teleport_refused_second_life"),
+            (ImitatedGrid::OpenSim, "teleport_admitted_open_sim"),
+        ] {
+            let catalogue = scenarios::scenario("catalogue")
+                .ok_or("the catalogue scenario is not registered")?;
+            let home = catalogue.dress(RegionConfig {
+                name: HOME.to_owned(),
+                ..RegionConfig::default()
+            });
+            let rated = RegionConfig {
+                name: RATED.to_owned(),
+                grid_x: home.grid_x.saturating_add(10),
+                maturity: sl_proto::Maturity::Mature,
+                ..RegionConfig::default()
+            };
+            stage(name, &["Alpha"])
+                .region(home)
+                .region(rated)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    // The preference the viewer would have set through its
+                    // own preferences, stored where the grid keeps it.
+                    stage
+                        .agent("Alpha")
+                        .await?
+                        .with_sim(|sim| {
+                            sim.merge_agent_preferences(&sl_proto::AgentPreferences {
+                                max_access_pref: Some("PG".to_owned()),
+                                ..sl_proto::AgentPreferences::default()
+                            });
+                        })
+                        .await;
+                    ask_the_map_for(alpha, RATED).await?;
+                    match flavour {
+                        ImitatedGrid::SecondLife => {
+                            let _failed = alpha
+                                .expect_state(Probe::Agent)
+                                .at("/teleport/state")
+                                .timeout(TELEPORT)
+                                .to_equal(json!("failed"))
+                                .await?;
+                            let readout = alpha.agent().await?;
+                            let teleport = readout.teleport.ok_or("no teleport readout")?;
+                            let TeleportState::Failed { reason, detail } = teleport.state else {
+                                return Err(format!("the teleport is {:?}", teleport.state).into());
+                            };
+                            assert!(
+                                reason.contains("maturity rating"),
+                                "the refusal reads as the catalogue's text: {reason:?}"
+                            );
+                            assert!(
+                                detail
+                                    .as_deref()
+                                    .is_some_and(|detail| detail.contains("RegionTPAccessBlocked")),
+                                "the key the grid sent stays on the page: {detail:?}"
+                            );
+                            assert_eq!(
+                                readout.region.and_then(|region| region.name).as_deref(),
+                                Some(HOME),
+                                "a refused teleport leaves the agent where it was"
+                            );
+                        }
+                        ImitatedGrid::OpenSim => {
+                            let _arrived = alpha
+                                .expect_state(Probe::Agent)
+                                .at("/region/name")
+                                .timeout(TELEPORT)
+                                .to_equal(json!(RATED))
+                                .await?;
+                        }
+                    }
+                    Ok(())
+                })?;
+        }
         Ok(())
     }
 }

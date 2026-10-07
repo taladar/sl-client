@@ -1,90 +1,101 @@
-//! Drive a local (intra-region) teleport and assert the observable phase
-//! sequence from the request to arrival.
+//! Drive a local (intra-region) teleport and hold the grid to the shape it
+//! was measured sending: the order of the messages, their flags, and which
+//! way the `TeleportLocal` says the agent faces.
 
 use std::time::Instant;
 
-use sl_client_tokio::{Command, Event, RegionCoordinates, Vector};
+use sl_client_tokio::TeleportFlags;
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
+use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{REGION_TIMEOUT, check, count_metric, secs_metric};
+use crate::teleport_trace::{LocalArrival, request_teleport, watch_teleport};
 
-/// The region-local destination of the teleport: the centre of the 256 m region
-/// at a modest height.
-///
-/// A local teleport request carries a region-local position; the simulator
-/// clamps `Z` up to ground level, so the exact height only needs to be
-/// non-negative. The centre `(128, 128)` is always inside the region regardless
-/// of which region the avatar logged in to, keeping the request a genuinely
-/// *local* teleport (the destination region is the agent's current region).
-const DESTINATION: (f32, f32, f32) = (128.0, 128.0, 30.0);
+/// Where each answer below is written down.
+const SOURCE: &str = "book/src/gridspec/teleport.md (teleport-local-phases, 2026-10-07)";
 
-/// One teleport phase observed on the circuit between the request and arrival.
+/// The region-local destination of the teleport: off the region's centre, so
+/// that "towards the region's origin" is a direction with three distinct
+/// components, at a modest height.
 ///
-/// The variants mirror the client-facing teleport [`Event`]s the session emits
-/// as it walks the sequence, in the order the reference viewer models it:
-/// *Starting* (`TeleportStart`), *Progress* (`TeleportProgress`), then the
-/// terminal *Complete* — which for an intra-region teleport is the dedicated
-/// `TeleportLocal` (the circuit does not change), and for the border-crossing
-/// case a `RegionChanged` handover.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Phase {
-    /// The simulator acknowledged the request and began the teleport
-    /// (`TeleportStart` → [`Event::TeleportStarted`]).
-    Started,
-    /// A progress update arrived mid-teleport (`TeleportProgress` →
-    /// [`Event::TeleportProgress`]).
-    Progress,
-    /// The intra-region teleport completed without a circuit change
-    /// (`TeleportLocal` → [`Event::TeleportLocal`]).
-    Local,
-    /// The destination region's handshake completed after a border crossing
-    /// ([`Event::RegionChanged`]) — the cross-region completion, tolerated for
-    /// an avatar that logged in adjacent to the target.
-    RegionChanged,
+/// A local teleport request carries a region-local position, and the point is
+/// inside the region whichever one the avatar logged in to, keeping the request
+/// a genuinely *local* teleport.
+const DESTINATION: (f32, f32, f32) = (120.0, 136.0, 40.0);
+
+/// The facing the request asks for: north, which is neither the east a grid
+/// falls back to nor the direction of the region's origin from
+/// [`DESTINATION`], so the three possible answers are told apart.
+const REQUESTED_LOOK_AT: (f32, f32, f32) = (0.0, 1.0, 0.0);
+
+/// How far a stated look-at may be from the direction it is classified as.
+const LOOK_AT_TOLERANCE: f32 = 0.05;
+
+/// The messages a local teleport is answered with: a `TeleportStart`, then
+/// the `TeleportLocal`, and no progress line between them, on both grids.
+const SEQUENCE: Measured<&str> = Measured {
+    second_life: "started,local",
+    opensim: "started,local",
+    source: SOURCE,
+};
+
+/// The flags of the `TeleportStart` and the `TeleportLocal` (they agree):
+/// Second Life adds `WITHIN_REGION` to the request's `VIA_LOCATION`; OpenSim
+/// sends the request's alone.
+const FLAGS: Measured<u32> = Measured {
+    second_life: TeleportFlags::VIA_LOCATION | TeleportFlags::WITHIN_REGION,
+    opensim: TeleportFlags::VIA_LOCATION,
+    source: SOURCE,
+};
+
+/// Which way the `TeleportLocal` says the agent faces: OpenSim the direction
+/// the request asked for; Second Life the direction from the landing position
+/// towards the region's origin, whatever was asked.
+const LOOK_AT: Measured<&str> = Measured {
+    second_life: "towards-region-origin",
+    opensim: "requested",
+    source: SOURCE,
+};
+
+/// Names the rule a `TeleportLocal`'s look-at follows: `requested`,
+/// `towards-region-origin`, or `other` when it is neither.
+fn look_at_rule(local: &LocalArrival) -> &'static str {
+    let (asked_x, asked_y, asked_z) = REQUESTED_LOOK_AT;
+    let near = |x: f32, y: f32, z: f32| {
+        (local.look_at.x - x).abs() < LOOK_AT_TOLERANCE
+            && (local.look_at.y - y).abs() < LOOK_AT_TOLERANCE
+            && (local.look_at.z - z).abs() < LOOK_AT_TOLERANCE
+    };
+    let at = local.position;
+    let length = at
+        .x()
+        .mul_add(at.x(), at.y().mul_add(at.y(), at.z() * at.z()))
+        .sqrt();
+    if near(asked_x, asked_y, asked_z) {
+        "requested"
+    } else if length > f32::EPSILON && near(-at.x() / length, -at.y() / length, -at.z() / length) {
+        "towards-region-origin"
+    } else {
+        "other"
+    }
 }
 
-impl Phase {
-    /// The short label recorded in the `phase_sequence` metric.
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Started => "started",
-            Self::Progress => "progress",
-            Self::Local => "local",
-            Self::RegionChanged => "region-changed",
-        }
-    }
-
-    /// Whether this phase terminates the teleport (arrival), ending observation.
-    const fn is_terminal(self) -> bool {
-        matches!(self, Self::Local | Self::RegionChanged)
-    }
-}
-
-/// Drives a local teleport and asserts the phase sequence from request to
-/// arrival.
+/// Drives a local teleport and holds the grid to the shape of its answer.
 ///
-/// A viewer teleport walks a small state machine — *Starting* → *Progress* →
-/// arrival — announced by the simulator with `TeleportStart`, zero or more
-/// `TeleportProgress` frames, and a terminal message. For a teleport whose
-/// destination is the agent's *current* region the terminal message is
-/// `TeleportLocal`: the circuit is not torn down and re-established, so no
-/// `RegionChanged` handover follows. OpenSim's intra-region path emits only
-/// `TeleportStart` then `TeleportLocal` (no intermediate `TeleportProgress`),
-/// which is the complete local sequence for that grid.
+/// A teleport whose destination is the agent's *current* region is answered
+/// with a `TeleportStart` and a `TeleportLocal`: the circuit is not torn down
+/// and re-established, so no `RegionChanged` handover follows, and neither
+/// grid narrates it with a progress line. The two differ in the flags — Second
+/// Life marks the pair `WITHIN_REGION` — and in the look-at the `TeleportLocal`
+/// states, which a viewer applies to the avatar at once: OpenSim echoes the
+/// request, Second Life points the agent at the region's south-west corner.
 ///
-/// The case teleports to the centre of the agent's current region, collects the
-/// teleport phases the session surfaces until it arrives, and asserts that the
-/// sequence began with *Starting* and ended at a terminal phase (`TeleportLocal`
-/// for the expected intra-region case, or a `RegionChanged` handover tolerated
-/// for an avatar that logged in adjacent to the target). It records the ordered
-/// phase sequence, the count of progress updates, and the request-to-arrival
-/// time.
-///
-/// `1av`, `[both, fake]`: the fake grid answers a same-region teleport request
-/// with the same `TeleportStart` → `TeleportLocal` pair, so the local sequence
-/// is pinned offline on every commit.
+/// The case records the whole trace — order, flags, landing position, look-at
+/// — and the request-to-arrival time. A landing position other than the one
+/// asked for is recorded and not held: a parcel's landing point or a telehub
+/// may redirect an in-region teleport on either grid.
 #[derive(Debug)]
 pub struct TeleportLocalPhases;
 
@@ -94,7 +105,7 @@ impl GridTest for TeleportLocalPhases {
     }
 
     fn description(&self) -> &'static str {
-        "Drive a local teleport and assert the Starting -> Progress -> Complete phase sequence"
+        "Drive a local teleport and hold its order, flags and look-at to the grid's measured shape"
     }
 
     fn grids(&self) -> &'static [Grid] {
@@ -103,96 +114,66 @@ impl GridTest for TeleportLocalPhases {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
+            let grid = ctx.grid();
             let session = ctx.primary();
             session.wait_for_region(REGION_TIMEOUT).await?;
 
-            // Teleport to the centre of the agent's *current* region so the
-            // request is intra-region: the destination region handle is the one
-            // the agent is already in.
+            // Teleport within the agent's *current* region so the request is
+            // intra-region: the destination region handle is the one the agent
+            // is already in.
             let region_handle = session.region_handle().ok_or_else(|| {
                 TestFailure::Assertion("no region handle after the region handshake".to_owned())
             })?;
-            let (x, y, z) = DESTINATION;
 
             let started_at = Instant::now();
-            session
-                .send(Command::Teleport {
-                    region_handle,
-                    position: RegionCoordinates::new(x, y, z),
-                    look_at: Vector {
-                        x: 1.0,
-                        y: 0.0,
-                        z: 0.0,
-                    },
-                })
-                .await?;
-
-            // Collect the teleport phases the session surfaces until it arrives
-            // (a terminal phase) or a `TeleportFailed` fails the case. A local
-            // teleport is quick, but keep the window at the region timeout so the
-            // border-crossing completion path (a full circuit handshake) also
-            // fits.
-            let mut phases: Vec<Phase> = Vec::new();
-            loop {
-                let phase = session
-                    .wait_for(REGION_TIMEOUT, |event| match event {
-                        Event::TeleportStarted => Some(Ok(Phase::Started)),
-                        Event::TeleportProgress { .. } => Some(Ok(Phase::Progress)),
-                        Event::TeleportLocal { .. } => Some(Ok(Phase::Local)),
-                        Event::RegionChanged { .. } => Some(Ok(Phase::RegionChanged)),
-                        Event::TeleportFailed { reason, .. } => Some(Err(reason.clone())),
-                        _ => None,
-                    })
-                    .await?;
-                match phase {
-                    Ok(phase) => {
-                        let terminal = phase.is_terminal();
-                        phases.push(phase);
-                        if terminal {
-                            break;
-                        }
-                    }
-                    Err(reason) => {
-                        return Err(TestFailure::Assertion(format!(
-                            "local teleport failed: {reason}"
-                        )));
-                    }
-                }
-            }
+            request_teleport(session, region_handle, DESTINATION, REQUESTED_LOOK_AT).await?;
+            let trace = watch_teleport(session, REGION_TIMEOUT).await?;
             let elapsed = started_at.elapsed();
 
-            // The sequence must open with the Starting phase: the simulator
-            // acknowledged the request before doing anything else.
-            check(
-                phases.first() == Some(&Phase::Started),
-                "expected the teleport to begin with a Starting (TeleportStart) phase",
-            )?;
-            // ... and end at arrival — the intra-region TeleportLocal for the
-            // expected local case, or a RegionChanged handover for an avatar that
-            // logged in adjacent to the target region.
-            let arrival = phases
-                .last()
-                .copied()
-                .ok_or_else(|| TestFailure::Assertion("no teleport phases observed".to_owned()))?;
-            check(
-                arrival.is_terminal(),
-                "expected the teleport to end at an arrival phase (TeleportLocal / RegionChanged)",
-            )?;
-
-            let progress_updates = phases.iter().filter(|p| **p == Phase::Progress).count();
-            let sequence = phases
-                .iter()
-                .map(|p| p.label())
-                .collect::<Vec<_>>()
-                .join(",");
-
             let metrics = ctx.metrics();
-            metrics.set("phase_sequence", sequence);
+            trace.record("", metrics);
+            metrics.set("phase_sequence", trace.sequence());
             metrics.set(
                 &count_metric("progress_updates"),
-                i64::try_from(progress_updates).unwrap_or(-1),
+                i64::try_from(trace.progress.len()).unwrap_or(-1),
             );
             metrics.set_timing(&secs_metric("teleport"), elapsed.as_secs_f64());
+
+            if let Some(failure) = &trace.failure {
+                return Err(TestFailure::Assertion(format!(
+                    "local teleport failed: {}",
+                    failure.reason
+                )));
+            }
+            let local = trace.local.as_ref().ok_or_else(|| {
+                TestFailure::Assertion(format!(
+                    "a teleport within the agent's own region ended as [{}], not with a \
+                     TeleportLocal",
+                    trace.sequence()
+                ))
+            })?;
+            let (wanted_x, wanted_y, _wanted_z) = DESTINATION;
+            let redirected = (local.position.x() - wanted_x).abs() > 1.0
+                || (local.position.y() - wanted_y).abs() > 1.0;
+            let rule = look_at_rule(local);
+            let metrics = ctx.metrics();
+            metrics.set("landing_redirected", redirected);
+            metrics.set("look_at_rule", rule);
+
+            SEQUENCE.check(
+                "the messages a local teleport is answered with",
+                grid,
+                &trace.sequence().as_str(),
+            )?;
+            check(
+                trace.starts.len() == 1,
+                &format!("expected one TeleportStart, got {:?}", trace.starts),
+            )?;
+            for flags in &trace.starts {
+                FLAGS.check("the TeleportStart flags of a local teleport", grid, flags)?;
+            }
+            FLAGS.check("the TeleportLocal flags", grid, &local.flags)?;
+            LOOK_AT.check("which way the TeleportLocal faces the agent", grid, &rule)?;
             Ok(())
         })
     }

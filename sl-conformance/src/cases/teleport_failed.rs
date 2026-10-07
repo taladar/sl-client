@@ -1,48 +1,198 @@
-//! Provoke a failed teleport and assert the session surfaces
-//! [`Event::TeleportFailed`] rather than an arrival.
+//! Provoke the two teleport refusals any avatar can provoke — a region that
+//! does not exist and a landmark the grid does not hold — and hold the grid to
+//! how it was measured refusing each.
 
 use std::time::Instant;
 
-use sl_client_tokio::{Command, Event, RegionCoordinates, RegionHandle, Vector};
+use sl_client_tokio::{AssetKey, Command, RegionHandle, TeleportFlags, Uuid};
 
-use crate::context::{TestContext, TestFailure};
+use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
+use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{REGION_TIMEOUT, check, secs_metric};
+use crate::teleport_trace::{TeleportTrace, request_teleport, watch_teleport};
+
+/// Where each answer below is written down.
+const SOURCE: &str = "book/src/gridspec/teleport.md (teleport-failed, 2026-10-07)";
 
 /// Grid coordinates (region indices) of the non-existent destination region.
 ///
-/// The local OpenSim standalone hosts a 2×2 block of regions at grid
-/// `(1000,1000)`–`(1001,1001)`; `(2000, 2000)` is far outside that block (and
-/// well away from any region a real grid would host near the test avatar), so
-/// no region occupies the handle and the simulator answers the teleport with
-/// `TeleportFailed` ("The region you tried to teleport to was not found")
-/// instead of a `TeleportStart` → arrival sequence. Choosing coordinates in the
-/// void — rather than reusing the current region's handle with an illegal
-/// position — is what forces the *different-region* path in OpenSim's
-/// `EntityTransferModule`, where the grid-service lookup returns no region.
+/// Every grid the case runs on keeps its regions around `(1000, 1000)`;
+/// `(2000, 2000)` is far outside any of them, so no region occupies the handle
+/// and the destination lookup fails. Choosing coordinates in the void — rather
+/// than reusing the current region's handle with an illegal position — is what
+/// forces the *different-region* path.
 const VOID_REGION_GRID: (u32, u32) = (2000, 2000);
 
 /// The region-local landing position of the (doomed) teleport request. The
-/// centre of the region at a modest height; the exact value is irrelevant since
-/// the destination region does not exist, but a plausible in-region position
-/// keeps the request well-formed.
+/// exact value is irrelevant since the destination region does not exist, but a
+/// plausible in-region position keeps the request well-formed.
 const DESTINATION: (f32, f32, f32) = (128.0, 128.0, 30.0);
 
-/// Drives a teleport to a region that does not exist and asserts the session
-/// reports the failure.
+/// A landmark asset id no grid holds.
+const NO_SUCH_LANDMARK: u128 = 0x1111_1111_2222_3333_4444_5555_5555_5555;
+
+/// How a grid refuses one kind of request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Refusal {
+    /// The flags of the `TeleportStart` sent before the refusal, if the grid
+    /// starts a teleport it is about to refuse.
+    start: Option<u32>,
+    /// The progress lines sent before the refusal.
+    lines: &'static [&'static str],
+    /// The `TeleportFailed` reason.
+    reason: &'static str,
+    /// The key of the alert attached, if any.
+    alert: Option<&'static str>,
+}
+
+/// A teleport to a region handle no region answers to. Second Life starts
+/// the teleport, says `resolving`, then fails it over the event queue with the
+/// key `no_host`, repeated in an alert; OpenSim answers with a UDP
+/// `TeleportFailed` carrying a sentence, and nothing before or beside it.
+const UNKNOWN_REGION: Measured<Refusal> = Measured {
+    second_life: Refusal {
+        start: Some(TeleportFlags::VIA_LOCATION),
+        lines: &["resolving"],
+        reason: "no_host",
+        alert: Some("no_host"),
+    },
+    opensim: Refusal {
+        start: None,
+        lines: &[],
+        reason: "The region you tried to teleport to was not found",
+        alert: None,
+    },
+    source: SOURCE,
+};
+
+/// A teleport to a landmark asset the grid does not hold. Second Life starts
+/// it as a landmark teleport and names the kind before failing it as
+/// `nolandmark_tport`; OpenSim again sends the sentence alone.
+const UNKNOWN_LANDMARK: Measured<Refusal> = Measured {
+    second_life: Refusal {
+        start: Some(TeleportFlags::VIA_LANDMARK),
+        lines: &["sending_landmark"],
+        reason: "nolandmark_tport",
+        alert: Some("nolandmark_tport"),
+    },
+    opensim: Refusal {
+        start: None,
+        lines: &[],
+        reason: "Could not find the landmark asset data",
+        alert: None,
+    },
+    source: SOURCE,
+};
+
+/// What the trace of a refused request amounts to, in the terms of
+/// [`Refusal`], borrowed from the trace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Observed<'trace> {
+    /// The flags of the first `TeleportStart`, if one came.
+    start: Option<u32>,
+    /// The progress lines ahead of the failure.
+    lines: Vec<&'trace str>,
+    /// The failure's reason.
+    reason: &'trace str,
+    /// The key of the failure's alert, if it carried one.
+    alert: Option<&'trace str>,
+}
+
+/// What a refused request's trace amounts to; `None` for a teleport that was
+/// not refused.
+fn observed(trace: &TeleportTrace) -> Option<Observed<'_>> {
+    let failure = trace.failure.as_ref()?;
+    Some(Observed {
+        start: trace.starts.first().copied(),
+        lines: trace.lines(),
+        reason: failure.reason.as_str(),
+        alert: failure.alert.as_ref().map(|alert| alert.message.as_str()),
+    })
+}
+
+/// Watches one doomed request to its end, records it under `prefix` and holds
+/// the grid to `expected`.
+async fn refused(
+    ctx: &mut TestContext,
+    prefix: &str,
+    what: &str,
+    expected: &Measured<Refusal>,
+) -> Result<(), TestFailure> {
+    let grid = ctx.grid();
+    let started_at = Instant::now();
+    let trace = watch_teleport(ctx.primary(), REGION_TIMEOUT).await?;
+    let elapsed = started_at.elapsed();
+    let metrics = ctx.metrics();
+    trace.record(prefix, metrics);
+    metrics.set_timing(
+        &secs_metric(&format!("{prefix}failure")),
+        elapsed.as_secs_f64(),
+    );
+    let Some(Observed {
+        start,
+        lines,
+        reason,
+        alert,
+    }) = observed(&trace)
+    else {
+        return Err(TestFailure::Assertion(format!(
+            "expected {what} to be refused, but it ended as [{}]",
+            trace.sequence()
+        )));
+    };
+    // A failure reason must accompany the refusal — an empty string would mean
+    // the simulator refused the teleport without telling the viewer why, which
+    // no client could surface.
+    check(
+        !reason.trim().is_empty(),
+        "expected TeleportFailed to carry a non-empty failure reason",
+    )?;
+    check(
+        trace.starts.len() <= 1,
+        &format!("a refused teleport was started {:?} times", trace.starts),
+    )?;
+    // What was observed borrows from the trace, so it is compared with the
+    // measured answer field by field rather than as one value.
+    let wanted = expected.on(grid);
+    check(
+        start == wanted.start
+            && lines == wanted.lines
+            && reason == wanted.reason
+            && alert == wanted.alert,
+        &format!(
+            "{what} was refused with start {start:?}, lines {lines:?}, reason {reason:?} and \
+             alert {alert:?}; the grid was measured sending {wanted:?} ({})",
+            expected.source
+        ),
+    )
+}
+
+/// Asks for a teleport to the landmark `landmark`.
+async fn request_landmark(session: &Session, landmark: AssetKey) -> Result<(), TestFailure> {
+    session
+        .send(Command::TeleportViaLandmark {
+            landmark: Some(landmark),
+        })
+        .await
+}
+
+/// Drives two teleports that cannot succeed and asserts the session reports
+/// each failure the way the grid was measured reporting it.
 ///
-/// A viewer teleport walks a small state machine announced by the simulator; a
-/// teleport whose destination region cannot be located never reaches an arrival
-/// phase — instead the simulator answers with `TeleportFailed` carrying a
-/// human-readable reason (and, on some grids, a structured `AlertInfo`). The
-/// session leaves the teleporting state and stays connected to the current
-/// region.
+/// A teleport whose destination cannot be found never reaches an arrival; the
+/// simulator answers with `TeleportFailed`, and the session leaves the
+/// teleporting state and stays connected to the current region. *How* it
+/// answers is where the two grids part: Second Life starts the teleport,
+/// narrates the step it got to, and fails it over the **event queue** with a
+/// localisation key repeated in an `AlertInfo`; OpenSim sends a UDP
+/// `TeleportFailed` in place of the start, its reason an English sentence and
+/// no alert. A client that listens for the failure on one transport only hangs
+/// on the other grid until its own timeout.
 ///
-/// The case teleports to a region handle in the empty part of the grid, waits
-/// for the first terminal teleport event, and asserts it is
-/// [`Event::TeleportFailed`] (not an arrival). It records the failure reason,
-/// whether a structured alert accompanied it, and the request-to-failure time.
+/// The second request is made after the first failure, so the case also shows
+/// the session is usable again once a teleport has been refused.
 #[derive(Debug)]
 pub struct TeleportFailed;
 
@@ -52,79 +202,47 @@ impl GridTest for TeleportFailed {
     }
 
     fn description(&self) -> &'static str {
-        "Provoke a teleport to a non-existent region and assert Event::TeleportFailed"
+        "Teleport to a void region and an unknown landmark and hold each refusal to the grid's own"
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
-            let session = ctx.primary();
-            session.wait_for_region(REGION_TIMEOUT).await?;
+            ctx.primary().wait_for_region(REGION_TIMEOUT).await?;
 
             // A region handle in the void: no region occupies these coordinates,
             // so the destination lookup fails and the teleport is refused.
             let (grid_x, grid_y) = VOID_REGION_GRID;
-            let region_handle = RegionHandle::from_grid(grid_x, grid_y);
-            let (x, y, z) = DESTINATION;
+            request_teleport(
+                ctx.primary(),
+                RegionHandle::from_grid(grid_x, grid_y),
+                DESTINATION,
+                (1.0, 0.0, 0.0),
+            )
+            .await?;
+            refused(
+                ctx,
+                "void_",
+                "a teleport to a region that does not exist",
+                &UNKNOWN_REGION,
+            )
+            .await?;
 
-            let started_at = Instant::now();
-            session
-                .send(Command::Teleport {
-                    region_handle,
-                    position: RegionCoordinates::new(x, y, z),
-                    look_at: Vector {
-                        x: 1.0,
-                        y: 0.0,
-                        z: 0.0,
-                    },
-                })
-                .await?;
-
-            // Wait for the first *terminal* teleport event. The failure path may
-            // (or may not) be preceded by a `TeleportStart`, so ignore
-            // `TeleportStarted` / `TeleportProgress` and resolve on the terminal
-            // outcome: a `TeleportFailed` (expected), or any arrival event
-            // (`TeleportLocal` / `TeleportFinished` / `RegionChanged`) that would
-            // mean the teleport unexpectedly succeeded.
-            let outcome = session
-                .wait_for(REGION_TIMEOUT, |event| match event {
-                    Event::TeleportFailed { reason, alert_info } => {
-                        Some(Ok((reason.clone(), alert_info.is_some())))
-                    }
-                    Event::TeleportLocal { .. } => Some(Err("TeleportLocal")),
-                    Event::TeleportFinished { .. } => Some(Err("TeleportFinished")),
-                    Event::RegionChanged { .. } => Some(Err("RegionChanged")),
-                    _ => None,
-                })
-                .await?;
-            let elapsed = started_at.elapsed();
-
-            let (reason, has_alert_info) = match outcome {
-                Ok(outcome) => outcome,
-                Err(arrival) => {
-                    return Err(TestFailure::Assertion(format!(
-                        "expected the teleport to a non-existent region to fail, but it arrived \
-                         ({arrival})"
-                    )));
-                }
-            };
-
-            // A failure reason must accompany the event — an empty string would
-            // mean the simulator refused the teleport without telling the viewer
-            // why, which no client could surface.
-            check(
-                !reason.trim().is_empty(),
-                "expected TeleportFailed to carry a non-empty failure reason",
-            )?;
-
-            let metrics = ctx.metrics();
-            metrics.set("failure_reason", reason);
-            metrics.set("has_alert_info", has_alert_info);
-            metrics.set_timing(&secs_metric("teleport_failure"), elapsed.as_secs_f64());
-            Ok(())
+            request_landmark(
+                ctx.primary(),
+                AssetKey::from(Uuid::from_u128(NO_SUCH_LANDMARK)),
+            )
+            .await?;
+            refused(
+                ctx,
+                "landmark_",
+                "a teleport to a landmark the grid does not hold",
+                &UNKNOWN_LANDMARK,
+            )
+            .await
         })
     }
 }

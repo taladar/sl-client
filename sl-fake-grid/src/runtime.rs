@@ -494,6 +494,9 @@ pub(crate) struct GridCore {
     /// What a region says of itself on arrival and after
     /// ([`ImitatedGrid::arrival_policy`]).
     pub(crate) arrival_policy: crate::imitates::ArrivalPolicy,
+    /// How a teleport runs and is refused
+    /// ([`ImitatedGrid::teleport_policy`]).
+    pub(crate) teleport_policy: crate::imitates::TeleportPolicy,
     /// What one region holds, by product ([`ImitatedGrid::region_capacity`]).
     pub(crate) imitated: ImitatedGrid,
     /// How a region's default day is labelled ([`ImitatedGrid::stock_day`]).
@@ -799,6 +802,20 @@ impl GridCore {
             ),
             now,
         );
+        // The maturity preference a grid with entitlements reports at login is
+        // the one its preferences capability starts from, and the one a
+        // teleport is checked against.
+        if self.account_entitlements {
+            let ceiling = account.config.maturity_ceiling;
+            let preference = match account.config.preferred_maturity {
+                Some(preference) if preference.permitted_by(ceiling) => preference,
+                _clamped_or_unset => ceiling,
+            };
+            sim.merge_agent_preferences(&sl_wire::AgentPreferences {
+                max_access_pref: preference.to_login_access().map(str::to_owned),
+                ..sl_wire::AgentPreferences::default()
+            });
+        }
         sim.set_link_tuning(self.circuit_policy.link, now);
         sim.set_timeout_kick(self.circuit_policy.timeout_kick.map(str::to_owned));
         sim.set_short_zero_tails(self.circuit_policy.short_zero_tails);
@@ -2040,6 +2057,7 @@ impl FakeGridBuilder {
             logout_reply: self.imitates.logout_reply(),
             circuit_policy: self.imitates.circuit_policy(),
             arrival_policy: self.imitates.arrival_policy(),
+            teleport_policy: self.imitates.teleport_policy(),
             imitated: self.imitates,
             stock_day: self.imitates.stock_day(),
             packages: self
@@ -2263,10 +2281,14 @@ impl FakeGrid {
             region,
             arrival: ArrivalPlacement { position, look_at },
             flags: sl_types::map::TeleportFlags::VIA_LOCATION,
-            progress: sl_proto::teleport_strings::SENDING_DEST,
+            kind_line: None,
+            client_requested: false,
         };
         match crate::teleport::teleport_session(&self.core, &agent.shared, request).await? {
-            crate::teleport::TeleportOutcome::Local => Ok(agent.clone()),
+            // A teleport the grid decides on is never refused or cancelled.
+            crate::teleport::TeleportOutcome::Local | crate::teleport::TeleportOutcome::Refused => {
+                Ok(agent.clone())
+            }
             crate::teleport::TeleportOutcome::Moved(shared) => Ok(FakeAgent {
                 shared,
                 agent_id: agent.agent_id,

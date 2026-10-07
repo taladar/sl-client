@@ -1909,13 +1909,14 @@ pub use legacy_preset::{
 pub(crate) use chat_session::SERVER_HISTORY_CAP;
 pub use conversions::{
     CrossedRegionInfo, STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID,
-    TeleportFinishInfo, agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd,
-    agent_state_update_to_llsd, ais_category_children_reply_to_llsd,
-    ais_category_links_reply_to_llsd, ais_inventory_update_to_llsd, ais_item_reply_to_llsd,
-    ais_mutation_reply_to_llsd, build_environment_update_request, build_map_block_reply,
-    build_map_item_reply, build_map_layer_reply, bulk_update_inventory_to_llsd,
-    chat_session_agent_params_from_llsd, chat_session_agents_body, chat_session_request_body,
-    chat_session_request_from_llsd, chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
+    TELEPORT_FINISH_LOCATION_ID_SECOND_LIFE, TeleportFinishInfo, agent_drop_group_to_llsd,
+    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
+    ais_category_children_reply_to_llsd, ais_category_links_reply_to_llsd,
+    ais_inventory_update_to_llsd, ais_item_reply_to_llsd, ais_mutation_reply_to_llsd,
+    build_environment_update_request, build_map_block_reply, build_map_item_reply,
+    build_map_layer_reply, bulk_update_inventory_to_llsd, chat_session_agent_params_from_llsd,
+    chat_session_agents_body, chat_session_request_body, chat_session_request_from_llsd,
+    chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
     chatterbox_session_start_reply_to_llsd, cof_version_increment_to_llsd,
     copy_inventory_from_notecard_body, created_category_to_llsd, crossed_region_to_caps_llsd,
     day_cycle_from_asset, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
@@ -1927,8 +1928,9 @@ pub use conversions::{
     parcel_info_to_llsd, parcel_object_owners_to_caps_llsd, required_voice_version_to_llsd,
     server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
     sim_console_response_to_llsd, sky_settings_from_asset, sky_with_blended_values,
-    sky_with_pushed_values, teleport_finish_to_llsd, water_settings_from_asset,
-    water_with_blended_values, water_with_pushed_values, windlight_refresh_to_llsd,
+    sky_with_pushed_values, teleport_failed_to_caps_llsd, teleport_finish_to_llsd,
+    water_settings_from_asset, water_with_blended_values, water_with_pushed_values,
+    windlight_refresh_to_llsd,
 };
 pub(crate) use conversions::{
     ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,

@@ -53,6 +53,9 @@ pub(crate) enum CapsEvent {
     DirLandReply,
     /// The destination region of a teleport that is going through.
     TeleportFinish,
+    /// A teleport the simulator refused or gave up on, in place of the UDP
+    /// `TeleportFailed` (Second Life answers this way; OpenSim uses UDP).
+    TeleportFailed,
     /// A neighbour region the simulator wants a child circuit to.
     EnableSimulator,
     /// The child-agent endpoint for a neighbour, with its seed capability.
@@ -190,6 +193,7 @@ impl CapsEvent {
             "ParcelObjectOwnersReply" => Self::ParcelObjectOwnersReply,
             "DirLandReply" => Self::DirLandReply,
             "TeleportFinish" => Self::TeleportFinish,
+            "TeleportFailed" => Self::TeleportFailed,
             "EnableSimulator" => Self::EnableSimulator,
             "EstablishAgentCommunication" => Self::EstablishAgentCommunication,
             "CrossedRegion" => Self::CrossedRegion,

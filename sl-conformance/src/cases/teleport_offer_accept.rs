@@ -200,7 +200,7 @@ impl GridTest for TeleportOfferAccept {
             loop {
                 let phase = secondary
                     .wait_for(REGION_TIMEOUT, |event| match event {
-                        Event::TeleportStarted => Some(Ok(Phase::Started)),
+                        Event::TeleportStarted { .. } => Some(Ok(Phase::Started)),
                         Event::TeleportProgress { .. } => Some(Ok(Phase::Progress)),
                         Event::TeleportLocal { .. } => Some(Ok(Phase::Local)),
                         Event::RegionChanged { .. } => Some(Ok(Phase::RegionChanged)),

@@ -27,7 +27,13 @@ and the position/orientation within it. There are a few flavours:
   resolved simulator-side, so the region handle only becomes known when the
   teleport finishes.
 - **Cancel** (`Command::CancelTeleport`) aborts a teleport already in progress;
-  the session reverts to its prior active state.
+  the session reverts to its prior active state. Whether the *grid* stops is
+  the grid's business — Second Life reports the teleport failed, OpenSim
+  usually completes it — and the session follows a teleport that carries on.
+
+How each grid narrates, completes, refuses and cancels a teleport — the
+progress lines, the flags, which transport a failure arrives on — is measured
+in [Grid Behaviour → Teleport](../gridspec/teleport.md).
 
 Why the teleport is happening is captured by a set of **teleport flags** (via a
 landmark, a lure, a login, a telehub, going home, …), which ride along in the
@@ -67,9 +73,10 @@ A teleport is reported as a small sequence of events, and the branch it takes
 tells you whether it was local or a region handover:
 
 ```text
-TeleportStarted
+TeleportStarted { flags }
    └─ TeleportProgress { message, flags }      (zero or more updates)
-        ├─ TeleportLocal                        → same region, same circuit. Done.
+        ├─ TeleportLocal { position, look_at, flags }
+        │                                       → same region, same circuit. Done.
         ├─ TeleportFinished { region_handle, sim, maturity, flags }
         │     └─ RegionChanged { region_handle, sim }   → arrived in a new region
         └─ TeleportFailed { reason, alert_info }        → it did not happen
@@ -83,8 +90,10 @@ TeleportStarted
   the root, and the destination's
   [region handshake](world.md#the-region-handshake) and a fresh
   [capability](../comms/caps.md) seed follow.
-- **Failure** (`Event::TeleportFailed`) carries a reason and any region alert
-  text.
+- **Failure** (`Event::TeleportFailed`) carries a reason and any alert the
+  grid attached. It arrives as a UDP message on OpenSim and as an event-queue
+  event on Second Life, where the reason is usually a key (`no_host`) repeated
+  in the alert; the session handles both the same way.
 
 ## Cross-region handover and child circuits
 

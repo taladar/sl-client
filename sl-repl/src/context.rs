@@ -201,6 +201,12 @@ impl SessionContext {
                 bind(&mut self.region_handle, *region_handle, "region");
                 bind(&mut self.circuit_id, *circuit, "circuitid");
             }
+            // The login arrival names the region too, and no `RegionChanged`
+            // precedes it: without this `$region` stays unbound until the
+            // first teleport.
+            Event::AgentArrived { region_handle, .. } => {
+                bind(&mut self.region_handle, *region_handle, "region");
+            }
             Event::RegionInfoHandshake(identity) => {
                 let name = identity.sim_name.as_ref().map(ToString::to_string);
                 if self.region_name != name {

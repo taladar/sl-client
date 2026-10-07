@@ -186,8 +186,8 @@ use crate::session::{
     land_stat_reply_to_caps_llsd, nav_mesh_status_to_llsd, open_region_info_to_llsd,
     parcel_object_owners_to_caps_llsd, parcel_properties_to_llsd, parcel_properties_to_wire,
     region_handshake_message, required_voice_version_to_llsd, set_display_name_reply_to_llsd,
-    shape_from_object_shape_block, sim_console_response_to_llsd, teleport_finish_to_llsd,
-    unpack_uuids, windlight_refresh_to_llsd,
+    shape_from_object_shape_block, sim_console_response_to_llsd, teleport_failed_to_caps_llsd,
+    teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
 };
 use crate::sim_experiences::SimExperiences;
 use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
@@ -3171,6 +3171,9 @@ pub struct SimSession {
     /// The agent's server-stored preferences, served and updated by the
     /// `AgentPreferences` capability ([`SimSession::agent_preferences`]).
     agent_preferences: AgentPreferences,
+    /// Whether a `TeleportCancel` has arrived since the client's last teleport
+    /// request ([`SimSession::take_teleport_cancel`]).
+    teleport_cancel: TeleportCancelState,
     /// An abuse report parked by the first `SendUserReportWithScreenshot` step
     /// until the second step delivers the screenshot bytes.
     pending_report_screenshot: Option<Box<AbuseReport>>,
@@ -3417,6 +3420,16 @@ pub struct ObjectMediaState {
     pub faces: Vec<Option<MediaEntry>>,
 }
 
+/// Whether the client has cancelled the teleport it last asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TeleportCancelState {
+    /// No cancel since the last teleport request.
+    None,
+    /// A `TeleportCancel` arrived after the last teleport request and has not
+    /// been read yet.
+    Pending,
+}
+
 /// The `AgentPreferences` set a fresh session starts from — OpenSim's stored
 /// defaults (`IAgentPreferencesService.cs`): hover height `0.0`, zero default
 /// permission masks, access ceiling `"M"`, language `"en-us"` marked public,
@@ -3478,6 +3491,7 @@ impl SimSession {
             offline_messages: Vec::new(),
             display_names: BTreeMap::new(),
             agent_preferences: default_agent_preferences(),
+            teleport_cancel: TeleportCancelState::None,
             pending_report_screenshot: None,
             pending_caps_uploads: BTreeMap::new(),
             next_sim_serial: 0,
@@ -3637,8 +3651,10 @@ impl SimSession {
     /// Merges an `AgentPreferences` capability update into the stored set:
     /// each `Some` field of `update` overwrites the stored value. `god_level`
     /// is ignored — it is reply-only (the grid reports the agent's
-    /// administrative level; clients cannot set it).
-    pub(crate) fn merge_agent_preferences(&mut self, update: &AgentPreferences) {
+    /// administrative level; clients cannot set it). A driver calls it to
+    /// seed a session from the account, and to carry the stored set over to
+    /// the session a teleport lands in.
+    pub fn merge_agent_preferences(&mut self, update: &AgentPreferences) {
         if let Some(hover_height) = update.hover_height {
             self.agent_preferences.hover_height = Some(hover_height);
         }
@@ -9254,6 +9270,18 @@ impl SimSession {
         Ok(())
     }
 
+    /// Whether the client has cancelled the teleport it last asked for: `true`
+    /// once for a `TeleportCancel` that arrived after the most recent teleport
+    /// request, which is what the driver sequencing that teleport reads before
+    /// it commits to the handover. A new request forgets an older cancel, so
+    /// a cancel sent with no teleport in flight cannot abort the next one.
+    pub const fn take_teleport_cancel(&mut self) -> bool {
+        matches!(
+            core::mem::replace(&mut self.teleport_cancel, TeleportCancelState::None),
+            TeleportCancelState::Pending
+        )
+    }
+
     /// Sends a `TeleportStart` — the simulator accepted a teleport request and
     /// the client should show its teleport screen (the inverse of the client's
     /// [`Event::TeleportStarted`](crate::Event::TeleportStarted)). The
@@ -9331,8 +9359,9 @@ impl SimSession {
         let message = AnyMessage::TeleportLocal(TeleportLocal {
             info: TeleportLocalInfoBlock {
                 agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
-                // The reference simulators send 0; the viewer ignores it.
-                location_id: 0,
+                // Both live grids send 2 (measured 2026-10-07); the viewer
+                // ignores it.
+                location_id: 2,
                 position: Vector {
                     x: position.x(),
                     y: position.y(),
@@ -9370,6 +9399,19 @@ impl SimSession {
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
+    }
+
+    /// Enqueues a CAPS `TeleportFailed` event — how Second Life refuses or
+    /// aborts a teleport: over the event queue rather than UDP, with the
+    /// reason key repeated in an `AlertInfo` block when `alert_info` is given.
+    /// Nothing is enqueued for a session with no agent.
+    pub fn enqueue_teleport_failed(&mut self, reason: &str, alert_info: Option<&AlertInfo>) {
+        if let Some(agent_id) = self.agent_id {
+            self.enqueue_caps_event(
+                "TeleportFailed",
+                teleport_failed_to_caps_llsd(agent_id, reason, alert_info),
+            );
+        }
     }
 
     /// Sends a `DisableSimulator` — tells the client to tear down this circuit
@@ -11954,6 +11996,7 @@ impl SimSession {
                 });
             }
             AnyMessage::TeleportLandmarkRequest(request) => {
+                self.teleport_cancel = TeleportCancelState::None;
                 // A nil LandmarkID is the wire encoding of "teleport home".
                 let landmark_id = request.info.landmark_id;
                 let landmark = (landmark_id != Uuid::nil()).then(|| AssetKey::from(landmark_id));
@@ -11961,6 +12004,7 @@ impl SimSession {
                     .push_back(ServerEvent::TeleportViaLandmark { landmark });
             }
             AnyMessage::TeleportLocationRequest(request) => {
+                self.teleport_cancel = TeleportCancelState::None;
                 let info = &request.info;
                 self.events.push_back(ServerEvent::TeleportRequested {
                     region_handle: RegionHandle(info.region_handle),
@@ -11973,12 +12017,14 @@ impl SimSession {
                 });
             }
             AnyMessage::TeleportLureRequest(request) => {
+                self.teleport_cancel = TeleportCancelState::None;
                 self.events.push_back(ServerEvent::TeleportViaLure {
                     lure_id: LureId::new(request.info.lure_id),
                     teleport_flags: request.info.teleport_flags,
                 });
             }
             AnyMessage::TeleportCancel(_) => {
+                self.teleport_cancel = TeleportCancelState::Pending;
                 self.events.push_back(ServerEvent::CancelTeleport);
             }
             AnyMessage::SetStartLocationRequest(request) => {

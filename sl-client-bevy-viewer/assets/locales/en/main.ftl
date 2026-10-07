@@ -3249,6 +3249,21 @@ notification-not-age-verified-notify = Location restricted to age 18 and over.
 notification-blocked-slurl = A SLurl was received from an untrusted browser and has been blocked for your security.
 notification-throttled-slurl = Multiple SLurls were received from an untrusted browser within a short period. They will be blocked for a few seconds for your security.
 
+## The teleport overlay's progress line: the texts of the progress keys a
+## simulator sends (the reference teleport_strings.xml "progress" set).
+
+teleport-progress-sending-dest = Sending to destination.
+teleport-progress-redirecting = Redirecting to different location.
+teleport-progress-relaying = Relaying to destination.
+teleport-progress-sending-home = Sending home location request.
+teleport-progress-sending-landmark = Sending landmark location request.
+teleport-progress-completing = Completing teleport.
+teleport-progress-resolving = Resolving destination.
+teleport-progress-contacting = Contacting new region.
+teleport-progress-arriving = Arriving...
+teleport-progress-requesting = Requesting Teleport...
+teleport-progress-pending = Pending Teleport...
+
 ## Teleport (viewer-notification-catalogue-teleport). Bodies follow
 ## the reference notifications.xml with the standard trims (KB URLs,
 ## [APP_NAME]/[SECOND_LIFE] self-references, <nolink> markup).

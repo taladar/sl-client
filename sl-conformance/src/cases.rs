@@ -110,6 +110,8 @@ pub mod session_mark_read;
 pub mod set_appearance;
 pub mod simulator_features;
 pub mod task_inventory;
+pub mod teleport_access_refused;
+pub mod teleport_cancel;
 pub mod teleport_cross_region;
 pub mod teleport_failed;
 pub mod teleport_local_phases;

@@ -16485,7 +16485,7 @@ mod test {
         let phases: Vec<&'static str> = drain_events(&mut session)
             .iter()
             .filter_map(|event| match event {
-                Event::TeleportStarted => Some("started"),
+                Event::TeleportStarted { .. } => Some("started"),
                 Event::TeleportProgress { .. } => Some("progress"),
                 Event::TeleportFinished { .. } => Some("finished"),
                 Event::RegionChanged { .. } => Some("region-changed"),

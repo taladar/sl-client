@@ -1722,21 +1722,25 @@ A `SimSession` has its region handle fixed at construction, so a teleport
 is always a **second session**: a fresh loopback socket, `SimSession` and
 `SimCaps` in the destination region, seeded with that region's scenario
 under the login's identity (the client opens every circuit with its login
-`UseCircuitCode` triple). `teleport.rs` sequences it the way OpenSim's
-`EntityTransferModule` does:
+`UseCircuitCode` triple). `teleport.rs` sequences it on the skeleton both
+live grids share, with what they do differently taken from
+`ImitatedGrid::teleport_policy` (measured in
+[Grid Behaviour → Teleport](../gridspec/teleport.md)):
 
-1. `TeleportStart` and the progress keys on the source (`resolving`, then
-   `sending_dest` / `sending_home` / `sending_landmark`, then `arriving`
-   — the keys of Firestorm's `teleport_strings.xml`, which the viewer
-   localises; `sl_proto::teleport_strings` holds them);
+1. `TeleportStart` on the source, and the progress lines the flavour
+   narrates with: Second Life's `resolving` and `Sending to destination.`
+   (after `sending_home` / `sending_landmark` for those two kinds), none
+   at all on OpenSim's;
 2. the destination session is prepared, placed (`set_arrival_position`
    — the `AgentMovementComplete` lands the avatar where the request
    asked) and **registered before the finish names it**, because the
    client contacts the destination the moment `TeleportFinish` arrives
    and an unregistered `/sim/<n>/…` answers 404 to the seed it POSTs;
-3. `TeleportFinish` on the source's event queue, and **nothing before
-   it** — the full reference record (`TeleportFinishInfo`: agent id,
-   region handle, region size, …; Firestorm builds the destination
+3. `TeleportFinish` on the source's event queue — held behind the
+   client's acknowledgement of the last UDP line, since the two
+   transports race — and **nothing before it**: the record each grid
+   sends (`TeleportFinishInfo`: agent id, region handle, and on OpenSim's
+   flavour the region size, …; Firestorm builds the destination
    region object from the handle, and the client reports the wire handle
    rather than the one it requested, which is what a lure or landmark
    teleport needs). No `EnableSimulator` / `EstablishAgentCommunication`
@@ -1769,9 +1773,17 @@ landmark fixture; `None` = home = the account's start region),
 `TeleportLureRequest` through the OpenSim lure-id convention (a
 `FakeParcelId`: handle + position packed into the UUID; an opaque id is
 taken as the offering agent's id). A request that resolves nowhere is
-refused with the matching failure key (`invalid_tport`,
-`nolandmark_tport`, `no_host`), so the viewer's teleport screen never
-hangs; a same-region request finishes as a `TeleportLocal`. The explicit
+refused the way the flavour's grid refuses, so the viewer's teleport
+screen never hangs: on Second Life's a `TeleportStart`, the line it got
+to, then a `TeleportFailed` **over the event queue** with a key
+(`no_host`, `nolandmark_tport`) repeated in an alert; on OpenSim's a UDP
+`TeleportFailed` with a sentence, sent instead of a start. The Second
+Life flavour also refuses a location teleport into a region rated above
+the agent's stored maturity preference (`RegionTPAccessBlocked`), and
+answers a `TeleportCancel` that arrives before the finish with
+`TPCancelled`; the OpenSim flavour does neither. A same-region request
+finishes as a `TeleportLocal`, flagged `WITHIN_REGION` and facing the
+region's origin on Second Life's flavour. The explicit
 `FakeGrid::teleport_agent(&agent, "Region", position, look_at)` is the
 grid-initiated counterpart (what `llTeleportAgent` or a scripted push
 does — no client request at all; the client follows a remote

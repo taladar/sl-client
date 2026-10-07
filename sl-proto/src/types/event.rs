@@ -479,8 +479,15 @@ pub enum Event {
         /// The image-tile layers covering the grid.
         layers: Vec<MapLayer>,
     },
-    /// A teleport has begun (`TeleportStart`).
-    TeleportStarted,
+    /// A teleport has begun (`TeleportStart`), or the simulator finished one it
+    /// never announced.
+    TeleportStarted {
+        /// The `TeleportStart` flags: how the teleport was asked for, and
+        /// whether it may be cancelled
+        /// ([`TeleportFlags::DISABLE_CANCEL`]). For a teleport that began with
+        /// its `TeleportFinish`, the flags of that finish.
+        flags: TeleportFlags,
+    },
     /// A progress update during a teleport (`TeleportProgress`).
     TeleportProgress {
         /// The human-readable progress message.
@@ -503,6 +510,10 @@ pub enum Event {
         /// (`gAgentCamera.slamLookAt`). May be degenerate (all-zero, or purely
         /// vertical) when the simulator had no facing to state.
         look_at: Vector,
+        /// The `TeleportLocal` flags. Second Life adds
+        /// [`TeleportFlags::WITHIN_REGION`] to the flags of the request;
+        /// OpenSim sends the request's alone.
+        flags: TeleportFlags,
     },
     /// A teleport failed (`TeleportFailed` or a teleport timeout); the session
     /// remains connected to the current region.

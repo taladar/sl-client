@@ -217,7 +217,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, Arrival, RegionCoordinates, RegionHandle, SlEvent, SlIdentity, SlSessionEvent,
-        Uuid, Vector,
+        TeleportFlags, Uuid, Vector,
     };
     use sl_viewer_world_api::{
         AvatarControls, AvatarEntities, AvatarInterp, AvatarMotion, AvatarState, CameraMode,
@@ -294,6 +294,7 @@ mod tests {
         let event = SlEvent(SlSessionEvent::TeleportLocal {
             position: RegionCoordinates::new(64.0, 64.0, 25.0),
             look_at: look(-1.0, 0.0, 0.0),
+            flags: TeleportFlags(TeleportFlags::VIA_LOCATION),
         });
         let yaw = arrival_yaw(&event).ok_or("an intra-region teleport states its facing")?;
         assert!(
@@ -429,6 +430,7 @@ mod tests {
             SlEvent(SlSessionEvent::TeleportLocal {
                 position: RegionCoordinates::new(64.0, 64.0, 2025.0),
                 look_at: look(0.0, 1.0, 0.0),
+                flags: TeleportFlags(TeleportFlags::VIA_LOCATION),
             }),
         ] {
             let (mut app, _own, _anchor) = app_with_own_avatar();

@@ -887,6 +887,7 @@ mod tests {
                     y: 0.0,
                     z: 0.0,
                 },
+                flags: sl_client_bevy::TeleportFlags(0),
             },
         ));
         app.update();
