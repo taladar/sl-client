@@ -25,6 +25,8 @@
 //!   registry ([`registry()`]).
 //! - [`context`] — the login + session-drive [`TestContext`](context::TestContext)
 //!   handed to each test, and the per-avatar aditi cooldown guard.
+//! - [`crossing`] — what a region's neighbours and a walk over its border
+//!   looked like from the client, shared by the neighbour cases.
 //! - [`support`] — shared scaffolding (timeouts, combinators, assertion and
 //!   metric-name helpers, well-known id fixtures) the cases build on.
 //! - [`isolate`] — runs a case body under a caught unwind and an overall
@@ -34,6 +36,7 @@
 pub mod cases;
 pub mod circuit;
 pub mod context;
+pub mod crossing;
 pub mod fake;
 pub mod fixtures;
 pub mod gitinfo;

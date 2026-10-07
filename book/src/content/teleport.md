@@ -112,6 +112,14 @@ regions around it before it ever steps across a border:
 - on a crossing — or a teleport *into that neighbour* — the child circuit is
   promoted to the root circuit.
 
+Which neighbours a grid announces depends on the draw distance the client
+states in its `AgentUpdate`s, and a neighbour that distance stops reaching is
+taken away again with a `DisableSimulator` down its child circuit
+(`Event::NeighborRetired`). The two grids read the distance differently, hand
+an agent over a border with different bodies, and repeat themselves
+differently: all of it is measured in
+[Grid Behaviour → Teleport](../gridspec/teleport.md#neighbours-and-crossings).
+
 A **distant** teleport is not the long-distance version of that. Its
 destination is announced by nothing: `TeleportFinish` carries the destination's
 address and seed itself, and the client opens the circuit off the back of it

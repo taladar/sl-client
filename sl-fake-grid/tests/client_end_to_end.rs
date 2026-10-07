@@ -2839,6 +2839,82 @@ mod test {
         Ok(())
     }
 
+    /// **The region walked into greets the agent again on Second Life, and
+    /// says nothing more on OpenSim.**
+    ///
+    /// Measured on 2026-10-07: aditi's destination sent its `RegionHandshake`
+    /// a second time as the child circuit became the root, ahead of the
+    /// `AgentMovementComplete`; OpenSim's sent the completion alone. A client
+    /// has to take the second handshake for the arrival it is, and must not
+    /// need one to arrive.
+    #[tokio::test]
+    async fn a_crossing_is_greeted_as_the_flavour_greets_it() -> Result<(), TestError> {
+        for (imitates, greeted) in [
+            (ImitatedGrid::SecondLife, true),
+            (ImitatedGrid::OpenSim, false),
+        ] {
+            let mut running = start_configured(
+                vec![RegionConfig::default(), adjacent_east_region()],
+                None,
+                imitates,
+            )
+            .await?;
+            let east = running
+                ._grid
+                .region_handle("Fake Region East")
+                .ok_or("no east region")?;
+            let source = running.agent.clone();
+            // The child circuit's own greeting — two of them on Second Life —
+            // has to be behind us before the crossing's can be counted.
+            running
+                .wait_until("the east region's child circuit", |event| match event {
+                    Event::GenericMessage(generic) => {
+                        sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                            == Some("Fake Region East")
+                    }
+                    _ => false,
+                })
+                .await?;
+
+            let _destination = running
+                ._grid
+                .cross_agent(
+                    &source,
+                    "Fake Region East",
+                    RegionCoordinates::new(2.0, 128.0, 26.0),
+                    Vector {
+                        x: 3.2,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                )
+                .await?;
+            let mut handshakes = 0_usize;
+            let mut arrived = false;
+            running
+                .wait_until("the arrival in the east region", |event| {
+                    match event {
+                        Event::RegionInfoHandshake(identity) if identity.region_handle == east => {
+                            handshakes = handshakes.saturating_add(1);
+                        }
+                        Event::RegionChanged { region_handle, .. } if *region_handle == east => {
+                            arrived = true;
+                        }
+                        _other => {}
+                    }
+                    arrived
+                })
+                .await?;
+            assert_eq!(
+                handshakes,
+                usize::from(greeted),
+                "{imitates:?} greets a crossing {} a handshake",
+                if greeted { "with" } else { "without" }
+            );
+        }
+        Ok(())
+    }
+
     /// The two-region border grid a ridden crossing runs on: the same scene
     /// either side, with the vehicle **numbered differently** in each.
     ///

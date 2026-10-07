@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 363 |
-| blocked | 111 |
+| ready | 362 |
+| blocked | 112 |
 | in-progress | 20 |
-| bugs | 33 |
-| done | 1330 |
+| bugs | 34 |
+| done | 1332 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2042** |
+| **total** | **2045** |
 
 ## ideas (139)
 
@@ -248,7 +248,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   identity service
 - [`server-agent-transfer`](ideas/server-agent-transfer.md) — Inter-simulator
   agent transfer — teleport, crossing, child agents (blocked by
-  `gridspec-neighbours-crossing`)
+  `gridspec-neighbours-crossing` (done))
 - [`server-architecture`](ideas/server-architecture.md) — Grid architecture —
   topology, service protocol, deployment
 - [`server-asset-service`](ideas/server-asset-service.md) — Asset service —
@@ -362,7 +362,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (363)
+## ready (362)
 
 ### protocol
 
@@ -1165,8 +1165,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   dialogs and buying objects on each grid
 - [`gridspec-mute-list`](ready/gridspec-mute-list.md) — Mute (block) list
   storage and enforcement on each grid
-- [`gridspec-neighbours-crossing`](ready/gridspec-neighbours-crossing.md) —
-  Child agents, EnableSimulator and region crossing on each grid
 - [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
   Notecards, embedded items and gestures on each grid
 - [`gridspec-object-edit`](ready/gridspec-object-edit.md) — Object edits on each
@@ -1208,7 +1206,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-world-map`](ready/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 
-## blocked (111)
+## blocked (112)
 
 ### protocol
 
@@ -1465,7 +1463,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-memory-limits`)
 - [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
   agent never moves — AgentUpdate is decoded and ignored (blocked by
-  `server-world-heartbeat`, `gridspec-neighbours-crossing`,
+  `server-world-heartbeat`, `gridspec-neighbours-crossing` (done),
   `gridspec-agent-movement`)
 - [`server-world-changed-raisers`](blocked/server-world-changed-raisers.md) —
   Raise changed() from every grid-side cause, with the right bit (blocked by
@@ -1554,6 +1552,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-time-timers`](blocked/gridspec-lsl-time-timers.md) — LSL time,
   timers and sleep on each grid (blocked by
   `gridspec-lsl-live-differential-runner`)
+- [`gridspec-seated-crossing`](blocked/gridspec-seated-crossing.md) — A seated
+  crossing on each grid — a vehicle carrying its riders over a border (blocked
+  by `gridspec-sit-stand`)
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
@@ -1617,7 +1618,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (33)
+## bugs (34)
 
 ### protocol
 
@@ -1630,9 +1631,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   bits
 - [`protocol-im-states-no-position`](bugs/protocol-im-states-no-position.md) —
   Every instant message the session sends states position zero
-- [`protocol-neighbor-discovered-repeats`](bugs/protocol-neighbor-discovered-repeats.md)
-  — NeighborDiscovered is reported again every time Second Life re-announces a
-  neighbour
 - [`protocol-region-flag-deny-ageunverified-value`](bugs/protocol-region-flag-deny-ageunverified-value.md)
   — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
   are split
@@ -1686,6 +1684,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-refused-capability-silent-drops`](bugs/viewer-refused-capability-silent-drops.md)
   — Commands for a capability the grid refuses are dropped without a word
+- [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
+  — A neighbour the simulator retired stays drawn — its ground, water and map
+  tile outlive its circuit
 - [`viewer-script-compile-error-positions-zero-based`](bugs/viewer-script-compile-error-positions-zero-based.md)
   — Grid compile-error positions are zero-based and shown as one-based
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
@@ -1701,8 +1702,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — object_asset_format fails only in a full-workspace run, and fails early
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
+- [`test-scripted-environment-change-marker-timeout`](bugs/test-scripted-environment-change-marker-timeout.md)
+  — The scripted environment change's `night` marker never arrived, once, in a
+  full suite run
 
-## done (1330)
+## done (1332)
 
 ### protocol
 
@@ -1906,6 +1910,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A logout on the local OpenSim sometimes gets no LogoutReply
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
+- [`protocol-neighbor-discovered-repeats`](done/protocol-neighbor-discovered-repeats.md)
+  — NeighborDiscovered is reported again every time Second Life re-announces a
+  neighbour
 - [`protocol-parcel-info-reply-flags-misread`](done/protocol-parcel-info-reply-flags-misread.md)
   — ParcelInfoReply's packed flags byte is read as the parcel-flags field
 - [`protocol-reference-capabilities`](done/protocol-reference-capabilities.md) —
@@ -4633,6 +4640,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-logout`](done/gridspec-logout.md) — Logout reply, timing and what
   logout does to seats and child circuits
+- [`gridspec-neighbours-crossing`](done/gridspec-neighbours-crossing.md) — Child
+  agents, EnableSimulator and region crossing on each grid
 - [`gridspec-parcel-access-and-ban-lines`](done/gridspec-parcel-access-and-ban-lines.md)
   — Parcel access and ban lists, enforcement and ban lines on each grid
 - [`gridspec-parcel-info-dwell`](done/gridspec-parcel-info-dwell.md) — Parcel

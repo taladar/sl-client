@@ -1315,6 +1315,23 @@ mod test {
                     parameter: b"payload".to_vec(),
                 }],
             }),
+            // Second Life sends the effects of an avatar in a neighbouring
+            // region down that region's child circuit (measured on aditi,
+            // 2026-10-07); the child dispatcher used to report them unhandled.
+            AnyMessage::ViewerEffect(ViewerEffectMessage {
+                agent_data: ViewerEffectAgentDataBlock {
+                    agent_id: owner,
+                    session_id: uuid::Uuid::nil(),
+                },
+                effect: vec![ViewerEffectEffectBlock {
+                    id: uuid::Uuid::from_u128(0xA05),
+                    agent_id: owner,
+                    r#type: 14, // LL_HUD_EFFECT_LOOKAT
+                    duration: 0.5,
+                    color: [255, 255, 255, 255],
+                    type_data: Vec::new(),
+                }],
+            }),
         ];
 
         // Each circuit de-duplicates its own sequence numbers, so one counter
@@ -13178,6 +13195,115 @@ mod test {
             take_transmit_to(&mut session, sim_b()).is_none(),
             "a retired child circuit should not answer"
         );
+        Ok(())
+    }
+
+    /// A retired neighbour is *reported*: without the event a consumer that
+    /// mirrors regions keeps one the simulator has taken away. Its objects go
+    /// first, the region last.
+    #[test]
+    fn disable_simulator_reports_the_neighbour_retired() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        while session.poll_transmit().is_some() {}
+        drain_events(&mut session);
+
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true)?;
+        session.handle_datagram(sim_b(), &disable, now)?;
+
+        let events = drain_events(&mut session);
+        let retired: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::NeighborRetired { sim, reason, .. } => Some((*sim, *reason)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            retired,
+            vec![(sim_b(), sl_proto::NeighborRetirement::Disabled)]
+        );
+        assert!(
+            matches!(events.last(), Some(Event::NeighborRetired { .. })),
+            "the region is reported gone after its contents, got {events:?}"
+        );
+
+        // The same message again names a circuit that is no longer held.
+        let again = server_datagram(MessageId::Low(152), &[], 4, true)?;
+        session.handle_datagram(sim_b(), &again, now)?;
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::NeighborRetired { .. })),
+            "a neighbour is retired once"
+        );
+        Ok(())
+    }
+
+    /// Second Life announces the neighbours it already announced again every
+    /// minute, and repeats a neighbour's seed every five seconds: neither is
+    /// news, and a seed surfaced again is a seed the driver POSTs again.
+    #[test]
+    fn a_repeated_neighbour_announcement_is_reported_once() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let enable = sl_proto::parse_llsd_xml(
+            "<llsd><map><key>SimulatorInfo</key><array><map>\
+                <key>Handle</key><binary>AAPpAAAD6AA=</binary>\
+                <key>IP</key><binary>fwAAAQ==</binary>\
+                <key>Port</key><integer>9001</integer>\
+                </map></array></map></llsd>",
+        )?;
+        let seed = |url: &str| {
+            sl_proto::parse_llsd_xml(&format!(
+                "<llsd><map>\
+                    <key>agent-id</key><uuid>00000000-0000-0000-0000-000000000001</uuid>\
+                    <key>sim-ip-and-port</key><string>127.0.0.1:9001</string>\
+                    <key>seed-capability</key><string>{url}</string>\
+                    </map></llsd>"
+            ))
+        };
+        let first = seed("http://127.0.0.1:9001/seedB")?;
+        let second = seed("http://127.0.0.1:9001/seedB2")?;
+
+        let count = |session: &mut Session| {
+            let events = drain_events(session);
+            let discovered = events
+                .iter()
+                .filter(|event| matches!(event, Event::NeighborDiscovered(_)))
+                .count();
+            let seeded = events
+                .iter()
+                .filter(|event| matches!(event, Event::NeighborSeed { .. }))
+                .count();
+            (discovered, seeded)
+        };
+
+        session.handle_caps_event("EnableSimulator", &enable, now)?;
+        session.handle_caps_event("EstablishAgentCommunication", &first, now)?;
+        assert_eq!(count(&mut session), (1, 1));
+
+        session.handle_caps_event("EnableSimulator", &enable, now)?;
+        session.handle_caps_event("EstablishAgentCommunication", &first, now)?;
+        session.handle_caps_event("EstablishAgentCommunication", &first, now)?;
+        assert_eq!(count(&mut session), (0, 0), "nothing changed");
+
+        // A seed that differs is news: the neighbour was re-seeded.
+        session.handle_caps_event("EstablishAgentCommunication", &second, now)?;
+        assert_eq!(count(&mut session), (0, 1));
+
+        // And a neighbour announced again after it was retired is new again.
+        let disable = server_datagram(MessageId::Low(152), &[], 3, true)?;
+        session.handle_datagram(sim_b(), &disable, now)?;
+        drain_events(&mut session);
+        session.handle_caps_event("EnableSimulator", &enable, now)?;
+        session.handle_caps_event("EstablishAgentCommunication", &second, now)?;
+        assert_eq!(count(&mut session), (1, 1));
         Ok(())
     }
 

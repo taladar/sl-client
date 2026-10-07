@@ -5669,23 +5669,27 @@ pub fn land_stat_reply_to_caps_llsd(
 
 /// Serializes a neighbour's region handle, address and size as a CAPS
 /// `EnableSimulator` event body (inverse of `enable_simulator_from_caps_llsd`,
-/// which reads only the handle and address; the size fields are what the
-/// reference servers send, `region_size` in metres).
+/// which reads only the handle and address).
+///
+/// `region_size`, in metres, is OpenSim's addition (`RegionSizeX` /
+/// `RegionSizeY`); Second Life sends neither key (`None`), as it sends neither
+/// in a `TeleportFinish`.
 #[must_use]
 pub fn enable_simulator_to_caps_llsd(
     handle: u64,
     sim: SocketAddr,
-    region_size: (u32, u32),
+    region_size: Option<(u32, u32)>,
 ) -> Llsd {
-    let (size_x, size_y) = region_size;
-    let info = llsd_map(vec![
+    let mut fields = vec![
         ("Handle", u64_to_llsd(handle)),
         ("IP", Llsd::Binary(ipv4_octets(sim).to_vec())),
         ("Port", Llsd::Integer(i32::from(sim.port()))),
-        ("RegionSizeX", u32_to_llsd(size_x)),
-        ("RegionSizeY", u32_to_llsd(size_y)),
-    ]);
-    llsd_map(vec![("SimulatorInfo", Llsd::Array(vec![info]))])
+    ];
+    if let Some((size_x, size_y)) = region_size {
+        fields.push(("RegionSizeX", u32_to_llsd(size_x)));
+        fields.push(("RegionSizeY", u32_to_llsd(size_y)));
+    }
+    llsd_map(vec![("SimulatorInfo", Llsd::Array(vec![llsd_map(fields)]))])
 }
 
 /// What a simulator hands the client in a CAPS `CrossedRegion` — the avatar
@@ -5718,14 +5722,17 @@ pub struct CrossedRegionInfo {
     pub position: RegionCoordinates,
     /// The `Info.LookAt` field.
     ///
-    /// Named for the wire, not for its contents: OpenSim passes the crossing
-    /// agent's horizontal **velocity** here rather than a facing (the
-    /// `EntityTransferModule` hands `vel2` to the event builder's `lookAt`
-    /// parameter), so the client keeps its momentum over the border. The
-    /// reference viewer reads neither field.
+    /// Named for the wire, not for its contents, which differ by grid. Second
+    /// Life sends a facing: the unit direction the agent crossed in (`-1 0 0`
+    /// for a flight west, measured on aditi 2026-10-07). OpenSim's
+    /// `EntityTransferModule` hands the event builder `vel2` — the agent's
+    /// horizontal **velocity** when it crosses flying, and zero otherwise (a
+    /// walk east at 3.2 m/s sent `0 0 0`). The reference viewer reads neither
+    /// field.
     pub look_at: Vector,
     /// The destination region's size in metres (`RegionSizeX`, `RegionSizeY`).
-    pub region_size: (u32, u32),
+    /// OpenSim states it; Second Life sends neither key (`None`).
+    pub region_size: Option<(u32, u32)>,
 }
 
 /// Serializes a CAPS `CrossedRegion` event body: the `AgentData`, `Info` and
@@ -5734,7 +5741,6 @@ pub struct CrossedRegionInfo {
 /// which is all this workspace's client reads.
 #[must_use]
 pub fn crossed_region_to_caps_llsd(info: &CrossedRegionInfo) -> Llsd {
-    let (size_x, size_y) = info.region_size;
     let agent = llsd_map(vec![
         ("AgentID", Llsd::Uuid(info.agent_id.uuid())),
         ("SessionID", Llsd::Uuid(info.session_id)),
@@ -5746,18 +5752,20 @@ pub fn crossed_region_to_caps_llsd(info: &CrossedRegionInfo) -> Llsd {
         ),
         ("Position", region_coords_to_llsd(info.position)),
     ]);
-    let region = llsd_map(vec![
+    let mut region = vec![
         ("RegionHandle", u64_to_llsd(info.region_handle.0)),
         ("SeedCapability", Llsd::String(info.seed.clone())),
         ("SimIP", Llsd::Binary(ipv4_octets(info.dest).to_vec())),
         ("SimPort", Llsd::Integer(i32::from(info.dest.port()))),
-        ("RegionSizeX", u32_to_llsd(size_x)),
-        ("RegionSizeY", u32_to_llsd(size_y)),
-    ]);
+    ];
+    if let Some((size_x, size_y)) = info.region_size {
+        region.push(("RegionSizeX", u32_to_llsd(size_x)));
+        region.push(("RegionSizeY", u32_to_llsd(size_y)));
+    }
     llsd_map(vec![
         ("AgentData", Llsd::Array(vec![agent])),
         ("Info", Llsd::Array(vec![placement])),
-        ("RegionData", Llsd::Array(vec![region])),
+        ("RegionData", Llsd::Array(vec![llsd_map(region)])),
     ])
 }
 
@@ -8663,8 +8671,51 @@ mod caps_serializer_tests {
     fn enable_simulator_round_trips() {
         let sim = addr(10, 0, 0, 5, 9000);
         let handle = 0x0003_e800_0003_e800;
-        let llsd = enable_simulator_to_caps_llsd(handle, sim, (256, 256));
+        let llsd = enable_simulator_to_caps_llsd(handle, sim, Some((256, 256)));
         assert_eq!(enable_simulator_from_caps_llsd(&llsd), Some((handle, sim)));
+    }
+
+    /// Second Life names no region size, in an announcement or in a crossing:
+    /// the keys are absent rather than zero, and the body still reads back.
+    #[test]
+    fn a_neighbour_without_a_region_size_omits_the_keys() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let sim = addr(10, 0, 0, 5, 9000);
+        let handle = 0x0003_e800_0003_e800;
+        let llsd = enable_simulator_to_caps_llsd(handle, sim, None);
+        assert_eq!(enable_simulator_from_caps_llsd(&llsd), Some((handle, sim)));
+        let info = llsd
+            .get("SimulatorInfo")
+            .and_then(|block| block.index(0))
+            .ok_or("the SimulatorInfo block")?;
+        assert_eq!(info.get("RegionSizeX"), None);
+        assert_eq!(info.get("RegionSizeY"), None);
+
+        let crossed = crossed_region_to_caps_llsd(&CrossedRegionInfo {
+            agent_id: AgentKey::from(Uuid::from_u128(1)),
+            session_id: Uuid::from_u128(2),
+            region_handle: RegionHandle(handle),
+            dest: sim,
+            seed: "https://seed/x".to_owned(),
+            position: RegionCoordinates::new(254.0, 10.0, 90.0),
+            look_at: Vector {
+                x: -1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            region_size: None,
+        });
+        assert_eq!(
+            crossed_region_from_caps_llsd(&crossed),
+            Some((handle, sim, "https://seed/x".parse()?))
+        );
+        let region = crossed
+            .get("RegionData")
+            .and_then(|block| block.index(0))
+            .ok_or("the RegionData block")?;
+        assert_eq!(region.get("RegionSizeX"), None);
+        assert_eq!(region.get("RegionSizeY"), None);
+        Ok(())
     }
 
     /// The `RegionData` half round-trips through this workspace's own parser,
@@ -8689,7 +8740,7 @@ mod caps_serializer_tests {
                 y: -1.5,
                 z: 0.0,
             },
-            region_size: (256, 256),
+            region_size: Some((256, 256)),
         };
         let llsd = crossed_region_to_caps_llsd(&info);
         assert_eq!(

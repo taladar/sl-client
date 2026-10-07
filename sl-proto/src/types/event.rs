@@ -17,8 +17,8 @@ use super::{
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor, InventoryFolder,
     InventoryItem, InventoryItemMove, ItemInfo, Kick, LandStatItem, LandStatReportType,
     LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapLayer, MapRegionInfo, Maturity,
-    MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, Object,
-    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, OpenRegionInfo,
+    MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, NeighborRetirement,
+    Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, OpenRegionInfo,
     ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo, PickInfo,
     PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats,
@@ -456,6 +456,28 @@ pub enum Event {
         sim: SocketAddr,
         /// The neighbour's seed capability URL to POST.
         seed_capability: url::Url,
+    },
+    /// A neighbouring region's child circuit is gone, and the region with it:
+    /// the simulator retired it (`DisableSimulator` — the agent's draw distance
+    /// no longer reaches it, or the agent moved away), it went silent, or a
+    /// transfer into it was abandoned.
+    ///
+    /// The region's objects have each been reported removed
+    /// ([`Event::ObjectRemoved`]) and its coarse locations emptied before this
+    /// arrives; this event is what says the *region* is no longer held, so a
+    /// consumer that mirrors regions drops its record of it. The simulator
+    /// announces it again ([`Event::NeighborDiscovered`]) if it comes back into
+    /// view.
+    NeighborRetired {
+        /// The region's handle, when the session learned one for the circuit.
+        region_handle: Option<RegionHandle>,
+        /// The neighbouring simulator's UDP address (the child circuit's key).
+        sim: SocketAddr,
+        /// The retired child circuit's instance identity; scoped ids minted
+        /// on it are stale from here on.
+        circuit: CircuitId,
+        /// Why the circuit went away.
+        reason: NeighborRetirement,
     },
     /// A region was reported by the world map (a `MapBlockReply` entry), giving
     /// its name and grid coordinates. Sent in response to

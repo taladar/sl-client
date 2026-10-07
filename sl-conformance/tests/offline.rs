@@ -99,6 +99,7 @@ mod test {
         teleport_lure_unknown => "teleport-lure-unknown" [fake_sl, fake_opensim],
         region_crossing => "region-crossing" [fake_sl, fake_opensim],
         neighbour_child_circuits => "neighbour-child-circuits" [fake_sl, fake_opensim],
+        draw_distance => "draw-distance" [fake_sl, fake_opensim],
         avatar_appearance_npc => "avatar-appearance-npc" [fake_sl, fake_opensim],
         server_appearance_bake => "server-appearance-bake" [fake_sl, fake_opensim],
         texture_fetch_http => "texture-fetch-http" [fake_sl, fake_opensim],

@@ -198,6 +198,12 @@ impl SlParcelOverlay {
         self.grids.insert(region, grid);
     }
 
+    /// Drops the overlay grid of `region`: its child circuit was retired, and
+    /// a region announced again sends its overlay afresh.
+    fn forget(&mut self, region: RegionHandle) {
+        let _grid = self.grids.remove(&region);
+    }
+
     /// Folds one pushed overlay chunk into its region's grid, creating the
     /// grid (sized for a standard 256 m region) on the first chunk. An untagged
     /// chunk (region handle 0 — the source circuit was not yet associated)
@@ -370,6 +376,19 @@ pub(crate) fn maintain_world(
             SessionEvent::NeighborDiscovered(info) => {
                 ensure_neighbor(&mut commands, &mut index, info.region_handle, info.sim);
             }
+            // The neighbour's child circuit is gone (the simulator retired it,
+            // or it fell silent): the region is no longer held, so its entity
+            // goes. Without this a region the draw distance no longer reaches
+            // stayed in the index — and on the map — until the next world reset.
+            SessionEvent::NeighborRetired {
+                region_handle: Some(handle),
+                ..
+            } => {
+                retire_neighbor(&mut commands, &mut index, *handle);
+                if index.current != Some(*handle) {
+                    overlay.forget(*handle);
+                }
+            }
             SessionEvent::ParcelProperties(info) => {
                 upsert_parcel(&mut commands, &mut index, (**info).clone());
             }
@@ -490,6 +509,23 @@ fn ensure_neighbor(
     let entity = commands.spawn((SlRegion { handle, sim }, SlNeighbor)).id();
     index.by_handle.insert(handle, entity);
     attach_pending_identity(commands, index, handle, entity);
+}
+
+/// Despawns the neighbour region entity for `handle` (its parcel children go
+/// with it) and forgets it. The **current** region is never retired this way:
+/// a `NeighborRetired` names a child circuit, and one that raced a crossing
+/// into the same region must not take the region the agent now stands in.
+fn retire_neighbor(commands: &mut Commands, index: &mut SlRegionIndex, handle: RegionHandle) {
+    if index.current == Some(handle) {
+        return;
+    }
+    if let Some(entity) = index.by_handle.remove(&handle) {
+        commands.entity(entity).despawn();
+    }
+    index
+        .parcels
+        .retain(|(region, _local_id), _entity| *region != handle);
+    let _identity = index.pending_identities.remove(&handle);
 }
 
 /// Upserts a parcel of the current region: updates the existing child entity for
@@ -677,6 +713,77 @@ mod tests {
             .query_filtered::<&SlRegion, With<SlNeighbor>>();
         assert_eq!(neighbors_after.iter(app.world()).count(), 0);
         assert_eq!(all.iter(app.world()).count(), 2);
+    }
+
+    /// A neighbour the simulator retired (`DisableSimulator` — the draw
+    /// distance no longer reaches it) leaves the index, and is spawned afresh
+    /// if it is announced again; the region the agent stands in is never
+    /// retired this way, whatever a stray event names.
+    #[test]
+    fn a_retired_neighbour_leaves_the_index_and_can_come_back() {
+        let mut app = world_app();
+        let home = RegionHandle(0x0000_03e8_0000_03e8);
+        let next = RegionHandle(0x0000_03e9_0000_03e8);
+        app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(home);
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::CircuitEstablished {
+                sim: sim(9000),
+                circuit: CircuitId(1),
+            }));
+        let announce = |app: &mut App| {
+            app.world_mut()
+                .write_message(SlEvent(SessionEvent::NeighborDiscovered(NeighborInfo {
+                    region_handle: next,
+                    sim: sim(9001),
+                    grid_coordinates: GridCoordinates::new(1001, 1000),
+                })));
+            app.update();
+        };
+        let retire = |app: &mut App, handle: RegionHandle| {
+            app.world_mut()
+                .write_message(SlEvent(SessionEvent::NeighborRetired {
+                    region_handle: Some(handle),
+                    sim: sim(9001),
+                    circuit: CircuitId(2),
+                    reason: sl_proto::NeighborRetirement::Disabled,
+                }));
+            app.update();
+        };
+        let handles = |app: &mut App| -> Vec<RegionHandle> {
+            let mut query = app.world_mut().query::<&SlRegion>();
+            let mut handles: Vec<RegionHandle> = query
+                .iter(app.world())
+                .map(|region| region.handle)
+                .collect();
+            handles.sort_by_key(|handle| handle.0);
+            handles
+        };
+
+        announce(&mut app);
+        assert_eq!(handles(&mut app), vec![home, next]);
+
+        retire(&mut app, next);
+        assert_eq!(handles(&mut app), vec![home], "the neighbour is gone");
+        assert!(
+            !app.world()
+                .resource::<SlRegionIndex>()
+                .by_handle
+                .contains_key(&next)
+        );
+
+        announce(&mut app);
+        assert_eq!(
+            handles(&mut app),
+            vec![home, next],
+            "and back when announced"
+        );
+
+        retire(&mut app, home);
+        assert_eq!(
+            handles(&mut app),
+            vec![home, next],
+            "the current region is not a neighbour to retire"
+        );
     }
 
     /// A neighbour's `RegionHandshake` (delivered on its child circuit before any

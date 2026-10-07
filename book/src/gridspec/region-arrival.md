@@ -67,7 +67,10 @@ Both grids open the root circuit the same way (**held**):
 | `CameraConstraint` | not seen | once, 27 s in | not sent |
 
 Second Life's repeated `EnableSimulator` is answered by the session as the
-first was: a neighbour it already holds a circuit to is not opened again.
+first was: a neighbour it already holds a circuit to is not opened again,
+and — since the repeats were timed
+([Teleport](teleport.md#which-neighbours-and-when)) — raises no second
+event either, nor does a seed the session already holds.
 The handshake a child circuit receives twice is likewise taken twice.
 
 ## What the region goes on sending
@@ -269,7 +272,7 @@ on either flavour; only the stock Full Region takes the flavour's.
 
 | behaviour | why |
 | --- | --- |
-| how often Second Life repeats a neighbour's announcement, exactly | counted (six in 32 s), not timed |
+| how often Second Life repeats a neighbour's announcement, exactly | counted here (six in 32 s); timed in another region, where it differed by neighbour ([Teleport](teleport.md#which-neighbours-and-when)) |
 | an estate (non-mainland) region's product, SKU and owner on Second Life | the test accounts stand on mainland |
 | `RegionInfo5` in the handshake | the handshake has no such block; the chat ranges it carries belong to `RegionInfo` (`gridspec-region-info`) |
 | what bit 5 of the region flags means | set on every region measured; not looked up |

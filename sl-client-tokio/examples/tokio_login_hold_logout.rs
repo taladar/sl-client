@@ -565,6 +565,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::EstateAccessList { .. }
             | Event::NeighborDiscovered(_)
             | Event::NeighborSeed { .. }
+            | Event::NeighborRetired { .. }
             | Event::MapBlock(_)
             | Event::MapItems { .. }
             | Event::MapLayers { .. }

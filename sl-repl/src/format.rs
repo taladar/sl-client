@@ -276,6 +276,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::ScriptRunning { .. } => "script_running",
         Event::NeighborDiscovered(..) => "neighbor_discovered",
         Event::NeighborSeed { .. } => "neighbor_seed",
+        Event::NeighborRetired { .. } => "neighbor_retired",
         Event::MapBlock(..) => "map_block",
         Event::MapItems { .. } => "map_items",
         Event::MapLayers { .. } => "map_layers",

@@ -1831,6 +1831,34 @@ waits for "the region next door has finished streaming" without sleeping
 (`sl_fake_grid::neighbour_marker_region`, and the viewer harness's
 `wait_neighbour`).
 
+**Which of the regions that touch are held is the draw distance's to
+say**, as on a live grid. The announcer reads the `Far` of every
+`AgentUpdate`, and when it changes looks at the neighbours again by the
+flavour's rule (`ImitatedGrid::neighbour_policy`, measured in
+[Grid Behaviour → Teleport](../gridspec/teleport.md#neighbours-and-crossings)):
+
+- the **Second Life** flavour holds a region sharing an edge at 128 m and
+  one touching at a corner at 128·√2 m, wherever the avatar stands,
+  announces one the distance comes to reach at once, and retires one it
+  stops reaching **fifty seconds later** — a test of that waits the fifty
+  seconds, as `draw-distance` does;
+- the **OpenSim** flavour holds every region a square around the avatar
+  touches (the draw distance plus 64 m, held between 96 m and 255 m), and
+  retires and announces at once. The avatar is where it last arrived: the
+  grid tracks no walking.
+
+Until an `AgentUpdate` says otherwise an agent is taken to see 256 m, the
+reference viewer's default, which reaches every adjacent region under
+either rule from anywhere but a region's far edge. The rule reads grid
+coordinates, so a `Named` neighbour — one a fixture wired up wherever it
+lies — is held at any distance. An `EnableSimulator` states the region's
+size on the OpenSim flavour and not on the Second Life one.
+
+Not modelled: Second Life's repeats (each neighbour's announcement again
+every minute, the corner neighbour's seed every five seconds) and
+OpenSim's half second between neighbours. The client is held to the first
+by a unit test of the session instead.
+
 Announcing is idempotent by construction: a region the agent already has
 a session in is skipped. That matters most right after a crossing, when
 the region walked out of is a neighbour of the one walked into and its
@@ -1951,17 +1979,22 @@ unfaithful: this viewer keys avatars by agent, not by circuit, so a kill
 arriving on the old circuit after the new one has streamed the body
 despawns the avatar outright.
 
-The event body is the full reference record
-(`sl_proto::CrossedRegionInfo`): `AgentData` (agent and session id),
-`Info` (position and "look at") and `RegionData` (handle, seed, address,
-region size). All three blocks, because the reference viewer's
-event-queue translation feeds the body straight into the legacy
-`CrossedRegion` message and `process_crossed_region` *rejects* one whose
-`AgentData` does not name its own agent — a body carrying `RegionData`
-alone reaches this workspace's client, which reads only that block, and
-is thrown away by Firestorm. The `Info.LookAt` field is named for the
-wire and not for its contents: OpenSim puts the crossing agent's
-horizontal **velocity** there, so the client keeps its momentum.
+The event body is the full reference record (`sl_proto::CrossedRegionInfo`):
+`AgentData` (agent and session id), `Info` (position and "look at") and
+`RegionData` (handle, seed, address, and on the OpenSim flavour the region
+size). All three blocks, because the reference viewer's event-queue translation
+feeds the body straight into the legacy `CrossedRegion` message and
+`process_crossed_region` *rejects* one whose `AgentData` does not name its own
+agent — a body carrying `RegionData` alone reaches this workspace's client,
+which reads only that block, and is thrown away by Firestorm. The `Info.LookAt`
+field is named for the wire and not for its contents, which are the flavour's:
+Second Life's is the unit direction the agent crossed in, OpenSim's the agent's
+horizontal **velocity** when it crosses flying and zero at a walk — so the
+OpenSim flavour sends the velocity the caller names and the Second Life one its
+direction. The Second Life flavour's destination also greets the agent with a
+second `RegionHandshake`, ahead of its `AgentMovementComplete`
+(`SimSession::greet_on_arrival`); OpenSim's says nothing more than the
+completion.
 
 Because the fake grid claims no movement authority, a crossing is asked
 for rather than noticed: `FakeGrid::cross_agent(&agent, "Region",
@@ -2185,12 +2218,14 @@ because `SimSession` learned to surface an `EconomyDataRequest`, a
 provocations (see above) — both of those used to pass by recording `partial`
 after burning their whole reply window, which is not the same as passing.
 
-Two of them can only exist here. `region-crossing` needs the harness to speak
-*as* the simulator — a crossing is a decision a region makes, and this grid
-simulates no movement to make it with — so `TestContext::fake()` hands the case
-`FakeGrid::cross_agent`; and `neighbour-child-circuits` needs two adjacent
-regions an avatar may walk between, which neither live grid reliably offers.
-See the *conformance testing* chapter.
+Two of them were written for this grid and now run live as well.
+`region-crossing` walks its avatar over a border on a live grid; here it needs
+the harness to speak *as* the simulator — a crossing is a decision a region
+makes, and this grid simulates no movement to make it with — so
+`TestContext::fake()` hands the case `FakeGrid::cross_agent`. And
+`neighbour-child-circuits` names the neighbour and the object it streams here,
+where both are known, and takes whatever neighbours the avatar stands next to
+on a live grid. See the *conformance testing* chapter.
 
 ### The logins that are refused
 

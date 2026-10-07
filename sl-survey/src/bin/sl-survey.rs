@@ -675,6 +675,7 @@ impl Survey {
             | Event::MapItems { .. }
             | Event::MapLayers { .. }
             | Event::NeighborSeed { .. }
+            | Event::NeighborRetired { .. }
             | Event::ObjectAdded(_)
             | Event::ObjectUpdated(_)
             | Event::TimeDilation { .. }

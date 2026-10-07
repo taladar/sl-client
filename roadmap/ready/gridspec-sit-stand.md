@@ -4,7 +4,8 @@ title: Sitting and standing: placement, refusals and alerts on each grid
 topic: gridspec
 status: ready
 origin: gridspec survey (2026-10-03)
-refs: [gridspec-survey, viewer-sit-stand-actions, gridspec-logout]
+refs: [gridspec-survey, viewer-sit-stand-actions, gridspec-logout,
+  gridspec-seated-crossing, gridspec-neighbours-crossing]
 ---
 
 Context: [context/gridspec.md](../context/gridspec.md).
@@ -46,3 +47,18 @@ Small refusals and fallback placement in this task; the full model is
 ## Viewer
 
 Named vs unnamed refusal alert, fallback seat position; `e2e` on both flavours.
+
+## From gridspec-neighbours-crossing (2026-10-07)
+
+The seated crossing waits on this task ([[gridspec-seated-crossing]]).
+
+One more thing about an avatar on aditi that would not do as it was told,
+which may or may not be the same thing as the unanswered sit: the third test
+avatar, standing at its region's landing point (Ahern, about 8/10), could not
+be **walked**. Ninety seconds of `AT_POS` in its `AgentUpdate`s — once a
+second from `sl-repl`, four times a second from the conformance steering —
+turned it to face where it was told and moved it two centimetres; its
+animations stayed a stand and `ANIM_AGENT_LAND`. `FLY | AT_POS` from the same
+spot moved it at once. The first avatar walks in its own region. Whether the
+landing point holds an avatar, or the avatar was left in a state that does,
+is not known.

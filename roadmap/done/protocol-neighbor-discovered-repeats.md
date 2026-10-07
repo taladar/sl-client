@@ -2,12 +2,24 @@
 id: protocol-neighbor-discovered-repeats
 title: NeighborDiscovered is reported again every time Second Life re-announces a neighbour
 topic: protocol
-status: bugs
+status: done
 origin: gridspec-region-arrival (2026-10-07)
 refs: [gridspec-region-arrival, gridspec-neighbours-crossing]
 ---
 
 Context: [context/protocol.md](../context/protocol.md).
+
+## Fixed (2026-10-07)
+
+In [[gridspec-neighbours-crossing]], which timed the repeats. The session
+reports a neighbour once: an `EnableSimulator` for a simulator it already
+holds a child circuit to raises no `NeighborDiscovered`, and an
+`EstablishAgentCommunication` naming the seed already held raises no
+`NeighborSeed`. A different seed is reported, and so is a neighbour announced
+again after it was retired. Both drivers POST a seed when the event arrives,
+so the five-second repeat was a POST every five seconds; that is gone with
+the event. `sl-proto`'s `a_repeated_neighbour_announcement_is_reported_once`
+holds it.
 
 ## Observation
 

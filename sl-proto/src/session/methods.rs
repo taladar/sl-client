@@ -75,21 +75,22 @@ use crate::types::{
     LandStatItem, LandStatReportType, LandStatScore, LoadUrlRequest, LoginAccount,
     LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
     MeanCollisionType, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation, ObjectPropertiesFamily,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelInfo, ParcelListingFlags, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo, ParcelRect, ParcelReturnType,
-    ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape,
-    PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionInfoUpdate,
-    RegionStats, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptControlAction, ScriptControlsInfo,
-    ScriptGrantInfo, ScriptLanguage, ScriptPermissionState, ScriptPermissionStatus,
-    ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags,
-    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture,
-    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, XferListing,
+    NeighborInfo, NeighborRetirement, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
+    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
+    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelListingFlags,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
+    ParcelOverlayInfo, ParcelRect, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
+    PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
+    RegionDebugUpdate, RegionInfoUpdate, RegionStats, RegionTerrainUpdate, Reliability,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
+    ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage,
+    ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest,
+    ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
+    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Wearable, WearableType, XferListing,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -629,16 +630,14 @@ impl Session {
             CapsEvent::EnableSimulator => {
                 if let Some((handle, sim)) = enable_simulator_from_caps_llsd(body) {
                     let handle = RegionHandle(handle);
-                    self.open_child_circuit(sim, now)?;
-                    if let Some(circuit_id) = self.circuit_id_for(sim) {
-                        self.world.note_region(circuit_id, handle);
-                    }
-                    self.events
-                        .push_back(Event::NeighborDiscovered(NeighborInfo {
+                    self.announce_neighbour(
+                        NeighborInfo {
                             region_handle: handle,
                             sim,
                             grid_coordinates: grid_coordinates_from_handle(handle),
-                        }));
+                        },
+                        now,
+                    )?;
                 } else {
                     self.caps_decode_failed(message);
                 }
@@ -648,15 +647,24 @@ impl Session {
             // root on a border crossing.
             CapsEvent::EstablishAgentCommunication => {
                 if let Some((sim, seed)) = establish_agent_communication_from_llsd(body) {
-                    self.child_seeds.insert(sim, seed.clone());
-                    // Surface the seed so the driver POSTs it: OpenSim only streams
-                    // a region's scene to the (child) agent once its capabilities
-                    // have been requested (`SentSeeds`), so this unlocks neighbour
-                    // object streaming on the child circuit.
-                    self.events.push_back(Event::NeighborSeed {
-                        sim,
-                        seed_capability: seed,
-                    });
+                    // Second Life repeats this event — every five seconds for
+                    // some neighbours, and for all of them when the draw
+                    // distance changes — always with the seed it sent first. A
+                    // seed already held is not news: surfacing it again would
+                    // have the driver POST the same seed every five seconds for
+                    // as long as the agent stands there.
+                    let known = self.child_seeds.insert(sim, seed.clone());
+                    if known.as_ref() != Some(&seed) {
+                        // Surface the seed so the driver POSTs it: OpenSim only
+                        // streams a region's scene to the (child) agent once its
+                        // capabilities have been requested (`SentSeeds`), so
+                        // this unlocks neighbour object streaming on the child
+                        // circuit.
+                        self.events.push_back(Event::NeighborSeed {
+                            sim,
+                            seed_capability: seed,
+                        });
+                    }
                 } else {
                     self.caps_decode_failed(message);
                 }
@@ -1641,12 +1649,34 @@ impl Session {
         let Some(pending) = self.pending_handover.take() else {
             return;
         };
-        let circuit_id = self.circuit_id_for(pending.dest);
-        self.children.remove(&pending.dest);
-        self.child_seeds.remove(&pending.dest);
-        if let Some(circuit_id) = circuit_id {
-            self.forget_sim_objects(circuit_id);
+        self.retire_child(pending.dest, NeighborRetirement::TransferAbandoned);
+    }
+
+    /// Drops the child circuit to `sim` and everything held for it — its seed,
+    /// its objects and coarse dots ([`forget_sim_objects`](Self::forget_sim_objects))
+    /// — and reports the region as gone with an [`Event::NeighborRetired`], so a
+    /// consumer that mirrors regions can drop its own record of this one. The
+    /// event comes last: by the time a consumer reads it, the region's contents
+    /// have already been removed one by one.
+    ///
+    /// A no-op for an address no child circuit is open to.
+    fn retire_child(&mut self, sim: SocketAddr, reason: NeighborRetirement) {
+        let circuit_id = self.circuit_id_for(sim);
+        if self.children.remove(&sim).is_none() {
+            return;
         }
+        self.child_seeds.remove(&sim);
+        let Some(circuit) = circuit_id else {
+            return;
+        };
+        let region_handle = self.world.region_handle(circuit);
+        self.forget_sim_objects(circuit);
+        self.events.push_back(Event::NeighborRetired {
+            region_handle,
+            sim,
+            circuit,
+            reason,
+        });
     }
 
     /// Completes the initial login handshake or a teleport handover: arms the
@@ -1744,6 +1774,29 @@ impl Session {
         child.timers.ping = Some(deadline(now, PING_INTERVAL));
         self.children.insert(sim, child);
         tracing::debug!("opened child-agent circuit to neighbour {sim}");
+        Ok(())
+    }
+
+    /// Acts on a neighbour announcement (`EnableSimulator`, over UDP or the
+    /// event queue): pre-opens a child-agent circuit to it, so the neighbour
+    /// holds the agent's presence before the avatar crosses the border, and
+    /// reports it with an [`Event::NeighborDiscovered`].
+    ///
+    /// Only a neighbour that is *new* is reported. Second Life announces the
+    /// neighbours it already announced again every minute; the circuit is open
+    /// and nothing about the region has changed, so there is nothing to tell a
+    /// consumer — and the root's own region, which a simulator may also name,
+    /// is no neighbour at all.
+    fn announce_neighbour(&mut self, info: NeighborInfo, now: Instant) -> Result<(), Error> {
+        let is_root = self.circuit.as_ref().map(|circuit| circuit.sim_addr) == Some(info.sim);
+        let known = self.children.contains_key(&info.sim);
+        self.open_child_circuit(info.sim, now)?;
+        if let Some(circuit_id) = self.circuit_id_for(info.sim) {
+            self.world.note_region(circuit_id, info.region_handle);
+        }
+        if !is_root && !known {
+            self.events.push_back(Event::NeighborDiscovered(info));
+        }
         Ok(())
     }
 
@@ -2577,17 +2630,10 @@ impl Session {
                 self.commit_handover(from, pose, version, now);
             }
             AnyMessage::DisableSimulator(_) => {
-                // The simulator is retiring this child circuit. Resolve its
-                // circuit id before removing it so the per-circuit caches can be
-                // dropped.
-                let circuit_id = self.circuit_id_for(from);
-                self.children.remove(&from);
-                self.child_seeds.remove(&from);
-                if let Some(circuit_id) = circuit_id {
-                    // Reaps this neighbour's objects *and* prunes its coarse
-                    // (minimap) dots via an empty `CoarseLocationUpdate` (R24).
-                    self.forget_sim_objects(circuit_id);
-                }
+                // The simulator is retiring this child circuit: its objects
+                // and coarse (minimap) dots go, and the region is reported as
+                // gone.
+                self.retire_child(from, NeighborRetirement::Disabled);
             }
             _ => {
                 self.push_diagnostic(Diagnostic::UnhandledMessage {
@@ -2851,6 +2897,30 @@ impl Session {
                 self.note_script_request_circuit(from, request.task_id);
                 self.events
                     .push_back(Event::ScriptPermissionRequest(Box::new(request)));
+            }
+            // Transient HUD effects from other avatars (look-at / point-at gaze,
+            // beams, …). Each effect's `TypeData` is decoded into a typed
+            // `ViewerEffectData` (unknown layouts stay raw). Second Life sends
+            // the effects of avatars standing in a neighbouring region down
+            // that region's child circuit; their positions are global, so they
+            // need no region to be read.
+            AnyMessage::ViewerEffect(effect) => {
+                let effects = effect
+                    .effect
+                    .iter()
+                    .map(|block| {
+                        let effect_type = ViewerEffectType::from_code(block.r#type);
+                        ViewerEffect {
+                            id: block.id,
+                            agent_id: AgentKey::from(block.agent_id),
+                            effect_type,
+                            duration: block.duration,
+                            color: block.color,
+                            data: ViewerEffectData::from_wire(effect_type, &block.type_data),
+                        }
+                    })
+                    .collect();
+                self.events.push_back(Event::ViewerEffect(effects));
             }
             _ => return Ok(false),
         }
@@ -4147,13 +4217,7 @@ impl Session {
             }
             AnyMessage::EnableSimulator(sim) => {
                 let info = neighbor_info(&sim.simulator_info);
-                // Pre-open a child-agent circuit to the neighbour so it holds the
-                // agent's presence before the avatar crosses the border.
-                self.open_child_circuit(info.sim, now)?;
-                if let Some(circuit_id) = self.circuit_id_for(info.sim) {
-                    self.world.note_region(circuit_id, info.region_handle);
-                }
-                self.events.push_back(Event::NeighborDiscovered(info));
+                self.announce_neighbour(info, now)?;
             }
             AnyMessage::MapBlockReply(reply) => {
                 for (index, data) in reply.data.iter().enumerate() {
@@ -4890,27 +4954,6 @@ impl Session {
                         sun_phase: time.time_info.sun_phase,
                         sun_ang_velocity: time.time_info.sun_ang_velocity.clone(),
                     })));
-            }
-            // Transient HUD effects from other avatars (look-at / point-at gaze,
-            // beams, …). Each effect's `TypeData` is decoded into a typed
-            // `ViewerEffectData` (unknown layouts stay raw).
-            AnyMessage::ViewerEffect(effect) => {
-                let effects = effect
-                    .effect
-                    .iter()
-                    .map(|block| {
-                        let effect_type = ViewerEffectType::from_code(block.r#type);
-                        ViewerEffect {
-                            id: block.id,
-                            agent_id: AgentKey::from(block.agent_id),
-                            effect_type,
-                            duration: block.duration,
-                            color: block.color,
-                            data: ViewerEffectData::from_wire(effect_type, &block.type_data),
-                        }
-                    })
-                    .collect();
-                self.events.push_back(Event::ViewerEffect(effects));
             }
             // The reply to a `FindAgent` lookup: the located global positions.
             AnyMessage::FindAgent(find) => {
@@ -5915,12 +5958,7 @@ impl Session {
             });
         }
         for addr in dead {
-            let circuit_id = self.circuit_id_for(addr);
-            self.children.remove(&addr);
-            self.child_seeds.remove(&addr);
-            if let Some(circuit_id) = circuit_id {
-                self.forget_sim_objects(circuit_id);
-            }
+            self.retire_child(addr, NeighborRetirement::Silent);
         }
     }
 

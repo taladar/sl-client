@@ -497,6 +497,9 @@ pub(crate) struct GridCore {
     /// How a teleport runs and is refused
     /// ([`ImitatedGrid::teleport_policy`]).
     pub(crate) teleport_policy: crate::imitates::TeleportPolicy,
+    /// Which neighbours an agent is held in and how it is handed to one
+    /// ([`ImitatedGrid::neighbour_policy`]).
+    pub(crate) neighbour_policy: crate::imitates::NeighbourViewPolicy,
     /// What one region holds, by product ([`ImitatedGrid::region_capacity`]).
     pub(crate) imitated: ImitatedGrid,
     /// How a region's default day is labelled ([`ImitatedGrid::stock_day`]).
@@ -673,6 +676,42 @@ impl GridCore {
                 .filter(|other| *other != index)
                 .collect(),
         }
+    }
+
+    /// The neighbours of the region at `index` that a draw distance of `far`
+    /// metres reaches, for an avatar standing at `avatar` in that region — the
+    /// flavour's rule ([`crate::imitates::NeighbourViewPolicy::reaches`]).
+    ///
+    /// The rule reads grid coordinates, so it decides among the regions that
+    /// are neighbours *by* their coordinates. A region wired up by name
+    /// ([`NeighbourPolicy::Named`]) is a neighbour because a fixture said so,
+    /// wherever it lies, and is held at any draw distance.
+    pub(crate) fn neighbours_in_view(
+        &self,
+        index: usize,
+        far: f32,
+        avatar: (f32, f32),
+    ) -> Vec<usize> {
+        let neighbours = self.neighbours_of(index);
+        let Some(entry) = self.region(index) else {
+            return neighbours;
+        };
+        if !matches!(entry.config.neighbours, NeighbourPolicy::Adjacent) {
+            return neighbours;
+        }
+        let slot = |here: u32, there: u32| {
+            i16::try_from(i64::from(there).saturating_sub(i64::from(here))).ok()
+        };
+        neighbours
+            .into_iter()
+            .filter(|neighbour| {
+                self.region(*neighbour).is_some_and(|other| {
+                    let slots = slot(entry.config.grid_x, other.config.grid_x)
+                        .zip(slot(entry.config.grid_y, other.config.grid_y));
+                    slots.is_some_and(|slots| self.neighbour_policy.reaches(far, avatar, slots))
+                })
+            })
+            .collect()
     }
 
     /// The registered account owning `agent_id`.
@@ -2058,6 +2097,7 @@ impl FakeGridBuilder {
             circuit_policy: self.imitates.circuit_policy(),
             arrival_policy: self.imitates.arrival_policy(),
             teleport_policy: self.imitates.teleport_policy(),
+            neighbour_policy: self.imitates.neighbour_policy(),
             imitated: self.imitates,
             stock_day: self.imitates.stock_day(),
             packages: self

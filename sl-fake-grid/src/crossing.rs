@@ -25,6 +25,10 @@
 //!   ([`crate::neighbours`]), which is why the region across the border is
 //!   already drawn. The crossing reuses that child session; only a crossing
 //!   into a region the announcement missed opens one on the spot.
+//! - **The body is the flavour's.** OpenSim states the region's size and puts
+//!   a velocity where the wire says `LookAt`; Second Life states no size,
+//!   sends a facing, and has the region crossed into greet the agent with a
+//!   second `RegionHandshake` ([`crate::ImitatedGrid::neighbour_policy`]).
 //! - **The source is not retired.** It becomes a *child* agent
 //!   (`SimSession::make_child_agent`) and keeps streaming, because the region
 //!   you just walked out of is still in front of you. A teleport's source is
@@ -106,6 +110,12 @@ pub(crate) async fn cross_session(
         .cloned()
         .ok_or(Error::UnknownAccount)?;
 
+    let policy = core.neighbour_policy;
+    let region_size = policy.states_region_size.then_some((
+        sl_proto::STANDARD_REGION_SIZE_METRES,
+        sl_proto::STANDARD_REGION_SIZE_METRES,
+    ));
+
     // The child circuit the neighbour announcement already opened, or — if the
     // policy or a race left none — one announced now. Either way the client
     // holds a circuit to `dest` by the time it reads the `CrossedRegion` that
@@ -128,7 +138,7 @@ pub(crate) async fn cross_session(
                 let addr = prepared.udp_addr;
                 source
                     .with_sim(|sim| {
-                        sim.enqueue_enable_simulator(dest_handle, addr);
+                        sim.enqueue_enable_simulator(dest_handle, addr, region_size);
                         sim.enqueue_establish_agent_communication(addr, &seed);
                     })
                     .await;
@@ -139,9 +149,31 @@ pub(crate) async fn cross_session(
     // Where the avatar lands, which is what the destination's
     // `AgentMovementComplete` will report back. The facing is carried over from
     // the region left behind: an avatar walking over a border does not turn.
-    destination
-        .with_sim(|sim| sim.set_arrival_position(position, look_at))
-        .await;
+    let crossing_look_at = match policy.crossing_look_at {
+        // The direction of travel, or — for an agent placed rather than moved
+        // — the way it was already facing.
+        crate::imitates::CrossingLookAt::Facing => {
+            let speed = velocity.x.hypot(velocity.y);
+            if speed > f32::EPSILON {
+                Vector {
+                    x: velocity.x / speed,
+                    y: velocity.y / speed,
+                    z: 0.0,
+                }
+            } else {
+                look_at.clone()
+            }
+        }
+        crate::imitates::CrossingLookAt::FlightVelocity => velocity,
+    };
+    {
+        let mut state = destination.state.lock().await;
+        state.sim.set_arrival_position(position, look_at);
+        if policy.handshake_on_crossing {
+            let identity = state.identity.clone();
+            state.sim.greet_on_arrival(identity);
+        }
+    }
     // Subscribe before announcing, or the arrival can slip past.
     let mut dest_events = destination.subscribe_events();
 
@@ -154,11 +186,8 @@ pub(crate) async fn cross_session(
                 dest: dest_addr,
                 seed: dest_seed,
                 position,
-                look_at: velocity,
-                region_size: (
-                    sl_proto::STANDARD_REGION_SIZE_METRES,
-                    sl_proto::STANDARD_REGION_SIZE_METRES,
-                ),
+                look_at: crossing_look_at,
+                region_size,
             });
         })
         .await;

@@ -302,6 +302,7 @@ fn on_events(
             | SlSessionEvent::MaterialParamsResult { .. }
             | SlSessionEvent::NeighborDiscovered(_)
             | SlSessionEvent::NeighborSeed { .. }
+            | SlSessionEvent::NeighborRetired { .. }
             | SlSessionEvent::MapBlock(_)
             | SlSessionEvent::MapItems { .. }
             | SlSessionEvent::MapLayers { .. }

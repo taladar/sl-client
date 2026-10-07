@@ -3,7 +3,9 @@ id: test-handover-distant-and-vehicle-aditi
 title: Live-test distant teleport (world_reset) and vehicle corner crossings, incl. on aditi
 topic: test
 status: ready
-refs: [protocol-teleport-deferred-teardown-handover, viewer-caps-event-queue-stops-after-teleport-spree]
+refs: [protocol-teleport-deferred-teardown-handover,
+  viewer-caps-event-queue-stops-after-teleport-spree,
+  gridspec-neighbours-crossing, gridspec-seated-crossing]
 ---
 
 Context: [context/test.md](../context/test.md).
@@ -32,3 +34,10 @@ against Second Life's simulators than the local OpenSim.
 
 Do **not** take known-bad behaviour to aditi — land the open follow-up fixes
 first where they affect the SL path.
+
+## From gridspec-neighbours-crossing (2026-10-07)
+
+A crossing without a vehicle now runs live on aditi and OpenSim
+(`sl-conformance run --grid aditi --avatar tertiary region-crossing`: over
+the nearest border and back, `world_reset` false both ways). The vehicle
+half is [[gridspec-seated-crossing]]'s to measure first.

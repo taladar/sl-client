@@ -789,6 +789,21 @@ pub struct NeighborInfo {
     pub grid_coordinates: GridCoordinates,
 }
 
+/// Why a neighbouring region's child circuit went away
+/// ([`Event::NeighborRetired`](crate::Event::NeighborRetired)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NeighborRetirement {
+    /// The simulator retired it with a `DisableSimulator`: the agent's draw
+    /// distance no longer reaches the region, the agent moved away from it, or
+    /// (on OpenSim) the agent logged out.
+    Disabled,
+    /// Nothing arrived on the circuit for the inactivity timeout.
+    Silent,
+    /// A teleport into the region was refused, cancelled or timed out, and the
+    /// simulator drops the child agent it had made for the arrival.
+    TransferAbandoned,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

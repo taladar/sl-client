@@ -496,6 +496,47 @@ impl ImitatedGrid {
         }
     }
 
+    /// Which neighbouring regions this grid holds a child agent in, and what
+    /// it says when an agent walks into one — measured by scripted `sl-repl`
+    /// probes and the `draw-distance`, `neighbour-child-circuits` and
+    /// `region-crossing` cases on aditi and the local OpenSim (2026-10-07,
+    /// `book/src/gridspec/teleport.md` § Neighbours and crossings).
+    ///
+    /// Both grids announce a neighbour with an event-queue `EnableSimulator`
+    /// and take it away with a `DisableSimulator` down its child circuit, and
+    /// both decide which from the draw distance in the agent's `AgentUpdate`.
+    /// They read that distance differently. OpenSim adds 64 m to it, holds the
+    /// sum between 96 and 255, and keeps every region a square of that
+    /// half-width around the *avatar* touches
+    /// (`ScenePresence.RegionViewDistance`, `EntityTransferModule.RegionsInView`),
+    /// answering a change within a second either way. Second Life compares it
+    /// with a figure per neighbour — 128 m for one sharing an edge, 128·√2 m
+    /// for one touching at a corner, from a spot eight metres from two borders
+    /// — announces within a second, and retires fifty seconds late.
+    #[must_use]
+    pub const fn neighbour_policy(self) -> NeighbourViewPolicy {
+        match self {
+            Self::SecondLife => NeighbourViewPolicy {
+                reach: NeighbourReach::RegionSpacing,
+                retire_delay: Duration::from_secs(50),
+                states_region_size: false,
+                crossing_look_at: CrossingLookAt::Facing,
+                handshake_on_crossing: true,
+            },
+            Self::OpenSim => NeighbourViewPolicy {
+                reach: NeighbourReach::SquareAroundAvatar {
+                    margin: 64.0,
+                    least: 96.0,
+                    most: 255.0,
+                },
+                retire_delay: Duration::ZERO,
+                states_region_size: true,
+                crossing_look_at: CrossingLookAt::FlightVelocity,
+                handshake_on_crossing: false,
+            },
+        }
+    }
+
     /// What a region says of itself as an agent arrives and afterwards —
     /// measured by `region-arrival` on aditi and the local OpenSim
     /// (2026-10-07, `book/src/gridspec/region-arrival.md`).
@@ -963,6 +1004,88 @@ impl ArrivalPolicy {
             },
         }
     }
+}
+
+/// Which neighbours a grid holds for an agent and how it hands the agent to
+/// one ([`ImitatedGrid::neighbour_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NeighbourViewPolicy {
+    /// How the agent's draw distance decides whether a neighbour is held.
+    pub reach: NeighbourReach,
+    /// How long after the draw distance stopped reaching a neighbour its child
+    /// circuit is retired. A neighbour reached again in the meantime is kept.
+    pub retire_delay: Duration,
+    /// Whether an `EnableSimulator` and a `CrossedRegion` state the region's
+    /// size (`RegionSizeX` / `RegionSizeY`).
+    pub states_region_size: bool,
+    /// What a `CrossedRegion`'s `LookAt` holds.
+    pub crossing_look_at: CrossingLookAt,
+    /// Whether the region crossed into sends its `RegionHandshake` again as
+    /// the child circuit becomes the root. OpenSim's said everything it had
+    /// to when the child circuit opened.
+    pub handshake_on_crossing: bool,
+}
+
+impl NeighbourViewPolicy {
+    /// Whether a draw distance of `far` metres reaches the neighbour
+    /// `(dx, dy)` region slots away, for an avatar standing at `(x, y)` in its
+    /// own region.
+    #[must_use]
+    pub fn reaches(&self, far: f32, avatar: (f32, f32), slots: (i16, i16)) -> bool {
+        /// A region's side in metres.
+        const SIDE: f32 = 256.0;
+        let (dx, dy) = (f32::from(slots.0), f32::from(slots.1));
+        match self.reach {
+            NeighbourReach::RegionSpacing => far >= (SIDE / 2.0) * dx.hypot(dy),
+            NeighbourReach::SquareAroundAvatar {
+                margin,
+                least,
+                most,
+            } => {
+                let view = (far + margin).clamp(least, most);
+                // The neighbour's rectangle, in the avatar's region's metres,
+                // against the square of half-width `view` around the avatar:
+                // they touch unless one lies wholly past the other on an axis.
+                let touches = |at: f32, slot: f32| {
+                    let low = slot * SIDE;
+                    at + view >= low && at - view <= low + SIDE
+                };
+                touches(avatar.0, dx) && touches(avatar.1, dy)
+            }
+        }
+    }
+}
+
+/// How a draw distance is read as reaching a neighbouring region
+/// ([`NeighbourViewPolicy::reach`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NeighbourReach {
+    /// Second Life: the draw distance has to be at least half the distance
+    /// between the two regions' centres — 128 m for a region sharing an edge,
+    /// 128·√2 m for one touching at a corner — wherever the avatar stands.
+    RegionSpacing,
+    /// OpenSim: the draw distance plus `margin`, held between `least` and
+    /// `most`, is the half-width of a square around the avatar; a neighbour
+    /// that square touches is held.
+    SquareAroundAvatar {
+        /// Added to the draw distance.
+        margin: f32,
+        /// The smallest half-width.
+        least: f32,
+        /// The largest half-width.
+        most: f32,
+    },
+}
+
+/// What a `CrossedRegion`'s `LookAt` holds
+/// ([`NeighbourViewPolicy::crossing_look_at`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrossingLookAt {
+    /// Second Life: the unit direction the agent crossed in.
+    Facing,
+    /// OpenSim: the agent's horizontal velocity when it crossed flying, and
+    /// zero when it walked.
+    FlightVelocity,
 }
 
 /// How a grid runs and refuses a teleport
@@ -1468,6 +1591,15 @@ mod test {
         assert_ne!(sl.circuit_policy(), opensim.circuit_policy());
         assert_ne!(sl.arrival_policy(), opensim.arrival_policy());
         assert_ne!(sl.teleport_policy(), opensim.teleport_policy());
+        let (sl_view, opensim_view) = (sl.neighbour_policy(), opensim.neighbour_policy());
+        assert_ne!(sl_view.reach, opensim_view.reach);
+        assert_ne!(sl_view.retire_delay, opensim_view.retire_delay);
+        assert_ne!(sl_view.states_region_size, opensim_view.states_region_size);
+        assert_ne!(sl_view.crossing_look_at, opensim_view.crossing_look_at);
+        assert_ne!(
+            sl_view.handshake_on_crossing,
+            opensim_view.handshake_on_crossing
+        );
         assert_ne!(
             sl.stock_simulator_features(),
             opensim.stock_simulator_features()
@@ -1476,6 +1608,42 @@ mod test {
             sl.region_capacity(sl_proto::ProductType::FullRegion),
             opensim.region_capacity(sl_proto::ProductType::FullRegion)
         );
+    }
+
+    /// The draw distances each grid was measured holding a neighbour at
+    /// (2026-10-07): on aditi 126 m did not reach a region sharing an edge
+    /// and 128 m did, 180 m did not reach the one touching at a corner and
+    /// 184 m did; on OpenSim, from the middle of a region, 32 m reached
+    /// nothing and 100 m everything.
+    #[test]
+    fn each_grid_reaches_the_neighbours_it_was_measured_reaching() {
+        let sl = ImitatedGrid::SecondLife.neighbour_policy();
+        // Where the aditi avatar stood: eight metres from two borders, so no
+        // figure below is a distance to anything.
+        let corner = (7.7, 10.1);
+        let (west, south, south_west) = ((-1, 0), (0, -1), (-1, -1));
+        for edge in [west, south] {
+            assert!(!sl.reaches(126.0, corner, edge));
+            assert!(sl.reaches(128.0, corner, edge));
+        }
+        assert!(!sl.reaches(180.0, corner, south_west));
+        assert!(sl.reaches(184.0, corner, south_west));
+        // ... and the same from anywhere else.
+        assert!(!sl.reaches(126.0, (128.0, 128.0), west));
+
+        let opensim = ImitatedGrid::OpenSim.neighbour_policy();
+        let middle = (128.0, 128.0);
+        for neighbour in [(1, 0), (0, 1), (1, 1)] {
+            assert!(!opensim.reaches(32.0, middle, neighbour));
+            assert!(opensim.reaches(100.0, middle, neighbour));
+            assert!(opensim.reaches(512.0, middle, neighbour));
+        }
+        // Twelve metres from the eastern border even the smallest view
+        // reaches east, and still not north.
+        assert!(opensim.reaches(32.0, (244.0, 128.0), (1, 0)));
+        assert!(!opensim.reaches(32.0, (244.0, 128.0), (0, 1)));
+        // And from the western edge the largest does not reach east at all.
+        assert!(!opensim.reaches(512.0, (0.0, 128.0), (1, 0)));
     }
 
     /// The bake policy is four coupled advertisements, and the flavour has to

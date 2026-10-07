@@ -2237,9 +2237,30 @@ mod tests {
     /// merely still projected), and the session took no teleport and no
     /// disconnect on the way (it was a crossing, not the scene being rebuilt by
     /// something else).
+    ///
+    /// Once per flavour, because the two grids hand an agent over differently
+    /// (`book/src/gridspec/teleport.md`, *Neighbours and crossings*): Second
+    /// Life's destination greets it with a second `RegionHandshake` and states
+    /// no region size; OpenSim's says neither more nor less than its
+    /// `AgentMovementComplete`.
     #[test]
     fn a_border_crossing_keeps_the_picture_still() -> Result<(), TestError> {
-        let mut harness = ViewerHarness::start_in(border_grid())?;
+        a_crossing_keeps_the_picture_still(sl_fake_grid::ImitatedGrid::SecondLife)
+    }
+
+    /// [`a_border_crossing_keeps_the_picture_still`], handed over as OpenSim
+    /// does it.
+    #[test]
+    fn an_open_sim_border_crossing_keeps_the_picture_still() -> Result<(), TestError> {
+        a_crossing_keeps_the_picture_still(sl_fake_grid::ImitatedGrid::OpenSim)
+    }
+
+    /// The body of the two tests above, against a grid imitating `grid`.
+    fn a_crossing_keeps_the_picture_still(
+        grid: sl_fake_grid::ImitatedGrid,
+    ) -> Result<(), TestError> {
+        let mut harness =
+            ViewerHarness::start_in_with(border_grid(), HarnessOptions::imitating(grid))?;
         harness.login()?;
         harness.wait_neighbour(EAST_REGION)?;
         wait_for_the_marker(&mut harness)?;

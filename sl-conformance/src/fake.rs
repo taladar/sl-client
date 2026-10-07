@@ -105,9 +105,10 @@ pub const START_REGION: &str = "Fake Region";
 /// neighbour: the border scene, whose marker pillar stands just past the
 /// shared edge.
 ///
-/// It exists so the two handover cases have somewhere to go. Neither live grid
-/// reliably offers an adjacent region an avatar may walk between, which is why
-/// `region-crossing` and `neighbour-child-circuits` live here and nowhere else.
+/// It exists so the handover cases have somewhere to go offline: here
+/// `region-crossing` crosses into it and `neighbour-child-circuits` names the
+/// object it streams, where a live run takes whatever regions the avatar
+/// stands next to.
 pub const EAST_REGION: &str = "Fake Region East";
 
 /// The name of a region far from [`START_REGION`], rated Moderate: somewhere a
@@ -159,6 +160,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "teleport-lure-unknown",
     "region-crossing",
     "neighbour-child-circuits",
+    "draw-distance",
     "avatar-appearance-npc",
     "server-appearance-bake",
     "texture-fetch-http",

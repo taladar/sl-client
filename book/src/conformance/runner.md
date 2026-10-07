@@ -153,9 +153,8 @@ once the fake grid grew a
 If a case belongs offline and does not bite, the thing to fix is usually the
 grid.
 
-Five cases live on the fake grid **only**, because nothing else can host them:
-`region-crossing` and `neighbour-child-circuits` need two adjacent regions an
-avatar may walk between; `terrain-layerdata` and `avatar-appearance-npc` assert
+Three cases live on the fake grid **only**, because nothing else can host them:
+`terrain-layerdata` and `avatar-appearance-npc` assert
 against ground and bakes this workspace declares; and `asset-round-trip` walks
 the fake grid's own seeded inventory, one item per writable asset class, which
 no live account has. That last one is fake-only for a second reason worth
@@ -165,12 +164,15 @@ several classes — measuring that is `test-asset-save-mutation-survey`'s job,
 and the assertion tightens when it has. It is also the one case that runs on
 `Grid::FakeOpensim` rather than `Grid::FakeSl`, because its fourth leg reads a
 taken object's asset back and Second Life never lets a viewer do that — see
-[which grid the fake one is](#which-grid-the-fake-one-is) below. The first of
-those also needs the harness to speak *as* the simulator — a crossing is a
-decision a region makes, and a grid that simulates no movement has to be told
-to make it — which
-is what `TestContext::fake()` hands a case. It is `None` on every live grid, and
-a case that reaches for it declares a fake grid and nothing else.
+[which grid the fake one is](#which-grid-the-fake-one-is) below.
+
+`region-crossing` runs everywhere and differs by where it runs: on a live grid
+it walks its avatar over a border, and on the fake one it needs the harness to
+speak *as* the simulator — a crossing is a decision a region makes, and a grid
+that simulates no movement has to be told to make it — which is what
+`TestContext::fake()` hands a case. It is `None` on every live grid, so a case
+that reaches for it either declares a fake grid and nothing else or, as this
+one does, takes another path when it is absent.
 
 The `cargo test` run writes no record: there the assertion is the record,
 re-made from scratch every run. `run-offline` runs the same cases through the

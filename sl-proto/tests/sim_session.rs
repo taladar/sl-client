@@ -5372,7 +5372,7 @@ mod test {
         assert!(!sim.has_caps_events());
         sim.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), (256, 256)),
+            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), Some((256, 256))),
         );
         assert!(sim.has_caps_events());
 
@@ -8045,7 +8045,7 @@ mod test {
 
         // The source accepts and announces the destination region.
         source.send_teleport_start(0, now)?;
-        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr());
+        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr(), None);
         source.enqueue_establish_agent_communication(
             dest_sim_addr(),
             "http://127.0.0.1:9001/child-seed",
@@ -8197,7 +8197,7 @@ mod test {
             "expected the progress key, got {client_events:?}"
         );
 
-        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr());
+        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr(), None);
         source.enqueue_establish_agent_communication(
             dest_sim_addr(),
             "http://127.0.0.1:9001/child-seed",
@@ -8290,7 +8290,7 @@ mod test {
         drain_server(&mut source);
         let mut dest = SimSession::new(RegionHandle(DEST_HANDLE), now);
 
-        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr());
+        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr(), None);
         source.enqueue_establish_agent_communication(
             dest_sim_addr(),
             "http://127.0.0.1:9001/child-seed",
@@ -8317,10 +8317,7 @@ mod test {
                 y: 0.0,
                 z: 0.0,
             },
-            region_size: (
-                sl_proto::STANDARD_REGION_SIZE_METRES,
-                sl_proto::STANDARD_REGION_SIZE_METRES,
-            ),
+            region_size: None,
         });
         deliver_caps(&mut client, &mut source, now)?;
         pump_multi(
@@ -10383,7 +10380,7 @@ mod test {
 
         sim.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), (256, 256)),
+            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), Some((256, 256))),
         );
         assert!(sim.has_caps_events());
 

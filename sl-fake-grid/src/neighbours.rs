@@ -10,10 +10,15 @@
 //! *promotion* of a circuit that is already open rather than a connection made
 //! on the spot ([`crate::crossing`]).
 //!
-//! The fake grid has no view distance and no physics, so "within view" is
-//! reduced to the one thing a fixture can state: which regions touch, as
-//! [`NeighbourPolicy`] decides.
+//! The fake grid has no physics, so "within view" is what a fixture can state
+//! — which regions touch, as [`NeighbourPolicy`] decides — narrowed by the one
+//! thing the client does state: its draw distance, in every `AgentUpdate`.
+//! Each live grid reads that distance its own way
+//! ([`crate::ImitatedGrid::neighbour_policy`]), announcing a neighbour it
+//! comes to reach and retiring one it stops reaching, and the fake grid does
+//! as the flavour it imitates.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use sl_types::key::AgentKey;
@@ -60,9 +65,20 @@ pub(crate) fn touches(a: (u32, u32), b: (u32, u32)) -> bool {
     a.0.abs_diff(b.0) <= ADJACENT_SLOTS && a.1.abs_diff(b.1) <= ADJACENT_SLOTS
 }
 
-/// Announces every neighbour of `shared`'s region to its client and opens a
-/// child session in each: the `EnableSimulator` + `EstablishAgentCommunication`
-/// pair a simulator sends a freshly rooted agent.
+/// The draw distance an agent is taken to have until an `AgentUpdate` of its
+/// own says otherwise: the reference viewer's default.
+const DEFAULT_FAR_M: f32 = 256.0;
+
+/// How far an `AgentUpdate`'s draw distance has to move before the neighbours
+/// are looked at again. A viewer repeats the same figure every update; this
+/// only keeps a float's noise from reading as a change.
+const FAR_CHANGE_M: f32 = 0.5;
+
+/// Announces every neighbour of `shared`'s region that a draw distance of
+/// `far` metres reaches to its client, and opens a child session in each: the
+/// `EnableSimulator` + `EstablishAgentCommunication` pair a simulator sends a
+/// freshly rooted agent — and sends again for a neighbour a wider draw
+/// distance brings back into view.
 ///
 /// A region the agent already has a session in is skipped — the region it just
 /// walked out of is a neighbour of the one it walked into, and its circuit is
@@ -71,18 +87,29 @@ pub(crate) fn touches(a: (u32, u32), b: (u32, u32)) -> bool {
 ///
 /// Failures are logged rather than propagated: an announcement that does not
 /// happen costs the client a neighbour, not its session.
-pub(crate) async fn announce_neighbours(core: &Arc<GridCore>, shared: &SharedSim) {
-    let (seq, region_index, ids, agent_id) = {
+pub(crate) async fn announce_neighbours(core: &Arc<GridCore>, shared: &SharedSim, far: f32) {
+    let (seq, region_index, ids, agent_id, avatar) = {
         let state = shared.state.lock().await;
         if !state.sim.is_root_agent() {
             return;
         }
-        (state.seq, state.region, state.ids, state.avatar.agent_id)
+        let at = crate::chat::agent_position(&state.sim);
+        (
+            state.seq,
+            state.region,
+            state.ids,
+            state.avatar.agent_id,
+            (at.x, at.y),
+        )
     };
     let Some(account) = core.account_by_agent(agent_id).cloned() else {
         return;
     };
-    for neighbour in core.neighbours_of(region_index) {
+    let region_size = core.neighbour_policy.states_region_size.then_some((
+        sl_proto::STANDARD_REGION_SIZE_METRES,
+        sl_proto::STANDARD_REGION_SIZE_METRES,
+    ));
+    for neighbour in core.neighbours_in_view(region_index, far, avatar) {
         // A root that ended meanwhile — logged out, or kicked by a second
         // login — has no client left to announce a neighbour to, and a child
         // session opened for it now would outlive the login it belonged to.
@@ -113,7 +140,7 @@ pub(crate) async fn announce_neighbours(core: &Arc<GridCore>, shared: &SharedSim
         };
         shared
             .with_sim(|session| {
-                session.enqueue_enable_simulator(handle, sim);
+                session.enqueue_enable_simulator(handle, sim, region_size);
                 session.enqueue_establish_agent_communication(sim, &seed);
             })
             .await;
@@ -122,6 +149,88 @@ pub(crate) async fn announce_neighbours(core: &Arc<GridCore>, shared: &SharedSim
             prepared.region_name,
             prepared.seq
         );
+    }
+}
+
+/// Looks at the neighbours of `shared`'s region again after its agent's draw
+/// distance changed to `far`: announces the ones it now reaches, and notes in
+/// `retiring` when each one it no longer reaches is due to go — at once on
+/// OpenSim, fifty seconds on on Second Life
+/// ([`crate::imitates::NeighbourViewPolicy::retire_delay`]). A neighbour that
+/// is reached again before it went is kept.
+async fn review_neighbours(
+    core: &Arc<GridCore>,
+    shared: &SharedSim,
+    far: f32,
+    retiring: &mut BTreeMap<usize, tokio::time::Instant>,
+) {
+    let (region_index, agent_id, avatar) = {
+        let state = shared.state.lock().await;
+        if !state.sim.is_root_agent() {
+            retiring.clear();
+            return;
+        }
+        let at = crate::chat::agent_position(&state.sim);
+        (state.region, state.avatar.agent_id, (at.x, at.y))
+    };
+    announce_neighbours(core, shared, far).await;
+    let reached = core.neighbours_in_view(region_index, far, avatar);
+    let now = tokio::time::Instant::now();
+    for neighbour in core.neighbours_of(region_index) {
+        if reached.contains(&neighbour) {
+            retiring.remove(&neighbour);
+        } else if core.session_of(agent_id, neighbour).await.is_some() {
+            // A delay too long to add to the clock never comes due.
+            if let Some(due) = now.checked_add(core.neighbour_policy.retire_delay) {
+                retiring.entry(neighbour).or_insert(due);
+            }
+        }
+    }
+}
+
+/// Retires the child session in each region of `retiring` whose time has
+/// come: the `DisableSimulator` a simulator sends down a child circuit once
+/// the agent's draw distance has stopped reaching the region.
+async fn retire_out_of_view(
+    core: &Arc<GridCore>,
+    shared: &SharedSim,
+    retiring: &mut BTreeMap<usize, tokio::time::Instant>,
+) {
+    let (agent_id, is_root) = {
+        let state = shared.state.lock().await;
+        (state.avatar.agent_id, state.sim.is_root_agent())
+    };
+    if !is_root {
+        // The agent walked or teleported away; what it holds is the new
+        // root's to decide.
+        retiring.clear();
+        return;
+    }
+    let now = tokio::time::Instant::now();
+    let due: Vec<usize> = retiring
+        .iter()
+        .filter(|(_region, at)| **at <= now)
+        .map(|(region, _at)| *region)
+        .collect();
+    for region in due {
+        retiring.remove(&region);
+        let Some(child) = core.session_of(agent_id, region).await else {
+            continue;
+        };
+        let (seq, child_is_root) = {
+            let state = child.state.lock().await;
+            (state.seq, state.sim.is_root_agent())
+        };
+        if child_is_root {
+            continue;
+        }
+        if let Err(error) = child
+            .with_sim(|session| session.retire_circuit(child.now()))
+            .await
+        {
+            tracing::warn!("retiring the out-of-view child session {seq} failed: {error}");
+        }
+        core.remove_session(seq).await;
     }
 }
 
@@ -175,12 +284,26 @@ pub(crate) fn run_neighbour_announcer(
         let mut events = shared.subscribe_events();
         let mut closed_rx = shared.closed_tx.subscribe();
         let mut shutdown_rx = shared.shutdown_rx.clone();
+        // The draw distance the agent last stated, and the neighbours it no
+        // longer reaches with when each is due to be retired.
+        let mut far = DEFAULT_FAR_M;
+        let mut retiring: BTreeMap<usize, tokio::time::Instant> = BTreeMap::new();
         loop {
             if *closed_rx.borrow_and_update() || *shutdown_rx.borrow_and_update() {
                 break;
             }
+            let next_retirement = retiring.values().min().copied();
             let received = tokio::select! {
                 received = events.recv() => received,
+                () = async {
+                    match next_retirement {
+                        Some(at) => tokio::time::sleep_until(at).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    retire_out_of_view(&core, &shared, &mut retiring).await;
+                    continue;
+                }
                 changed = closed_rx.changed() => {
                     if changed.is_err() || *closed_rx.borrow() {
                         break;
@@ -196,7 +319,16 @@ pub(crate) fn run_neighbour_announcer(
             };
             match received {
                 Ok(sl_proto::ServerEvent::AgentArrived) => {
-                    announce_neighbours(&core, &shared).await;
+                    // A new root region: what was due to go was due from the
+                    // region the agent left.
+                    retiring.clear();
+                    announce_neighbours(&core, &shared, far).await;
+                }
+                Ok(sl_proto::ServerEvent::AgentUpdate(update))
+                    if (update.far - far).abs() > FAR_CHANGE_M =>
+                {
+                    far = update.far;
+                    review_neighbours(&core, &shared, far, &mut retiring).await;
                 }
                 Ok(sl_proto::ServerEvent::LoggedOut) => {
                     retire_children_on_logout(&core, &shared).await;

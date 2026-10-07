@@ -1,9 +1,12 @@
 # Teleport
 
 How each grid carries out a teleport the client asks for, and how it refuses
-one; then how it carries the offers and requests avatars make each other
-([Offers and requests](#offers-and-requests)). The messages and the client's
-handover are described in [Teleport](../content/teleport.md).
+one; how it carries the offers and requests avatars make each other
+([Offers and requests](#offers-and-requests)); and which neighbouring regions
+it holds an agent in and how it hands the agent to one when it walks over a
+border ([Neighbours and crossings](#neighbours-and-crossings)). The messages
+and the client's handover are described in
+[Teleport](../content/teleport.md).
 
 Measured on 2026-10-07 on Second Life's beta grid (aditi) and the local
 OpenSim standalone (a 2×2 block of regions), by:
@@ -242,6 +245,98 @@ declines and requests reach nobody there; a test plays the other avatar
 through the session's own grid-side handle (the roadmap's
 `server-fake-grid-im-relay`).
 
+## Neighbours and crossings
+
+A simulator holds a **child agent** for an avatar in each neighbouring region
+the avatar can see into: it announces the region with an `EnableSimulator`,
+hands over that region's seed capability with an
+`EstablishAgentCommunication`, the client opens a child circuit there, and
+the region streams its scene down it. Walking over the border then promotes a
+circuit the client already holds: a `CrossedRegion` names it, the client
+sends its `CompleteAgentMovement` there, and nothing is torn down.
+
+Measured on 2026-10-07 on aditi — an avatar standing in the north-eastern
+region of a two-by-two block, eight to ten metres from its western and
+southern borders — and on the local OpenSim's two-by-two block, by:
+
+- scripted `sl-repl` runs with the trace log on (five on aditi, two on
+  OpenSim), which is where the transports, the event bodies and the messages
+  no event carries were read;
+- `neighbour-child-circuits`, the neighbours as an arrival is told of them;
+- `draw-distance`, the draw distance stepped to 100 m, 32 m and 512 m;
+- `region-crossing`, a walk over the nearest border a neighbour shares and
+  back again — on foot on OpenSim, by flight on aditi (below).
+
+The three cases hold aditi, OpenSim and both fake flavours to these answers,
+except where a row says the fake grid does not model it.
+
+### Which neighbours, and when
+
+Both grids announce over the **event queue** and retire with a
+`DisableSimulator` over UDP, down the child circuit being retired. Neither
+sent a UDP `EnableSimulator`.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the regions announced to an arrival | all three others of the block, the one touching at a corner included | the same | every region one slot away, as each flavour's draw-distance rule allows |
+| how they are announced | every `EnableSimulator` in one event-queue batch, 1.4 s after the handshake; each `EstablishAgentCommunication` only once the client has opened that circuit, 0.2–0.6 s later | an `EnableSimulator` and its `EstablishAgentCommunication` together, one neighbour every half second (source: a `Thread.Sleep(500)` in `EnableChildAgents`), the first 0.9 s after the handshake | the pair together, with nothing between neighbours, on both flavours |
+| the `EnableSimulator` body | `Handle`, `IP`, `Port` | the same and `RegionSizeX` / `RegionSizeY` | each flavour's |
+| the `RegionHandshake` a child circuit is greeted with | sent twice | sent once | each flavour's |
+| an announcement repeated | the `EnableSimulator` of each neighbour sharing an edge again every 60 s; the `EstablishAgentCommunication` of the one touching at a corner again every 5 s, for as long as it is held; all of them again when the draw distance changes. Always the same seed. (A mainland region with five neighbours repeated *both* events for every neighbour about every five seconds: [Region arrival](region-arrival.md)) | on one login of four — two seconds after the avatar's previous logout — every neighbour was announced a second time, two seconds after the first | not modelled |
+| what a child circuit carries | the region's ground, parcel overlay, objects and kills, its coarse locations, and the avatars standing there: their object updates, animations, appearance, attached sounds and `ViewerEffect`s. No `SimStats` and no time messages | ground, parcel overlay, objects, coarse locations. No avatars were there to see | the region's ground, objects and a marker |
+| a draw distance that reaches a neighbour | 128 m for one sharing an edge (126 m did not reach, 128 m did); 128·√2 = 181 m for the one touching at a corner (180 m did not, 184 m did). Both edges, 8 m and 10 m away, answered at the same figure, so it is no distance to anything | the draw distance plus 64 m, held between 96 m and 255 m, as the half-width of a square around the *avatar*: a region that square touches is held (source: `ScenePresence.RegionViewDistance`, `EntityTransferModule.RegionsInView`). From the middle of a region 32 m reached nothing and 100 m everything; twelve metres from a border 32 m reached across it | each flavour's rule |
+| a neighbour the draw distance stops reaching | retired **50 s** later (50.3 s to 51.0 s over four runs), all three within 40 ms of each other | retired within a second (0.5 s to 0.8 s) | each flavour's delay |
+| a neighbour the draw distance reaches again | announced within 1.3 s, with a new seed | announced within a second, half a second apart, with a new seed | announced at once, with a new seed |
+| at logout | nothing down the child circuits ([Logout](session.md#logout)) | a `DisableSimulator` down each | each flavour's |
+
+The figure Second Life compares the draw distance with is half the distance
+between the two regions' centres. It was measured from one spot only; that a
+neighbour eight metres away needed the same 128 m as one ten metres away is
+what says the avatar's position is not in it.
+
+One thing seen once and OpenSim's alone: a login two seconds after the same
+avatar's logout found the region touching at a corner still holding the old
+session's child agent (`Reusing existing child scene presence`). It was
+announced, never said a word down the new child circuit, and the client
+dropped the circuit as silent 45 s later.
+
+### Walking over a border
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the message | `CrossedRegion` over the event queue | the same | the same |
+| its body | `AgentData` (`AgentID`, `SessionID`), `Info` (`LookAt`, `Position`), `RegionData` (`RegionHandle`, `SeedCapability`, `SimIP`, `SimPort`) | the same and `RegionSizeX` / `RegionSizeY` in `RegionData` | each flavour's |
+| `Info.Position` | in the destination region, two metres past the border (254.2, 254.1 and 254.0 flying west and south; 1.9 and 2.0 flying back) | in the destination region, half a metre past it (0.53 walking east, 255.4 back) | where the test puts the agent |
+| `Info.LookAt` | the unit direction of travel: `-1 0 0` flying west, `0 1 0` flying north | zero at a walk. The source passes the agent's horizontal velocity there when it crosses flying (`EntityTransferModule.CrossAgentIntoNewRegionMain`) | a facing on the Second Life flavour, the velocity the test names on the OpenSim one |
+| the seed it names | the one that neighbour's `EstablishAgentCommunication` gave; on the way back, the one the login gave | the same | the child session's |
+| sent ahead of it | nothing that belongs to it | an `AgentDataUpdate` from the destination, 85 ms ahead | nothing |
+| what the destination says once the client has completed its movement | its `RegionHandshake` a third time, then `AgentMovementComplete` and `HealthMessage`, 0.18 s after the `CrossedRegion`; then an `AgentStateUpdate` and the agent's `ParcelProperties` over the event queue | `AgentMovementComplete` within a millisecond, the agent's `ParcelProperties`, and no handshake | each flavour's |
+| the agent's own avatar | re-sent by the destination under a new local id 1.2 s later, after a `KillObject` for the id before it. The region left sends no kill for its copy | re-sent by the destination under a new local id 5 ms later, with its `AvatarAppearance`. No kill from either region | re-sent by the destination; no kill |
+| the region left behind | stays a child: its handshake comes a fourth time 1.4 s later, and it goes on streaming | stays a child and goes on streaming | stays a child |
+| the other neighbours | each one the new region also borders is announced again by it, 1.2 s to 1.4 s after the arrival, and greets its circuit again. Walking back, nothing was announced | nothing announced, nothing retired: every region of the block borders every other | a child no longer bordering the new region is retired, on both flavours |
+| a neighbour retired after a crossing | none in the 25 s watched; the block is too small for a crossing to leave one behind | none | as above, unmeasured |
+| request to arrival | 0.2 s | 0.1 s over loopback | milliseconds |
+| a teleport event on the way | none | none | none |
+
+Neither grid tells the crossing agent's own viewer that its avatar has left
+the region it walked out of; the client is left holding two copies of one
+avatar, and drops the old region's the moment the new region's arrives.
+
+The aditi avatar could not be *walked* to its border. Its region routes every
+arrival to a landing point, and an avatar standing there is held by it: ninety
+seconds of the forward key moved it two centimetres, while it turned to face
+where it was told. A flight from the same spot crossed the border eight
+metres away in four seconds, so the case flies on Second Life and walks on
+OpenSim.
+
+Not measured: a **seated** crossing — a vehicle carrying its riders over a
+border. Neither grid has a vehicle to hand: it needs a script uploaded into a
+prim and an avatar seated on it, and aditi has yet to answer a sit request
+from this client at all (the roadmap's `gridspec-sit-stand`). Also not
+measured: a crossing that leaves a neighbour out of view (both blocks are two
+by two), a crossing at a corner, and what either grid does when the client
+never completes its movement.
+
 ## What the client does with it
 
 - **Both failure transports end the teleport.** The event-queue
@@ -278,6 +373,23 @@ through the session's own grid-side handle (the roadmap's
   both fake flavours and holds the cards and their answers to the above; its
   two-viewer test of an offer declined and an offer taken runs on a live grid
   (`SL_E2E_GRID=opensim|aditi`), and passed on both on 2026-10-07.
+- **A retired neighbour is reported.** `Event::NeighborRetired` names the
+  region, its simulator, the circuit and the reason — the simulator's
+  `DisableSimulator`, a circuit gone silent, or a transfer abandoned. The
+  session used to drop the circuit and its objects and say nothing of the
+  region, so a mirror of the regions kept one the draw distance had stopped
+  reaching until the next world reset; the Bevy plugin's region index now
+  drops it, and its parcel overlay with it.
+- **A repeated announcement is not news.** An `EnableSimulator` for a region
+  already held and an `EstablishAgentCommunication` naming a seed already
+  held raise no event. Second Life's five-second repeat used to have the
+  driver POST the same seed every five seconds for as long as the avatar
+  stood there.
+- **`ViewerEffect`s are read on a child circuit too**: Second Life sends the
+  effects of avatars in a neighbouring region down that region's circuit, and
+  they were reported as unhandled.
+- The viewer's border-crossing check (the scene stays where it was, and stays
+  drawn) runs against both fake flavours.
 - `e2e_pilot` drives one request — an agent set to General asking the world
   map for a Moderate region — against both fake flavours: refused with the
   catalogue's text on the one, carried out on the other.

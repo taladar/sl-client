@@ -176,8 +176,8 @@ use crate::link::{
 };
 use crate::object_update::TerseUpdate;
 use crate::session::{
-    CrossedRegionInfo, SERVER_HISTORY_CAP, STANDARD_REGION_SIZE_METRES, ServerHistoryMessage,
-    TeleportFinishInfo, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, agent_drop_group_to_llsd,
+    CrossedRegionInfo, SERVER_HISTORY_CAP, ServerHistoryMessage, TeleportFinishInfo,
+    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, agent_drop_group_to_llsd,
     agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
     build_map_item_reply, build_map_layer_reply, build_task_inventory,
     chatterbox_invitation_to_llsd, chatterbox_session_start_reply_to_llsd,
@@ -3142,6 +3142,10 @@ pub struct SimSession {
     /// facing +X unless [`SimSession::set_arrival_position`] placed the
     /// arrival (a teleport lands where the request asked).
     arrival: ArrivalPlacement,
+    /// The region identity to greet the agent with as its movement into this
+    /// region completes, when one was asked for
+    /// ([`SimSession::greet_on_arrival`]). Taken by the arrival it greets.
+    arrival_greeting: Option<Box<RegionIdentity>>,
     /// The agent's sit state (the server-side mirror of the client's sit
     /// machine).
     sit: SimSitState,
@@ -3483,6 +3487,7 @@ impl SimSession {
             transfer_serves: BTreeMap::new(),
             agent_presence: AgentPresence::Child,
             arrival: ArrivalPlacement::default(),
+            arrival_greeting: None,
             sit: SimSitState::NotSitting,
             sit_expires: None,
             script_questions: BTreeMap::new(),
@@ -9501,6 +9506,17 @@ impl SimSession {
         self.arrival = ArrivalPlacement { position, look_at };
     }
 
+    /// Has the next arrival on this circuit greeted with a `RegionHandshake`
+    /// for `identity`, sent ahead of the `AgentMovementComplete`.
+    ///
+    /// A circuit's handshake goes out when it opens; this is the *second* one
+    /// a Second Life region sends a child agent as a border crossing makes it
+    /// the root (measured on aditi 2026-10-07 — OpenSim's region says nothing
+    /// more). One arrival takes it.
+    pub fn greet_on_arrival(&mut self, identity: RegionIdentity) {
+        self.arrival_greeting = Some(Box::new(identity));
+    }
+
     /// Where the agent lands when its movement completes.
     #[must_use]
     pub const fn arrival_position(&self) -> &ArrivalPlacement {
@@ -9510,15 +9526,17 @@ impl SimSession {
     /// Enqueues a CAPS `EnableSimulator` event — announces a neighbouring (or
     /// teleport-destination) region so the client opens a **child** circuit to
     /// it (the modern event-queue path; the client answers with a
-    /// `UseCircuitCode` on `sim`).
-    pub fn enqueue_enable_simulator(&mut self, handle: RegionHandle, sim: SocketAddr) {
+    /// `UseCircuitCode` on `sim`). `region_size` is the neighbour's size in
+    /// metres where the grid states one: OpenSim does, Second Life does not.
+    pub fn enqueue_enable_simulator(
+        &mut self,
+        handle: RegionHandle,
+        sim: SocketAddr,
+        region_size: Option<(u32, u32)>,
+    ) {
         self.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(
-                handle.0,
-                sim,
-                (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
-            ),
+            enable_simulator_to_caps_llsd(handle.0, sim, region_size),
         );
     }
 
@@ -10137,6 +10155,11 @@ impl SimSession {
                     return Ok(());
                 }
                 self.agent_presence = AgentPresence::Root;
+                // A region that greets an agent walking in sends its handshake
+                // ahead of the movement's completion, as Second Life does.
+                if let Some(identity) = self.arrival_greeting.take() {
+                    self.send_region_handshake(&identity, now)?;
+                }
                 self.send_agent_movement_complete(now)?;
                 if let Some(armed) = self.telemetry.as_mut() {
                     let first = Some(deadline(now, TELEMETRY_FIRST_DELAY));
