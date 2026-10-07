@@ -21,6 +21,7 @@
 //! | a taken object's asset ([`ObjectAssetPolicy`]) | withheld: nil id, an unfetchable Linden-text body | served: minted id, a `<SceneObjectGroup>` XML body under it |
 //! | the login response's `options` list ([`honor_options`](crate::FakeGridBuilder::honor_options)) | honoured: the response is trimmed to what was asked for | ignored: every field is sent |
 //! | the `OpenSimExtras` block in `SimulatorFeatures` ([`advertises_open_sim_extras`](ImitatedGrid::advertises_open_sim_extras)) | absent | sent, carrying the grid's map-tile and currency-helper URLs |
+//! | the rest of `SimulatorFeatures` ([`stock_simulator_features`](ImitatedGrid::stock_simulator_features)) | 29 keys: the PBR, mirror and pathfinding switches, the estate and group limits, the dead-reckoning pair, the host's name, a 2048 px texture limit, four material requests a second | 14 keys and the 24 of `OpenSimExtras`: the grid's name and limits, the simulator's frame rate, `ExportSupported` as a string; five empty `menus`; no texture limit, three material requests a second |
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named two ways: `SimulatorFeatures.VoiceServerType` and the `RequiredVoiceVersion` push — **not** the login `voice-config`, which aditi does not send even when asked (2026-10-04) | none: a stock region loads no voice module, and nothing is advertised |
 //! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
 //! | how a **taken** item is announced ([`InventoryAnnouncement`]) | a `BulkUpdateInventory` over the event queue | the legacy UDP `UpdateCreateInventoryItem` |
@@ -479,6 +480,100 @@ impl ImitatedGrid {
                 time_interval: Duration::from_millis(2_550),
                 sun_direction: [0.0, 0.0, 0.0],
                 sun_phase: 2.665_263,
+            },
+        }
+    }
+
+    /// The `SimulatorFeatures` document a stock region of this grid serves —
+    /// every key the live grid was measured sending, in the LLSD kind it sent
+    /// it in (`simulator-features`, 2026-10-07,
+    /// `book/src/gridspec/region-arrival.md`).
+    ///
+    /// Four things in a live reply are not here, because they are the grid's
+    /// own and not its flavour's, and the fake grid fills them in where it
+    /// knows them: the `OpenSimExtras` addresses and grid names, the currency
+    /// symbol, the voice backend (`VoiceServerType`), and the script syntax
+    /// (`LSLSyntaxId`, with Second Life's `LSLSyntaxVersion`), which a region
+    /// may only advertise beside a syntax document it serves.
+    #[must_use]
+    pub fn stock_simulator_features(self) -> sl_proto::SimulatorFeatures {
+        let shared = sl_proto::SimulatorFeatures {
+            mesh_rez_enabled: Some(true),
+            mesh_upload_enabled: Some(true),
+            mesh_xfer_enabled: Some(true),
+            bakes_on_mesh_enabled: Some(true),
+            avatar_hover_height_enabled: Some(true),
+            physics_materials_enabled: Some(true),
+            physics_shape_types: Some(sl_proto::PhysicsShapeTypes {
+                convex: true,
+                none: true,
+                prim: true,
+            }),
+            max_agent_attachments: Some(38),
+            max_materials_per_transaction: Some(50),
+            ..sl_proto::SimulatorFeatures::default()
+        };
+        match self {
+            Self::SecondLife => sl_proto::SimulatorFeatures {
+                animated_objects: Some(sl_proto::AnimatedObjects {
+                    max_tris: 100_000,
+                    max_agent_attachments: 1,
+                }),
+                dynamic_pathfinding_enabled: Some(true),
+                max_agent_groups: Some(50),
+                max_agent_groups_basic: Some(42),
+                max_agent_groups_premium: Some(70),
+                max_estate_access_ids: Some(750),
+                max_estate_managers: Some(20),
+                max_texture_resolution: Some(2048),
+                render_materials_capability: Some(4.0),
+                pbr_terrain_enabled: Some(true),
+                pbr_terrain_transforms_enabled: Some(true),
+                pbr_material_swatch_enabled: Some(true),
+                gltf_enabled: Some(false),
+                mirrors_enabled: Some(true),
+                no_mod_bypass_support: Some(true),
+                // Per region on the live grid; this grid runs no Lua.
+                lua_scripts_enabled: Some(false),
+                dead_reckoning_distance: Some(20.0),
+                dead_reckoning_time: Some(1.0),
+                host_name: Some("simhost-fake.sl-fake-grid.invalid".to_owned()),
+                ..shared
+            },
+            Self::OpenSim => sl_proto::SimulatorFeatures {
+                animated_objects: Some(sl_proto::AnimatedObjects {
+                    max_tris: 150_000,
+                    max_agent_attachments: 2,
+                }),
+                max_agent_groups_basic: Some(60),
+                max_agent_groups_premium: Some(60),
+                render_materials_capability: Some(3.0),
+                menus: Some(sl_proto::DynamicMenus::default()),
+                open_sim_extras: Some(sl_proto::OpenSimExtras {
+                    export_supported: Some(true),
+                    animation_set: Some(true),
+                    avatar_skeleton: Some(true),
+                    grid_url_alias: Some(String::new()),
+                    say_range: Some(20),
+                    shout_range: Some(100),
+                    whisper_range: Some(10),
+                    min_prim_scale: Some(0.001),
+                    max_prim_scale: Some(256.0),
+                    min_phys_prim_scale: Some(0.01),
+                    max_phys_prim_scale: Some(64.0),
+                    min_sim_height: Some(-100.0),
+                    max_sim_height: Some(50_000.0),
+                    min_heightmap: Some(-100.0),
+                    max_heightmap: Some(4000.0),
+                    // The reciprocal of the 0.0909 s frame, and what the region
+                    // multiplies it by to report the 55 a viewer expects.
+                    simulator_fps: Some(11.001_1),
+                    simulator_fps_factor: Some(4.999_5),
+                    simulator_fps_warn_percent: Some(60),
+                    simulator_fps_crit_percent: Some(40),
+                    ..sl_proto::OpenSimExtras::default()
+                }),
+                ..shared
             },
         }
     }
@@ -1177,6 +1272,10 @@ mod test {
         assert_ne!(sl.logout_reply(), opensim.logout_reply());
         assert_ne!(sl.circuit_policy(), opensim.circuit_policy());
         assert_ne!(sl.arrival_policy(), opensim.arrival_policy());
+        assert_ne!(
+            sl.stock_simulator_features(),
+            opensim.stock_simulator_features()
+        );
         assert_ne!(
             sl.region_capacity(sl_proto::ProductType::FullRegion),
             opensim.region_capacity(sl_proto::ProductType::FullRegion)

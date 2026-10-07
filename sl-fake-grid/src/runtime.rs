@@ -459,6 +459,10 @@ pub(crate) struct GridCore {
     pub(crate) object_assets: ObjectAssetPolicy,
     /// Whether `SimulatorFeatures` carries the `OpenSimExtras` block.
     pub(crate) open_sim_extras: bool,
+    /// The `SimulatorFeatures` document a stock region of the imitated grid
+    /// serves ([`ImitatedGrid::stock_simulator_features`]), before this grid's
+    /// own addresses and names go into it.
+    pub(crate) stock_features: SimulatorFeatures,
     /// The subscription packages the login response describes, when this grid
     /// describes any ([`account_entitlements`](Self::account_entitlements)).
     pub(crate) packages: BTreeMap<String, sl_proto::AccountBenefits>,
@@ -1123,9 +1127,9 @@ impl GridCore {
         None
     }
 
-    /// The stock `SimulatorFeatures` document: mesh enabled, plus — on a grid
-    /// that sends the block at all — the `OpenSimExtras` URLs pointing back at
-    /// this grid.
+    /// The stock `SimulatorFeatures` document: the one a stock region of the
+    /// imitated grid serves, with — on a grid that sends the block at all —
+    /// the `OpenSimExtras` addresses and names pointing back at this grid.
     ///
     /// A Second-Life-flavoured grid omits the block entirely, as Second Life
     /// does. Nothing goes missing with it: the map-tile server is in the login
@@ -1133,24 +1137,31 @@ impl GridCore {
     /// `get_grid_info`'s `economy` key — the routes
     /// the reference viewer reads when no extras block overrode them.
     fn simulator_features(&self) -> SimulatorFeatures {
-        SimulatorFeatures {
-            mesh_rez_enabled: Some(true),
-            mesh_upload_enabled: Some(true),
-            open_sim_extras: self.open_sim_extras.then(|| OpenSimExtras {
-                map_server_url: Some(self.login_uri.clone()),
-                // Stock OpenSim puts `currency-base-uri` in this block and no
-                // symbol beside it, so this follows the economy's own answer
-                // rather than forcing one: a grid that announces no symbol
-                // announces none here either.
-                currency: self.economy.currency_symbol.clone(),
-                currency_base_uri: Some(self.login_uri.clone()),
-                say_range: Some(20),
-                shout_range: Some(100),
-                whisper_range: Some(10),
-                ..OpenSimExtras::default()
-            }),
-            ..SimulatorFeatures::default()
-        }
+        let mut features = self.stock_features.clone();
+        // A grid told to send the block its flavour does not
+        // ([`FakeGridBuilder::open_sim_extras`]) sends OpenSim's.
+        let stock_extras = features.open_sim_extras.take().or_else(|| {
+            ImitatedGrid::OpenSim
+                .stock_simulator_features()
+                .open_sim_extras
+        });
+        features.open_sim_extras =
+            stock_extras
+                .filter(|_extras| self.open_sim_extras)
+                .map(|extras| OpenSimExtras {
+                    map_server_url: Some(self.login_uri.clone()),
+                    grid_url: Some(self.login_uri.clone()),
+                    grid_name: Some(self.identity.name.clone()),
+                    grid_nick: Some(self.identity.nick.clone()),
+                    // Stock OpenSim puts `currency-base-uri` in this block and no
+                    // symbol beside it, so this follows the economy's own answer
+                    // rather than forcing one: a grid that announces no symbol
+                    // announces none here either.
+                    currency: self.economy.currency_symbol.clone(),
+                    currency_base_uri: Some(self.login_uri.clone()),
+                    ..extras
+                });
+        features
     }
 }
 
@@ -2019,6 +2030,7 @@ impl FakeGridBuilder {
             open_sim_extras: self
                 .open_sim_extras
                 .unwrap_or_else(|| self.imitates.advertises_open_sim_extras()),
+            stock_features: self.imitates.stock_simulator_features(),
             account_entitlements: self.imitates.describes_account_entitlements(),
             login_fields: self.imitates.login_fields(),
             login_refusals: self.imitates.login_refusals(),

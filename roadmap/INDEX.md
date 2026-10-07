@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 138 |
-| ready | 363 |
+| ready | 364 |
 | blocked | 111 |
 | in-progress | 20 |
 | bugs | 30 |
-| done | 1327 |
+| done | 1328 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2035** |
+| **total** | **2037** |
 
 ## ideas (138)
 
@@ -359,7 +359,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (363)
+## ready (364)
 
 ### protocol
 
@@ -960,6 +960,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Seamless seated region crossing (keep sit-implied permissions)
 - [`viewer-settings-backup`](ready/viewer-settings-backup.md) — Settings backup
   — export / import (blocked by `viewer-preferences-floater` (done))
+- [`viewer-simulator-features-unread-keys`](ready/viewer-simulator-features-unread-keys.md)
+  — Act on the SimulatorFeatures keys the reference viewer reads and ours does
+  not
 - [`viewer-skin-icon-set`](ready/viewer-skin-icon-set.md) — A skin should be
   able to carry an icon set, not just colours
 - [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
@@ -1082,6 +1085,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
+  grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-parcel-divide-join`](ready/server-fake-grid-parcel-divide-join.md)
   — Fake grid — divide and join parcels
 - [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
@@ -1179,8 +1184,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   flags and limits on each grid
 - [`gridspec-search-directory`](ready/gridspec-search-directory.md) — Directory
   search and the avatar picker on each grid
-- [`gridspec-simulator-features`](ready/gridspec-simulator-features.md) — The
-  full SimulatorFeatures map on each grid
 - [`gridspec-sit-stand`](ready/gridspec-sit-stand.md) — Sitting and standing:
   placement, refusals and alerts on each grid
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
@@ -1691,7 +1694,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1327)
+## done (1328)
 
 ### protocol
 
@@ -4634,6 +4637,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   handshake identity, the arrival burst and region telemetry on each grid
 - [`gridspec-seed-capabilities`](done/gridspec-seed-capabilities.md) — Which
   capabilities each grid grants from the seed, and to whom
+- [`gridspec-simulator-features`](done/gridspec-simulator-features.md) — The
+  full SimulatorFeatures map on each grid
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
 

@@ -59,10 +59,22 @@ use sl_viewer_world_api::TERRAIN_BOOST_PRIORITY;
 /// resolution rather than starved behind the pixel-area-ranked diffuse faces.
 const MATERIAL_TEXTURE_PRIORITY: Priority = TERRAIN_BOOST_PRIORITY;
 
-/// The most material ids to fetch in one `RenderMaterials` POST — the reference's
-/// `MaxMaterialsPerTransaction` (advertised in `SimulatorFeatures`), which stock
-/// OpenSim also enforces. Requests are chunked to this size.
-const MAX_MATERIALS_PER_REQUEST: usize = 50;
+/// The most material ids to fetch in one `RenderMaterials` POST on a region
+/// that states no limit of its own — the reference's default for
+/// `MaxMaterialsPerTransaction`, which is also the number both Second Life and
+/// stock OpenSim advertise in `SimulatorFeatures`
+/// ([`materials_per_request`]).
+const DEFAULT_MATERIALS_PER_REQUEST: usize = 50;
+
+/// How many material ids one `RenderMaterials` POST may carry on a region
+/// advertising `advertised` as its `MaxMaterialsPerTransaction`: the region's
+/// number when it states a usable one, the reference's default otherwise.
+fn materials_per_request(advertised: Option<i32>) -> usize {
+    advertised
+        .and_then(|limit| usize::try_from(limit).ok())
+        .filter(|limit| *limit > 0)
+        .unwrap_or(DEFAULT_MATERIALS_PER_REQUEST)
+}
 
 /// The diffuse alpha-blend mode (`DIFFUSE_ALPHA_MODE_BLEND`): the z-sorted
 /// transparent path.
@@ -110,6 +122,10 @@ pub struct LegacyMaterialManager {
     /// for despawned faces go stale harmlessly (asset ids are not reused) and
     /// are dropped with the manager at session end.
     alpha_overridden: HashSet<AssetId<FaceMaterial>>,
+    /// The region's `MaxMaterialsPerTransaction`, from its last
+    /// `SimulatorFeatures` reply; `None` until one arrives, and on a region
+    /// that states none.
+    region_limit: Option<i32>,
 }
 
 impl LegacyMaterialManager {
@@ -347,7 +363,7 @@ pub fn drive_legacy_material_requests(
     }
     let queued = std::mem::take(&mut manager.to_request);
     debug!("requesting {} legacy render-material(s)", queued.len());
-    for chunk in queued.chunks(MAX_MATERIALS_PER_REQUEST) {
+    for chunk in queued.chunks(materials_per_request(manager.region_limit)) {
         commands.write(SlCommand(Command::RequestRenderMaterials {
             material_ids: chunk.to_vec(),
         }));
@@ -357,13 +373,19 @@ pub fn drive_legacy_material_requests(
 /// Fold each `RenderMaterials` capability reply (the runtime
 /// [`SlSessionEvent::RenderMaterials`]) into the decoded-material cache;
 /// [`apply_legacy_materials`] then applies each to the faces waiting on it.
+/// A `SimulatorFeatures` reply sets how many ids the next requests carry.
 pub fn receive_legacy_materials(
     mut manager: ResMut<LegacyMaterialManager>,
     mut events: MessageReader<SlEvent>,
 ) {
     for SlEvent(event) in events.read() {
-        let SlSessionEvent::RenderMaterials(entries) = event else {
-            continue;
+        let entries = match event {
+            SlSessionEvent::RenderMaterials(entries) => entries,
+            SlSessionEvent::SimulatorFeatures(features) => {
+                manager.region_limit = features.max_materials_per_transaction;
+                continue;
+            }
+            _other => continue,
         };
         debug!("received {} legacy render-material(s)", entries.len());
         for entry in entries {
@@ -683,6 +705,16 @@ mod tests {
             alpha_mode: AlphaMode::Blend,
             ..StandardMaterial::default()
         })
+    }
+
+    /// A region's own limit sizes the request; a region stating none, or a
+    /// number no request could be cut to, gets the reference's default.
+    #[test]
+    fn the_request_size_follows_the_region() {
+        assert_eq!(materials_per_request(Some(20)), 20);
+        assert_eq!(materials_per_request(None), 50);
+        assert_eq!(materials_per_request(Some(0)), 50);
+        assert_eq!(materials_per_request(Some(-1)), 50);
     }
 
     #[test]

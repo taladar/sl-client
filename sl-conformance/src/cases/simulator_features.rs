@@ -11,88 +11,228 @@
 //! [`Command::RequestSimulatorFeatures`] and asserts a decodable reply arrives.
 //!
 //! A grid advertises only the subset its configuration enables, so every field
-//! of [`SimulatorFeatures`] is an
+//! of [`SimulatorFeatures`](sl_client_tokio::SimulatorFeatures) is an
 //! [`Option`]: [`None`] means "not advertised" (distinct from an advertised
-//! `Some(false)`). The one cross-grid invariant the case asserts is that the
-//! reply carries **at least one** advertised feature — an empty map would mean
-//! the capability answered but decoded to nothing.
+//! `Some(false)`).
 //!
-//! Everything else it asserts is **per grid**, because the two live grids
-//! introduce themselves differently and this reply is where they do it:
+//! The case records the **whole reply** — every key, nested ones by dotted
+//! path, as a `feature.<path>` metric — and holds each grid to the keys it was
+//! measured sending and the LLSD kind of each (`ADVERTISED`): the reply is
+//! where the two live grids introduce themselves, and they share fourteen of
+//! their keys. A key a grid stops sending, a key it adds, and a key that
+//! changes kind (OpenSim's `ExportSupported` is a string) each fail the case
+//! by name, so the table in `book/src/gridspec/region-arrival.md` cannot go
+//! stale quietly. The values are recorded, not held: most are a region's own.
 //!
-//! - `OpenSimExtras` is the one structural difference that reliably tells the
-//!   two replies apart. OpenSim always sends it; Second Life has no such key.
-//! - `VoiceServerType` is the reverse: Second Life names its spatial-voice
-//!   backend here, OpenSim names it nowhere at all (the string appears in none
-//!   of its sources) and leaves the viewer to fall back to Vivox on its own.
-//!
-//! So the case runs on **both** fake flavours and holds each to the grid it
-//! says it is — a survey of exactly what the two disagree about, which is the
-//! shape that is worth running twice.
+//! It runs on **both** fake flavours and holds each to the grid it says it
+//! is, but for the script syntax: a live region advertises an `LSLSyntaxId`
+//! (and Second Life its version) beside a syntax document it serves, and the
+//! fake grid serves none.
 //! `1av`, `[both, fake]`.
 
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use sl_client_tokio::{Command, Event, SimulatorFeatures};
+use sl_client_tokio::{Command, Event, Llsd};
 
-use crate::context::TestContext;
+use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::measured::Measured;
+use crate::record::MetricValue;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{REGION_TIMEOUT, check, count_metric, secs_metric};
+use crate::support::{REGION_TIMEOUT, count_metric, secs_metric};
 
 /// How long to wait for the `SimulatorFeatures` reply.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Counts how many of a [`SimulatorFeatures`] reply's top-level fields the grid
-/// advertised (each `Some` field counts one). A richer reply advertises more;
-/// the count is recorded so the reporter can trend "feature richness" per grid
-/// and a caller can tell an empty decode (`0`) from a populated one.
-fn advertised_count(features: &SimulatorFeatures) -> usize {
-    [
-        features.mesh_rez_enabled.is_some(),
-        features.mesh_upload_enabled.is_some(),
-        features.mesh_xfer_enabled.is_some(),
-        features.bakes_on_mesh_enabled.is_some(),
-        features.physics_materials_enabled.is_some(),
-        features.physics_shape_types.is_some(),
-        features.animated_objects.is_some(),
-        features.max_agent_attachments.is_some(),
-        features.max_agent_groups_basic.is_some(),
-        features.max_agent_groups_premium.is_some(),
-        features.max_texture_resolution.is_some(),
-        features.pbr_terrain_enabled.is_some(),
-        features.gltf_enabled.is_some(),
-        features.lsl_syntax_id.is_some(),
-        features.open_sim_extras.is_some(),
-    ]
-    .into_iter()
-    .filter(|advertised| *advertised)
-    .count()
+/// The keys the fake grid leaves out of either flavour's reply: the script
+/// syntax a region may only advertise beside a document it serves.
+const FAKE_GRID_OMITS: &[&str] = &["LSLSyntaxId", "LSLSyntaxVersion"];
+
+/// Every key each grid's reply carries, by dotted path, with its LLSD kind.
+const ADVERTISED: Measured<&[(&str, &str)]> = Measured {
+    second_life: &[
+        ("AnimatedObjects", "map"),
+        ("AnimatedObjects.AnimatedObjectMaxTris", "integer"),
+        (
+            "AnimatedObjects.MaxAgentAnimatedObjectAttachments",
+            "integer",
+        ),
+        ("AvatarHoverHeightEnabled", "boolean"),
+        ("BakesOnMeshEnabled", "boolean"),
+        ("DeadReckoningDistance", "real"),
+        ("DeadReckoningTime", "real"),
+        ("DynamicPathfindingEnabled", "boolean"),
+        ("GLTFEnabled", "boolean"),
+        ("HostName", "string"),
+        ("LSLSyntaxId", "uuid"),
+        ("LSLSyntaxVersion", "string"),
+        ("LuaScriptsEnabled", "boolean"),
+        ("MaxAgentAttachments", "integer"),
+        ("MaxAgentGroups", "integer"),
+        ("MaxAgentGroupsBasic", "integer"),
+        ("MaxAgentGroupsPremium", "integer"),
+        ("MaxEstateAccessIds", "integer"),
+        ("MaxEstateManagers", "integer"),
+        ("MaxMaterialsPerTransaction", "integer"),
+        ("MaxTextureResolution", "integer"),
+        ("MeshRezEnabled", "boolean"),
+        ("MeshUploadEnabled", "boolean"),
+        ("MeshXferEnabled", "boolean"),
+        ("MirrorsEnabled", "boolean"),
+        ("NoModBypassSupport", "boolean"),
+        ("PBRMaterialSwatchEnabled", "boolean"),
+        ("PBRTerrainEnabled", "boolean"),
+        ("PBRTerrainTransformsEnabled", "boolean"),
+        ("PhysicsMaterialsEnabled", "boolean"),
+        ("PhysicsShapeTypes", "map"),
+        ("PhysicsShapeTypes.convex", "boolean"),
+        ("PhysicsShapeTypes.none", "boolean"),
+        ("PhysicsShapeTypes.prim", "boolean"),
+        ("RenderMaterialsCapability", "real"),
+        ("VoiceServerType", "string"),
+    ],
+    opensim: &[
+        ("AnimatedObjects", "map"),
+        ("AnimatedObjects.AnimatedObjectMaxTris", "integer"),
+        (
+            "AnimatedObjects.MaxAgentAnimatedObjectAttachments",
+            "integer",
+        ),
+        ("AvatarHoverHeightEnabled", "boolean"),
+        ("BakesOnMeshEnabled", "boolean"),
+        ("LSLSyntaxId", "uuid"),
+        ("MaxAgentAttachments", "integer"),
+        ("MaxAgentGroupsBasic", "integer"),
+        ("MaxAgentGroupsPremium", "integer"),
+        ("MaxMaterialsPerTransaction", "integer"),
+        ("MeshRezEnabled", "boolean"),
+        ("MeshUploadEnabled", "boolean"),
+        ("MeshXferEnabled", "boolean"),
+        ("OpenSimExtras", "map"),
+        ("OpenSimExtras.AnimationSet", "boolean"),
+        ("OpenSimExtras.AvatarSkeleton", "boolean"),
+        ("OpenSimExtras.ExportSupported", "string"),
+        ("OpenSimExtras.GridName", "string"),
+        ("OpenSimExtras.GridNick", "string"),
+        ("OpenSimExtras.GridURL", "string"),
+        ("OpenSimExtras.GridURLAlias", "string"),
+        ("OpenSimExtras.MaxHeightmap", "real"),
+        ("OpenSimExtras.MaxPhysPrimScale", "real"),
+        ("OpenSimExtras.MaxPrimScale", "real"),
+        ("OpenSimExtras.MaxSimHeight", "real"),
+        ("OpenSimExtras.MinHeightmap", "real"),
+        ("OpenSimExtras.MinPhysPrimScale", "real"),
+        ("OpenSimExtras.MinPrimScale", "real"),
+        ("OpenSimExtras.MinSimHeight", "real"),
+        ("OpenSimExtras.SimulatorFPS", "real"),
+        ("OpenSimExtras.SimulatorFPSCritPercent", "integer"),
+        ("OpenSimExtras.SimulatorFPSFactor", "real"),
+        ("OpenSimExtras.SimulatorFPSWarnPercent", "integer"),
+        ("OpenSimExtras.currency-base-uri", "string"),
+        ("OpenSimExtras.map-server-url", "string"),
+        ("OpenSimExtras.say-range", "integer"),
+        ("OpenSimExtras.shout-range", "integer"),
+        ("OpenSimExtras.whisper-range", "integer"),
+        ("PhysicsMaterialsEnabled", "boolean"),
+        ("PhysicsShapeTypes", "map"),
+        ("PhysicsShapeTypes.convex", "boolean"),
+        ("PhysicsShapeTypes.none", "boolean"),
+        ("PhysicsShapeTypes.prim", "boolean"),
+        ("RenderMaterialsCapability", "real"),
+        ("menus", "map"),
+        ("menus.admin", "map"),
+        ("menus.advanced", "map"),
+        ("menus.agent", "map"),
+        ("menus.tools", "map"),
+        ("menus.world", "map"),
+    ],
+    source: "book/src/gridspec/region-arrival.md (simulator-features, 2026-10-07)",
+};
+
+/// Holds the reply's keys and their kinds to what `grid` was measured sending.
+///
+/// # Errors
+///
+/// Returns [`TestFailure::Assertion`] naming every key that is missing, every
+/// key that was not expected, and every key whose kind differs.
+fn check_advertised(
+    grid: Grid,
+    advertised: &BTreeMap<String, &'static str>,
+) -> Result<(), TestFailure> {
+    let expected: BTreeMap<&str, &str> = ADVERTISED
+        .on(grid)
+        .iter()
+        .filter(|(key, _kind)| !(grid.is_fake() && FAKE_GRID_OMITS.contains(key)))
+        .copied()
+        .collect();
+    let mut differences: Vec<String> = Vec::new();
+    for (key, kind) in &expected {
+        match advertised.get(*key) {
+            None => differences.push(format!("{key} is missing")),
+            Some(actual) if actual != kind => {
+                differences.push(format!("{key} is a {actual}, not a {kind}"));
+            }
+            Some(_) => {}
+        }
+    }
+    for (key, kind) in advertised {
+        if !expected.contains_key(key.as_str()) {
+            differences.push(format!("{key} ({kind}) was not expected"));
+        }
+    }
+    if differences.is_empty() {
+        return Ok(());
+    }
+    let verdict = if grid.is_fake() {
+        "the fake grid no longer imitates"
+    } else {
+        "the grid no longer matches"
+    };
+    Err(TestFailure::Assertion(format!(
+        "the SimulatorFeatures reply on {grid}: {} — {verdict} {}",
+        differences.join("; "),
+        ADVERTISED.source
+    )))
 }
 
-/// Whether a region's reply carries the `OpenSimExtras` subtree (currency,
-/// chat ranges, prim-scale limits, grid URLs): OpenSim always, Second Life
-/// never.
-const ADVERTISES_OPEN_SIM_EXTRAS: Measured<bool> = Measured {
-    second_life: false,
-    opensim: true,
-    source: "simulator-features on aditi and OpenSim (ImitatedGrid audit, 2026-09-07)",
-};
-
-/// Whether a region's reply names its spatial-voice backend: Second Life does,
-/// OpenSim names it nowhere and leaves the viewer to fall back on its own.
-const NAMES_VOICE_SERVER_TYPE: Measured<bool> = Measured {
-    second_life: true,
-    opensim: false,
-    source: "simulator-features on aditi and OpenSim (ImitatedGrid audit, 2026-09-07)",
-};
+/// Records every scalar of the reply as a `feature.<path>` metric.
+fn record_values(prefix: &str, value: &Llsd, out: &mut BTreeMap<String, MetricValue>) {
+    let Llsd::Map(members) = value else {
+        return;
+    };
+    for (key, member) in members {
+        let path = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        let metric = match member {
+            Llsd::Boolean(flag) => MetricValue::Bool(*flag),
+            Llsd::Integer(number) => MetricValue::Int(i64::from(*number)),
+            Llsd::Real(number) => MetricValue::Float(*number),
+            Llsd::String(text) | Llsd::Uri(text) | Llsd::Date(text) => {
+                MetricValue::Text(text.clone())
+            }
+            Llsd::Uuid(id) => MetricValue::Text(id.to_string()),
+            Llsd::Map(_) => {
+                record_values(&path, member, out);
+                continue;
+            }
+            Llsd::Undef | Llsd::Binary(_) | Llsd::Array(_) => {
+                MetricValue::Text(format!("({})", member.kind()))
+            }
+        };
+        let _previous = out.insert(format!("feature.{path}"), metric);
+    }
+}
 
 /// Requests the region's `SimulatorFeatures` capability and records the reply's
 /// advertised flags and limits.
 ///
 /// Named `…Case` rather than `SimulatorFeatures` to avoid clashing with the
-/// [`SimulatorFeatures`] reply type this case decodes.
+/// [`SimulatorFeatures`](sl_client_tokio::SimulatorFeatures) reply type this
+/// case decodes.
 #[expect(
     clippy::module_name_repetitions,
     reason = "the bare `SimulatorFeatures` name is the reply type; the case struct needs a distinct name"
@@ -133,50 +273,24 @@ impl GridTest for SimulatorFeaturesCase {
                 .await?;
             let elapsed = start.elapsed().as_secs_f64();
 
-            let advertised = advertised_count(&features);
-            check(
-                advertised >= 1,
-                "expected the SimulatorFeatures reply to advertise at least one feature",
-            )?;
-            // How a region introduces itself is where the two live grids
-            // disagree, so each is held to the grid it says it is — including
-            // the fake one, which is whichever flavour was asked for. Which
-            // voice backend Second Life names is not asserted: it was Vivox
-            // until 2024 and is a thing the grid may change again, so the case
-            // records it rather than pinning it.
-            ADVERTISES_OPEN_SIM_EXTRAS.check(
-                "the OpenSimExtras subtree",
-                grid,
-                &features.open_sim_extras.is_some(),
-            )?;
-            NAMES_VOICE_SERVER_TYPE.check(
-                "a VoiceServerType",
-                grid,
-                &features.voice_server_type.is_some(),
-            )?;
+            let advertised = features.advertised();
+            check_advertised(grid, &advertised)?;
 
+            let mut values = BTreeMap::new();
+            record_values("", &features.to_llsd(), &mut values);
             let metrics = ctx.metrics();
             metrics.set_timing(&secs_metric("sim_features"), elapsed);
             metrics.set(
                 &count_metric("advertised_features"),
-                i64::try_from(advertised).unwrap_or(-1),
+                i64::try_from(advertised.len()).unwrap_or(-1),
             );
             metrics.set("has_open_sim_extras", features.open_sim_extras.is_some());
             metrics.set(
                 "voice_server_type",
                 features.voice_server_type.as_deref().unwrap_or("(none)"),
             );
-            if let Some(mesh_upload_enabled) = features.mesh_upload_enabled {
-                metrics.set("mesh_upload_enabled", mesh_upload_enabled);
-            }
-            if let Some(physics_materials_enabled) = features.physics_materials_enabled {
-                metrics.set("physics_materials_enabled", physics_materials_enabled);
-            }
-            if let Some(max_agent_attachments) = features.max_agent_attachments {
-                metrics.set("max_agent_attachments", i64::from(max_agent_attachments));
-            }
-            if let Some(max_texture_resolution) = features.max_texture_resolution {
-                metrics.set("max_texture_resolution", i64::from(max_texture_resolution));
+            for (key, value) in values {
+                metrics.set(&key, value);
             }
             Ok(())
         })

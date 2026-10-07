@@ -211,7 +211,7 @@ pub use resource_report::{
 };
 pub use sequence_number::SequenceNumber;
 pub use sim_features::{
-    AnimatedObjects, OpenSimExtras, PhysicsShapeTypes, SimulatorFeatures,
+    AnimatedObjects, DynamicMenus, OpenSimExtras, PhysicsShapeTypes, SimulatorFeatures,
     build_simulator_features_response, parse_simulator_features,
 };
 pub use xmlrpc::{

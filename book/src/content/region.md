@@ -280,8 +280,19 @@ and on each region change), surfacing the result as
 `max_agent_attachments`, `pbr_terrain_enabled`, `gltf_enabled`, …). OpenSim
 grids add a nested `OpenSimExtras` subtree — chat ranges
 (`say-range`/`shout-range`/ `whisper-range`), the currency symbol, the
-map/search/destination-guide URLs, and the prim-scale limits — surfaced in
-`open_sim_extras` (it is `None` on Second Life, which omits the map).
+map/search/destination-guide URLs, the grid's name, and the prim-scale,
+altitude and terrain limits — surfaced in `open_sim_extras` (it is `None`
+on Second Life, which omits the map), and a `menus` map of entries to add
+to the viewer's menus.
+
+Every field is an `Option`: `None` is a key the grid did not send, which is
+not the same as one it sent as `false` (Second Life sends `GLTFEnabled` as
+`false`; OpenSim does not send it). A key the type has no field for is kept
+in `other`, and `SimulatorFeatures::advertised()` lists everything a reply
+carried, by dotted path and LLSD kind.
+
+Which keys each grid sends, with their kinds and values, is measured in
+[Region arrival](../gridspec/region-arrival.md#simulatorfeatures).
 
 ## Agent preferences (`AgentPreferences`)
 

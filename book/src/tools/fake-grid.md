@@ -1151,8 +1151,12 @@ all, and a grid Firestorm refuses to add tests nothing.
 
 ### How a region introduces itself
 
-`SimulatorFeatures` is where the two grids describe themselves, and they
-describe themselves differently in two ways that the flavour now decides.
+`SimulatorFeatures` is where the two grids describe themselves, and the
+flavour decides the whole document
+(`ImitatedGrid::stock_simulator_features`): every key each live grid was
+measured sending, in the kind it sent it in — the table is in
+[Region arrival](../gridspec/region-arrival.md#simulatorfeatures). Two of
+the differences have a knob of their own.
 
 **`OpenSimExtras`.** OpenSim always sends the block —
 `SimulatorFeaturesModule` fills it in unconditionally and `GridService`
