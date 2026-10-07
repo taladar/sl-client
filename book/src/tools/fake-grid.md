@@ -2231,6 +2231,22 @@ against that flavour takes that much longer to log out. Both flavours send
 `DisableSimulator` down the avatar's child circuits, and a reply carries one
 `InventoryData` block holding the nil id, as both live grids' do.
 
+### The arrival, as each grid sends it
+
+`ImitatedGrid::arrival_policy` (measured in
+[Region arrival](../gridspec/region-arrival.md)) is what a region says of
+itself. A Second-Life-flavoured stock region names its product, SKU and data
+centre in the handshake, greets a child circuit twice, tells an arriving agent
+its health and pushes an `AgentStateUpdate`, and then sends `SimStats` every
+two seconds and the time every ten. An OpenSim-flavoured one names nothing,
+sends neither message and one handshake, and sends the statistics — six more
+of them — every three seconds and the time every 2.55. Both open the arrival
+with an `AgentDataUpdate`, and both regions carry the flags the live grids'
+stock regions do (`STOCK_REGION_FLAGS`) where they used to carry none.
+
+The telemetry is `SimSession::set_region_telemetry`; a scenario that wants
+other numbers sets its own.
+
 ### The circuit, as each grid runs it
 
 `ImitatedGrid::circuit_policy` (measured in

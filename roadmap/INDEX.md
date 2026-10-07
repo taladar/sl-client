@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 138 |
-| ready | 364 |
+| ready | 363 |
 | blocked | 111 |
 | in-progress | 20 |
-| bugs | 29 |
-| done | 1326 |
+| bugs | 30 |
+| done | 1327 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2034** |
+| **total** | **2035** |
 
 ## ideas (138)
 
@@ -359,7 +359,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (364)
+## ready (363)
 
 ### protocol
 
@@ -1175,8 +1175,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Current Outfit Folder and wearables on each grid
 - [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
   classifieds, notes and display names on each grid
-- [`gridspec-region-arrival`](ready/gridspec-region-arrival.md) — Region
-  handshake identity, the arrival burst and region telemetry on each grid
 - [`gridspec-region-info`](ready/gridspec-region-info.md) — RegionInfo, region
   flags and limits on each grid
 - [`gridspec-search-directory`](ready/gridspec-search-directory.md) — Directory
@@ -1615,7 +1613,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (29)
+## bugs (30)
 
 ### protocol
 
@@ -1624,6 +1622,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-classified-query-wrong-flag-space`](bugs/protocol-classified-query-wrong-flag-space.md)
   — DirClassifiedQuery sends DirFind maturity bits instead of classified-query
   bits
+- [`protocol-neighbor-discovered-repeats`](bugs/protocol-neighbor-discovered-repeats.md)
+  — NeighborDiscovered is reported again every time Second Life re-announces a
+  neighbour
 - [`protocol-region-flag-deny-ageunverified-value`](bugs/protocol-region-flag-deny-ageunverified-value.md)
   — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
   are split
@@ -1690,7 +1691,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 
-## done (1326)
+## done (1327)
 
 ### protocol
 
@@ -4629,6 +4630,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   edits, divide/join, object owners and return on each grid
 - [`gridspec-parcel-properties`](done/gridspec-parcel-properties.md) —
   ParcelProperties transport, fields and pushes on each grid
+- [`gridspec-region-arrival`](done/gridspec-region-arrival.md) — Region
+  handshake identity, the arrival burst and region telemetry on each grid
 - [`gridspec-seed-capabilities`](done/gridspec-seed-capabilities.md) — Which
   capabilities each grid grants from the seed, and to whom
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi

@@ -241,7 +241,12 @@ impl RegionEntry {
     /// `region_protocols` is the grid's own too
     /// ([`GridCore::region_protocols`]): what a region claims to speak is a
     /// property of the grid running it, not of the patch of land.
-    fn identity(&self, estate_owner: AgentKey, region_protocols: u64) -> RegionIdentity {
+    fn identity(
+        &self,
+        estate_owner: AgentKey,
+        region_protocols: u64,
+        arrival: &crate::imitates::ArrivalPolicy,
+    ) -> RegionIdentity {
         let handle = self.handle();
         RegionIdentity {
             sim_name: region_name_from_wire("fake-grid", &self.config.name)
@@ -253,28 +258,35 @@ impl RegionEntry {
                 self.config.grid_x,
                 self.config.grid_y,
             ),
-            region_flags: 0,
-            region_flags_extended: 0,
+            region_flags: crate::imitates::STOCK_REGION_FLAGS,
+            region_flags_extended: u64::from(crate::imitates::STOCK_REGION_FLAGS),
             region_protocols,
             maturity: self.config.maturity,
             product: self.config.product,
-            product_sku: String::new(),
-            // The name is what a viewer classifies the product from; the stock
-            // Full Region keeps the fake grid's own.
+            // The name is what a viewer classifies the product from. A region
+            // configured as a Homestead or an Openspace says so on either
+            // flavour; the stock Full Region takes the imitated grid's own
+            // words, which on OpenSim are none at all.
+            product_sku: match self.config.product {
+                ProductType::Homestead | ProductType::Openspace => "",
+                _ => arrival.product_sku,
+            }
+            .to_owned(),
             product_name: match self.config.product {
                 ProductType::Homestead => "Estate / Homestead",
                 ProductType::Openspace => "Estate / Openspace",
-                _ => "Fake Region",
+                _ => arrival.product_name,
             }
             .to_owned(),
-            cpu_class_id: 0,
+            colo_name: arrival.colo_name.to_owned(),
+            cpu_class_id: arrival.cpu_class_id,
             cpu_ratio: 1,
             sim_owner: estate_owner.uuid(),
             // Per session, not per region: set by the caller from the account's
             // own estate power.
             is_estate_manager: false,
             water_height: self.config.water_height,
-            billable_factor: 1.0,
+            billable_factor: arrival.billable_factor,
             terrain: self.config.terrain.composition,
         }
     }
@@ -475,6 +487,11 @@ pub(crate) struct GridCore {
     pub(crate) logout_reply: crate::imitates::LogoutReply,
     /// How a circuit is run ([`ImitatedGrid::circuit_policy`]).
     pub(crate) circuit_policy: crate::imitates::CircuitPolicy,
+    /// What a region says of itself on arrival and after
+    /// ([`ImitatedGrid::arrival_policy`]).
+    pub(crate) arrival_policy: crate::imitates::ArrivalPolicy,
+    /// What one region holds, by product ([`ImitatedGrid::region_capacity`]).
+    pub(crate) imitated: ImitatedGrid,
     /// How a region's default day is labelled ([`ImitatedGrid::stock_day`]).
     pub(crate) stock_day: crate::imitates::StockDay,
     /// The spatial-voice backend every region serves ([`VoiceBackend`]).
@@ -762,6 +779,22 @@ impl GridCore {
             self.logout_reply,
             crate::imitates::LogoutReply::Withheld
         ));
+        sim.set_region_telemetry(
+            Some(
+                self.arrival_policy.telemetry(
+                    &region.identity(
+                        self.estate_owner,
+                        self.region_protocols,
+                        &self.arrival_policy,
+                    ),
+                    self.imitated
+                        .region_capacity(region.config.product)
+                        .land_impact,
+                    now_epoch_micros(),
+                ),
+            ),
+            now,
+        );
         sim.set_link_tuning(self.circuit_policy.link, now);
         sim.set_timeout_kick(self.circuit_policy.timeout_kick.map(str::to_owned));
         sim.set_short_zero_tails(self.circuit_policy.short_zero_tails);
@@ -928,10 +961,15 @@ impl GridCore {
             upload_announcements: self.upload_announcements,
             bakes: self.bakes,
             identity: {
-                let mut identity = region.identity(self.estate_owner, self.region_protocols);
+                let mut identity = region.identity(
+                    self.estate_owner,
+                    self.region_protocols,
+                    &self.arrival_policy,
+                );
                 identity.is_estate_manager = account.config.estate_manager;
                 identity
             },
+            arrival: self.arrival_policy,
             on_agent_arrived: region.scenario.on_agent_arrived.clone(),
             on_event: region.scenario.on_event.clone(),
             udp_assets,
@@ -1335,6 +1373,14 @@ fn enrich_success(
         .map_or(1, |folder| folder.version);
     let now = success.seconds_since_epoch.unwrap_or(0);
     fields.sections.fill(success, now, cof_version);
+}
+
+/// The wall-clock time as UNIX microseconds — what both live grids put in a
+/// time message's `usec_since_start`, whatever the field is called.
+fn now_epoch_micros() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| u64::try_from(elapsed.as_micros()).unwrap_or(0))
 }
 
 /// The wall-clock time as UNIX seconds (the `seconds_since_epoch` field).
@@ -1981,6 +2027,8 @@ impl FakeGridBuilder {
             environment_change_reply: self.imitates.environment_change_reply(),
             logout_reply: self.imitates.logout_reply(),
             circuit_policy: self.imitates.circuit_policy(),
+            arrival_policy: self.imitates.arrival_policy(),
+            imitated: self.imitates,
             stock_day: self.imitates.stock_day(),
             packages: self
                 .packages

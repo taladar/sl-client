@@ -65,6 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_plugins(SlClientPlugin {
             params,
             diagnostics: false,
+            circuit_probe: sl_client_bevy::CircuitProbe::Off,
             chat_log_config: ChatLogConfig::default(),
             directories: ClientDirectories::default(),
             account_dirs: None,

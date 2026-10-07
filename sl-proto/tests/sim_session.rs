@@ -48,8 +48,8 @@ mod test {
         parse_event_queue_response,
     };
     use sl_proto::{
-        AgentPresence, FlowMirrorStatus, LinkTuning, SESSION_FLOW_COVERAGE, SimChatSessionKind,
-        UserRightsEntry,
+        AgentPresence, FlowMirrorStatus, LinkTuning, RegionTelemetry, SESSION_FLOW_COVERAGE,
+        SimChatSessionKind, UserRightsEntry,
     };
     use sl_proto::{
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
@@ -5247,6 +5247,108 @@ mod test {
         Ok(())
     }
 
+    /// A simulator given its region's telemetry sends a root agent the
+    /// statistics and the time unasked, each on its own interval and the
+    /// clock advancing, and stops the moment the agent is a child.
+    #[test]
+    fn region_telemetry_is_sent_on_its_two_intervals() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+        let zero = sl_proto::Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        sim.set_region_telemetry(
+            Some(RegionTelemetry {
+                stats_interval: Duration::from_secs(2),
+                stats: sl_proto::RegionStats {
+                    grid_coordinates: sl_proto::GridCoordinates::new(1000, 1000),
+                    region_flags: 6,
+                    object_capacity: 15_000,
+                    region_flags_extended: 6,
+                    stats: vec![(sl_proto::SimStatId::TimeDilation, 1.0)],
+                },
+                time_interval: Duration::from_secs(10),
+                time: sl_proto::SimulatorTime {
+                    usec_since_start: 1_000_000,
+                    sec_per_day: 14_400,
+                    sec_per_year: 158_400,
+                    sun_direction: zero.clone(),
+                    sun_phase: 1.0,
+                    sun_ang_velocity: zero,
+                },
+            }),
+            now,
+        );
+
+        let mut stats = 0_u32;
+        let mut clocks = Vec::new();
+        for second in 1..=21_u64 {
+            let step = after(now, second.saturating_mul(1_000))?;
+            sim.handle_timeout(step);
+            // The client's own timer too: it is what flushes the
+            // acknowledgements the simulator is waiting for.
+            client.handle_timeout(step);
+            pump(&mut client, &mut sim, step)?;
+            for event in drain_client(&mut client) {
+                match event {
+                    Event::SimStats(_) => stats = stats.saturating_add(1),
+                    Event::SimulatorTime(time) => clocks.push(time.usec_since_start),
+                    _ => {}
+                }
+            }
+        }
+        // The first of each a second in, then every two and every ten.
+        assert_eq!(stats, 11);
+        assert_eq!(clocks, vec![2_000_000, 12_000_000, 22_000_000]);
+
+        sim.make_child_agent();
+        let later = after(now, 60_000)?;
+        sim.handle_timeout(later);
+        while let Some(transmit) = sim.poll_transmit() {
+            assert!(
+                !matches!(
+                    decode(&transmit)?,
+                    AnyMessage::SimStats(_) | AnyMessage::SimulatorViewerTimeMessage(_)
+                ),
+                "a child circuit carries no region telemetry"
+            );
+        }
+        Ok(())
+    }
+
+    /// The agent's own data — who it is, which group it has active — reaches
+    /// the client as the active-group change both live grids open an arrival
+    /// with.
+    #[test]
+    fn an_agent_data_update_reaches_the_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+        let agent = sl_proto::ActiveGroup {
+            agent_id: AgentKey::from(uuid::Uuid::from_u128(7)),
+            first_name: "Test".to_owned(),
+            last_name: "User".to_owned(),
+            group_title: String::new(),
+            active_group_id: None,
+            group_powers: 0,
+            group_name: String::new(),
+        };
+        sim.send_agent_data_update(&agent, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let got = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ActiveGroupChanged(group) => Some(*group),
+                _ => None,
+            })
+            .ok_or("expected an ActiveGroupChanged client event")?;
+        assert_eq!(got, agent);
+        Ok(())
+    }
+
     #[test]
     fn inactivity_times_out() -> Result<(), TestError> {
         let now = Instant::now();
@@ -5764,6 +5866,7 @@ mod test {
             product: ProductType::Homestead,
             product_sku: String::new(),
             product_name: "Homestead".to_owned(),
+            colo_name: String::new(),
             cpu_class_id: 4,
             cpu_ratio: 8,
             sim_owner: uuid::Uuid::from_u128(0x0411),

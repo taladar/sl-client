@@ -47,6 +47,14 @@ pub trait GridTest: Send + Sync {
         false
     }
 
+    /// Whether the primary session's circuits are probed from the first
+    /// datagram on (default `false`): the only way a case sees a region's
+    /// arrival burst datagram by datagram, since the burst is over before the
+    /// case body could ask for it.
+    fn probes_arrival(&self) -> bool {
+        false
+    }
+
     /// The `start` location every avatar of this test logs in at, as the wire
     /// string a grid expects (`"last"`, `"home"`, or `"uri:Region&x&y&z"`).
     ///
@@ -124,6 +132,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::throttle_set::ThrottleSet),
         Box::new(crate::cases::circuit_unacked_resend::CircuitUnackedResend),
         Box::new(crate::cases::circuit_silence::CircuitSilence),
+        Box::new(crate::cases::region_arrival::RegionArrival),
         Box::new(crate::cases::draw_distance::DrawDistance),
         Box::new(crate::cases::chat_self_echo::ChatSelfEcho),
         Box::new(crate::cases::chat_hear_other::ChatHearOther),

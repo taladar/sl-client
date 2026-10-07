@@ -133,6 +133,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "throttle-set",
     "circuit-unacked-resend",
     "circuit-silence",
+    "region-arrival",
     "simulator-features",
     "seed-capabilities",
     "object-update-decode",
@@ -411,6 +412,11 @@ impl FakeGridHarness {
                     // Nothing to force: the fake grid rate-limits nothing.
                     force: false,
                     cache_dir: None,
+                    probe: if sessions.is_empty() && test.probes_arrival() {
+                        sl_client_tokio::CircuitProbe::Observe
+                    } else {
+                        sl_client_tokio::CircuitProbe::Off
+                    },
                     options: None,
                     capabilities: None,
                 })

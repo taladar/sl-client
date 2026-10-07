@@ -45,6 +45,7 @@ use sl_wire::messages::{
     LandStatReplyRequestDataBlock, MeanCollisionAlert, MeanCollisionAlertMeanCollisionBlock,
     ViewerFrozenMessage, ViewerFrozenMessageFrozenDataBlock,
 };
+use sl_wire::messages::{AgentDataUpdate, AgentDataUpdateAgentDataBlock};
 use sl_wire::messages::{
     AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
     AgentMovementCompleteSimDataBlock, AvatarPickerReply, AvatarPickerReplyAgentDataBlock,
@@ -591,6 +592,40 @@ pub enum AgentPresence {
     /// `CompleteAgentMovement` answered: the root agent — the avatar is in
     /// this region.
     Root,
+}
+
+/// How long after an agent arrives the first of the region's periodic
+/// messages goes out: both live grids' came about a second in.
+const TELEMETRY_FIRST_DELAY: Duration = Duration::from_secs(1);
+
+/// What a simulator tells a root agent about its region on a timer
+/// ([`SimSession::set_region_telemetry`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionTelemetry {
+    /// How far apart the `SimStats` messages are.
+    pub stats_interval: Duration,
+    /// The statistics every one of them carries.
+    pub stats: RegionStats,
+    /// How far apart the `SimulatorViewerTimeMessage`s are.
+    pub time_interval: Duration,
+    /// The time message as of the instant the telemetry was set. Its clock
+    /// (`usec_since_start`) is advanced by the time passed since; the sun is
+    /// sent as given.
+    pub time: SimulatorTime,
+}
+
+/// A [`RegionTelemetry`] in force: when it was set, and when each of its
+/// messages is next due (`None` while the agent is not a root agent).
+#[derive(Debug)]
+struct ArmedTelemetry {
+    /// What is sent.
+    telemetry: RegionTelemetry,
+    /// When it was set: the instant its clock counts from.
+    since: Instant,
+    /// When the next `SimStats` is due.
+    stats_due: Option<Instant>,
+    /// When the next `SimulatorViewerTimeMessage` is due.
+    time_due: Option<Instant>,
 }
 
 /// Where an agent lands when its movement into the region completes: the
@@ -3043,6 +3078,10 @@ pub struct SimSession {
     /// What a root agent is told when its circuit times out; see
     /// [`SimSession::set_timeout_kick`].
     timeout_kick: Option<String>,
+    /// What the root agent is told about the region on a timer, with the
+    /// instant it was set and when each message is next due; see
+    /// [`SimSession::set_region_telemetry`].
+    telemetry: Option<Box<ArmedTelemetry>>,
     /// How an `ObjectUpdate` body is put on the wire; see
     /// [`SimSession::set_short_zero_tails`].
     object_update_coding: BodyCoding,
@@ -3411,6 +3450,7 @@ impl SimSession {
             bare_environment_replies: false,
             withholds_logout_reply: false,
             timeout_kick: None,
+            telemetry: None,
             object_update_coding: BodyCoding::Plain,
             region_handle,
             channel_version: b"sl-proto SimSession".to_vec(),
@@ -4028,6 +4068,28 @@ impl SimSession {
     #[must_use]
     pub const fn link_tuning(&self) -> LinkTuning {
         self.link.tuning()
+    }
+
+    /// Sets what this simulator tells a **root** agent about its region on a
+    /// timer — `SimStats` and `SimulatorViewerTimeMessage`, each at its own
+    /// interval — or nothing (`None`, the default).
+    ///
+    /// Both live grids push the two unasked for as long as the avatar stands
+    /// in the region, and neither sends them down a child circuit. The first
+    /// of each goes out a second after the agent arrives. The numbers are the
+    /// ones given: the statistics as stated every time, the clock advanced by
+    /// the time that has passed since this call.
+    pub fn set_region_telemetry(&mut self, telemetry: Option<RegionTelemetry>, now: Instant) {
+        let root = matches!(self.agent_presence, AgentPresence::Root);
+        self.telemetry = telemetry.map(|telemetry| {
+            let first = root.then(|| deadline(now, TELEMETRY_FIRST_DELAY));
+            Box::new(ArmedTelemetry {
+                telemetry,
+                since: now,
+                stats_due: first,
+                time_due: first,
+            })
+        });
     }
 
     /// Sets what a **root** agent is told when its circuit is closed for
@@ -5032,6 +5094,42 @@ impl SimSession {
             });
             self.send(&message, Reliability::Reliable, now)?;
         }
+        Ok(())
+    }
+
+    /// Sends an `AgentDataUpdate`: who the agent is and which group it has
+    /// active (the inverse of the client's
+    /// [`Event::ActiveGroupChanged`](crate::Event::ActiveGroupChanged)). Both
+    /// live grids open an arrival with one, ahead of the `RegionHandshake`,
+    /// and send another whenever the active group changes or the client asks
+    /// ([`ServerEvent::RequestAgentDataUpdate`]). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_agent_data_update(
+        &mut self,
+        agent: &crate::ActiveGroup,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AgentDataUpdate(AgentDataUpdate {
+            agent_data: AgentDataUpdateAgentDataBlock {
+                agent_id: agent.agent_id.uuid(),
+                first_name: with_nul(&agent.first_name),
+                last_name: with_nul(&agent.last_name),
+                group_title: with_nul_unless_empty(&agent.group_title),
+                active_group_id: agent
+                    .active_group_id
+                    .map_or_else(Uuid::nil, |group| group.uuid()),
+                group_powers: agent.group_powers,
+                group_name: with_nul_unless_empty(&agent.group_name),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
         Ok(())
     }
 
@@ -9427,8 +9525,13 @@ impl SimSession {
     /// simulator kills it only for *other* viewers that cannot see the region
     /// the avatar walked into, never for the crossing agent's own client,
     /// whose avatar is one object across every circuit it holds.
-    pub const fn make_child_agent(&mut self) {
+    pub fn make_child_agent(&mut self) {
         self.agent_presence = AgentPresence::Child;
+        // A child circuit carries no region telemetry.
+        if let Some(armed) = self.telemetry.as_mut() {
+            armed.stats_due = None;
+            armed.time_due = None;
+        }
     }
 
     /// Queues a `ChatterBoxInvitation` on the event queue — invites this
@@ -9993,6 +10096,11 @@ impl SimSession {
                 }
                 self.agent_presence = AgentPresence::Root;
                 self.send_agent_movement_complete(now)?;
+                if let Some(armed) = self.telemetry.as_mut() {
+                    let first = Some(deadline(now, TELEMETRY_FIRST_DELAY));
+                    armed.stats_due = first;
+                    armed.time_due = first;
+                }
                 self.events.push_back(ServerEvent::AgentArrived);
             }
             AnyMessage::RegionHandshakeReply(_) => {
@@ -12152,6 +12260,7 @@ impl SimSession {
             // rather than failing the session over it.
             tracing::warn!(%error, "failed to tell the client about an expired Xfer");
         }
+        self.send_due_telemetry(now);
         if let Some(at) = self.ping
             && now >= at
         {
@@ -12163,6 +12272,32 @@ impl SimSession {
             self.ping = Some(deadline(now, PING_INTERVAL));
             let _result = self.start_ping_check(now);
         }
+    }
+
+    /// Sends whichever of the region's periodic messages is due and arms its
+    /// next one ([`set_region_telemetry`](Self::set_region_telemetry)).
+    fn send_due_telemetry(&mut self, now: Instant) {
+        let Some(mut armed) = self.telemetry.take() else {
+            return;
+        };
+        if armed.stats_due.is_some_and(|due| now >= due) {
+            armed.stats_due = Some(deadline(now, armed.telemetry.stats_interval));
+            if let Err(error) = self.send_sim_stats(&armed.telemetry.stats, now) {
+                tracing::warn!(%error, "failed to send the region's statistics");
+            }
+        }
+        if armed.time_due.is_some_and(|due| now >= due) {
+            armed.time_due = Some(deadline(now, armed.telemetry.time_interval));
+            let elapsed = now.saturating_duration_since(armed.since);
+            let mut time = armed.telemetry.time.clone();
+            time.usec_since_start = time
+                .usec_since_start
+                .saturating_add(u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX));
+            if let Err(error) = self.send_simulator_time(&time, now) {
+                tracing::warn!(%error, "failed to send the region's time");
+            }
+        }
+        self.telemetry = Some(armed);
     }
 
     /// Closes a circuit the client has gone silent on, telling a root agent
@@ -12310,6 +12445,10 @@ impl SimSession {
         merge_deadline(&mut earliest, self.ping);
         merge_deadline(&mut earliest, self.next_resend_deadline());
         merge_deadline(&mut earliest, self.sit_expires);
+        if let Some(armed) = self.telemetry.as_ref() {
+            merge_deadline(&mut earliest, armed.stats_due);
+            merge_deadline(&mut earliest, armed.time_due);
+        }
         merge_deadline(
             &mut earliest,
             self.transfer_serves.values().map(|s| s.expires).min(),
@@ -12345,6 +12484,7 @@ impl SimSession {
         self.state = SimState::Closed;
         self.ping = None;
         self.sit_expires = None;
+        self.telemetry = None;
         self.link.quiesce();
         self.caps_events = Vec::new();
         self.xfer_files = BTreeMap::new();
@@ -12417,6 +12557,16 @@ fn with_nul(s: &str) -> Vec<u8> {
     let mut bytes = s.as_bytes().to_vec();
     bytes.push(0);
     bytes
+}
+
+/// Encodes `s` NUL-terminated, or as no bytes at all when it is empty — how
+/// both live grids send a string field that has nothing in it.
+fn with_nul_unless_empty(s: &str) -> Vec<u8> {
+    if s.is_empty() {
+        Vec::new()
+    } else {
+        with_nul(s)
+    }
 }
 
 /// Encodes an optional array index for the `You`/`Prey` fields of

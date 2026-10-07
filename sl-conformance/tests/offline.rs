@@ -82,6 +82,7 @@ mod test {
         throttle_set => "throttle-set" [fake_sl, fake_opensim],
         circuit_unacked_resend => "circuit-unacked-resend" [fake_sl, fake_opensim],
         circuit_silence => "circuit-silence" [fake_sl, fake_opensim],
+        region_arrival => "region-arrival" [fake_sl, fake_opensim],
         simulator_features => "simulator-features" [fake_sl, fake_opensim],
         seed_capabilities => "seed-capabilities" [fake_sl, fake_opensim],
         object_update_decode => "object-update-decode" [fake_sl, fake_opensim],

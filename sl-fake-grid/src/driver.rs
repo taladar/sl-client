@@ -62,6 +62,9 @@ pub(crate) struct SimState {
     /// The region identity sent in the automatic `RegionHandshake` greeting
     /// (on `UseCircuitCode`, before the agent's movement completes).
     pub(crate) identity: RegionIdentity,
+    /// What the region says of itself on arrival where the live grids
+    /// disagree ([`crate::ImitatedGrid::arrival_policy`]).
+    pub(crate) arrival: crate::imitates::ArrivalPolicy,
     /// Scenario hook run right after the arrival world burst when the agent
     /// completes its movement into the region.
     pub(crate) on_agent_arrived: Option<SimHook>,
@@ -292,7 +295,26 @@ impl SharedSim {
             // `RegionHandshake` before it sends `CompleteAgentMovement`, and
             // the client discards a handshake that arrives after its
             // `AgentMovementComplete` already completed the arrival.
-            if matches!(event, ServerEvent::CircuitOpened { .. }) {
+            // Who the agent is, as both live grids say it: first of all on the
+            // circuit the avatar arrives on, and again whenever asked.
+            let opened = matches!(event, ServerEvent::CircuitOpened { .. });
+            if (opened && matches!(state.role, SessionRole::Root))
+                || matches!(event, ServerEvent::RequestAgentDataUpdate)
+            {
+                let agent = sl_proto::ActiveGroup {
+                    agent_id: state.avatar.agent_id,
+                    first_name: state.avatar.first_name.clone(),
+                    last_name: state.avatar.last_name.clone(),
+                    group_title: String::new(),
+                    active_group_id: None,
+                    group_powers: 0,
+                    group_name: String::new(),
+                };
+                if let Err(error) = state.sim.send_agent_data_update(&agent, now) {
+                    tracing::warn!("agent data update failed: {error}");
+                }
+            }
+            if opened {
                 if let Err(error) = state.sim.send_region_handshake(&state.identity, now) {
                     tracing::warn!("auto region handshake failed: {error}");
                 }
@@ -301,6 +323,13 @@ impl SharedSim {
                 // exactly a circuit that streams a region the avatar is not
                 // standing in.
                 if matches!(state.role, SessionRole::Child) {
+                    // Second Life greets a child circuit twice; the client
+                    // has to take the second for what it is.
+                    for _again in 1..state.arrival.child_handshakes {
+                        if let Err(error) = state.sim.send_region_handshake(&state.identity, now) {
+                            tracing::warn!("repeated region handshake failed: {error}");
+                        }
+                    }
                     push_child_world(
                         &state.world.lock(),
                         &state.terrain,
@@ -312,6 +341,17 @@ impl SharedSim {
                 }
             }
             if matches!(event, ServerEvent::AgentArrived) {
+                // What Second Life tells an arriving agent about itself and
+                // OpenSim does not: its health, and — over the event queue —
+                // what it may do to the region's navmesh.
+                if state.arrival.health_message
+                    && let Err(error) = state.sim.send_health_message(FULL_HEALTH, now)
+                {
+                    tracing::warn!("arrival health message failed: {error}");
+                }
+                if state.arrival.agent_state_update {
+                    state.sim.enqueue_agent_state_update(true);
+                }
                 // A voice-enabled region tells the arriving viewer which
                 // backend to load (`RequiredVoiceVersion` over the event
                 // queue, as a Second Life simulator does on region entry).
@@ -654,6 +694,9 @@ async fn deliver_datagram(shared: &SharedSim, from: SocketAddr, datagram: &[u8])
     }
     closed
 }
+
+/// The health an arriving agent is told it has: all of it.
+const FULL_HEALTH: f32 = 100.0;
 
 /// The `audible` byte of a line heard in full: OpenSim's
 /// `ChatAudibleLevel.Fully`, the only level it sends.

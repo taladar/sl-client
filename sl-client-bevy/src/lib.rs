@@ -495,6 +495,11 @@ pub struct SlClientPlugin {
     /// the session records [`Diagnostic`]s for anomalies it would otherwise
     /// silently drop, surfaced as [`SlDiagnostic`] events.
     pub diagnostics: bool,
+    /// What the session does to its circuits from the first datagram on
+    /// ([`CircuitProbe`]; [`CircuitProbe::Off`] for every normal session).
+    /// Set here rather than with [`Command::ProbeCircuits`] to see a region's
+    /// arrival burst, which is over before a command can be sent.
+    pub circuit_probe: CircuitProbe,
     /// The local chat-log configuration (default off). When any text-chat type is
     /// enabled, the driver writes Firestorm-compatible transcripts and serves the
     /// older, file-backed pages of `QueryChatHistoryPage`.
@@ -581,6 +586,7 @@ impl Plugin for SlClientPlugin {
             .insert_resource(SlConfig {
                 params: self.params.clone(),
                 diagnostics: self.diagnostics,
+                circuit_probe: self.circuit_probe,
                 chat_log_config: self.chat_log_config.clone(),
                 directories: self.directories.clone(),
                 account_dirs: self.account_dirs.clone(),
@@ -698,6 +704,8 @@ struct SlConfig {
     params: LoginParams,
     /// Whether to collect protocol diagnostics.
     diagnostics: bool,
+    /// What the session does to its circuits from the start.
+    circuit_probe: CircuitProbe,
     /// The local chat-log configuration (default off).
     chat_log_config: ChatLogConfig,
     /// The per-account filesystem directories the optional disk features use.
@@ -882,6 +890,7 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
     }
     let mut session = Session::new(config.params.clone());
     session.set_diagnostics(config.diagnostics);
+    session.probe_circuits(config.circuit_probe);
     session.set_background_inventory_fetch(config.background_inventory_fetch);
     session.set_fetch_server_chat_history(config.fetch_server_chat_history);
     let (command_tx, command_rx) = unbounded();

@@ -666,6 +666,7 @@ pub(crate) fn region_identity(
         product: ProductType::classify(&product_sku, &product_name),
         product_sku,
         product_name,
+        colo_name: trimmed_string(&info3.colo_name),
         cpu_class_id: info3.cpu_class_id,
         cpu_ratio: info3.cpu_ratio,
         sim_owner: info.sim_owner,
@@ -745,7 +746,7 @@ pub(crate) fn region_handshake_message(
         region_info3: RegionHandshakeRegionInfo3Block {
             cpu_class_id: identity.cpu_class_id,
             cpu_ratio: identity.cpu_ratio,
-            colo_name: Vec::new(),
+            colo_name: with_nul(&identity.colo_name),
             product_sku: with_nul(&identity.product_sku),
             product_name: with_nul(&identity.product_name),
         },

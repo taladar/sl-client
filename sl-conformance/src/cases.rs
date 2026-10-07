@@ -96,6 +96,7 @@ pub mod parcel_properties;
 pub mod picks_classifieds;
 pub mod presence_online_offline;
 pub mod profile_edit_roundtrip;
+pub mod region_arrival;
 pub mod region_crossing;
 pub mod region_info;
 pub mod script_dialog;

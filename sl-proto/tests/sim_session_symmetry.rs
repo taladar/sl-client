@@ -320,6 +320,7 @@ mod test {
             product: ProductType::Homestead,
             product_sku: String::new(),
             product_name: "Homestead".to_owned(),
+            colo_name: String::new(),
             cpu_class_id: 4,
             cpu_ratio: 8,
             sim_owner: uuid::Uuid::from_u128(0x0411),

@@ -570,6 +570,7 @@ mod tests {
             product: ProductType::Unknown,
             product_sku: String::new(),
             product_name: String::new(),
+            colo_name: String::new(),
             cpu_class_id: 0,
             cpu_ratio: 0,
             sim_owner: Uuid::nil(),

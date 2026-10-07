@@ -36,6 +36,7 @@
 //! | whether a logout is answered ([`logout_reply`](ImitatedGrid::logout_reply)) | a `LogoutReply`, always | none: the session closes with the request unanswered and unacknowledged, which is what the live grid does six times in seven |
 //! | a circuit the client stops answering ([`circuit_policy`](ImitatedGrid::circuit_policy)) | an unacknowledged packet is sent four times, a second apart, and given up; a silent client is dropped after 100 s without a word | an unacknowledged packet is resent for as long as the circuit lasts; a silent client is kicked after 60 s |
 //! | how an `ObjectUpdate` is put on the wire ([`CircuitPolicy::short_zero_tails`]) | zero-coded, its final run of zeros one short | as encoded |
+//! | what a region says of itself on arrival ([`arrival_policy`](ImitatedGrid::arrival_policy)) | a product name, SKU and data centre; a `HealthMessage` and an `AgentStateUpdate`; two handshakes down each child circuit; `SimStats` every 2 s and the time every 10 s, with a sun direction | none of the three names; neither message; one handshake; `SimStats` every 3 s with six more statistics and the time every 2.55 s, with no sun direction |
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
 //!
@@ -435,6 +436,53 @@ impl ImitatedGrid {
         }
     }
 
+    /// What a region says of itself as an agent arrives and afterwards —
+    /// measured by `region-arrival` on aditi and the local OpenSim
+    /// (2026-10-07, `book/src/gridspec/region-arrival.md`).
+    #[must_use]
+    pub const fn arrival_policy(self) -> ArrivalPolicy {
+        match self {
+            Self::SecondLife => ArrivalPolicy {
+                product_name: "Mainland / Full Region",
+                product_sku: "023",
+                colo_name: "aws-us-west-2b",
+                cpu_class_id: 1140,
+                billable_factor: 1.0,
+                child_handshakes: 2,
+                health_message: true,
+                agent_state_update: true,
+                stats_interval: Duration::from_secs(2),
+                stat_ids: &[
+                    0, 1, 2, 3, 31, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 24,
+                    25, 26, 27, 28, 29, 30, 32, 33, 34, 35, 38, 39, 40,
+                ],
+                frames_per_second: 45.0,
+                time_interval: Duration::from_secs(10),
+                sun_direction: [0.419_341_44, 0.0, 0.907_828_6],
+                sun_phase: 1.114_392_9,
+            },
+            Self::OpenSim => ArrivalPolicy {
+                product_name: "",
+                product_sku: "",
+                colo_name: "",
+                cpu_class_id: 9,
+                billable_factor: 0.0,
+                child_handshakes: 1,
+                health_message: false,
+                agent_state_update: false,
+                stats_interval: Duration::from_secs(3),
+                stat_ids: &[
+                    0, 1, 2, 3, 13, 14, 11, 12, 4, 5, 7, 9, 6, 17, 18, 24, 8, 19, 20, 15, 33, 32,
+                    27, 21, 22, 23, 25, 26, 31, 38, 34, 35, 36, 37, 39, 40, 30, 10, 16, 28, 29,
+                ],
+                frames_per_second: 55.0,
+                time_interval: Duration::from_millis(2_550),
+                sun_direction: [0.0, 0.0, 0.0],
+                sun_phase: 2.665_263,
+            },
+        }
+    }
+
     /// Whether this grid's `SimulatorFeatures` carries the `OpenSimExtras`
     /// block.
     ///
@@ -666,6 +714,101 @@ pub enum EnvironmentChangeReply {
     Settings,
     /// A verdict and nothing else.
     Bare,
+}
+
+/// The region flags both live grids' stock regions were measured sending in
+/// their handshake (2026-10-07): landmarks and set-home allowed, direct
+/// teleport, parcel changes and voice allowed, externally visible, and bit 5.
+/// (The aditi sandbox added bit 9 to these.)
+pub const STOCK_REGION_FLAGS: u32 = 0x1410_8026;
+
+/// What a region says of itself as an agent arrives, and on a timer after
+/// ([`ImitatedGrid::arrival_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArrivalPolicy {
+    /// The stock Full Region's `ProductName` in the handshake. A region
+    /// configured as another product keeps that product's own name.
+    pub product_name: &'static str,
+    /// The stock Full Region's `ProductSKU`.
+    pub product_sku: &'static str,
+    /// The handshake's `ColoName`: the data centre.
+    pub colo_name: &'static str,
+    /// The handshake's `CPUClassID`.
+    pub cpu_class_id: i32,
+    /// The handshake's `BillableFactor`.
+    pub billable_factor: f32,
+    /// How many `RegionHandshake`s a child circuit is sent as it opens.
+    pub child_handshakes: u8,
+    /// Whether an arrival is told the agent's health (`HealthMessage`).
+    pub health_message: bool,
+    /// Whether an arrival is pushed an `AgentStateUpdate` over the event
+    /// queue.
+    pub agent_state_update: bool,
+    /// How far apart the `SimStats` are.
+    pub stats_interval: Duration,
+    /// The statistic ids a `SimStats` carries, in the order the grid sends
+    /// them.
+    pub stat_ids: &'static [u32],
+    /// The frame rate the statistics report: the live grids' own, 45 and 55.
+    pub frames_per_second: f32,
+    /// How far apart the `SimulatorViewerTimeMessage`s are.
+    pub time_interval: Duration,
+    /// The sun direction the time message carries; OpenSim's is zero.
+    pub sun_direction: [f32; 3],
+    /// The sun phase the time message carries.
+    pub sun_phase: f32,
+}
+
+impl ArrivalPolicy {
+    /// The region's periodic telemetry: the statistics of an idle region with
+    /// one agent in it, and the time as of `unix_usec`.
+    #[must_use]
+    pub fn telemetry(
+        &self,
+        identity: &sl_proto::RegionIdentity,
+        object_capacity: u32,
+        unix_usec: u64,
+    ) -> sl_proto::RegionTelemetry {
+        let [x, y, z] = self.sun_direction;
+        let zero = sl_proto::Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        sl_proto::RegionTelemetry {
+            stats_interval: self.stats_interval,
+            stats: sl_proto::RegionStats {
+                grid_coordinates: identity.grid_coordinates,
+                region_flags: identity.region_flags,
+                object_capacity,
+                region_flags_extended: identity.region_flags_extended,
+                stats: self
+                    .stat_ids
+                    .iter()
+                    .map(|id| {
+                        let stat = sl_proto::SimStatId::from_id(*id);
+                        let value = match stat {
+                            sl_proto::SimStatId::TimeDilation => 1.0,
+                            sl_proto::SimStatId::SimFps | sl_proto::SimStatId::PhysicsFps => {
+                                self.frames_per_second
+                            }
+                            _ => 0.0,
+                        };
+                        (stat, value)
+                    })
+                    .collect(),
+            },
+            time_interval: self.time_interval,
+            time: sl_proto::SimulatorTime {
+                usec_since_start: unix_usec,
+                sec_per_day: 14_400,
+                sec_per_year: 158_400,
+                sun_direction: sl_proto::Vector { x, y, z },
+                sun_phase: self.sun_phase,
+                sun_ang_velocity: zero,
+            },
+        }
+    }
 }
 
 /// How a grid runs a circuit ([`ImitatedGrid::circuit_policy`]).
@@ -1033,6 +1176,7 @@ mod test {
         assert_ne!(sl.stock_day(), opensim.stock_day());
         assert_ne!(sl.logout_reply(), opensim.logout_reply());
         assert_ne!(sl.circuit_policy(), opensim.circuit_policy());
+        assert_ne!(sl.arrival_policy(), opensim.arrival_policy());
         assert_ne!(
             sl.region_capacity(sl_proto::ProductType::FullRegion),
             opensim.region_capacity(sl_proto::ProductType::FullRegion)

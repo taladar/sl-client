@@ -443,6 +443,7 @@ mod test {
             cooldown: &sl_repl::LoginCooldown::under(std::env::temp_dir()),
             force: false,
             cache_dir: None,
+            probe: sl_client_tokio::CircuitProbe::Off,
             options: None,
             capabilities: None,
         })

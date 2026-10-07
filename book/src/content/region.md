@@ -16,6 +16,10 @@ It arrives in four layers, fetched separately:
 
 ## Region identity (the handshake)
 
+What each grid puts in the handshake, in what order an arrival comes and how
+often the telemetry below is sent is measured in
+[Grid Behaviour → Region arrival](../gridspec/region-arrival.md).
+
 When a [circuit](../comms/circuits.md) to a region comes up, the region
 introduces itself with a **`RegionHandshake`**. The client replies with
 `RegionHandshakeReply` (after which the scene stream begins) and surfaces the

@@ -879,6 +879,7 @@ pub(crate) fn seed_region_name(app: &mut App, handle: sl_client_bevy::RegionHand
         product: sl_client_bevy::ProductType::Unknown,
         product_sku: String::new(),
         product_name: String::new(),
+        colo_name: String::new(),
         cpu_class_id: 0,
         cpu_ratio: 0,
         sim_owner: sl_client_bevy::Uuid::nil(),

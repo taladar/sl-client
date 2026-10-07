@@ -105,22 +105,23 @@ pub use sl_proto::{
     REQUESTED_CAPABILITIES, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
     RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
     RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
-    RegionName, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
-    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
-    SculptOrMeshKey, SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures,
-    SkySettings, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
-    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerraformArea,
-    TerrainLayerType, TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace,
-    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
-    TransferId, TransferStatus, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
-    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
-    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
-    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
-    Vector, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
-    XferListing, avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
+    RegionName, RegionStats, RegionTerrainComposition, RegionTerrainUpdate, Reliability,
+    RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
+    ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptTeleportRequest,
+    ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber, SessionMessage,
+    SetDisplayNameReply, SimStatId, SimulatorFeatures, SimulatorTime, SkySettings, SoundFlags,
+    SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot, TaskInventoryItem,
+    TaskInventoryKey, TaskInventoryReply, TerraformArea, TerrainLayerType, TerrainPatch, Texture,
+    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
+    ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit,
+    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
+    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
+    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, XferListing,
+    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
     encode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
     particle_pattern, pcode, prim_flags, sim_access, texture_anim_mode,
 };
@@ -550,6 +551,15 @@ impl Client {
     /// over its `diagnostics` channel. Call before [`Client::run`].
     pub fn set_diagnostics(&mut self, enabled: bool) {
         self.session.set_diagnostics(enabled);
+    }
+
+    /// Probes the session's circuits from its first datagram
+    /// ([`CircuitProbe`]) — the only way to see a region's arrival burst
+    /// datagram by datagram, since a [`Command::ProbeCircuits`] cannot be sent
+    /// before the run loop that carries the burst has started. Call before
+    /// [`Client::run`], with [`Client::set_diagnostics`] on.
+    pub const fn set_circuit_probe(&mut self, probe: CircuitProbe) {
+        self.session.probe_circuits(probe);
     }
 
     /// Sets the channel over which [`Client::run`] reports the region's

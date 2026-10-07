@@ -700,6 +700,7 @@ fn run_session(
         .add_plugins(SlClientPlugin {
             params: params.clone(),
             diagnostics: true,
+            circuit_probe: sl_client_bevy::CircuitProbe::Off,
             chat_log_config: chat_log_config.clone(),
             directories: directories.clone(),
             account_dirs,

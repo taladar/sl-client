@@ -327,6 +327,11 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         cooldown: &cooldown,
         force: args.force,
         cache_dir: primary_cache_dir,
+        probe: if test.probes_arrival() {
+            sl_client_tokio::CircuitProbe::Observe
+        } else {
+            sl_client_tokio::CircuitProbe::Off
+        },
         options: None,
         capabilities: None,
     })
@@ -343,6 +348,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 cooldown: &cooldown,
                 force: args.force,
                 cache_dir: None,
+                probe: sl_client_tokio::CircuitProbe::Off,
                 options: None,
                 capabilities: None,
             })
@@ -362,6 +368,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 cooldown: &cooldown,
                 force: args.force,
                 cache_dir: None,
+                probe: sl_client_tokio::CircuitProbe::Off,
                 options: None,
                 capabilities: None,
             })

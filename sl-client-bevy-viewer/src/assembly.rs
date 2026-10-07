@@ -705,6 +705,7 @@ impl ViewerAppBuilder {
         app.insert_resource(skin).add_plugins(SlClientPlugin {
             params: params.clone(),
             diagnostics: true,
+            circuit_probe: sl_client_bevy::CircuitProbe::Off,
             // Log every text-chat type to the per-avatar chat directory — the
             // pre-login default; once the account settings load,
             // `preferences_chat` pushes the avatar's stored logging preferences

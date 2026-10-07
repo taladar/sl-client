@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sl_client_tokio::{
-    AgentKey, CircuitId, Client, ClientDirectories, Command, Diagnostic, Event, ExperienceKey,
-    GroupKey, InventoryCacheConfig, LoginAccount, LoginParams, LoginRejectKind, LoginRequest,
-    MeshKey, RegionHandle, StartLocation, Uuid,
+    AgentKey, CircuitId, CircuitProbe, Client, ClientDirectories, Command, Diagnostic, Event,
+    ExperienceKey, GroupKey, InventoryCacheConfig, LoginAccount, LoginParams, LoginRejectKind,
+    LoginRequest, MeshKey, RegionHandle, StartLocation, Uuid,
 };
 use sl_repl::{Avatar, CooldownError, LoginCooldown};
 use time::OffsetDateTime;
@@ -540,6 +540,7 @@ impl Session {
             cooldown: &cooldown,
             force,
             cache_dir,
+            probe: CircuitProbe::Off,
             options,
             capabilities,
         })
@@ -574,6 +575,7 @@ impl Session {
             cooldown: &self.cooldown,
             force: self.force,
             cache_dir: None,
+            probe: CircuitProbe::Off,
             options: self.options.clone(),
             capabilities: self.capabilities.clone(),
         };
@@ -697,6 +699,11 @@ pub struct LoginSpec<'a> {
     /// there across the session's [`Session::disconnect`] /
     /// [`Session::relogin`] cycle.
     pub cache_dir: Option<PathBuf>,
+    /// What the session does to its circuits from the first datagram on —
+    /// [`CircuitProbe::Observe`] for a case that reads the arrival burst
+    /// ([`GridTest::probes_arrival`](crate::registry::GridTest::probes_arrival)),
+    /// [`CircuitProbe::Off`] otherwise.
+    pub probe: CircuitProbe,
     /// The login request's `options` list, or `None` for the client's default
     /// (what every case but `login-options` passes).
     pub options: Option<Vec<String>>,
@@ -844,12 +851,14 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
         cooldown,
         force,
         cache_dir,
+        probe,
         options,
         capabilities,
     } = spec;
     // Enable diagnostics so a case can observe protocol anomalies (e.g. a
     // logout that never received its `LogoutReply`); they are off by default.
     client.set_diagnostics(true);
+    client.set_circuit_probe(probe);
 
     // Enable the inventory disk cache when the case asked for one (only
     // `inventory-cache-skip` does). The runtime then loads the cache before the

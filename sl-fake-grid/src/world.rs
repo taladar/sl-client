@@ -3192,6 +3192,7 @@ mod test {
             product: sl_proto::ProductType::FullRegion,
             product_sku: String::new(),
             product_name: name.to_owned(),
+            colo_name: String::new(),
             cpu_class_id: 0,
             cpu_ratio: 1,
             sim_owner: uuid::Uuid::nil(),

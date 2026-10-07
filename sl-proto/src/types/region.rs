@@ -45,6 +45,9 @@ pub struct RegionIdentity {
     pub product_sku: String,
     /// The raw `ProductName` string (possibly empty, e.g. on OpenSim).
     pub product_name: String,
+    /// The raw `ColoName` string: the data centre the simulator runs in, as
+    /// Second Life names it (`aws-us-west-2b`). Empty on OpenSim.
+    pub colo_name: String,
     /// The simulator's advertised CPU class (`CPUClassID`, from the `RegionInfo3`
     /// block); a coarse performance tier. `0` when the grid does not provide it.
     pub cpu_class_id: i32,

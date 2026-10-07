@@ -10,6 +10,9 @@
 //! - the About window's tabs switch panes, a license row shows its text, Copy
 //!   to Clipboard pastes the support block, the Help menu ticks the window,
 //!   and the Region line follows a teleport;
+//! - the About window names the region's product where the grid sends one
+//!   (Second Life's flavour) and shows no Product line where it sends none
+//!   (OpenSim's);
 //! - while Unavailable, an IM is answered once and an offer is held until the
 //!   mode ends;
 //! - the radar sorts on a column click, filters by name, and opens a row's
@@ -23,8 +26,8 @@ mod test {
     use serde_json::json;
     use sl_automation_proto::{CameraView, Locator, LogStream, Probe, Role};
     use sl_e2e::{BodyError, Need, Stage, StageBuilder};
-    use sl_fake_grid::RegionConfig;
     use sl_fake_grid::fixtures::scenarios;
+    use sl_fake_grid::{ImitatedGrid, RegionConfig};
     use sl_proto::{AgentKey, ImDialog, InstantMessage, RegionCoordinates, ServerEvent, Uuid};
     use sl_viewer_driver::{UiLocator, Viewer};
     use tokio::sync::broadcast;
@@ -364,6 +367,61 @@ mod test {
                 Ok(())
             })?;
         Ok(())
+    }
+
+    /// Open About on a grid imitating `flavour` and wait for its support
+    /// block to hold `wanted`.
+    fn about_block_holds(
+        name: &str,
+        flavour: ImitatedGrid,
+        wanted: impl Fn(&str, &RegionConfig) -> String + Send + Sync + 'static,
+    ) -> Result<(), TestError> {
+        let home = RegionConfig::default();
+        let config = home.clone();
+        stage(name, &["Alpha"])
+            .region(home)
+            .configure_grid(move |grid| grid.imitates(flavour))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let _opened = alpha.menu_path(&HELP_ABOUT).await?;
+                let about = alpha.ui().window(ABOUT);
+                let block = about.test_id("about:info:support-block");
+                let _named = alpha
+                    .expect(&block)
+                    .to_contain_text(&wanted(stage.home_region(), &config))
+                    .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// **About on Second Life's flavour**: the handshake names the region's
+    /// product and SKU, and the window shows them
+    /// (`book/src/gridspec/region-arrival.md`).
+    #[test]
+    fn the_about_window_names_a_second_life_flavoured_regions_product() -> Result<(), TestError> {
+        about_block_holds(
+            "about_product_second_life",
+            ImitatedGrid::SecondLife,
+            |_region, _config| "Product: Mainland / Full Region (023)".to_owned(),
+        )
+    }
+
+    /// **About on OpenSim's flavour**: the handshake names no product at all,
+    /// and the window goes from the region straight to the simulator's host
+    /// with no empty Product line between.
+    #[test]
+    fn the_about_window_shows_no_product_on_an_opensim_flavoured_region() -> Result<(), TestError> {
+        about_block_holds(
+            "about_product_opensim",
+            ImitatedGrid::OpenSim,
+            |region, config| {
+                format!(
+                    "Region: {region} ({}, {})\nSimulator host:",
+                    config.grid_x, config.grid_y
+                )
+            },
+        )
     }
 
     /// Open the Help menu, see its About entry ticked, and close the menu.
