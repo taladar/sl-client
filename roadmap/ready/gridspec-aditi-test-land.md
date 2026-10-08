@@ -37,3 +37,10 @@ Not applicable.
 ## Viewer
 
 Not applicable.
+
+## From gridspec-avatar-presence (2026-10-08)
+
+`parcel-privacy` (a parcel with `SeeAVs` off: who is sent whom across its
+line) ran on OpenSim only and waits on this for its Second Life column in
+`book/src/gridspec/avatars.md`. It needs a parcel it can divide; add
+`Grid::Aditi` to its grids and a fixture for where the parcel is.

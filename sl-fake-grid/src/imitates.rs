@@ -594,6 +594,8 @@ impl ImitatedGrid {
                 ],
                 frames_per_second: 45.0,
                 time_interval: Duration::from_secs(10),
+                coarse_interval: Duration::from_millis(1_333),
+                coarse_rounding: sl_proto::CoarseRounding::Nearest,
                 sun_direction: [0.419_341_44, 0.0, 0.907_828_6],
                 sun_phase: 1.114_392_9,
             },
@@ -613,6 +615,8 @@ impl ImitatedGrid {
                 ],
                 frames_per_second: 55.0,
                 time_interval: Duration::from_millis(2_550),
+                coarse_interval: Duration::from_millis(4_545),
+                coarse_rounding: sl_proto::CoarseRounding::Down,
                 sun_direction: [0.0, 0.0, 0.0],
                 sun_phase: 2.665_263,
             },
@@ -983,6 +987,11 @@ pub struct ArrivalPolicy {
     pub frames_per_second: f32,
     /// How far apart the `SimulatorViewerTimeMessage`s are.
     pub time_interval: Duration,
+    /// How far apart the `CoarseLocationUpdate`s are.
+    pub coarse_interval: Duration,
+    /// How a position is cut down to a coarse entry: Second Life rounds,
+    /// OpenSim cuts off.
+    pub coarse_rounding: sl_proto::CoarseRounding,
     /// The sun direction the time message carries; OpenSim's is zero.
     pub sun_direction: [f32; 3],
     /// The sun phase the time message carries.
@@ -1037,6 +1046,8 @@ impl ArrivalPolicy {
                 sun_phase: self.sun_phase,
                 sun_ang_velocity: zero,
             },
+            coarse_interval: Some(self.coarse_interval),
+            coarse_rounding: self.coarse_rounding,
         }
     }
 }

@@ -52,6 +52,7 @@
 - [Region arrival](gridspec/region-arrival.md)
 - [Teleport](gridspec/teleport.md)
 - [Movement](gridspec/movement.md)
+- [Avatars](gridspec/avatars.md)
 - [Capabilities](gridspec/capabilities.md)
 - [Land](gridspec/land.md)
 - [Environment](gridspec/environment.md)

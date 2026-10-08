@@ -67,3 +67,23 @@ object needs that region's object stream — another "never streamed" route (the
 distinguishes "never streamed" (no full ObjectUpdate ever logged for the agent)
 from "streamed-but-unrendered" (logged, but no body). Confirm which before
 touching code.
+
+## From gridspec-avatar-presence (2026-10-08) — the draw distance is not it
+
+`avatar-presence` put one of our avatars 1,123 m above another on aditi
+(Ahern), the watcher's draw distance at 64 m: the far avatar was never
+killed, and when the watcher left for a neighbouring region and came back
+it was sent the far avatar's full object 1.2 s after arriving
+(`book/src/gridspec/avatars.md`, *How far an avatar is sent*). So a
+same-region avatar is streamed whatever the draw distance and however high,
+and the "leading cause" above is wrong; raising `RenderFarClip` would not
+have helped.
+
+What is left to check live, with `SL_VIEWER_LOG_AVATAR_INTEREST=1`:
+
+- whether the resident was in the agent's own region at all — a region the
+  viewer holds no child circuit to sends only what its neighbour relays,
+  and a coarse height at the 1,020 m ceiling is how the feed states "above
+  what I can say";
+- whether the object did arrive and the viewer dropped it (an update for an
+  avatar seated on something not yet streamed, say).

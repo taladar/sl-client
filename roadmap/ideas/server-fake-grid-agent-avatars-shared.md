@@ -29,3 +29,31 @@ live-only because the fake grid has no observer to send it to. Once agents
 are shared — and a sit re-parents the avatar for the others
 ([[server-world-sit-and-attach]]) — add it to the offline list for both
 flavours.
+
+## From gridspec-avatar-presence (2026-10-08)
+
+Measured in `book/src/gridspec/avatars.md`; build to that chapter.
+
+- **Arrival**, as the others see it: the object, then `AvatarAppearance`
+  and `AvatarAnimation` within 30 to 65 ms, on both grids. Second Life sends
+  the appearance twice and the animations five to seven times in the first
+  fifteen seconds, and goes on re-sending an idle avatar's animations;
+  OpenSim sends each once.
+- **Departure**: a `KillObject` 0.3 to 0.4 s after a teleport's request
+  and 0.6 s after a `LogoutRequest` on Second Life, 0.2 s and 15 ms on
+  OpenSim.
+- **No range**: neither grid withholds a same-region avatar by distance or
+  draw distance.
+- **The coarse feed** is already sent per flavour, listing NPCs and the
+  agent; it has to list the other sessions' agents too, drop one with the
+  next update after it leaves, and go down a child circuit with the
+  neighbour's own list.
+- **A neighbour's avatars** are streamed down the child circuit as full
+  objects, and killed there when the avatar crosses into the agent's own
+  region (before its object arrives on Second Life, with it on OpenSim).
+- **Parcel hiding** (OpenSim; Second Life unmeasured): one-way, 60 ms, the
+  coarse feed untouched.
+
+`avatar-presence` declares both fake flavours but runs only its
+single-resident leg there; drop the `is_fake` branch once residents see each
+other.

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 361 |
+| ready | 360 |
 | blocked | 111 |
 | in-progress | 20 |
 | bugs | 34 |
-| done | 1334 |
+| done | 1335 |
 | deferred | 29 |
 | wont-do | 17 |
 | **total** | **2045** |
@@ -263,7 +263,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   service — records, permissions, key-value store
 - [`server-fake-grid-agent-avatars-shared`](ideas/server-fake-grid-agent-avatars-shared.md)
   — Fake grid — logged-in agents see each other's avatars (blocked by
-  `gridspec-avatar-presence`, `gridspec-animations`)
+  `gridspec-avatar-presence` (done), `gridspec-animations`)
 - [`server-fake-grid-im-relay`](ideas/server-fake-grid-im-relay.md) — Fake grid
   — relay IMs and offers between its sessions (blocked by
   `gridspec-teleport-lures` (done), `gridspec-instant-messages`)
@@ -362,7 +362,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (361)
+## ready (360)
 
 ### protocol
 
@@ -1123,8 +1123,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   their costs, refusals and announcements on each grid
 - [`gridspec-attachments`](ready/gridspec-attachments.md) — Attachments on each
   grid: attach, detach, limits, HUDs, temporary
-- [`gridspec-avatar-presence`](ready/gridspec-avatar-presence.md) — Other
-  avatars in the region: full updates, coarse locations and kills
 - [`gridspec-avatar-render-info`](ready/gridspec-avatar-render-info.md) —
   AvatarRenderInfo and AttachmentResources on each grid
 - [`gridspec-estate`](ready/gridspec-estate.md) — Estate info, access, covenant
@@ -1701,7 +1699,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The scripted environment change's `night` marker never arrived, once, in a
   full suite run
 
-## done (1334)
+## done (1335)
 
 ### protocol
 
@@ -4624,6 +4622,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`gridspec-agent-movement`](done/gridspec-agent-movement.md) — How each grid
   moves an agent: AgentUpdate handling, speeds, terse updates
+- [`gridspec-avatar-presence`](done/gridspec-avatar-presence.md) — Other avatars
+  in the region: full updates, coarse locations and kills
 - [`gridspec-circuit`](done/gridspec-circuit.md) — Circuit behaviour: acks,
   resends, pings, inactivity, packet quirks and throttles
 - [`gridspec-environment`](done/gridspec-environment.md) — Region and parcel

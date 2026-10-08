@@ -5279,6 +5279,8 @@ mod test {
                     sun_phase: 1.0,
                     sun_ang_velocity: zero,
                 },
+                coarse_interval: None,
+                coarse_rounding: sl_proto::CoarseRounding::Nearest,
             }),
             now,
         );
@@ -5317,6 +5319,130 @@ mod test {
             );
         }
         Ok(())
+    }
+
+    /// A simulator given a coarse interval lists the other avatars it was
+    /// told of and then the agent itself, where it arrived, with `You` on
+    /// that last entry — and each entry cut down to whole metres and a
+    /// height that is a multiple of four.
+    #[test]
+    fn coarse_locations_are_sent_on_their_interval_with_the_agent_last() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+        let own = sim.agent_id().ok_or("the simulator knows no agent")?;
+        let other = sl_proto::AgentKey::from(sl_proto::Uuid::from_u128(0x0c0a_25e0));
+        sim.set_arrival_position(
+            sl_proto::RegionCoordinates::new(127.82, 128.4, 29.19),
+            sl_proto::Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        sim.set_coarse_others(vec![sl_proto::coarse_location(
+            other,
+            &sl_proto::RegionCoordinates::new(10.9, 300.0, 2000.0),
+            sl_proto::CoarseRounding::Down,
+        )]);
+        let zero = sl_proto::Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        sim.set_region_telemetry(
+            Some(RegionTelemetry {
+                stats_interval: Duration::from_secs(3600),
+                stats: sl_proto::RegionStats {
+                    grid_coordinates: sl_proto::GridCoordinates::new(1000, 1000),
+                    region_flags: 6,
+                    object_capacity: 15_000,
+                    region_flags_extended: 6,
+                    stats: Vec::new(),
+                },
+                time_interval: Duration::from_secs(3600),
+                time: sl_proto::SimulatorTime {
+                    usec_since_start: 0,
+                    sec_per_day: 14_400,
+                    sec_per_year: 158_400,
+                    sun_direction: zero.clone(),
+                    sun_phase: 1.0,
+                    sun_ang_velocity: zero,
+                },
+                coarse_interval: Some(Duration::from_secs(4)),
+                coarse_rounding: sl_proto::CoarseRounding::Down,
+            }),
+            now,
+        );
+
+        let mut updates = Vec::new();
+        for second in 1..=9_u64 {
+            let step = after(now, second.saturating_mul(1_000))?;
+            sim.handle_timeout(step);
+            client.handle_timeout(step);
+            pump(&mut client, &mut sim, step)?;
+            for event in drain_client(&mut client) {
+                if let Event::CoarseLocationUpdate {
+                    locations,
+                    you,
+                    prey,
+                    ..
+                } = event
+                {
+                    updates.push((locations, you, prey));
+                }
+            }
+        }
+        // A second in, then every four.
+        assert_eq!(updates.len(), 3);
+        let expected = vec![
+            sl_proto::CoarseLocation {
+                agent_id: other,
+                x: 10,
+                y: 255,
+                z: 0,
+            },
+            sl_proto::CoarseLocation {
+                agent_id: own,
+                x: 127,
+                y: 128,
+                z: 28,
+            },
+        ];
+        for (locations, you, prey) in updates {
+            assert_eq!(locations, expected);
+            assert_eq!(you, Some(1));
+            assert_eq!(prey, None);
+        }
+
+        sim.make_child_agent();
+        sim.handle_timeout(after(now, 60_000)?);
+        while let Some(transmit) = sim.poll_transmit() {
+            assert!(
+                !matches!(decode(&transmit)?, AnyMessage::CoarseLocationUpdate(_)),
+                "a child circuit is sent no coarse locations"
+            );
+        }
+        Ok(())
+    }
+
+    /// Second Life rounds a position into its coarse entry and OpenSim cuts
+    /// it off.
+    #[test]
+    fn a_coarse_entry_is_rounded_or_cut_off() {
+        let agent = sl_proto::AgentKey::from(sl_proto::Uuid::from_u128(1));
+        let at = sl_proto::RegionCoordinates::new(7.64, 10.14, 235.74);
+        let nearest = sl_proto::coarse_location(agent, &at, sl_proto::CoarseRounding::Nearest);
+        assert_eq!((nearest.x, nearest.y, nearest.z), (8, 10, 236));
+        let down = sl_proto::coarse_location(agent, &at, sl_proto::CoarseRounding::Down);
+        assert_eq!((down.x, down.y, down.z), (7, 10, 232));
+        // Above what a byte holds, Second Life states the most it can and
+        // OpenSim nothing.
+        let high = sl_proto::RegionCoordinates::new(7.64, 10.14, 1163.5);
+        let nearest = sl_proto::coarse_location(agent, &high, sl_proto::CoarseRounding::Nearest);
+        assert_eq!(nearest.z, 1020);
+        let down = sl_proto::coarse_location(agent, &high, sl_proto::CoarseRounding::Down);
+        assert_eq!(down.z, 0);
     }
 
     /// The agent's own data — who it is, which group it has active — reaches

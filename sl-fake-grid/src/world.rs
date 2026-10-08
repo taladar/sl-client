@@ -1502,7 +1502,41 @@ pub(crate) fn push_arrival_world(
         tracing::warn!("rezzing the fixture objects failed: {error}");
     }
     push_npcs(&world.npcs, bakes, sim, now);
+    sim.set_coarse_others(coarse_others(world, sim.coarse_rounding()));
     push_object_animations(&world.object_animations, sim, now);
+}
+
+/// The entries the region's periodic `CoarseLocationUpdate` carries for its
+/// other avatars: one per NPC, where it stands. A seated one is placed at its
+/// seat's position plus its own offset from it, the seat's rotation left out:
+/// an entry is a whole metre wide.
+fn coarse_others(
+    world: &SceneFixtures,
+    rounding: sl_proto::CoarseRounding,
+) -> Vec<sl_proto::CoarseLocation> {
+    world
+        .npcs
+        .iter()
+        .map(|npc| {
+            let seat = npc.seat.and_then(|seat| {
+                world
+                    .objects
+                    .iter()
+                    .find(|object| object.local_id == seat)
+                    .map(|object| object.motion.position.clone())
+            });
+            let (x, y, z) = seat.map_or((0.0, 0.0, 0.0), |seat| (seat.x, seat.y, seat.z));
+            sl_proto::coarse_location(
+                npc.agent_id(),
+                &sl_proto::RegionCoordinates::new(
+                    npc.position.x + x,
+                    npc.position.y + y,
+                    npc.position.z + z,
+                ),
+                rounding,
+            )
+        })
+        .collect()
 }
 
 /// Pushes what a **child** circuit is shown: the region's objects, its other
@@ -1720,6 +1754,7 @@ pub(crate) fn receive_crossing(
     push_npcs(&npcs, bakes, sim, now);
     world.objects.extend(objects);
     world.npcs.extend(npcs);
+    sim.set_coarse_others(coarse_others(world, sim.coarse_rounding()));
 }
 
 /// Streams the region's ground: the LAND layer as the spiral of patches a

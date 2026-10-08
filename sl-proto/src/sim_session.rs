@@ -612,6 +612,13 @@ pub struct RegionTelemetry {
     /// (`usec_since_start`) is advanced by the time passed since; the sun is
     /// sent as given.
     pub time: SimulatorTime,
+    /// How far apart the `CoarseLocationUpdate`s are, or `None` to send none.
+    /// Each lists the avatars given to
+    /// [`SimSession::set_coarse_others`] and then the agent itself, where it
+    /// last arrived, with `You` pointing at that entry.
+    pub coarse_interval: Option<Duration>,
+    /// How the agent's own position is cut down to its entry.
+    pub coarse_rounding: CoarseRounding,
 }
 
 /// A [`RegionTelemetry`] in force: when it was set, and when each of its
@@ -626,6 +633,8 @@ struct ArmedTelemetry {
     stats_due: Option<Instant>,
     /// When the next `SimulatorViewerTimeMessage` is due.
     time_due: Option<Instant>,
+    /// When the next `CoarseLocationUpdate` is due.
+    coarse_due: Option<Instant>,
 }
 
 /// Where an agent lands when its movement into the region completes: the
@@ -3086,6 +3095,9 @@ pub struct SimSession {
     /// instant it was set and when each message is next due; see
     /// [`SimSession::set_region_telemetry`].
     telemetry: Option<Box<ArmedTelemetry>>,
+    /// The other avatars the periodic `CoarseLocationUpdate` lists
+    /// ([`SimSession::set_coarse_others`]).
+    coarse_others: Vec<CoarseLocation>,
     /// How an `ObjectUpdate` body is put on the wire; see
     /// [`SimSession::set_short_zero_tails`].
     object_update_coding: BodyCoding,
@@ -3472,6 +3484,7 @@ impl SimSession {
             withholds_logout_reply: false,
             timeout_kick: None,
             telemetry: None,
+            coarse_others: Vec::new(),
             object_update_coding: BodyCoding::Plain,
             region_handle,
             channel_version: b"sl-proto SimSession".to_vec(),
@@ -4113,8 +4126,29 @@ impl SimSession {
                 since: now,
                 stats_due: first,
                 time_due: first,
+                coarse_due: first,
             })
         });
+    }
+
+    /// Sets the other avatars the periodic `CoarseLocationUpdate` lists
+    /// ([`RegionTelemetry::coarse_interval`]), replacing any set before. The
+    /// agent's own entry is not among them: it is added from where the agent
+    /// last arrived.
+    pub fn set_coarse_others(&mut self, others: Vec<CoarseLocation>) {
+        self.coarse_others = others;
+    }
+
+    /// How this simulator cuts a position down to a coarse entry: its
+    /// telemetry's ([`RegionTelemetry::coarse_rounding`]), or the default
+    /// where none is set.
+    #[must_use]
+    pub fn coarse_rounding(&self) -> CoarseRounding {
+        self.telemetry
+            .as_ref()
+            .map_or_else(CoarseRounding::default, |armed| {
+                armed.telemetry.coarse_rounding
+            })
     }
 
     /// Sets what a **root** agent is told when its circuit is closed for
@@ -9595,6 +9629,7 @@ impl SimSession {
         if let Some(armed) = self.telemetry.as_mut() {
             armed.stats_due = None;
             armed.time_due = None;
+            armed.coarse_due = None;
         }
     }
 
@@ -10169,6 +10204,7 @@ impl SimSession {
                     let first = Some(deadline(now, TELEMETRY_FIRST_DELAY));
                     armed.stats_due = first;
                     armed.time_due = first;
+                    armed.coarse_due = first;
                 }
                 self.events.push_back(ServerEvent::AgentArrived);
             }
@@ -12370,6 +12406,23 @@ impl SimSession {
                 tracing::warn!(%error, "failed to send the region's time");
             }
         }
+        if let Some(interval) = armed.telemetry.coarse_interval
+            && armed.coarse_due.is_some_and(|due| now >= due)
+        {
+            armed.coarse_due = Some(deadline(now, interval));
+            let mut locations = self.coarse_others.clone();
+            if let Some(agent_id) = self.agent_id() {
+                locations.push(coarse_location(
+                    agent_id,
+                    &self.arrival.position,
+                    armed.telemetry.coarse_rounding,
+                ));
+            }
+            let you = locations.len().checked_sub(1);
+            if let Err(error) = self.send_coarse_location_update(&locations, you, None, now) {
+                tracing::warn!(%error, "failed to send the region's coarse locations");
+            }
+        }
         self.telemetry = Some(armed);
     }
 
@@ -12521,6 +12574,9 @@ impl SimSession {
         if let Some(armed) = self.telemetry.as_ref() {
             merge_deadline(&mut earliest, armed.stats_due);
             merge_deadline(&mut earliest, armed.time_due);
+            if armed.telemetry.coarse_interval.is_some() {
+                merge_deadline(&mut earliest, armed.coarse_due);
+            }
         }
         merge_deadline(
             &mut earliest,
@@ -12639,6 +12695,56 @@ fn with_nul_unless_empty(s: &str) -> Vec<u8> {
         Vec::new()
     } else {
         with_nul(s)
+    }
+}
+
+/// How a simulator cuts a position down to a `CoarseLocationUpdate` entry's
+/// whole metres and its height's multiple of four
+/// (`avatar-presence`, 2026-10-08).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CoarseRounding {
+    /// To the nearest: 7.64 m is 8 and a height of 235.7 m is 236. Second
+    /// Life's.
+    #[default]
+    Nearest,
+    /// Downwards: 127.82 m is 127 and a height of 226.6 m is 224. OpenSim's,
+    /// which also states a height above 1,024 m as zero where Second Life
+    /// states the most a byte holds.
+    Down,
+}
+
+/// The entry a `CoarseLocationUpdate` carries for an avatar standing at
+/// `position`, cut down as `rounding` says.
+#[must_use]
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a clamped, non-negative metre value cut down to the wire's whole number; a float \
+              cast saturates"
+)]
+pub fn coarse_location(
+    agent_id: AgentKey,
+    position: &RegionCoordinates,
+    rounding: CoarseRounding,
+) -> CoarseLocation {
+    /// The largest height an entry can state, in metres.
+    const CEILING_M: f32 = 1020.0;
+    /// The height above which OpenSim states none.
+    const OPENSIM_CEILING_M: f32 = 1024.0;
+    let whole = |value: f32| match rounding {
+        CoarseRounding::Nearest => value.round(),
+        CoarseRounding::Down => value.floor(),
+    };
+    let height = match rounding {
+        CoarseRounding::Down if position.z() > OPENSIM_CEILING_M => 0.0,
+        CoarseRounding::Nearest | CoarseRounding::Down => position.z().clamp(0.0, CEILING_M),
+    };
+    CoarseLocation {
+        agent_id,
+        x: whole(position.x()).clamp(0.0, 255.0) as u8,
+        y: whole(position.y()).clamp(0.0, 255.0) as u8,
+        z: (whole(height / 4.0) as u16).saturating_mul(4),
     }
 }
 

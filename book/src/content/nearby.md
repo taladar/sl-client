@@ -22,6 +22,10 @@ negative wire index means "absent". Heights arrive in units of four metres on
 the wire, so `CoarseLocation::z` is a metre value that is always a multiple of
 four, up to `1020`.
 
+How often each grid sends it, how it rounds a position into an entry and
+what it does with `prey` are measured in
+[Grid Behaviour: Avatars](../gridspec/avatars.md).
+
 ## Viewer effects
 
 A **viewer effect** (`ViewerEffect`) is a short-lived visual cue one viewer asks

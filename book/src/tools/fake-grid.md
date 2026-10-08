@@ -2037,6 +2037,17 @@ both, as both grids set it. What is not imitated yet is that both grids
 seat the avatar on the request, without waiting for the `AgentSit`
 (`server-world-sit-and-attach`).
 
+The region's **coarse locations** go out on a timer with its statistics and
+its time (`ArrivalPolicy::coarse_interval`, measured in
+[Grid Behaviour → Avatars](../gridspec/avatars.md)): every 1.333 s as
+Second Life sends them or every 4.545 s as OpenSim does, listing the scene's
+NPCs and then the agent itself with `You` on its own entry. A position is
+rounded into its entry on a Second-Life-flavoured grid and cut off on an
+OpenSim-flavoured one (`sl_proto::CoarseRounding`), which also states a
+height above 1,024 m as zero. The agent's entry is where it last arrived:
+the grid tracks no walking. Nothing goes down a child circuit yet, where
+both live grids send the neighbour's own list.
+
 A **ridden** crossing is the interesting case, because the vehicle is
 handed over too and everything about it is renumbered. An object keeps its
 grid-wide `ObjectKey` across a border and takes the destination's own

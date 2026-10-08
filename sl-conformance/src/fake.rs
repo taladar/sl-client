@@ -186,6 +186,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "estate-access",
     "logout-clean",
     "sit-stand",
+    "avatar-presence",
 ];
 
 /// The offline cases meaningful on **one** fake flavour only, each with the

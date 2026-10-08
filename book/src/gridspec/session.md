@@ -80,7 +80,7 @@ polled throughout.
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | pings during the silence | every 5.1 s, 19 of them, the last at 93–94 s | every 5.28 s, 11 or 12, the last at 54–58 s | the same cadence to the end, on both |
-| other traffic during the silence | goes on: about 23 datagrams every ten seconds once the scene has arrived (`CoarseLocationUpdate`, `LayerData`, the time message) | goes on, and grows: every unacknowledged packet is resent three times a second (160–170 transmissions of one packet) | pings only |
+| other traffic during the silence | goes on: about 23 datagrams every ten seconds once the scene has arrived (`CoarseLocationUpdate`, `LayerData`, the time message) | goes on, and grows: every unacknowledged packet is resent three times a second (160–170 transmissions of one packet) | pings, the region's statistics and time, and the coarse locations |
 | the simulator's last datagram on the root circuit | at 97.5–98.9 s | at 59.1 s | `FakeSl` 98.0 s; `FakeOpensim` 59.0 s |
 | what it says as it gives up | **nothing**: no `KickUser`, no `DisableSimulator`, no `CloseCircuit` | **`KickUser`**, "Simulator logged you out due to connection timeout." | each flavour's own |
 | the child circuits | pinged until 98.3 s, last datagram at 98.5 s, nothing said | last datagram within 50 ms of the kick, nothing said on them | closed with the root's, nothing said |

@@ -1160,6 +1160,69 @@ mod test {
         Ok(())
     }
 
+    /// **Out of sight and back**: a resident whose avatar the region stops
+    /// streaming — Second Life sends a `KillObject` for one past its range
+    /// and goes on listing it in the coarse feed — stays on the radar with an
+    /// approximate position, and is exact again once the region sends its
+    /// avatar anew.
+    #[test]
+    fn a_resident_out_of_sight_stays_listed_coarsely_and_returns() -> Result<(), TestError> {
+        stage("radar_out_of_sight", &["Alpha"])
+            .region(catalogue()?)
+            .needs(Need::GridControl)
+            .configure_grid(|grid| {
+                grid.account(AccountConfig::new(FIRST_NAME, ARRIVAL, "password"))
+            })
+            .run(async |stage: &Stage| {
+                let alpha = stage.viewer("Alpha")?;
+                open_radar(&alpha).await?;
+                let arrival = account_id(stage, ARRIVAL)?;
+                let npc = alpha.world().avatar(NEAR_NPC).node().await?;
+                let position = npc.position.unwrap_or_default();
+                let resident = NpcFixture::new(
+                    RegionLocalObjectId(ARRIVAL_LOCAL_ID),
+                    AvatarIdentity::new(arrival, FIRST_NAME, ARRIVAL),
+                    Vector {
+                        x: position[0] + 2.0,
+                        y: position[1],
+                        z: position[2],
+                    },
+                );
+                let body = resident.avatar_prim();
+                let agent = stage.agent("Alpha").await?;
+                agent.receive_crossing(Vec::new(), vec![resident]).await;
+                let row = radar_row(&alpha, &account(ARRIVAL));
+                let exact = row.get(Locator::role(Role::Image).name_key("radar-position-exact"));
+                let approximate =
+                    row.get(Locator::role(Role::Image).name_key("radar-position-approximate"));
+                let _streamed = alpha.expect(&exact).timeout(WAIT).to_be_visible().await?;
+
+                // Out of range: the avatar goes, the coarse feed keeps it.
+                let now = agent.now();
+                agent
+                    .with_sim(|sim| {
+                        sim.send_kill_object(&[RegionLocalObjectId(ARRIVAL_LOCAL_ID)], now)
+                    })
+                    .await
+                    .map_err(|error| format!("the resident's removal: {error}"))?;
+                let _coarse = alpha
+                    .expect(&approximate)
+                    .timeout(WAIT)
+                    .to_be_visible()
+                    .await?;
+
+                // Back in range: the region sends the avatar again.
+                let now = agent.now();
+                agent
+                    .with_sim(|sim| sim.send_object_update(&[body], u16::MAX, now))
+                    .await
+                    .map_err(|error| format!("the resident's return: {error}"))?;
+                let _again = alpha.expect(&exact).timeout(WAIT).to_be_visible().await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     // ---- Minimap ----------------------------------------------------------
 
     /// A pixel of the minimap's resident dot (`MapAvatarColor`, pure green),

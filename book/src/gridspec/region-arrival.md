@@ -87,7 +87,7 @@ The handshake a child circuit receives twice is likewise taken twice.
 | its `UsecSinceStart` | the UNIX time in microseconds | the same | the same |
 | its `SecPerDay`, `SecPerYear` | 14,400 and 158,400 | the same | the same |
 | the first of each after the handshake | the time message 1–9 s in, the statistics 1.7–2.7 s: each on the region's own cycle | 0.9 s and 1.9 s | a second in, both |
-| `CoarseLocationUpdate` | every 1.33 s | every 4.54 s | not sent on a timer |
+| `CoarseLocationUpdate` (**held**, by `avatar-presence`) | every 1.33 s | every 4.54 s | every 1.33 s on `FakeSl`, every 4.55 s on `FakeOpensim`; what it carries is in [Avatars](avatars.md) |
 | any of it down a child circuit | none but the coarse locations | the same | none |
 
 The six statistics OpenSim sends and Second Life does not are ids 16, 21,

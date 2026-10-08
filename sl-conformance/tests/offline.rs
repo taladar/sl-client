@@ -125,6 +125,7 @@ mod test {
         estate_access => "estate-access" [fake_sl, fake_opensim],
         logout_clean => "logout-clean" [fake_sl, fake_opensim],
         sit_stand => "sit-stand" [fake_sl, fake_opensim],
+        avatar_presence => "avatar-presence" [fake_sl, fake_opensim],
     }
 
     /// The tests declared above are exactly the offline cases, each on exactly

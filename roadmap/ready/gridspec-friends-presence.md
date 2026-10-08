@@ -39,3 +39,11 @@ The masked bit on SL; never wait for OpenSim's calling-card confirmation.
 [[protocol-cap-offline-friendship-answers]]: answering offline friendship
 offers over `AcceptFriendship` / `DeclineFriendship`, measured together with
 [[gridspec-instant-messages]]' offline delivery.
+
+## From gridspec-avatar-presence (2026-10-08)
+
+A `TrackAgent` for a resident who is not a friend never set the coarse
+feed's `Prey` index on aditi (and OpenSim's encoder never sets it at all).
+Whether Second Life sets it for a friend who granted map rights is this
+task's: `avatar-presence` records `track_sets_prey`, so grant the right and
+run it again.
