@@ -49,6 +49,26 @@ impl Seen {
 /// diagnostics, timed from `origin`.
 #[must_use]
 pub fn seen_since(session: &Session, skip: usize, origin: Instant) -> Vec<Seen> {
+    datagrams_since(session, skip, origin, false)
+}
+
+/// The datagrams of [`seen_since`] the session went on to process: every one
+/// but the retransmissions of a reliable packet it had already had. These are
+/// the datagrams the session's events were made of, in the same order.
+#[must_use]
+pub fn processed_since(session: &Session, skip: usize, origin: Instant) -> Vec<Seen> {
+    datagrams_since(session, skip, origin, true)
+}
+
+/// The datagrams `session`'s probe has reported since its first `skip`
+/// diagnostics, timed from `origin` — without the ones the session discarded
+/// as already seen when `processed_only`.
+fn datagrams_since(
+    session: &Session,
+    skip: usize,
+    origin: Instant,
+    processed_only: bool,
+) -> Vec<Seen> {
     session
         .diagnostics()
         .iter()
@@ -62,8 +82,9 @@ pub fn seen_since(session: &Session, skip: usize, origin: Instant) -> Vec<Seen> 
                 sequence,
                 len,
                 name,
+                duplicate,
                 ..
-            } => Some(Seen {
+            } if !(processed_only && *duplicate) => Some(Seen {
                 offset: signed_seconds(*at, origin),
                 from: *from,
                 child: *child,

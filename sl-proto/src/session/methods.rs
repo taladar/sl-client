@@ -88,9 +88,9 @@ use crate::types::{
     ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest,
     ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
     StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType, XferListing,
+    TeleportFlags, TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, XferListing,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -2803,7 +2803,7 @@ impl Session {
                 }
             }
             AnyMessage::LayerData(layer) => {
-                self.dispatch_terrain(from, &layer.layer_data.data);
+                self.dispatch_terrain(from, layer.layer_id.r#type, &layer.layer_data.data);
             }
             // A GLTF (PBR) material override for an object in this sim, pushed as
             // a `GenericStreamingMessage`. Only the override method is ours;
@@ -2928,9 +2928,14 @@ impl Session {
     }
 
     /// Decodes a `LayerData` payload received from simulator `from`, caching each
-    /// patch (keyed by layer and grid position) and emitting an
-    /// [`Event::TerrainPatch`]. Best-effort: a malformed group header is ignored.
-    fn dispatch_terrain(&mut self, from: SocketAddr, data: &[u8]) {
+    /// patch (keyed by layer and grid position) and emitting the message whole
+    /// as an [`Event::TerrainLayerBatch`] followed by an
+    /// [`Event::TerrainPatch`] per patch. `message_layer` is the message's own
+    /// `LayerID.Type`. Best-effort: a malformed group header is ignored.
+    fn dispatch_terrain(&mut self, from: SocketAddr, message_layer: u8, data: &[u8]) {
+        let Some((stride, patch_size, _code)) = terrain::group_header(data) else {
+            return;
+        };
         let Some((layer, patches)) = terrain::decode_layer(data) else {
             return;
         };
@@ -2941,6 +2946,26 @@ impl Session {
             .world
             .region_handle(circuit_id)
             .unwrap_or(RegionHandle(0));
+        let batch = TerrainLayerBatch {
+            region_handle,
+            child: self.children.contains_key(&from),
+            message_layer: TerrainLayerType::from_code(message_layer),
+            layer,
+            stride,
+            patch_size,
+            payload_len: data.len(),
+            patches: patches
+                .iter()
+                .map(|decoded| TerrainPatchHeader {
+                    patch_x: decoded.patch_x,
+                    patch_y: decoded.patch_y,
+                    prequant: decoded.prequant,
+                    word_bits: decoded.word_bits,
+                    dc_offset: decoded.dc_offset,
+                    range: decoded.range,
+                })
+                .collect(),
+        };
         let cache = self.world.terrain_in_or_default(circuit_id);
         let mut emit = Vec::with_capacity(patches.len());
         for decoded in patches {
@@ -2948,6 +2973,8 @@ impl Session {
             cache.insert((layer.code(), patch.patch_x, patch.patch_y), patch.clone());
             emit.push(patch);
         }
+        self.events
+            .push_back(Event::TerrainLayerBatch(Box::new(batch)));
         for patch in emit {
             self.events.push_back(Event::TerrainPatch(Box::new(patch)));
         }

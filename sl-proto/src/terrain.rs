@@ -16,21 +16,22 @@
 
 use sl_wire::RegionHandle;
 
-use crate::types::{TerrainLayerType, TerrainPatch};
+use crate::types::{FlatPatches, LayerEncoding, LayerPacking, TerrainLayerType, TerrainPatch};
 
 /// The per-patch quant/wbits byte value that marks the end of the patch stream.
 const END_OF_PATCHES: u32 = 97;
 
-/// The fixed group-header `stride` value the viewer and OpenSim always emit
-/// (`STRIDE` in `TerrainCompressor.cs` / the viewer's `code_patch_group_header`).
-/// The decoder ignores it, but a faithful encoder reproduces it.
-const STRIDE: u32 = 264;
+/// The least prequantization exponent the wire can state: the header's high
+/// nibble is the exponent less two.
+const MIN_PREQUANT: u32 = 2;
 
-/// The prequantization exponent used for the forward transform: heights are
-/// scaled to `2^PREQUANT` levels across the patch's range before the DCT. This
-/// is the value the viewer and OpenSim use for terrain (`10`), giving the same
-/// `quant` nibble (`PREQUANT - 2`) the decoder reads back.
-const PREQUANT: u32 = 10;
+/// The greatest prequantization exponent the wire can state.
+const MAX_PREQUANT: u32 = 17;
+
+/// How far apart a patch's lowest and highest value may be for it to count as
+/// flat ([`FlatPatches::HeaderOnly`]): OpenSim rounds the spread to two
+/// decimals and asks whether nothing is left.
+const FLAT_SPREAD: f32 = 0.005;
 
 /// The 2-bit end-of-block code: every remaining coefficient in the patch is
 /// zero (`ZERO_EOB`, decoded as the `10` bit pattern).
@@ -160,8 +161,30 @@ pub(crate) struct DecodedPatch {
     pub(crate) patch_y: u32,
     /// The patch edge length in cells (16 or 32).
     pub(crate) size: u32,
+    /// The prequantization exponent the patch header states (the high nibble
+    /// of its first byte, plus two).
+    pub(crate) prequant: u32,
+    /// The magnitude bits each non-zero coefficient is written in (the low
+    /// nibble of the header's first byte, plus two).
+    pub(crate) word_bits: u32,
+    /// The header's `dc_offset`: the lowest value in the patch.
+    pub(crate) dc_offset: f32,
+    /// The header's `range`: the whole number the patch's values span.
+    pub(crate) range: u32,
     /// The decoded values, row-major (`row * size + col`), length `size*size`.
     pub(crate) values: Vec<f32>,
+}
+
+/// The group header a `LayerData` payload opens with: `(stride, patch size,
+/// layer-type code)`, or `None` of a payload too short to hold one. Read
+/// without judging it, so a census can report a header
+/// [`decode_layer`] refuses.
+pub(crate) fn group_header(data: &[u8]) -> Option<(u32, u32, u8)> {
+    let mut reader = BitReader::new(data);
+    let stride = reader.unpack(16);
+    let patch_size = reader.unpack(8);
+    let code = u8::try_from(reader.unpack(8) & 0xff).ok()?;
+    (!reader.overrun).then_some((stride, patch_size, code))
 }
 
 /// Decodes a `LayerData` payload into its layer type and the patches it carries.
@@ -225,6 +248,10 @@ pub(crate) fn decode_layer(data: &[u8]) -> Option<(TerrainLayerType, Vec<Decoded
             patch_x,
             patch_y,
             size: patch_size,
+            prequant,
+            word_bits,
+            dc_offset,
+            range,
             values,
         });
     }
@@ -489,7 +516,7 @@ pub(crate) fn into_terrain_patch(
 /// most-significant-first into each byte, and a multi-bit value is taken
 /// little-endian (its low byte emitted first), so [`BitReader::unpack`]
 /// reassembles it. The trailing partial byte is left-aligned at flush.
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 struct BitWriter {
     /// The completed bytes, in transmission order.
     bytes: Vec<u8>,
@@ -527,6 +554,13 @@ impl BitWriter {
                 self.push_bit((chunk >> bit_index) & 1);
             }
         }
+    }
+
+    /// How many bytes [`into_bytes`](Self::into_bytes) would return now.
+    fn len(&self) -> usize {
+        self.bytes
+            .len()
+            .saturating_add(usize::from(self.filled > 0))
     }
 
     /// Flushes any partial byte (left-aligned, the unused low bits zero) and
@@ -579,57 +613,165 @@ const fn word_bits_for(max_abs: u32) -> u32 {
 }
 
 /// Encodes a set of terrain patches into a `LayerData` payload — the inverse of
-/// `decode_layer`. The group header takes its patch size from the first patch
-/// (16 for a standard region, 32 for a variable-region "large" patch); patches
-/// whose `size` differs are skipped, since one message carries a single size.
-/// The patch coordinate width (10 vs 32 bits) follows `layer.is_extended()`.
+/// `decode_layer` — in the [reference encoding](LayerEncoding::REFERENCE). The
+/// group header takes its patch size from the first patch (16 for a standard
+/// region, 32 for a variable-region "large" patch); patches whose `size`
+/// differs are skipped, since one message carries a single size. The patch
+/// coordinate width (10 vs 32 bits) follows `layer.is_extended()`.
 ///
-/// Encoding is lossy: heights are quantized to `2^PREQUANT` levels across each
+/// Encoding is lossy: heights are quantized to `2^prequant` levels across each
 /// patch's value range, exactly as the viewer and OpenSim do, so a
 /// decode→encode→decode round-trip reproduces the heights to within that
 /// quantization step (and is stable thereafter).
 #[must_use]
 pub fn encode_layer(layer: TerrainLayerType, patches: &[TerrainPatch]) -> Vec<u8> {
-    let patch_size = patches
-        .first()
-        .map_or(16, |patch| patch.size)
-        .clamp(1, MAX_PATCH_SIZE);
-    let size = usize::try_from(patch_size).unwrap_or(16);
-    let total = size.saturating_mul(size);
-    let large = layer.is_extended();
+    encode_layer_with(layer, patches, &LayerEncoding::REFERENCE)
+}
 
-    let dequantize = build_dequantize_table(size);
-    let icosines = build_icosine_table(patch_size, size);
-    // `decopy[k]` (row-major position `k`) is the transmission index for that
-    // position — the same un-zigzag map the decoder builds; the encoder writes
-    // `block[k] / dequant[k]` to that index.
-    let decopy = build_decopy_matrix(patch_size, total).unwrap_or_default();
-
-    let mut writer = BitWriter::default();
-    writer.push(STRIDE, 16);
-    writer.push(patch_size, 8);
-    writer.push(u32::from(layer.code()), 8);
-
+/// [`encode_layer`] in the encoding given: every patch into one payload.
+#[must_use]
+pub fn encode_layer_with(
+    layer: TerrainLayerType,
+    patches: &[TerrainPatch],
+    encoding: &LayerEncoding,
+) -> Vec<u8> {
+    let encoder = LayerEncoder::new(layer, patches, *encoding);
+    let mut writer = encoder.open();
     for patch in patches {
-        if patch.size != patch_size {
-            continue;
+        encoder.patch(&mut writer, patch);
+    }
+    LayerEncoder::close(writer)
+}
+
+/// Encodes `patches`, in the order given, into as many `LayerData` payloads
+/// as `packing` cuts them into — how a simulator sends a whole region's
+/// ground. An empty `patches` is no payload at all.
+#[must_use]
+pub fn encode_layer_messages(
+    layer: TerrainLayerType,
+    patches: &[TerrainPatch],
+    encoding: &LayerEncoding,
+    packing: LayerPacking,
+) -> Vec<Vec<u8>> {
+    let encoder = LayerEncoder::new(layer, patches, *encoding);
+    let mut payloads = Vec::new();
+    let mut writer = encoder.open();
+    let mut held = 0_usize;
+    for patch in patches
+        .iter()
+        .filter(|patch| patch.size == encoder.patch_size)
+    {
+        match packing {
+            LayerPacking::CloseOnceOver(limit) => {
+                encoder.patch(&mut writer, patch);
+                held = held.saturating_add(1);
+                if writer.len() > limit {
+                    payloads.push(LayerEncoder::close(writer));
+                    writer = encoder.open();
+                    held = 0;
+                }
+            }
+            LayerPacking::KeepWithin(limit) => {
+                let before = writer.clone();
+                encoder.patch(&mut writer, patch);
+                if writer.len() > limit && held > 0 {
+                    payloads.push(LayerEncoder::close(before));
+                    writer = encoder.open();
+                    encoder.patch(&mut writer, patch);
+                    held = 0;
+                }
+                held = held.saturating_add(1);
+            }
         }
-        encode_patch(
-            &mut writer,
-            patch,
-            large,
+    }
+    if held > 0 {
+        payloads.push(LayerEncoder::close(writer));
+    }
+    payloads
+}
+
+/// What encoding one layer's patches takes: the tables their size fixes and
+/// the encoding chosen.
+struct LayerEncoder {
+    /// The layer the payloads are of.
+    layer: TerrainLayerType,
+    /// The patch edge length every payload's group header states.
+    patch_size: u32,
+    /// [`patch_size`](Self::patch_size) as an index.
+    size: usize,
+    /// The cells in one patch.
+    total: usize,
+    /// The encoding chosen, its exponent brought into the wire's range.
+    encoding: LayerEncoding,
+    /// The per-coefficient dequantisation scale.
+    dequantize: Vec<f32>,
+    /// The inverse-DCT cosine table.
+    icosines: Vec<f32>,
+    /// `decopy[k]` (row-major position `k`) is the transmission index for that
+    /// position — the same un-zigzag map the decoder builds; the encoder
+    /// writes `block[k] / dequant[k]` to that index.
+    decopy: Vec<u32>,
+}
+
+impl LayerEncoder {
+    /// An encoder for `patches` of `layer`, sized by the first of them.
+    fn new(layer: TerrainLayerType, patches: &[TerrainPatch], encoding: LayerEncoding) -> Self {
+        let patch_size = patches
+            .first()
+            .map_or(16, |patch| patch.size)
+            .clamp(1, MAX_PATCH_SIZE);
+        let size = usize::try_from(patch_size).unwrap_or(16);
+        let total = size.saturating_mul(size);
+        Self {
+            layer,
+            patch_size,
             size,
             total,
+            encoding: LayerEncoding {
+                prequant: encoding.prequant.clamp(MIN_PREQUANT, MAX_PREQUANT),
+                ..encoding
+            },
+            dequantize: build_dequantize_table(size),
+            icosines: build_icosine_table(patch_size, size),
+            decopy: build_decopy_matrix(patch_size, total).unwrap_or_default(),
+        }
+    }
+
+    /// A payload with its group header written and no patch yet.
+    fn open(&self) -> BitWriter {
+        let mut writer = BitWriter::default();
+        writer.push(self.encoding.stride, 16);
+        writer.push(self.patch_size, 8);
+        writer.push(u32::from(self.layer.code()), 8);
+        writer
+    }
+
+    /// Writes `patch` into `writer`, unless it is of another size than the
+    /// payload's.
+    fn patch(&self, writer: &mut BitWriter, patch: &TerrainPatch) {
+        if patch.size != self.patch_size {
+            return;
+        }
+        encode_patch(
+            writer,
+            patch,
+            self.layer.is_extended(),
+            self.encoding,
+            self.size,
+            self.total,
             PatchTables {
-                dequantize: &dequantize,
-                icosines: &icosines,
-                decopy: &decopy,
+                dequantize: &self.dequantize,
+                icosines: &self.icosines,
+                decopy: &self.decopy,
             },
         );
     }
 
-    writer.push(END_OF_PATCHES, 8);
-    writer.into_bytes()
+    /// Ends a payload and returns its bytes.
+    fn close(mut writer: BitWriter) -> Vec<u8> {
+        writer.push(END_OF_PATCHES, 8);
+        writer.into_bytes()
+    }
 }
 
 /// Encodes one patch: prescan for range/offset, scale to the quantizer grid,
@@ -639,6 +781,7 @@ fn encode_patch(
     writer: &mut BitWriter,
     patch: &TerrainPatch,
     large: bool,
+    encoding: LayerEncoding,
     size: usize,
     total: usize,
     tables: PatchTables<'_>,
@@ -656,11 +799,30 @@ fn encode_patch(
     let zmin = cells.iter().copied().fold(f32::MAX, f32::min);
     let zmax = cells.iter().copied().fold(f32::MIN, f32::max);
 
+    let patch_ids = if large {
+        (patch.patch_x << 16) | (patch.patch_y & 0xffff)
+    } else {
+        (patch.patch_x << 5) | (patch.patch_y & 0x1f)
+    };
+    let id_bits = if large { 32 } else { 10 };
+    if encoding.flat_patches == FlatPatches::HeaderOnly && zmax - zmin < FLAT_SPREAD {
+        // A `QuantWBits` of zero is the least exponent and the least word
+        // size; with a range of one the decoder adds back exactly the half
+        // taken off here.
+        writer.push(0, 8);
+        writer.push((zmin - 0.5).to_bits(), 32);
+        writer.push(1, 16);
+        writer.push(patch_ids, id_bits);
+        writer.push(ZERO_EOB, 2);
+        return;
+    }
+
+    let prequant = encoding.prequant;
     let dc_offset = zmin;
     let range = floor_to_u16((zmax - zmin + 1.0).clamp(1.0, f32::from(u16::MAX)));
     let range_f = small_u32_to_f32(u32::from(range));
 
-    let quantize = small_u32_to_f32(1u32 << PREQUANT.min(31));
+    let quantize = small_u32_to_f32(1u32 << prequant.min(31));
     let premult = quantize / range_f;
     // The decoder's `add_value`: range/2 + dc_offset. Subtracting it then scaling
     // by `premult` (= 1/multiplier) inverts the decoder's final affine step.
@@ -687,16 +849,11 @@ fn encode_patch(
 
     // Patch header: quant_wbits (high nibble = prequant-2, low = wbits-2),
     // dc_offset, range, packed patch ids.
-    let quant_wbits = (PREQUANT.wrapping_sub(2) << 4) | word_bits.wrapping_sub(2);
+    let quant_wbits = (prequant.wrapping_sub(2) << 4) | word_bits.wrapping_sub(2);
     writer.push(quant_wbits, 8);
     writer.push(dc_offset.to_bits(), 32);
     writer.push(u32::from(range), 16);
-    let patch_ids = if large {
-        (patch.patch_x << 16) | (patch.patch_y & 0xffff)
-    } else {
-        (patch.patch_x << 5) | (patch.patch_y & 0x1f)
-    };
-    writer.push(patch_ids, if large { 32 } else { 10 });
+    writer.push(patch_ids, id_bits);
 
     encode_patch_data(writer, &coefficients, word_bits);
 }

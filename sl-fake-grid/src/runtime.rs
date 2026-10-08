@@ -847,6 +847,14 @@ impl GridCore {
             ),
             now,
         );
+        // The wind runs on the region's clock, down a root and a child circuit
+        // alike.
+        sim.set_wind_feed(
+            self.imitated
+                .terrain_policy()
+                .wind_feed(region.config.terrain.wind_patches(region.handle())),
+            now,
+        );
         // The maturity preference a grid with entitlements reports at login is
         // the one its preferences capability starts from, and the one a
         // teleport is checked against.
@@ -1038,6 +1046,7 @@ impl GridCore {
                 identity
             },
             arrival: self.arrival_policy,
+            terrain_policy: self.imitated.terrain_policy(),
             on_agent_arrived: region.scenario.on_agent_arrived.clone(),
             on_event: region.scenario.on_event.clone(),
             udp_assets,

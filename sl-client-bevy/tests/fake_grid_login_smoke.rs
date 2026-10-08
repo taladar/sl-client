@@ -356,7 +356,7 @@ mod test {
                 STOCK_SCRIPTED_OBJECT_POSITION
             )
         );
-        // The region's ground: the whole spiral of land patches through the
+        // The region's ground: every one of its land patches through the
         // real UDP path, each stamped with the region handle.
         harness.step_until("the region's 256 land patches", |app| {
             let patches: Vec<(u32, u32)> = app

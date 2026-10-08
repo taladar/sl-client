@@ -196,6 +196,10 @@ mod test {
                 break;
             }
         }
+        // Keep reading: the client's run loop waits on this channel, so a
+        // session whose events go unread stops at the 256th — which the
+        // region's ground alone outnumbers — and never sends the chat.
+        let drain = tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
         command_tx
             .send(Command::Chat {
                 message: "hello twice".to_owned(),
@@ -218,6 +222,7 @@ mod test {
         }
         drop(command_tx);
         run.abort();
+        drain.abort();
         Ok(events)
     }
 

@@ -576,7 +576,10 @@ pub use sound::{
     UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT,
     UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN,
 };
-pub use terrain::{TerrainLayerType, TerrainPatch};
+pub use terrain::{
+    FlatPatches, LayerEncoding, LayerPacking, TerrainLayerBatch, TerrainLayerType, TerrainPatch,
+    TerrainPatchHeader,
+};
 pub use voice::RequiredVoiceVersion;
 
 // Value types migrated to the shared `sl-types` crate, re-exported here so the

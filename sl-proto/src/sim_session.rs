@@ -205,15 +205,15 @@ use crate::types::{
     GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, ImDialog,
     InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
     LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
-    LandStatReportType, MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo,
-    MapRequestFlags, Material, MeanCollision, MovementMode, NavMeshStatus, NewInventoryItem,
-    NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ObjectTransform,
-    OpenRegionInfo, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelInfo, ParcelObjectOwner, ParcelReturnType, ParcelUpdate, PermissionField,
-    PlacesResult, PlayingAnimation, Postcard, PrimShape, PrimShapeParams, ProposalVoteId,
-    RegionIdentity, RegionLimits, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem,
-    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
+    LandStatReportType, LayerEncoding, LayerPacking, MapBlockBatch, MapItem, MapItemType, MapLayer,
+    MapRegionInfo, MapRequestFlags, Material, MeanCollision, MovementMode, NavMeshStatus,
+    NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
+    ObjectFlagSettings, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily,
+    ObjectTransform, OpenRegionInfo, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelDetails, ParcelInfo, ParcelObjectOwner, ParcelReturnType, ParcelUpdate,
+    PermissionField, PlacesResult, PlayingAnimation, Postcard, PrimShape, PrimShapeParams,
+    ProposalVoteId, RegionIdentity, RegionLimits, RegionStats, Reliability, RequiredVoiceVersion,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
     ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
     SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
     TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
@@ -599,6 +599,46 @@ pub enum AgentPresence {
 /// messages goes out: both live grids' came about a second in.
 const TELEMETRY_FIRST_DELAY: Duration = Duration::from_secs(1);
 
+/// The square of the distance, in metres, from `point` to the centre of
+/// `patch`.
+fn patch_distance_squared(patch: &TerrainPatch, point: (f32, f32)) -> f32 {
+    let centre = |index: u32| {
+        let cells = f32::from(u16::try_from(patch.size).unwrap_or(u16::MAX));
+        f32::from(u16::try_from(index).unwrap_or(u16::MAX)).mul_add(cells, cells / 2.0)
+    };
+    let east = centre(patch.patch_x) - point.0;
+    let north = centre(patch.patch_y) - point.1;
+    east.mul_add(east, north * north)
+}
+
+/// How a simulator streams a region's ground at an arriving agent
+/// ([`SimSession::send_terrain`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TerrainStream {
+    /// The point, in region metres east and north, the ground is sent
+    /// outwards from: the patch whose centre is nearest goes first.
+    pub nearest_to: (f32, f32),
+    /// How many patches go into one message.
+    pub packing: LayerPacking,
+    /// How the patches are written.
+    pub encoding: LayerEncoding,
+}
+
+/// The wind a simulator goes on sending for as long as a circuit is open
+/// ([`SimSession::set_wind_feed`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindFeed {
+    /// How far apart the wind messages are.
+    pub interval: Duration,
+    /// The wind layer's two patches: the east, then the north component of
+    /// one field over the whole region.
+    pub patches: Vec<TerrainPatch>,
+    /// How the patches are written.
+    pub encoding: LayerEncoding,
+    /// Whether a wind message is sent reliably.
+    pub reliability: Reliability,
+}
+
 /// What a simulator tells a root agent about its region on a timer
 /// ([`SimSession::set_region_telemetry`]).
 #[derive(Debug, Clone, PartialEq)]
@@ -715,48 +755,6 @@ pub enum TransferRequestSource {
 /// The size of one `ParcelOverlay` chunk: a simulator splits the region's
 /// per-4 m-cell ownership map into 1024-byte pieces (four for a 256 m region).
 pub const PARCEL_OVERLAY_CHUNK_BYTES: usize = 1024;
-
-/// The largest number of terrain patches
-/// [`send_terrain`](SimSession::send_terrain) packs into one `LayerData`
-/// message. A compressed 16×16 patch is a few hundred bytes at worst, so four
-/// of them stay under the ~1 kB a simulator keeps a `LayerData` datagram to.
-pub const TERRAIN_PATCHES_PER_MESSAGE: usize = 4;
-
-/// The patch positions of a `(0, 0)..=(max_x, max_y)` grid in the spiral order
-/// OpenSim sends a region's ground in (`LLClientView.SendLayerTopRight` /
-/// `SendLayerBottomLeft`): the outer ring first, starting at the south-west
-/// corner — east along the south edge, north up the east edge, west back along
-/// the north edge, south down the west edge — then the next ring in, until the
-/// centre is reached. Every position appears exactly once.
-fn spiral_patch_order(max_x: u32, max_y: u32) -> Vec<(u32, u32)> {
-    let mut order = Vec::new();
-    let (mut west, mut south, mut east, mut north) = (0_u32, 0_u32, max_x, max_y);
-    loop {
-        for x in west..=east {
-            order.push((x, south));
-        }
-        for y in south.saturating_add(1)..=north {
-            order.push((east, y));
-        }
-        if east <= west || north <= south {
-            break;
-        }
-        south = south.saturating_add(1);
-        east = east.saturating_sub(1);
-        for x in (west..=east).rev() {
-            order.push((x, north));
-        }
-        for y in (south..north).rev() {
-            order.push((west, y));
-        }
-        if east <= west || north <= south {
-            break;
-        }
-        west = west.saturating_add(1);
-        north = north.saturating_sub(1);
-    }
-    order
-}
 
 /// The decoded camera/control state carried by a client `AgentUpdate`, surfaced
 /// as [`ServerEvent::AgentUpdate`]. The simulator uses this to move the agent
@@ -3096,6 +3094,9 @@ pub struct SimSession {
     /// instant it was set and when each message is next due; see
     /// [`SimSession::set_region_telemetry`].
     telemetry: Option<Box<ArmedTelemetry>>,
+    /// The wind this simulator goes on sending, and when the next message is
+    /// due ([`set_wind_feed`](Self::set_wind_feed)).
+    wind: Option<(WindFeed, Instant)>,
     /// The other avatars the periodic `CoarseLocationUpdate` lists
     /// ([`SimSession::set_coarse_others`]).
     coarse_others: Vec<CoarseLocation>,
@@ -3485,6 +3486,7 @@ impl SimSession {
             withholds_logout_reply: false,
             timeout_kick: None,
             telemetry: None,
+            wind: None,
             coarse_others: Vec::new(),
             object_update_coding: BodyCoding::Plain,
             region_handle,
@@ -7039,7 +7041,7 @@ impl SimSession {
     /// Every patch goes into this one message, so the caller keeps the group
     /// small enough for a datagram — see
     /// [`send_terrain`](Self::send_terrain), which does that for a whole
-    /// region's ground. An empty `patches` sends nothing. Sent reliably.
+    /// region's ground. An empty `patches` sends nothing.
     ///
     /// # Errors
     ///
@@ -7049,35 +7051,52 @@ impl SimSession {
         &mut self,
         layer: TerrainLayerType,
         patches: &[TerrainPatch],
+        encoding: &LayerEncoding,
+        reliability: Reliability,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if patches.is_empty() {
+            return if self.client_addr.is_none() {
+                Err(Error::NoCircuit)
+            } else {
+                Ok(())
+            };
+        }
+        self.send_layer_payload(
+            layer,
+            crate::terrain::encode_layer_with(layer, patches, encoding),
+            reliability,
+            now,
+        )
+    }
+
+    /// Sends one encoded `LayerData` payload of `layer`.
+    fn send_layer_payload(
+        &mut self,
+        layer: TerrainLayerType,
+        data: Vec<u8>,
+        reliability: Reliability,
         now: Instant,
     ) -> Result<(), Error> {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        if patches.is_empty() {
-            return Ok(());
-        }
         let message = AnyMessage::LayerData(LayerData {
             layer_id: LayerDataLayerIDBlock {
                 r#type: layer.code(),
             },
-            layer_data: LayerDataLayerDataBlock {
-                data: crate::terrain::encode_layer(layer, patches),
-            },
+            layer_data: LayerDataLayerDataBlock { data },
         });
-        self.send(&message, Reliability::Reliable, now)?;
+        self.send(&message, reliability, now)?;
         Ok(())
     }
 
     /// Sends a whole region's ground as the sequence of `LayerData` messages a
-    /// simulator emits on region entry: at most
-    /// [`TERRAIN_PATCHES_PER_MESSAGE`] patches per message, walked in
-    /// OpenSim's spiral order (`LLClientView.SendLayerTopRight` /
-    /// `SendLayerBottomLeft`) — the outer ring of the patch grid from its
-    /// south-west corner (east along the south edge, north up the east edge,
-    /// west back along the north edge, south down the west edge), then the
-    /// next ring in, so the region fills from its edges inwards as the patches
-    /// arrive.
+    /// simulator emits on region entry: nearest first from
+    /// [`TerrainStream::nearest_to`] — both live grids send the ground
+    /// outwards from the agent — and cut into messages by
+    /// [`TerrainStream::packing`]. Patches equally far keep the order given.
+    /// Sent reliably, as both grids send it.
     ///
     /// The layer is the first patch's; patches of any other layer are skipped,
     /// since one message carries a single layer. Patches are addressed by their
@@ -7090,28 +7109,76 @@ impl SimSession {
     ///
     /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
     /// if a message fails to encode.
-    pub fn send_terrain(&mut self, patches: &[TerrainPatch], now: Instant) -> Result<(), Error> {
+    pub fn send_terrain(
+        &mut self,
+        patches: &[TerrainPatch],
+        stream: &TerrainStream,
+        now: Instant,
+    ) -> Result<(), Error> {
         let Some(first) = patches.first() else {
             return Ok(());
         };
         let layer = first.layer;
         let mut by_position: BTreeMap<(u32, u32), &TerrainPatch> = BTreeMap::new();
+        let mut ordered: Vec<&TerrainPatch> = Vec::new();
         for patch in patches.iter().filter(|patch| patch.layer == layer) {
-            by_position
-                .entry((patch.patch_x, patch.patch_y))
-                .or_insert(patch);
+            if let std::collections::btree_map::Entry::Vacant(slot) =
+                by_position.entry((patch.patch_x, patch.patch_y))
+            {
+                slot.insert(patch);
+                ordered.push(patch);
+            }
         }
-        let (max_x, max_y) = by_position.keys().fold((0, 0), |(max_x, max_y), &(x, y)| {
-            (max_x.max(x), max_y.max(y))
+        ordered.sort_by(|left, right| {
+            patch_distance_squared(left, stream.nearest_to)
+                .total_cmp(&patch_distance_squared(right, stream.nearest_to))
         });
-        let ordered: Vec<TerrainPatch> = spiral_patch_order(max_x, max_y)
-            .into_iter()
-            .filter_map(|position| by_position.get(&position).map(|patch| (*patch).clone()))
-            .collect();
-        for group in ordered.chunks(TERRAIN_PATCHES_PER_MESSAGE) {
-            self.send_layer_data(layer, group, now)?;
+        let ordered: Vec<TerrainPatch> = ordered.into_iter().cloned().collect();
+        for payload in
+            crate::terrain::encode_layer_messages(layer, &ordered, &stream.encoding, stream.packing)
+        {
+            self.send_layer_payload(layer, payload, Reliability::Reliable, now)?;
         }
         Ok(())
+    }
+
+    /// Sets the wind this simulator goes on sending down the circuit, root or
+    /// child — both live grids send a neighbour's wind too — or none (`None`,
+    /// the default). The first message is due one interval from `now`: a
+    /// region's wind runs on the region's own clock, not on an agent's
+    /// arrival. A simulator that sends the wind with the ground as well does
+    /// so itself, through [`send_layer_data`](Self::send_layer_data).
+    pub fn set_wind_feed(&mut self, feed: Option<WindFeed>, now: Instant) {
+        self.wind = feed.map(|feed| {
+            let due = deadline(now, feed.interval);
+            (feed, due)
+        });
+    }
+
+    /// Sends the wind if it is due and arms the next one
+    /// ([`set_wind_feed`](Self::set_wind_feed)). Nothing is sent before the
+    /// circuit is open.
+    fn send_due_wind(&mut self, now: Instant) {
+        let Some((feed, due)) = self.wind.take() else {
+            return;
+        };
+        if now < due {
+            self.wind = Some((feed, due));
+            return;
+        }
+        if self.client_addr.is_some()
+            && let Err(error) = self.send_layer_data(
+                TerrainLayerType::Wind,
+                &feed.patches,
+                &feed.encoding,
+                feed.reliability,
+                now,
+            )
+        {
+            tracing::warn!(%error, "failed to send the region's wind");
+        }
+        let next = deadline(now, feed.interval);
+        self.wind = Some((feed, next));
     }
 
     /// Sends a full `ObjectUpdate` carrying `objects` (every object in this
@@ -12393,6 +12460,7 @@ impl SimSession {
             tracing::warn!(%error, "failed to tell the client about an expired Xfer");
         }
         self.send_due_telemetry(now);
+        self.send_due_wind(now);
         if let Some(at) = self.ping
             && now >= at
         {
@@ -12594,6 +12662,7 @@ impl SimSession {
         merge_deadline(&mut earliest, self.ping);
         merge_deadline(&mut earliest, self.next_resend_deadline());
         merge_deadline(&mut earliest, self.sit_expires);
+        merge_deadline(&mut earliest, self.wind.as_ref().map(|(_, due)| *due));
         if let Some(armed) = self.telemetry.as_ref() {
             merge_deadline(&mut earliest, armed.stats_due);
             merge_deadline(&mut earliest, armed.time_due);

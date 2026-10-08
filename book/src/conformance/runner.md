@@ -153,9 +153,10 @@ once the fake grid grew a
 If a case belongs offline and does not bite, the thing to fix is usually the
 grid.
 
-Three cases live on the fake grid **only**, because nothing else can host them:
-`terrain-layerdata` and `avatar-appearance-npc` assert
-against ground and bakes this workspace declares; and `asset-round-trip` walks
+Two cases live on the fake grid **only**, because nothing else can host them:
+`avatar-appearance-npc` asserts against bakes this workspace declares (as
+`terrain-layerdata` does against the ground it declares, in the one leg of
+that case a live grid skips); and `asset-round-trip` walks
 the fake grid's own seeded inventory, one item per writable asset class, which
 no live account has. That last one is fake-only for a second reason worth
 keeping straight: it asserts a save comes back **byte for byte**, which is what

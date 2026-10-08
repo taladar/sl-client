@@ -1463,7 +1463,7 @@ pub fn avatar_prim(
 /// that arrives before the first object update is stamped with handle zero.
 pub(crate) fn push_arrival_world(
     world: &SceneFixtures,
-    terrain: &TerrainFixture,
+    ground: Ground<'_>,
     identity: &AvatarIdentity,
     assets: &crate::assets::GridAssets,
     bakes: crate::bakes::BakePolicy,
@@ -1495,7 +1495,7 @@ pub(crate) fn push_arrival_world(
         record.sequence_id = UNSOLICITED_SEQUENCE_ID;
         sim.enqueue_parcel_properties(&record);
     }
-    push_terrain(terrain, sim, now);
+    push_terrain(ground, true, sim, now);
     if !world.objects.is_empty()
         && let Err(error) = send_objects(sim, &world.objects, now)
     {
@@ -1556,7 +1556,7 @@ fn coarse_others(
 /// Send failures are logged, never fatal.
 pub(crate) fn push_child_world(
     world: &SceneFixtures,
-    terrain: &TerrainFixture,
+    ground: Ground<'_>,
     identity: &sl_proto::RegionIdentity,
     bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
@@ -1569,7 +1569,7 @@ pub(crate) fn push_child_world(
     }
     push_npcs(&world.npcs, bakes, sim, now);
     push_object_animations(&world.object_animations, sim, now);
-    push_terrain(terrain, sim, now);
+    push_terrain(ground, false, sim, now);
     // The overlay is the whole region's parcel layout, which a neighbouring
     // region draws on the minimap; it needs no viewer to be standing on it.
     // `overlay_for` colours the cells by owner, and a child agent owns nothing
@@ -1757,23 +1757,55 @@ pub(crate) fn receive_crossing(
     sim.set_coarse_others(coarse_others(world, sim.coarse_rounding()));
 }
 
-/// Streams the region's ground: the LAND layer as the spiral of patches a
-/// simulator sends on region entry, then the WIND and CLOUD layers the
-/// fixture carries (each one message). Send failures are logged.
-fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
+/// A region's ground and how the grid being imitated sends it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Ground<'a> {
+    /// The ground itself.
+    pub(crate) fixture: &'a TerrainFixture,
+    /// How it is sent ([`crate::ImitatedGrid::terrain_policy`]).
+    pub(crate) policy: &'a crate::imitates::TerrainPolicy,
+}
+
+/// Streams the region's ground as the grid being imitated does: the LAND
+/// layer outwards from where the session's agent arrives, the WIND layer
+/// behind it where the grid sends a root agent its wind with the ground
+/// (`root`), and the CLOUD layer if the fixture carries one. The wind that
+/// follows on a timer is the session's own
+/// ([`SimSession::set_wind_feed`]). Send failures are logged.
+fn push_terrain(ground: Ground<'_>, root: bool, sim: &mut SimSession, now: Instant) {
+    let Ground {
+        fixture: terrain,
+        policy,
+    } = ground;
     let handle = sim.region_handle();
-    if let Err(error) = sim.send_terrain(&terrain.to_patches(handle), now) {
+    let placement = sim.arrival_position().position;
+    let stream = policy.land_stream(placement.x(), placement.y());
+    if let Err(error) = sim.send_terrain(&terrain.to_patches(handle), &stream, now) {
         tracing::warn!("streaming the region's ground failed: {error}");
     }
     let wind = terrain.wind_patches(handle);
-    if !wind.is_empty()
-        && let Err(error) = sim.send_layer_data(TerrainLayerType::Wind, &wind, now)
+    if root
+        && policy.wind_start == crate::imitates::WindStart::WithTheGround
+        && !wind.is_empty()
+        && let Err(error) = sim.send_layer_data(
+            TerrainLayerType::Wind,
+            &wind,
+            &policy.wind_encoding,
+            policy.wind_reliability,
+            now,
+        )
     {
         tracing::warn!("sending the wind layer failed: {error}");
     }
     let clouds = terrain.cloud_patches(handle);
     if !clouds.is_empty()
-        && let Err(error) = sim.send_layer_data(TerrainLayerType::Cloud, &clouds, now)
+        && let Err(error) = sim.send_layer_data(
+            TerrainLayerType::Cloud,
+            &clouds,
+            &sl_proto::LayerEncoding::REFERENCE,
+            sl_proto::Reliability::Reliable,
+            now,
+        )
     {
         tracing::warn!("sending the cloud layer failed: {error}");
     }

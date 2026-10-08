@@ -1659,18 +1659,24 @@ on `RegionConfig::terrain` (a `TerrainFixture`) rather than on `Scenario`.
 It is the one source three different paths read:
 
 - **`to_patches(handle)`** — the 256 LAND patches (16 × 16 metre cells
-  each) the arrival burst streams. `SimSession::send_terrain` walks them
-  in OpenSim's spiral order (`SendLayerTopRight` / `SendLayerBottomLeft`:
-  the outer ring from the south-west corner, then the next ring in) and
-  packs at most `TERRAIN_PATCHES_PER_MESSAGE` into each `LayerData`
-  message, so the region fills from its edges inwards.
+  each) the arrival burst streams. `SimSession::send_terrain` sends them
+  nearest first from where the agent arrives, cut into `LayerData`
+  messages by size, so the region fills outwards from the avatar. What
+  "nearest" is counted from, where a message is cut and how a flat patch
+  is written follow the grid being imitated
+  (`ImitatedGrid::terrain_policy`, measured in
+  [Terrain, wind and clouds](../gridspec/terrain.md)).
 - **`wind_patches` / `cloud_patches`** — the wind field as the *two*
-  patches OpenSim's `SendWindData` packs into one message (the east then
-  the north velocity component of one whole-region 16 × 16 field, both at
-  patch position `(0, 0)`), and the cloud field as one. Both go out
-  through `SimSession::send_layer_data`, which sends exactly one message:
+  patches both live grids pack into one message (the east then the north
+  velocity component of one whole-region 16 × 16 field, both at patch
+  position `(0, 0)`), and the cloud field as one. Both go out through
+  `SimSession::send_layer_data`, which sends exactly one message:
   `send_terrain` addresses patches by grid position and would collapse the
-  wind layer's two.
+  wind layer's two. The wind is then sent again on a timer
+  (`SimSession::set_wind_feed`), down child circuits too: every second
+  and unreliably as Second Life, every 13.6 s and reliably as OpenSim.
+  Neither live grid sends clouds, so a fixture with `clouds` set is a
+  region no grid has.
 - **`to_raw()`** — the same heights as the estate RAW32 download, so
   "download terrain" and the rendered ground agree. The height multiplier
   is the finest one whose range still covers the field.

@@ -54,6 +54,7 @@
 - [Movement](gridspec/movement.md)
 - [Avatars](gridspec/avatars.md)
 - [World map](gridspec/world-map.md)
+- [Terrain, wind and clouds](gridspec/terrain.md)
 - [Capabilities](gridspec/capabilities.md)
 - [Land](gridspec/land.md)
 - [Environment](gridspec/environment.md)

@@ -2,8 +2,8 @@
 //! the wind and cloud fields that go with it, and the detail-texture
 //! composition its `RegionHandshake` names.
 //!
-//! A real simulator sends the whole region's ground at an arriving viewer as a
-//! spiral of compressed 16×16 patches, and serves the same heights again as the
+//! A real simulator sends the whole region's ground at an arriving viewer as
+//! compressed 16×16 patches, nearest first, and serves the same heights again as the
 //! estate "download RAW terrain" file. A [`TerrainFixture`] is the one source
 //! both come from ([`to_patches`] and [`to_raw`]), so a test that asserts a
 //! height sees the same number whichever path it read it through.
@@ -29,6 +29,9 @@ pub const PATCH_CELLS: u32 = 16;
 
 /// Patches along each edge of a standard 256 m region: `256 / 16`.
 pub const PATCHES_PER_EDGE: u32 = STANDARD_REGION_SIZE_METRES / PATCH_CELLS;
+
+/// [`PATCH_CELLS`] in metres: a patch's cells are a metre apart.
+pub(crate) const PATCH_CELLS_M: f32 = 16.0;
 
 /// The wind and cloud layers are one 16×16 field over the whole region, not
 /// one field per patch, so their patches are this many cells on a side too —

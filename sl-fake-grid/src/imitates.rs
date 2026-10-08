@@ -42,6 +42,7 @@
 //! | how a teleport runs and how it is refused ([`teleport_policy`](ImitatedGrid::teleport_policy)) | `resolving` and `Sending to destination.` between the start and the finish; a refusal after the start, over the event queue, as a key with an `AlertInfo`; a cancel answered `TPCancelled`; a region above the maturity preference refused; a local teleport flagged `WITHIN_REGION` | no progress lines; a refusal before any start, over UDP, as a sentence with no alert; a cancel unanswered; no maturity check; the request's flags alone |
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
 //! | the world map ([`map_policy`](ImitatedGrid::map_policy)) | every empty cell of a null-sims rectangle reported; a rectangle of more than 256 cells unanswered; a name search by prefix, of any length, in silence; no map layers; an absent tile refused with `403` | an empty cell reported only when asked about alone; any rectangle answered; a search anywhere in the name, of three characters or more, with an alert for a short one and for no match; one whole-grid layer; a blank tile for an absent one |
+//! | how a region's ground and wind are sent ([`terrain_policy`](ImitatedGrid::terrain_policy)) | the ground outwards from where the agent stands, a message kept within 1,200 bytes, every patch transformed; the wind with the ground and then every second, unreliably, under a stride of 18 with six bits of prequantization | the ground outwards from the patch the agent is in, a message closed once past 890 bytes, a flat patch as a header alone; the wind every 13.6 s on the region's own clock, reliably, in the ground's encoding |
 //! | a sit on an object the region does not have ([`SitPolicy::unknown_target`]) | refused at once with the named alert `SitFailNotSameRegion` | not answered: the client's own sit timeout ends it |
 //! | where standing up puts the avatar ([`SitPolicy::stand_forward_m`], [`SitPolicy::stand_up_m`]) | 0.34 m in front of where it sat, at the same height | 0.65 m in front and 0.57 m above |
 //! | the seat position in an `AvatarSitResponse` for a seat with a sit target ([`SitPolicy::response_states_seated_position`]) | where the avatar is put: the target raised by 0.35 m | the target as the script set it, 0.35 m below where the avatar is put |
@@ -670,6 +671,39 @@ impl ImitatedGrid {
         }
     }
 
+    /// How a region's ground and wind are sent (`terrain-layerdata`,
+    /// 2026-10-08, `book/src/gridspec/terrain.md`).
+    #[must_use]
+    pub const fn terrain_policy(self) -> TerrainPolicy {
+        match self {
+            Self::SecondLife => TerrainPolicy {
+                land_origin: LandOrigin::AgentPosition,
+                land_packing: sl_proto::LayerPacking::KeepWithin(1_200),
+                land_encoding: sl_proto::LayerEncoding::REFERENCE,
+                wind_start: WindStart::WithTheGround,
+                wind_interval: Duration::from_secs(1),
+                wind_reliability: sl_proto::Reliability::Unreliable,
+                wind_encoding: sl_proto::LayerEncoding {
+                    stride: 18,
+                    prequant: 6,
+                    flat_patches: sl_proto::FlatPatches::Transformed,
+                },
+            },
+            Self::OpenSim => TerrainPolicy {
+                land_origin: LandOrigin::AgentPatch,
+                land_packing: sl_proto::LayerPacking::CloseOnceOver(890),
+                land_encoding: sl_proto::LayerEncoding {
+                    flat_patches: sl_proto::FlatPatches::HeaderOnly,
+                    ..sl_proto::LayerEncoding::REFERENCE
+                },
+                wind_start: WindStart::OnTheRegionClock,
+                wind_interval: Duration::from_millis(13_636),
+                wind_reliability: sl_proto::Reliability::Reliable,
+                wind_encoding: sl_proto::LayerEncoding::REFERENCE,
+            },
+        }
+    }
+
     /// The `SimulatorFeatures` document a stock region of this grid serves —
     /// every key the live grid was measured sending, in the LLSD kind it sent
     /// it in (`simulator-features`, 2026-10-07,
@@ -1002,6 +1036,86 @@ pub enum EnvironmentChangeReply {
 /// teleport, parcel changes and voice allowed, externally visible, and bit 5.
 /// (The aditi sandbox added bit 9 to these.)
 pub const STOCK_REGION_FLAGS: u32 = 0x1410_8026;
+
+/// How a region's ground and wind are sent
+/// ([`ImitatedGrid::terrain_policy`]).
+///
+/// Both live grids send the whole ground of the agent's region and of every
+/// neighbour it is shown, reliably, nearest first, and go on sending the wind
+/// as two patches at position `(0, 0)`; neither sends a cloud or a water
+/// layer. Everything else here is where they part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerrainPolicy {
+    /// What "nearest" is measured from.
+    pub land_origin: LandOrigin,
+    /// How many land patches go into one `LayerData`.
+    pub land_packing: sl_proto::LayerPacking,
+    /// How a land patch is written.
+    pub land_encoding: sl_proto::LayerEncoding,
+    /// When an arriving root agent gets its first wind.
+    pub wind_start: WindStart,
+    /// How far apart the wind messages are. OpenSim's is 150 frames of its
+    /// eleven a second.
+    pub wind_interval: Duration,
+    /// Whether a wind message is sent reliably.
+    pub wind_reliability: sl_proto::Reliability,
+    /// How a wind patch is written.
+    pub wind_encoding: sl_proto::LayerEncoding,
+}
+
+impl TerrainPolicy {
+    /// How the ground is streamed at an agent placed at `(east, north)`
+    /// region metres.
+    #[must_use]
+    pub fn land_stream(&self, east: f32, north: f32) -> sl_proto::TerrainStream {
+        let cells = crate::terrain::PATCH_CELLS_M;
+        let nearest_to = match self.land_origin {
+            LandOrigin::AgentPosition => (east, north),
+            LandOrigin::AgentPatch => (
+                (east / cells).floor().mul_add(cells, cells / 2.0),
+                (north / cells).floor().mul_add(cells, cells / 2.0),
+            ),
+        };
+        sl_proto::TerrainStream {
+            nearest_to,
+            packing: self.land_packing,
+            encoding: self.land_encoding,
+        }
+    }
+
+    /// The wind a region goes on sending, given the wind layer's patches —
+    /// or none for a region with no wind.
+    #[must_use]
+    pub fn wind_feed(&self, patches: Vec<sl_proto::TerrainPatch>) -> Option<sl_proto::WindFeed> {
+        (!patches.is_empty()).then_some(sl_proto::WindFeed {
+            interval: self.wind_interval,
+            patches,
+            encoding: self.wind_encoding,
+            reliability: self.wind_reliability,
+        })
+    }
+}
+
+/// What the ground is sent outwards from ([`TerrainPolicy::land_origin`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LandOrigin {
+    /// Where the agent stands: Second Life, roughly — its order is nearest
+    /// first with a patch here and there out of turn, and not the same twice.
+    AgentPosition,
+    /// The patch the agent is in, distances counted in whole patches:
+    /// OpenSim, exactly.
+    AgentPatch,
+}
+
+/// When an arriving root agent gets its first wind
+/// ([`TerrainPolicy::wind_start`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindStart {
+    /// Behind the last message of the ground, and then on the region's clock.
+    WithTheGround,
+    /// Whenever the region's clock next says, up to an interval away.
+    OnTheRegionClock,
+}
 
 /// What a region says of itself as an agent arrives, and on a timer after
 /// ([`ImitatedGrid::arrival_policy`]).
@@ -1849,6 +1963,7 @@ mod test {
         assert_ne!(sl.logout_reply(), opensim.logout_reply());
         assert_ne!(sl.circuit_policy(), opensim.circuit_policy());
         assert_ne!(sl.arrival_policy(), opensim.arrival_policy());
+        assert_ne!(sl.terrain_policy(), opensim.terrain_policy());
         assert_ne!(sl.teleport_policy(), opensim.teleport_policy());
         let (sl_view, opensim_view) = (sl.neighbour_policy(), opensim.neighbour_policy());
         assert_ne!(sl_view.reach, opensim_view.reach);

@@ -22,7 +22,7 @@ use crate::terrain::TerrainFixture;
 use crate::time::Now;
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{
-    AvatarIdentity, RegionChange, RegionUpdate, RegionWorld, answer_world_request,
+    AvatarIdentity, Ground, RegionChange, RegionUpdate, RegionWorld, answer_world_request,
     push_arrival_world, push_child_world,
 };
 
@@ -71,6 +71,9 @@ pub(crate) struct SimState {
     /// What the region says of itself on arrival where the live grids
     /// disagree ([`crate::ImitatedGrid::arrival_policy`]).
     pub(crate) arrival: crate::imitates::ArrivalPolicy,
+    /// How the region's ground and wind are sent
+    /// ([`crate::ImitatedGrid::terrain_policy`]).
+    pub(crate) terrain_policy: crate::imitates::TerrainPolicy,
     /// Scenario hook run right after the arrival world burst when the agent
     /// completes its movement into the region.
     pub(crate) on_agent_arrived: Option<SimHook>,
@@ -338,7 +341,10 @@ impl SharedSim {
                     }
                     push_child_world(
                         &state.world.lock(),
-                        &state.terrain,
+                        Ground {
+                            fixture: &state.terrain,
+                            policy: &state.terrain_policy,
+                        },
                         &state.identity,
                         state.bakes,
                         &mut state.sim,
@@ -380,7 +386,10 @@ impl SharedSim {
                 // own hook.
                 push_arrival_world(
                     &state.world.lock(),
-                    &state.terrain,
+                    Ground {
+                        fixture: &state.terrain,
+                        policy: &state.terrain_policy,
+                    },
                     &state.avatar,
                     &state.assets,
                     state.bakes,
@@ -486,6 +495,15 @@ impl SharedSim {
             );
             if let Some(hook) = &state.on_event {
                 hook(&mut state.sim, &event, now);
+            }
+            // A reliable packet the grid stopped resending is one the client
+            // will never see: whatever a test was waiting for in it is gone,
+            // and nothing else in a log would say why.
+            if let ServerEvent::ReliableGiveUp { message } = &event {
+                tracing::warn!(
+                    message = message.as_deref().unwrap_or("?"),
+                    "gave up resending a reliable packet the client never acknowledged"
+                );
             }
             // Only lagging subscribers error; the driver never stalls on them.
             drop(self.events_tx.send(event));

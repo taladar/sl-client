@@ -25,8 +25,8 @@ use super::{
     RegionStats, RequiredVoiceVersion, ScriptCompileError, ScriptControl, ScriptDialog,
     ScriptPermissionRequest, ScriptPermissionState, ScriptTeleportRequest, ServerError,
     SetDisplayNameReply, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryItem,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus,
-    UserInfo, ViewerEffect, Wearable,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerBatch, TerrainPatch, Texture,
+    TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
@@ -1734,6 +1734,10 @@ pub enum Event {
     /// [`Session::terrain_height`](crate::Session::terrain_height) and
     /// [`Session::terrain_patches`](crate::Session::terrain_patches).
     TerrainPatch(Box<TerrainPatch>),
+    /// A `LayerData` message arrived: what its headers state and the patches
+    /// it carried, in order. Emitted once per message, ahead of the
+    /// [`Event::TerrainPatch`] of each patch in it.
+    TerrainLayerBatch(Box<TerrainLayerBatch>),
     /// A requested texture finished downloading: the reassembled
     /// [`Texture`] from the legacy UDP image path
     /// ([`Session::request_texture`](crate::Session::request_texture)) or the

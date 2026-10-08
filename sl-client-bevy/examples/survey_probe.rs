@@ -211,6 +211,7 @@ fn on_events(
             | SlSessionEvent::ObjectRemoved { .. }
             | SlSessionEvent::ObjectProperties(_)
             | SlSessionEvent::TerrainPatch(_)
+            | SlSessionEvent::TerrainLayerBatch(_)
             | SlSessionEvent::TextureReceived(_)
             | SlSessionEvent::TextureNotFound(_)
             | SlSessionEvent::AssetReceived(_)

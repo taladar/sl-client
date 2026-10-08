@@ -146,6 +146,11 @@ assembles patches into the region's terrain and re-applies updates as the land
 is edited. There are also terrain *texture/material* layers describing how the
 heightfield is painted.
 
+The wind is sent in the same encoding, as two patches over the whole region.
+How each grid cuts the ground into messages, the order it sends it in and how
+often the wind comes are measured in
+[Terrain, wind and clouds](../gridspec/terrain.md).
+
 ## Parcels
 
 A region's land is subdivided into **parcels**, each with its own ownership,
@@ -391,7 +396,11 @@ None of these has a reply; the client just acts on them.
 >   (`sl-proto/src/types/region.rs`); `Command::RequestRegionInfo` fetches
 >   updatable settings (`RegionInfoUpdate`).
 > - Terrain is `sl-proto/src/terrain.rs` (`TerrainPatch`, `encode_layer`),
->   surfaced as `Event::TerrainPatch`.
+>   surfaced as `Event::TerrainPatch` per patch and, per message with its
+>   headers, as `Event::TerrainLayerBatch`. A simulator sends a region's
+>   ground with `SimSession::send_terrain` (a `TerrainStream`: where it is
+>   sent outwards from, where a message is cut, how a patch is written) and
+>   its wind on a timer with `set_wind_feed`.
 > - Parcels are `sl-proto/src/types/parcel.rs` (`ParcelInfo`, `ParcelStatus`,
 >   `ParcelCategory`, `LandingType`, plus the by-id `ParcelDetails` and
 >   per-owner `ParcelObjectOwner`); request via

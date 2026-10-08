@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 359 |
+| ready | 358 |
 | blocked | 111 |
 | in-progress | 20 |
-| bugs | 35 |
-| done | 1336 |
+| bugs | 36 |
+| done | 1337 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2046** |
+| **total** | **2047** |
 
 ## ideas (139)
 
@@ -362,7 +362,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (359)
+## ready (358)
 
 ### protocol
 
@@ -1191,8 +1191,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 - [`gridspec-task-inventory`](ready/gridspec-task-inventory.md) — Task inventory
   reads and writes on each grid
-- [`gridspec-terrain`](ready/gridspec-terrain.md) — Terrain, wind and cloud
-  layers as each grid sends them
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 - [`gridspec-touch-grab`](ready/gridspec-touch-grab.md) — Touch and grab on each
@@ -1609,7 +1607,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (35)
+## bugs (36)
 
 ### protocol
 
@@ -1640,6 +1638,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-about-land-list-save-leaves-flags-stale`](bugs/viewer-about-land-list-save-leaves-flags-stale.md)
   — Saving an allow or ban list on OpenSim leaves About Land's access flags
   stale
+- [`viewer-automation-ground-reveal-eye-under-terrain`](bugs/viewer-automation-ground-reveal-eye-under-terrain.md)
+  — A ground reveal can put the camera under higher ground beside the point
 - [`viewer-bespoke-card-responses-lose-the-button`](bugs/viewer-bespoke-card-responses-lose-the-button.md)
   — Bespoke notification cards resolve every click as "no choice"
 - [`viewer-build-phantom-flag-wrong-bit`](bugs/viewer-build-phantom-flag-wrong-bit.md)
@@ -1700,7 +1700,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The scripted environment change's `night` marker never arrived, once, in a
   full suite run
 
-## done (1336)
+## done (1337)
 
 ### protocol
 
@@ -4662,6 +4662,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   failures, cancel and access refusals on each grid
 - [`gridspec-teleport-lures`](done/gridspec-teleport-lures.md) — Teleport
   offers, requests and their answers on each grid
+- [`gridspec-terrain`](done/gridspec-terrain.md) — Terrain, wind and cloud
+  layers as each grid sends them
 - [`gridspec-world-map`](done/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 

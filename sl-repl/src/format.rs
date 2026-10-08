@@ -401,6 +401,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::RegionExperiences { .. } => "region_experiences",
         Event::ParcelExperiences { .. } => "parcel_experiences",
         Event::TerrainPatch(..) => "terrain_patch",
+        Event::TerrainLayerBatch(..) => "terrain_layer_batch",
         Event::TextureReceived(..) => "texture_received",
         Event::TextureNotFound(..) => "texture_not_found",
         Event::AssetReceived(..) => "asset_received",

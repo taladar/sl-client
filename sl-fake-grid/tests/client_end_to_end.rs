@@ -725,8 +725,8 @@ mod test {
         Ok(())
     }
 
-    /// The region's ground arrives as the full spiral of land patches, every
-    /// one stamped with the region handle, carrying the heights the fixture
+    /// The region's ground arrives as every one of its land patches, each
+    /// stamped with the region handle, carrying the heights the fixture
     /// declares — plus the wind layer's two patches.
     #[tokio::test]
     async fn arrival_streams_the_regions_ground() -> Result<(), TestError> {
@@ -773,13 +773,26 @@ mod test {
                 .all(|patch| patch.region_handle == expected_handle && patch.size == 16),
             "every patch carries the region handle at the standard patch size"
         );
-        // The spiral starts at the south-west corner and runs east.
-        let opening: Vec<(u32, u32)> = land
+        // The ground comes outwards from the agent, who lands at the region's
+        // centre — the corner four patches share — and its far corners last.
+        let mut opening: Vec<(u32, u32)> = land
             .iter()
             .take(4)
             .map(|patch| (patch.patch_x, patch.patch_y))
             .collect();
-        assert_eq!(opening, vec![(0, 0), (1, 0), (2, 0), (3, 0)]);
+        opening.sort_unstable();
+        assert!(
+            opening.contains(&(8, 8))
+                && opening
+                    .iter()
+                    .all(|&(x, y)| (7..=9).contains(&x) && (7..=9).contains(&y)),
+            "the ground opened with {opening:?}, not with the patches round the agent"
+        );
+        let last = land.last().map(|patch| (patch.patch_x, patch.patch_y));
+        assert!(
+            matches!(last, Some((0 | 15, 0 | 15))),
+            "the ground ended with {last:?}, not with a corner of the region"
+        );
 
         // The decoded heights are the fixture's, to within the encoder's
         // quantization of the patch's range.

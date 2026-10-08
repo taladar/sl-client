@@ -40,12 +40,11 @@ mod test {
         ScriptControl, ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus,
         ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
         SimStatId, SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot,
-        TERRAIN_PATCHES_PER_MESSAGE, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
-        TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace,
-        TextureKey, Throttle, TransactionId, TransferId, TransferRequestSource, TransferStatus,
-        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, WearableType, XferId, enable_simulator_to_caps_llsd,
-        parse_event_queue_response,
+        TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+        TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, TextureKey, Throttle,
+        TransactionId, TransferId, TransferRequestSource, TransferStatus, Transmit,
+        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+        WearableType, XferId, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{
         AgentPresence, FlowMirrorStatus, LinkTuning, RegionTelemetry, SESSION_FLOW_COVERAGE,
@@ -54,6 +53,9 @@ mod test {
     use sl_proto::{
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
         chatterbox_invitation_to_llsd,
+    };
+    use sl_proto::{
+        FlatPatches, LayerEncoding, LayerPacking, TerrainLayerBatch, TerrainStream, WindFeed,
     };
     use sl_proto::{
         INVENTORY_SAVE_TIMEOUT, STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID,
@@ -8806,53 +8808,73 @@ mod test {
         let patches: Vec<TerrainPatch> = (0..side)
             .flat_map(|y| (0..side).map(move |x| land_patch(x, y, patch_height(x, y))))
             .collect();
-        sim.send_terrain(&patches, now)?;
+        // Sent outwards from the middle of patch (2, 1), a message closed by
+        // the patch that takes it past sixty bytes.
+        let stream = TerrainStream {
+            nearest_to: (40.0, 24.0),
+            packing: LayerPacking::CloseOnceOver(60),
+            encoding: LayerEncoding::REFERENCE,
+        };
+        sim.send_terrain(&patches, &stream, now)?;
 
         // Count the `LayerData` messages on the way to the client.
         let mut messages = 0_usize;
+        let mut longest = 0_usize;
         while let Some(transmit) = sim.poll_transmit() {
-            if matches!(decode(&transmit)?, AnyMessage::LayerData(_)) {
+            if let AnyMessage::LayerData(layer) = decode(&transmit)? {
                 messages = messages.saturating_add(1);
+                longest = longest.max(layer.layer_data.data.len());
             }
             client.handle_datagram(sim_addr(), &transmit.payload, now)?;
         }
-        assert_eq!(
-            messages, 4,
-            "16 patches, {TERRAIN_PATCHES_PER_MESSAGE} to a message"
+        assert!(
+            (2..16).contains(&messages),
+            "16 patches went into {messages} messages"
         );
+        assert!(longest > 60, "no message passed the line it is closed at");
 
-        let received: Vec<TerrainPatch> = drain_client(&mut client)
+        let events = drain_client(&mut client);
+        let batches: Vec<TerrainLayerBatch> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::TerrainLayerBatch(batch) => Some((**batch).clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(batches.len(), messages, "one batch per message");
+        for batch in &batches {
+            assert_eq!(batch.layer, TerrainLayerType::Land);
+            assert_eq!(batch.message_layer, TerrainLayerType::Land);
+            assert_eq!(batch.stride, 264);
+            assert_eq!(batch.patch_size, PATCH_CELLS);
+            assert!(!batch.child);
+            assert!(batch.patches.iter().all(|patch| patch.prequant == 10));
+        }
+        let received: Vec<TerrainPatch> = events
             .into_iter()
             .filter_map(|e| match e {
                 Event::TerrainPatch(patch) => Some(*patch),
                 _ => None,
             })
             .collect();
-        // The outer ring from the south-west corner (east, north, west,
-        // south), then the inner ring the same way.
-        let expected_order = vec![
-            (0, 0),
-            (1, 0),
-            (2, 0),
-            (3, 0),
-            (3, 1),
-            (3, 2),
-            (3, 3),
-            (2, 3),
-            (1, 3),
-            (0, 3),
-            (0, 2),
-            (0, 1),
-            (1, 1),
-            (2, 1),
-            (2, 2),
-            (1, 2),
-        ];
+        // Nearest first: the patch the point is in, then its four neighbours,
+        // and the far corner last.
         let order: Vec<(u32, u32)> = received
             .iter()
             .map(|patch| (patch.patch_x, patch.patch_y))
             .collect();
-        assert_eq!(order, expected_order);
+        assert_eq!(order.len(), 16);
+        assert_eq!(order.first(), Some(&(2, 1)));
+        let mut ring: Vec<(u32, u32)> = order.get(1..5).ok_or("too few patches")?.to_vec();
+        ring.sort_unstable();
+        assert_eq!(ring, vec![(1, 1), (2, 0), (2, 2), (3, 1)]);
+        assert_eq!(order.last(), Some(&(0, 3)));
+        let headers: Vec<(u32, u32)> = batches
+            .iter()
+            .flat_map(|batch| batch.patches.iter())
+            .map(|patch| (patch.patch_x, patch.patch_y))
+            .collect();
+        assert_eq!(headers, order, "the batches name the patches in order");
         for patch in &received {
             assert_eq!(patch.region_handle, RegionHandle(REGION_HANDLE));
             assert_eq!(patch.layer, TerrainLayerType::Land);
@@ -8886,12 +8908,36 @@ mod test {
         east.values = vec![1.5; 256];
         let mut north = east.clone();
         north.values = vec![-2.5; 256];
-        sim.send_layer_data(TerrainLayerType::Wind, &[east, north], now)?;
+        // As Second Life writes its wind: its own stride, six bits of
+        // prequantization, unreliably.
+        let breeze = LayerEncoding {
+            stride: 18,
+            prequant: 6,
+            flat_patches: FlatPatches::Transformed,
+        };
+        sim.send_layer_data(
+            TerrainLayerType::Wind,
+            &[east, north],
+            &breeze,
+            Reliability::Unreliable,
+            now,
+        )?;
 
         let mut clouds = land_patch(0, 0, 0.0);
         clouds.layer = TerrainLayerType::Cloud;
         clouds.values = vec![0.25; 256];
-        sim.send_layer_data(TerrainLayerType::Cloud, std::slice::from_ref(&clouds), now)?;
+        // As OpenSim writes a patch with no relief: a header and nothing else.
+        let flat = LayerEncoding {
+            flat_patches: FlatPatches::HeaderOnly,
+            ..LayerEncoding::REFERENCE
+        };
+        sim.send_layer_data(
+            TerrainLayerType::Cloud,
+            std::slice::from_ref(&clouds),
+            &flat,
+            Reliability::Reliable,
+            now,
+        )?;
 
         let mut messages = 0_usize;
         while let Some(transmit) = sim.poll_transmit() {
@@ -8902,7 +8948,32 @@ mod test {
         }
         assert_eq!(messages, 2, "one message per layer");
 
-        let received: Vec<TerrainPatch> = drain_client(&mut client)
+        let events = drain_client(&mut client);
+        let headers: Vec<(u32, u32, u32, u32)> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::TerrainLayerBatch(batch) => Some(&**batch),
+                _ => None,
+            })
+            .flat_map(|batch| {
+                batch
+                    .patches
+                    .iter()
+                    .map(|patch| (batch.stride, patch.prequant, patch.word_bits, patch.range))
+            })
+            .collect();
+        assert_eq!(
+            headers
+                .iter()
+                .map(|header| (header.0, header.1))
+                .collect::<Vec<_>>(),
+            vec![(18, 6), (18, 6), (264, 2)]
+        );
+        assert_eq!(
+            headers.last().map(|header| (header.2, header.3)),
+            Some((2, 1))
+        );
+        let received: Vec<TerrainPatch> = events
             .into_iter()
             .filter_map(|e| match e {
                 Event::TerrainPatch(patch) => Some(*patch),
@@ -8930,17 +9001,70 @@ mod test {
         Ok(())
     }
 
+    /// A wind feed sends nothing until an interval has passed, then one
+    /// message an interval, unreliably when told to.
+    #[test]
+    fn a_wind_feed_sends_the_wind_every_interval() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let mut east = land_patch(0, 0, 0.0);
+        east.layer = TerrainLayerType::Wind;
+        east.values = vec![1.0; 256];
+        let north = east.clone();
+        sim.set_wind_feed(
+            Some(WindFeed {
+                interval: Duration::from_secs(1),
+                patches: vec![east, north],
+                encoding: LayerEncoding::REFERENCE,
+                reliability: Reliability::Unreliable,
+            }),
+            now,
+        );
+        let wind_at = |sim: &mut SimSession, at: Instant| -> Result<Vec<bool>, TestError> {
+            sim.handle_timeout(at);
+            let mut reliable = Vec::new();
+            while let Some(transmit) = sim.poll_transmit() {
+                if matches!(decode(&transmit)?, AnyMessage::LayerData(_)) {
+                    let flags = transmit.payload.first().copied().unwrap_or(0);
+                    reliable.push(flags & 0x40 != 0);
+                }
+            }
+            Ok(reliable)
+        };
+        assert_eq!(wind_at(&mut sim, after(now, 500)?)?, Vec::<bool>::new());
+        assert_eq!(wind_at(&mut sim, after(now, 1_000)?)?, vec![false]);
+        assert_eq!(wind_at(&mut sim, after(now, 1_500)?)?, Vec::<bool>::new());
+        assert_eq!(wind_at(&mut sim, after(now, 2_000)?)?, vec![false]);
+        sim.set_wind_feed(None, after(now, 2_000)?);
+        assert_eq!(wind_at(&mut sim, after(now, 3_000)?)?, Vec::<bool>::new());
+        Ok(())
+    }
+
     #[test]
     fn terrain_without_a_circuit_is_refused() -> Result<(), TestError> {
         let now = Instant::now();
         let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
         let patch = land_patch(0, 0, 21.0);
         assert!(matches!(
-            sim.send_layer_data(TerrainLayerType::Land, std::slice::from_ref(&patch), now),
+            sim.send_layer_data(
+                TerrainLayerType::Land,
+                std::slice::from_ref(&patch),
+                &LayerEncoding::REFERENCE,
+                Reliability::Reliable,
+                now
+            ),
             Err(sl_proto::Error::NoCircuit)
         ));
         // Nothing to send is not an error, with or without a circuit.
-        sim.send_terrain(&[], now)?;
+        let stream = TerrainStream {
+            nearest_to: (128.0, 128.0),
+            packing: LayerPacking::KeepWithin(1_200),
+            encoding: LayerEncoding::REFERENCE,
+        };
+        sim.send_terrain(&[], &stream, now)?;
         Ok(())
     }
 
