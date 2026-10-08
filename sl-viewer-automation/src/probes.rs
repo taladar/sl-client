@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use sl_automation_proto::{
     AgentReadout, CameraView, ClockTime, ConversationReadout, EnvironmentReadout, InventoryEntry,
     InventoryFolderReadout, InventoryRoot, NotificationReadout, OfferedButton, QuiescenceReadout,
-    RegionReadout, SelectedObject, SkyReadout, StatusReadout, WaterReadout,
+    RegionReadout, SelectedObject, SkyReadout, StatusReadout, WaterReadout, WorldMapReadout,
 };
 use sl_client_bevy::{
     FolderState, InventoryFolderKey, SlAgentParcel, SlCurrentRegion, SlIdentity, SlRegion,
@@ -255,6 +255,16 @@ pub fn read_environment(world: &mut World) -> EnvironmentReadout {
         }),
         previewing: scene.previewing,
     }
+}
+
+/// What the world map knows, through [`ProbeSources::world_map`]. An app
+/// without a world map knows nothing.
+#[must_use]
+pub fn read_world_map(world: &mut World) -> WorldMapReadout {
+    ProbeSources::of(world)
+        .world_map
+        .map(|reader| reader(world))
+        .unwrap_or_default()
 }
 
 /// The edit selection in selection order, the primary last.

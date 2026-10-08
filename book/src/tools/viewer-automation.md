@@ -120,7 +120,11 @@ nothing runs while none are queued.
   `sl-viewer-ctl inventory [--library] [--wait-loaded SECS]` prints; the
   viewer's model holds a folder's items once the UI has paged it, so a whole
   tree is read after a search query has swept every folder), `quiescence`
-  (outstanding work, bucket by bucket) and `environment`.
+  (outstanding work, bucket by bucket), `environment` and `world_map` (the
+  regions the map was told of, each item layer with its counts and whether
+  an item is drawn, and the tiles ready, pending and absent — what
+  `sl-viewer-ctl world-map` prints; the map is one composited image, so
+  none of this is a widget).
 - **Streams** — the event log (session events, outbound commands, UI
   actions; sequence-numbered, read by cursor or subscribed to) and the
   warnings and errors logged since a cursor.

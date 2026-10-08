@@ -17,6 +17,7 @@ use crate::probe_sources::{FileDialogAnswer, ProbeSources};
 use crate::probes::{
     ProbeError, read_agent, read_conversations, read_environment, read_inventory,
     read_inventory_tree, read_notifications, read_quiescence, read_selection, read_status,
+    read_world_map,
 };
 use crate::screenshot::{ScreenshotTicket, request_screenshot, take_screenshot};
 use crate::ui_model::snapshot;
@@ -45,6 +46,7 @@ pub(super) fn read(world: &mut World, probe: &Probe) -> Result<ProbeReadout, Box
         }
         Probe::Quiescence => ProbeReadout::Quiescence(read_quiescence(world)),
         Probe::Environment => ProbeReadout::Environment(read_environment(world)),
+        Probe::WorldMap => ProbeReadout::WorldMap(read_world_map(world)),
     })
 }
 

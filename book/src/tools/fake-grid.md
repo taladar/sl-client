@@ -607,8 +607,11 @@ over a small generic `xmlrpc` module):
   `OpenSimExtras` says it a second time), so a viewer's world map
   loads tiles from the fake grid. Every configured region gets a stock
   zoom-1 tile (an embedded JPEG); `FakeGridBuilder::map_tile` registers
-  others. Absent tiles are 404; tiles carry `Cache-Control`/`ETag` so the
-  viewer's disk cache holds them.
+  others. A tile the grid does not have is answered as the imitated
+  grid's tile server answers one: `403` with an `AccessDenied` document on
+  the Second Life flavour, OpenSim's tile of plain water on the OpenSim
+  one. Only a Second Life flavoured grid sends `Cache-Control`, `ETag` and
+  `Last-Modified` with a tile; OpenSim sends none of them.
 - **`POST /currency.php`** and **`POST /landtool.php`** — the XML-RPC
   economy helpers behind the buy-L$ and buy-land floaters
   (`getCurrencyQuote`/`buyCurrency`, `preflightBuyLandPrep`/`buyLandPrep`).
@@ -628,19 +631,32 @@ in more than one sense: a viewer opening its map asks *whichever* simulator it
 happens to be on about the whole grid, so every session has to be able to
 answer for every region.
 
-- **`MapBlockRequest`** — every region whose grid coordinates fall inside the
-  requested rectangle.
-- **`MapNameRequest`** — every region whose name starts with the search text,
-  case-insensitively, because the viewer's search box sends whatever has been
-  typed so far.
-- **`MapItemRequest`** — for `AgentLocations` on the session's own region, one
-  green dot at the agent's position; anything else answers with an empty reply
-  of the requested type rather than silence, which is what a viewer's "no
-  events here" needs to see.
-- **`MapLayerRequest`** — one layer covering the bounding rectangle of every
-  configured region.
+Each request is answered as the imitated grid answers it
+(`ImitatedGrid::map_policy`, measured in
+[Grid Behaviour → World map](../gridspec/world-map.md)):
 
-A block's `map_image_id` is the **region id**, which is what OpenSim reports for
+- **`MapBlockRequest`** — every region whose grid coordinates fall inside the
+  requested rectangle, with the request's low sixteen flag bits echoed. With
+  the null-sims flag the Second Life flavour adds an entry for every empty
+  cell and the OpenSim flavour one only for a cell asked about alone. The
+  Second Life flavour leaves a rectangle of more than 256 cells unanswered.
+- **`MapNameRequest`** — the regions whose name starts with the search text
+  (Second Life) or contains it (OpenSim, which runs no search under three
+  characters), ignoring case, then the entry at cell `(0, 0)` that ends a
+  search on both grids. The OpenSim flavour sends its alert for a short
+  search and for one that matched nothing.
+- **`MapItemRequest`** — for agent locations, the one item both grids send
+  for a region with nobody to show: a count of zero, on the region's corner
+  (Second Life) or a metre in (OpenSim). The grid's residents are not shown
+  to each other, so there is never anybody to count. Any other type gets no
+  reply, since the grid has no telehubs, land for sale or events — except
+  that the OpenSim flavour answers any request naming the agent's own
+  region with its agent locations, as OpenSim does.
+- **`MapLayerRequest`** — a reply with no layers (Second Life) or OpenSim's
+  one whole-grid layer.
+
+A block's `map_image_id` — sent, as on both grids, only for a request with no
+flags — is the **region id**, which is what OpenSim reports for
 a region with no separately-uploaded map asset. It is not a texture the grid
 serves: the tiles go out over HTTP, as they do on every modern grid.
 

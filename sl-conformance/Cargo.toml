@@ -33,6 +33,9 @@ etherparse = { version = "0.20.2" }
 fs-err = { workspace = true }
 owo-colors = "4.3.0"
 pcap-file = { version = "2.0.0" }
+# The world-map case asks the grid's tile server and its `MapLayer`
+# capability directly: neither is something the client crate fetches.
+reqwest = { workspace = true, features = ["rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sl-anim = { workspace = true }

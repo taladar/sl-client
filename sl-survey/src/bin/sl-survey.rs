@@ -672,6 +672,7 @@ impl Survey {
             | Event::ParcelAccessList { .. }
             | Event::EstateInfo(_)
             | Event::EstateAccessList { .. }
+            | Event::MapBlockBatch(_)
             | Event::MapItems { .. }
             | Event::MapLayers { .. }
             | Event::NeighborSeed { .. }
@@ -860,6 +861,9 @@ impl Survey {
                     max_x: self.bounds.max_x,
                     min_y: self.bounds.min_y,
                     max_y: self.bounds.max_y,
+                    flags: sl_client_tokio::MapRequestFlags(
+                        sl_client_tokio::MapRequestFlags::LAYER,
+                    ),
                 })
                 .await
                 .ok();

@@ -17,16 +17,16 @@ use crate::types::{
     GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
     InventoryListing, InventoryType, LandStatExtended, LandStatItem, LandStatReportType,
-    LandStatScore, LandingType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-    Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus,
-    NavMeshStatus, NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo,
-    ParcelCategory, ParcelInfo, ParcelLlsdDialect, ParcelMediaData, ParcelMediaSharing,
-    ParcelObjectOwner, ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlayingAnimation,
-    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
-    RegionCombatSettings, RegionIdentity, RegionLimits, RegionTerrainComposition,
-    RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissions, SetDisplayNameReply, SkySettings, TRACK_MAX, TaskInventoryItem,
-    WaterSettings, avatar_texture,
+    LandStatScore, LandingType, MapBlockBatch, MapBlockRecord, MapItem, MapItemType, MapLayer,
+    MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags,
+    MuteType, NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties,
+    ObjectTransform, OpenRegionInfo, ParcelCategory, ParcelInfo, ParcelLlsdDialect,
+    ParcelMediaData, ParcelMediaSharing, ParcelObjectOwner, ParcelRequestResult, ParcelStatus,
+    PickInfo, PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId,
+    ProposalVoteId, RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
+    RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings, TRACK_MAX,
+    TaskInventoryItem, WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -2987,6 +2987,29 @@ pub(crate) fn map_region_info(
     }))
 }
 
+/// A whole `MapBlockReply` as a [`MapBlockBatch`]: its echoed flags and every
+/// entry, the ones [`map_region_info`] passes over included.
+pub(crate) fn map_block_batch(reply: &MapBlockReply) -> MapBlockBatch {
+    MapBlockBatch {
+        flags: MapRequestFlags(reply.agent_data.flags),
+        blocks: reply
+            .data
+            .iter()
+            .enumerate()
+            .map(|(index, data)| MapBlockRecord {
+                grid_coordinates: GridCoordinates::new(u32::from(data.x), u32::from(data.y)),
+                name: trimmed_string(&data.name),
+                access: data.access,
+                region_flags: data.region_flags,
+                water_height: data.water_height,
+                agents: data.agents,
+                map_image_id: data.map_image_id,
+                size: reply.size.get(index).map(|size| (size.size_x, size.size_y)),
+            })
+            .collect(),
+    }
+}
+
 /// Builds a [`MapItem`] from a `MapItemReply` data block. Coordinates are global
 /// metres; `extra`/`extra2` are type-specific (see [`MapItem`]).
 pub(crate) fn map_item(data: &sl_wire::messages::MapItemReplyDataBlock) -> MapItem {
@@ -3069,6 +3092,52 @@ pub fn build_map_block_reply(
             flags: flags.0,
         },
         data: regions.iter().map(map_region_info_to_data_block).collect(),
+        size,
+    }
+}
+
+/// Builds a `MapBlockReply` from `batch` entry for entry — the inverse of the
+/// client's decoding into [`Event::MapBlockBatch`], and the way a simulator
+/// sends what
+/// [`build_map_block_reply`] cannot say: an empty cell, the entry that ends a
+/// name search.
+///
+/// The parallel `Size` block is sent when any entry states a size, with the
+/// standard 256 m for the entries that do not. The `data` array is capped at
+/// the 255 entries the wire count byte allows.
+#[must_use]
+pub fn build_map_block_batch_reply(agent_id: AgentKey, batch: &MapBlockBatch) -> MapBlockReply {
+    let size = if batch.blocks.iter().any(|block| block.size.is_some()) {
+        batch
+            .blocks
+            .iter()
+            .map(|block| {
+                let (size_x, size_y) = block.size.unwrap_or((256, 256));
+                MapBlockReplySizeBlock { size_x, size_y }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    MapBlockReply {
+        agent_data: MapBlockReplyAgentDataBlock {
+            agent_id: agent_id.uuid(),
+            flags: batch.flags.0,
+        },
+        data: batch
+            .blocks
+            .iter()
+            .map(|block| MapBlockReplyDataBlock {
+                x: u16::try_from(block.grid_coordinates.x()).unwrap_or(u16::MAX),
+                y: u16::try_from(block.grid_coordinates.y()).unwrap_or(u16::MAX),
+                name: with_nul(&block.name),
+                access: block.access,
+                region_flags: block.region_flags,
+                water_height: block.water_height,
+                agents: block.agents,
+                map_image_id: block.map_image_id,
+            })
+            .collect(),
         size,
     }
 }

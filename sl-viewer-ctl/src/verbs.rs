@@ -177,6 +177,7 @@ pub(crate) async fn run<W: Write>(
             Outcome::InventoryTree(settled_inventory_tree(viewer, root, *wait_loaded).await?)
         }
         Verb::Environment => Outcome::Environment(viewer.environment().await?),
+        Verb::WorldMap => Outcome::WorldMap(viewer.world_map().await?),
         Verb::FileDialog { path, .. } => Outcome::FileDialog {
             answered: viewer.answer_file_dialog(path.as_deref()).await?,
             picked: path.clone(),

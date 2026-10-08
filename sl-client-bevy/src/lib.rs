@@ -92,7 +92,8 @@ pub use sl_proto::{
     LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest, LoggedChatType, LoginAccount,
     LoginFailure, LoginParams, LoginRejectKind, LoginRequest, LookAtType, LureDestination, LureId,
     MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
-    MEDIA_PERM_OWNER, MUTE_LIST_LIMIT, MapItem, MapItemType, MapRegionInfo, MarketplaceApiError,
+    MEDIA_PERM_OWNER, MUTE_LIST_LIMIT, MapBlockBatch, MapBlockKind, MapBlockRecord, MapItem,
+    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MarketplaceApiError,
     MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo,
     MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus,
     MeshKey, MessageCursor, MessageId, MessageStatus, MfaChallenge, MoneyBalance, MoneyTransaction,
@@ -2807,8 +2808,9 @@ fn apply_command(
             max_x,
             min_y,
             max_y,
+            flags,
         } => {
-            session.request_map_blocks(*min_x, *max_x, *min_y, *max_y, now)?;
+            session.request_map_blocks((*min_x, *max_x), (*min_y, *max_y), *flags, now)?;
         }
         Command::RequestMapByName { name } => {
             session.request_map_by_name(name, now)?;

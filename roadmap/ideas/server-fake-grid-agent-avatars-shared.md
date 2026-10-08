@@ -57,3 +57,14 @@ Measured in `book/src/gridspec/avatars.md`; build to that chapter.
 `avatar-presence` declares both fake flavours but runs only its
 single-resident leg there; drop the `is_fake` branch once residents see each
 other.
+
+## The world map's agent locations (2026-10-08)
+
+Measured by [[gridspec-world-map]] (`book/src/gridspec/world-map.md`
+§ Agent locations), and what shared avatars have to feed: a
+`MapItemRequest` for agent locations never counts the asker; OpenSim sends
+one item per other avatar at its whole-metre position with `Extra` 1 and
+keeps another region's answer for two minutes; Second Life sends a count of
+the others at a coarse position and is current within two seconds. Until
+then `world_map::item_answer` sends only the item both grids send for a
+region with nobody to show.

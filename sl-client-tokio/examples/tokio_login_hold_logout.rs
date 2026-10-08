@@ -567,6 +567,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::NeighborSeed { .. }
             | Event::NeighborRetired { .. }
             | Event::MapBlock(_)
+            | Event::MapBlockBatch(_)
             | Event::MapItems { .. }
             | Event::MapLayers { .. }
             | Event::TeleportStarted { .. }

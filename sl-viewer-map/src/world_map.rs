@@ -263,6 +263,64 @@ pub(crate) struct WorldMapModel {
     revision: u64,
 }
 
+/// Reads what the world map knows — the regions the grid named, the items it
+/// reported, how its tiles fared: the reader the viewer registers for the
+/// automation's world-map probe.
+#[must_use]
+pub fn world_map_readout(world: &mut World) -> sl_automation_proto::WorldMapReadout {
+    use sl_automation_proto::{MapItemLayerReadout, MapItemReadout, MapRegionReadout};
+    let mut readout = sl_automation_proto::WorldMapReadout::default();
+    if let Some(model) = world.get_resource::<WorldMapModel>() {
+        readout.regions = model
+            .regions
+            .iter()
+            .filter_map(|((x, y), info)| {
+                Some(MapRegionReadout {
+                    name: info.name.as_ref()?.to_string(),
+                    grid: [*x, *y],
+                })
+            })
+            .collect();
+        readout.regions.sort_by_key(|region| region.grid);
+        readout.items = model
+            .items
+            .iter()
+            .map(|((handle, code), items)| {
+                let cell = GridCoordinates::from(RegionHandle(*handle));
+                let agents = MapItemType::from_u32(*code) == MapItemType::AgentLocations;
+                let width = f64::from(REGION_WIDTH_METRES);
+                MapItemLayerReadout {
+                    grid: [cell.x(), cell.y()],
+                    kind: *code,
+                    items: items
+                        .iter()
+                        .map(|item| MapItemReadout {
+                            at: [
+                                item.position.x() - f64::from(cell.x()) * width,
+                                item.position.y() - f64::from(cell.y()) * width,
+                            ],
+                            extra: item.extra,
+                            extra2: item.extra2,
+                            // The same test `gather_markers` draws by.
+                            drawn: !(agents && item.extra <= 0),
+                        })
+                        .collect(),
+                }
+            })
+            .collect();
+        readout.items.sort_by_key(|layer| (layer.grid, layer.kind));
+    }
+    if let Some(tiles) = world.get_resource::<WorldMapTiles>() {
+        readout.tile_server = tiles.base_url().map(str::to_owned);
+        (
+            readout.tiles_ready,
+            readout.tiles_pending,
+            readout.tiles_absent,
+        ) = tiles.counts();
+    }
+    readout
+}
+
 /// The world-map floater's live view / interaction state.
 #[derive(Resource)]
 struct WorldMapState {
@@ -1041,22 +1099,10 @@ fn ingest_world_map_events(
                     state.results_dirty = true;
                 }
             }
-            SlSessionEvent::MapItems { item_type, items } => {
-                // Group the reply by the region each item actually sits in and
-                // replace those regions' layers wholesale.
-                let mut grouped: HashMap<(u64, u32), Vec<MapItem>> = HashMap::new();
-                for item in items {
-                    let Some(handle) = item.region_handle() else {
-                        continue;
-                    };
-                    grouped
-                        .entry((handle.0, item_type.to_u32()))
-                        .or_default()
-                        .push(item.clone());
-                }
-                for (key, group) in grouped {
-                    model.items.insert(key, group);
-                }
+            SlSessionEvent::MapItems {
+                item_type, items, ..
+            } => {
+                fold_items(&mut model.items, *item_type, items);
                 model.revision = model.revision.saturating_add(1);
             }
             SlSessionEvent::SimulatorFeatures(features) => {
@@ -1069,6 +1115,42 @@ fn ingest_world_map_events(
                 }
             }
             _other => {}
+        }
+    }
+}
+
+/// Folds one `MapItemReply` into the item layers, keyed by the region each
+/// item actually sits in.
+///
+/// Agent locations are a region's whole answer in one reply, so they replace
+/// what was known about that region. Every other kind is added to: Second
+/// Life answers a telehub or land-for-sale request for the whole grid, across
+/// a few hundred replies in which one region's items are not together, and
+/// OpenSim sends a region's telehub and land again with every agent-location
+/// answer — so a reply is neither the whole of a region's layer nor new.
+fn fold_items(
+    layers: &mut HashMap<(u64, u32), Vec<MapItem>>,
+    item_type: MapItemType,
+    items: &[MapItem],
+) {
+    let code = item_type.to_u32();
+    let mut grouped: HashMap<u64, Vec<MapItem>> = HashMap::new();
+    for item in items {
+        let Some(handle) = item.region_handle() else {
+            continue;
+        };
+        grouped.entry(handle.0).or_default().push(item.clone());
+    }
+    for (handle, group) in grouped {
+        if item_type == MapItemType::AgentLocations {
+            layers.insert((handle, code), group);
+            continue;
+        }
+        let layer = layers.entry((handle, code)).or_default();
+        for item in group {
+            if !layer.contains(&item) {
+                layer.push(item);
+            }
         }
     }
 }
@@ -1436,8 +1518,17 @@ const BLOCK_REFRESH_SECONDS: f64 = 120.0;
 /// How long a region's item layer stays fresh, in seconds.
 const ITEM_REFRESH_SECONDS: f64 = 30.0;
 
-/// The map-block request chunk edge, in regions.
-const BLOCK_CHUNK: u32 = 16;
+/// How long the grid-wide item layers — everything but agent locations —
+/// stay fresh, in seconds. Second Life answers land for sale with several
+/// thousand items, so this is not asked for often.
+const GRID_ITEM_REFRESH_SECONDS: f64 = 300.0;
+
+/// The map-block request chunk edge, in regions: eight, so that a request
+/// names the sixty-four regions the reference viewer keeps to. Second Life
+/// answers no rectangle of more than 256 cells at all
+/// (`book/src/gridspec/world-map.md`), and was measured only where regions
+/// are sparse, so this stays well inside it.
+const BLOCK_CHUNK: u32 = 8;
 
 /// The most map-block chunks sent per frame.
 const MAX_BLOCK_SENDS: usize = 4;
@@ -1564,11 +1655,12 @@ fn request_world_map_data(
             max_x: chunk.1,
             min_y: chunk.2,
             max_y: chunk.3,
+            flags: sl_client_bevy::MapRequestFlags(sl_client_bevy::MapRequestFlags::LAYER),
         }));
         block_sends = block_sends.saturating_add(1);
     }
 
-    // Item layers for the visible, known regions.
+    // Item layers.
     let store = settings.store();
     let mut wanted: Vec<MapItemType> = Vec::new();
     if store.get_bool(SETTING_PEOPLE).unwrap_or(true) {
@@ -1590,7 +1682,38 @@ fn request_world_map_data(
     if store.get_bool(SETTING_ADULT_EVENTS).unwrap_or(false) {
         wanted.push(MapItemType::AdultEvent);
     }
+    // Everything but agent locations is asked for once, of "the region I am
+    // in", as the reference viewer does: Second Life answers for the whole
+    // grid whichever region is named, and OpenSim for the agent's own.
     let mut item_sends = 0_usize;
+    for item_type in wanted
+        .iter()
+        .filter(|item_type| **item_type != MapItemType::AgentLocations)
+    {
+        let code = item_type.to_u32();
+        let fresh = model
+            .item_requests
+            .get(&(0, code))
+            .is_some_and(|sent| now - sent < GRID_ITEM_REFRESH_SECONDS);
+        if fresh {
+            continue;
+        }
+        model.item_requests.insert((0, code), now);
+        // The answer is the layer anew, in as many replies as it takes.
+        model.items.retain(|(_region, kind), _items| *kind != code);
+        model.revision = model.revision.saturating_add(1);
+        commands.write(SlCommand(Command::RequestMapItems {
+            item_type: *item_type,
+            region_handle: RegionHandle(0),
+        }));
+        item_sends = item_sends.saturating_add(1);
+    }
+    if !wanted.contains(&MapItemType::AgentLocations) {
+        return;
+    }
+
+    // Agent locations for the visible, known regions, region by region.
+    let code = MapItemType::AgentLocations.to_u32();
     let visible_regions: Vec<RegionHandle> = model
         .regions
         .values()
@@ -1600,26 +1723,24 @@ fn request_world_map_data(
         })
         .map(|info| info.region_handle)
         .collect();
-    'regions: for handle in visible_regions {
-        for item_type in &wanted {
-            if item_sends >= MAX_ITEM_SENDS {
-                break 'regions;
-            }
-            let key = (handle.0, item_type.to_u32());
-            let fresh = model
-                .item_requests
-                .get(&key)
-                .is_some_and(|sent| now - sent < ITEM_REFRESH_SECONDS);
-            if fresh {
-                continue;
-            }
-            model.item_requests.insert(key, now);
-            commands.write(SlCommand(Command::RequestMapItems {
-                item_type: *item_type,
-                region_handle: handle,
-            }));
-            item_sends = item_sends.saturating_add(1);
+    for handle in visible_regions {
+        if item_sends >= MAX_ITEM_SENDS {
+            break;
         }
+        let key = (handle.0, code);
+        let fresh = model
+            .item_requests
+            .get(&key)
+            .is_some_and(|sent| now - sent < ITEM_REFRESH_SECONDS);
+        if fresh {
+            continue;
+        }
+        model.item_requests.insert(key, now);
+        commands.write(SlCommand(Command::RequestMapItems {
+            item_type: MapItemType::AgentLocations,
+            region_handle: handle,
+        }));
+        item_sends = item_sends.saturating_add(1);
     }
 }
 
@@ -2630,8 +2751,11 @@ fn on_world_map_context(
 /// Seconds the search field must be quiet before the query is sent.
 const SEARCH_DEBOUNCE_SECONDS: f32 = 0.6;
 
-/// The shortest query worth sending to the grid.
-const SEARCH_MIN_CHARS: usize = 2;
+/// The shortest query sent to the grid: three characters, because OpenSim
+/// runs no search shorter than that and answers one with an alert instead
+/// (`book/src/gridspec/world-map.md`) — which, from a field that searches as
+/// it is typed in, would be an alert for every second keystroke.
+const SEARCH_MIN_CHARS: usize = 3;
 
 /// Drive the region-name search: debounce the field's text into a
 /// `MapNameRequest`, and rebuild the result rows when the matches change.
@@ -3431,17 +3555,17 @@ mod tests {
     #[test]
     fn search_matches_prefix_first_then_alphabetical() {
         let regions = [
-            region("Dublin", 1000, 1000),
+            region("Dunes", 1000, 1000),
             region("Da Boom", 1001, 1000),
             region("Sandy Dune", 1002, 1000),
             region("Elsewhere", 1003, 1000),
         ];
-        let results = search_results("du", regions.iter());
+        let results = search_results("dun", regions.iter());
         let names: Vec<&str> = results.iter().map(|(name, _x, _y)| name.as_str()).collect();
-        // Prefix match ("Dublin") first, then the substring match.
-        assert_eq!(names, vec!["Dublin", "Sandy Dune"]);
+        // Prefix match ("Dunes") first, then the substring match.
+        assert_eq!(names, vec!["Dunes", "Sandy Dune"]);
         // Too-short queries yield nothing.
-        assert_eq!(search_results("d", regions.iter()).len(), 0);
+        assert_eq!(search_results("du", regions.iter()).len(), 0);
     }
 
     /// Every sample marker passes the live marker filter at the default layer
@@ -3466,6 +3590,115 @@ mod tests {
         assert_eq!(
             pixels.len(),
             usize::try_from(px.x.saturating_mul(px.y).saturating_mul(4)).unwrap_or(0)
+        );
+    }
+
+    /// A map item at `(x, y)` global metres.
+    fn item(x: f64, y: f64, extra: i32) -> sl_client_bevy::MapItem {
+        sl_client_bevy::MapItem {
+            position: sl_client_bevy::GlobalCoordinates::new(x, y, 0.0),
+            id: None,
+            extra,
+            extra2: 0,
+            name: String::new(),
+        }
+    }
+
+    /// Agent locations are a region's whole answer and replace what was
+    /// known; any other kind arrives spread over many replies, and repeated,
+    /// so it is added to and never doubled.
+    #[test]
+    fn item_replies_fold_by_kind() {
+        use sl_client_bevy::MapItemType;
+        let mut layers = std::collections::HashMap::new();
+        let here = RegionHandle::from_grid(1000, 1000).0;
+        let agents = MapItemType::AgentLocations;
+        super::fold_items(&mut layers, agents, &[item(256_010.0, 256_010.0, 2)]);
+        super::fold_items(&mut layers, agents, &[item(256_020.0, 256_020.0, 1)]);
+        assert_eq!(
+            layers.get(&(here, agents.to_u32())),
+            Some(&vec![item(256_020.0, 256_020.0, 1)]),
+            "the later answer is the region's dots"
+        );
+
+        let land = MapItemType::LandForSale;
+        super::fold_items(&mut layers, land, &[item(256_010.0, 256_010.0, 16)]);
+        super::fold_items(
+            &mut layers,
+            land,
+            &[
+                item(256_030.0, 256_030.0, 32),
+                item(256_010.0, 256_010.0, 16),
+            ],
+        );
+        assert_eq!(
+            layers.get(&(here, land.to_u32())),
+            Some(&vec![
+                item(256_010.0, 256_010.0, 16),
+                item(256_030.0, 256_030.0, 32)
+            ]),
+            "a second reply adds its parcels and repeats none"
+        );
+    }
+
+    /// The probe's readout names each region by its cell and tells an agent
+    /// location that counts nobody — the grids' "this region is empty" —
+    /// from one that is drawn.
+    #[test]
+    fn the_readout_says_which_items_are_drawn() {
+        /// An item layer as the test reads it: its kind, and where each item
+        /// is and whether it is drawn.
+        type Layer = (u32, Vec<([f64; 2], bool)>);
+        use sl_client_bevy::MapItemType;
+        let mut app = App::new();
+        let mut model = super::WorldMapModel::default();
+        let _previous = model
+            .regions
+            .insert((1000, 1000), region("Home", 1000, 1000));
+        let here = RegionHandle::from_grid(1000, 1000).0;
+        let agents = MapItemType::AgentLocations;
+        super::fold_items(
+            &mut model.items,
+            agents,
+            &[item(256_128.0, 256_064.0, 2), item(256_001.0, 256_001.0, 0)],
+        );
+        super::fold_items(
+            &mut model.items,
+            MapItemType::Telehub,
+            &[item(256_010.0, 256_010.0, 0)],
+        );
+        assert!(model.items.contains_key(&(here, agents.to_u32())));
+        app.insert_resource(model);
+        let readout = super::world_map_readout(app.world_mut());
+        assert_eq!(
+            readout
+                .regions
+                .iter()
+                .map(|region| (region.name.as_str(), region.grid))
+                .collect::<Vec<_>>(),
+            vec![("Home", [1000, 1000])]
+        );
+        let layers: Vec<Layer> = readout
+            .items
+            .iter()
+            .map(|layer| {
+                (
+                    layer.kind,
+                    layer
+                        .items
+                        .iter()
+                        .map(|item| (item.at, item.drawn))
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            layers,
+            vec![
+                // A telehub's `Extra` is always zero, and it is drawn.
+                (1, vec![([10.0, 10.0], true)]),
+                (6, vec![([128.0, 64.0], true), ([1.0, 1.0], false)]),
+            ]
         );
     }
 }

@@ -12,7 +12,7 @@ use sl_automation_proto::{
     EnvironmentReadout, InventoryFolderReadout, InventoryRoot, Locator, LogEntry, LogPage,
     LogStream, NotificationReadout, PROTOCOL_VERSION, Probe, ProbeReadout, QuiescenceReadout,
     Request, RequestBody, ResponseBody, SelectedObject, StateCondition, StateObservation,
-    StatusReadout, UiNode, ViewerIdentity, ViewerMessage,
+    StatusReadout, UiNode, ViewerIdentity, ViewerMessage, WorldMapReadout,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -596,6 +596,21 @@ impl Viewer {
             ProbeReadout::Quiescence(quiescence) => Ok(quiescence),
             other => {
                 Err(self.unexpected("read quiescence", &ResponseBody::Readout { readout: other }))
+            }
+        }
+    }
+
+    /// What the world map knows: the regions the grid named, the items it
+    /// reported and how its tiles fared.
+    ///
+    /// # Errors
+    ///
+    /// As [`read`](Self::read).
+    pub async fn world_map(&self) -> Result<WorldMapReadout, DriverError> {
+        match self.read(Probe::WorldMap).await? {
+            ProbeReadout::WorldMap(map) => Ok(map),
+            other => {
+                Err(self.unexpected("read world map", &ResponseBody::Readout { readout: other }))
             }
         }
     }

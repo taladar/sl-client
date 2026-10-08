@@ -27,10 +27,10 @@ mod test {
         InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InventoryType, InviteChannel,
         ItemInfo, LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact,
         LandingType, LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams,
-        LoginRedirect, LookAtType, LureId, MapItemType, Material, Maturity, MeanCollisionType,
-        MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NavMeshBuildStatus,
-        NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
-        ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
+        LoginRedirect, LookAtType, LureId, MapItemType, MapRequestFlags, Material, Maturity,
+        MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+        NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez,
+        ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey,
         ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags,
         ParcelKey, ParcelMediaCommand, ParcelRect, ParcelRequestResult, ParcelReturnType,
         ParcelStatus, ParcelUpdate, PendingInvite, PermissionField, Permissions, Permissions5,
@@ -13798,7 +13798,9 @@ mod test {
         let (item_type, items) = drain_events(&mut session)
             .into_iter()
             .find_map(|e| match e {
-                Event::MapItems { item_type, items } => Some((item_type, items)),
+                Event::MapItems {
+                    item_type, items, ..
+                } => Some((item_type, items)),
                 _ => None,
             })
             .ok_or("expected a MapItems event")?;
@@ -16263,7 +16265,7 @@ mod test {
         drain(&mut session)?;
         drain_events(&mut session);
 
-        session.request_map_blocks(1000, 1001, 1000, 1001, now)?;
+        session.request_map_blocks((1000, 1001), (1000, 1001), MapRequestFlags(0), now)?;
         let sent = drain(&mut session)?;
         let request = sent
             .iter()
@@ -16367,7 +16369,7 @@ mod test {
         let layers = drain_events(&mut session)
             .into_iter()
             .find_map(|e| match e {
-                Event::MapLayers { layers } => Some(layers),
+                Event::MapLayers { layers, .. } => Some(layers),
                 _ => None,
             })
             .ok_or("expected a MapLayers event")?;

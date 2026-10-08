@@ -158,7 +158,7 @@ pub use crate::probe_sources::{
 };
 pub use crate::probes::{
     ProbeError, read_agent, read_conversations, read_environment, read_inventory,
-    read_notifications, read_quiescence, read_selection, read_status,
+    read_notifications, read_quiescence, read_selection, read_status, read_world_map,
 };
 pub use crate::pursuit::{
     DEFAULT_DEADLINE, DEFAULT_DEADLINE_FRAMES, Intent, Progress, Pursuit, PursuitError, Target,

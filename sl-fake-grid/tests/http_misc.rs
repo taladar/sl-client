@@ -147,7 +147,9 @@ mod test {
 
         let absent = MapTileRef::new(1, 999, 999).ok_or("bad zoom")?;
         let response = reqwest::get(base.join(&absent.file_name())?).await?;
-        assert_eq!(response.status().as_u16(), 404);
+        // The default flavour is Second Life, whose tile server refuses a
+        // tile it does not have.
+        assert_eq!(response.status().as_u16(), 403);
 
         let response = reqwest::Client::new()
             .head(base.join(&tile.file_name())?)

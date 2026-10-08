@@ -373,64 +373,92 @@ mod test {
     /// The region east of it.
     const NEIGHBOUR: &str = "Neighbour";
 
-    /// **Two regions**: from the catalogue region, the world map's search
-    /// finds the neighbouring region, and its Teleport button takes the
-    /// viewer there; the status bar and the agent probe agree on where it
-    /// arrived.
+    /// **Two regions**, on a grid of each flavour: from the catalogue region,
+    /// the world map's search finds the neighbouring region, and its Teleport
+    /// button takes the viewer there; the status bar and the agent probe
+    /// agree on where it arrived.
+    ///
+    /// The two grids search differently (`book/src/gridspec/world-map.md`):
+    /// OpenSim matches anywhere in a name, so there the middle of the
+    /// neighbour's name finds it too; Second Life matches the start alone.
+    /// Both end a search with an entry that is no region, which must not
+    /// become a row.
     #[test]
     fn the_world_map_teleports_to_the_neighbouring_region() -> Result<(), TestError> {
-        let catalogue =
-            scenarios::scenario("catalogue").ok_or("the catalogue scenario is not registered")?;
-        let home = catalogue.dress(RegionConfig {
-            name: HOME.to_owned(),
-            ..RegionConfig::default()
-        });
-        let neighbour = RegionConfig {
-            name: NEIGHBOUR.to_owned(),
-            grid_x: home.grid_x.saturating_add(1),
-            ..RegionConfig::default()
-        };
-        stage("world_map_teleport", &["Alpha"])
-            .region(home)
-            .region(neighbour)
-            .run(async |stage: &Stage| {
-                let alpha = &stage.viewer("Alpha")?;
-                let _opened = alpha
-                    .menu_path(&["menu-bar-world", "menu-bar-world-map"])
-                    .await?;
-                let map = alpha.ui().window("worldmap");
-                let _typed = map
-                    .test_id("worldmap:search")
-                    .role(Role::Textbox)
-                    .fill(NEIGHBOUR)
-                    .await?;
-                let _picked = map
-                    .get(Locator::role(Role::ListItem).named(NEIGHBOUR))
-                    .timeout(WAIT)
-                    .click()
-                    .await?;
-                let _asked = map
-                    .test_id("worldmap-button:teleport-selected")
-                    .click()
-                    .await?;
-                let _arrived = alpha
-                    .expect_state(Probe::Agent)
-                    .at("/region/name")
-                    .timeout(TELEPORT)
-                    .to_equal(json!(NEIGHBOUR))
-                    .await?;
-                let _shown = alpha
-                    .expect(&alpha.ui().test_id(REGION_READOUT))
-                    .to_have_text(NEIGHBOUR)
-                    .await?;
-                let status = alpha.status().await?;
-                assert_eq!(
-                    status.region.as_deref(),
-                    Some(NEIGHBOUR),
-                    "the status probe"
-                );
-                Ok(())
-            })?;
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "world_map_teleport_second_life"),
+            (ImitatedGrid::OpenSim, "world_map_teleport_open_sim"),
+        ] {
+            let catalogue = scenarios::scenario("catalogue")
+                .ok_or("the catalogue scenario is not registered")?;
+            let home = catalogue.dress(RegionConfig {
+                name: HOME.to_owned(),
+                ..RegionConfig::default()
+            });
+            let neighbour = RegionConfig {
+                name: NEIGHBOUR.to_owned(),
+                grid_x: home.grid_x.saturating_add(1),
+                ..RegionConfig::default()
+            };
+            stage(name, &["Alpha"])
+                .region(home)
+                .region(neighbour)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    let _opened = alpha
+                        .menu_path(&["menu-bar-world", "menu-bar-world-map"])
+                        .await?;
+                    let map = alpha.ui().window("worldmap");
+                    if flavour == ImitatedGrid::OpenSim {
+                        let _typed = map
+                            .test_id("worldmap:search")
+                            .role(Role::Textbox)
+                            .fill("ighbou")
+                            .await?;
+                        let _found = alpha
+                            .expect(&map.get(Locator::role(Role::ListItem).named(NEIGHBOUR)))
+                            .timeout(WAIT)
+                            .to_be_visible()
+                            .await?;
+                    }
+                    let _typed = map
+                        .test_id("worldmap:search")
+                        .role(Role::Textbox)
+                        .fill(NEIGHBOUR)
+                        .await?;
+                    let _picked = map
+                        .get(Locator::role(Role::ListItem).named(NEIGHBOUR))
+                        .timeout(WAIT)
+                        .click()
+                        .await?;
+                    // The search's closing entry is not a place, and the list
+                    // holds the one region the text matches.
+                    let rows = map.get(Locator::role(Role::ListItem)).count().await?;
+                    assert_eq!(rows, 1, "{flavour:?}: the rows of the search");
+                    let _asked = map
+                        .test_id("worldmap-button:teleport-selected")
+                        .click()
+                        .await?;
+                    let _arrived = alpha
+                        .expect_state(Probe::Agent)
+                        .at("/region/name")
+                        .timeout(TELEPORT)
+                        .to_equal(json!(NEIGHBOUR))
+                        .await?;
+                    let _shown = alpha
+                        .expect(&alpha.ui().test_id(REGION_READOUT))
+                        .to_have_text(NEIGHBOUR)
+                        .await?;
+                    let status = alpha.status().await?;
+                    assert_eq!(
+                        status.region.as_deref(),
+                        Some(NEIGHBOUR),
+                        "the status probe"
+                    );
+                    Ok(())
+                })?;
+        }
         Ok(())
     }
 

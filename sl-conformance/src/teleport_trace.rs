@@ -367,6 +367,7 @@ pub async fn neighbouring_region(
             max_x: origin.x().saturating_add(BLOCK_MARGIN),
             min_y: origin.y().saturating_sub(BLOCK_MARGIN),
             max_y: origin.y().saturating_add(BLOCK_MARGIN),
+            flags: sl_client_tokio::MapRequestFlags(sl_client_tokio::MapRequestFlags::LAYER),
         })
         .await?;
     drain_map_blocks(session)

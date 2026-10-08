@@ -440,6 +440,63 @@ async fn environment_reads_the_probe_and_prints_the_sky() -> Result<(), TestErro
 }
 
 #[tokio::test]
+async fn world_map_reads_the_probe_and_prints_what_the_map_knows() -> Result<(), TestError> {
+    let script: Arc<Script> = Arc::new(|_body| {
+        Ok(ResponseBody::Readout {
+            readout: ProbeReadout::WorldMap(sl_automation_proto::WorldMapReadout {
+                regions: vec![sl_automation_proto::MapRegionReadout {
+                    name: "Home".to_owned(),
+                    grid: [1000, 1000],
+                }],
+                items: vec![sl_automation_proto::MapItemLayerReadout {
+                    grid: [1000, 1000],
+                    kind: 6,
+                    items: vec![
+                        sl_automation_proto::MapItemReadout {
+                            at: [128.0, 128.0],
+                            extra: 1,
+                            extra2: 0,
+                            drawn: true,
+                        },
+                        sl_automation_proto::MapItemReadout {
+                            at: [1.0, 1.0],
+                            extra: 0,
+                            extra2: 0,
+                            drawn: false,
+                        },
+                    ],
+                }],
+                tile_server: Some("http://127.0.0.1:9000/".to_owned()),
+                tiles_ready: 4,
+                tiles_pending: 1,
+                tiles_absent: 2,
+            }),
+        })
+    });
+    let (printed, asked) = run_verb(Arc::clone(&script), &["world-map"], false).await?;
+    assert_eq!(
+        printed,
+        "tiles    4 ready, 1 pending, 2 absent, from http://127.0.0.1:9000/
+region   (1000, \
+         1000) Home
+items    (1000, 1000) type 6: 2 items, 1 drawn
+"
+    );
+    match asked.as_slice() {
+        [
+            RequestBody::Read {
+                probe: Probe::WorldMap,
+            },
+        ] => {}
+        other => return Err(format!("asked {other:?}").into()),
+    }
+    let (json, _asked) = run_verb(script, &["--json", "world-map"], true).await?;
+    let parsed: serde_json::Value = serde_json::from_str(&json)?;
+    assert_eq!(parsed.pointer("/tiles_ready"), Some(&json!(4)), "{json}");
+    Ok(())
+}
+
+#[tokio::test]
 async fn wait_asks_the_viewer_to_wait_for_the_state() -> Result<(), TestError> {
     let (printed, asked) = run_verb(
         Arc::new(|_body| {

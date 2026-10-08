@@ -271,6 +271,63 @@ pub struct AgentReadout {
     pub published_bakes: Vec<Uuid>,
 }
 
+/// What the viewer's world map knows: the regions the grid named, the items
+/// it reported, and how its tiles fared.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WorldMapReadout {
+    /// Every region the grid has named, sorted by cell.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<MapRegionReadout>,
+    /// Every item layer the grid has reported, sorted by region and kind. A
+    /// layer the map asked for and got nothing in is not here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<MapItemLayerReadout>,
+    /// The tile server the map fetches from, once it resolved one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tile_server: Option<String>,
+    /// How many tiles are decoded and drawable.
+    pub tiles_ready: usize,
+    /// How many tiles are still being fetched.
+    pub tiles_pending: usize,
+    /// How many tiles the server does not have, or failed to send.
+    pub tiles_absent: usize,
+}
+
+/// A region the world map knows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MapRegionReadout {
+    /// Its name.
+    pub name: String,
+    /// Its grid cell, `[x, y]`.
+    pub grid: [u32; 2],
+}
+
+/// One kind of item in one region of the world map.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MapItemLayerReadout {
+    /// The grid cell of the region the items lie in, `[x, y]`.
+    pub grid: [u32; 2],
+    /// The item type's wire code: 6 for agent locations, 1 for telehubs, 7
+    /// for land for sale.
+    pub kind: u32,
+    /// The items.
+    pub items: Vec<MapItemReadout>,
+}
+
+/// One item of the world map.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MapItemReadout {
+    /// Where it lies in its region, `[east, north]` in metres.
+    pub at: [f64; 2],
+    /// Its `Extra`: the agents counted at an agent location, a parcel's area.
+    pub extra: i32,
+    /// Its `Extra2`: a parcel's price, 1 for an infohub.
+    pub extra2: i32,
+    /// Whether the map draws it: an agent location that counts nobody is the
+    /// grid's way of saying a region is empty, and is not drawn.
+    pub drawn: bool,
+}
+
 /// The environment the viewer draws.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentReadout {
@@ -527,9 +584,10 @@ mod tests {
     use super::{
         AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,
         DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, InventoryEntry,
-        InventoryFolderReadout, LogEntry, LogLevel, LogPage, LogStream, NotificationReadout,
-        OfferedButton, QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout, SpeakerKind,
-        StatusReadout, TeleportReadout, TeleportState, TranscriptLine, WaterReadout,
+        InventoryFolderReadout, LogEntry, LogLevel, LogPage, LogStream, MapItemLayerReadout,
+        MapItemReadout, MapRegionReadout, NotificationReadout, OfferedButton, QuiescenceReadout,
+        RegionReadout, SelectedObject, SkyReadout, SpeakerKind, StatusReadout, TeleportReadout,
+        TeleportState, TranscriptLine, WaterReadout, WorldMapReadout,
     };
 
     /// Serializes `value`, reads it back and checks nothing was lost.
@@ -701,6 +759,40 @@ mod tests {
             previewing: Vec::new(),
         })?;
         assert_eq!(none, r#"{"local_sky":false}"#);
+        Ok(())
+    }
+
+    #[test]
+    fn world_map_round_trips() -> Result<(), serde_json::Error> {
+        let json = round_trip(&WorldMapReadout {
+            regions: vec![MapRegionReadout {
+                name: "Home".to_owned(),
+                grid: [1000, 1000],
+            }],
+            items: vec![MapItemLayerReadout {
+                grid: [1000, 1000],
+                kind: 6,
+                items: vec![MapItemReadout {
+                    at: [1.0, 1.0],
+                    extra: 0,
+                    extra2: 0,
+                    drawn: false,
+                }],
+            }],
+            tile_server: Some("http://127.0.0.1:9000/".to_owned()),
+            tiles_ready: 4,
+            tiles_pending: 1,
+            tiles_absent: 2,
+        })?;
+        assert_eq!(
+            json,
+            r#"{"regions":[{"name":"Home","grid":[1000,1000]}],"items":[{"grid":[1000,1000],"kind":6,"items":[{"at":[1.0,1.0],"extra":0,"extra2":0,"drawn":false}]}],"tile_server":"http://127.0.0.1:9000/","tiles_ready":4,"tiles_pending":1,"tiles_absent":2}"#
+        );
+        let nothing = round_trip(&WorldMapReadout::default())?;
+        assert_eq!(
+            nothing,
+            r#"{"tiles_ready":0,"tiles_pending":0,"tiles_absent":0}"#
+        );
         Ok(())
     }
 

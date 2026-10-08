@@ -19,15 +19,15 @@ use super::conversions::{
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
     inventory_item_from_create, inventory_offer_bucket, invite_channel_from_llsd,
-    land_stat_reply_from_caps_llsd, map_item, map_layer, map_region_info, money_balance,
-    nav_mesh_status_from_llsd, neighbor_info, object_from_full_update, object_properties,
-    offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids, packages_of, parcel_info,
-    parcel_info_from_llsd, parcel_object_owners_from_caps_llsd, parse_lure_region_handle,
-    parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info, region_identity,
-    region_limits, required_voice_version_from_llsd, script_dialog, script_permission_request,
-    script_running_from_caps_llsd, server_appearance_update_from_llsd, session_history_from_llsd,
-    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
-    teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
+    land_stat_reply_from_caps_llsd, map_block_batch, map_item, map_layer, map_region_info,
+    money_balance, nav_mesh_status_from_llsd, neighbor_info, object_from_full_update,
+    object_properties, offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids,
+    packages_of, parcel_info, parcel_info_from_llsd, parcel_object_owners_from_caps_llsd,
+    parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
+    region_identity, region_limits, required_voice_version_from_llsd, script_dialog,
+    script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
+    session_history_from_llsd, set_display_name_reply_from_llsd, sim_console_response_from_llsd,
+    skeleton_folder, teleport_failed_from_caps_llsd, teleport_finish_from_llsd, trimmed_string,
     voice_channel_info_from_llsd, windlight_refresh_from_llsd,
 };
 use super::transfers::Transfers;
@@ -73,7 +73,7 @@ use crate::types::{
     GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryCursor, InventoryFolder,
     InventoryItem, InventoryItemMove, InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType,
     LandStatItem, LandStatReportType, LandStatScore, LoadUrlRequest, LoginAccount,
-    LoginHttpRequest, LoginParams, MapItemType, Material, Maturity, MeanCollision,
+    LoginHttpRequest, LoginParams, MapItemType, MapRequestFlags, Material, Maturity, MeanCollision,
     MeanCollisionType, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
     NeighborInfo, NeighborRetirement, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
     ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
@@ -4225,15 +4225,19 @@ impl Session {
                         self.events.push_back(Event::MapBlock(Box::new(region)));
                     }
                 }
+                self.events
+                    .push_back(Event::MapBlockBatch(Box::new(map_block_batch(reply))));
             }
             AnyMessage::MapItemReply(reply) => {
                 self.events.push_back(Event::MapItems {
                     item_type: MapItemType::from_u32(reply.request_data.item_type),
+                    flags: MapRequestFlags(reply.agent_data.flags),
                     items: reply.data.iter().map(map_item).collect(),
                 });
             }
             AnyMessage::MapLayerReply(reply) => {
                 self.events.push_back(Event::MapLayers {
+                    flags: MapRequestFlags(reply.agent_data.flags),
                     layers: reply.layer_data.iter().map(map_layer).collect(),
                 });
             }
@@ -12763,7 +12767,11 @@ impl Session {
     /// Requests world-map blocks for the inclusive grid-coordinate rectangle
     /// `[min_x, max_x] x [min_y, max_y]` (region indices). Each region in range
     /// arrives as an [`Event::MapBlock`], giving its name, coordinates, and
-    /// maturity. Coordinates are clamped to the protocol's 16-bit range.
+    /// maturity, and each reply whole as an [`Event::MapBlockBatch`].
+    /// Coordinates are clamped to the protocol's 16-bit range. `flags` is what
+    /// the request says about itself: the reference viewer sends
+    /// [`MapRequestFlags::LAYER`], and [`MapRequestFlags::RETURN_NULL_SIMS`]
+    /// instead when it wants an empty cell reported rather than passed over.
     ///
     /// # Errors
     ///
@@ -12771,19 +12779,17 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn request_map_blocks(
         &mut self,
-        min_x: u32,
-        max_x: u32,
-        min_y: u32,
-        max_y: u32,
+        (min_x, max_x): (u32, u32),
+        (min_y, max_y): (u32, u32),
+        flags: MapRequestFlags,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         let clamp = |value: u32| u16::try_from(value).unwrap_or(u16::MAX);
         circuit.send_map_block_request(
-            clamp(min_x),
-            clamp(max_x),
-            clamp(min_y),
-            clamp(max_y),
+            (clamp(min_x), clamp(max_x)),
+            (clamp(min_y), clamp(max_y)),
+            flags,
             now,
         )?;
         Ok(())

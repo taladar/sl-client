@@ -30,6 +30,7 @@ pub(crate) fn probe_sources() -> ProbeSources {
         file_dialog: Some(answer_file_dialog),
         environment_scene: Some(environment_scene),
         published_bakes: Some(published_bakes),
+        world_map: Some(sl_viewer_map::world_map::world_map_readout),
     }
 }
 

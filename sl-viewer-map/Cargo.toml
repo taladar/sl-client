@@ -20,6 +20,8 @@ bevy = { version = "0.19.0" }
 bevy_flair = { version = "0.8.0" }
 crossbeam-channel = { workspace = true }
 fs-err = { workspace = true }
+# The world-map probe's readout: the type the automation reads it as.
+sl-automation-proto = { workspace = true }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }

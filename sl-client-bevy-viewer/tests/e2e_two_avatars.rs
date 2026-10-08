@@ -27,7 +27,10 @@
 //!   (live);
 //! - a teleport offer is declined without a word to the offerer, and a second
 //!   one is taken (live);
-//! - two editors of one prim: what the loser is told (live).
+//! - two editors of one prim: what the loser is told (live);
+//! - the world map knows the region it is opened in, draws its tiles and
+//!   counts the other resident there, and its search finds the region as
+//!   each grid matches names (live).
 
 #[cfg(test)]
 mod test {
@@ -1736,6 +1739,83 @@ mod test {
 
                 offer_teleport_from_radar(alpha, beta, &beta_name).await?;
                 take_offered_teleport(beta, home).await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// **The world map, live**: with Beta beside it, Alpha opens its world
+    /// map. The map learns the region Alpha stands in by name, draws tiles
+    /// from the grid's tile server, and holds an agent location that counts
+    /// somebody for that region — Beta, whom both grids report and neither
+    /// reports to itself. A search for the start of the region's name lists
+    /// it; on OpenSim, which matches anywhere in a name, so does a search
+    /// for its end (`book/src/gridspec/world-map.md`).
+    #[test]
+    fn the_live_world_map_knows_the_region_and_who_is_in_it() -> Result<(), TestError> {
+        /// The item type of agent locations.
+        const AGENT_LOCATIONS: u32 = 6;
+        stage("live_world_map", &["Alpha", "Beta"])
+            .needs(RELAYED)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let beta = &stage.viewer("Beta")?;
+                gather(stage, alpha, beta).await?;
+                let here = alpha.agent().await?.region.ok_or("Alpha is in no region")?;
+                let name = here.name.clone().ok_or("Alpha's region has no name")?;
+                let cell = [
+                    u32::try_from(here.handle >> 32)? / 256,
+                    u32::try_from(here.handle & 0xFFFF_FFFF)? / 256,
+                ];
+                let _opened = alpha
+                    .menu_path(&["menu-bar-world", "menu-bar-world-map"])
+                    .await?;
+                let known = tokio::time::timeout(LIVE_WAIT, async {
+                    loop {
+                        let map = alpha.world_map().await?;
+                        let named = map
+                            .regions
+                            .iter()
+                            .any(|region| region.grid == cell && region.name == name);
+                        let somebody = map.items.iter().any(|layer| {
+                            layer.grid == cell
+                                && layer.kind == AGENT_LOCATIONS
+                                && layer.items.iter().any(|item| item.drawn && item.extra >= 1)
+                        });
+                        if named && somebody && map.tiles_ready > 0 {
+                            return Ok::<_, BodyError>(map);
+                        }
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                })
+                .await
+                .map_err(
+                    |_elapsed| "the world map never came to know its own region, a tile and Beta",
+                )??;
+                assert!(
+                    known.tile_server.is_some(),
+                    "tiles are drawn from a tile server the grid named"
+                );
+
+                let map = alpha.ui().window("worldmap");
+                let start: String = name.chars().take(4).collect();
+                let mut searches = vec![start];
+                if std::env::var("SL_E2E_GRID").as_deref() == Ok("opensim") {
+                    let skipped = name.chars().count().saturating_sub(4);
+                    searches.push(name.chars().skip(skipped).collect());
+                }
+                for text in searches {
+                    let _typed = map
+                        .test_id("worldmap:search")
+                        .role(Role::Textbox)
+                        .fill(&text)
+                        .await?;
+                    let _listed = alpha
+                        .expect(&map.get(Locator::role(Role::ListItem).named(&name)))
+                        .timeout(LIVE_WAIT)
+                        .to_be_visible()
+                        .await?;
+                }
                 Ok(())
             })?;
         Ok(())

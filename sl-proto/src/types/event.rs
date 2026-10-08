@@ -16,16 +16,17 @@ use super::{
     GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle,
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor, InventoryFolder,
     InventoryItem, InventoryItemMove, ItemInfo, Kick, LandStatItem, LandStatReportType,
-    LoadUrlRequest, LoginAccount, MapItem, MapItemType, MapLayer, MapRegionInfo, Maturity,
-    MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, NeighborRetirement,
-    Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, OpenRegionInfo,
-    ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo, PickInfo,
-    PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits, RegionStats,
-    RequiredVoiceVersion, ScriptCompileError, ScriptControl, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissionState, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime,
-    SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
-    TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
+    LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo,
+    MapRequestFlags, Maturity, MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo,
+    NeighborRetirement, Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily,
+    OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
+    ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits,
+    RegionStats, RequiredVoiceVersion, ScriptCompileError, ScriptControl, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissionState, ScriptTeleportRequest, ServerError,
+    SetDisplayNameReply, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryItem,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainPatch, Texture, TransferStatus,
+    UserInfo, ViewerEffect, Wearable,
 };
 use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
@@ -484,6 +485,11 @@ pub enum Event {
     /// [`Session::request_map_blocks`](crate::Session::request_map_blocks) and
     /// [`Session::request_map_by_name`](crate::Session::request_map_by_name).
     MapBlock(Box<MapRegionInfo>),
+    /// One whole `MapBlockReply`, after the [`Event::MapBlock`] of each region
+    /// in it: the flags the grid echoed and every entry, those that are not
+    /// regions included — a cell reported empty, the entry that ends a name
+    /// search.
+    MapBlockBatch(Box<MapBlockBatch>),
     /// World-map overlay items (avatar locations, telehubs, land for sale,
     /// events) from a `MapItemReply`, in response to
     /// [`Session::request_map_items`](crate::Session::request_map_items). All
@@ -491,6 +497,8 @@ pub enum Event {
     MapItems {
         /// The kind of item these are (echoed from the request).
         item_type: MapItemType,
+        /// The `Flags` the reply carried.
+        flags: MapRequestFlags,
         /// The items returned for the queried region(s).
         items: Vec<MapItem>,
     },
@@ -498,6 +506,8 @@ pub enum Event {
     /// [`Session::request_map_layer`](crate::Session::request_map_layer). Each
     /// [`MapLayer`] gives the texture covering a rectangular run of regions.
     MapLayers {
+        /// The `Flags` the reply carried.
+        flags: MapRequestFlags,
         /// The image-tile layers covering the grid.
         layers: Vec<MapLayer>,
     },

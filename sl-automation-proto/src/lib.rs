@@ -24,7 +24,8 @@
 //!   [`NotificationReadout`] (text and offered buttons), the [`StatusReadout`]
 //!   of the status bar, the own [`AgentReadout`] (region, position, seat,
 //!   teleport, camera, heading), the [`EnvironmentReadout`] of the sky being
-//!   drawn, the [`SelectedObject`]s, an
+//!   drawn, the [`WorldMapReadout`] of what the world map knows, the
+//!   [`SelectedObject`]s, an
 //!   [`InventoryFolderReadout`] by path, the sequence-numbered [`LogEntry`]s
 //!   of events, commands and UI actions read by cursor as a [`LogPage`], the
 //!   [`DiagnosticsReadout`] of warnings and errors, and the
@@ -98,9 +99,10 @@ pub use crate::message::{
 pub use crate::probe::{
     AgentReadout, CameraView, ChatKind, ClockTime, ConversationReadout, ConversationRef,
     DiagnosticLine, DiagnosticsReadout, EnvironmentReadout, InventoryEntry, InventoryFolderReadout,
-    InventoryRoot, LogEntry, LogLevel, LogPage, LogStream, NotificationReadout, OfferedButton,
-    QuiescenceReadout, RegionReadout, SelectedObject, SkyReadout, SpeakerKind, StatusReadout,
-    TeleportReadout, TeleportState, TranscriptLine, WaterReadout,
+    InventoryRoot, LogEntry, LogLevel, LogPage, LogStream, MapItemLayerReadout, MapItemReadout,
+    MapRegionReadout, NotificationReadout, OfferedButton, QuiescenceReadout, RegionReadout,
+    SelectedObject, SkyReadout, SpeakerKind, StatusReadout, TeleportReadout, TeleportState,
+    TranscriptLine, WaterReadout, WorldMapReadout,
 };
 pub use crate::report::FailureReport;
 pub use crate::selector::SelectorError;

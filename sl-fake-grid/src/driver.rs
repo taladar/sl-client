@@ -47,6 +47,9 @@ pub(crate) struct SimState {
     /// How the region answers a sit request where the live grids disagree
     /// ([`crate::ImitatedGrid::sit_policy`]).
     pub(crate) sit_policy: crate::imitates::SitPolicy,
+    /// How the grid answers the world map where the live grids disagree
+    /// ([`crate::ImitatedGrid::map_policy`]).
+    pub(crate) map_policy: crate::imitates::MapPolicy,
     /// How this grid announces an inventory item it just created — the legacy
     /// UDP message or an event-queue `BulkUpdateInventory`
     /// ([`crate::InventoryAnnouncement`]). Grid-wide, because it is a property
@@ -474,9 +477,9 @@ impl SharedSim {
                 now,
             );
             crate::world_map::answer_map_request(
+                &state.map_policy,
                 &state.map,
                 state.identity.region_handle,
-                &state.avatar,
                 &mut state.sim,
                 &event,
                 now,

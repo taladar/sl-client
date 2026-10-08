@@ -5727,7 +5727,7 @@ mod test {
         // Drive each world-map request from the real client paths so the wire
         // encoding matches a viewer; the simulator must decode each into its
         // dedicated ServerEvent rather than the ClientMessage catch-all.
-        client.request_map_blocks(1000, 1002, 1000, 1002, now)?;
+        client.request_map_blocks((1000, 1002), (1000, 1002), MapRequestFlags(0), now)?;
         client.request_map_by_name("Foo", now)?;
         client.request_map_items(
             MapItemType::Telehub,
@@ -5860,7 +5860,9 @@ mod test {
         let reply = drain_client(&mut client)
             .into_iter()
             .find_map(|event| match event {
-                Event::MapItems { item_type, items } => Some((item_type, items)),
+                Event::MapItems {
+                    item_type, items, ..
+                } => Some((item_type, items)),
                 _ => None,
             })
             .ok_or("expected a MapItems client event")?;
@@ -5897,7 +5899,7 @@ mod test {
         let decoded: Vec<MapLayer> = drain_client(&mut client)
             .into_iter()
             .find_map(|event| match event {
-                Event::MapLayers { layers } => Some(layers),
+                Event::MapLayers { layers, .. } => Some(layers),
                 _ => None,
             })
             .ok_or("expected a MapLayers client event")?;

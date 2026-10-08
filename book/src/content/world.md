@@ -275,19 +275,28 @@ in `sl-proto/tests/sim_session.rs`.
 The world map is assembled from three separate queries, all sent to the current
 region's circuit and answered over UDP:
 
-- **Map blocks** — `Command::RequestMapBlocks` (a grid-coordinate rectangle) or
-  `RequestMapByName` (search by name) ask for the per-region details: name, grid
-  coordinates, maturity, size, and the region's map-tile texture id. Each region
-  arrives as an `Event::MapBlock`.
+- **Map blocks** — `Command::RequestMapBlocks` (a grid-coordinate rectangle
+  and the request's `MapRequestFlags`) or `RequestMapByName` (search by name)
+  ask for the per-region details: name, grid coordinates and maturity. Each
+  region arrives as an `Event::MapBlock`, and each reply whole as an
+  `Event::MapBlockBatch` — the flags it echoed and every entry, the ones
+  that are not regions included: a cell reported empty
+  (`MapRequestFlags::RETURN_NULL_SIMS`), and the entry at cell `(0, 0)` that
+  ends a name search (`MapBlockRecord::kind`).
 - **Map items** — `Command::RequestMapItems` asks for a map overlay of a given
   kind (avatar "green dots", telehubs, land for sale, events). They arrive as an
-  `Event::MapItems` carrying global-coordinate `MapItem`s.
+  `Event::MapItems` carrying global-coordinate `MapItem`s and the reply's
+  flags.
 - **Map layers** — `Command::RequestMapLayer` asks for the zoomed-out image
   tiles: each `MapLayer` (in the resulting `Event::MapLayers`) gives a texture
   and the inclusive grid rectangle (`left..=right` by `bottom..=top`) it covers.
-  The viewer stitches these tiles into the background of the world map, then
-  overlays the per-region detail from the map blocks. Second Life's main grid is
-  a single global layer; OpenSim grids report their own coverage.
+  Second Life answers with no layers at all — its map is the HTTP tiles
+  below — and OpenSim with one covering the whole grid.
+
+The two grids answer all of these differently — how large a rectangle may
+be, which empty cells are reported, what a search matches, whether an item
+request is about a region or the whole grid: see
+[Grid Behaviour → World map](../gridspec/world-map.md).
 
 Modern grids additionally serve the zoomed-out imagery over plain HTTP: a
 **map-tile service** hosting `map-<zoom>-<x>-<y>-objects.jpg` files (zoom
@@ -405,7 +414,8 @@ None of these has a reply; the client just acts on them.
 > - `RequestRemoteParcelId` posts the `RemoteParcelRequest` capability
 >   (`sl-wire/src/remote_parcel.rs`), decoded into `Event::RemoteParcelId`.
 > - The world map's three queries are `Command::RequestMapBlocks` /
->   `RequestMapByName` (→ `Event::MapBlock`, `MapRegionInfo`),
+>   `RequestMapByName` (→ `Event::MapBlock`, `MapRegionInfo`, and
+>   `Event::MapBlockBatch`, `MapBlockBatch`/`MapBlockRecord`),
 >   `RequestMapItems` (→ `Event::MapItems`, `MapItem`/`MapItemType`), and
 >   `RequestMapLayer` (→ `Event::MapLayers`, `MapLayer`) — types in
 >   `sl-proto/src/types/map.rs`, UDP encoders in
@@ -413,7 +423,8 @@ None of these has a reply; the client just acts on them.
 >   request messages into `ServerEvent::MapBlockRequested` /
 >   `MapNameRequested` / `MapItemRequested` / `MapLayerRequested` (carrying the
 >   requested rectangle / name / item type / region handle, plus the map-layer
->   flags) and answers with `SimSession::send_map_block_reply` /
+>   flags) and answers with `SimSession::send_map_block_reply` (regions) or
+>   `send_map_block_batch` (any entries, as the live grids send them) /
 >   `send_map_item_reply` / `send_map_layer_reply`.
 > - The map-tile service base URL from login is
 >   `LoginSuccess::map_server_url` (`sl-wire/src/login.rs`), kept on the

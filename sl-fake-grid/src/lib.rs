@@ -52,14 +52,15 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use imitates::{
-    EditEcho, EnvironmentChangeReply, ImitatedGrid, LoginFields, LoginRefusals, LogoutReply,
-    OPENSIM_MAX_AGENT_GROUPS, ParcelPolicy, RegionCapacity, SELECTED_PARCEL_SEQUENCE_ID,
-    SIT_TARGET_RAISE_M, SecondLogin, SitPolicy, SitRefusal, StockDay,
+    AbsentTile, DotName, EditEcho, EmptyCells, EnvironmentChangeReply, ImitatedGrid, LoginFields,
+    LoginRefusals, LogoutReply, MapLayerAnswer, MapPolicy, NameMatch, OPENSIM_MAX_AGENT_GROUPS,
+    ParcelPolicy, RegionCapacity, SELECTED_PARCEL_SEQUENCE_ID, SIT_TARGET_RAISE_M, SecondLogin,
+    SitPolicy, SitRefusal, StockDay,
 };
 pub use inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,
 };
-pub use map_tiles::STOCK_TILE_JPEG;
+pub use map_tiles::{BLANK_TILE_JPEG, STOCK_TILE_JPEG};
 pub use marker::{
     MARKER_METHOD, NEIGHBOUR_MARKER_PREFIX, marker, marker_name, neighbour_marker,
     neighbour_marker_region,

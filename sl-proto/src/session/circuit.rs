@@ -4296,18 +4296,17 @@ impl Circuit {
     /// Queues a `MapBlockRequest` reliably for a grid-coordinate rectangle.
     pub(crate) fn send_map_block_request(
         &mut self,
-        min_x: u16,
-        max_x: u16,
-        min_y: u16,
-        max_y: u16,
+        (min_x, max_x): (u16, u16),
+        (min_y, max_y): (u16, u16),
+        flags: MapRequestFlags,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::MapBlockRequest(MapBlockRequest {
             agent_data: MapBlockRequestAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
-                // Flags 0 selects the terrain map layer; estate/godlike unused.
-                flags: 0,
+                // estate/godlike are unused.
+                flags: flags.0,
                 estate_id: 0,
                 godlike: false,
             },

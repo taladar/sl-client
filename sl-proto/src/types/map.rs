@@ -623,6 +623,76 @@ pub struct MapRegionInfo {
     pub map_image_id: TextureKey,
 }
 
+/// What one `MapBlockReply` `Data` entry stands for
+/// ([`MapBlockRecord::kind`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MapBlockKind {
+    /// A region: the entry names it and says where it is.
+    Region,
+    /// A grid cell with no region in it: coordinates and no name. A grid sends
+    /// one only when asked to ([`MapRequestFlags::RETURN_NULL_SIMS`]), which is
+    /// how a viewer finds out that a spot clicked on the map is empty.
+    EmptyCell,
+    /// The entry that closes a reply and is no place at all: grid cell
+    /// `(0, 0)`. OpenSim ends every name search with one, carrying the text
+    /// that was searched for.
+    Terminator,
+}
+
+/// One `MapBlockReply` `Data` entry exactly as the grid sent it, the entries
+/// that are not regions included ([`MapBlockBatch`]).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MapBlockRecord {
+    /// The grid cell the entry is about (`(0, 0)` for a terminator).
+    pub grid_coordinates: GridCoordinates,
+    /// The name as sent: a region's name, nothing for an empty cell, and on a
+    /// terminator whatever the grid put there.
+    pub name: String,
+    /// The raw `Access` byte: a maturity rating for a region, and `254`
+    /// (down) or `255` (non-existent) for what is not one.
+    pub access: u8,
+    /// The raw region flags.
+    pub region_flags: u32,
+    /// The water height, in whole metres.
+    pub water_height: u8,
+    /// The number of agents the map reports.
+    pub agents: u8,
+    /// The map image id, nil when the entry has none.
+    pub map_image_id: Uuid,
+    /// The region's size in metres from the reply's parallel `Size` block,
+    /// `None` when the reply carried no such block.
+    pub size: Option<(u16, u16)>,
+}
+
+impl MapBlockRecord {
+    /// What the entry stands for.
+    #[must_use]
+    pub const fn kind(&self) -> MapBlockKind {
+        if self.grid_coordinates.x() == 0 && self.grid_coordinates.y() == 0 {
+            MapBlockKind::Terminator
+        } else if self.name.is_empty() {
+            MapBlockKind::EmptyCell
+        } else {
+            MapBlockKind::Region
+        }
+    }
+}
+
+/// One whole `MapBlockReply` datagram: the flags it echoed and every entry
+/// in it, in order.
+///
+/// [`Event::MapBlock`](crate::Event::MapBlock) reports the regions of a reply
+/// one at a time and passes over the entries that are not regions; this is
+/// the reply itself, which is where a client learns that a cell is empty or
+/// that a search has ended.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MapBlockBatch {
+    /// The `Flags` the reply carried (the request's, as the grid echoed them).
+    pub flags: MapRequestFlags,
+    /// Every `Data` entry of the reply.
+    pub blocks: Vec<MapBlockRecord>,
+}
+
 /// A kind of world-map overlay item requested via `MapItemRequest` (the
 /// `GridItemType`). [`MapItemType::AgentLocations`] gives the avatar "green
 /// dots"; the land-for-sale and event types give the corresponding map overlays.

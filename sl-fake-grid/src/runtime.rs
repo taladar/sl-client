@@ -487,6 +487,9 @@ pub(crate) struct GridCore {
     /// How the region answers a sit request
     /// ([`ImitatedGrid::sit_policy`]).
     pub(crate) sit_policy: crate::imitates::SitPolicy,
+    /// How the grid answers the world map
+    /// ([`ImitatedGrid::map_policy`]).
+    pub(crate) map_policy: crate::imitates::MapPolicy,
     /// What an accepted environment set or reset is answered with
     /// ([`ImitatedGrid::environment_change_reply`]).
     pub(crate) environment_change_reply: crate::imitates::EnvironmentChangeReply,
@@ -1021,6 +1024,7 @@ impl GridCore {
             object_assets: self.object_assets,
             parcel_policy: self.parcel_policy,
             sit_policy: self.sit_policy,
+            map_policy: self.map_policy,
             inventory_announcement: self.inventory_announcement,
             upload_announcements: self.upload_announcements,
             bakes: self.bakes,
@@ -1995,6 +1999,7 @@ impl FakeGridBuilder {
         let (teleports_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
         let (crossings_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
         let mut map_tiles = self.map_tiles;
+        map_tiles.imitate(&self.imitates.map_policy());
         for region in &self.regions {
             map_tiles.seed_region(region.grid_x, region.grid_y);
         }
@@ -2097,6 +2102,7 @@ impl FakeGridBuilder {
             withheld_capabilities: self.imitates.withheld_capabilities(),
             parcel_policy: self.imitates.parcel_policy(),
             sit_policy: self.imitates.sit_policy(),
+            map_policy: self.imitates.map_policy(),
             environment_change_reply: self.imitates.environment_change_reply(),
             logout_reply: self.imitates.logout_reply(),
             circuit_policy: self.imitates.circuit_policy(),

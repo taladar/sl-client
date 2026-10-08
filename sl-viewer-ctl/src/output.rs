@@ -9,7 +9,7 @@ use serde_json::{Value as JsonValue, json};
 use sl_automation_proto::{
     AgentReadout, ConversationReadout, ConversationRef, EnvironmentReadout, GroundPoint,
     InventoryFolderReadout, LogEntry, NodeState, NodeValue, NodeVisibility, NotificationReadout,
-    UiNode, ViewerIdentity, WorldNode,
+    UiNode, ViewerIdentity, WorldMapReadout, WorldNode,
 };
 use sl_viewer_driver::{AnsweredFileDialog, Screenshot};
 
@@ -64,6 +64,8 @@ pub enum Outcome {
     InventoryTree(Vec<InventoryFolderReadout>),
     /// The environment being drawn.
     Environment(EnvironmentReadout),
+    /// What the world map knows.
+    WorldMap(WorldMapReadout),
     /// A file dialog answered.
     FileDialog {
         /// The dialog.
@@ -211,6 +213,7 @@ fn json_of(outcome: &Outcome) -> io::Result<JsonValue> {
         Outcome::Agent(agent) => to_json(agent)?,
         Outcome::InventoryTree(folders) => to_json(folders)?,
         Outcome::Environment(environment) => to_json(environment)?,
+        Outcome::WorldMap(map) => to_json(map)?,
         Outcome::FileDialog { answered, picked } => json!({
             "done": if picked.is_some() { "answered" } else { "cancelled" },
             "purpose": answered.purpose,
@@ -303,6 +306,7 @@ fn text_of(out: &mut impl Write, outcome: &Outcome) -> io::Result<()> {
         Outcome::Agent(agent) => agent_lines(out, agent)?,
         Outcome::InventoryTree(folders) => inventory_lines(out, folders)?,
         Outcome::Environment(environment) => environment_lines(out, environment)?,
+        Outcome::WorldMap(map) => world_map_lines(out, map)?,
         Outcome::FileDialog { answered, picked } => match picked {
             Some(path) => writeln!(
                 out,
@@ -563,6 +567,34 @@ fn inventory_lines(out: &mut impl Write, folders: &[InventoryFolderReadout]) -> 
         "{} folders, {items} items, {unloaded} not loaded",
         folders.len()
     )
+}
+
+/// The world map's readout: the tiles, then a region a line, then an item
+/// layer a line.
+fn world_map_lines(out: &mut impl Write, map: &WorldMapReadout) -> io::Result<()> {
+    writeln!(
+        out,
+        "tiles    {} ready, {} pending, {} absent, from {}",
+        map.tiles_ready,
+        map.tiles_pending,
+        map.tiles_absent,
+        map.tile_server.as_deref().unwrap_or("(no tile server)")
+    )?;
+    for region in &map.regions {
+        let [x, y] = region.grid;
+        writeln!(out, "region   ({x}, {y}) {}", region.name)?;
+    }
+    for layer in &map.items {
+        let [x, y] = layer.grid;
+        let drawn = layer.items.iter().filter(|item| item.drawn).count();
+        writeln!(
+            out,
+            "items    ({x}, {y}) type {}: {} items, {drawn} drawn",
+            layer.kind,
+            layer.items.len()
+        )?;
+    }
+    Ok(())
 }
 
 /// The environment's readout, a field a line.

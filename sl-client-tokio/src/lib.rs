@@ -87,8 +87,9 @@ pub use sl_proto::{
     LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
     LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest,
     LoginResponse, LoginSuccess, LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
-    MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapBlockBatch,
+    MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
+    MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
     MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
     MediaEntry, MerchantStatus, MeshKey, MessageCursor, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
@@ -1670,8 +1671,8 @@ impl Client {
                         Some(Command::SetDrawDistance(far)) => {
                             self.session.set_draw_distance(far);
                         }
-                        Some(Command::RequestMapBlocks { min_x, max_x, min_y, max_y }) => {
-                            self.session.request_map_blocks(min_x, max_x, min_y, max_y, Instant::now())?;
+                        Some(Command::RequestMapBlocks { min_x, max_x, min_y, max_y, flags }) => {
+                            self.session.request_map_blocks((min_x, max_x), (min_y, max_y), flags, Instant::now())?;
                         }
                         Some(Command::RequestMapByName { name }) => {
                             self.session.request_map_by_name(&name, Instant::now())?;

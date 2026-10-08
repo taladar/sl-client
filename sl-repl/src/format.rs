@@ -278,6 +278,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::NeighborSeed { .. } => "neighbor_seed",
         Event::NeighborRetired { .. } => "neighbor_retired",
         Event::MapBlock(..) => "map_block",
+        Event::MapBlockBatch(..) => "map_block_batch",
         Event::MapItems { .. } => "map_items",
         Event::MapLayers { .. } => "map_layers",
         Event::TeleportStarted { .. } => "teleport_started",

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::probe::{
     AgentReadout, ConversationReadout, EnvironmentReadout, InventoryFolderReadout, InventoryRoot,
     LogEntry, LogStream, NotificationReadout, QuiescenceReadout, SelectedObject, StatusReadout,
+    WorldMapReadout,
 };
 
 /// One of the viewer's state readouts.
@@ -56,6 +57,8 @@ pub enum Probe {
     Quiescence,
     /// The environment being drawn ([`EnvironmentReadout`]).
     Environment,
+    /// What the world map knows ([`WorldMapReadout`]).
+    WorldMap,
 }
 
 impl fmt::Display for Probe {
@@ -79,6 +82,7 @@ impl fmt::Display for Probe {
             },
             Self::Quiescence => f.write_str("quiescence"),
             Self::Environment => f.write_str("environment"),
+            Self::WorldMap => f.write_str("world map"),
         }
     }
 }
@@ -109,6 +113,8 @@ pub enum ProbeReadout {
     Quiescence(QuiescenceReadout),
     /// The environment being drawn.
     Environment(EnvironmentReadout),
+    /// What the world map knows.
+    WorldMap(WorldMapReadout),
 }
 
 /// A test of the JSON value a [`StateCondition::Probe`]'s pointer selects in a

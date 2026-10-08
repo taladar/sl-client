@@ -237,6 +237,11 @@ pub enum Verb {
     /// for the shared one, how far a manual change's cross-fade has got, and
     /// which editor windows are previewing.
     Environment,
+    /// Print what the world map knows: the regions the grid named, each item
+    /// layer it reported (agent locations, telehubs, land for sale) and how
+    /// many tiles are drawable, pending and absent. The map asks the grid
+    /// only while its window is open.
+    WorldMap,
     /// Answer the file dialog the viewer waits on — an Import's, a bulk
     /// import's — with a file or a folder, or cancel it; waits for one to be
     /// asked for. Only a `--headless` viewer waits; a windowed one shows the

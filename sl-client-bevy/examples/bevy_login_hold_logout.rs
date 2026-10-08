@@ -304,6 +304,7 @@ fn on_events(
             | SlSessionEvent::NeighborSeed { .. }
             | SlSessionEvent::NeighborRetired { .. }
             | SlSessionEvent::MapBlock(_)
+            | SlSessionEvent::MapBlockBatch(_)
             | SlSessionEvent::MapItems { .. }
             | SlSessionEvent::MapLayers { .. }
             | SlSessionEvent::ObjectAdded(_)

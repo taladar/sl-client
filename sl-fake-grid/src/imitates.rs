@@ -41,6 +41,7 @@
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //! | how a teleport runs and how it is refused ([`teleport_policy`](ImitatedGrid::teleport_policy)) | `resolving` and `Sending to destination.` between the start and the finish; a refusal after the start, over the event queue, as a key with an `AlertInfo`; a cancel answered `TPCancelled`; a region above the maturity preference refused; a local teleport flagged `WITHIN_REGION` | no progress lines; a refusal before any start, over UDP, as a sentence with no alert; a cancel unanswered; no maturity check; the request's flags alone |
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
+//! | the world map ([`map_policy`](ImitatedGrid::map_policy)) | every empty cell of a null-sims rectangle reported; a rectangle of more than 256 cells unanswered; a name search by prefix, of any length, in silence; no map layers; an absent tile refused with `403` | an empty cell reported only when asked about alone; any rectangle answered; a search anywhere in the name, of three characters or more, with an alert for a short one and for no match; one whole-grid layer; a blank tile for an absent one |
 //! | a sit on an object the region does not have ([`SitPolicy::unknown_target`]) | refused at once with the named alert `SitFailNotSameRegion` | not answered: the client's own sit timeout ends it |
 //! | where standing up puts the avatar ([`SitPolicy::stand_forward_m`], [`SitPolicy::stand_up_m`]) | 0.34 m in front of where it sat, at the same height | 0.65 m in front and 0.57 m above |
 //! | the seat position in an `AvatarSitResponse` for a seat with a sit target ([`SitPolicy::response_states_seated_position`]) | where the avatar is put: the target raised by 0.35 m | the target as the script set it, 0.35 m below where the avatar is put |
@@ -527,6 +528,52 @@ impl ImitatedGrid {
                 response_states_seated_position: false,
                 stand_forward_m: 0.65,
                 stand_up_m: 0.57,
+            },
+        }
+    }
+
+    /// How this grid answers the world map where the two disagree — measured
+    /// by the `map-blocks-items` conformance case on aditi and the local
+    /// OpenSim (2026-10-08, `book/src/gridspec/world-map.md`).
+    ///
+    /// They agree on the outline: a block reply echoes the low sixteen bits of
+    /// the request's flags and carries a map image id only when those are
+    /// zero; water height, agent count and region flags are always zero; a
+    /// name search ends with an entry at cell `(0, 0)` carrying the text that
+    /// was searched for; a rectangle whose bounds are the wrong way round and
+    /// a lone empty cell asked about without the null-sims flag get no reply.
+    #[must_use]
+    pub const fn map_policy(self) -> MapPolicy {
+        match self {
+            Self::SecondLife => MapPolicy {
+                empty_cells: EmptyCells::Every,
+                blocks_per_reply: 255,
+                agent_dot_name: DotName::Uuid,
+                largest_block_request: Some(MapPolicy::SECOND_LIFE_LARGEST_BLOCK_REQUEST),
+                name_match: NameMatch::Prefix,
+                shortest_search: 1,
+                short_search_alert: None,
+                no_match_alert: None,
+                layers: MapLayerAnswer::None,
+                named_region_sends_agents: false,
+                empty_region_dot_m: 0,
+                absent_tile: AbsentTile::Forbidden,
+                tile_cache_headers: true,
+            },
+            Self::OpenSim => MapPolicy {
+                empty_cells: EmptyCells::LoneCell,
+                blocks_per_reply: MapPolicy::OPENSIM_BLOCKS_PER_REPLY,
+                agent_dot_name: DotName::Hash,
+                largest_block_request: None,
+                name_match: NameMatch::Anywhere,
+                shortest_search: 3,
+                short_search_alert: Some("Use a search string with at least 3 characters"),
+                no_match_alert: Some("No regions found with that name."),
+                layers: MapLayerAnswer::WholeGrid,
+                named_region_sends_agents: true,
+                empty_region_dot_m: 1,
+                absent_tile: AbsentTile::BlankTile,
+                tile_cache_headers: false,
             },
         }
     }
@@ -1432,6 +1479,131 @@ impl ParcelPolicy {
             parcel.media_sharing = None;
         }
     }
+}
+
+/// How a grid answers the world map ([`ImitatedGrid::map_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapPolicy {
+    /// Which empty cells a `MapBlockRequest` carrying the null-sims flag is
+    /// told about.
+    pub empty_cells: EmptyCells,
+    /// The most entries one `MapBlockReply` carries before the answer goes on
+    /// in another. OpenSim cuts at ten; Second Life was not seen to cut one
+    /// (the most the case drew from it was nine entries), so its figure is
+    /// what the message allows.
+    pub blocks_per_reply: usize,
+    /// What an agent-location item is called.
+    pub agent_dot_name: DotName,
+    /// The most cells a `MapBlockRequest` may name and still be answered, or
+    /// `None` on a grid that answers a rectangle of any size.
+    pub largest_block_request: Option<u32>,
+    /// Which part of a region's name a search has to match.
+    pub name_match: NameMatch,
+    /// The fewest characters a search may have and still be run.
+    pub shortest_search: usize,
+    /// The `AlertMessage` a search shorter than that is answered with, beside
+    /// the entry that ends it.
+    pub short_search_alert: Option<&'static str>,
+    /// The modal `AgentAlertMessage` a search that matched nothing is
+    /// answered with, beside the entry that ends it.
+    pub no_match_alert: Option<&'static str>,
+    /// What a `MapLayerRequest` is answered with.
+    pub layers: MapLayerAnswer,
+    /// Whether a `MapItemRequest` that names the agent's own region is
+    /// answered with that region's agent locations whatever type it asked
+    /// for. OpenSim does it for every type; Second Life answers the type
+    /// asked for and nothing else.
+    pub named_region_sends_agents: bool,
+    /// How far inside a region's south-west corner the one agent-location
+    /// item of a region with nobody to show sits, in metres along each axis.
+    /// Both grids send such an item with an `Extra` of zero; Second Life puts
+    /// it on the corner and OpenSim a metre in.
+    pub empty_region_dot_m: u32,
+    /// What the tile server answers for a tile it does not have.
+    pub absent_tile: AbsentTile,
+    /// Whether a tile comes with `Cache-Control`, `ETag` and `Last-Modified`.
+    /// Second Life's content network sends all three; OpenSim sends none.
+    pub tile_cache_headers: bool,
+}
+
+impl MapPolicy {
+    /// The most cells Second Life answers a `MapBlockRequest` for.
+    pub const SECOND_LIFE_LARGEST_BLOCK_REQUEST: u32 = 256;
+
+    /// The image id of OpenSim's one map layer, fixed in its source.
+    pub const OPENSIM_LAYER_IMAGE: uuid::Uuid =
+        uuid::Uuid::from_u128(0x0000_0000_0000_1111_9999_0000_0000_0006);
+
+    /// The upper bound, on each axis, of the rectangle OpenSim's one map
+    /// layer claims to cover.
+    pub const OPENSIM_LAYER_EXTENT: u32 = 30_000;
+
+    /// The most matches OpenSim returns for one name search.
+    pub const OPENSIM_SEARCH_LIMIT: usize = 20;
+
+    /// The most entries OpenSim puts in one `MapBlockReply`.
+    pub const OPENSIM_BLOCKS_PER_REPLY: usize = 10;
+
+    /// The `Access` byte both grids give an entry that is not a region.
+    pub const NON_EXISTENT_ACCESS: u8 = 255;
+}
+
+/// Which empty cells a null-sims `MapBlockRequest` reports
+/// ([`MapPolicy::empty_cells`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmptyCells {
+    /// Every empty cell of the rectangle, beside the regions in it: Second
+    /// Life.
+    Every,
+    /// A cell only when the request names that one cell and nothing is there:
+    /// OpenSim, which answers a larger empty rectangle with nothing.
+    LoneCell,
+}
+
+/// What an agent-location item's `Name` holds ([`MapPolicy::agent_dot_name`]).
+/// No viewer reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DotName {
+    /// A UUID in text: Second Life, for a region other than the agent's own.
+    Uuid,
+    /// Thirty-two hexadecimal digits: OpenSim's MD5 of the region's name and
+    /// a clock tick.
+    Hash,
+}
+
+/// How a name search matches ([`MapPolicy::name_match`]). Both ignore case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameMatch {
+    /// The name has to begin with the text: Second Life.
+    Prefix,
+    /// The name has to contain it: OpenSim.
+    Anywhere,
+}
+
+/// What a `MapLayerRequest` is answered with ([`MapPolicy::layers`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapLayerAnswer {
+    /// A reply with no layers in it, echoing the request's flags: Second
+    /// Life, whose map is tiles alone.
+    None,
+    /// One layer from `(0, 0)` to
+    /// [`MapPolicy::OPENSIM_LAYER_EXTENT`] with the image
+    /// [`MapPolicy::OPENSIM_LAYER_IMAGE`], under flags of zero whatever the
+    /// request carried: OpenSim.
+    WholeGrid,
+}
+
+/// What a tile server answers for a tile it does not have
+/// ([`MapPolicy::absent_tile`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AbsentTile {
+    /// `403` with an XML `AccessDenied` body: Second Life's content network,
+    /// for open ocean, for a zoom it does not serve and for a tile named by a
+    /// region that is not its corner alike.
+    #[default]
+    Forbidden,
+    /// `200` with a tile of plain water: OpenSim, for all three.
+    BlankTile,
 }
 
 /// How a grid answers a sit request ([`ImitatedGrid::sit_policy`]).

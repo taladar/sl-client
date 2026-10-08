@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 360 |
+| ready | 359 |
 | blocked | 111 |
 | in-progress | 20 |
-| bugs | 34 |
-| done | 1335 |
+| bugs | 35 |
+| done | 1336 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2045** |
+| **total** | **2046** |
 
 ## ideas (139)
 
@@ -362,7 +362,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (360)
+## ready (359)
 
 ### protocol
 
@@ -1199,8 +1199,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid
 - [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
   Viewer effects and sound relays on each grid
-- [`gridspec-world-map`](ready/gridspec-world-map.md) — World map blocks, items,
-  layers and tiles on each grid
 
 ## blocked (111)
 
@@ -1611,7 +1609,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (34)
+## bugs (35)
 
 ### protocol
 
@@ -1688,6 +1686,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Colour textures are filtered after sRGB decoding, the reference before
 - [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
   — The radar's range column is unreadable on a light list
+- [`viewer-world-map-search-end-and-empty-cells`](bugs/viewer-world-map-search-end-and-empty-cells.md)
+  — World map — say when a search found nothing, and when a clicked cell is
+  empty
 
 ### test
 
@@ -1699,7 +1700,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The scripted environment change's `night` marker never arrived, once, in a
   full suite run
 
-## done (1335)
+## done (1336)
 
 ### protocol
 
@@ -4661,6 +4662,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   failures, cancel and access refusals on each grid
 - [`gridspec-teleport-lures`](done/gridspec-teleport-lures.md) — Teleport
   offers, requests and their answers on each grid
+- [`gridspec-world-map`](done/gridspec-world-map.md) — World map blocks, items,
+  layers and tiles on each grid
 
 ## deferred (29)
 

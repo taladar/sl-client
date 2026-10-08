@@ -175,6 +175,26 @@ impl WorldMapTiles {
         }
     }
 
+    /// The base URL of the tile server, once one was resolved.
+    pub(crate) fn base_url(&self) -> Option<&str> {
+        self.base_url.as_deref()
+    }
+
+    /// How many tiles are decoded, still being fetched, and absent or
+    /// failed.
+    pub(crate) fn counts(&self) -> (usize, usize, usize) {
+        self.tiles.values().fold(
+            (0_usize, 0_usize, 0_usize),
+            |(ready, pending, absent), slot| match slot.state {
+                TileState::Ready(_) => (ready.saturating_add(1), pending, absent),
+                TileState::Pending => (ready, pending.saturating_add(1), absent),
+                TileState::Missing | TileState::Failed { .. } => {
+                    (ready, pending, absent.saturating_add(1))
+                }
+            },
+        )
+    }
+
     /// Whether a worker is running (a base URL was resolved).
     pub(crate) const fn running(&self) -> bool {
         self.handle.is_some()

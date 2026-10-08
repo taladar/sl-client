@@ -18,18 +18,18 @@ use crate::{
     GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate,
     InventoryCursor, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
     InventoryType, LandEdit, LandSearchType, LandStatReportType, LindenAmount, ListingId, LureId,
-    MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform,
-    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
-    ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard, PrimShape,
-    PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate,
-    RegionHandle, RegionInfoUpdate, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptLanguage, ScriptPermissions,
-    ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags, StartLocationSlot, SurfaceInfo,
-    TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
-    Wearable,
+    MapItemType, MapRequestFlags, Material, MaterialOverrideUpdate, MediaEntry, MeshKey,
+    MessageCursor, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
+    NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+    ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey,
+    ParcelReturnType, ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard,
+    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates,
+    RegionDebugUpdate, RegionHandle, RegionInfoUpdate, RegionTerrainUpdate, Reliability,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags,
+    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey, Throttle,
+    TransactionId, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector,
+    ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1279,6 +1279,11 @@ pub enum Command {
         min_y: u32,
         /// Maximum grid y (inclusive).
         max_y: u32,
+        /// What the request says about itself: the reference viewer's
+        /// [`MapRequestFlags::LAYER`], or
+        /// [`MapRequestFlags::RETURN_NULL_SIMS`] to have an empty cell
+        /// reported.
+        flags: MapRequestFlags,
     },
     /// Search the world map for regions by name (`MapNameRequest`); matches
     /// arrive as [`Event::MapBlock`](crate::Event::MapBlock).

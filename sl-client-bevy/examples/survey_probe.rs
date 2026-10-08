@@ -119,6 +119,7 @@ fn on_events(
                     max_x: 1001,
                     min_y: 999,
                     max_y: 1001,
+                    flags: sl_client_bevy::MapRequestFlags(sl_client_bevy::MapRequestFlags::LAYER),
                 }));
             }
             SlSessionEvent::RegionInfoHandshake(identity) => {
@@ -199,6 +200,7 @@ fn on_events(
             | SlSessionEvent::MuteListUnchanged
             | SlSessionEvent::MoneyBalance(_)
             | SlSessionEvent::EconomyData(_)
+            | SlSessionEvent::MapBlockBatch(_)
             | SlSessionEvent::MapItems { .. }
             | SlSessionEvent::MapLayers { .. }
             | SlSessionEvent::NeighborSeed { .. }

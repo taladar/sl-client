@@ -178,8 +178,8 @@ use crate::object_update::TerseUpdate;
 use crate::session::{
     CrossedRegionInfo, SERVER_HISTORY_CAP, ServerHistoryMessage, TeleportFinishInfo,
     XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, agent_drop_group_to_llsd,
-    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
-    build_map_item_reply, build_map_layer_reply, build_task_inventory,
+    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_batch_reply,
+    build_map_block_reply, build_map_item_reply, build_map_layer_reply, build_task_inventory,
     chatterbox_invitation_to_llsd, chatterbox_session_start_reply_to_llsd,
     crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
     establish_agent_communication_to_llsd, full_update_block, instant_message,
@@ -205,20 +205,21 @@ use crate::types::{
     GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, ImDialog,
     InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
     LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
-    LandStatReportType, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Material,
-    MeanCollision, MovementMode, NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez,
-    Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
-    ObjectProperties, ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo,
-    ParcelObjectOwner, ParcelReturnType, ParcelUpdate, PermissionField, PlacesResult,
-    PlayingAnimation, Postcard, PrimShape, PrimShapeParams, ProposalVoteId, RegionIdentity,
-    RegionLimits, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest,
-    ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime,
-    SoundFlags, SoundPreload, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry,
-    Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, Wearable, WearableType,
+    LandStatReportType, MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo,
+    MapRequestFlags, Material, MeanCollision, MovementMode, NavMeshStatus, NewInventoryItem,
+    NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ObjectTransform,
+    OpenRegionInfo, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelInfo, ParcelObjectOwner, ParcelReturnType, ParcelUpdate, PermissionField,
+    PlacesResult, PlayingAnimation, Postcard, PrimShape, PrimShapeParams, ProposalVoteId,
+    RegionIdentity, RegionLimits, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem,
+    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
+    ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
+    SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
+    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+    TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus, Transmit,
+    UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
+    WearableType,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -5022,6 +5023,28 @@ impl SimSession {
         }
         let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
         let message = AnyMessage::MapBlockReply(build_map_block_reply(agent_id, flags, regions));
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `MapBlockReply` carrying `batch` entry for entry: its flags, its
+    /// regions, and the entries that are not regions — a cell reported empty,
+    /// the entry that ends a name search. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode (e.g. more than 255 entries).
+    pub fn send_map_block_batch(
+        &mut self,
+        batch: &MapBlockBatch,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
+        let message = AnyMessage::MapBlockReply(build_map_block_batch_reply(agent_id, batch));
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
     }
