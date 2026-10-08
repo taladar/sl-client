@@ -51,6 +51,15 @@ const SIT_REFUSAL_ALERTS: &[&str] = &[
     "CantSitNoRoom",
     "CantSitNoSuitableSurface",
 ];
+/// The texts with which OpenSim refuses a sit request from the agent's own
+/// region. It names none of its alerts, so its two sit refusals
+/// (`ScenePresence.PhysicsSit` and `PhysicsSitResponse`) are known by their
+/// wording, compared without the space each begins with; like a named
+/// refusal, one of these ends a pending sit at once.
+const SIT_REFUSAL_TEXTS: &[&str] = &[
+    "There is no suitable surface to sit on, try another spot.",
+    "Sit position on restricted land, try another spot",
+];
 /// The default draw distance (metres) advertised in keep-alive `AgentUpdate`s,
 /// large enough that the simulator enables the neighbouring regions.
 const DEFAULT_DRAW_DISTANCE: Distance = Distance::new(256.0);

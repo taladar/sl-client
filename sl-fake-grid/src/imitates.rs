@@ -41,6 +41,9 @@
 //! | the account's entitlements ([`describes_account_entitlements`](ImitatedGrid::describes_account_entitlements)) | a benefits package, its subscription name, every package's numbers, and the maturity preference | none of the four; a viewer prices uploads from the legacy `EconomyData` instead |
 //! | how a teleport runs and how it is refused ([`teleport_policy`](ImitatedGrid::teleport_policy)) | `resolving` and `Sending to destination.` between the start and the finish; a refusal after the start, over the event queue, as a key with an `AlertInfo`; a cancel answered `TPCancelled`; a region above the maturity preference refused; a local teleport flagged `WITHIN_REGION` | no progress lines; a refusal before any start, over UDP, as a sentence with no alert; a cancel unanswered; no maturity check; the request's flags alone |
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
+//! | a sit on an object the region does not have ([`SitPolicy::unknown_target`]) | refused at once with the named alert `SitFailNotSameRegion` | not answered: the client's own sit timeout ends it |
+//! | where standing up puts the avatar ([`SitPolicy::stand_forward_m`], [`SitPolicy::stand_up_m`]) | 0.34 m in front of where it sat, at the same height | 0.65 m in front and 0.57 m above |
+//! | the seat position in an `AvatarSitResponse` for a seat with a sit target ([`SitPolicy::response_states_seated_position`]) | where the avatar is put: the target raised by 0.35 m | the target as the script set it, 0.35 m below where the avatar is put |
 //!
 //! **The inventory rows are the divergence a viewer is most likely to trip
 //! over**, which is why they are three rows rather than one setting. An
@@ -492,6 +495,38 @@ impl ImitatedGrid {
                 finish_flags: FinishFlags::ViaLocation,
                 cancel: CancelAnswer::Ignored,
                 enforces_maturity_preference: false,
+            },
+        }
+    }
+
+    /// How this grid answers a sit request where the two disagree — measured
+    /// by the `sit-stand` conformance case on aditi and the local OpenSim
+    /// (2026-10-08, `book/src/gridspec/movement.md` § Sitting).
+    ///
+    /// They agree on more than they differ in: both answer a sit on a seat
+    /// with an `AvatarSitResponse` whose `AutoPilot` flag is set whatever the
+    /// distance, and both have the avatar on the seat before the client's
+    /// `AgentSit` can have arrived. What a client can tell them apart by is
+    /// the answer to a sit on nothing, and which of two positions the
+    /// response carries for a scripted seat.
+    #[must_use]
+    pub const fn sit_policy(self) -> SitPolicy {
+        match self {
+            Self::SecondLife => SitPolicy {
+                unknown_target: Some(SitRefusal {
+                    name: "SitFailNotSameRegion",
+                    text: "Try moving closer.  Can't sit on object because\n\
+                           it is not in the same region as you.",
+                }),
+                response_states_seated_position: true,
+                stand_forward_m: 0.34,
+                stand_up_m: 0.0,
+            },
+            Self::OpenSim => SitPolicy {
+                unknown_target: None,
+                response_states_seated_position: false,
+                stand_forward_m: 0.65,
+                stand_up_m: 0.57,
             },
         }
     }
@@ -1388,6 +1423,46 @@ impl ParcelPolicy {
     }
 }
 
+/// How a grid answers a sit request ([`ImitatedGrid::sit_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SitPolicy {
+    /// What a sit on an object the region does not have is refused with, or
+    /// `None` on a grid that does not answer it. Second Life uses the alert
+    /// it refuses a neighbour region's seat with, which is what an object it
+    /// cannot find in the agent's own region amounts to; OpenSim logs "Sit
+    /// requested on unknown object" and sends nothing.
+    pub unknown_target: Option<SitRefusal>,
+    /// Whether the `SitPosition` of an `AvatarSitResponse` for a seat with a
+    /// sit target is where the avatar ends up. Both grids put the avatar
+    /// [`SIT_TARGET_RAISE_M`] above the target a script sets; Second Life's
+    /// response says that position and OpenSim's says the target, so only
+    /// the avatar's own object update says the same thing on both.
+    pub response_states_seated_position: bool,
+    /// How far in front of where it sat an avatar that stands up is put, in
+    /// metres, along the way it faced on the seat. The same for two avatars
+    /// on each grid, from a seat with a sit target and from one without.
+    pub stand_forward_m: f32,
+    /// How far above where it sat it is put, in metres. Second Life stands
+    /// it at the height it sat at and lets it drop; OpenSim lifts it first.
+    pub stand_up_m: f32,
+}
+
+/// How far above a script's sit target both grids put the seated avatar, in
+/// metres: `llSitTarget(<0, 0, 1>, …)` seated both test avatars at 1.35 m.
+/// OpenSim's arithmetic is its `SIT_TARGET_ADJUSTMENT` of 0.4 m less 0.05 m
+/// along the target's own up axis, "empirically determined to be what is
+/// used in SL".
+pub const SIT_TARGET_RAISE_M: f32 = 0.35;
+
+/// A named alert refusing a sit ([`SitPolicy::unknown_target`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SitRefusal {
+    /// The alert's name: its `AlertInfo` message.
+    pub name: &'static str,
+    /// The alert's text.
+    pub text: &'static str,
+}
+
 /// Which sequence id a grid's post-edit push carries ([`ParcelPolicy`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditEcho {
@@ -1555,6 +1630,7 @@ mod test {
             sl.describes_account_entitlements(),
             opensim.describes_account_entitlements()
         );
+        assert_ne!(sl.sit_policy(), opensim.sit_policy());
         let (sl_parcels, opensim_parcels) = (sl.parcel_policy(), opensim.parcel_policy());
         assert_ne!(
             sl_parcels.answers_request_by_id,

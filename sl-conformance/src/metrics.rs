@@ -27,6 +27,15 @@ impl Metrics {
         Self::default()
     }
 
+    /// Fold every value and its metadata from `other` into this collector, a
+    /// later value replacing an earlier one of the same name — for a case
+    /// that collects into a collector of its own while the context's is
+    /// borrowed along with its sessions.
+    pub fn merge(&mut self, other: Self) {
+        self.values.extend(other.values);
+        self.meta.extend(other.meta);
+    }
+
     /// Record a metric value with no inherent direction (neutral).
     pub fn set(&mut self, key: &str, value: impl Into<MetricValue>) {
         let _previous = self.values.insert(key.to_owned(), value.into());

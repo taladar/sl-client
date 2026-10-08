@@ -526,7 +526,7 @@ fn multiply(second: &Rotation, first: &Rotation) -> Rotation {
 }
 
 /// `vector` turned by `rotation` (`q * v * q⁻¹`, written out).
-fn rotate(rotation: &Rotation, vector: &Vector) -> Vector {
+pub(crate) fn rotate(rotation: &Rotation, vector: &Vector) -> Vector {
     let as_vector = Rotation {
         x: vector.x,
         y: vector.y,

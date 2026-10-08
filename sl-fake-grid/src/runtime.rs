@@ -484,6 +484,9 @@ pub(crate) struct GridCore {
     /// How the region answers the About Land traffic
     /// ([`ImitatedGrid::parcel_policy`]).
     pub(crate) parcel_policy: crate::imitates::ParcelPolicy,
+    /// How the region answers a sit request
+    /// ([`ImitatedGrid::sit_policy`]).
+    pub(crate) sit_policy: crate::imitates::SitPolicy,
     /// What an accepted environment set or reset is answered with
     /// ([`ImitatedGrid::environment_change_reply`]).
     pub(crate) environment_change_reply: crate::imitates::EnvironmentChangeReply,
@@ -1017,6 +1020,7 @@ impl GridCore {
             assets: self.assets.clone(),
             object_assets: self.object_assets,
             parcel_policy: self.parcel_policy,
+            sit_policy: self.sit_policy,
             inventory_announcement: self.inventory_announcement,
             upload_announcements: self.upload_announcements,
             bakes: self.bakes,
@@ -2092,6 +2096,7 @@ impl FakeGridBuilder {
             login_refusals: self.imitates.login_refusals(),
             withheld_capabilities: self.imitates.withheld_capabilities(),
             parcel_policy: self.imitates.parcel_policy(),
+            sit_policy: self.imitates.sit_policy(),
             environment_change_reply: self.imitates.environment_change_reply(),
             logout_reply: self.imitates.logout_reply(),
             circuit_policy: self.imitates.circuit_policy(),

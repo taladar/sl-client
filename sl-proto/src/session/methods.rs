@@ -39,13 +39,13 @@ use super::{
     INVENTORY_FETCH_MAX_ATTEMPTS, INVENTORY_SAVE_TIMEOUT, Inventory, InventoryOwner,
     LOGOUT_TIMEOUT, MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload,
     PARENT_REQUEST_WARN_ATTEMPTS, PendingHandover, PendingInventorySave, PendingInvite,
-    SIT_REFUSAL_ALERTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
-    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState, SitState,
-    TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TEXTURE_DOWNLOAD_STALL_TIMEOUT,
-    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, TransferDownload,
-    TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_REFUSED_RESULT,
-    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
-    merge_deadline,
+    SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
+    ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
+    SessionState, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
+    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
+    TransferDownload, TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT,
+    XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose,
+    XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -6616,9 +6616,10 @@ impl Session {
 
     /// Ends a pending sit that `alert`, arriving on `circuit`, refuses.
     ///
-    /// Two alerts are refusals: one of the named sit refusals
-    /// ([`SIT_REFUSAL_ALERTS`]) from any region — Second Life names them — and
-    /// any alert from the neighbour region the request went to, since a child
+    /// Three alerts are refusals: one of the named sit refusals
+    /// ([`SIT_REFUSAL_ALERTS`]) from any region — Second Life names them —,
+    /// one worded as OpenSim words its own ([`SIT_REFUSAL_TEXTS`]), and any
+    /// alert from the neighbour region the request went to, since a child
     /// agent's sit can only be refused (OpenSim sends that refusal as bare
     /// text, with no name). Without this the alert shows and the sit then also
     /// times out as a request that was never answered.
@@ -6631,7 +6632,9 @@ impl Session {
             .alert_info
             .iter()
             .any(|info| SIT_REFUSAL_ALERTS.contains(&trimmed_string(&info.message).as_str()));
-        if !(named_refusal || (asked_a_neighbour && circuit == asked)) {
+        let worded_refusal =
+            SIT_REFUSAL_TEXTS.contains(&trimmed_string(&alert.alert_data.message).trim());
+        if !(named_refusal || worded_refusal || (asked_a_neighbour && circuit == asked)) {
             return;
         }
         self.sit = SitState::NotSitting;

@@ -2025,6 +2025,18 @@ client learns someone is aboard something.
 The offset is a fixed `SIT_TARGET_OFFSET`, not the point the client
 clicked: a real vehicle sets an `llSitTarget`, so riders snap to the seat.
 
+Where the live grids differ about a sit the answer is the flavour's
+`ImitatedGrid::sit_policy` (measured in
+[Grid Behaviour → Movement](../gridspec/movement.md#sitting)): a sit on an
+object the region does not have is refused with the named alert
+`SitFailNotSameRegion` or met with silence; the response states the
+position the avatar is put at or the script's own target 0.35 m below it;
+and standing up leaves the avatar 0.34 m in front of where it sat, or
+0.65 m in front and 0.57 m above. The response's `AutoPilot` flag is set on
+both, as both grids set it. What is not imitated yet is that both grids
+seat the avatar on the request, without waiting for the `AgentSit`
+(`server-world-sit-and-attach`).
+
 A **ridden** crossing is the interesting case, because the vehicle is
 handed over too and everything about it is renumbered. An object keeps its
 grid-wide `ObjectKey` across a border and takes the destination's own

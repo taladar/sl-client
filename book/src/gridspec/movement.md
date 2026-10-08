@@ -100,6 +100,125 @@ Over a whole run OpenSim sent one full `ObjectUpdate` of the avatar among
 | the collision plane, in the air | `0 0 0 1` | `0 0 0 1` | the stock plane |
 | the animation set | the locomotion state and two to five assets beside it that are no built-in, changing from one statement to the next; on both avatars a fall, its landing, a hover and level flight were stated *only* as such assets, while `walk`, `run`, `stand`, `crouch`, `pre_jump`, `jump`, `land`, `hover_up` and `hover_down` came as the built-ins | exactly one built-in at a time: `stand`, `walk`, `run`, `crouch`, `crouchwalk`, `pre_jump`, `jump`, `land`, `hover`, `hover_up`, `hover_down`, `fly`, `falldown`, `standup` | none |
 
+## Sitting
+
+A sit is a request the simulator answers. The viewer sends an
+`AgentRequestSit` naming the object and the point on it that was clicked;
+the simulator answers with an `AvatarSitResponse` — the seat's position and
+rotation relative to the object, a camera, an `AutoPilot` flag — and sends
+the avatar's own object again, now a child of the seat with a position
+relative to it. Standing up is one `AgentUpdate` with the `STAND_UP` bit.
+
+Measured on 2026-10-08 by the `sit-stand` conformance case, four runs on
+aditi and five on the local OpenSim, with two avatars: the first rezzes a
+half-metre cube on the ground a metre and a half from itself and asks to sit
+on it from there, from the ground, from six spots it walks to and, once a
+script has given the cube a sit target
+(`llSitTarget(<0, 0, 1>, llEuler2Rot(<0, 0, PI_BY_TWO>))`), from two it
+flies to; the second asks for the seat while the first is on it. Distances
+are along the ground, from the avatar to the cube's centre. The case holds
+every grid it can put the question to — the live ones, and each fake
+flavour for the legs that need no second resident, no script and no walk —
+to the rows marked †.
+
+### The answer
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a sit on the cube from 1.5 m † | an `AvatarSitResponse` 0.17 to 0.18 s later — one round trip | the same, 0.01 to 0.1 s later | the same |
+| the response's `AutoPilot` flag † | **set, in every response**: from 0.5 m and from 52 m, with a sit target and without | the same: `ScenePresence.SendSitResponse` passes `true` | set |
+| the avatar on the seat | its object arrives as a child of the seat 22 ms after the response, a frame later and long before the client's `AgentSit` could have reached the simulator: **the request seats it** | in the same instant as the response (`SendSitResponse` calls its own `HandleAgentSit`) | on the client's `AgentSit` (`server-world-sit-and-attach`) |
+| the object the response names | the cube asked for | the same | the same |
+| the camera offsets and `ForceMouselook` | zero and unset: the script sets none | the same | zero and unset |
+| the animation set once seated | no built-in: three to five assets that are none (`gridspec-animations`) | `sit` | none |
+| what an observer is sent | the avatar as a child of the seat, at the same offset | the same | residents are not shown to each other |
+
+### Where the avatar is put
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a scriptless cube, asked for at its centre | at an edge, 0.34 m off the centre and 0.88 m above it, facing outwards | 0.42 m off the centre one way and up to 0.23 m the other, 0.90 m above it, facing outwards | every seat has a sit target |
+| the same, asked for at a point on its top face 0.1 / 0.2 m off the centre | 0.34 / 0.20 m off: the point clicked chooses the edge and the place along it | 0.15 / 0.43 m off: the same, by a rule of its own | the point is ignored |
+| the response's `SitPosition` for that cube † | **0.33 m below** where the avatar's own update then puts it (0.55 against 0.88 m) | where the update puts it | — |
+| a seat with the sit target `<0, 0, 1>` | the avatar 1.35 m above the centre, turned as the target says | the same 1.35 m (`SIT_TARGET_ADJUSTMENT` less 0.05 m, "empirically determined to be what is used in SL") | 0.55 m above, on both |
+| the response's `SitPosition` for that seat † | where the avatar is put: 1.35 m | **the target as the script set it**: 1.00 m, 0.35 m below the avatar | Second Life's states where the avatar is put, OpenSim's 0.35 m lower |
+| a second avatar on a scriptless seat that is taken | seated on the same cube, 0.54 m higher than the first | seated on the same cube at the spot it would have had alone, the first avatar's or not | — |
+| a second avatar on a sit target that is taken | seated as on a scriptless cube: no refusal | the same (`FindNextAvailableSitTarget` falls back to the prim) | — |
+
+Neither response says where a viewer should draw the avatar on both grids;
+the avatar's own object update does.
+
+### From a distance
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a scriptless seat from further off † | answered, and the avatar seated at once, from 3.6, 4.2, 4.3, 6.6, 6.8, 7.3 and 7.5 m; **not answered at all** from 9.3, 10.0, 10.1, 12.6, 12.9, 13.1, 15.3, 15.7, 15.9, 20.5, 21.1, 21.3 and 24.8 m — no response, no alert, and the avatar stays where it is | answered, and the avatar seated at once, from every distance tried: 4.1 to 20.9 m | does not move an avatar |
+| a seat with a sit target from further off † | answered and seated at once from 20.5, 21.1, 21.3, 24.8, 44.5, 45.0, 50.9 and 52.0 m | the same from 40.0 m | — |
+| a sit on an object the region does not have † | the named alert `SitFailNotSameRegion` ("Try moving closer. Can't sit on object because it is not in the same region as you."), 0.17 s later | **nothing**: the simulator logs "Sit requested on unknown object" | each flavour's |
+| a sit on an object in a neighbouring region | the same alert, from that region — measured earlier (see [World](../content/world.md)); no neighbour's object was in view of these runs | the same words as an alert **with no name**, 0.02 s later | not modelled |
+
+The silence past eight or nine metres is what `logout-seated` ran into on
+2026-10-06, when aditi "did not answer the sit": that case rezzed its seat a
+metre and a half from where its flight to the build location was reckoned to
+have ended, and the avatar had come down up to eleven metres from there.
+
+### The ground, standing up and teleporting
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `SIT_ON_GROUND` | `sit_ground_constrained` joins the animation set; the avatar stays its own root and is reported once or not at all | the animation set becomes `sit_ground_constrained`; no update of the avatar | nothing |
+| a sit on the cube from there | answered as from standing | answered as from standing, a `stand` stated first | answered |
+| `STAND_UP` from a seat † | the avatar is its own root again 0.2 s later, **0.34 m in front of where it sat and at the same height**, and drops to the ground from there; the same for both avatars, with a sit target and without | free 5 to 15 ms later, **0.65 m in front and 0.57 m above**, then drops; `sit` then `stand` | each flavour's placement, and no drop: nothing moves an avatar there |
+| a teleport within the region, asked from a seat † | a `TeleportLocal` and the avatar free of the seat (in the sandbox, at the landing point every teleport there is sent to) | a `TeleportLocal` to the spot asked for, and the avatar free | — |
+| a logout from a seat | [Session → Logout](session.md) | the same | — |
+
+### What the client does with it
+
+- **The session answers every `AvatarSitResponse` with an `AgentSit` at
+  once**, as it always has. Neither grid waits for it, and neither says
+  anything with its `AutoPilot` flag: the reference viewer walks towards
+  the seat whenever the flag is set (`process_avatar_sit_response`) and is
+  seated on the way.
+- **The viewer draws a seated avatar from the avatar's own update**, never
+  from the response, and reads the response for the scripted camera alone.
+  The response is the wrong place to look on Second Life for a scriptless
+  seat and on OpenSim for a scripted one.
+- **A refusal ends the pending sit.** Second Life's are named alerts;
+  OpenSim's two for a seat in the agent's own region — "There is no
+  suitable surface to sit on, try another spot." and "Sit position on
+  restricted land, try another spot" (`ScenePresence.PhysicsSit`,
+  `PhysicsSitResponse`) — carry no name, so since this measurement the
+  session knows them by their wording. Neither was provoked here.
+- **A sit nothing answers** — OpenSim's unknown object, Second Life's seat
+  too far away — ends on the session's own fifteen-second timeout as a
+  `Diagnostic::ExpectedReplyMissing`. The viewer shows nothing for it, as
+  the reference shows nothing.
+- `e2e_sit` drives the viewer against each fake flavour: *Sit Here* seats
+  the avatar, *Stand Up* leaves it where that grid puts a standing avatar,
+  and a sit on an object the grid has dropped raises `SitFailNotSameRegion`
+  on the Second Life flavour and nothing on the OpenSim one.
+
+### Not measured
+
+- **Where exactly Second Life stops answering**: between 7.5 and 9.3 m for
+  this cube. Whether the seat's size or the height between the two moves
+  that is not known.
+- **The other refusals**: `SitFailCantMove`, `SitFailNotAllowedOnLand`,
+  `CantSitNoRoom` and `CantSitNoSuitableSurface` on Second Life, and
+  OpenSim's two sentences. Nothing here was refused except the unknown
+  object.
+- **OpenSim without a physics engine that seats avatars**: its fallback
+  ignores a scriptless seat more than 10 m away
+  (`ScenePresence.SendSitResponse`). The local grid's ubODE never reaches
+  it.
+- **A seat that sets a camera or forces mouselook**, a linkset with several
+  sit targets, a phantom or physical seat, a seat that moves, and an
+  unsit by script.
+- **A sit while Second Life holds the avatar for an animation**: every sit
+  here was answered whatever the avatar's animations were, a landing among
+  them.
+- **A region crossing on a seat**: `gridspec-seated-crossing`.
+
 ## What the client does with it
 
 - **The viewer reports its own holding animations finished**, as the
@@ -146,8 +265,8 @@ Over a whole run OpenSim sent one full `ObjectUpdate` of the avatar among
 - **A turn on the spot on Second Life**: the three readings do not agree.
 - **Movement with no `AgentUpdate` at all** after the control is stated:
   the session always sends one a second.
-- **Swimming, sitting on the ground, mouselook steering, pushes and
-  collisions**: no leg of the case.
+- **Swimming, mouselook steering, pushes and collisions**: no leg of the
+  case.
 - Seen once and OpenSim's alone: an avatar that came down from a fall on a
   region border was left there by its simulator — walk animation playing,
   no update, child circuits closed, and the next login into that region

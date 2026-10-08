@@ -4,7 +4,7 @@ title: Animations as each grid broadcasts them
 topic: gridspec
 status: ready
 origin: gridspec survey (2026-10-03)
-refs: [gridspec-survey, gridspec-agent-movement]
+refs: [gridspec-survey, gridspec-agent-movement, gridspec-sit-stand]
 ---
 
 Context: [context/gridspec.md](../context/gridspec.md).
@@ -23,6 +23,11 @@ hover and level flight were stated *only* as such assets (`46b54ef6-…`,
 `8e6b62ad-…`, `b6abe991-…`). Whether those are the avatars' own animation
 overrides or something the simulator adds is for this task to find out.
 OpenSim states exactly one built-in at a time.
+
+From [[gridspec-sit-stand]] (2026-10-08): the same on a seat. Second Life
+stated a seated avatar's set as three to five such assets and no built-in
+`sit` (on the ground it did state `sit_ground_constrained`, beside them);
+OpenSim stated `sit`, and `sit` then `stand` on standing up.
 
 ## Discover
 

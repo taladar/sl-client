@@ -111,7 +111,7 @@ const AT_REST_M_PER_S: f32 = 0.05;
 /// The built-ins a Second Life simulator holds the avatar still for until the
 /// viewer reports them finished (`LLAgent::onAnimStop`), by their names in
 /// [`sl_anim`]'s registry.
-const HOLDING_ANIMATIONS: [&str; 4] = ["standup", "pre_jump", "land", "medium_land"];
+pub(crate) const HOLDING_ANIMATIONS: [&str; 4] = ["standup", "pre_jump", "land", "medium_land"];
 
 /// How long a single report of an avatar at rest has to stand uncontradicted
 /// before the avatar counts as having stopped, in seconds.
@@ -353,7 +353,7 @@ impl Watch {
 /// `+N` entry counting the rest — the facial expressions and other assets a
 /// Second Life simulator lists beside the locomotion state, which say nothing
 /// about movement and change from one statement to the next.
-fn animation_names(animations: &[PlayingAnimation]) -> BTreeSet<String> {
+pub(crate) fn animation_names(animations: &[PlayingAnimation]) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = animations
         .iter()
         .filter_map(|animation| sl_anim::builtin_animation(animation.anim_id))
@@ -367,7 +367,7 @@ fn animation_names(animations: &[PlayingAnimation]) -> BTreeSet<String> {
 }
 
 /// A set as one string.
-fn join(set: &BTreeSet<String>) -> String {
+pub(crate) fn join(set: &BTreeSet<String>) -> String {
     if set.is_empty() {
         "-".to_owned()
     } else {

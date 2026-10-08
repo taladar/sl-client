@@ -7017,7 +7017,7 @@ mod test {
         assert!(
             server_events
                 .iter()
-                .any(|e| matches!(e, ServerEvent::StoodUp)),
+                .any(|e| matches!(e, ServerEvent::StoodUp { .. })),
             "expected StoodUp, got {server_events:?}"
         );
         assert_eq!(sim.seated_on(), None);

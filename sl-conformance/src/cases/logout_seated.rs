@@ -34,7 +34,8 @@ use crate::support::{
 };
 
 /// Where the measured answers are written down.
-const SOURCE: &str = "book/src/gridspec/session.md § Logout (logout-seated, 2026-10-06)";
+const SOURCE: &str =
+    "book/src/gridspec/session.md § Logout (logout-seated, 2026-10-06 and 2026-10-08)";
 
 /// The OpenSim start location: the "Default Region", centred, where both
 /// avatars land side by side.
@@ -70,10 +71,12 @@ const CASE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Whether the observer is sent the seated avatar's `KillObject` after the
 /// logout.
 ///
-/// Only OpenSim's answer is a measurement, here and below: aditi did not
-/// answer the sit request on any of three runs (2026-10-06), so the case has
-/// yet to get as far as a seated logout there. Second Life's are what the
-/// reference viewer expects.
+/// Second Life's answer, here and below, is from 2026-10-08. Three runs two
+/// days earlier never got as far: the seat was rezzed a metre and a half from
+/// where the flight to the build location was reckoned to have ended rather
+/// than from where the avatar came down, which can be ten metres off, and
+/// Second Life does not answer a sit on a scriptless seat from more than
+/// eight or nine (`sit-stand`).
 const OBSERVER_SEES_KILL: Measured<bool> = Measured {
     second_life: true,
     opensim: true,
@@ -89,13 +92,13 @@ const SEATED_AFTER_RELOGIN: Measured<bool> = Measured {
 
 /// Deletes the seat if the case body never gets to (the runner's overall
 /// timeout, an unwind): the awaited delete covers every path that returns.
-struct DeleteOnDrop {
+pub(crate) struct DeleteOnDrop {
     /// The command channel of the session the sitter has at the moment.
-    commander: Commander,
+    pub(crate) commander: Commander,
     /// The sitter's Trash folder, once its login skeleton has been read.
-    trash: Option<InventoryFolderKey>,
+    pub(crate) trash: Option<InventoryFolderKey>,
     /// The seat as that session knows it, while it does.
-    seat: Option<ScopedObjectId>,
+    pub(crate) seat: Option<ScopedObjectId>,
 }
 
 impl Drop for DeleteOnDrop {
@@ -107,7 +110,7 @@ impl Drop for DeleteOnDrop {
 }
 
 /// The command that deletes `seat` into `trash`.
-fn delete_command(seat: ScopedObjectId, trash: InventoryFolderKey) -> Command {
+pub(crate) fn delete_command(seat: ScopedObjectId, trash: InventoryFolderKey) -> Command {
     Command::DerezObjects {
         local_ids: vec![seat],
         destination: DeRezDestination::Trash(trash),
@@ -117,7 +120,7 @@ fn delete_command(seat: ScopedObjectId, trash: InventoryFolderKey) -> Command {
 }
 
 /// The Trash folder of a login skeleton, or failing that its root.
-fn trash_folder(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
+pub(crate) fn trash_folder(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
     folders
         .iter()
         .find(|folder| folder.folder_type == FolderType::Trash.to_code())
@@ -126,7 +129,7 @@ fn trash_folder(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
 }
 
 /// The straight-line distance between two region positions, in metres.
-fn distance(a: &Vector, b: &Vector) -> f32 {
+pub(crate) fn distance(a: &Vector, b: &Vector) -> f32 {
     let (dx, dy, dz) = (a.x - b.x, a.y - b.y, a.z - b.z);
     dx.mul_add(dx, dy.mul_add(dy, dz * dz)).sqrt()
 }
@@ -202,7 +205,7 @@ async fn sight_avatar(
 /// Point `session`'s camera at `spot`. A grid streams objects by where the
 /// agent's camera is, not its avatar, so this is what brings the seat into
 /// the stream of an avatar standing somewhere else in the region.
-async fn look_at(session: &Session, spot: &Vector) -> Result<(), TestFailure> {
+pub(crate) async fn look_at(session: &Session, spot: &Vector) -> Result<(), TestFailure> {
     session
         .send(Command::SetCamera(Camera::looking_at(
             Vector {
@@ -216,7 +219,7 @@ async fn look_at(session: &Session, spot: &Vector) -> Result<(), TestFailure> {
 }
 
 /// The first sighting of the object `full_id` in `session`'s stream.
-async fn sight_object(
+pub(crate) async fn sight_object(
     session: &mut Session,
     full_id: ObjectKey,
     timeout: Duration,

@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 139 |
 | ready | 361 |
-| blocked | 112 |
+| blocked | 111 |
 | in-progress | 20 |
 | bugs | 34 |
-| done | 1333 |
+| done | 1334 |
 | deferred | 29 |
 | wont-do | 17 |
 | **total** | **2045** |
@@ -1185,8 +1185,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   flags and limits on each grid
 - [`gridspec-search-directory`](ready/gridspec-search-directory.md) — Directory
   search and the avatar picker on each grid
-- [`gridspec-sit-stand`](ready/gridspec-sit-stand.md) — Sitting and standing:
-  placement, refusals and alerts on each grid
+- [`gridspec-seated-crossing`](ready/gridspec-seated-crossing.md) — A seated
+  crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
   down when Second Life pushes a ban line
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
@@ -1204,7 +1204,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-world-map`](ready/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 
-## blocked (112)
+## blocked (111)
 
 ### protocol
 
@@ -1477,7 +1477,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-ecs-store`, `gridspec-object-link-delink`)
 - [`server-world-sit-and-attach`](blocked/server-world-sit-and-attach.md) —
   Sitting and attaching as world state a script can read (blocked by
-  `server-world-ecs-store`, `gridspec-sit-stand`, `gridspec-attachments`)
+  `server-world-ecs-store`, `gridspec-attachments`)
 - [`server-world-touch-and-grab`](blocked/server-world-touch-and-grab.md) —
   Touch routing — a click on a prim reaches nothing (blocked by
   `protocol-sim-script-messages`, `gridspec-touch-grab`)
@@ -1550,9 +1550,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-time-timers`](blocked/gridspec-lsl-time-timers.md) — LSL time,
   timers and sleep on each grid (blocked by
   `gridspec-lsl-live-differential-runner`)
-- [`gridspec-seated-crossing`](blocked/gridspec-seated-crossing.md) — A seated
-  crossing on each grid — a vehicle carrying its riders over a border (blocked
-  by `gridspec-sit-stand`)
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
@@ -1704,7 +1701,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The scripted environment change's `night` marker never arrived, once, in a
   full suite run
 
-## done (1333)
+## done (1334)
 
 ### protocol
 
@@ -4656,6 +4653,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   capabilities each grid grants from the seed, and to whom
 - [`gridspec-simulator-features`](done/gridspec-simulator-features.md) — The
   full SimulatorFeatures map on each grid
+- [`gridspec-sit-stand`](done/gridspec-sit-stand.md) — Sitting and standing:
+  placement, refusals and alerts on each grid
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
 - [`gridspec-teleport`](done/gridspec-teleport.md) — Teleport phases, flags,

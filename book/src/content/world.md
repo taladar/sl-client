@@ -236,6 +236,13 @@ refusal ends the pending sit at once. Only a request nothing answers at all
 runs into the sit timeout, which reports it as
 `Diagnostic::ExpectedReplyMissing`.
 
+Neither live grid waits for the `AgentSit`, both set the autopilot flag on
+every response, and they disagree about what the response's seat position
+means and about where standing up leaves the avatar: the measurements are
+in [Grid Behaviour → Movement](../gridspec/movement.md#sitting). OpenSim's
+own refusals of a seat in the agent's region carry no name; the session
+knows the two by their wording and ends the pending sit on them too.
+
 Standing up is not a message at all: one `AgentUpdate` with the transient
 `STAND_UP` control flag (`Session::stand`). Sitting on the ground is likewise
 just the `SIT_ON_GROUND` control flag (`Session::sit_on_ground`) — a pure

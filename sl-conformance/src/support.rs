@@ -584,6 +584,10 @@ pub struct SettledScene {
     /// move to the build location, where there was one. `None` when the
     /// avatar never appeared in the object stream.
     pub avatar: Option<Vector>,
+    /// A root prim streamed from a neighbouring region's child circuit, if
+    /// one came into view: an object the agent can see and is not in the
+    /// region of.
+    pub neighbour_object: Option<ObjectKey>,
 }
 
 /// [`settle_scene`], also reporting where our own avatar ended up — for a
@@ -604,9 +608,18 @@ pub async fn settle_scene_with_avatar(
     let mut seen = HashSet::new();
     let mut anchor: Option<Vector> = None;
     let mut avatar: Option<Vector> = None;
+    let root = session.circuit_id();
+    let mut neighbour_object: Option<ObjectKey> = None;
     drain_scene(session, window, idle, &mut seen, |object| {
         if Some(object.full_id.uuid()) == own {
             avatar = Some(object.motion.position.clone());
+        }
+        if neighbour_object.is_none()
+            && root.is_some_and(|root| root != object.circuit)
+            && object.pcode == pcode::PRIMITIVE
+            && object.parent_id == RegionLocalObjectId(0)
+        {
+            neighbour_object = Some(object.full_id);
         }
         let anchors = if content_is_ours(grid) {
             object.pcode == pcode::PRIMITIVE
@@ -623,6 +636,7 @@ pub async fn settle_scene_with_avatar(
             seen,
             anchor,
             avatar,
+            neighbour_object,
         });
     };
     // The build location: rez right there. When the login did not land the
@@ -638,8 +652,16 @@ pub async fn settle_scene_with_avatar(
         from
     } else {
         let arrived = walk_within_region(session, from, &build, |_event| {}).await?;
-        drain_scene(session, window, idle, &mut seen, |_object| {}).await?;
-        arrived
+        // The flight ends in the air: where the avatar comes down is where
+        // it stands.
+        let mut landed = arrived;
+        drain_scene(session, window, idle, &mut seen, |object| {
+            if Some(object.full_id.uuid()) == own {
+                landed = object.motion.position.clone();
+            }
+        })
+        .await?;
+        landed
     };
     // The named spot's x/y, at the avatar's own height: the fixture's height
     // is only a login hint.
@@ -663,16 +685,24 @@ pub async fn settle_scene_with_avatar(
             spot.clone(),
         )))
         .await?;
-    drain_scene(session, window, idle, &mut seen, |_object| {}).await?;
+    let mut standing = arrived;
+    drain_scene(session, window, idle, &mut seen, |object| {
+        if Some(object.full_id.uuid()) == own {
+            standing = object.motion.position.clone();
+        }
+    })
+    .await?;
     Ok(SettledScene {
         seen,
         anchor: Some(spot),
-        avatar: Some(arrived),
+        avatar: Some(standing),
+        neighbour_object,
     })
 }
 
-/// Records every [`Event::ObjectAdded`] into `seen` (and shows it to
-/// `observe`) until none has arrived for `idle`, or `window` has passed.
+/// Records every [`Event::ObjectAdded`] into `seen` until none has arrived
+/// for `idle`, or `window` has passed, showing `observe` each of them and
+/// every [`Event::ObjectUpdated`] that arrives meanwhile.
 async fn drain_scene(
     session: &mut Session,
     window: Duration,
@@ -688,14 +718,22 @@ async fn drain_scene(
         }
         match session
             .wait_for(remaining.min(idle), |event| match event {
-                Event::ObjectAdded(object) => Some((**object).clone()),
+                Event::ObjectAdded(object) => {
+                    observe(object);
+                    Some(object.scoped_id())
+                }
+                // An object already sighted that moved: shown, and not what
+                // the idle gap waits for.
+                Event::ObjectUpdated(object) => {
+                    observe(object);
+                    None
+                }
                 _ => None,
             })
             .await
         {
-            Ok(object) => {
-                observe(&object);
-                seen.insert(object.scoped_id());
+            Ok(sighted) => {
+                seen.insert(sighted);
             }
             Err(TestFailure::Timeout(_)) => return Ok(()),
             Err(other) => return Err(other),

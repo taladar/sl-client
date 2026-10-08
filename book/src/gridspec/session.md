@@ -171,8 +171,9 @@ OpenSim standalone (a 2×2 block of regions), by:
   circuits open), makes exactly one login request, and logs that session out
   **early** — the moment its region handshake completes;
 - `logout-seated`, in which one avatar rezzes a cube, sits on it and logs
-  out while a second avatar watches, then logs in again at `last` (OpenSim
-  only: four runs, the same answer each time);
+  out while a second avatar watches, then logs in again at `last` (four
+  runs on OpenSim, the same answer each time, and one on aditi on
+  2026-10-08);
 - 21 scripted `sl-repl` logouts on OpenSim after holds of 0, 1, 2, 3, 5, 8
   and 15 seconds, three of each, read off the wire trace
   (`sl_proto::wire`), and five more runs of `logout-clean` there; and one
@@ -231,9 +232,9 @@ listening.
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | the next login, one request | admitted (after the two-minute login cooldown the harness keeps on aditi) | admitted at once, whether or not the logout was answered | admitted on both |
-| a seated avatar, as an observer sees it | not measured (below) | the seat is re-sent once, then the avatar's `KillObject`, 30 ms after the request | not modelled: residents of the fake grid are not shown to each other (`server-fake-grid-agent-avatars-shared`) |
-| the seat after the kill | not measured | not re-sent | — |
-| the next login at `last` after a seated logout | not measured | standing, 1 m from the seat | — |
+| a seated avatar, as an observer sees it | the seat is re-sent once, then the avatar's `KillObject`, 0.6 s after the request | the seat is re-sent once, then the avatar's `KillObject`, 30 ms after the request | not modelled: residents of the fake grid are not shown to each other (`server-fake-grid-agent-avatars-shared`) |
+| the seat after the kill | re-sent once more | not re-sent | — |
+| the next login at `last` after a seated logout | standing, 1.04 m from the seat | standing, 1 m from the seat | — |
 
 So a logout that OpenSim never answered left nothing behind: no presence to
 refuse the next login, no avatar in anybody's view. The `presence` refusal
@@ -261,5 +262,4 @@ that OpenSim gives a session which ended *without* a `LogoutRequest` is in
 | --- | --- |
 | what Second Life sends on child circuits after the `LogoutReply` | the client has ended the session by then, as the reference viewer has |
 | which items the reply's `InventoryData` names on Second Life | four ids on each of two accounts; not compared with what the avatars wear (`inventory-logout-reply-items`) |
-| a seated logout on Second Life | aditi never answered the sit: three `logout-seated` runs got the cube rezzed and seen by both avatars, sent `AgentRequestSit` for it, and drew neither an `AvatarSitResponse` nor an alert within the session's sit timeout — with the cube 1.5 m from the avatar at its own height, and again at ground level. Why is `gridspec-sit-stand`'s to find out; the case's Second Life answers are the reference's expectation, not a measurement |
 | a logout while a teleport or a region crossing is in flight | left to the teleport and crossing chapters |

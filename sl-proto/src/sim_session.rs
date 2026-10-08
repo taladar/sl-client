@@ -2862,7 +2862,11 @@ pub enum ServerEvent {
     /// completing `AgentSit`). The inverse of the client's
     /// [`Session::stand`](crate::Session::stand). The sit state resets to
     /// not-sitting.
-    StoodUp,
+    StoodUp {
+        /// The seat the agent was on, or had been offered: where it stands
+        /// afterwards is beside that.
+        from: ObjectKey,
+    },
     /// The client recorded a start location (`SetStartLocationRequest`): stores
     /// the region-local `position` and `look_at` as the named [`StartLocationSlot`]
     /// (the everyday case being [`StartLocationSlot::Home`], "set home to here").
@@ -10222,11 +10226,11 @@ impl SimSession {
                         flags: data.flags,
                     })));
                 if controls.contains(ControlFlags::STAND_UP)
-                    && !matches!(self.sit, SimSitState::NotSitting)
+                    && let SimSitState::ResponseSent { on } | SimSitState::Seated { on } = self.sit
                 {
                     self.sit = SimSitState::NotSitting;
                     self.sit_expires = None;
-                    self.events.push_back(ServerEvent::StoodUp);
+                    self.events.push_back(ServerEvent::StoodUp { from: on });
                 }
             }
             AnyMessage::AgentRequestSit(request) => {

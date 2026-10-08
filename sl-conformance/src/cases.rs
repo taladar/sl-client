@@ -110,6 +110,7 @@ pub mod server_error;
 pub mod session_mark_read;
 pub mod set_appearance;
 pub mod simulator_features;
+pub mod sit_stand;
 pub mod task_inventory;
 pub mod teleport_access_refused;
 pub mod teleport_cancel;

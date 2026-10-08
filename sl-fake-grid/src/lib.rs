@@ -54,7 +54,7 @@ pub use fixtures::{
 pub use imitates::{
     EditEcho, EnvironmentChangeReply, ImitatedGrid, LoginFields, LoginRefusals, LogoutReply,
     OPENSIM_MAX_AGENT_GROUPS, ParcelPolicy, RegionCapacity, SELECTED_PARCEL_SEQUENCE_ID,
-    SecondLogin, StockDay,
+    SIT_TARGET_RAISE_M, SecondLogin, SitPolicy, SitRefusal, StockDay,
 };
 pub use inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,

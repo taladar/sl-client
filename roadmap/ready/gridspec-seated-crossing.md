@@ -2,12 +2,11 @@
 id: gridspec-seated-crossing
 title: A seated crossing on each grid — a vehicle carrying its riders over a border
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec-neighbours-crossing (2026-10-07)
 refs: [gridspec-neighbours-crossing, viewer-seated-region-crossing,
   test-handover-distant-and-vehicle-aditi, test-fake-grid-seated-crossing,
   server-world-sit-and-attach]
-blocked_by: [gridspec-sit-stand]
 ---
 
 Context: [context/gridspec.md](../context/gridspec.md).
@@ -28,8 +27,10 @@ measured. Second Life's unsit and resit at a vehicle crossing is assumed.
 - A moving seat on each grid: a prim the avatar rezzes, a script uploaded
   into it that sets a sit target and steps the prim over the border once
   somebody sits (`llSetPos` for a non-physical one), and the avatar seated
-  on it. The script has to get into the prim by upload on both grids; the
-  sit has to be answered on aditi first ([[gridspec-sit-stand]]).
+  on it. The script has to get into the prim by upload on both grids, as
+  `sit-stand` does it; a seat with a sit target is answered on aditi from
+  any distance tried, a scriptless one only from within eight metres or so
+  ([[gridspec-sit-stand]]).
 - Record, with `sl_conformance::crossing`: the `CrossedRegion` and what
   comes with it, the vehicle's `KillObject` on the region left and its
   update on the one entered (ids, order, timing against the avatar's), the

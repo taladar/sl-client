@@ -1770,6 +1770,8 @@ pub(crate) struct WorldPolicies<'a> {
     pub(crate) announcement: crate::inventory::InventoryAnnouncement,
     /// How the About Land traffic is answered.
     pub(crate) parcels: crate::imitates::ParcelPolicy,
+    /// How a sit request is answered.
+    pub(crate) sits: crate::imitates::SitPolicy,
     /// Where the simulator's own ids come from.
     pub(crate) mint: &'a dyn Fn() -> uuid::Uuid,
 }
@@ -1824,6 +1826,7 @@ pub(crate) fn answer_world_request(
         object_assets,
         announcement,
         parcels,
+        sits,
         mint,
     } = policies;
     // The object and parcel edit families are bodies of work of their own; each
@@ -2047,9 +2050,9 @@ pub(crate) fn answer_world_request(
             }];
         }
         // The agent asked to sit on something. A simulator answers a sit on an
-        // object it has with an `AvatarSitResponse` and simply does not answer
-        // one it does not (the client's own sit timeout recovers that), so an
-        // unknown target is dropped rather than refused.
+        // object it has with an `AvatarSitResponse`. One it does not have,
+        // Second Life refuses with a named alert and OpenSim does not answer
+        // at all, which leaves it to the client's own sit timeout.
         ServerEvent::SitRequested { target, offset } => {
             let Some(seat) = world
                 .all_objects()
@@ -2057,15 +2060,35 @@ pub(crate) fn answer_world_request(
                 .find(|object| object.full_id == *target)
             else {
                 tracing::debug!("a sit was requested on {target}, which this region does not have");
+                if let Some(refusal) = sits.unknown_target {
+                    let named = sl_proto::AlertInfo {
+                        message: refusal.name.to_owned(),
+                        extra_params: String::new(),
+                    };
+                    if let Err(error) = sim.send_alert_message(refusal.text, &[named], &[], now) {
+                        tracing::warn!("refusing a sit on an unknown object failed: {error}");
+                    }
+                }
                 return Vec::new();
             };
             // The seat has a sit target, so the click point is ignored — see
             // [`SIT_TARGET_OFFSET`]. The `offset` the client sent is where it
             // touched the object, which a scripted seat never honours either.
             let _clicked = offset;
+            // Where the avatar is put on both grids; the response says so on
+            // Second Life and says the script's own target, lower, on OpenSim.
+            let stated = if sits.response_states_seated_position {
+                SIT_TARGET_OFFSET
+            } else {
+                Vector {
+                    z: SIT_TARGET_OFFSET.z - crate::imitates::SIT_TARGET_RAISE_M,
+                    ..SIT_TARGET_OFFSET
+                }
+            };
             let transform = sl_proto::SitTransform {
-                autopilot: false,
-                sit_position: SIT_TARGET_OFFSET,
+                // Set by both grids on every response, whatever the distance.
+                autopilot: true,
+                sit_position: stated,
                 sit_rotation: UNROTATED,
                 camera_eye_offset: ZERO,
                 camera_at_offset: ZERO,
@@ -2099,19 +2122,45 @@ pub(crate) fn answer_world_request(
                 now,
             );
         }
-        // Standing up puts the avatar back in the region's own frame, at the
-        // place the driver last knew it.
-        ServerEvent::StoodUp => {
-            let placement = sim.arrival_position().position;
-            let avatar = avatar_prim(
-                world.avatar_local_id,
-                identity,
-                Vector {
-                    x: placement.x(),
-                    y: placement.y(),
-                    z: placement.z(),
+        // Standing up puts the avatar back in the region's own frame, beside
+        // the seat it was on: where it sat, moved forwards — and on OpenSim
+        // upwards — by what that grid was measured to move it
+        // ([`SitPolicy::stand_forward_m`](crate::imitates::SitPolicy)). The
+        // seat's own facing is the avatar's, the sit target here being
+        // unrotated. A seat that has gone leaves the avatar where the driver
+        // last knew it.
+        ServerEvent::StoodUp { from } => {
+            let known = sim.arrival_position().clone();
+            let seat = world
+                .all_objects()
+                .into_iter()
+                .find(|object| object.full_id == *from);
+            let stands_at = seat.map_or_else(
+                || Vector {
+                    x: known.position.x(),
+                    y: known.position.y(),
+                    z: known.position.z(),
+                },
+                |seat| {
+                    let aboard = crate::object_edits::rotate(
+                        &seat.motion.rotation,
+                        &Vector {
+                            x: SIT_TARGET_OFFSET.x + sits.stand_forward_m,
+                            ..SIT_TARGET_OFFSET
+                        },
+                    );
+                    Vector {
+                        x: seat.motion.position.x + aboard.x,
+                        y: seat.motion.position.y + aboard.y,
+                        z: seat.motion.position.z + aboard.z + sits.stand_up_m,
+                    }
                 },
             );
+            sim.set_arrival_position(
+                RegionCoordinates::new(stands_at.x, stands_at.y, stands_at.z),
+                known.look_at,
+            );
+            let avatar = avatar_prim(world.avatar_local_id, identity, stands_at);
             if let Err(error) = send_objects(sim, &[avatar], now) {
                 tracing::warn!("standing the agent up failed: {error}");
             }

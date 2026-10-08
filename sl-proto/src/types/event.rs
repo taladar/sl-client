@@ -1467,10 +1467,16 @@ pub enum Event {
     SitResult {
         /// The object sat upon.
         sit_object: ObjectKey,
-        /// Whether the simulator wants the viewer to autopilot (walk) to the seat
-        /// first (the target was out of immediate sit range).
+        /// The `AutoPilot` flag: nominally whether the viewer should walk to
+        /// the seat first. Second Life and OpenSim both set it on **every**
+        /// response, whatever the distance, and both have the avatar on the
+        /// seat before an `AgentSit` could arrive, so it says nothing.
         autopilot: bool,
-        /// The seat position relative to the object, in metres.
+        /// The seat position relative to the object, in metres. Not where to
+        /// draw the avatar: Second Life states a scriptless seat's a third of
+        /// a metre low and OpenSim a scripted one's as the script's own sit
+        /// target, 0.35 m low. The avatar's own object update, a child of
+        /// the seat, carries the position both grids mean.
         sit_position: Vector,
         /// The seated orientation relative to the object — which way the avatar
         /// faces once seated.

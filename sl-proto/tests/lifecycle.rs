@@ -2527,14 +2527,25 @@ mod test {
 
     /// Second Life answers a sit it will not allow with a named alert — seen
     /// live on aditi from the agent's own region as `SitFailNotSameRegion`. A
-    /// named refusal ends the pending sit whichever region sends it; an
+    /// named refusal ends the pending sit whichever region sends it, and so
+    /// does one worded as OpenSim words its own, which it does not name; an
     /// unrelated alert does not.
     #[test]
     fn a_named_sit_refusal_ends_the_pending_sit_and_other_alerts_do_not() -> Result<(), TestError> {
-        for (name, refuses) in [
-            (Some("SitFailNotSameRegion"), true),
-            (Some("RegionEntryAccessBlocked"), false),
-            (None, false),
+        for (text, name, refuses) in [
+            ("Some alert", Some("SitFailNotSameRegion"), true),
+            ("Some alert", Some("RegionEntryAccessBlocked"), false),
+            ("Some alert", None, false),
+            (
+                " There is no suitable surface to sit on, try another spot.",
+                None,
+                true,
+            ),
+            (
+                " Sit position on restricted land, try another spot",
+                None,
+                true,
+            ),
         ] {
             let now = Instant::now();
             let mut session = established(now)?;
@@ -2547,7 +2558,7 @@ mod test {
                 now,
             )?;
             drain(&mut session)?;
-            let datagram = server_message(&alert("Some alert", name), 9, true)?;
+            let datagram = server_message(&alert(text, name), 9, true)?;
             session.handle_datagram(sim_addr(), &datagram, now)?;
             drain_events(&mut session);
 
@@ -2556,7 +2567,7 @@ mod test {
             assert_eq!(
                 reports_missing_sit_reply(&diagnostics),
                 !refuses,
-                "alert {name:?} on the root: {diagnostics:?}"
+                "alert {text:?} named {name:?} on the root: {diagnostics:?}"
             );
         }
         Ok(())

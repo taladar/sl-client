@@ -128,6 +128,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::region_info::RegionInfo),
         Box::new(crate::cases::logout_clean::LogoutClean),
         Box::new(crate::cases::logout_seated::LogoutSeated),
+        Box::new(crate::cases::sit_stand::SitStand),
         Box::new(crate::cases::keepalive_ping::KeepalivePing),
         Box::new(crate::cases::throttle_set::ThrottleSet),
         Box::new(crate::cases::circuit_unacked_resend::CircuitUnackedResend),
