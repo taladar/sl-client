@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 362 |
+| ready | 361 |
 | blocked | 112 |
 | in-progress | 20 |
 | bugs | 34 |
-| done | 1332 |
+| done | 1333 |
 | deferred | 29 |
 | wont-do | 17 |
 | **total** | **2045** |
@@ -362,7 +362,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (362)
+## ready (361)
 
 ### protocol
 
@@ -1113,8 +1113,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-agent-movement`](ready/gridspec-agent-movement.md) — How each grid
-  moves an agent: AgentUpdate handling, speeds, terse updates
 - [`gridspec-animations`](ready/gridspec-animations.md) — Animations as each
   grid broadcasts them
 - [`gridspec-appearance-baking`](ready/gridspec-appearance-baking.md) —
@@ -1464,7 +1462,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
   agent never moves — AgentUpdate is decoded and ignored (blocked by
   `server-world-heartbeat`, `gridspec-neighbours-crossing` (done),
-  `gridspec-agent-movement`)
+  `gridspec-agent-movement` (done))
 - [`server-world-changed-raisers`](blocked/server-world-changed-raisers.md) —
   Raise changed() from every grid-side cause, with the right bit (blocked by
   `server-fake-grid-script-engine-wiring`, `gridspec-lsl-events`)
@@ -1706,7 +1704,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The scripted environment change's `night` marker never arrived, once, in a
   full suite run
 
-## done (1332)
+## done (1333)
 
 ### protocol
 
@@ -4627,6 +4625,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### gridspec
 
+- [`gridspec-agent-movement`](done/gridspec-agent-movement.md) — How each grid
+  moves an agent: AgentUpdate handling, speeds, terse updates
 - [`gridspec-circuit`](done/gridspec-circuit.md) — Circuit behaviour: acks,
   resends, pings, inactivity, packet quirks and throttles
 - [`gridspec-environment`](done/gridspec-environment.md) — Region and parcel

@@ -250,6 +250,11 @@ Bevy viewer raises it when its own copy of the motion runs out, beside the
 `AgentAnimation` stop the reference sends for every self-terminating
 motion. OpenSim ends those states on its own timer and ignores the flag.
 
+What each grid does with the controls themselves — how fast a walk, a run
+and a flight are, how often the avatar is reported back, and exactly which
+of those states Second Life holds an avatar in — is measured in
+[Grid Behaviour → Movement](../gridspec/movement.md).
+
 On the server side `SimSession` mirrors the machine: `AgentRequestSit`
 decodes as `ServerEvent::SitRequested`, the driver answers with
 `send_avatar_sit_response` (a `SitTransform`), the completing `AgentSit`

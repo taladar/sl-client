@@ -223,11 +223,12 @@ fn checked(
 /// Whether the avatar flies to a border `distance` metres away rather than
 /// walking there.
 ///
-/// Always on Second Life, and not for the view: the spot the aditi avatar
-/// logs in at — a landing point every arrival in its region is routed to —
-/// holds a walking avatar where it stands. Ninety seconds of the forward key
-/// moved it two centimetres on 2026-10-07; a flight from the same spot crossed
-/// the border eight metres away in four seconds.
+/// Always on Second Life, and not for the view: an avatar that arrives at a
+/// region's landing point is held in its landing animation until a viewer
+/// reports it finished (`FINISH_ANIM`), and this client plays no animations.
+/// Ninety seconds of the forward key moved it two centimetres on 2026-10-07; a
+/// flight, which ends the landing, crossed the border eight metres away in
+/// four seconds (`book/src/gridspec/movement.md`).
 fn flies(grid: Grid, distance: f32) -> bool {
     is_aditi(grid) || distance > FLY_BEYOND_M
 }

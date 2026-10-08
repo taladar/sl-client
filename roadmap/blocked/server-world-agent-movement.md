@@ -56,6 +56,29 @@ The determinism rule bites here: the step must be `flags × step`, never
 `flags × measured elapsed`, or two runs of one scenario put the avatar in
 different places.
 
+Measured by [[gridspec-agent-movement]] (2026-10-08), in
+`book/src/gridspec/movement.md` — build to these, per flavour, as rows of
+`ImitatedGrid`:
+
+- the speeds of each control (a walk is 3.20 m/s on Second Life and 3.145
+  on OpenSim, level flight 16.0 against 12.58, a descent 22.8 against 16.35;
+  a crouch slows only Second Life's avatar; `FAST_AT` does nothing on
+  either);
+- how far the avatar carries on when a control is let go;
+- **Second Life's holds**: the avatar does not leave the ground until its
+  `pre_jump` is answered with `FINISH_ANIM`, and does not get up from a hard
+  landing (or from an arrival at a landing point) until that is; OpenSim
+  runs both on its own clock and ignores the bit;
+- the update cadence: Second Life reports a walking avatar eight to sixteen
+  times a second and a steadily climbing one not at all, OpenSim a level
+  walk once every two seconds; the velocity is the motion and the
+  acceleration is always zero;
+- the collision plane: the ground's on the ground, `0 0 0 1` in the air.
+
+The `agent-movement` conformance case is live-only until this lands: add it
+to `OFFLINE_CASES` for both flavours here, and run `e2e_movement` (which
+needs `Need::LiveGrid` today) against both.
+
 Acceptance: a client holding forward for N ticks arrives at a position
 the test can compute from the step and the walk speed; the viewer, run
 against the fake grid, walks; and chat-range and parcel-entry behaviour

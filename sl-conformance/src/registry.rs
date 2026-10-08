@@ -205,6 +205,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::teleport_lure_rated::TeleportLureRated),
         Box::new(crate::cases::neighbour_child_circuits::NeighbourChildCircuits),
         Box::new(crate::cases::region_crossing::RegionCrossing),
+        Box::new(crate::cases::agent_movement::AgentMovement),
         Box::new(crate::cases::texture_fetch_http::TextureFetchHttp),
         Box::new(crate::cases::mesh_fetch_http::MeshFetchHttp),
         Box::new(crate::cases::asset_fetch_http::AssetFetchHttp),
