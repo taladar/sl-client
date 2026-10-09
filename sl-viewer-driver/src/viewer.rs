@@ -475,6 +475,47 @@ impl Viewer {
         }
     }
 
+    /// One of the viewer's settings, by the key its settings store keeps it
+    /// under, as bare JSON of the setting's kind.
+    ///
+    /// # Errors
+    ///
+    /// As any request; [`AutomationError::InvalidRequest`] for a key that is
+    /// not registered.
+    pub async fn setting(&self, key: &str) -> Result<serde_json::Value, DriverError> {
+        let action = format!("read the setting {key}");
+        let body = RequestBody::ReadSetting {
+            key: key.to_owned(),
+        };
+        match self.ask_now(body, &action).await? {
+            ResponseBody::Setting { value, .. } => Ok(value),
+            other => Err(self.unexpected(&action, &other)),
+        }
+    }
+
+    /// Write one of the viewer's settings, through its store; the value then
+    /// in force.
+    ///
+    /// # Errors
+    ///
+    /// As any request; [`AutomationError::InvalidRequest`] for a key that is
+    /// not registered and for a value of another kind than the setting's.
+    pub async fn set_setting(
+        &self,
+        key: &str,
+        value: serde_json::Value,
+    ) -> Result<serde_json::Value, DriverError> {
+        let action = format!("set the setting {key} to {value}");
+        let body = RequestBody::WriteSetting {
+            key: key.to_owned(),
+            value,
+        };
+        match self.ask_now(body, &action).await? {
+            ResponseBody::Setting { value, .. } => Ok(value),
+            other => Err(self.unexpected(&action, &other)),
+        }
+    }
+
     /// The own agent: region, position, seat, teleport, camera.
     ///
     /// # Errors

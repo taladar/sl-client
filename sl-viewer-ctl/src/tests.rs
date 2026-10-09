@@ -497,6 +497,41 @@ items    (1000, 1000) type 6: 2 items, 1 drawn
 }
 
 #[tokio::test]
+async fn setting_reads_a_setting_and_writes_one_given_a_value() -> Result<(), TestError> {
+    let script: Arc<Script> = Arc::new(|body| match body {
+        RequestBody::ReadSetting { key } => Ok(ResponseBody::Setting {
+            key: key.clone(),
+            value_kind: "f32".to_owned(),
+            value: json!(256.0),
+        }),
+        RequestBody::WriteSetting { key, value } => Ok(ResponseBody::Setting {
+            key: key.clone(),
+            value_kind: "f32".to_owned(),
+            value: value.clone(),
+        }),
+        other => Err(Box::new(AutomationError::InvalidRequest {
+            reason: format!("unexpected {other:?}"),
+        })),
+    });
+    let (text, asked) = run_verb(Arc::clone(&script), &["setting", "RenderFarClip"], false).await?;
+    assert_eq!(text, "RenderFarClip = 256.0\n");
+    assert!(
+        matches!(asked.as_slice(), [RequestBody::ReadSetting { key }] if key == "RenderFarClip"),
+        "asked {asked:?}"
+    );
+    let (text, asked) = run_verb(script, &["setting", "RenderFarClip", "32"], false).await?;
+    assert_eq!(text, "RenderFarClip = 32\n");
+    assert!(
+        matches!(
+            asked.as_slice(),
+            [RequestBody::WriteSetting { key, value }] if key == "RenderFarClip" && *value == json!(32)
+        ),
+        "asked {asked:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn wait_asks_the_viewer_to_wait_for_the_state() -> Result<(), TestError> {
     let (printed, asked) = run_verb(
         Arc::new(|_body| {

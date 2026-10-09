@@ -159,6 +159,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::calling_card::CallingCard),
         Box::new(crate::cases::mute_list::MuteList),
         Box::new(crate::cases::object_update_decode::ObjectUpdateDecode),
+        Box::new(crate::cases::object_handshake_flags::ObjectHandshakeFlags),
         Box::new(crate::cases::object_properties::ObjectProperties),
         Box::new(crate::cases::object_rez_derez::ObjectRezDerez),
         Box::new(crate::cases::object_asset_format::ObjectAssetFormat),

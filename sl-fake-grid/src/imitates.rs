@@ -31,7 +31,7 @@
 //! | whether an update capability's completion names the item it rewrote ([`UpdateCompletionItem`]) | omitted: `new_asset` alone, and the client uses the id it sent | echoed: `new_inventory_item` carries the rewritten item |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
-//! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 33 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger |
+//! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 34 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger, the interest-list switch |
 //! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
 //! | how a login is refused, and a second login of an avatar in world ([`login_refusals`](ImitatedGrid::login_refusals)) | `key` with a localisation key, its (empty) arguments and an incident id; the second login is admitted and the first session kicked | `key` with a text and nothing else; the second login is refused as `presence` and the first session kicked all the same |
 //! | whether a logout is answered ([`logout_reply`](ImitatedGrid::logout_reply)) | a `LogoutReply`, always | none: the session closes with the request unanswered and unacknowledged, which is what the live grid does six times in seven |
@@ -43,6 +43,8 @@
 //! | a parcel listing's flags for an adult region ([`ParcelPolicy::adult_listing_bits`]) | the adult and the mature bit, `0x03` | the adult bit alone, `0x02` |
 //! | the world map ([`map_policy`](ImitatedGrid::map_policy)) | every empty cell of a null-sims rectangle reported; a rectangle of more than 256 cells unanswered; a name search by prefix, of any length, in silence; no map layers; an absent tile refused with `403` | an empty cell reported only when asked about alone; any rectangle answered; a search anywhere in the name, of three characters or more, with an alert for a short one and for no match; one whole-grid layer; a blank tile for an absent one |
 //! | how a region's ground and wind are sent ([`terrain_policy`](ImitatedGrid::terrain_policy)) | the ground outwards from where the agent stands, a message kept within 1,200 bytes, every patch transformed; the wind with the ground and then every second, unreliably, under a stride of 18 with six bits of prequantization | the ground outwards from the patch the agent is in, a message closed once past 890 bytes, a flat patch as a header alone; the wind every 13.6 s on the region's own clock, reliably, in the ground's encoding |
+//! | an arriving agent's own appearance ([`BakePolicy::sends_own_appearance`](crate::BakePolicy::sends_own_appearance)) | sent only to a viewer whose handshake reply set `SUPPORTS_SELF_APPEARANCE` | sent whatever the reply's flags |
+//! | the interest-list switch (`InterestList`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted, and answered with the mode and the one it replaced | not granted |
 //! | a sit on an object the region does not have ([`SitPolicy::unknown_target`]) | refused at once with the named alert `SitFailNotSameRegion` | not answered: the client's own sit timeout ends it |
 //! | where standing up puts the avatar ([`SitPolicy::stand_forward_m`], [`SitPolicy::stand_up_m`]) | 0.34 m in front of where it sat, at the same height | 0.65 m in front and 0.57 m above |
 //! | the seat position in an `AvatarSitResponse` for a seat with a sit target ([`SitPolicy::response_states_seated_position`]) | where the avatar is put: the target raised by 0.35 m | the target as the script set it, 0.35 m below where the avatar is put |
@@ -985,6 +987,7 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "GetExperiences",
     "GroupExperiences",
     "IncrementCOFVersion",
+    "InterestList",
     "InventoryAPIv3",
     "IsExperienceAdmin",
     "IsExperienceContributor",

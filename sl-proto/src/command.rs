@@ -15,21 +15,21 @@ use crate::{
     EstateInfoUpdate, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
     FaceMaterialPut, FolderType, FreezeAction, FriendKey, FriendRights, GestureActivation,
     GodRegionUpdate, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId,
-    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate,
-    InventoryCursor, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
-    InventoryType, LandEdit, LandSearchType, LandStatReportType, LindenAmount, ListingId, LureId,
-    MapItemType, MapRequestFlags, Material, MaterialOverrideUpdate, MediaEntry, MeshKey,
-    MessageCursor, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
-    NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-    ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey,
-    ParcelReturnType, ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard,
-    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates,
-    RegionDebugUpdate, RegionHandle, RegionInfoUpdate, RegionTerrainUpdate, Reliability,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags,
-    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey, Throttle,
-    TransactionId, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector,
-    ViewerEffect, VoiceProvisionRequest, Wearable,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId,
+    InterestListMode, InterestsUpdate, InventoryCursor, InventoryFolderKey, InventoryItem,
+    InventoryKey, InventoryOffer, InventoryType, LandEdit, LandSearchType, LandStatReportType,
+    LindenAmount, ListingId, LureId, MapItemType, MapRequestFlags, Material,
+    MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
+    Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
+    ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate, RegionHandle, RegionInfoUpdate,
+    RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    Rotation, SaleType, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
+    SimWideDeleteFlags, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey,
+    Throttle, TransactionId, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid,
+    Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -822,6 +822,14 @@ pub enum Command {
     /// carrying the full stored set after the update. A no-op when the region seed
     /// omits the capability.
     SetAgentPreferences(Box<AgentPreferences>),
+    /// Switch which objects the simulator sends, via the `InterestList`
+    /// capability: the objects the camera's view takes in
+    /// ([`InterestListMode::Default`]) or every object round the agent
+    /// ([`InterestListMode::Full360`]). Second Life only; a no-op where the
+    /// region grants no such capability. The reply arrives as
+    /// [`Event::InterestListMode`](crate::Event::InterestListMode), and the
+    /// mode is asked for again of every region the agent moves into.
+    SetInterestListMode(InterestListMode),
     /// Request the **land-impact / physics costs** of one or more objects via the
     /// `GetObjectCost` capability; the reply arrives as
     /// [`Event::ObjectCosts`](crate::Event::ObjectCosts). A no-op when the region
@@ -3035,6 +3043,7 @@ impl Command {
             Self::RequestSimulatorFeatures => "RequestSimulatorFeatures",
             Self::RequestAgentPreferences => "RequestAgentPreferences",
             Self::SetAgentPreferences(..) => "SetAgentPreferences",
+            Self::SetInterestListMode(..) => "SetInterestListMode",
             Self::RequestObjectCost { .. } => "RequestObjectCost",
             Self::RequestSelectedCost { .. } => "RequestSelectedCost",
             Self::RequestObjectPhysicsData { .. } => "RequestObjectPhysicsData",

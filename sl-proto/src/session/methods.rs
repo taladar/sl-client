@@ -77,20 +77,21 @@ use crate::types::{
     MeanCollisionType, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
     NeighborInfo, NeighborRetirement, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
     ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
-    ObjectPropertiesFamily, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
-    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelListingFlags,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
-    ParcelOverlayInfo, ParcelRect, ParcelReturnType, ParcelUpdate, PermissionField, PickKey,
-    PickUpdate, PlacesResult, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId,
-    RegionDebugUpdate, RegionInfoUpdate, RegionStats, RegionTerrainUpdate, Reliability,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
-    ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage,
-    ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest,
-    ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
-    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TeleportFlags, TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture,
-    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, XferListing,
+    ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry, ObjectTransform,
+    ObjectUpdateForm, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelDetails, ParcelInfo, ParcelListingFlags, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo, ParcelRect, ParcelReturnType,
+    ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape,
+    PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionHandshakeReplyFlags,
+    RegionInfoUpdate, RegionStats, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptControlAction,
+    ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage, ScriptPermissionState,
+    ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId,
+    SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerBatch,
+    TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture, TextureEntry, Throttle,
+    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, Wearable, WearableType, XferListing,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -210,6 +211,53 @@ fn invite_session_kind(session_id: ImSessionId, from_group: bool) -> ChatSession
     }
 }
 
+/// An [`ObjectStreamBatch`] being put together while its message is
+/// processed: where in the event queue it belongs, and what it has named.
+struct OpenObjectBatch {
+    /// How many events were queued when the message arrived: the batch goes
+    /// in ahead of everything the message itself queues.
+    at: usize,
+    /// The circuit the message came down, if it is one of the session's.
+    circuit: Option<CircuitId>,
+    /// Whether that is a child circuit.
+    child: bool,
+    /// The message's form.
+    form: ObjectUpdateForm,
+    /// The region the message is about.
+    region_handle: RegionHandle,
+    /// The objects named so far.
+    entries: Vec<ObjectStreamEntry>,
+}
+
+impl OpenObjectBatch {
+    /// Records that the message names `local_id`, and whether `session` holds
+    /// that object now — so call it before the message's effect is applied.
+    fn name(&mut self, session: &Session, local_id: RegionLocalObjectId) {
+        let known = self
+            .circuit
+            .and_then(|circuit| session.world.objects_in(circuit))
+            .is_some_and(|objects| objects.contains_key(&local_id));
+        self.entries.push(ObjectStreamEntry {
+            local_id,
+            known,
+            crc: None,
+            cache_hit: None,
+        });
+    }
+
+    /// Queues the batch, ahead of the events its message queued.
+    fn close(self, session: &mut Session) {
+        let event = Event::ObjectStreamBatch(Box::new(ObjectStreamBatch {
+            region_handle: self.region_handle,
+            child: self.child,
+            form: self.form,
+            entries: self.entries,
+        }));
+        let at = self.at.min(session.events.len());
+        session.events.insert(at, event);
+    }
+}
+
 impl Session {
     /// Creates a new session for the given login parameters.
     #[must_use]
@@ -255,6 +303,8 @@ impl Session {
             background_inventory_fetch: false,
             fetch_server_chat_history: ServerHistoryFetch::Enabled,
             events: VecDeque::new(),
+            handshake_reply_flags: RegionHandshakeReplyFlags::CLIENT_DEFAULT,
+            interest_list_mode: sl_wire::InterestListMode::Default,
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
             circuit_probe: CircuitProbe::Off,
@@ -284,6 +334,34 @@ impl Session {
         if !enabled {
             self.diagnostics.clear();
         }
+    }
+
+    /// Sets the `Flags` every `RegionHandshakeReply` of this session carries
+    /// — what it tells a simulator about its object cache
+    /// ([`RegionHandshakeReplyFlags`]). Takes effect with the next handshake
+    /// answered, so set it before the session connects.
+    pub const fn set_region_handshake_reply_flags(&mut self, flags: RegionHandshakeReplyFlags) {
+        self.handshake_reply_flags = flags;
+    }
+
+    /// The interest-list mode this session last asked for
+    /// ([`Command::SetInterestListMode`](crate::Command::SetInterestListMode)) — what a driver asks again of every
+    /// region the agent moves into, since each simulator starts from
+    /// `default`.
+    #[must_use]
+    pub const fn interest_list_mode(&self) -> sl_wire::InterestListMode {
+        self.interest_list_mode
+    }
+
+    /// Records the interest-list mode a driver is about to ask for.
+    pub const fn set_interest_list_mode(&mut self, mode: sl_wire::InterestListMode) {
+        self.interest_list_mode = mode;
+    }
+
+    /// The `Flags` this session's `RegionHandshakeReply`s carry.
+    #[must_use]
+    pub const fn region_handshake_reply_flags(&self) -> RegionHandshakeReplyFlags {
+        self.handshake_reply_flags
     }
 
     /// Whether protocol-diagnostic collection is currently enabled.
@@ -949,6 +1027,14 @@ impl Session {
             // (or none) stands rather than a wrongly-parsed one replacing it.
             CapsEvent::LslSyntax => match parse_lsl_syntax(body) {
                 Ok(syntax) => self.events.push_back(Event::LslSyntax(Box::new(syntax))),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            // The reply to an `InterestList` POST: the mode now in force.
+            CapsEvent::InterestList => match sl_wire::parse_interest_list_reply(body) {
+                Ok(reply) => {
+                    self.interest_list_mode = reply.mode;
+                    self.events.push_back(Event::InterestListMode(reply));
+                }
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to an `AgentPreferences` POST: the agent's full stored
@@ -2400,8 +2486,9 @@ impl Session {
                 // the region's identity/flags whatever the session state (the
                 // reference viewer's `process_region_handshake` is likewise
                 // ungated).
+                let flags = self.handshake_reply_flags;
                 if let Some(circuit) = self.circuit_in_role(role, from) {
-                    circuit.send_region_handshake_reply(now)?;
+                    circuit.send_region_handshake_reply(flags, now)?;
                 }
                 // Surface the region's identity (terrain textures + elevation
                 // bands, flags, maturity, …) keyed by this circuit's region
@@ -2682,6 +2769,25 @@ impl Session {
         }
     }
 
+    /// Starts the [`ObjectStreamBatch`] of a message of `form` that came from
+    /// `from`, to be emitted ahead of whatever events the message's objects
+    /// give rise to.
+    fn open_object_batch(
+        &self,
+        from: SocketAddr,
+        form: ObjectUpdateForm,
+        region_handle: RegionHandle,
+    ) -> OpenObjectBatch {
+        OpenObjectBatch {
+            at: self.events.len(),
+            circuit: self.circuit_id_for(from),
+            child: self.children.contains_key(&from),
+            form,
+            region_handle,
+            entries: Vec::new(),
+        }
+    }
+
     /// Handles the object/scene-graph messages (full / compressed / cached /
     /// terse updates, `KillObject`, `ObjectProperties`) and the per-object
     /// replies and script requests (`PayPriceReply`, `ObjectPropertiesFamily`,
@@ -2698,22 +2804,29 @@ impl Session {
             AnyMessage::ObjectUpdate(update) => {
                 let region_handle = RegionHandle(update.region_data.region_handle);
                 self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
+                let mut batch = self.open_object_batch(from, ObjectUpdateForm::Full, region_handle);
                 for block in &update.object_data {
+                    batch.name(self, RegionLocalObjectId(block.id));
                     self.upsert_object(from, now, object_from_full_update(block, region_handle)?);
                 }
+                batch.close(self);
             }
             AnyMessage::ObjectUpdateCompressed(update) => {
                 let region_handle = RegionHandle(update.region_data.region_handle);
                 self.note_time_dilation(from, region_handle, update.region_data.time_dilation);
+                let mut batch =
+                    self.open_object_batch(from, ObjectUpdateForm::Compressed, region_handle);
                 for block in &update.object_data {
                     if let Some(object) = crate::object_update::compressed_object(
                         &block.data,
                         region_handle,
                         block.update_flags,
                     ) {
+                        batch.name(self, object.local_id);
                         self.upsert_object(from, now, object);
                     }
                 }
+                batch.close(self);
             }
             AnyMessage::ObjectUpdateCached(update) => {
                 self.note_time_dilation(
@@ -2727,16 +2840,29 @@ impl Session {
                 let cached = self
                     .circuit_id_for(from)
                     .and_then(|circuit_id| self.world.objects_in(circuit_id));
-                let misses: Vec<RegionLocalObjectId> = update
-                    .object_data
-                    .iter()
-                    .filter(|block| {
-                        cached
-                            .and_then(|sim| sim.get(&RegionLocalObjectId(block.id)))
-                            .is_none_or(|object| object.crc != block.crc)
-                    })
-                    .map(|block| RegionLocalObjectId(block.id))
-                    .collect();
+                let mut entries = Vec::with_capacity(update.object_data.len());
+                let mut misses = Vec::new();
+                for block in &update.object_data {
+                    let local_id = RegionLocalObjectId(block.id);
+                    let held = cached.and_then(|sim| sim.get(&local_id));
+                    let hit = held.is_some_and(|object| object.crc == block.crc);
+                    if !hit {
+                        misses.push(local_id);
+                    }
+                    entries.push(ObjectStreamEntry {
+                        local_id,
+                        known: held.is_some(),
+                        crc: Some(block.crc),
+                        cache_hit: Some(hit),
+                    });
+                }
+                let mut batch = self.open_object_batch(
+                    from,
+                    ObjectUpdateForm::Cached,
+                    RegionHandle(update.region_data.region_handle),
+                );
+                batch.entries = entries;
+                batch.close(self);
                 self.request_object_ids(from, &misses, now);
             }
             AnyMessage::ImprovedTerseObjectUpdate(update) => {
@@ -2748,28 +2874,65 @@ impl Session {
                 // Terse updates carry only motion. Apply to known objects; for
                 // unknown ones (which lack identity here), fetch the full update.
                 let mut misses = Vec::new();
+                let mut batch = self.open_object_batch(
+                    from,
+                    ObjectUpdateForm::Terse,
+                    RegionHandle(update.region_data.region_handle),
+                );
                 for block in &update.object_data {
                     let Some(terse) = crate::object_update::terse_update(&block.data) else {
                         continue;
                     };
                     let local_id = terse.local_id;
+                    batch.name(self, local_id);
                     let texture_entry =
                         crate::object_update::terse_texture_entry(&block.texture_entry);
                     if !self.apply_terse_update(from, terse, texture_entry) {
                         misses.push(local_id);
                     }
                 }
+                batch.close(self);
                 self.request_object_ids(from, &misses, now);
             }
             AnyMessage::KillObject(kill) => {
                 let Some(circuit_id) = self.circuit_id_for(from) else {
                     return Ok(true);
                 };
+                let region_handle = self
+                    .world
+                    .region_handle(circuit_id)
+                    .unwrap_or(RegionHandle(0));
+                let mut batch = self.open_object_batch(from, ObjectUpdateForm::Kill, region_handle);
                 for block in &kill.object_data {
-                    let removed = self.world.remove_object(ScopedObjectId::new(
-                        circuit_id,
-                        RegionLocalObjectId(block.id),
-                    ));
+                    batch.name(self, RegionLocalObjectId(block.id));
+                }
+                batch.close(self);
+                // A kill names what the simulator stops telling the viewer
+                // about, and Second Life names a linkset's root alone when the
+                // linkset goes out of range: everything hanging off the root
+                // goes with it, as in the reference viewer. Left behind, the
+                // children would answer the simulator's cache probes when the
+                // linkset comes back, and stand in the scene without a root
+                // meanwhile.
+                let mut going: Vec<RegionLocalObjectId> = Vec::new();
+                for block in &kill.object_data {
+                    let id = RegionLocalObjectId(block.id);
+                    for dependent in self
+                        .world
+                        .dependents_of(ScopedObjectId::new(circuit_id, id))
+                    {
+                        if !going.contains(&dependent) {
+                            going.push(dependent);
+                        }
+                    }
+                    if !going.contains(&id) {
+                        going.push(id);
+                    }
+                }
+                for id in going {
+                    let removed = self
+                        .world
+                        .remove_object(ScopedObjectId::new(circuit_id, id));
                     let region_handle = removed
                         .as_ref()
                         .map_or(RegionHandle(0), |object| object.region_handle);
@@ -2781,7 +2944,7 @@ impl Session {
                     }
                     self.events.push_back(Event::ObjectRemoved {
                         region_handle,
-                        local_id: ScopedObjectId::new(circuit_id, RegionLocalObjectId(block.id)),
+                        local_id: ScopedObjectId::new(circuit_id, id),
                     });
                 }
             }

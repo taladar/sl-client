@@ -125,6 +125,14 @@ nothing runs while none are queued.
   an item is drawn, and the tiles ready, pending and absent — what
   `sl-viewer-ctl world-map` prints; the map is one composited image, so
   none of this is a widget).
+- **Settings** are read and written by the key the settings store keeps
+  them under (`ReadSetting` / `WriteSetting`, `Viewer::setting` /
+  `set_setting`, `sl-viewer-ctl setting <KEY> [VALUE]`): a value is the bare
+  JSON of the setting's kind, a key that is not registered and a value of
+  another kind are refused, and a write goes through the store — so a test
+  takes the draw distance down with `RenderFarClip` and the viewer tells the
+  grid, as it would for the slider. The write lands in the scope whose
+  value is in force, and a stage's settings are its own run's.
 - **Streams** — the event log (session events, outbound commands, UI
   actions; sequence-numbered, read by cursor or subscribed to) and the
   warnings and errors logged since a cursor.

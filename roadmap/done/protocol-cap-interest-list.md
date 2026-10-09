@@ -2,7 +2,7 @@
 id: protocol-cap-interest-list
 title: Switch the interest list mode over the InterestList capability
 topic: protocol
-status: blocked
+status: done
 origin: protocol-reference-capabilities triage (2026-10-04)
 refs: [protocol-reference-capabilities, viewer-network-debug-tools, viewer-area-search, viewer-360-snapshot]
 blocked_by: [gridspec-object-update-stream]
@@ -32,3 +32,15 @@ and Firestorm references: `book/src/comms/caps-reference.md`.
 This capability is adopted inside that gridspec task, which measures the
 feature on both grids over both paths, makes the fake grid serve the
 capability per flavour, and checks the viewer. Claim that task.
+
+## Done (2026-10-09)
+
+Adopted inside [[gridspec-object-update-stream]]: `CAP_INTEREST_LIST` in
+`REQUESTED_CAPABILITIES`, `Command::SetInterestListMode` /
+`Event::InterestListMode` in both runtimes with the mode asked again of
+each region arrived in, `sl-repl`'s `set_interest_list_mode`, the
+simulator's side in `SimCaps`, granted by `FakeSl` and withheld by
+`FakeOpensim`. The 360° capture uses it. Area search and the debug menu are
+to use the same command when they exist ([[viewer-area-search]],
+[[viewer-network-debug-tools]]). The DELETE the reference viewer's "reset
+interest lists" sends is not adopted: aditi did not answer one in 30 s.

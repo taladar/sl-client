@@ -681,6 +681,7 @@ impl Survey {
             | Event::ObjectUpdated(_)
             | Event::TimeDilation { .. }
             | Event::ObjectRemoved { .. }
+            | Event::ObjectStreamBatch(_)
             | Event::ObjectProperties(_)
             | Event::TerrainPatch(_)
             | Event::TerrainLayerBatch(_)
@@ -794,6 +795,7 @@ impl Survey {
             | Event::SimulatorFeatures(_)
             | Event::LslSyntax(_)
             | Event::AgentPreferences(_)
+            | Event::InterestListMode(_)
             | Event::ObjectCosts(_)
             | Event::SelectedResourceCost(_)
             | Event::ObjectPhysicsData(_)

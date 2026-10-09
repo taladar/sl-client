@@ -4676,40 +4676,46 @@ mod test {
     async fn the_arriving_agent_gets_its_own_appearance() -> Result<(), TestError> {
         let mut running = start().await?;
         let me = running.agent.agent_id();
-        let appearance = running
-            .wait_for(|event| match event {
-                Event::AvatarAppearance(appearance) if appearance.avatar_id == me => {
-                    Some((**appearance).clone())
-                }
-                _ => None,
-            })
+        // The appearance and the animation are asked for in one wait: which
+        // comes first is the grid's business. A Second-Life-flavoured grid
+        // sends the appearance once the viewer's handshake reply has said it
+        // understands one, which a viewer that completes its movement first
+        // makes later than the arrival burst the animation is in.
+        //
+        // The agent is told what it is *playing* because a real simulator
+        // always has an answer — OpenSim stands an arriving agent up before
+        // it has moved — and an avatar the grid signals nothing for is one no
+        // motion drives: the reference viewer draws it folded forwards in its
+        // raw rest pose, which is what a fake-grid arrival looked like once
+        // the body became visible at all.
+        let mut appearance = None;
+        let mut animations = None;
+        running
+            .wait_until(
+                "the agent's own appearance and the animation it is playing",
+                |event| {
+                    match event {
+                        Event::AvatarAppearance(own) if own.avatar_id == me => {
+                            appearance = Some((**own).clone());
+                        }
+                        Event::AvatarAnimation {
+                            avatar_id,
+                            animations: playing,
+                            ..
+                        } if *avatar_id == me => animations = Some(playing.clone()),
+                        _ => {}
+                    }
+                    appearance.is_some() && animations.is_some()
+                },
+            )
             .await?;
+        let appearance = appearance.ok_or("no appearance of the agent itself")?;
+        let animations = animations.ok_or("no animation of the agent itself")?;
         assert_eq!(
             appearance.visual_params.len(),
             sl_fake_grid::fixtures::npcs::DEFAULT_VISUAL_PARAMS.len(),
             "the own avatar's visual params were truncated on the wire"
         );
-
-        // The agent is also told what it is *playing*, in the same arrival
-        // burst. A real simulator always has an answer — OpenSim stands an
-        // arriving agent up before it has moved — and an avatar the grid
-        // signals nothing for is one no motion drives: the reference viewer
-        // draws it folded forwards in its raw rest pose, which is what a
-        // fake-grid arrival looked like once the body became visible at all.
-        //
-        // Asserted here rather than after the fetches below, because
-        // `wait_for` discards what it does not match: a later wait would throw
-        // this event away while draining the texture replies.
-        let animations = running
-            .wait_for(|event| match event {
-                Event::AvatarAnimation {
-                    avatar_id,
-                    animations,
-                    ..
-                } if *avatar_id == me => Some(animations.clone()),
-                _ => None,
-            })
-            .await?;
         assert!(
             animations.iter().any(|animation| {
                 sl_anim::builtin_animation(animation.anim_id)

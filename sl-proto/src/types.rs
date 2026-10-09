@@ -26,6 +26,7 @@ mod merge;
 mod name;
 mod nearby;
 mod object;
+mod object_stream;
 mod open_region;
 mod parcel;
 mod pathfinding;
@@ -537,6 +538,9 @@ pub use object::{
     PrimShapeParams, ReflectionProbe, RenderMaterialRef, SculptData, TaskInventoryItem,
     TaskInventoryReply, TextureAnimation, attachment_state_from_point, particle_pattern, pcode,
     prim_flags, texture_anim_mode,
+};
+pub use object_stream::{
+    ObjectStreamBatch, ObjectStreamEntry, ObjectUpdateForm, RegionHandshakeReplyFlags,
 };
 pub use open_region::OpenRegionInfo;
 pub use parcel::{

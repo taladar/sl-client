@@ -23,7 +23,7 @@ use crate::time::Now;
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{
     AvatarIdentity, Ground, RegionChange, RegionUpdate, RegionWorld, answer_world_request,
-    push_arrival_world, push_child_world,
+    push_arrival_world, push_child_world, push_own_appearance,
 };
 
 /// The lockable state of one logged-in session: the protocol machine, its
@@ -71,6 +71,10 @@ pub(crate) struct SimState {
     /// What the region says of itself on arrival where the live grids
     /// disagree ([`crate::ImitatedGrid::arrival_policy`]).
     pub(crate) arrival: crate::imitates::ArrivalPolicy,
+    /// Whether the agent arrived before its `RegionHandshakeReply` did, so
+    /// that whether it is sent its own appearance is still to be decided
+    /// ([`crate::BakePolicy::sends_own_appearance`]).
+    pub(crate) own_appearance_owed: bool,
     /// How the region's ground and wind are sent
     /// ([`crate::ImitatedGrid::terrain_policy`]).
     pub(crate) terrain_policy: crate::imitates::TerrainPolicy,
@@ -352,7 +356,27 @@ impl SharedSim {
                     );
                 }
             }
+            // A viewer may complete its movement before it has answered the
+            // region's handshake, and its answer is what says whether it is
+            // to be sent its own appearance: an arrival that could not tell
+            // is settled here.
+            if matches!(event, ServerEvent::RegionHandshakeReplied)
+                && state.own_appearance_owed
+                && state
+                    .bakes
+                    .sends_own_appearance(state.sim.handshake_reply_flags())
+            {
+                state.own_appearance_owed = false;
+                push_own_appearance(
+                    &state.avatar,
+                    &state.assets,
+                    state.bakes,
+                    &mut state.sim,
+                    now,
+                );
+            }
             if matches!(event, ServerEvent::AgentArrived) {
+                state.own_appearance_owed = state.sim.handshake_reply_flags().is_none();
                 // What Second Life tells an arriving agent about itself and
                 // OpenSim does not: its health, and — over the event queue —
                 // what it may do to the region's navmesh.

@@ -28,17 +28,17 @@ use std::collections::{BTreeMap, HashMap};
 
 use sl_types::key::AgentKey;
 use sl_wire::{
-    AisUpdate, AssetUploadResponse, DisplayName, ExperiencePermission, LandResourcesUrls, Llsd,
-    ObjectMediaRequest, ObjectMediaResponse, Permissions, UploadGrantedPermissions,
-    build_agent_preferences_response, build_asset_upload_response,
+    AisUpdate, AssetUploadResponse, DisplayName, ExperiencePermission, InterestListReply,
+    LandResourcesUrls, Llsd, ObjectMediaRequest, ObjectMediaResponse, Permissions,
+    UploadGrantedPermissions, build_agent_preferences_response, build_asset_upload_response,
     build_attachment_resources_response, build_avatar_picker_search_response,
     build_create_inventory_category_response, build_display_names_response,
     build_experience_ids_response, build_experience_infos_response,
     build_experience_permissions_response, build_experience_query_response,
     build_experience_search_response, build_experience_status_response,
     build_get_object_cost_response, build_get_object_physics_data_response,
-    build_land_resource_detail_response, build_land_resource_summary_response,
-    build_land_resources_response, build_lsl_syntax_document,
+    build_interest_list_reply, build_land_resource_detail_response,
+    build_land_resource_summary_response, build_land_resources_response, build_lsl_syntax_document,
     build_modify_material_params_response, build_parcel_voice_info_response,
     build_provision_voice_account_response, build_region_experiences_response,
     build_remote_parcel_response, build_render_materials_response,
@@ -54,8 +54,8 @@ use sl_wire::{
     parse_experience_info_query, parse_experience_query, parse_fetch_inventory_items_request,
     parse_fetch_inventory_request, parse_find_experience_query, parse_forget_experience_query,
     parse_get_object_cost_request, parse_get_object_physics_data_request,
-    parse_group_experiences_query, parse_land_resources_request, parse_llsd_xml,
-    parse_modify_material_params_request, parse_new_file_agent_inventory_request,
+    parse_group_experiences_query, parse_interest_list_request, parse_land_resources_request,
+    parse_llsd_xml, parse_modify_material_params_request, parse_new_file_agent_inventory_request,
     parse_object_media_navigate_request, parse_object_media_request,
     parse_provision_voice_account_request, parse_region_experiences_request,
     parse_remote_parcel_request, parse_render_materials_put_request,
@@ -89,7 +89,7 @@ use crate::{
     CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES,
-    CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
     CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
@@ -168,6 +168,7 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_GET_DISPLAY_NAMES,
     CAP_AVATAR_PICKER_SEARCH,
     CAP_AGENT_PREFERENCES,
+    CAP_INTEREST_LIST,
     CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     // The content upload/update, materials and MOAP cluster.
@@ -256,6 +257,8 @@ pub enum CapHandler {
     /// The `AgentPreferences` merge-and-echo of the agent's server-stored
     /// preferences ([`SimSession::agent_preferences`]).
     AgentPreferences,
+    /// The `InterestList` mode switch ([`SimSession::interest_list_mode`]).
+    InterestList,
     /// The one-step `SendUserReport` abuse-report POST.
     UserReport,
     /// The two-step `SendUserReportWithScreenshot` uploader: the report POST
@@ -649,6 +652,7 @@ impl SimCaps {
             CAP_GET_DISPLAY_NAMES => Some(CapHandler::DisplayNames),
             CAP_AVATAR_PICKER_SEARCH => Some(CapHandler::AvatarPickerSearch),
             CAP_AGENT_PREFERENCES => Some(CapHandler::AgentPreferences),
+            CAP_INTEREST_LIST => Some(CapHandler::InterestList),
             CAP_SEND_USER_REPORT => Some(CapHandler::UserReport),
             CAP_SEND_USER_REPORT_WITH_SCREENSHOT => Some(CapHandler::UserReportScreenshot),
             CAP_UPDATE_AVATAR_APPEARANCE => Some(CapHandler::AvatarAppearance),
@@ -790,6 +794,9 @@ impl SimCaps {
                 }
                 Some(CapHandler::AgentPreferences) => {
                     CapsDispatch::Response(Self::dispatch_agent_preferences(sim, request))
+                }
+                Some(CapHandler::InterestList) => {
+                    CapsDispatch::Response(Self::dispatch_interest_list(sim, request))
                 }
                 Some(CapHandler::UserReport) => {
                     CapsDispatch::Response(Self::dispatch_user_report(sim, request))
@@ -1113,6 +1120,27 @@ impl SimCaps {
         };
         sim.merge_agent_preferences(&update);
         CapsResponse::llsd_xml(build_agent_preferences_response(sim.agent_preferences()))
+    }
+
+    /// Serves one `InterestList` POST: switches the session's interest-list
+    /// mode and answers with the mode now in force and the one it replaced,
+    /// as Second Life does. A body that names no mode, or one the simulator
+    /// does not know, asks for `default`.
+    fn dispatch_interest_list(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(mode) = parse_interest_list_request(&body) else {
+            return CapsResponse::bad_request();
+        };
+        let previous_mode = sim.set_interest_list_mode(mode);
+        CapsResponse::llsd_xml(build_interest_list_reply(&InterestListReply {
+            mode,
+            previous_mode,
+        }))
     }
 
     /// Serves one `SendUserReport` POST: parses the abuse report and routes
@@ -2650,6 +2678,7 @@ mod tests {
             ("SendUserReport", CapStatus::Served),
             ("SendUserReportWithScreenshot", CapStatus::Served),
             ("DirectDelivery", CapStatus::Pending),
+            ("InterestList", CapStatus::Served),
         ];
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES
             .iter()

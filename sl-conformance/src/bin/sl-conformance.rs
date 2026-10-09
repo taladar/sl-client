@@ -334,6 +334,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         },
         options: None,
         capabilities: None,
+        handshake_flags: sl_client_tokio::RegionHandshakeReplyFlags::CLIENT_DEFAULT,
     })
     .await
     .map_err(|error| Error::Test(error.to_string()))?;
@@ -351,6 +352,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 probe: sl_client_tokio::CircuitProbe::Off,
                 options: None,
                 capabilities: None,
+                handshake_flags: sl_client_tokio::RegionHandshakeReplyFlags::CLIENT_DEFAULT,
             })
             .await
             .map_err(|error| Error::Test(error.to_string()))?,
@@ -371,6 +373,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
                 probe: sl_client_tokio::CircuitProbe::Off,
                 options: None,
                 capabilities: None,
+                handshake_flags: sl_client_tokio::RegionHandshakeReplyFlags::CLIENT_DEFAULT,
             })
             .await
             .map_err(|error| Error::Test(error.to_string()))?,

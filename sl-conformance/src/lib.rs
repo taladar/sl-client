@@ -45,6 +45,7 @@ pub mod isolate;
 pub mod lure;
 pub mod measured;
 pub mod metrics;
+pub mod object_stream;
 pub mod record;
 pub mod registry;
 pub mod report;

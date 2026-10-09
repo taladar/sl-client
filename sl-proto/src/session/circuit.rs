@@ -21,9 +21,10 @@ use crate::types::{
     Material, MovementMode, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
     ObjectExtraParams, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory,
     ParcelRect, ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape,
-    PrimShapeParams, ProfileUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptPermissions, StartLocationSlot, SurfaceInfo, TaskInventoryKey,
-    TeleportFlags, TextureEntry, Throttle, UpdateGroupInfoParams, ViewerEffect, Wearable,
+    PrimShapeParams, ProfileUpdate, RegionHandshakeReplyFlags, Reliability, RestoreItem,
+    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptPermissions,
+    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TeleportFlags, TextureEntry, Throttle,
+    UpdateGroupInfoParams, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
@@ -459,13 +460,17 @@ impl Circuit {
     }
 
     /// Queues `RegionHandshakeReply` reliably.
-    pub(crate) fn send_region_handshake_reply(&mut self, now: Instant) -> Result<(), WireError> {
+    pub(crate) fn send_region_handshake_reply(
+        &mut self,
+        flags: RegionHandshakeReplyFlags,
+        now: Instant,
+    ) -> Result<(), WireError> {
         let message = AnyMessage::RegionHandshakeReply(RegionHandshakeReply {
             agent_data: RegionHandshakeReplyAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
                 session_id: self.session_id,
             },
-            region_info: RegionHandshakeReplyRegionInfoBlock { flags: 0 },
+            region_info: RegionHandshakeReplyRegionInfoBlock { flags: flags.0 },
         });
         self.send(&message, Reliability::Reliable, now)
     }

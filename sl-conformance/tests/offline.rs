@@ -86,6 +86,7 @@ mod test {
         simulator_features => "simulator-features" [fake_sl, fake_opensim],
         seed_capabilities => "seed-capabilities" [fake_sl, fake_opensim],
         object_update_decode => "object-update-decode" [fake_sl, fake_opensim],
+        object_handshake_flags => "object-handshake-flags" [fake_sl, fake_opensim],
         parcel_properties => "parcel-properties" [fake_sl, fake_opensim],
         environment => "environment" [fake_sl, fake_opensim],
         terrain_raw_transfer_download => "terrain-raw-transfer-download" [fake_sl, fake_opensim],

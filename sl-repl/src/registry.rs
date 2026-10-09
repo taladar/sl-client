@@ -51,6 +51,7 @@ use sl_proto::GroupKey;
 use sl_proto::GroupRequestId;
 use sl_proto::GroupRoleKey;
 use sl_proto::ImSessionId;
+use sl_proto::InterestListMode;
 use sl_proto::InventoryFolderKey;
 use sl_proto::InventoryItemOrFolderKey;
 use sl_proto::InventoryKey;
@@ -3864,6 +3865,18 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "set_interest_list_mode",
+            usage: "<mode> (default|360)",
+            build: |args, ctx| {
+                let mode = args.req_str(ctx, "mode", 0)?;
+                match mode.as_str() {
+                    "default" => Ok(Command::SetInterestListMode(InterestListMode::Default)),
+                    "360" => Ok(Command::SetInterestListMode(InterestListMode::Full360)),
+                    _other => Err(invalid("mode", &mode, "default or 360")),
+                }
+            },
+        },
+        CommandSpec {
             name: "request_object_cost",
             usage: "<object_ids-comma-separated>",
             build: |args, ctx| {
@@ -7495,6 +7508,26 @@ mod tests {
                     && prefs.max_access_pref.as_deref() == Some("M")
                     && prefs.language.as_deref() == Some("en-us")
                     && prefs.language_is_public == Some(true)
+        ));
+    }
+
+    #[test]
+    fn set_interest_list_mode_takes_the_two_modes_and_no_other() {
+        assert!(matches!(
+            build("set_interest_list_mode 360"),
+            Ok(Command::SetInterestListMode(
+                sl_proto::InterestListMode::Full360
+            ))
+        ));
+        assert!(matches!(
+            build("set_interest_list_mode default"),
+            Ok(Command::SetInterestListMode(
+                sl_proto::InterestListMode::Default
+            ))
+        ));
+        assert!(matches!(
+            build("set_interest_list_mode sideways"),
+            Err(ReplError::InvalidArg { .. })
         ));
     }
 

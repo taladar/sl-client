@@ -10,6 +10,9 @@ use sl_automation_proto::{
     Probe, ProbeReadout, ResponseBody, StateCondition, StateObservation, UiNode, ViewerIdentity,
 };
 
+use sl_settings::{Scope, SettingValue};
+use sl_viewer_settings::ViewerSettings;
+
 use super::{Answer, AutomationIdentity, Clock, Started, Step, Task};
 use crate::event_log::EventLog;
 use crate::locate::{find_all, shallow};
@@ -177,6 +180,97 @@ pub(super) fn screenshot(world: &mut World, path: String, outline: Option<Locato
         outlined,
         clock: Clock::new(Deadline::default()),
     })))
+}
+
+/// The settings store of `world`.
+///
+/// # Errors
+///
+/// [`AutomationError::Unavailable`] when the app keeps none.
+fn unavailable_settings() -> Box<AutomationError> {
+    Box::new(AutomationError::Unavailable {
+        what: "settings store".to_owned(),
+    })
+}
+
+/// A setting as bare JSON and the name of its kind, out of the store's own
+/// tagged form.
+fn bare(value: &SettingValue) -> Result<(String, serde_json::Value), Box<AutomationError>> {
+    let tagged = serde_json::to_value(value).map_err(|error| {
+        Box::new(AutomationError::InvalidRequest {
+            reason: format!("the setting's value could not be written as JSON: {error}"),
+        })
+    })?;
+    let kind = tagged
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let value = tagged
+        .get("value")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    Ok((kind, value))
+}
+
+/// The setting `key` as it stands.
+///
+/// # Errors
+///
+/// [`AutomationError::Unavailable`] when the app keeps no settings store, and
+/// [`AutomationError::InvalidRequest`] for a key that is not registered.
+pub(super) fn read_setting(world: &World, key: &str) -> Answer {
+    let settings = world
+        .get_resource::<ViewerSettings>()
+        .ok_or_else(unavailable_settings)?;
+    let value = settings.store().get(key).ok_or_else(|| {
+        Box::new(AutomationError::InvalidRequest {
+            reason: format!("there is no setting {key:?}"),
+        })
+    })?;
+    let (kind, value) = bare(value)?;
+    Ok(ResponseBody::Setting {
+        key: key.to_owned(),
+        value_kind: kind,
+        value,
+    })
+}
+
+/// Write `value` to the setting `key`, in the scope whose value is in force:
+/// the account's when the account overrides it, the machine-wide one
+/// otherwise — so the write is what the viewer then reads.
+///
+/// # Errors
+///
+/// [`AutomationError::Unavailable`] when the app keeps no settings store, and
+/// [`AutomationError::InvalidRequest`] for a key that is not registered and
+/// for a value that is not of the setting's kind.
+pub(super) fn write_setting(world: &mut World, key: &str, value: &serde_json::Value) -> Answer {
+    let mut settings = world
+        .get_resource_mut::<ViewerSettings>()
+        .ok_or_else(unavailable_settings)?;
+    let current = settings.store().get(key).ok_or_else(|| {
+        Box::new(AutomationError::InvalidRequest {
+            reason: format!("there is no setting {key:?}"),
+        })
+    })?;
+    let (kind, _was) = bare(current)?;
+    let wanted: SettingValue = serde_json::from_value(serde_json::json!({
+        "type": kind,
+        "value": value,
+    }))
+    .map_err(|error| {
+        Box::new(AutomationError::InvalidRequest {
+            reason: format!("{value} is no {kind} for the setting {key:?}: {error}"),
+        })
+    })?;
+    let scope = if settings.store().get_override(Scope::Account, key).is_some() {
+        Scope::Account
+    } else {
+        Scope::Global
+    };
+    settings.set(scope, key, wanted);
+    read_setting(world, key)
 }
 
 /// An answer to the file dialog the viewer will ask for: `path`, or Cancel.

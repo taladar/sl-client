@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             params,
             diagnostics: false,
             circuit_probe: sl_client_bevy::CircuitProbe::Off,
+            region_handshake_reply_flags: sl_client_bevy::RegionHandshakeReplyFlags::CLIENT_DEFAULT,
             chat_log_config: ChatLogConfig::default(),
             directories: ClientDirectories::default(),
             account_dirs: None,
@@ -209,6 +210,7 @@ fn on_events(
             | SlSessionEvent::ObjectUpdated(_)
             | SlSessionEvent::TimeDilation { .. }
             | SlSessionEvent::ObjectRemoved { .. }
+            | SlSessionEvent::ObjectStreamBatch(_)
             | SlSessionEvent::ObjectProperties(_)
             | SlSessionEvent::TerrainPatch(_)
             | SlSessionEvent::TerrainLayerBatch(_)
@@ -324,6 +326,7 @@ fn on_events(
             | SlSessionEvent::SimulatorFeatures(_)
             | SlSessionEvent::LslSyntax(_)
             | SlSessionEvent::AgentPreferences(_)
+            | SlSessionEvent::InterestListMode(_)
             | SlSessionEvent::ObjectCosts(_)
             | SlSessionEvent::SelectedResourceCost(_)
             | SlSessionEvent::ObjectPhysicsData(_)

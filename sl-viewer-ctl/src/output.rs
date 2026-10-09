@@ -66,6 +66,13 @@ pub enum Outcome {
     Environment(EnvironmentReadout),
     /// What the world map knows.
     WorldMap(WorldMapReadout),
+    /// A setting as it now stands.
+    Setting {
+        /// The setting's key.
+        key: String,
+        /// Its value.
+        value: serde_json::Value,
+    },
     /// A file dialog answered.
     FileDialog {
         /// The dialog.
@@ -214,6 +221,7 @@ fn json_of(outcome: &Outcome) -> io::Result<JsonValue> {
         Outcome::InventoryTree(folders) => to_json(folders)?,
         Outcome::Environment(environment) => to_json(environment)?,
         Outcome::WorldMap(map) => to_json(map)?,
+        Outcome::Setting { key, value } => json!({ "setting": key, "value": value }),
         Outcome::FileDialog { answered, picked } => json!({
             "done": if picked.is_some() { "answered" } else { "cancelled" },
             "purpose": answered.purpose,
@@ -307,6 +315,7 @@ fn text_of(out: &mut impl Write, outcome: &Outcome) -> io::Result<()> {
         Outcome::InventoryTree(folders) => inventory_lines(out, folders)?,
         Outcome::Environment(environment) => environment_lines(out, environment)?,
         Outcome::WorldMap(map) => world_map_lines(out, map)?,
+        Outcome::Setting { key, value } => writeln!(out, "{key} = {value}")?,
         Outcome::FileDialog { answered, picked } => match picked {
             Some(path) => writeln!(
                 out,

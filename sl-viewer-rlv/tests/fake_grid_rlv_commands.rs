@@ -216,6 +216,8 @@ mod test {
                     params,
                     diagnostics: false,
                     circuit_probe: sl_client_bevy::CircuitProbe::Off,
+                    region_handshake_reply_flags:
+                        sl_client_bevy::RegionHandshakeReplyFlags::CLIENT_DEFAULT,
                     chat_log_config: ChatLogConfig::default(),
                     directories: ClientDirectories::default(),
                     account_dirs: None,

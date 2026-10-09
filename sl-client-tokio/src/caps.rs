@@ -93,9 +93,12 @@ pub(crate) async fn fetch_capabilities(
         ))
         .send()
         .await?;
+    // Kept for the message: a region that answers `404` with no body would
+    // otherwise read as a document that failed to parse.
+    let status = response.status();
     let text = response.text().await?;
     parse_seed_response(&text).map_err(|error| crate::Error::NoCapabilities {
-        message: format!("the seed-capabilities response did not parse: {error}"),
+        message: format!("the seed-capabilities response (HTTP {status}) did not parse: {error}"),
     })
 }
 

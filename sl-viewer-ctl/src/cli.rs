@@ -237,6 +237,16 @@ pub enum Verb {
     /// for the shared one, how far a manual change's cross-fade has got, and
     /// which editor windows are previewing.
     Environment,
+    /// Print one of the viewer's settings, or set it: the key the settings
+    /// store keeps it under (`RenderFarClip`), and to set it a value of the
+    /// setting's own kind as JSON (`32`, `true`, `"text"`, `[1,0,0,1]`). A
+    /// write goes through the store, so the viewer follows it at once.
+    Setting {
+        /// The setting's key.
+        key: String,
+        /// The value to set; the setting is only printed without one.
+        value: Option<String>,
+    },
     /// Print what the world map knows: the regions the grid named, each item
     /// layer it reported (agent locations, telehubs, land for sale) and how
     /// many tiles are drawable, pending and absent. The map asks the grid

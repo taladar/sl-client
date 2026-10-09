@@ -7,7 +7,7 @@ use crate::mute::MuteList;
 use crate::scoped_id::CircuitId;
 use crate::types::{
     AssetType, Camera, CircuitProbe, Diagnostic, Event, Friend, ImageCodec, LoginAccount,
-    LoginParams, Throttle,
+    LoginParams, RegionHandshakeReplyFlags, Throttle,
 };
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
@@ -686,6 +686,14 @@ pub const CAP_SEND_USER_REPORT_WITH_SCREENSHOT: &str = "SendUserReportWithScreen
 /// not serve this capability at all.
 pub const CAP_DIRECT_DELIVERY: &str = "DirectDelivery";
 
+/// The `InterestList` capability: which objects the simulator sends. A POST
+/// of `{mode}` — `default` or `360` — switches between the objects the
+/// camera's view takes in and every object round the agent; a DELETE has the
+/// simulator forget what it has sent and send it again. Second Life only.
+/// Driven by the runtimes' `SetInterestListMode` and `ResetInterestList`
+/// commands.
+pub const CAP_INTEREST_LIST: &str = "InterestList";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -763,6 +771,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_DIRECT_DELIVERY,
+    CAP_INTEREST_LIST,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.
@@ -1874,6 +1883,12 @@ pub struct Session {
     fetch_server_chat_history: ServerHistoryFetch,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
+    /// What every `RegionHandshakeReply` tells the simulator about this
+    /// client's object cache ([`Session::set_region_handshake_reply_flags`]).
+    handshake_reply_flags: RegionHandshakeReplyFlags,
+    /// The interest-list mode last asked for or answered
+    /// ([`Session::interest_list_mode`]).
+    interest_list_mode: sl_wire::InterestListMode,
     /// Whether protocol diagnostics are collected. Off by default so the
     /// silent-drop sites cost nothing (no raw-byte capture, no queueing) on the
     /// normal path. Toggled by [`Session::set_diagnostics`].

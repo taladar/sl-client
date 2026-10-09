@@ -14,7 +14,9 @@ holds each live grid to exactly the refused set below, and each fake flavour
 to refusing at least that set. Each capability adopted since is granted by
 both grids and re-measured on adoption: with `ParcelPropertiesUpdate`
 (2026-10-05) the list is 68 names, aditi grants 66 and OpenSim 35, and the
-refused sets are unchanged.
+refused sets are unchanged. `InterestList` (2026-10-09) is the first adopted
+capability OpenSim does not grant: the list is 69 names, aditi grants 67, and
+OpenSim's refused set is one longer.
 
 ## The client's own list
 
@@ -35,6 +37,7 @@ What OpenSim refuses, grouped by what a viewer loses:
 | account | `UserInfo` | the UDP `UserInfoRequest` / `UpdateUserInfo` |
 | appearance | `UpdateAvatarAppearance`, `IncrementCOFVersion` | the viewer bakes and uploads (`UploadBakedTexture`, which OpenSim grants) |
 | materials | `ModifyMaterialParams`, `UpdateMaterialAgentInventory` | no PBR overrides or material saving; an edit is reported as failed rather than dropped (since 2026-10-04) |
+| objects | `InterestList` | nothing: OpenSim sends a region's objects whichever way the camera looks (since 2026-10-09) |
 | other | `DirectDelivery`, `SendUserReport`, `SendUserReportWithScreenshot`, `ObjectAnimation` | marketplace delivery reports its absence; a report goes over the UDP `UserReport`, without a screenshot (since 2026-10-04); `ObjectAnimation` is only named to opt in to the UDP stream |
 
 How each runtime handles each refused capability was audited on 2026-10-04,

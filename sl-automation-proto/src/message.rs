@@ -345,6 +345,26 @@ pub enum RequestBody {
         #[serde(default, skip_serializing_if = "Deadline::is_default")]
         deadline: Deadline,
     },
+    /// Read one of the viewer's settings by the key its settings store keeps
+    /// it under (`RenderFarClip`). Answered with [`ResponseBody::Setting`].
+    ReadSetting {
+        /// The setting's key.
+        key: String,
+    },
+    /// Write one of the viewer's settings, through the store, so that
+    /// everything that follows the setting follows the write. Answered with
+    /// [`ResponseBody::Setting`] holding the value now in force.
+    ///
+    /// The value is the bare JSON of the setting's own kind — a number, a
+    /// boolean, a string, an array of numbers for a colour, a vector or a
+    /// rectangle. A key that is not registered, and a value of another kind,
+    /// are refused as invalid.
+    WriteSetting {
+        /// The setting's key.
+        key: String,
+        /// The value to set.
+        value: serde_json::Value,
+    },
     /// Who is answering: the protocol version and the viewer's identity.
     /// Answered with [`ResponseBody::Hello`]. The first request a client on
     /// a socket sends, to learn whether it speaks the same protocol.
@@ -615,6 +635,17 @@ pub enum ResponseBody {
     Swept {
         /// The things the band selected.
         nodes: Vec<WorldNode>,
+    },
+    /// The answer to [`RequestBody::ReadSetting`] and
+    /// [`RequestBody::WriteSetting`]: the setting as it now stands.
+    Setting {
+        /// The setting's key.
+        key: String,
+        /// The setting's kind, as the settings store spells it (`f32`,
+        /// `bool`, `string`, `color4`, …).
+        value_kind: String,
+        /// Its value, as bare JSON of that kind.
+        value: serde_json::Value,
     },
     /// The answer to [`RequestBody::Read`].
     Readout {
@@ -1054,6 +1085,13 @@ mod tests {
                     frames: None,
                     millis: Some(5_000),
                 },
+            },
+            RequestBody::ReadSetting {
+                key: "RenderFarClip".to_owned(),
+            },
+            RequestBody::WriteSetting {
+                key: "RenderFarClip".to_owned(),
+                value: serde_json::json!(32.0),
             },
             RequestBody::Hello,
             RequestBody::Subscribe {

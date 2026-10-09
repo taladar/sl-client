@@ -109,6 +109,30 @@ pub enum BakePolicy {
 }
 
 impl BakePolicy {
+    /// Whether an arriving agent is sent an `AvatarAppearance` about its own
+    /// avatar, given what its `RegionHandshakeReply` said (`None` if it never
+    /// answered the handshake).
+    ///
+    /// Second Life sends one only to a viewer that set
+    /// `SUPPORTS_SELF_APPEARANCE`; OpenSim sends one whatever the flags
+    /// (`object-handshake-flags`, 2026-10-09,
+    /// `book/src/gridspec/objects.md`).
+    #[must_use]
+    pub const fn sends_own_appearance(
+        self,
+        flags: Option<sl_proto::RegionHandshakeReplyFlags>,
+    ) -> bool {
+        match self {
+            Self::ServerSide => match flags {
+                Some(flags) => {
+                    flags.contains(sl_proto::RegionHandshakeReplyFlags::SUPPORTS_SELF_APPEARANCE)
+                }
+                None => false,
+            },
+            Self::ClientSide => true,
+        }
+    }
+
     /// Whether the login response names an `agent_appearance_service`, and the
     /// per-session appearance-texture route answers at all.
     #[must_use]

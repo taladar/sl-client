@@ -1046,6 +1046,7 @@ impl GridCore {
                 identity
             },
             arrival: self.arrival_policy,
+            own_appearance_owed: false,
             terrain_policy: self.imitated.terrain_policy(),
             on_agent_arrived: region.scenario.on_agent_arrived.clone(),
             on_event: region.scenario.on_event.clone(),

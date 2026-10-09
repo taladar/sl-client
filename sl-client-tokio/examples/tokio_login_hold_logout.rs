@@ -579,6 +579,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::TimeDilation { .. }
             | Event::TerrainPatch(_)
             | Event::TerrainLayerBatch(_)
+            | Event::ObjectStreamBatch(_)
             | Event::TextureReceived(_)
             | Event::TextureNotFound(_)
             | Event::AssetReceived(_)
@@ -613,6 +614,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::SimulatorFeatures(_)
             | Event::LslSyntax(_)
             | Event::AgentPreferences(_)
+            | Event::InterestListMode(_)
             | Event::ObjectCosts(_)
             | Event::SelectedResourceCost(_)
             | Event::ObjectPhysicsData(_)

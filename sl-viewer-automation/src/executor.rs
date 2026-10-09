@@ -521,6 +521,10 @@ fn start(
         RequestBody::AnswerFileDialog { path, deadline } => {
             state::answer_file_dialog(path, deadline)
         }
+        RequestBody::ReadSetting { key } => Started::answered(state::read_setting(world, &key)),
+        RequestBody::WriteSetting { key, value } => {
+            Started::answered(state::write_setting(world, &key, &value))
+        }
         RequestBody::Hello => Started::answered(Ok(state::hello(world))),
         RequestBody::Subscribe { cursor, streams } => {
             Started::answered(subscribe(world, subscriptions, id, cursor, streams))

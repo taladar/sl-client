@@ -29,12 +29,16 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 serde_json = { workspace = true }
 sl-automation-proto = { workspace = true }
 sl-client-bevy = { workspace = true }
+# The kinds and scopes of a setting read or written by its key.
+sl-settings = { workspace = true }
 # `in_app` fails with the driver's own error, so a failure in a fixture test
 # reads exactly as one in the end-to-end tier.
 sl-viewer-driver = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-notifications = { workspace = true }
+# A setting read or written by its key (`ReadSetting` / `WriteSetting`).
+sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-pie-menu = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }

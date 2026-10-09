@@ -16,6 +16,7 @@ mod field;
 mod geometry;
 mod grid_info;
 mod header;
+mod interest_list;
 mod inventory;
 mod landmark;
 mod llsd;
@@ -112,6 +113,10 @@ pub use grid_info::{
     parse_grid_info_xmlrpc_response,
 };
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
+pub use interest_list::{
+    InterestListMode, InterestListReply, build_interest_list_reply, build_interest_list_request,
+    parse_interest_list_reply, parse_interest_list_request,
+};
 pub use inventory::{
     AIS_CURRENT_OUTFIT_LINKS_PATH, AIS_MAX_FOLDER_DEPTH, AIS_ORPHANS_PATH, AisCategoryCreate,
     AisItemUpdate, AisLinkCreate, AisUpdate, CreateInventoryCategoryRequest,

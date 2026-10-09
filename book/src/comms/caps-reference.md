@@ -35,7 +35,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `GroupAPIv1` | yes | — | current | task `protocol-cap-group-bans` |
 | `GroupProposalBallot` | yes | — | removed feature | not adopted |
 | `HomeLocation` | yes | yes | current | task `protocol-cap-home-location` (UDP today) |
-| `InterestList` | yes | — | current | task `protocol-cap-interest-list` |
+| `InterestList` | yes | — | current | adopted (`Command::SetInterestListMode`) |
 | `InventoryThumbnailUpload` | yes | — | current | task `viewer-inventory-thumbnails` |
 | `MapLayer` | yes | yes | unused since viewer 2.0 | not adopted |
 | `MapLayerGod` | yes | — | unused | not adopted |
@@ -122,10 +122,14 @@ because cap-delivered offers carry no transaction id for the UDP answers.
 **`UpdateAgentLanguage`** (`llagentlanguage.cpp`). POST `{language,
 language_is_public}` at login and on change; the reply is ignored.
 
-**`InterestList`** (`llviewerregion.cpp`). POST `{mode:"default"|"360"}`;
-`360` streams every object around the agent instead of only the view frustum.
-DELETE resets. Firestorm applies it to every region and after each region
-change, and uses it for 360° snapshots and area search.
+**`InterestList`** (`llviewerregion.cpp`). POST `{mode:"default"|"360"}` →
+`{mode, previous_mode}`; `360` is meant to stream every object around the agent
+instead of only the view frustum. A mode the simulator does not know is
+answered as `default`; a DELETE, which Firestorm's "reset interest lists" sends,
+got no answer from aditi in 30 s. Firestorm applies the mode to every region
+and after each region change, and uses it for 360° snapshots and area search;
+so do we, for the 360° capture. Measured in
+[Objects](../gridspec/objects.md#the-interest-list-mode).
 
 **`AbuseCategories`** (`llfloaterreporter.cpp`). GET `{cap}[?lc=<language>]` →
 `{categories:[{category, description_localized}]}`, replacing the report

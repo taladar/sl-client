@@ -61,6 +61,7 @@ mod test {
         INVENTORY_SAVE_TIMEOUT, STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID,
         TeleportFinishInfo,
     };
+    use sl_proto::{ObjectStreamBatch, ObjectUpdateForm, RegionHandshakeReplyFlags, Vector};
     use sl_wire::messages::{
         AbortXfer, AbortXferXferIDBlock, CompleteAgentMovement,
         CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
@@ -5981,7 +5982,7 @@ mod test {
     #[test]
     fn send_region_handshake_encodes_the_identity() -> Result<(), TestError> {
         let now = Instant::now();
-        let (_client, mut sim) = setup(now)?;
+        let (mut client, mut sim) = setup(now)?;
 
         let identity = RegionIdentity {
             sim_name: region("Server Region"),
@@ -6061,6 +6062,21 @@ mod test {
         assert_eq!(
             handshake.region_info.terrain_height_range10.to_bits(),
             30.0_f32.to_bits()
+        );
+
+        // Answered by a client, the handshake brings back what that client
+        // says of its object cache: empty, and that it understands its own
+        // appearance, unless it was told to say something else.
+        assert_eq!(sim.handshake_reply_flags(), None);
+        assert_eq!(
+            client.region_handshake_reply_flags(),
+            RegionHandshakeReplyFlags::CLIENT_DEFAULT
+        );
+        sim.send_region_handshake(&identity, now)?;
+        pump(&mut client, &mut sim, now)?;
+        assert_eq!(
+            sim.handshake_reply_flags(),
+            Some(RegionHandshakeReplyFlags::CLIENT_DEFAULT)
         );
         Ok(())
     }
@@ -9189,6 +9205,102 @@ mod test {
             vec![RegionLocalObjectId(0x10), RegionLocalObjectId(0x11)]
         );
         Ok(())
+    }
+
+    /// A kill that names a linkset's root alone — which is how Second Life
+    /// takes a linkset out of range — takes the prims under it too, and an
+    /// avatar seated on it stays. The batch says what the message itself
+    /// named, and that the session held it.
+    #[test]
+    fn a_kill_of_a_root_takes_its_child_prims_and_leaves_a_seated_avatar() -> Result<(), TestError>
+    {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+        let at = Vector {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let root = box_prim(0x20, 0x2020, at.clone());
+        let mut child = box_prim(0x21, 0x2121, at.clone());
+        child.parent_id = root.local_id;
+        let mut grandchild = box_prim(0x22, 0x2222, at.clone());
+        grandchild.parent_id = child.local_id;
+        let mut rider = box_prim(0x23, 0x2323, at.clone());
+        rider.parent_id = root.local_id;
+        rider.pcode = sl_proto::pcode::AVATAR;
+        let bystander = box_prim(0x24, 0x2424, at);
+        sim.send_object_update(
+            &[root.clone(), child, grandchild, rider, bystander],
+            0xFFFF,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let arrived = drain_client(&mut client);
+        let full: Vec<&ObjectStreamBatch> = arrived
+            .iter()
+            .filter_map(|e| match e {
+                Event::ObjectStreamBatch(batch) if batch.form == ObjectUpdateForm::Full => {
+                    Some(&**batch)
+                }
+                _ => None,
+            })
+            .collect();
+        let named: usize = full.iter().map(|batch| batch.entries.len()).sum();
+        assert_eq!(named, 5, "the full updates named five objects");
+        assert!(
+            full.iter()
+                .flat_map(|batch| batch.entries.iter())
+                .all(|entry| !entry.known),
+            "none of them was held before"
+        );
+
+        sim.send_kill_object(&[root.local_id], now)?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        let kills: Vec<&ObjectStreamBatch> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::ObjectStreamBatch(batch) if batch.form == ObjectUpdateForm::Kill => {
+                    Some(&**batch)
+                }
+                _ => None,
+            })
+            .collect();
+        let [kill] = kills.as_slice() else {
+            return Err("expected one kill batch".into());
+        };
+        assert_eq!(
+            kill.entries
+                .iter()
+                .map(|entry| (entry.local_id, entry.known))
+                .collect::<Vec<_>>(),
+            vec![(root.local_id, true)]
+        );
+        let mut removed: Vec<u32> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::ObjectRemoved { local_id, .. } => Some(local_id.id().0),
+                _ => None,
+            })
+            .collect();
+        removed.sort_unstable();
+        assert_eq!(removed, vec![0x20, 0x21, 0x22]);
+        let mut left: Vec<u32> = client.objects().map(|object| object.local_id.0).collect();
+        left.sort_unstable();
+        assert_eq!(left, vec![0x23, 0x24]);
+        Ok(())
+    }
+
+    /// What the session says of its object cache by default.
+    #[test]
+    fn the_default_handshake_flags_are_an_empty_cache_and_self_appearance() {
+        let flags = RegionHandshakeReplyFlags::CLIENT_DEFAULT;
+        assert!(flags.contains(RegionHandshakeReplyFlags::CACHE_EMPTY));
+        assert!(flags.contains(RegionHandshakeReplyFlags::SUPPORTS_SELF_APPEARANCE));
+        assert!(!flags.contains(RegionHandshakeReplyFlags::CACHE_ALL));
     }
 
     /// The grid-side **write** path: the client rezzes a prim, the simulator

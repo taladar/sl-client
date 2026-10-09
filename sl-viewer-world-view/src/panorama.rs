@@ -97,7 +97,7 @@ use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use bevy::ui_widgets::Activate;
 use image::{ImageEncoder as _, RgbImage};
 
-use sl_client_bevy::{SlCurrentRegion, SlRegionIdentity};
+use sl_client_bevy::{Command, InterestListMode, SlCommand, SlCurrentRegion, SlRegionIdentity};
 use sl_settings::SettingValue;
 use sl_viewer_intents::LocalChatNotice;
 use sl_viewer_settings::ViewerSettings;
@@ -168,6 +168,13 @@ const EXPOSURE_TIMEOUT_FRAMES: u8 = 240;
 /// in seconds. A busy region never reaches zero outstanding fetches, and a
 /// photographer who pressed the button still wants a photo.
 const QUIET_TIMEOUT_SECONDS: f32 = 20.0;
+
+/// The least a capture waits before its first face, in seconds: the time a
+/// simulator takes to start sending what the switch to the 360° interest
+/// list asked for. Second Life's first messages came 0.4 to 1.2 s after the
+/// switch; a scene with nothing in flight would otherwise read as quiet in
+/// the frame the switch was sent.
+const INTEREST_LIST_SECONDS: f32 = 2.0;
 
 /// The cube-face sizes the quality combo offers, in pixels — the reference
 /// viewer's own preview / medium / high / maximum ladder.
@@ -265,6 +272,7 @@ impl Plugin for PanoramaPlugin {
                 )
                     .chain(),
             )
+            .add_systems(Update, ask_for_everything_around.after(start_capture))
             .add_systems(
                 Update,
                 drive_capture.in_set(sl_viewer_world_api::WorldPhase::CameraPositioned),
@@ -1011,6 +1019,41 @@ fn start_capture(
     }
 }
 
+/// Whether a capture is looking at the world: from the moment it starts
+/// waiting for the scene until its last face is read back.
+const fn looks_around(phase: CapturePhase) -> bool {
+    !matches!(phase, CapturePhase::Idle | CapturePhase::Stitching)
+}
+
+/// Switch the simulator to its 360° interest list for as long as a capture
+/// looks around, and back when it is done.
+///
+/// A simulator sends what the camera's view takes in, and a capture turns
+/// the camera to six faces in as many frames: five of them would show what
+/// happened to be streamed already. Second Life has a mode for exactly this
+/// (`InterestList`, as the reference's 360° capture uses it); on a grid
+/// without the capability the command does nothing.
+fn ask_for_everything_around(
+    state: Res<PanoramaState>,
+    mut asked: Local<bool>,
+    commands: Option<ResMut<Messages<SlCommand>>>,
+) {
+    let wanted = looks_around(state.phase);
+    if wanted == *asked {
+        return;
+    }
+    *asked = wanted;
+    let Some(mut commands) = commands else {
+        return;
+    };
+    let mode = if wanted {
+        InterestListMode::Full360
+    } else {
+        InterestListMode::Default
+    };
+    let _id = commands.write(SlCommand(Command::SetInterestListMode(mode)));
+}
+
 /// The viewer camera's pose, lens and target: the three things a capture
 /// borrows and hands back, named once so the driver and its helpers cannot
 /// disagree about the shape of the query.
@@ -1066,7 +1109,8 @@ fn drive_capture(
         CapturePhase::Idle | CapturePhase::Stitching => {}
         CapturePhase::Settling { remaining } => {
             let left = remaining - rig.real.delta_secs();
-            if !quiescence.is_quiet() && left > 0.0 {
+            let waited = QUIET_TIMEOUT_SECONDS - left;
+            if left > 0.0 && (!quiescence.is_quiet() || waited < INTEREST_LIST_SECONDS) {
                 state.phase = CapturePhase::Settling { remaining: left };
                 return;
             }
@@ -1607,6 +1651,10 @@ fn preview_dimension(value: f32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
+        App, CapturePhase, Command, InterestListMode, Messages, SlCommand, Update,
+        ask_for_everything_around, looks_around,
+    };
+    use super::{
         CUBE_FACES, FACE_SIZES, FORMATS, OUTPUT_WIDTHS, PREVIEW_HEIGHT, PREVIEW_WIDTH,
         PanoramaState, capture_basis, clamp_index, clamp_to_u8, clamp_to_u16, cube_face_projection,
         heading_degrees, panorama_labels, pixel_labels, preview_dimension, sample_panorama,
@@ -1620,6 +1668,35 @@ mod tests {
 
     /// How far a lens number may differ and still be the same one.
     const LENS_EPSILON: f32 = 1.0e-4;
+
+    /// A capture asks for everything round the agent when it starts looking
+    /// and for the default list again when it has its faces — once each.
+    #[test]
+    fn a_capture_switches_the_interest_list_for_its_duration() {
+        let mut app = App::new();
+        app.init_resource::<PanoramaState>()
+            .add_message::<SlCommand>()
+            .add_systems(Update, ask_for_everything_around);
+        let sent = |app: &mut App| -> Vec<InterestListMode> {
+            app.update();
+            app.world_mut()
+                .resource_mut::<Messages<SlCommand>>()
+                .drain()
+                .filter_map(|command| match command.0 {
+                    Command::SetInterestListMode(mode) => Some(mode),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(sent(&mut app), Vec::new());
+        app.world_mut().resource_mut::<PanoramaState>().phase =
+            CapturePhase::Settling { remaining: 20.0 };
+        assert_eq!(sent(&mut app), vec![InterestListMode::Full360]);
+        assert_eq!(sent(&mut app), Vec::new());
+        app.world_mut().resource_mut::<PanoramaState>().phase = CapturePhase::Stitching;
+        assert_eq!(sent(&mut app), vec![InterestListMode::Default]);
+        assert!(looks_around(CapturePhase::Framing { face: 0, settle: 1 }));
+    }
 
     /// The specimen's sample panorama is exactly the preview's size, so
     /// `show_preview` draws it unscaled, and reads as sky over ground: the

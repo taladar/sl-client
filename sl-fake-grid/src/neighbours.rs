@@ -365,18 +365,24 @@ pub(crate) fn run_neighbour_announcer(
 /// `LogoutRequest` to the root region alone, so it is the grid that closes the
 /// child agents watching from next door; otherwise they outlive the login.
 ///
-/// Only a root's logout does this: a child session never receives one.
+/// Only a root's logout does this: a child session never receives one. And
+/// only that login's children are retired, not the sessions of a login of the
+/// same avatar that followed it.
 async fn retire_children_on_logout(core: &Arc<GridCore>, shared: &SharedSim) {
-    let (seq, agent_id) = {
+    let (seq, agent_id, login) = {
         let state = shared.state.lock().await;
-        (state.seq, state.avatar.agent_id)
+        (state.seq, state.avatar.agent_id, state.ids.session_id)
     };
     for child in core.sessions_of(agent_id).await {
-        let (child_seq, is_root) = {
+        let (child_seq, is_root, child_login) = {
             let state = child.state.lock().await;
-            (state.seq, state.sim.is_root_agent())
+            (state.seq, state.sim.is_root_agent(), state.ids.session_id)
         };
-        if child_seq == seq || is_root {
+        // Only the children of the login that just ended. The avatar may be
+        // logging in again already, and the session that login was given is
+        // no root agent until its movement completes: retired here, it
+        // answered the new viewer's seed request with a 404.
+        if child_seq == seq || is_root || child_login != login {
             continue;
         }
         if let Err(error) = child

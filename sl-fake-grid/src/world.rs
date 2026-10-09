@@ -1629,20 +1629,25 @@ pub const AVATAR_CENTRE_ABOVE_GROUND_M: f32 = 0.95;
 /// Pushes the arriving agent its **own** `AvatarAppearance`, registering the
 /// bakes it names.
 ///
-/// A simulator sends an agent its own appearance like anyone else's, and a
-/// viewer that never receives one has no visual params and no texture entry
+/// OpenSim sends an agent its own appearance like anyone else's; Second Life
+/// does so for a viewer whose `RegionHandshakeReply` said it understands one
+/// ([`BakePolicy::sends_own_appearance`](crate::bakes::BakePolicy::sends_own_appearance)).
+/// A viewer that never receives one has no visual params and no texture entry
 /// for itself: it spawns the avatar, poses its skeleton, and draws no body at
 /// all — a name tag hanging in mid-air. The fake grid runs no bake service, so
 /// it bakes the arriving agent exactly the way it bakes an NPC: one solid per
 /// body region under ids derived from the agent's own id, whose bytes go into
 /// *this session's* asset store, because the agent id is only known now.
-fn push_own_appearance(
+pub(crate) fn push_own_appearance(
     identity: &AvatarIdentity,
     assets: &crate::assets::GridAssets,
     bakes: crate::bakes::BakePolicy,
     sim: &mut SimSession,
     now: Instant,
 ) {
+    if !bakes.sends_own_appearance(sim.handshake_reply_flags()) {
+        return;
+    }
     let appearance = NpcAppearance::solid(identity.agent_id, OWN_AVATAR_BAKE_COLOR);
     {
         let mut store = assets.write();

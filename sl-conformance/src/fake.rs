@@ -147,6 +147,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "simulator-features",
     "seed-capabilities",
     "object-update-decode",
+    "object-handshake-flags",
     "parcel-properties",
     "environment",
     "terrain-raw-transfer-download",
@@ -445,6 +446,7 @@ impl FakeGridHarness {
                     },
                     options: None,
                     capabilities: None,
+                    handshake_flags: sl_client_tokio::RegionHandshakeReplyFlags::CLIENT_DEFAULT,
                 })
                 .await?,
             );

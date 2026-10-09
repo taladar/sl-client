@@ -35,3 +35,9 @@ objects outside the view frustum are streamed: [[protocol-cap-interest-list]].
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## The interest-list switch (2026-10-09)
+
+`Command::SetInterestListMode` exists since
+[[gridspec-object-update-stream]] and the session re-asks it of each region
+arrived in; this is one of the places meant to send it.

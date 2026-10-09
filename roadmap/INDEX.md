@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 139 |
 | ready | 358 |
-| blocked | 111 |
+| blocked | 109 |
 | in-progress | 20 |
-| bugs | 36 |
-| done | 1337 |
+| bugs | 38 |
+| done | 1340 |
 | deferred | 29 |
 | wont-do | 17 |
-| **total** | **2047** |
+| **total** | **2050** |
 
 ## ideas (139)
 
@@ -1092,6 +1092,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
+- [`server-fake-grid-object-update-forms`](ready/server-fake-grid-object-update-forms.md)
+  — Fake grid — send compressed, terse and cached object updates as each grid
+  does (blocked by `gridspec-object-update-stream` (done))
 - [`server-fake-grid-parcel-divide-join`](ready/server-fake-grid-parcel-divide-join.md)
   — Fake grid — divide and join parcels
 - [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
@@ -1173,8 +1176,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   properties and selection replies on each grid
 - [`gridspec-object-rez-derez`](ready/gridspec-object-rez-derez.md) — Rez, take,
   take-copy, delete, return and auto-return on each grid
-- [`gridspec-object-update-stream`](ready/gridspec-object-update-stream.md) —
-  Object update forms, the interest list and kills on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
   Current Outfit Folder and wearables on each grid
 - [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
@@ -1198,7 +1199,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
   Viewer effects and sound relays on each grid
 
-## blocked (111)
+## blocked (109)
 
 ### protocol
 
@@ -1220,9 +1221,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   lists over the GroupAPIv1 capability (blocked by `gridspec-groups`)
 - [`protocol-cap-home-location`](blocked/protocol-cap-home-location.md) — Set
   home over the HomeLocation capability (blocked by `gridspec-landmarks-home`)
-- [`protocol-cap-interest-list`](blocked/protocol-cap-interest-list.md) — Switch
-  the interest list mode over the InterestList capability (blocked by
-  `gridspec-object-update-stream`)
 - [`protocol-cap-offline-friendship-answers`](blocked/protocol-cap-offline-friendship-answers.md)
   — Answer offline friendship offers over AcceptFriendship / DeclineFriendship
   (blocked by `gridspec-friends-presence`)
@@ -1424,9 +1422,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-object-media-region`](blocked/server-fake-grid-object-media-region.md)
   — Fake grid — region-wide object media with version bumps and propagation
   (blocked by `gridspec-object-media`)
-- [`server-fake-grid-object-update-forms`](blocked/server-fake-grid-object-update-forms.md)
-  — Fake grid — send compressed, terse and cached object updates as each grid
-  does (blocked by `gridspec-object-update-stream`)
 - [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
   — Fake grid — enforce parcel access and push ban lines (blocked by
   `gridspec-parcel-access-and-ban-lines` (done),
@@ -1478,7 +1473,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-update-scheduling`](blocked/server-world-update-scheduling.md)
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`, `gridspec-circuit` (done),
-  `gridspec-object-update-stream`)
+  `gridspec-object-update-stream` (done))
 
 ### gridspec
 
@@ -1607,7 +1602,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (36)
+## bugs (38)
 
 ### protocol
 
@@ -1696,11 +1691,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — object_asset_format fails only in a full-workspace run, and fails early
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
+- [`test-e2e-ground-double-click-fails-under-suite-load`](bugs/test-e2e-ground-double-click-fails-under-suite-load.md)
+  — The ground double-click e2e test flies its camera by frames and failed once
+  in the full suite
+- [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
+  — Fake-grid integration tests stop reading the client's events and can stall
+  it
 - [`test-scripted-environment-change-marker-timeout`](bugs/test-scripted-environment-change-marker-timeout.md)
   — The scripted environment change's `night` marker never arrived, once, in a
   full suite run
 
-## done (1337)
+## done (1340)
 
 ### protocol
 
@@ -1890,6 +1891,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   failure
 - [`protocol-audit-wire-error-contract`](done/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-cap-interest-list`](done/protocol-cap-interest-list.md) — Switch
+  the interest list mode over the InterestList capability (blocked by
+  `gridspec-object-update-stream` (done))
 - [`protocol-cap-parcel-properties-update`](done/protocol-cap-parcel-properties-update.md)
   — Edit parcels over the ParcelPropertiesUpdate capability
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
@@ -2215,6 +2219,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-automation-semantic-ui-model`](done/viewer-automation-semantic-ui-model.md)
   — The semantic UI model — roles, names and states read from the ECS (blocked
   by `viewer-automation-protocol` (done))
+- [`viewer-automation-set-a-setting`](done/viewer-automation-set-a-setting.md) —
+  Let a test change a viewer setting through the automation
 - [`viewer-automation-state-probes`](done/viewer-automation-state-probes.md) —
   State probes — chat, notifications, agent, logs and screenshots (blocked by
   `viewer-automation-protocol` (done), `viewer-automation-windowless-mode`
@@ -4640,6 +4646,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   logout does to seats and child circuits
 - [`gridspec-neighbours-crossing`](done/gridspec-neighbours-crossing.md) — Child
   agents, EnableSimulator and region crossing on each grid
+- [`gridspec-object-update-stream`](done/gridspec-object-update-stream.md) —
+  Object update forms, the interest list and kills on each grid
 - [`gridspec-parcel-access-and-ban-lines`](done/gridspec-parcel-access-and-ban-lines.md)
   — Parcel access and ban lists, enforcement and ban lines on each grid
 - [`gridspec-parcel-info-dwell`](done/gridspec-parcel-info-dwell.md) — Parcel

@@ -55,6 +55,9 @@ mod test {
         parse_event_queue_response, parse_experience_ids, parse_experience_infos,
         parse_experience_status, parse_seed_response, stamp_remote_parcel_request,
     };
+    use sl_proto::{
+        InterestListMode, InterestListReply, build_interest_list_request, parse_interest_list_reply,
+    };
     use sl_wire::PROPERTY_PRIVATE;
     use sl_wire::{
         CircuitCode, FetchItemRef, Llsd, LoginRequest, LoginResponse, LoginSuccess,
@@ -153,9 +156,9 @@ mod test {
         // descendents fetches, the two per-item fetches, AISv3 agent +
         // Library, CreateInventoryCategory), the nine
         // region/object-information caps, the parcel edit
-        // (ParcelPropertiesUpdate), the thirteen experience caps, and the three
-        // voice signalling caps.
-        assert_eq!(granted.len(), 62);
+        // (ParcelPropertiesUpdate), the thirteen experience caps, the three
+        // voice signalling caps, and the interest-list switch.
+        assert_eq!(granted.len(), 63);
         Ok(())
     }
 
@@ -877,6 +880,54 @@ mod test {
         let (status, reply) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map /></llsd>"))?;
         assert_eq!(status, 200);
         assert_eq!(parse_agent_preferences(&parse_llsd_xml(&reply)?)?, stored);
+        Ok(())
+    }
+
+    /// An `InterestList` POST switches the session's mode and answers with
+    /// the mode now in force and the one it replaced; a mode nobody knows asks
+    /// for `default`, as on Second Life; the event comes when the mode
+    /// changes and not when it does not.
+    #[test]
+    fn interest_list_switches_and_says_what_it_replaced() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "InterestList")?;
+        while sim.poll_event().is_some() {}
+
+        let body = build_interest_list_request(InterestListMode::Full360);
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 200);
+        assert_eq!(
+            parse_interest_list_reply(&parse_llsd_xml(&reply)?)?,
+            InterestListReply {
+                mode: InterestListMode::Full360,
+                previous_mode: InterestListMode::Default,
+            }
+        );
+        assert_eq!(sim.interest_list_mode(), InterestListMode::Full360);
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::InterestListModeChanged {
+                mode: InterestListMode::Full360
+            })
+        ));
+
+        let unknown = "<llsd><map><key>mode</key><string>sideways</string></map></llsd>";
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, unknown))?;
+        assert_eq!(status, 200);
+        assert_eq!(
+            parse_interest_list_reply(&parse_llsd_xml(&reply)?)?,
+            InterestListReply {
+                mode: InterestListMode::Default,
+                previous_mode: InterestListMode::Full360,
+            }
+        );
+        let _changed = sim.poll_event();
+        let (_status, _reply) = respond(&mut caps, &mut sim, &post(&path, unknown))?;
+        assert!(
+            sim.poll_event().is_none(),
+            "nothing changed the second time"
+        );
         Ok(())
     }
 

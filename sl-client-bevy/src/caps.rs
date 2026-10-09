@@ -188,11 +188,15 @@ fn post_seed(
         .body(build_seed_request(&names))
         .send()
         .map_err(|error| format!("the seed-capabilities request failed: {error}"))?;
+    // Kept for the message: a region that answers `404` with no body would
+    // otherwise read as a document that failed to parse.
+    let status = response.status();
     let text = response.text().map_err(|error| {
         format!("the seed-capabilities response body could not be read: {error}")
     })?;
-    parse_seed_response(&text)
-        .map_err(|error| format!("the seed-capabilities response did not parse: {error}"))
+    parse_seed_response(&text).map_err(|error| {
+        format!("the seed-capabilities response (HTTP {status}) did not parse: {error}")
+    })
 }
 
 /// The outcome of one seed-capabilities fetch, distinguishing the two ways it

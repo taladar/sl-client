@@ -21,7 +21,7 @@ use sl_proto::{
     CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INVENTORY_API_V3,
+    CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
     CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
     CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
@@ -38,20 +38,21 @@ use sl_proto::{
     avatar_picker_search_query, build_agent_preferences_request, build_ais_create_category_body,
     build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
     build_ais_update_item_body, build_create_inventory_category_request,
-    build_environment_update_request, build_modify_material_params_request,
-    build_new_file_agent_inventory_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_properties_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_send_user_report,
-    build_set_experience_permission_request, build_update_experience_request,
-    build_update_item_asset_request, build_update_script_agent_request,
-    build_update_script_task_request, build_update_task_item_asset_request,
-    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
-    chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
-    create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
-    experience_id_query, experience_info_query, experience_query, find_experience_query,
-    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
-    listings_request, merchant_status_request, parse_login_response, update_listing_request,
+    build_environment_update_request, build_interest_list_request,
+    build_modify_material_params_request, build_new_file_agent_inventory_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_properties_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_send_user_report, build_set_experience_permission_request,
+    build_update_experience_request, build_update_item_asset_request,
+    build_update_script_agent_request, build_update_script_task_request,
+    build_update_task_item_asset_request, build_upload_baked_texture_request,
+    build_user_info_update, build_voice_signaling_request, chat_session_agents_body,
+    chat_session_request_body, copy_inventory_from_notecard_body, create_listing_request,
+    delete_listing_request, display_names_query, environment_cap_url, experience_id_query,
+    experience_info_query, experience_query, find_experience_query, forget_experience_query,
+    group_experiences_query, group_invite_response_body, listing_request, listings_request,
+    merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -78,15 +79,15 @@ pub use sl_proto::{
     GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
     GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, ImageCodec, InstantMessage, InterestsUpdate, InventoryCacheConfig,
-    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
-    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
-    InviteChannel, ItemInfo, Key, Kilobits, LOGOUT_TIMEOUT, LandArea, LandBrushAction,
-    LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandSearchType, LandStatExtended,
-    LandStatItem, LandStatReportType, LandStatScore, LandingType, LegacyMaterial, LightData,
-    LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
-    LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest,
-    LoginResponse, LoginSuccess, LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    ImSessionId, ImageCodec, InstantMessage, InterestListMode, InterestListReply, InterestsUpdate,
+    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
+    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
+    InventoryOwner, InventoryType, InviteChannel, ItemInfo, Key, Kilobits, LOGOUT_TIMEOUT,
+    LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact,
+    LandSearchType, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd,
+    LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
+    LoginRequest, LoginResponse, LoginSuccess, LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapBlockBatch,
     MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
     MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
@@ -96,9 +97,10 @@ pub use sl_proto::{
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement, NewInventoryItem,
     NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
     ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectProperties,
-    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelCollision,
-    ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags, ParcelMediaCommand,
+    ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry, ObjectTransform,
+    ObjectUpdateForm, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelCollision, ParcelDetails,
+    ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags, ParcelMediaCommand,
     ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell,
     ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult,
     ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
@@ -106,25 +108,25 @@ pub use sl_proto::{
     PingId, PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
     ProposalCandidateId, ProposalVoteId, QueryId, REQUESTED_CAPABILITIES, ReflectionProbe,
     ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates,
-    RegionDebugUpdate, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionStats, RegionTerrainComposition,
-    RegionTerrainUpdate, Reliability, RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction,
-    ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
-    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
-    SessionMessage, SetDisplayNameReply, SimStatId, SimulatorFeatures, SimulatorTime, SkySettings,
-    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
-    TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture,
-    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
-    ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit,
-    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
-    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
-    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, XferListing,
-    avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
+    RegionDebugUpdate, RegionFlags, RegionHandle, RegionHandshakeReplyFlags, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
+    RegionStats, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
+    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
+    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
+    SculptOrMeshKey, SequenceNumber, SessionMessage, SetDisplayNameReply, SimStatId,
+    SimulatorFeatures, SimulatorTime, SkySettings, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerBatch, TerrainLayerType,
+    TerrainPatch, TerrainPatchHeader, Texture, TextureAnimation, TextureEntry, TextureFace,
+    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
+    TransferId, TransferStatus, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
+    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
+    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
+    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
+    Vector, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
+    XferListing, avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
     encode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
     particle_pattern, pcode, prim_flags, sim_access, texture_anim_mode,
 };
@@ -586,6 +588,13 @@ impl Client {
         self.neighbour_caps_reporter = Some(reporter);
     }
 
+    /// Sets the `Flags` every `RegionHandshakeReply` carries: what the client
+    /// tells a simulator about its object cache
+    /// ([`RegionHandshakeReplyFlags`]). Call before [`Client::run`].
+    pub const fn set_region_handshake_reply_flags(&mut self, flags: RegionHandshakeReplyFlags) {
+        self.session.set_region_handshake_reply_flags(flags);
+    }
+
     /// Replaces the capability names every seed request asks for
     /// ([`REQUESTED_CAPABILITIES`] by
     /// default) — for a survey of what a grid grants, not for ordinary use: a
@@ -1022,6 +1031,17 @@ impl Client {
                             deliver(reporter, caps.clone()).await;
                         }
                         spawn_simulator_features(&caps, &http, &caps_tx);
+                        // Every simulator starts an agent on the default
+                        // interest list, so one asked for is asked for again
+                        // of each region arrived in, as the reference viewer
+                        // does.
+                        let mode = self.session.interest_list_mode();
+                        if mode != InterestListMode::Default
+                            && let Some(url) = caps.get(CAP_INTEREST_LIST).cloned()
+                        {
+                            let body = build_interest_list_request(mode);
+                            tokio::spawn(post_voice_cap(url, body, CAP_INTEREST_LIST, http.clone(), caps_tx.clone()));
+                        }
                         // The region change already aborted the old poller; abort
                         // again so that even a map arriving without one (a retry
                         // that outlived its region change) cannot leave two
@@ -2370,6 +2390,15 @@ impl Client {
                             if let Some(url) = caps.get(CAP_AGENT_PREFERENCES).cloned() {
                                 let body = build_agent_preferences_request(&AgentPreferences::default());
                                 tokio::spawn(post_voice_cap(url, body, CAP_AGENT_PREFERENCES, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::SetInterestListMode(mode)) => {
+                            // Remembered whether or not this region has the
+                            // capability: the next one may.
+                            self.session.set_interest_list_mode(mode);
+                            if let Some(url) = caps.get(CAP_INTEREST_LIST).cloned() {
+                                let body = build_interest_list_request(mode);
+                                tokio::spawn(post_voice_cap(url, body, CAP_INTEREST_LIST, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::SetAgentPreferences(prefs)) => {

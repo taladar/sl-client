@@ -446,6 +446,7 @@ mod test {
             probe: sl_client_tokio::CircuitProbe::Off,
             options: None,
             capabilities: None,
+            handshake_flags: sl_client_tokio::RegionHandshakeReplyFlags::CLIENT_DEFAULT,
         })
         .await?;
         session.logout().await?;

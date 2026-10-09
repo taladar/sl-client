@@ -22,6 +22,15 @@ objects with a family of messages tuned for different change rates:
 - **Terse object update** (`ImprovedTerseObjectUpdate`) — *motion only*: just
   the changing position/velocity/rotation, no shape or textures. This is the
   high-frequency path that keeps moving things smooth.
+- **Cached object update** (`ObjectUpdateCached`) — an id and a checksum, for a
+  viewer to answer from its own cache or ask for in full with
+  `RequestMultipleObjects`.
+- **Kill** (`KillObject`) — the object is gone from the viewer's view: deleted,
+  or out of range. A kill of a linkset's root takes the prims under it too.
+
+Which form each grid picks, what a viewer's handshake flags, draw distance and
+camera change about it, and what a kill names are measured in
+[Objects](../gridspec/objects.md).
 
 Each update carries a **local id** (a per-region handle, compact and reused) as
 well as the object's **full id** (its global UUID). Real-time traffic refers to
@@ -131,8 +140,10 @@ When a [circuit](../comms/circuits.md) to a region comes up, the region
 introduces itself with a **`RegionHandshake`** carrying its *identity*: name,
 region flags, maturity rating, product type, owner, water height, billing
 factor, and whether you are an estate manager there. The client replies with
-`RegionHandshakeReply`, after which the scene/terrain stream begins. Richer,
-updatable region settings (`RegionInfo`) can be requested afterward.
+`RegionHandshakeReply`, whose `Flags` say what it holds in its object cache and
+whether it understands an appearance message about its own avatar
+(`RegionHandshakeReplyFlags`), after which the scene/terrain stream begins.
+Richer, updatable region settings (`RegionInfo`) can be requested afterward.
 
 The descriptive and configuration data of a region — its identity, agent
 limits, estate, and sky/water environment — is covered on its own in
@@ -379,8 +390,10 @@ None of these has a reply; the client just acts on them.
 >   `sl-proto/src/types/object.rs` (extra params in
 >   `sl-proto/src/extra_params.rs`, particles in `sl-proto/src/particles.rs`).
 >   Events: `ObjectAdded`, `ObjectUpdated`, `ObjectRemoved`, `ObjectProperties`,
->   `TimeDilation`. Animesh animation pushes are
->   `Event::ObjectAnimation { object_id, animations }` carrying
+>   `TimeDilation`, and per message `ObjectStreamBatch` (its form and the
+>   objects it named). `Command::SetInterestListMode` switches Second Life's
+>   interest list (`Event::InterestListMode` is the answer). Animesh animation
+>   pushes are `Event::ObjectAnimation { object_id, animations }` carrying
 >   `ObjectPlayingAnimation` (`anim_id` / `sequence_id`); the sim-side inverse
 >   is `SimSession::send_object_animation`.
 > - Object editing: `Command::SetObjectShape` / `SetObjectImage` /

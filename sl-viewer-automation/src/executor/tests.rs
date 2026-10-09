@@ -911,3 +911,103 @@ fn a_file_dialog_answer_fails_without_a_dialog_it_can_answer() -> Result<(), Str
     );
     Ok(())
 }
+
+/// An app with a settings store holding one float and one flag.
+fn settings_app() -> App {
+    let mut settings =
+        sl_viewer_settings::ViewerSettings::from_store_for_test(sl_settings::SettingsStore::new());
+    settings.register_transient("TestFarClip", sl_settings::SettingValue::F32(256.0), "");
+    settings.register_transient("TestFlag", sl_settings::SettingValue::Bool(false), "");
+    let mut app = app();
+    app.insert_resource(settings);
+    app
+}
+
+/// The setting a `Setting` response holds: its kind and its value.
+fn setting_of(body: ResponseBody) -> Result<(String, serde_json::Value), String> {
+    match body {
+        ResponseBody::Setting {
+            value_kind, value, ..
+        } => Ok((value_kind, value)),
+        other => Err(format!("not a setting: {other:?}")),
+    }
+}
+
+/// A setting is read as bare JSON of its kind, written through the store —
+/// an integer will do for a float — and read back as written.
+#[test]
+fn a_setting_is_read_and_written_by_its_key() -> Result<(), String> {
+    let mut app = settings_app();
+    let read = RequestBody::ReadSetting {
+        key: "TestFarClip".to_owned(),
+    };
+    assert_eq!(
+        setting_of(ok(request(&mut app, read.clone())?)?)?,
+        ("f32".to_owned(), serde_json::json!(256.0))
+    );
+    let written = ok(request(
+        &mut app,
+        RequestBody::WriteSetting {
+            key: "TestFarClip".to_owned(),
+            value: serde_json::json!(32),
+        },
+    )?)?;
+    assert_eq!(
+        setting_of(written)?,
+        ("f32".to_owned(), serde_json::json!(32.0))
+    );
+    assert_eq!(
+        app.world()
+            .resource::<sl_viewer_settings::ViewerSettings>()
+            .store()
+            .get_f32("TestFarClip")
+            .map_err(|error| error.to_string())?
+            .to_bits(),
+        32.0_f32.to_bits()
+    );
+    assert_eq!(
+        setting_of(ok(request(&mut app, read)?)?)?,
+        ("f32".to_owned(), serde_json::json!(32.0))
+    );
+    Ok(())
+}
+
+/// A key nobody registered and a value of another kind are refused, and an
+/// app with no settings store says it has none.
+#[test]
+fn a_setting_write_is_refused_for_an_unknown_key_and_a_wrong_kind() -> Result<(), String> {
+    let mut with_settings = settings_app();
+    let (error, _report) = failed(request(
+        &mut with_settings,
+        RequestBody::ReadSetting {
+            key: "NoSuchSetting".to_owned(),
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::InvalidRequest { .. }),
+        "{error:?}"
+    );
+    let (error, _report) = failed(request(
+        &mut with_settings,
+        RequestBody::WriteSetting {
+            key: "TestFlag".to_owned(),
+            value: serde_json::json!("sideways"),
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::InvalidRequest { .. }),
+        "{error:?}"
+    );
+    let mut bare = app();
+    let (error, _report) = failed(request(
+        &mut bare,
+        RequestBody::ReadSetting {
+            key: "TestFarClip".to_owned(),
+        },
+    )?)?;
+    assert!(
+        matches!(error, AutomationError::Unavailable { .. }),
+        "{error:?}"
+    );
+    Ok(())
+}

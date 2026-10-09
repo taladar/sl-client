@@ -13,7 +13,7 @@ use std::time::Duration;
 use sl_client_tokio::{
     AgentKey, CircuitId, CircuitProbe, Client, ClientDirectories, Command, Diagnostic, Event,
     ExperienceKey, GroupKey, InventoryCacheConfig, LoginAccount, LoginParams, LoginRejectKind,
-    LoginRequest, MeshKey, RegionHandle, StartLocation, Uuid,
+    LoginRequest, MeshKey, RegionHandle, RegionHandshakeReplyFlags, StartLocation, Uuid,
 };
 use sl_repl::{Avatar, CooldownError, LoginCooldown};
 use time::OffsetDateTime;
@@ -157,6 +157,10 @@ pub struct Session {
     /// `seed-capabilities` case changes it with
     /// [`Session::relogin_requesting_capabilities`].
     capabilities: Option<Vec<String>>,
+    /// The `Flags` the session's `RegionHandshakeReply`s carry. Retained like
+    /// [`options`](Self::options); the `object-update-decode` case changes it
+    /// with [`Session::relogin_with_handshake_flags`].
+    handshake_flags: RegionHandshakeReplyFlags,
     /// Each neighbour region's capability map as its seed answered, keyed by
     /// the neighbour's simulator address.
     neighbour_caps: Arc<Mutex<NeighbourCapabilityMaps>>,
@@ -498,6 +502,22 @@ impl Session {
         self.relogin_with(options, capabilities).await
     }
 
+    /// [`Session::relogin`], answering every region handshake with `flags` —
+    /// how a case finds out what a grid makes of what a viewer says about its
+    /// object cache.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::relogin`].
+    pub async fn relogin_with_handshake_flags(
+        &mut self,
+        flags: RegionHandshakeReplyFlags,
+    ) -> Result<(), TestFailure> {
+        self.handshake_flags = flags;
+        let (options, capabilities) = (self.options.clone(), self.capabilities.clone());
+        self.relogin_with(options, capabilities).await
+    }
+
     /// [`Session::relogin`], asking for `options` (or the client's default list
     /// for `None`) instead of what the previous login asked for — which is how
     /// a case maps which fields each option gates.
@@ -527,6 +547,7 @@ impl Session {
         let cooldown = self.cooldown.clone();
         let force = self.force;
         let cache_dir = self.cache_dir.clone();
+        let handshake_flags = self.handshake_flags;
         if grid.needs_cooldown() {
             let label = avatar_label(&avatar);
             wait_out_cooldown(&cooldown, &label, force).await?;
@@ -543,6 +564,7 @@ impl Session {
             probe: CircuitProbe::Off,
             options,
             capabilities,
+            handshake_flags,
         })
         .await?;
         Ok(())
@@ -578,6 +600,7 @@ impl Session {
             probe: CircuitProbe::Off,
             options: self.options.clone(),
             capabilities: self.capabilities.clone(),
+            handshake_flags: self.handshake_flags,
         };
         let (login_uri, mut request) = login_request(&spec)?;
         if let Some((first, last)) = &attempt.name {
@@ -710,6 +733,9 @@ pub struct LoginSpec<'a> {
     /// The capability names the seed requests ask for, or `None` for the
     /// client's default (what every case but `seed-capabilities` passes).
     pub capabilities: Option<Vec<String>>,
+    /// The `Flags` every `RegionHandshakeReply` carries (the client's default,
+    /// for every case but `object-update-decode`).
+    pub handshake_flags: RegionHandshakeReplyFlags,
 }
 
 /// Log in as the spec says, answering any MFA challenge, and spawn the run
@@ -854,11 +880,13 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
         probe,
         options,
         capabilities,
+        handshake_flags,
     } = spec;
     // Enable diagnostics so a case can observe protocol anomalies (e.g. a
     // logout that never received its `LogoutReply`); they are off by default.
     client.set_diagnostics(true);
     client.set_circuit_probe(probe);
+    client.set_region_handshake_reply_flags(handshake_flags);
 
     // Enable the inventory disk cache when the case asked for one (only
     // `inventory-cache-skip` does). The runtime then loads the cache before the
@@ -967,6 +995,7 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
         cache_dir,
         options,
         capabilities,
+        handshake_flags,
         neighbour_caps,
         connected: true,
         caps,

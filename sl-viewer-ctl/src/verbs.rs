@@ -178,6 +178,22 @@ pub(crate) async fn run<W: Write>(
         }
         Verb::Environment => Outcome::Environment(viewer.environment().await?),
         Verb::WorldMap => Outcome::WorldMap(viewer.world_map().await?),
+        Verb::Setting { key, value } => {
+            let value = match value {
+                Some(text) => {
+                    // A bare word is a string: `setting SkinName vintage`
+                    // need not be quoted twice.
+                    let wanted = serde_json::from_str(text)
+                        .unwrap_or_else(|_not_json| serde_json::Value::String(text.clone()));
+                    viewer.set_setting(key, wanted).await?
+                }
+                None => viewer.setting(key).await?,
+            };
+            Outcome::Setting {
+                key: key.clone(),
+                value,
+            }
+        }
         Verb::FileDialog { path, .. } => Outcome::FileDialog {
             answered: viewer.answer_file_dialog(path.as_deref()).await?,
             picked: path.clone(),

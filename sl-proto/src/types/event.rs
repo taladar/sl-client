@@ -19,14 +19,14 @@ use super::{
     LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo,
     MapRequestFlags, Maturity, MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo,
     NeighborRetirement, Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily,
-    OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
-    ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits,
-    RegionStats, RequiredVoiceVersion, ScriptCompileError, ScriptControl, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissionState, ScriptTeleportRequest, ServerError,
-    SetDisplayNameReply, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryItem,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerBatch, TerrainPatch, Texture,
-    TransferStatus, UserInfo, ViewerEffect, Wearable,
+    ObjectStreamBatch, OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
+    ParcelObjectOwnersPart, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation,
+    RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion, ScriptCompileError,
+    ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissionState,
+    ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags,
+    SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
+    TerrainLayerBatch, TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
@@ -39,7 +39,6 @@ use sl_types::key::{
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_types::map::RegionCoordinates;
-use sl_wire::AgentPreferences;
 use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
 use sl_wire::ExperienceEnvironmentPush;
@@ -58,6 +57,7 @@ use sl_wire::SelectedResourceCost;
 use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
 use sl_wire::WireError;
+use sl_wire::{AgentPreferences, InterestListReply};
 use sl_wire::{ExperienceInfo, ExperienceSearchPage};
 use uuid::Uuid;
 
@@ -372,6 +372,10 @@ pub enum Event {
     /// [`Command::RequestAgentPreferences`](crate::Command::RequestAgentPreferences).
     /// The grid echoes the full stored set, so every field is `Some`.
     AgentPreferences(Box<AgentPreferences>),
+    /// The simulator's answer to
+    /// [`Command::SetInterestListMode`](crate::Command::SetInterestListMode):
+    /// the interest-list mode now in force and the one it replaced.
+    InterestListMode(InterestListReply),
     /// The land-impact / physics costs of one or more objects, from a
     /// `GetObjectCost` capability reply to
     /// [`Command::RequestObjectCost`](crate::Command::RequestObjectCost). One
@@ -1527,6 +1531,10 @@ pub enum Event {
         /// The time dilation, `0.0`..=`1.0` (the raw `u16` divided by `65535`).
         dilation: f32,
     },
+    /// A message of the object-update stream arrived: its form and the
+    /// objects it named. Emitted once per message, ahead of the per-object
+    /// events it gives rise to.
+    ObjectStreamBatch(Box<ObjectStreamBatch>),
     /// An object left the scene (`KillObject`): it was removed from the region
     /// cache.
     ObjectRemoved {

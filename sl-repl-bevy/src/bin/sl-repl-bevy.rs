@@ -701,6 +701,7 @@ fn run_session(
             params: params.clone(),
             diagnostics: true,
             circuit_probe: sl_client_bevy::CircuitProbe::Off,
+            region_handshake_reply_flags: sl_client_bevy::RegionHandshakeReplyFlags::CLIENT_DEFAULT,
             chat_log_config: chat_log_config.clone(),
             directories: directories.clone(),
             account_dirs,

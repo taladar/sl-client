@@ -300,6 +300,30 @@ impl WorldCache {
         })
     }
 
+    /// Everything that hangs off `parent` and goes when it does: its child
+    /// prims, and theirs — but no avatar and nothing an avatar carries. An
+    /// avatar seated on an object that is taken away is not taken with it;
+    /// the reference viewer unparents it instead
+    /// (`LLViewerObject::markDead`).
+    pub(crate) fn dependents_of(&self, parent: ScopedObjectId) -> Vec<RegionLocalObjectId> {
+        let Some(sim) = self.objects.get(&parent.circuit) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        let mut frontier = vec![parent.id];
+        while let Some(current) = frontier.pop() {
+            for object in sim.values().filter(|object| {
+                object.parent_id == current && object.pcode != crate::types::pcode::AVATAR
+            }) {
+                if object.local_id != parent.id && !found.contains(&object.local_id) {
+                    found.push(object.local_id);
+                    frontier.push(object.local_id);
+                }
+            }
+        }
+        found
+    }
+
     /// `circuit`'s terrain patches, created empty on first use.
     pub(crate) fn terrain_in_or_default(&mut self, circuit: CircuitId) -> &mut SimTerrain {
         self.terrain.entry(circuit).or_default()

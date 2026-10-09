@@ -212,14 +212,14 @@ use crate::types::{
     ObjectTransform, OpenRegionInfo, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
     ParcelCategory, ParcelDetails, ParcelInfo, ParcelObjectOwner, ParcelReturnType, ParcelUpdate,
     PermissionField, PlacesResult, PlayingAnimation, Postcard, PrimShape, PrimShapeParams,
-    ProposalVoteId, RegionIdentity, RegionLimits, RegionStats, Reliability, RequiredVoiceVersion,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
-    ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
-    SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-    TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus, Transmit,
-    UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
-    WearableType,
+    ProposalVoteId, RegionHandshakeReplyFlags, RegionIdentity, RegionLimits, RegionStats,
+    Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
+    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
+    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Wearable, WearableType,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -261,7 +261,7 @@ use sl_wire::messages::{
 use sl_wire::messages::{
     TransferInfo, TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
 };
-use sl_wire::{AgentPreferences, DisplayName, ObjectPermMasks};
+use sl_wire::{AgentPreferences, DisplayName, InterestListMode, ObjectPermMasks};
 use sl_wire::{
     AttachmentResourcesReport, LslSyntax, ObjectCost, ObjectPhysicsData, ParcelScriptResources,
     RemoteParcelRequest, ResourceSummary, SelectedResourceCost, SimulatorFeatures,
@@ -1660,6 +1660,13 @@ pub enum ServerEvent {
         invoice: Uuid,
         /// The method's string parameters, in order.
         params: Vec<String>,
+    },
+    /// The client switched its interest-list mode over the `InterestList`
+    /// capability: which objects it wants sent. Queued only when the mode
+    /// changes.
+    InterestListModeChanged {
+        /// The mode now in force.
+        mode: InterestListMode,
     },
     /// The client filed an abuse / bug report over the legacy `UserReport` UDP
     /// message (the modern path is the `SendUserReport` capability). The
@@ -3193,6 +3200,13 @@ pub struct SimSession {
     /// The agent's server-stored preferences, served and updated by the
     /// `AgentPreferences` capability ([`SimSession::agent_preferences`]).
     agent_preferences: AgentPreferences,
+    /// Which objects the client asked to be sent
+    /// ([`SimSession::interest_list_mode`]).
+    interest_list_mode: InterestListMode,
+    /// What the client's `RegionHandshakeReply` said of its object cache,
+    /// once it has answered the handshake
+    /// ([`SimSession::handshake_reply_flags`]).
+    handshake_reply_flags: Option<RegionHandshakeReplyFlags>,
     /// Whether a `TeleportCancel` has arrived since the client's last teleport
     /// request ([`SimSession::take_teleport_cancel`]).
     teleport_cancel: TeleportCancelState,
@@ -3516,6 +3530,8 @@ impl SimSession {
             offline_messages: Vec::new(),
             display_names: BTreeMap::new(),
             agent_preferences: default_agent_preferences(),
+            interest_list_mode: InterestListMode::Default,
+            handshake_reply_flags: None,
             teleport_cancel: TeleportCancelState::None,
             pending_report_screenshot: None,
             pending_caps_uploads: BTreeMap::new(),
@@ -3671,6 +3687,33 @@ impl SimSession {
     #[must_use]
     pub const fn agent_preferences(&self) -> &AgentPreferences {
         &self.agent_preferences
+    }
+
+    /// The `Flags` of the client's `RegionHandshakeReply` — whether it wants
+    /// every cacheable object, whether its cache is empty, whether it
+    /// understands an appearance message about its own avatar — or `None`
+    /// until it has answered the handshake.
+    #[must_use]
+    pub const fn handshake_reply_flags(&self) -> Option<RegionHandshakeReplyFlags> {
+        self.handshake_reply_flags
+    }
+
+    /// Which objects the client asked to be sent: the mode its last
+    /// `InterestList` POST set, `default` until one does.
+    #[must_use]
+    pub const fn interest_list_mode(&self) -> InterestListMode {
+        self.interest_list_mode
+    }
+
+    /// Switches the interest-list mode, returning the one it replaces and
+    /// queueing [`ServerEvent::InterestListModeChanged`] if they differ.
+    pub fn set_interest_list_mode(&mut self, mode: InterestListMode) -> InterestListMode {
+        let previous = core::mem::replace(&mut self.interest_list_mode, mode);
+        if previous != mode {
+            self.events
+                .push_back(ServerEvent::InterestListModeChanged { mode });
+        }
+        previous
     }
 
     /// Merges an `AgentPreferences` capability update into the stored set:
@@ -10298,7 +10341,9 @@ impl SimSession {
                 }
                 self.events.push_back(ServerEvent::AgentArrived);
             }
-            AnyMessage::RegionHandshakeReply(_) => {
+            AnyMessage::RegionHandshakeReply(reply) => {
+                self.handshake_reply_flags =
+                    Some(RegionHandshakeReplyFlags(reply.region_info.flags));
                 self.events.push_back(ServerEvent::RegionHandshakeReplied);
             }
             AnyMessage::StartPingCheck(ping) => {
