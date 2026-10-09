@@ -14,6 +14,7 @@ refs:
     test-script-upload,
     test-baked-texture-upload,
     protocol-audit-notecard-fidelity,
+    gridspec-object-properties,
   ]
 ---
 
@@ -79,7 +80,11 @@ does there is equally unmeasured, and the answers decide what
   viewer has no way to notice at all.
 - does the losing viewer get told without asking — a re-sent `ObjectProperties`
   carrying the new `inventory_serial` is the channel a simulator has for it —
-  or does it only find out when it next requests the listing?
+  or does it only find out when it next requests the listing? For an item
+  *dropped into* a prim this is measured ([[gridspec-object-properties]],
+  2026-10-09): Second Life tells every session holding the prim selected,
+  OpenSim only the writer. For an asset saved over in place it is still
+  open.
 - for a script, does the save reset or restart it, and does the other viewer
   see the `ScriptRunning` change?
 

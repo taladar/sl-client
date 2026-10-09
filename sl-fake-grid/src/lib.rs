@@ -52,9 +52,10 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use imitates::{
-    AbsentTile, DotName, EditEcho, EmptyCells, EnvironmentChangeReply, ImitatedGrid, LandOrigin,
-    LoginFields, LoginRefusals, LogoutReply, MapLayerAnswer, MapPolicy, NameMatch,
-    OPENSIM_MAX_AGENT_GROUPS, ParcelPolicy, RegionCapacity, SELECTED_PARCEL_SEQUENCE_ID,
+    AbsentTile, ChildSale, ContentsAudience, DotName, EditEcho, EmptyCells, EnvironmentChangeReply,
+    ImitatedGrid, LandOrigin, LastOwner, LinkedRecord, LoginFields, LoginRefusals, LogoutReply,
+    MapLayerAnswer, MapPolicy, NameMatch, OPENSIM_ALL_PERMISSIONS, OPENSIM_MAX_AGENT_GROUPS,
+    ParcelPolicy, PropertiesPolicy, RegionCapacity, SELECTED_PARCEL_SEQUENCE_ID,
     SIT_TARGET_RAISE_M, SecondLogin, SitPolicy, SitRefusal, StockDay, TerrainPolicy, WindStart,
 };
 pub use inventory::{

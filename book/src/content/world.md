@@ -51,7 +51,9 @@ is never serialized.
 
 Extended, less-frequently-changing data — creator, full permissions, name,
 description, sale info — comes separately as **object properties**, requested on
-demand.
+demand by selecting the object. What each grid's record holds, what else a
+select brings and who is told when a record changes are measured in
+[Objects § Properties](../gridspec/objects.md#properties).
 
 A child names its parent only by local id, and nothing guarantees the parent's
 update arrived first — or at all. The reference viewer files such a child as an

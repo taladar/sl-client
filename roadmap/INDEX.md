@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 109 |
 | in-progress | 20 |
 | bugs | 38 |
-| done | 1340 |
-| deferred | 29 |
+| done | 1341 |
+| deferred | 30 |
 | wont-do | 17 |
-| **total** | **2050** |
+| **total** | **2052** |
 
 ## ideas (139)
 
@@ -1092,6 +1092,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
+- [`server-fake-grid-object-record-texture-ids`](ready/server-fake-grid-object-record-texture-ids.md)
+  — Fake grid — list face textures in a Second Life object record
 - [`server-fake-grid-object-update-forms`](ready/server-fake-grid-object-update-forms.md)
   — Fake grid — send compressed, terse and cached object updates as each grid
   does (blocked by `gridspec-object-update-stream` (done))
@@ -1172,8 +1174,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   order, limits and refusals on each grid
 - [`gridspec-object-media`](ready/gridspec-object-media.md) — Media on a prim:
   ObjectMedia, navigation and propagation on each grid
-- [`gridspec-object-properties`](ready/gridspec-object-properties.md) — Object
-  properties and selection replies on each grid
 - [`gridspec-object-rez-derez`](ready/gridspec-object-rez-derez.md) — Rez, take,
   take-copy, delete, return and auto-return on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
@@ -1701,7 +1701,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The scripted environment change's `night` marker never arrived, once, in a
   full suite run
 
-## done (1340)
+## done (1341)
 
 ### protocol
 
@@ -4646,6 +4646,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   logout does to seats and child circuits
 - [`gridspec-neighbours-crossing`](done/gridspec-neighbours-crossing.md) — Child
   agents, EnableSimulator and region crossing on each grid
+- [`gridspec-object-properties`](done/gridspec-object-properties.md) — Object
+  properties and selection replies on each grid
 - [`gridspec-object-update-stream`](done/gridspec-object-update-stream.md) —
   Object update forms, the interest list and kills on each grid
 - [`gridspec-parcel-access-and-ban-lines`](done/gridspec-parcel-access-and-ban-lines.md)
@@ -4675,7 +4677,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-world-map`](done/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 
-## deferred (29)
+## deferred (30)
 
 ### protocol
 
@@ -4756,6 +4758,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-object-record-batching`](deferred/server-fake-grid-object-record-batching.md)
+  — Fake grid — send object records several to a message, as each grid does
 - [`server-lsl-lib-email-xmlrpc`](deferred/server-lsl-lib-email-xmlrpc.md) —
   Library tranche — email and XML-RPC, parked (blocked by
   `server-lsl-vm-execution` (done))

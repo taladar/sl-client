@@ -48,6 +48,12 @@
 //! | a sit on an object the region does not have ([`SitPolicy::unknown_target`]) | refused at once with the named alert `SitFailNotSameRegion` | not answered: the client's own sit timeout ends it |
 //! | where standing up puts the avatar ([`SitPolicy::stand_forward_m`], [`SitPolicy::stand_up_m`]) | 0.34 m in front of where it sat, at the same height | 0.65 m in front and 0.57 m above |
 //! | the seat position in an `AvatarSitResponse` for a seat with a sit target ([`SitPolicy::response_states_seated_position`]) | where the avatar is put: the target raised by 0.35 m | the target as the script set it, 0.35 m below where the avatar is put |
+//! | who is sent an object's record when its name or description is edited ([`PropertiesPolicy::rename_answered`]) | the editor, selected or not | nobody |
+//! | who is sent it when something is written into its contents ([`PropertiesPolicy::contents_change_told_to`]) | every session holding it selected, the writer among them or not | the writer, selected or not |
+//! | what a select and a deselect bring besides the record ([`PropertiesPolicy::strangers_select_resends_object`], [`PropertiesPolicy::deselect_sends_terse`]) | a deselect brings a terse update of the object | a select of somebody else's object brings it again in full |
+//! | whose record a link sends the linker ([`PropertiesPolicy::link_sends`]) | each linked child's | the root's |
+//! | a child prim's sale state in its record ([`PropertiesPolicy::child_sale`]) | its own | the root's |
+//! | a new prim's record ([`PropertiesPolicy::new_prim_owner_mask`], [`PropertiesPolicy::new_prim_last_owner`], [`PropertiesPolicy::ownership_cost`]) | base and owner masks `0x7fffffff`, no last owner, an ownership cost of 10 | masks `0x0009e000`, the rezzer as last owner, a cost of 0 |
 //!
 //! **The inventory rows are the divergence a viewer is most likely to trip
 //! over**, which is why they are three rows rather than one setting. An
@@ -531,6 +537,47 @@ impl ImitatedGrid {
                 response_states_seated_position: false,
                 stand_forward_m: 0.65,
                 stand_up_m: 0.57,
+            },
+        }
+    }
+
+    /// How this grid answers a select and tells of a change to an object's
+    /// record where the two disagree — measured by the `object-properties`
+    /// conformance case on aditi and the local OpenSim (2026-10-09,
+    /// `book/src/gridspec/objects.md` § Properties).
+    ///
+    /// They agree on the outline: a select is answered with the record and
+    /// with the object's physics record over the event queue, whoever owns
+    /// the object and however often it is selected; a select of a linkset's
+    /// root is answered for the root alone; a family request about a child
+    /// prim is answered with the root's record; a child's record carries the
+    /// root's permission masks; the creation date is in microseconds; and no
+    /// edit of a name, a description, a price or a permission is told to
+    /// anybody but the session that made it.
+    #[must_use]
+    pub const fn properties_policy(self) -> PropertiesPolicy {
+        match self {
+            Self::SecondLife => PropertiesPolicy {
+                rename_answered: true,
+                contents_change_told_to: ContentsAudience::Selectors,
+                strangers_select_resends_object: false,
+                deselect_sends_terse: true,
+                link_sends: LinkedRecord::Children,
+                child_sale: ChildSale::Own,
+                new_prim_owner_mask: sl_wire::Permissions::ALL,
+                new_prim_last_owner: LastOwner::Nobody,
+                ownership_cost: 10,
+            },
+            Self::OpenSim => PropertiesPolicy {
+                rename_answered: false,
+                contents_change_told_to: ContentsAudience::Writer,
+                strangers_select_resends_object: true,
+                deselect_sends_terse: false,
+                link_sends: LinkedRecord::Root,
+                child_sale: ChildSale::Roots,
+                new_prim_owner_mask: OPENSIM_ALL_PERMISSIONS,
+                new_prim_last_owner: LastOwner::Rezzer,
+                ownership_cost: 0,
             },
         }
     }
@@ -1721,6 +1768,94 @@ pub enum AbsentTile {
     Forbidden,
     /// `200` with a tile of plain water: OpenSim, for all three.
     BlankTile,
+}
+
+/// How a grid answers a select and tells of a change to an object's record
+/// ([`ImitatedGrid::properties_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PropertiesPolicy {
+    /// Whether an `ObjectName` or an `ObjectDescription` is answered with the
+    /// new record. Second Life answers every edit of the record to the
+    /// session that made it, whether or not it holds the object selected;
+    /// OpenSim's two handlers store the text and send nothing
+    /// (`SceneGraph.PrimName`), while its sale and permission handlers answer.
+    pub rename_answered: bool,
+    /// Who is sent the record, with its advanced contents serial, when
+    /// something is written into the object's task inventory.
+    pub contents_change_told_to: ContentsAudience,
+    /// Whether a select of an object the agent does not own sends it the
+    /// object again in a full `ObjectUpdate` ahead of the record: OpenSim's
+    /// `SelectPrim`, "if a friend got or lost edit rights after login, a full
+    /// update is needed".
+    pub strangers_select_resends_object: bool,
+    /// Whether a deselect is answered with a terse update of the object.
+    pub deselect_sends_terse: bool,
+    /// Whose record a link sends the session that linked.
+    pub link_sends: LinkedRecord,
+    /// Whose sale type and price a child prim's record states.
+    pub child_sale: ChildSale,
+    /// The base and owner masks of a prim nobody has changed the permissions
+    /// of. Second Life's "everything" is thirty-one bits; OpenSim's is the
+    /// five it defines ([`OPENSIM_ALL_PERMISSIONS`]).
+    pub new_prim_owner_mask: sl_wire::Permissions,
+    /// Who a new prim's record names as its last owner.
+    pub new_prim_last_owner: LastOwner,
+    /// The `OwnershipCost` of a record and of a family record, in L$.
+    pub ownership_cost: u64,
+}
+
+impl Default for PropertiesPolicy {
+    /// Second Life's, as the grid's own default flavour is.
+    fn default() -> Self {
+        ImitatedGrid::SecondLife.properties_policy()
+    }
+}
+
+/// OpenSim's `PermissionMask.All`: transfer, modify, copy, export and move.
+pub const OPENSIM_ALL_PERMISSIONS: sl_wire::Permissions = sl_wire::Permissions::TRANSFER
+    .union(sl_wire::Permissions::MODIFY)
+    .union(sl_wire::Permissions::COPY)
+    .union(sl_wire::Permissions::EXPORT)
+    .union(sl_wire::Permissions::MOVE);
+
+/// Who a write into an object's contents is told to
+/// ([`PropertiesPolicy::contents_change_told_to`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentsAudience {
+    /// Every session holding the object selected, and nobody else: Second
+    /// Life. The writer is told only if it is one of them.
+    Selectors,
+    /// The session that wrote, selected or not, and nobody else: OpenSim.
+    Writer,
+}
+
+/// Whose sale state a child prim's record carries
+/// ([`PropertiesPolicy::child_sale`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildSale {
+    /// The child's own: Second Life.
+    Own,
+    /// The root's: OpenSim reads the sale type and price off the root part.
+    Roots,
+}
+
+/// Who a new prim's record names as its last owner
+/// ([`PropertiesPolicy::new_prim_last_owner`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LastOwner {
+    /// Nobody: Second Life.
+    Nobody,
+    /// Whoever rezzed it: OpenSim.
+    Rezzer,
+}
+
+/// Whose record a link sends ([`PropertiesPolicy::link_sends`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkedRecord {
+    /// Each child's that came under the root: Second Life.
+    Children,
+    /// The root's: OpenSim.
+    Root,
 }
 
 /// How a grid answers a sit request ([`ImitatedGrid::sit_policy`]).

@@ -451,6 +451,12 @@ pub async fn confirm_group_departure(
 /// own cube sits untouched until the parcel's auto-return. That was the whole
 /// "Second Life drops our `RezScript`" mystery.
 ///
+/// Nor is "the next unseen object of ours": a neighbouring region streams its
+/// objects down a child circuit that opens after the agent's own region has
+/// settled, and one of those may be ours too — OpenSim's neighbours hold this
+/// workspace's fixtures. The cases rez where the avatar stands, so only an
+/// object of the agent's own region counts.
+///
 /// Ownership is read from the object's per-viewer
 /// [`OBJECT_YOU_OWNER`](prim_flags::OBJECT_YOU_OWNER) flag as well as its
 /// owner id: Second Life sends the owner id only for objects that carry a sound
@@ -481,6 +487,7 @@ pub async fn wait_for_own_new_object(
         .agent_id()
         .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?
         .uuid();
+    let root = session.circuit_id();
     let started = Instant::now();
     let mut alert: Option<String> = None;
     loop {
@@ -489,6 +496,7 @@ pub async fn wait_for_own_new_object(
             .wait_for(remaining, |event| match event {
                 Event::ObjectAdded(object)
                     if is_own(object, owner)
+                        && root.is_none_or(|root| object.circuit == root)
                         && object.parent_id == RegionLocalObjectId(0)
                         && !seen.contains(&object.scoped_id()) =>
                 {

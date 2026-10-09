@@ -66,3 +66,15 @@ What those runs add:
 
 Both failing runs had an earlier failure in another test, since fixed
 ([[test-fake-grid-tests-stop-reading-client-events]]).
+
+## Again (2026-10-09)
+
+`a_scripted_move_puts_the_object_where_the_script_said` failed once more in
+the commit hook's full run for [[gridspec-object-properties]] (5197 of 5316
+tests run): `timed out waiting for the moved marker` after 110 s. It had
+passed in the same tree an hour earlier, in a run of the viewer's packages
+alone (777 tests). The three `ui_contract` tests were past 300 s beside it,
+and another build was using the machine all day. The timeout report now
+lists the last events and warnings: wind patches, `SimStats` and coarse
+locations to the end, no `ReliableGiveUp` and no abandoned-script warning
+among the last warnings shown.

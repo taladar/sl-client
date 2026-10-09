@@ -4,7 +4,7 @@ title: Task inventory reads and writes on each grid
 topic: gridspec
 status: ready
 origin: gridspec survey (2026-10-03)
-refs: [gridspec-survey,
+refs: [gridspec-survey, gridspec-object-properties,
   test-phase-z-deferred-04,
   viewer-task-inventory-open-and-save-back, test-asset-save-mutation-survey]
 ---
@@ -21,6 +21,13 @@ listing over the `RequestTaskInventory` capability instead
 ([[protocol-request-task-inventory-cap]]). OpenSim mints a fresh item id on
 copy-in. The fake grid ignores `RezScript`,
 `MoveTaskInventory`, `RemoveTaskInventory`.
+
+The serial-push half of an `UpdateTaskInventory` drop is measured
+([[gridspec-object-properties]], `book/src/gridspec/objects.md` § Properties,
+2026-10-09): Second Life sends the record with its advanced serial to every
+session holding the prim selected, the writer only if it is one; OpenSim to
+the writer alone, selected or not. The drop itself lands on Second Life. Left
+for this task: the same question for `RezScript`, a remove and a move.
 
 ## Discover
 

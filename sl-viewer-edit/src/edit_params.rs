@@ -763,7 +763,7 @@ impl ParamField {
     /// The gate guarding this field.
     const fn gate(self) -> ParamGate {
         match self.family() {
-            CommitFamily::Name | CommitFamily::Description => ParamGate::Selection,
+            CommitFamily::Name | CommitFamily::Description => ParamGate::Record,
             CommitFamily::Shape => ParamGate::ShapeEditable,
             CommitFamily::Flexi => ParamGate::FlexiFields,
             CommitFamily::Light => ParamGate::LightFields,
@@ -873,9 +873,21 @@ enum FeatureRows {
 /// does not hide; only the per-type rows hide).
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 enum ParamGate {
-    /// Any selected, tracked object (name / description, the flag toggles,
-    /// the material cycle).
+    /// Any selected, tracked object (the flag toggles, the material cycle):
+    /// what an object update alone says enough about.
     Selection,
+    /// A selection whose **record** the simulator has sent — the
+    /// `ObjectProperties` a select is answered with (name / description, the
+    /// permission toggles). Until it lands these would show a blank name and
+    /// unticked permissions as though they were the object's, and a commit
+    /// would write them; the reference greys them the same way
+    /// (`LLPanelPermissions::refresh` on an invalid selection). Both grids
+    /// answer a select of an object within a second, and neither answers one
+    /// of an avatar or of a local id the region does not have, so the gate
+    /// can stay shut for good — the rest of the floater does not wait on it.
+    /// The group's Set… button is not behind it: a picked group is sent
+    /// whatever the record says, and reads nothing off it.
+    Record,
     /// A selected plain prim whose shape is editable — not a sculpt / mesh
     /// (the shape fields and the type / hollow-shape cycles).
     ShapeEditable,
@@ -897,15 +909,15 @@ enum ParamGate {
 /// The gate guarding a toggle row.
 const fn toggle_gate(toggle: ParamToggle) -> ParamGate {
     match toggle {
-        ParamToggle::Physical
-        | ParamToggle::Temporary
-        | ParamToggle::Phantom
-        | ParamToggle::NextModify
+        ParamToggle::Physical | ParamToggle::Temporary | ParamToggle::Phantom => {
+            ParamGate::Selection
+        }
+        ParamToggle::NextModify
         | ParamToggle::NextCopy
         | ParamToggle::NextTransfer
         | ParamToggle::ShareGroup
         | ParamToggle::AnyoneMove
-        | ParamToggle::AnyoneCopy => ParamGate::Selection,
+        | ParamToggle::AnyoneCopy => ParamGate::Record,
         ParamToggle::Flexi => ParamGate::FlexiToggle,
         ParamToggle::Light => ParamGate::Prim,
     }
@@ -2577,9 +2589,11 @@ fn show_param_snapshot(
             .as_ref()
             .is_some_and(|shape| matches!(shape.path_curve, PathCurve::Line | PathCurve::Flexible));
     let deed_ok = data.is_some_and(|data| data.group.is_some());
+    let has_record = data.is_some_and(|data| data.permissions.is_some());
     let enabled_for = |gate: ParamGate| -> bool {
         let base = match gate {
             ParamGate::Selection => has_selection,
+            ParamGate::Record => has_record,
             ParamGate::ShapeEditable => shape_editable,
             ParamGate::Prim => is_prim,
             ParamGate::FlexiToggle => flexi_toggle_ok,
@@ -3576,6 +3590,36 @@ mod tests {
                 .collect(),
         );
         assert_eq!(super::agent_label(agent, &mut avatars), "Skipper");
+    }
+
+    /// Everything the General tab reads off the simulator's record of the
+    /// selection waits for that record; what an object update says does not.
+    /// A select of an avatar, or of a local id the region does not have, is
+    /// never answered on either grid (`object-select-scene`,
+    /// `object-properties`), and a name field left live over a record that
+    /// never came would commit a blank name.
+    #[test]
+    fn the_record_gates_what_is_read_off_it() {
+        use super::{ParamGate, ParamToggle, toggle_gate};
+        assert_eq!(ParamField::Name.gate(), ParamGate::Record);
+        assert_eq!(ParamField::Description.gate(), ParamGate::Record);
+        for toggle in [
+            ParamToggle::NextModify,
+            ParamToggle::NextCopy,
+            ParamToggle::NextTransfer,
+            ParamToggle::ShareGroup,
+            ParamToggle::AnyoneMove,
+            ParamToggle::AnyoneCopy,
+        ] {
+            assert_eq!(toggle_gate(toggle), ParamGate::Record, "{toggle:?}");
+        }
+        for toggle in [
+            ParamToggle::Physical,
+            ParamToggle::Temporary,
+            ParamToggle::Phantom,
+        ] {
+            assert_eq!(toggle_gate(toggle), ParamGate::Selection, "{toggle:?}");
+        }
     }
 
     /// A default (unit-box-like) quantized shape.

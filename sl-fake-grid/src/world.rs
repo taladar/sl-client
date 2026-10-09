@@ -53,7 +53,7 @@ const OVERLAY_WEST_LINE: u8 = 0x40;
 /// The parcel-overlay bit marking a cell on a parcel's south edge.
 const OVERLAY_SOUTH_LINE: u8 = 0x80;
 /// The physics time dilation reported on fixture object updates: real time.
-const REAL_TIME_DILATION: u16 = 0xFFFF;
+pub(crate) const REAL_TIME_DILATION: u16 = 0xFFFF;
 /// The sequence id of an unsolicited agent-parcel push (what OpenSim's
 /// `SendLandUpdateToClient` sends).
 const UNSOLICITED_SEQUENCE_ID: i32 = 0;
@@ -163,6 +163,10 @@ pub struct SceneFixtures {
     /// set when the grid starts; `None` in a world no grid has adopted, which
     /// reports [`region_limits`]' own numbers.
     pub(crate) capacity: Option<crate::imitates::RegionCapacity>,
+    /// How the region answers a select and tells of a change to an object's
+    /// record ([`ImitatedGrid::properties_policy`](crate::ImitatedGrid::properties_policy)),
+    /// set when the grid starts; Second Life's in a world no grid has adopted.
+    pub(crate) properties: crate::imitates::PropertiesPolicy,
     /// The region's terrain textures and blend heights as an estate manager has
     /// changed them, or [`None`] while they are still the identity's.
     ///
@@ -308,17 +312,19 @@ pub enum RegionChange {
     Updated(Box<Object>),
     /// An object left the region; every other viewer needs its `KillObject`.
     Killed(RegionLocalObjectId),
-    /// An object's **properties** record changed — it was renamed, deeded,
-    /// re-priced, or something was written into its task inventory (which is
-    /// what [`inventory_serial`](sl_proto::ObjectProperties::inventory_serial)
-    /// announces).
+    /// Something was written into an object's task inventory, which its
+    /// **properties** record announces in its
+    /// [`inventory_serial`](sl_proto::ObjectProperties::inventory_serial).
     ///
-    /// The one change in this enum that does not go to the whole region.
-    /// Properties travel in a message a simulator sends to the clients holding
-    /// the object *selected*, so the watcher forwards this only to a session
-    /// whose selection names it — which is what makes the push a subscription
-    /// rather than a broadcast, and why the local id travels alongside the
-    /// record a selection is keyed by.
+    /// The one change in this enum that does not go to the whole region, and
+    /// one only a Second-Life-flavoured grid publishes. Second Life sends the
+    /// record to the clients holding the object *selected*, so the watcher
+    /// forwards this only to a session whose selection names it — which is
+    /// what makes the push a subscription rather than a broadcast, and why the
+    /// local id travels alongside the record a selection is keyed by. OpenSim
+    /// tells the writer alone. An *edit* of the record — a rename, a price, a
+    /// permission — is not published on either grid: it is answered to the
+    /// session that made it and to nobody else.
     PropertiesChanged {
         /// The region-local id the selection subscription is keyed by.
         local_id: RegionLocalObjectId,
@@ -371,6 +377,10 @@ const DEFAULT_OBJECT_NAME: &str = "Object";
 /// mints the same run twice, and a timestamp read off the machine would be the
 /// one field that never matched.
 const FIXTURE_CREATION_DATE: i32 = 1_700_000_000;
+
+/// How many microseconds a second holds: an object's creation date is stated
+/// in them.
+const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 
 /// Permissions with everything granted on every mask: what an inventory item
 /// the grid files away (a take) carries.
@@ -576,6 +586,7 @@ impl SceneFixtures {
             estate: EstateFixture::default(),
             limits: None,
             capacity: None,
+            properties: crate::imitates::PropertiesPolicy::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
         }
@@ -663,18 +674,66 @@ impl SceneFixtures {
     /// inventory's *serial* comes from the inventory, because that is where a
     /// write advances it, and a record that carried a stale one would tell a
     /// viewer its cached contents listing is still good.
+    ///
+    /// A third thing is the grid's rather than the object's: what a record
+    /// says a prim nobody has edited may be done with, who owned it last and
+    /// what it costs to own differ by the grid being imitated
+    /// ([`PropertiesPolicy`](crate::imitates::PropertiesPolicy)).
     #[must_use]
     pub fn properties_of(&self, local_id: RegionLocalObjectId) -> Option<ObjectProperties> {
         let object = self.object_by_local_id(local_id)?;
-        let mut properties = object
-            .properties
-            .clone()
-            .unwrap_or_else(|| default_object_properties(&object));
+        let mut properties = object.properties.clone().unwrap_or_else(|| {
+            let mut fresh = default_object_properties(&object);
+            fresh.permissions.base = self.properties.new_prim_owner_mask;
+            fresh.permissions.owner = self.properties.new_prim_owner_mask;
+            if self.properties.new_prim_last_owner == crate::imitates::LastOwner::Rezzer {
+                fresh.last_owner_id = object.owner_id;
+            }
+            fresh
+        });
+        properties.ownership_cost = LindenAmount(self.properties.ownership_cost);
         properties.inventory_serial = self
             .task_inventories
             .get(&local_id)
             .map_or(0, |contents| contents.serial);
         Some(properties)
+    }
+
+    /// The record of the object as a simulator **sends** it: what
+    /// [`properties_of`](Self::properties_of) holds, with the two things a
+    /// child prim's record takes from its linkset's root. Both live grids
+    /// state the root's permission masks for every prim of a linkset, and
+    /// OpenSim the root's sale type and price as well
+    /// ([`PropertiesPolicy::child_sale`](crate::imitates::PropertiesPolicy::child_sale)).
+    ///
+    /// Kept apart from the stored record because an edit reads the one and
+    /// writes it back: a child that read the root's masks would keep them
+    /// after a delink.
+    #[must_use]
+    pub fn record_of(&self, local_id: RegionLocalObjectId) -> Option<ObjectProperties> {
+        let mut record = self.properties_of(local_id)?;
+        let root = self.root_of(local_id);
+        if root != local_id
+            && let Some(of_root) = self.properties_of(root)
+        {
+            record.permissions = of_root.permissions;
+            if self.properties.child_sale == crate::imitates::ChildSale::Roots {
+                record.sale_type = of_root.sale_type;
+                record.sale_price = of_root.sale_price;
+            }
+        }
+        Some(record)
+    }
+
+    /// The root of `local_id`'s linkset — itself when it is not a child, since
+    /// a prim whose parent this region does not have is one nothing can be
+    /// said about.
+    #[must_use]
+    pub fn root_of(&self, local_id: RegionLocalObjectId) -> RegionLocalObjectId {
+        self.object_by_local_id(local_id)
+            .map(|object| object.parent_id)
+            .filter(|parent| parent.0 != 0 && self.object_by_local_id(*parent).is_some())
+            .unwrap_or(local_id)
     }
 
     /// Records the object as it is now as a state an undo can return to.
@@ -2110,11 +2169,23 @@ pub(crate) fn answer_world_request(
                 .entry(*local_id)
                 .or_default()
                 .write(task_item_from(&source, object.full_id, mint));
-            let Some(properties) = world.properties_of(*local_id) else {
+            let Some(properties) = world.record_of(*local_id) else {
                 return Vec::new();
             };
-            if let Err(error) = sim.send_object_properties(&properties, now) {
+            // Who hears of it is the grid's: Second Life tells every session
+            // holding the prim selected, the writer among them or not;
+            // OpenSim tells the writer and nobody else.
+            let (to_writer, to_selectors) = match world.properties.contents_change_told_to {
+                crate::imitates::ContentsAudience::Selectors => {
+                    (selection.contains(local_id), true)
+                }
+                crate::imitates::ContentsAudience::Writer => (true, false),
+            };
+            if to_writer && let Err(error) = sim.send_object_properties(&properties, now) {
                 tracing::warn!("pushing a written prim's contents serial failed: {error}");
+            }
+            if !to_selectors {
+                return Vec::new();
             }
             return vec![RegionChange::PropertiesChanged {
                 local_id: *local_id,
@@ -2416,7 +2487,10 @@ pub fn default_object_properties(object: &Object) -> ObjectProperties {
         owner: OwnerKey::Agent(owner),
         group: None,
         last_owner_id: uuid::Uuid::nil(),
-        creation_date: FIXTURE_CREATION_DATE.unsigned_abs().into(),
+        // In microseconds, as both live grids state an object's (and unlike an
+        // inventory item's, which is in seconds).
+        creation_date: u64::from(FIXTURE_CREATION_DATE.unsigned_abs())
+            .saturating_mul(MICROSECONDS_PER_SECOND),
         permissions: NEW_OBJECT_PERMISSIONS,
         ownership_cost: LindenAmount(0),
         sale_type: SaleType::NotForSale.to_code(),

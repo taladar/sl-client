@@ -134,3 +134,151 @@ Not measured: a viewer that answers probes from a cache of its own (ours
 keeps none between sessions); what a kill names when an object is deleted
 or taken, which is `gridspec-object-rez-derez`'s; an interest list that
 culls by view.
+
+## Properties
+
+An object update says where an object is and what it looks like. Who made
+it, who owns it, what it is called and what may be done with it is its
+**record**, and a simulator sends that in two messages of their own:
+`ObjectProperties`, the answer to an `ObjectSelect`, and
+`ObjectPropertiesFamily`, the condensed answer to a
+`RequestObjectPropertiesFamily`, which needs no selection.
+
+Measured on 2026-10-09 by two conformance cases. `object-properties` rezzes
+a cube as one avatar, with a second avatar beside it, and asks each question
+below in a leg of its own, listening for four seconds after each for the
+answer or for the silence that is one; it ran six times on aditi (Mauve, the
+public sandbox parcel) and eight on the local OpenSim. `object-select-scene`
+selects what a region already holds — eight root prims, eight child prims,
+eight prims of a neighbouring region and the agent's own avatar — and ran
+twice on aditi (Ahern) and twice on OpenSim. Every row below but the ones
+marked **not held** is checked on every run of both live grids and of both
+fake flavours.
+
+The survey had it that aditi never answered an `ObjectSelect`. It answers
+every one that names an object.
+
+### A select
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a select of an object the agent owns | its `ObjectProperties`, 0.2 to 0.35 s later, and an `ObjectPhysicsProperties` over the event queue | the same, 0.02 s later | the same |
+| of somebody else's object, an avatar beside it | the same, and the same record field for field | the same, with a full `ObjectUpdate` of the object ahead of it (`SelectPrim`: "if a friend got or lost edit rights after login, a full update is needed") | each flavour as its grid |
+| of an object already selected | answered again, in full | the same | the same |
+| a deselect | a terse update of the object | nothing | each flavour as its grid |
+| of eight root prims in one message (none of them the agent's) | eight records in two messages of four, or of five and three | eight records in three messages of three, three and two, 15 to 30 ms apart | eight records, one to a message (**not held**) |
+| of eight child prims | eight records, each the child's own | the same | the same |
+| of eight prims of a neighbouring region, asked of that region | eight records, from the neighbour's simulator | the same (five of five) | the same |
+| of the agent's own avatar | nothing | nothing | nothing |
+| of a local id the region does not have | nothing | nothing | nothing |
+| of a linkset's root alone | the root's record and no child's | the same | the same |
+
+OpenSim's three to a message is its throttle and not a packet's size. It
+turns queued records into messages at most every 20 ms
+(`LLUDPClient.MIN_CALLBACK_MS`), each time as many as the task throttle lets
+through in 30 ms (`HandleQueueEmpty`), counting a record as 200 bytes
+(`ProcessEntityPropertyRequests`). At the task rate a client that sets no
+throttle is given, 18,500 bytes a second, that is 555 bytes: three records.
+A client that asks for a higher task throttle is sent more to a message, up
+to the 1,200 bytes one may hold. Why Second Life's two messages split as
+they did was not found: they came in the same millisecond.
+
+So a viewer that wants a linkset's children named selects every prim of it,
+as the reference viewer does, and one that is not answered is looking at
+something that is not an object.
+
+The physics record is the same on both for a cube nobody has changed:
+shape type 0, density 1000, friction 0.6, restitution 0.5, gravity
+multiplier 1.
+
+### The record of a new prim
+
+| field | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| name, description, touch and sit names | `Object`, and three empty strings | the same | the same |
+| creator and owner | the rezzer | the same | the same |
+| last owner | nobody | the rezzer | each flavour as its grid |
+| group | none | none | none |
+| creation date | **microseconds** since the epoch | the same | the same |
+| base and owner masks | `0x7fffffff` | `0x0009e000`: transfer, modify, copy, export and move, which is all OpenSim defines | each flavour as its grid |
+| group and everyone masks | `0` | `0` | `0` |
+| next-owner mask | `0x00082000`: move and transfer | the same | the same |
+| ownership cost | 10 | 0 | each flavour as its grid |
+| sale type and price | not for sale, at a price of 10 | not for sale, at 0 | not for sale, at 0 (**not held**: a price is not read off a record that is not for sale) |
+| category, contents serial, the three aggregate-permission bytes | 0 | 0 | 0 |
+| item, folder and source task | nil | nil | nil |
+| texture ids | one for each face, the same id six times for a cube | none ("still not sending, not clear the impact on viewers") | none (**not held**) |
+
+Our own type said the creation date was in seconds. Nothing of ours read it.
+
+### The family record
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a request about an object | one `ObjectPropertiesFamily`, its request flags echoed (0, and the pay dialog's 4), agreeing with the full record in every field the two share | the same | the same |
+| from an avatar that does not own it | the same | the same | the same |
+| about a child prim | the **root's** record, under the root's id | the same | the same |
+| about an id nothing has | nothing | nothing | nothing |
+
+### Who is told of a change
+
+The primary avatar made each change three times: with both avatars holding
+the cube selected, with only itself, and with nobody.
+
+| change | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a name or a description (`ObjectName`, `ObjectDescription`) | the record, to the session that made the edit, selected or not; to nobody else | to nobody (`SceneGraph.PrimName` stores it and sends nothing) | each flavour as its grid |
+| a price or a permission (`ObjectSaleInfo`, `ObjectPermissions`) | the same: the editor, selected or not, and nobody else | the same | the same |
+| something written into its contents (`UpdateTaskInventory`) | the record, with its contents serial advanced, to **every session holding it selected** — the writer if it is one of them, and not otherwise | to the writer, selected or not, and nobody else | each flavour as its grid |
+| an edit made with nothing selected | takes | takes | takes |
+| a link | the record of each child that came under the root, to the linker | the root's record, to the linker | each flavour as its grid |
+
+A selection is therefore a subscription on Second Life alone, and to one
+thing: what is in the prim. An avatar looking at a prim somebody else
+renames, prices or re-permissions is not told on either grid, and shows the
+old record until it selects the prim again. Nothing arbitrates two editors.
+
+### A child prim's record
+
+| field | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| name | the child's | the child's | the child's |
+| permission masks | the root's | the root's | the root's |
+| sale type and price | the child's own | the root's | each flavour as its grid |
+
+### What our viewer does with a record
+
+- The Build window's General tab reads the name, the description, the creator,
+  the owner, the group and the permission boxes off the record of the primary
+  selection, and now keeps the fields that would *write* one — the name, the
+  description, the permission boxes — shut until the record has come (the
+  group's Set… button reads nothing off it and stays live). They used to be live
+  over a blank record for the third of a second Second Life takes to answer, and
+  for good over a select that is never answered. The rest of the window reads
+  the object update and never waited.
+- A commit writes the field at once and sends the edit. Where the grid
+  answers (Second Life always; OpenSim for a price or a permission, after
+  which the viewer selects again to read what was kept) the answer
+  replaces what was written; where it does not, the field keeps it, and a
+  fresh selection reads what the grid holds.
+- The Content tab re-reads a prim's contents when a record arrives with a
+  contents serial it has not seen — which is how it hears of another
+  avatar's write on Second Life. On OpenSim it does not hear of one.
+- `ObjectProperties::creation_date` is documented as what it is.
+
+Checked through the viewer automation (`e2e_objects`): on each fake flavour
+a freshly rezzed prim's name reaches the General tab and opens the field, a
+rename shows and is what a fresh selection reads back, and a select the grid
+does not answer leaves the name blank and shut; and on each live grid
+(`SL_E2E_GRID=opensim` and `=aditi`) the same rez, record, rename and fresh
+read against the grid's own answers.
+
+Not imitated by the fake grid: how many records go to a message
+(`server-fake-grid-object-record-batching`, deferred until a test needs it), the
+texture ids of Second Life's record
+(`server-fake-grid-object-record-texture-ids`), and its price of 10 on a prim
+that is not for sale. Not measured: a category edit's answer (no viewer sends
+one); what a group or an owner change is answered with; who is told when a
+script or a notecard *in* a prim is saved over, which is
+`test-asset-save-mutation-survey`'s; a select across a region border of an
+object the agent may edit.

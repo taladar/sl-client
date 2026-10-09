@@ -11,15 +11,26 @@
 //! the grid takes objects away for being out of range, as Second Life does
 //! by naming a linkset's root alone, they have to go whole and come back
 //! whole.
+//!
+//! And what a viewer shows of an object's *record* — its name, its owner, its
+//! permissions — it has from the answer to a select
+//! ([[gridspec-object-properties]]). Both grids answer one; Second Life
+//! answers a rename as well and OpenSim does not; neither answers a select of
+//! something the region does not hold. The Build window has to fill from the
+//! answer, keep a name it wrote whether or not the grid said so, and leave
+//! the record's fields shut over an answer that never comes.
 
 #[cfg(test)]
 mod test {
     use core::time::Duration;
 
     use serde_json::json;
-    use sl_automation_proto::{LogStream, Probe, WorldKind, WorldLocator, WorldNode};
-    use sl_e2e::{BodyError, Grid, Stage, StageBuilder};
+    use sl_automation_proto::{
+        Locator, LogStream, Probe, Role, WorldKind, WorldLocator, WorldNode,
+    };
+    use sl_e2e::{BodyError, Grid, Need, Stage, StageBuilder};
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
+    use sl_proto::{RegionLocalObjectId, ServerEvent};
     use sl_viewer_driver::Viewer;
 
     /// A failed stage, or a test that could not set one up.
@@ -294,6 +305,215 @@ mod test {
                 .configure_grid(move |grid| grid.imitates(flavour))
                 .run(the_world_holds_objects)?;
         }
+        Ok(())
+    }
+
+    /// The name a prim nobody has named has on both grids.
+    const UNNAMED: &str = "Object";
+
+    /// The name the record test gives its prim.
+    const WRITTEN: &str = "Named By The Viewer";
+
+    /// Rez a prim, read its record off the Build window's General tab, rename
+    /// it and read the name back from a fresh selection. On a live grid the
+    /// prim is then deleted; on the fake one it is selected once more after
+    /// the grid has lost it without a word.
+    async fn the_build_window_follows_the_record(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        alpha.press("Ctrl+B").await?;
+        let build = alpha.ui().window("build-tools");
+        let _create = build
+            .get(Locator::role(Role::Radio).name_key("build-tool-create"))
+            .click()
+            .await?;
+        let fake = stage.on_grid() == Grid::Fake;
+        if fake {
+            let _placed = alpha.world().object_named(UNNAMED).place().await?;
+        } else {
+            // On the ground a few metres to the camera's right of the avatar
+            // and a little ahead of it: the Build window takes the left of
+            // the screen. Where exactly moves with the run, since a run that
+            // failed half-way leaves its prim where the next would aim.
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| format!("the clock: {error}"))?
+                .as_secs();
+            let aside = 3.0 + f32::from(u8::try_from(stamp % 6).unwrap_or(0));
+            let readout = alpha.agent().await?;
+            let spot = readout.position.ok_or("Alpha has no position")?;
+            let eye = readout.camera_eye.ok_or("Alpha has no camera")?;
+            let (ahead_x, ahead_y) = (spot[0] - eye[0], spot[1] - eye[1]);
+            let length = ahead_x.hypot(ahead_y).max(0.001);
+            let (ahead_x, ahead_y) = (ahead_x / length, ahead_y / length);
+            let _placed = alpha
+                .world()
+                .ground(
+                    stage.home_region(),
+                    spot[0] + aside * ahead_y + 3.0 * ahead_x,
+                    spot[1] - aside * ahead_x + 3.0 * ahead_y,
+                )
+                .timeout(SETTLE)
+                .place()
+                .await?;
+        }
+        let _general = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-general"))
+            .click()
+            .await?;
+
+        // The rez leaves the prim selected, and the select's answer names it.
+        let field = build.test_id("build-name:field");
+        let _named = alpha
+            .expect(&field)
+            .timeout(WAIT)
+            .to_have_text(UNNAMED)
+            .await?;
+        let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
+        let selected = alpha.selection().await?;
+        let [prim] = selected.as_slice() else {
+            return Err(format!("the rez left {selected:?} selected").into());
+        };
+        let (prim_id, local_id) = (prim.full_id, prim.local_id);
+
+        // A rename. Second Life answers it with the record and OpenSim with
+        // nothing; the field reads what was written either way.
+        let heard = if fake {
+            Some(stage.agent("Alpha").await?.events())
+        } else {
+            None
+        };
+        let _typed = field.fill(WRITTEN).await?;
+        field.press("Enter").await?;
+        if let Some(mut heard) = heard {
+            let renamed = tokio::time::timeout(WAIT, async {
+                loop {
+                    match heard.recv().await {
+                        Ok(ServerEvent::ObjectNameSet { .. }) => return Ok(()),
+                        Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(error) => return Err(error),
+                    }
+                }
+            })
+            .await;
+            match renamed {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => return Err(format!("the grid's event stream: {error}").into()),
+                Err(_elapsed) => return Err("the grid never heard the rename".into()),
+            }
+        } else {
+            // No grid handle to hear it with: give the grid the time an
+            // answer to it was measured to take, several times over.
+            tokio::time::sleep(UNANSWERED).await;
+        }
+        let _kept = alpha
+            .expect(&field)
+            .timeout(WAIT)
+            .to_have_text(WRITTEN)
+            .await?;
+
+        // A fresh selection reads the record again: Escape takes the focus
+        // out of the field, a second Escape the selection.
+        let this_prim = || alpha.world().locator(WorldLocator::full_id(prim_id));
+        let deselect = async || -> Result<(), BodyError> {
+            alpha.press("Escape").await?;
+            alpha.press("Escape").await?;
+            let _cleared = alpha
+                .expect_state(Probe::Selection)
+                .to_equal(json!([]))
+                .await?;
+            Ok(())
+        };
+        deselect().await?;
+        let _blank = alpha.expect(&field).timeout(WAIT).to_be_disabled().await?;
+        let _reselected = this_prim().select().await?;
+        let _reread = alpha
+            .expect(&field)
+            .timeout(WAIT)
+            .to_have_text(WRITTEN)
+            .await?;
+        let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
+
+        if !fake {
+            // Nothing to take the prim away behind the viewer's back with. The
+            // click that selected it left the world the keyboard, and Delete
+            // takes what is selected.
+            alpha.press("Delete").await?;
+            let _gone = alpha
+                .expect_world(&this_prim())
+                .timeout(SETTLE)
+                .to_be_detached()
+                .await?;
+            return Ok(());
+        }
+
+        // The grid loses the prim and tells nobody: the viewer still holds
+        // it, selects it, and is not answered. The field stays shut, with no
+        // name in it that a commit could write.
+        deselect().await?;
+        stage
+            .agent("Alpha")
+            .await?
+            .with_world(|world, _sim| {
+                world
+                    .objects
+                    .retain(|object| object.local_id != RegionLocalObjectId(local_id));
+            })
+            .await;
+        let _selected = this_prim().select().await?;
+        let _picked = alpha
+            .expect_state(Probe::Selection)
+            .at("/0/local_id")
+            .timeout(WAIT)
+            .to_equal(json!(local_id))
+            .await?;
+        tokio::time::sleep(UNANSWERED).await;
+        let _shut = alpha.expect(&field).to_be_disabled().await?;
+        let _empty = alpha.expect(&field).to_have_text("").await?;
+        Ok(())
+    }
+
+    /// How long a select that gets no answer is given before the window is
+    /// read: both live grids answered within half a second.
+    const UNANSWERED: Duration = Duration::from_secs(3);
+
+    /// **The Build window and the record**, on each fake flavour: the General
+    /// tab names a freshly rezzed prim from the select's answer and only then
+    /// lets its name be edited; a rename shows whether the grid answers it
+    /// (Second Life) or not (OpenSim), and is what a fresh selection reads
+    /// back; and a select the grid does not answer leaves the name blank and
+    /// shut rather than editable.
+    #[test]
+    fn the_build_window_follows_the_record_on_each_fake_flavour() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "record_second_life"),
+            (ImitatedGrid::OpenSim, "record_open_sim"),
+        ] {
+            StageBuilder::new(name)
+                .viewer_binary(VIEWER)
+                .viewer("Alpha")
+                .needs(Need::Content("the stock scene's unnamed box, to rez on"))
+                .needs(Need::GridControl)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(the_build_window_follows_the_record)?;
+        }
+        Ok(())
+    }
+
+    /// **The Build window and the record, live** (`SL_E2E_GRID=opensim|aditi`,
+    /// where the avatar stands on land it may build on): the same rez, record,
+    /// rename and fresh read against the grid's own answers — Second Life's,
+    /// which come a third of a second after the select and after every
+    /// rename, and OpenSim's, which answers the select and not the rename.
+    #[test]
+    fn the_build_window_follows_a_live_grids_record() -> Result<(), TestError> {
+        StageBuilder::new("record_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid(
+                "a grid's own answer to a select and to a rename",
+            ))
+            .run(the_build_window_follows_the_record)?;
         Ok(())
     }
 }

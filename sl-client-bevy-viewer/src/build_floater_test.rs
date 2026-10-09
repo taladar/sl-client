@@ -1135,6 +1135,44 @@ mod tests {
     // The per-aspect editors
     // ------------------------------------------------------------------
 
+    /// Deliver the record a simulator answers the select of fixture prim
+    /// `scoped` with: a new prim's, named `name`. The General tab's name and
+    /// description stay shut until it has come.
+    fn the_record_arrives(app: &mut App, scoped: ScopedObjectId, name: &str) {
+        use sl_client_bevy::{
+            AgentKey, InventoryKey, LindenAmount, ObjectProperties, OwnerKey, Permissions5,
+        };
+        let owner = AgentKey::from(Uuid::from_u128(0x0A));
+        app.world_mut().write_message(sl_client_bevy::SlEvent(
+            sl_client_bevy::SlSessionEvent::ObjectProperties(Box::new(ObjectProperties {
+                object_id: ObjectKey::from(Uuid::from_u128(u128::from(scoped.id.0))),
+                creator_id: owner,
+                owner: OwnerKey::Agent(owner),
+                group: None,
+                last_owner_id: Uuid::nil(),
+                creation_date: 0,
+                permissions: Permissions5::default(),
+                ownership_cost: LindenAmount(0),
+                sale_type: 0,
+                sale_price: None,
+                category: 0,
+                inventory_serial: 0,
+                item_id: InventoryKey::from(Uuid::nil()),
+                folder_id: None,
+                from_task_id: None,
+                aggregate_perms: 0,
+                aggregate_perm_textures: 0,
+                aggregate_perm_textures_owner: 0,
+                name: name.to_owned(),
+                description: String::new(),
+                touch_name: String::new(),
+                sit_name: String::new(),
+                texture_ids: Vec::new(),
+            })),
+        ));
+        settle(app, 3);
+    }
+
     /// **A General-tab name edit commits a `SetObjectName`.**
     ///
     /// The simplest of the parameter tabs' commits, and the one that proves the
@@ -1146,6 +1184,11 @@ mod tests {
         let mut app = build_tools_app()?;
         let (scoped, _at) = select_a_fixture_prim(&mut app)?;
         show_tab(&mut app, 0)?;
+        // The field is shut over a selection the simulator has not described
+        // yet: there is no name in it but a blank one to commit.
+        in_app::expect_disabled(&mut app, &Locator::test_id("build-name:field"))?;
+        the_record_arrives(&mut app, scoped, "Object");
+        in_app::expect_enabled(&mut app, &Locator::test_id("build-name:field"))?;
         let _settling = drain_commands(&mut app);
 
         retype_and_commit(&mut app, "build-name:field", "a renamed prim")?;

@@ -396,7 +396,7 @@ async fn request_task_inventory(
 /// the taken agent inventory `item` into a prim. OpenSim looks the item up by id
 /// from the agent's own inventory and copies its asset in; the permission masks
 /// and CRC carried here are not validated on the local grid.
-fn task_item(item: &InventoryItem) -> RestoreItem {
+pub(super) fn task_item(item: &InventoryItem) -> RestoreItem {
     RestoreItem {
         item_id: item.item_id,
         folder_id: item.folder_id,

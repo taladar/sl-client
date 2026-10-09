@@ -20,31 +20,46 @@
 //!   `ObjectUpdate` carries none of those fields, so a client that renames an
 //!   object learns the rename took only from that message.
 //!
-//! Both pushes now reach the region's *other* viewers, by different routes. A
-//! change to the object goes to everyone, because an `ObjectUpdate` needs no
-//! subscription. A change to the properties goes only to the sessions holding
-//! that object selected — the [`Selection`] each session keeps, which a select
-//! opens and a deselect closes — because that is the only client a simulator
-//! sends properties to, and a resident who is not looking is not told.
+//! Only the first of the two reaches the region's *other* viewers. A change to
+//! the object goes to everyone, because an `ObjectUpdate` needs no
+//! subscription. An edit of the properties is answered to the session that
+//! made it and to nobody else, on both live grids (`object-properties`,
+//! 2026-10-09): a resident holding a prim selected while somebody else renames
+//! it is not told. The one thing a selection does subscribe to, on Second Life
+//! alone, is the record's contents serial — see [`Selection`].
 
 use std::time::Instant;
 
 use sl_proto::{
-    Object, ObjectProperties, RegionLocalObjectId, ServerEvent, SimSession, prim_flags,
+    Object, ObjectPhysicsData, ObjectProperties, PhysicsShapeType, RegionLocalObjectId,
+    ServerEvent, SimSession, prim_flags,
 };
-use sl_types::key::ObjectKey;
+use sl_types::key::{ObjectKey, OwnerKey};
 use sl_types::lsl::{Rotation, Vector};
 
 use crate::world::{RegionChange, SceneFixtures};
+
+/// The physics record both live grids send for a prim nobody has changed the
+/// physics of: the prim's own shape, the density of water, and the friction
+/// and restitution of the default material.
+const NEW_PRIM_PHYSICS: ObjectPhysicsData = ObjectPhysicsData {
+    physics_shape_type: PhysicsShapeType::Prim,
+    density: 1000.0,
+    friction: 0.6,
+    restitution: 0.5,
+    gravity_multiplier: 1.0,
+};
 
 /// The objects one session holds selected.
 ///
 /// Selection is a **subscription**, not a lock: Second Life has no edit lock,
 /// and two residents may hold the same object selected indefinitely. What the
-/// set decides is only who is *told* — a simulator sends the full
-/// `ObjectProperties` to every client holding an object selected and keeps
-/// sending them while the selection stands, which is the only way a resident
-/// learns somebody else renamed the prim they are looking at.
+/// set decides is only who is *told* of a write into a prim's contents —
+/// Second Life sends the record, with its advanced contents serial, to every
+/// client holding the object selected. It is a narrow subscription: an edit
+/// of the record itself is told to nobody but its editor, on either grid, and
+/// OpenSim publishes nothing to a selection at all
+/// ([`PropertiesPolicy`](crate::imitates::PropertiesPolicy)).
 pub(crate) type Selection = std::collections::BTreeSet<RegionLocalObjectId>;
 
 /// Answers one drained [`ServerEvent`] that edits an object, returning the
@@ -75,33 +90,37 @@ pub(crate) fn answer_object_edit(
 ) -> Option<Vec<RegionChange>> {
     match event {
         // ----- edits to the properties record ------------------------------
+        // The two edits OpenSim stores without a word; Second Life answers
+        // them as it answers every other.
         ServerEvent::ObjectNameSet { local_id, name } => {
-            return Some(edit_properties(world, *local_id, sim, now, |properties| {
+            let answer = world.properties.rename_answered.then_some((sim, now));
+            edit_properties(world, *local_id, answer, |properties| {
                 properties.name.clone_from(name);
-            }));
+            });
         }
         ServerEvent::ObjectDescriptionSet {
             local_id,
             description,
         } => {
-            return Some(edit_properties(world, *local_id, sim, now, |properties| {
+            let answer = world.properties.rename_answered.then_some((sim, now));
+            edit_properties(world, *local_id, answer, |properties| {
                 properties.description.clone_from(description);
-            }));
+            });
         }
         ServerEvent::ObjectCategorySet { local_id, category } => {
-            return Some(edit_properties(world, *local_id, sim, now, |properties| {
+            edit_properties(world, *local_id, Some((sim, now)), |properties| {
                 properties.category = *category;
-            }));
+            });
         }
         ServerEvent::ObjectSaleInfoSet {
             local_id,
             sale_type,
             sale_price,
         } => {
-            return Some(edit_properties(world, *local_id, sim, now, |properties| {
+            edit_properties(world, *local_id, Some((sim, now)), |properties| {
                 properties.sale_type = sale_type.to_code();
                 properties.sale_price.clone_from(sale_price);
-            }));
+            });
         }
         // A grant sets the named bits and a revoke clears them: the message
         // carries the bits being *changed*, not the mask's new value. What each
@@ -115,7 +134,7 @@ pub(crate) fn answer_object_edit(
             mask,
             ..
         } => {
-            let mut changes = edit_properties(world, *local_id, sim, now, |properties| {
+            edit_properties(world, *local_id, Some((&mut *sim, now)), |properties| {
                 let target = field.select_mut(&mut properties.permissions);
                 *target = if *set {
                     target.union(*mask)
@@ -123,6 +142,7 @@ pub(crate) fn answer_object_edit(
                     target.difference(*mask)
                 };
             });
+            let mut changes = Vec::new();
             if let Some(object) = world.object_by_local_id(*local_id) {
                 push_object(sim, &object, now);
                 changes.push(RegionChange::Updated(Box::new(object)));
@@ -133,13 +153,11 @@ pub(crate) fn answer_object_edit(
             local_ids,
             group_id,
         } => {
-            let mut changes = Vec::new();
             for local_id in local_ids {
-                changes.extend(edit_properties(world, *local_id, sim, now, |properties| {
+                edit_properties(world, *local_id, Some((&mut *sim, now)), |properties| {
                     properties.group = *group_id;
-                }));
+                });
             }
-            return Some(changes);
         }
         // A deed names the group as the owner and no agent, which is exactly
         // what an `OwnerKey::Group` is; the object's own `owner_id` moves with
@@ -149,13 +167,13 @@ pub(crate) fn answer_object_edit(
         } => {
             let mut changes = Vec::new();
             for local_id in local_ids {
-                changes.extend(edit_properties(world, *local_id, sim, now, |properties| {
+                edit_properties(world, *local_id, Some((&mut *sim, now)), |properties| {
                     properties.last_owner_id = properties.owner.uuid();
                     properties.owner = *owner;
                     if let sl_types::key::OwnerKey::Group(group) = *owner {
                         properties.group = Some(group);
                     }
-                }));
+                });
                 if let Some(changed) = edit_object(world, *local_id, |object| {
                     object.owner_id = owner.uuid();
                 }) {
@@ -245,7 +263,7 @@ pub(crate) fn answer_object_edit(
             transform,
         } => {
             let target = if transform.group {
-                root_of(world, *local_id)
+                world.root_of(*local_id)
             } else {
                 *local_id
             };
@@ -290,6 +308,17 @@ pub(crate) fn answer_object_edit(
                     object.motion.position = position;
                     object.motion.rotation = rotation;
                 }));
+            }
+            // A link is followed by a record, and whose is the grid's: each
+            // child's that came under the root, or the root's.
+            let told: Vec<RegionLocalObjectId> = match world.properties.link_sends {
+                crate::imitates::LinkedRecord::Children => children.to_vec(),
+                crate::imitates::LinkedRecord::Root => vec![*root],
+            };
+            for local_id in told {
+                if let Some(record) = world.record_of(local_id) {
+                    push_properties(sim, &record, now);
+                }
             }
             return Some(changes);
         }
@@ -387,28 +416,59 @@ pub(crate) fn answer_object_edit(
             return Some(step_history(world, sim, object_ids, now, false));
         }
         // ----- reading the record back -------------------------------------
-        // A selection is a simulator's cue to send the full properties, and
-        // keep sending them while it stands — so it is remembered, not just
-        // answered: it is the subscription a properties push from *another*
-        // session goes to ([`RegionChange::PropertiesChanged`]).
+        // A select is answered with the record and with the object's physics
+        // record over the event queue — every time, whoever owns the object
+        // and whether or not it was selected already. It is also remembered:
+        // on Second Life a selection is the subscription a change to the
+        // object's *contents* is told to ([`RegionChange::PropertiesChanged`]).
+        // A local id the region does not have, and an avatar's, get nothing.
         ServerEvent::ObjectsSelected { local_ids } => {
+            let agent = sim.agent_id();
             for local_id in local_ids {
                 selection.insert(*local_id);
-                if let Some(properties) = world.properties_of(*local_id) {
-                    push_properties(sim, &properties, now);
+                let Some(object) = world.object_by_local_id(*local_id) else {
+                    continue;
+                };
+                let Some(record) = world.record_of(*local_id) else {
+                    continue;
+                };
+                let owned = agent.is_some_and(|agent| OwnerKey::Agent(agent) == record.owner);
+                if world.properties.strangers_select_resends_object && !owned {
+                    push_object(sim, &object, now);
                 }
+                push_properties(sim, &record, now);
+                sim.enqueue_caps_event(
+                    "ObjectPhysicsProperties",
+                    sl_proto::build_object_physics_properties(&[(*local_id, NEW_PRIM_PHYSICS)]),
+                );
             }
         }
-        // The end of the subscription. A viewer that stops looking stops being
-        // told, which is what makes the push a subscription rather than a
-        // broadcast with extra steps.
+        // The end of the subscription. Second Life answers it with a terse
+        // update of the object; OpenSim with nothing.
         ServerEvent::ObjectsDeselected { local_ids } => {
             for local_id in local_ids {
                 selection.remove(local_id);
+                if !world.properties.deselect_sends_terse {
+                    continue;
+                }
+                let Some(object) = world.object_by_local_id(*local_id) else {
+                    continue;
+                };
+                let update = sl_proto::TerseUpdate {
+                    local_id: *local_id,
+                    state: object.state,
+                    motion: object.motion,
+                };
+                if let Err(error) =
+                    sim.send_terse_update(&[update], crate::world::REAL_TIME_DILATION, now)
+                {
+                    tracing::warn!("answering a deselect failed: {error}");
+                }
             }
         }
         // The condensed form, which needs no selection: what a viewer shows on
-        // hover and in the pay / report dialogs.
+        // hover and in the pay / report dialogs. Asked about a child prim,
+        // both live grids answer with its linkset's root.
         ServerEvent::RequestObjectPropertiesFamily {
             request_flags,
             object_id,
@@ -417,7 +477,7 @@ pub(crate) fn answer_object_edit(
                 tracing::debug!("properties were asked of {object_id}, which is not here");
                 return Some(Vec::new());
             };
-            let Some(properties) = world.properties_of(local_id) else {
+            let Some(properties) = world.properties_of(world.root_of(local_id)) else {
                 return Some(Vec::new());
             };
             let family = sl_proto::ObjectPropertiesFamily {
@@ -440,8 +500,8 @@ pub(crate) fn answer_object_edit(
         }
         _other => return None,
     }
-    // Every arm that falls through here read the region rather than changing
-    // it, so there is nothing for its other sessions to be told.
+    // Every arm that falls through here read the region or edited an object's
+    // record, and neither is anything its other sessions are told.
     Some(Vec::new())
 }
 
@@ -559,49 +619,40 @@ fn offset_by(position: &Vector, offset: &Vector) -> Vector {
     }
 }
 
-/// The root of `local_id`'s linkset — itself when it is not a child, since a
-/// prim whose parent this region does not have is one nothing can be said
-/// about.
-fn root_of(world: &SceneFixtures, local_id: RegionLocalObjectId) -> RegionLocalObjectId {
-    world
-        .object_by_local_id(local_id)
-        .map(|object| object.parent_id)
-        .filter(|parent| parent.0 != 0 && world.object_by_local_id(*parent).is_some())
-        .unwrap_or(local_id)
-}
-
 /// Applies `edit` to the object's stored [`ObjectProperties`], recording the
-/// object as it was for the undo stack, pushes the new record at the editing
-/// client, and returns the change the region's other selectors need.
+/// object as it was for the undo stack, and answers the editing client with
+/// the new record where `answer` says there is an answer.
+///
+/// Nobody else is told. Neither live grid sends an edited record to another
+/// session, whether or not it holds the object selected: a resident looking
+/// at a prim somebody else renames keeps the old name until they select it
+/// again.
 fn edit_properties(
     world: &mut SceneFixtures,
     local_id: RegionLocalObjectId,
-    sim: &mut SimSession,
-    now: Instant,
+    answer: Option<(&mut SimSession, Instant)>,
     edit: impl FnOnce(&mut ObjectProperties),
-) -> Vec<RegionChange> {
+) {
     let Some(current) = world.properties_of(local_id) else {
         tracing::debug!("an object edit named {local_id:?}, which this region does not have");
-        return Vec::new();
+        return;
     };
     world.record_undo(local_id);
     let Some(object) = world.object_mut(local_id) else {
-        return Vec::new();
+        return;
     };
     let mut properties = current;
     edit(&mut properties);
     object.properties = Some(properties);
+    let Some((sim, now)) = answer else {
+        return;
+    };
     // Re-read rather than pushing what was just written: the contents serial a
     // client reads off the record lives with the task inventory, not with the
-    // object, and only `properties_of` knows to put the two together.
-    let Some(pushed) = world.properties_of(local_id) else {
-        return Vec::new();
-    };
-    push_properties(sim, &pushed, now);
-    vec![RegionChange::PropertiesChanged {
-        local_id,
-        properties: Box::new(pushed),
-    }]
+    // object, and a child prim's record states its root's masks.
+    if let Some(record) = world.record_of(local_id) {
+        push_properties(sim, &record, now);
+    }
 }
 
 /// Applies `edit` to the object itself, recording the object as it was for the
@@ -658,12 +709,8 @@ fn step_history(
             continue;
         };
         push_object(sim, &restored, now);
-        if let Some(properties) = world.properties_of(local_id) {
-            push_properties(sim, &properties, now);
-            changes.push(RegionChange::PropertiesChanged {
-                local_id,
-                properties: Box::new(properties),
-            });
+        if let Some(record) = world.record_of(local_id) {
+            push_properties(sim, &record, now);
         }
         changes.push(RegionChange::Updated(Box::new(restored)));
     }

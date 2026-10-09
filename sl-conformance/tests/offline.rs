@@ -118,6 +118,7 @@ mod test {
         object_edit => "object-edit" [fake_sl, fake_opensim],
         object_link_delink => "object-link-delink" [fake_sl, fake_opensim],
         object_properties => "object-properties" [fake_sl, fake_opensim],
+        object_select_scene => "object-select-scene" [fake_sl, fake_opensim],
         object_rez_derez => "object-rez-derez" [fake_sl, fake_opensim],
         parcel_edit => "parcel-edit" [fake_sl, fake_opensim],
         parcel_access_list => "parcel-access-list" [fake_sl, fake_opensim],

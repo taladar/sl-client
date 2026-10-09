@@ -42,6 +42,8 @@ simulator answers with `ObjectPropertiesFamily`
 (`Event::ObjectPropertiesFamily`). The `request_flags` field (e.g.
 `OBJECT_PAY_REQUEST` `0x04`) is echoed back so the viewer can route the reply to
 the dialog that asked.
+Asked about a child prim, both grids answer with its linkset's root
+([Objects § Properties](../gridspec/objects.md#properties)).
 
 ## Spinning
 

@@ -1259,11 +1259,16 @@ region's own lock:
   motion, scale, material, click action and `PrimFlags`) goes out in an
   `ObjectUpdate` and reaches the whole region, while its `ObjectProperties`
   (name, description, category, sale state, permissions, owner, group) go
-  out in a message of their own that a simulator sends to whoever holds the
-  object *selected*. An `ObjectUpdate` carries none of those fields, so a
-  client that renames an object learns the rename took only from
-  `SimSession::send_object_properties` — which is why the family needed a
-  sender for the full form before any of it was observable.
+  out in a message of their own, in answer to a select and to an edit. An
+  `ObjectUpdate` carries none of those fields, so a client that renames an
+  object learns the rename took only from
+  `SimSession::send_object_properties` — on a Second-Life-flavoured grid;
+  an OpenSim-flavoured one answers a price or a permission and not a
+  rename, as measured (`PropertiesPolicy`,
+  [Objects § Properties](../gridspec/objects.md#properties)). A select is
+  also answered with the object's physics record over the event queue, and
+  per flavour with the object again (OpenSim, for somebody else's) or, on a
+  deselect, a terse update of it (Second Life).
 
   Linking is not only a parent id: a child's placement is stated in its
   root's frame, so a link restates it and a delink puts it back. Undo and
@@ -1345,13 +1350,17 @@ touch.
 to a different set of sessions because each surface's subscription is
 different:
 
-- **An object's properties** go to the sessions holding it *selected*, and
-  to nobody else. `ObjectSelect` / `ObjectDeselect` are typed
+- **A write into a prim's task inventory** goes, on a Second-Life-flavoured
+  grid, to the sessions holding the prim *selected*, and to nobody else:
+  its contents serial is a field of the properties record and travels
+  nowhere else. `ObjectSelect` / `ObjectDeselect` are typed
   (`ServerEvent::ObjectsSelected` / `ObjectsDeselected`) and each session
   keeps its own selection set, which `run_region_watcher` consults before
-  forwarding. A prim's **task inventory** rides on this one: its contents
-  serial is a field of the properties record and travels nowhere else, so a
-  write into a prim now pushes the record as well as advancing it.
+  forwarding. An OpenSim-flavoured grid tells the writer alone. An *edit*
+  of the record — a rename, a price, a permission — is published to nobody
+  on either flavour, because neither live grid tells anybody but the
+  editor: this push went to every selector until it was measured
+  (2026-10-09).
 - **A parcel** goes to the avatars standing on it — OpenSim's
   `SendLandUpdateToAvatarsOverMe` — as a sequence-zero `ParcelProperties`,
   the same unsolicited form the arrival burst uses. The fake grid tracks no
@@ -1377,7 +1386,8 @@ finding is that nothing arbitrates.
 
 Offline conformance: `object-edit` (the whole build surface, including the
 transform, the undo stack and the read-back through `ObjectProperties`),
-`object-link-delink`, `object-properties`, `parcel-edit` (the About Land
+`object-link-delink`, `object-properties` and `object-select-scene` (what a
+select answers and who is told of a change), `parcel-edit` (the About Land
 form and the ban list, each refetched and restored), `region-info`,
 `estate-info`, `estate-access`, and `asset-round-trip` (every seeded
 inventory class fetched, every savable one saved and re-fetched, plus a prim

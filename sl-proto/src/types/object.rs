@@ -931,7 +931,9 @@ pub struct ObjectProperties {
     pub group: Option<GroupKey>,
     /// The previous owner's id.
     pub last_owner_id: Uuid,
-    /// The creation timestamp (seconds since the Unix epoch).
+    /// The creation timestamp, in **microseconds** since the Unix epoch: both
+    /// Second Life and OpenSim state it so (an inventory item's, by contrast,
+    /// is in seconds).
     pub creation_date: u64,
     /// The base / owner / group / everyone / next-owner permission masks.
     pub permissions: Permissions5,

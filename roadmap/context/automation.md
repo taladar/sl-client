@@ -797,7 +797,9 @@ replaces that person.
   "see online" alone both ways (the fake grid adds the map); a rename
   (`PrimName`) tells nobody, the writer included, so two editors each show
   their own write until they select afresh, and the grid keeps whichever it
-  handled last; an offer left unanswered at logout comes back with the next
+  handled last (an OpenSim-flavoured fake grid does the same since
+  2026-10-09, and neither flavour tells another selector of any edit); an
+  offer left unanswered at logout comes back with the next
   login, as a stored offline IM. A live test that rezzes names its prim per
   run and places it per run, since a failed run leaves its prim where the
   next would aim.

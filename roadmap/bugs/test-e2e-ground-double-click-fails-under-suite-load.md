@@ -45,3 +45,10 @@ Park the camera by distance, not by frames — fly until the eye has moved
 `FLOWN` metres, or place it — so the test aims from where it means to
 whatever the frame rate. Then see whether a double-click still fails at a
 low frame rate, which would be the viewer's bug and not the test's.
+
+## Again (2026-10-09)
+
+Failed in the same full-suite run as
+[[test-scripted-environment-change-marker-timeout]]'s latest, after 176 s,
+in process, with the three `ui_contract` tests past 300 s beside it; it had
+passed an hour earlier among the viewer's packages alone.

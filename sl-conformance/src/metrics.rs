@@ -36,6 +36,13 @@ impl Metrics {
         self.meta.extend(other.meta);
     }
 
+    /// The value recorded under `key`, if any — for a case that holds what it
+    /// recorded to a table of measured answers once it is done.
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<&MetricValue> {
+        self.values.get(key)
+    }
+
     /// Record a metric value with no inherent direction (neutral).
     pub fn set(&mut self, key: &str, value: impl Into<MetricValue>) {
         let _previous = self.values.insert(key.to_owned(), value.into());
