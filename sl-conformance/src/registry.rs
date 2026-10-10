@@ -175,6 +175,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::object_touch_grab::ObjectTouchGrab),
         Box::new(crate::cases::object_link_delink::ObjectLinkDelink),
         Box::new(crate::cases::object_edit::ObjectEdit),
+        Box::new(crate::cases::object_edit_stranger::ObjectEditStranger),
         Box::new(crate::cases::parcel_edit::ParcelEdit),
         Box::new(crate::cases::parcel_crossing::ParcelCrossing),
         Box::new(crate::cases::parcel_edit_refused::ParcelEditRefused),

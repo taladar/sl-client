@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 139 |
+| ideas | 138 |
 | ready | 358 |
-| blocked | 109 |
+| blocked | 108 |
 | in-progress | 20 |
-| bugs | 38 |
-| done | 1344 |
+| bugs | 37 |
+| done | 1347 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2055** |
 
-## ideas (139)
+## ideas (138)
 
 ### protocol
 
@@ -267,9 +267,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-im-relay`](ideas/server-fake-grid-im-relay.md) — Fake grid
   — relay IMs and offers between its sessions (blocked by
   `gridspec-teleport-lures` (done), `gridspec-instant-messages`)
-- [`server-fake-grid-object-undo`](ideas/server-fake-grid-object-undo.md) — Fake
-  grid — keep an object's edit history for Undo / Redo (blocked by
-  `gridspec-object-edit`)
 - [`server-fake-grid-teleport-edges`](ideas/server-fake-grid-teleport-edges.md)
   — Fake grid — the teleport edges each grid was measured handling and the fake
   grid does not model
@@ -1090,6 +1087,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-edit-permission-enforcement`](ready/server-fake-grid-edit-permission-enforcement.md)
+  — Fake grid — refuse edits the editor may not make, as each grid refuses them
+  (blocked by `gridspec-object-edit` (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-object-record-texture-ids`](ready/server-fake-grid-object-record-texture-ids.md)
@@ -1171,8 +1171,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   storage and enforcement on each grid
 - [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
   Notecards, embedded items and gestures on each grid
-- [`gridspec-object-edit`](ready/gridspec-object-edit.md) — Object edits on each
-  grid: transforms, shape, flags, admin fields, undo, duplicate
 - [`gridspec-object-link-delink`](ready/gridspec-object-link-delink.md) — Link
   order, limits and refusals on each grid
 - [`gridspec-object-media`](ready/gridspec-object-media.md) — Media on a prim:
@@ -1200,7 +1198,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
   Viewer effects and sound relays on each grid
 
-## blocked (109)
+## blocked (108)
 
 ### protocol
 
@@ -1387,9 +1385,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-directory-search`](blocked/server-fake-grid-directory-search.md)
   — Fake grid — answer directory searches from an index of accounts, parcels and
   fixtures (blocked by `gridspec-search-directory`)
-- [`server-fake-grid-edit-permission-enforcement`](blocked/server-fake-grid-edit-permission-enforcement.md)
-  — Fake grid — refuse edits the editor may not make, as each grid refuses them
-  (blocked by `gridspec-object-edit`)
 - [`server-fake-grid-estate-actions`](blocked/server-fake-grid-estate-actions.md)
   — Fake grid — kick, eject, freeze, teleport home, estate messages and restarts
   (blocked by `gridspec-estate`)
@@ -1603,7 +1598,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (38)
+## bugs (37)
 
 ### protocol
 
@@ -1690,8 +1685,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
-- [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
-  — object-edit on OpenSim never sees the sit click action re-broadcast
 - [`test-e2e-objects-live-opensim-intermittent`](bugs/test-e2e-objects-live-opensim-intermittent.md)
   — e2e_objects on the live OpenSim fails now and then, two ways
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
@@ -1700,7 +1693,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1344)
+## done (1347)
 
 ### protocol
 
@@ -4168,6 +4161,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — verify whisper/shout reach vs normal
 - [`test-chat-whisper-shout-range-aditi`](done/test-chat-whisper-shout-range-aditi-add-the-aditi-variant.md)
   — Chat whisper/shout range — [aditi] variant
+- [`test-conformance-object-edit-click-action-opensim`](done/test-conformance-object-edit-click-action-opensim.md)
+  — object-edit on OpenSim never sees the sit click action re-broadcast
 - [`test-crosscheck-day-position-is-inert`](done/test-crosscheck-day-position-is-inert.md)
   — --day-position asks for a keyframe the stock cycle does not have
 - [`test-crosscheck-pin-ui-scale`](done/test-crosscheck-pin-ui-scale.md) — A
@@ -4606,6 +4601,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-login-response-sections`](done/server-fake-grid-login-response-sections.md)
   — The fake grid's login response lacks the sections and scalars the live grids
   send
+- [`server-fake-grid-object-undo`](done/server-fake-grid-object-undo.md) — Fake
+  grid — keep an object's edit history for Undo / Redo
 - [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them
@@ -4651,6 +4648,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   logout does to seats and child circuits
 - [`gridspec-neighbours-crossing`](done/gridspec-neighbours-crossing.md) — Child
   agents, EnableSimulator and region crossing on each grid
+- [`gridspec-object-edit`](done/gridspec-object-edit.md) — Object edits on each
+  grid: transforms, shape, flags, admin fields, undo, duplicate
 - [`gridspec-object-properties`](done/gridspec-object-properties.md) — Object
   properties and selection replies on each grid
 - [`gridspec-object-rez-derez`](done/gridspec-object-rez-derez.md) — Rez, take,

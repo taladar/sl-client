@@ -172,6 +172,9 @@ pub struct SceneFixtures {
     /// ([`ImitatedGrid::rez_policy`](crate::ImitatedGrid::rez_policy)), set
     /// when the grid starts; Second Life's in a world no grid has adopted.
     pub(crate) rez: crate::imitates::RezPolicy,
+    /// What the region makes of an edit of an object, where the live grids
+    /// disagree. Second Life's unless the grid's flavour says otherwise.
+    pub(crate) edit: crate::imitates::EditPolicy,
     /// The region's terrain textures and blend heights as an estate manager has
     /// changed them, or [`None`] while they are still the identity's.
     ///
@@ -215,47 +218,73 @@ impl ParcelAccessLists {
     }
 }
 
-/// How many edits of one object a region can undo.
+/// Where an object stands, how it is turned and how large it is: what an
+/// `Undo` steps back out of.
 ///
-/// The reference viewer's own stack is deeper, and it keeps asking after the
-/// simulator has run out: an `Undo` with nothing left to undo is answered with
-/// silence, not an error, which is why the depth can be a number rather than a
-/// negotiation.
-const UNDO_DEPTH: usize = 10;
+/// Both live grids keep a history of an object's moves, turns and resizes and
+/// of nothing else (`object-edit`, 2026-10-10): a rename, a sale, a material,
+/// a flag and a shape stay as they are through any number of undos.
+#[derive(Debug, Clone, PartialEq)]
+struct Placed {
+    /// Its position: in the region, or in its root's frame.
+    position: Vector,
+    /// Its rotation.
+    rotation: Rotation,
+    /// Its size.
+    scale: Vector,
+}
 
-/// One object's edit history: what it was before each of the last
-/// [`UNDO_DEPTH`] edits, and — once something has been undone — what it was
-/// before each undo.
+impl Placed {
+    /// How `object` is placed.
+    fn of(object: &Object) -> Self {
+        Self {
+            position: object.motion.position.clone(),
+            rotation: object.motion.rotation.clone(),
+            scale: object.scale.clone(),
+        }
+    }
+
+    /// Places `object` so.
+    fn place(&self, object: &mut Object) {
+        object.motion.position.clone_from(&self.position);
+        object.motion.rotation.clone_from(&self.rotation);
+        object.scale.clone_from(&self.scale);
+    }
+}
+
+/// One object's history of moves, turns and resizes: how it was placed before
+/// each of the last few, and — once something has been undone — how it was
+/// placed before each undo.
 ///
-/// The unit is the whole [`Object`], not the field that changed. A simulator's
-/// undo is a restore, not an inverse operation: it puts the object back the way
-/// it was, which is the only definition that composes when the edits were of
-/// different kinds (a move, then a rename, then a resize).
+/// How many it keeps is the grid's
+/// ([`EditPolicy::undo_depth`](crate::imitates::EditPolicy::undo_depth)). The
+/// reference viewer keeps asking after the simulator has run out: an `Undo`
+/// with nothing left to undo is answered with silence, not an error.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct EditHistory {
-    /// The states to go back to, oldest first.
-    past: Vec<Object>,
-    /// The states an undo stepped out of, oldest first — what a redo returns
-    /// to. Cleared by any fresh edit, because a new edit makes the branch it
-    /// held unreachable.
-    future: Vec<Object>,
+    /// The placements to go back to, oldest first.
+    past: Vec<Placed>,
+    /// The placements an undo stepped out of, oldest first — what a redo
+    /// returns to. Cleared by any fresh edit, because a new edit makes the
+    /// branch it held unreachable.
+    future: Vec<Placed>,
 }
 
 impl EditHistory {
-    /// Records `before` as a state an undo can return to, dropping the oldest
-    /// when the stack is full and abandoning any redo branch.
-    fn record(&mut self, before: Object) {
-        if self.past.len() >= UNDO_DEPTH {
+    /// Records `before` as a placement an undo can return to, dropping the
+    /// oldest when `depth` are held and abandoning any redo branch.
+    fn record(&mut self, before: Placed, depth: usize) {
+        while self.past.len() >= depth.max(1) {
             let _oldest = self.past.remove(0);
         }
         self.past.push(before);
         self.future.clear();
     }
 
-    /// Steps one place back (`backwards`) or forward, handing over the state to
-    /// restore and keeping `current` on the other stack. [`None`] when that
-    /// direction has run out.
-    fn step(&mut self, current: Object, backwards: bool) -> Option<Object> {
+    /// Steps one place back (`backwards`) or forward, handing over the
+    /// placement to restore and keeping `current` on the other stack. [`None`]
+    /// when that direction has run out.
+    fn step(&mut self, current: Placed, backwards: bool) -> Option<Placed> {
         let (from, to) = if backwards {
             (&mut self.past, &mut self.future)
         } else {
@@ -577,6 +606,7 @@ impl SceneFixtures {
             capacity: None,
             properties: crate::imitates::PropertiesPolicy::default(),
             rez: crate::imitates::RezPolicy::default(),
+            edit: crate::imitates::EditPolicy::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
         }
@@ -726,30 +756,39 @@ impl SceneFixtures {
             .unwrap_or(local_id)
     }
 
-    /// Records the object as it is now as a state an undo can return to.
+    /// Records how the object is placed now as something an undo can return
+    /// to.
     ///
-    /// Called before a change rather than after it: what an undo restores is
-    /// the state the edit replaced.
+    /// Called before a move, a turn or a resize rather than after it: what an
+    /// undo restores is the placement the edit replaced.
     pub fn record_undo(&mut self, local_id: RegionLocalObjectId) {
         let Some(before) = self.object_by_local_id(local_id) else {
             return;
         };
-        self.undo.entry(local_id).or_default().record(before);
+        let depth = self.edit.undo_depth;
+        self.undo
+            .entry(local_id)
+            .or_default()
+            .record(Placed::of(&before), depth);
     }
 
-    /// Steps the object one place back along its edit history (`backwards`) or
-    /// forward again, returning the object as restored — or [`None`] when that
-    /// direction has run out, or the object is not here.
+    /// Steps the object one place back along its history of moves, turns and
+    /// resizes (`backwards`) or forward again, returning the object as it was
+    /// and as it is now — or [`None`] when that direction has run out, or the
+    /// object is not here.
     pub fn step_history(
         &mut self,
         local_id: RegionLocalObjectId,
         backwards: bool,
-    ) -> Option<Object> {
-        let current = self.object_by_local_id(local_id)?;
-        let restored = self.undo.get_mut(&local_id)?.step(current, backwards)?;
+    ) -> Option<(Object, Object)> {
+        let before = self.object_by_local_id(local_id)?;
+        let restored = self
+            .undo
+            .get_mut(&local_id)?
+            .step(Placed::of(&before), backwards)?;
         let held = self.object_mut(local_id)?;
-        held.clone_from(&restored);
-        Some(restored)
+        restored.place(held);
+        Some((before, held.clone()))
     }
 
     /// Removes the prim with the given region-local id, returning it.
@@ -2092,179 +2131,62 @@ pub(crate) fn answer_world_request(
             transaction_id,
             ..
         } => {
-            let policy = world.rez;
-            let returned = matches!(
-                destination,
-                DeRezDestination::ReturnToOwner | DeRezDestination::ReturnToLastOwner
+            return derez(
+                world,
+                assets,
+                (identity, region),
+                (object_assets, announcement),
+                mint,
+                sim,
+                &Derez {
+                    local_ids,
+                    destination,
+                    transaction_id: *transaction_id,
+                    off_world_at: None,
+                },
+                now,
             );
-            let mut created = Vec::new();
-            let mut changes = Vec::new();
-            // What the kill names: every prim that went, or its linkset's root
-            // alone, as the grid being imitated does.
-            let mut killed = Vec::new();
-            let mut notices = Vec::new();
-            let mut handled: BTreeSet<RegionLocalObjectId> = BTreeSet::new();
-            for local_id in local_ids {
-                if !handled.insert(*local_id) {
-                    // Already taken as another named object's child: a viewer
-                    // that sent a whole linkset's ids must not file it twice.
-                    continue;
-                }
-                let Some(object) = world.object_by_local_id(*local_id) else {
-                    // The client believes in an object this region does not
-                    // have. A real simulator kills it on the client rather
-                    // than ignoring the request, so the two agree again — but
-                    // it is *this* client that is out of step, and telling the
-                    // region's other viewers to forget an object they may
-                    // legitimately hold would spread the disagreement rather
-                    // than settle it.
-                    killed.push(*local_id);
-                    continue;
-                };
-                let mut linkset = vec![object];
-                linkset.extend(
-                    world
-                        .objects
-                        .iter()
-                        .filter(|child| child.parent_id == *local_id)
-                        .cloned(),
-                );
-                handled.extend(linkset.iter().map(|member| member.local_id));
-                // Each prim with its record as the region holds it, so that
-                // the item and the body state the name, the masks and the
-                // creation date of the object they were made from — also of
-                // a prim nobody has edited, which stores none.
-                for member in &mut linkset {
-                    if let Some(record) = world.properties_of(member.local_id) {
-                        member.properties = Some(record);
-                    }
-                }
-                // Where the item goes. A delete names its folder and OpenSim
-                // files it in the agent's own Trash whatever that was; a return
-                // names none, and the owner's Lost And Found is where both
-                // grids put it. Only an agent's own object is returned to an
-                // inventory this session holds.
-                let own = linkset
-                    .first()
-                    .is_some_and(|root| root.owner_id == identity.agent_id.uuid());
-                let folder = match destination {
-                    DeRezDestination::Trash(named) => Some(match policy.trash_folder {
-                        crate::imitates::TrashFolder::Named => *named,
-                        crate::imitates::TrashFolder::AgentsOwn => {
-                            folder_of_type(sim, FolderType::Trash).unwrap_or(*named)
-                        }
-                    }),
-                    _returned if returned => own
-                        .then(|| folder_of_type(sim, FolderType::LostAndFound))
-                        .flatten(),
-                    other => other.agent_folder(),
-                };
-                if let Some(folder) = folder {
-                    // What each prim contains, gathered while the region still
-                    // has it: an object update carries no contents, so a body
-                    // that stated none would lose a scripted prim's scripts.
-                    let contents: Vec<TaskInventory> = linkset
-                        .iter()
-                        .map(|member| {
-                            world
-                                .task_inventories
-                                .get(&member.local_id)
-                                .cloned()
-                                .unwrap_or_default()
-                        })
-                        .collect();
-                    let item = taken_item(
-                        &linkset,
-                        folder,
-                        identity.agent_id,
-                        mint,
-                        (object_assets, policy.taken_item_masks),
-                    );
-                    store_taken_asset(assets, &item, &linkset, &contents);
-                    if returned && let Some(root) = linkset.first() {
-                        notices.push(return_notice(world, region, root, &item.name));
-                    }
-                    created.push(item);
-                }
-                if destination.removes_from_world() {
-                    for (index, member) in linkset.iter().enumerate() {
-                        let _removed = world.remove_object(member.local_id);
-                        if index == 0
-                            || policy.derez_kill == crate::imitates::DerezKill::EveryPrimOnce
-                        {
-                            killed.push(member.local_id);
-                        }
-                        changes.push(RegionChange::Killed(member.local_id));
-                    }
-                }
-            }
-            // A return is never acknowledged, whether or not it filed anything
-            // this session can see.
-            if created.is_empty() && returned {
-            } else if created.is_empty() {
-                // Nothing was filed, so there is no created-item announcement
-                // to correlate the client's transaction with -- which is
-                // exactly what a `DeRezAck` is for.
-                if let Err(error) = sim.send_derez_ack(*transaction_id, true, now) {
-                    tracing::warn!("acknowledging a derez failed: {error}");
-                }
-            } else {
-                // Never under the derez's own transaction: Second Life states
-                // one of its own, OpenSim none.
-                let stated = if policy.announcement_states_a_transaction {
-                    mint()
-                } else {
-                    uuid::Uuid::nil()
-                };
-                announce_created_items(
-                    announcement,
-                    sim,
-                    &created,
-                    TransactionId::from(stated),
-                    now,
-                );
-            }
-            for item in created {
-                sim.agent_inventory_mut().insert_item(item);
-            }
-            let kill_messages = match policy.derez_kill {
-                crate::imitates::DerezKill::EveryPrimOnce => 1,
-                crate::imitates::DerezKill::RootTwice => 2,
+        }
+        // A move out of the world, which only gets here on a grid that sends
+        // such an object back to its owner
+        // ([`OutOfWorld::Returned`](crate::imitates::OutOfWorld::Returned)):
+        // the same return, told of in other words.
+        ServerEvent::ObjectTransformSet {
+            local_id,
+            transform,
+        } => {
+            let Some(to) = &transform.position else {
+                return Vec::new();
             };
-            if !killed.is_empty() {
-                for _message in 0..kill_messages {
-                    if let Err(error) = sim.send_kill_object(&killed, now) {
-                        tracing::warn!("killing a derezzed object failed: {error}");
-                    }
-                }
-            }
-            for text in notices {
-                let from = policy.return_notice;
-                let notice = sl_proto::InstantMessage {
-                    // Second Life signs it with the id of the agent it tells.
-                    from_agent_id: if from.states_an_id() {
-                        identity.agent_id
-                    } else {
-                        AgentKey::from(uuid::Uuid::nil())
-                    },
-                    from_agent_name: from.sender().to_owned(),
-                    to_agent_id: identity.agent_id,
-                    dialog: sl_proto::ImDialog::FromTask,
-                    from_group: false,
-                    region_id: None,
-                    position: sl_types::map::RegionCoordinates::new(0.0, 0.0, 0.0),
-                    offline: false,
-                    timestamp: None,
-                    id: uuid::Uuid::nil(),
-                    parent_estate_id: ESTATE_ID,
-                    message: text,
-                    binary_bucket: Vec::new(),
+            let root = world.root_of(*local_id);
+            // The object goes where it was sent first, and the session that
+            // sent it is told so in a terse update, as of any other move.
+            if let Some(object) = world.object_mut(root) {
+                object.motion.position.clone_from(to);
+                let update = sl_proto::TerseUpdate {
+                    local_id: root,
+                    state: object.state,
+                    motion: object.motion.clone(),
                 };
-                if let Err(error) = sim.send_instant_message(&notice, now) {
-                    tracing::warn!("telling of a returned object failed: {error}");
+                if let Err(error) = sim.send_terse_update(&[update], REAL_TIME_DILATION, now) {
+                    tracing::warn!("sending a terse update of a moved object failed: {error}");
                 }
             }
-            return changes;
+            return derez(
+                world,
+                assets,
+                (identity, region),
+                (object_assets, announcement),
+                mint,
+                sim,
+                &Derez {
+                    local_ids: &[root],
+                    destination: &DeRezDestination::ReturnToOwner,
+                    transaction_id: TransactionId::from(uuid::Uuid::nil()),
+                    off_world_at: Some(to),
+                },
+                now,
+            );
         }
         // The contents listing of a prim. An object with nothing in it is
         // answered with serial zero and an *empty* filename -- a real
@@ -3164,6 +3086,241 @@ fn folder_of_type(sim: &SimSession, folder_type: FolderType) -> Option<Inventory
         .folders()
         .find(|folder| folder.folder_type == code)
         .map(|folder| folder.folder_id)
+}
+
+/// One derez: what is to leave the region and where it is to go.
+struct Derez<'a> {
+    /// The objects named.
+    local_ids: &'a [RegionLocalObjectId],
+    /// Where they are to go.
+    destination: &'a DeRezDestination,
+    /// The client's transaction.
+    transaction_id: TransactionId,
+    /// Where the object was moved to, when what sends it back to its owner is
+    /// a move out of the world rather than a `DeRezObject`.
+    off_world_at: Option<&'a Vector>,
+}
+
+/// A take, a save, a return, a delete to trash — and a return the region
+/// makes by itself of an object that left the world. Returns what the
+/// region's other sessions are to be told.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the region, the grid's asset store, who is asking and where, the two policies a \
+              filed item is shaped by, the id mint, the session, the request and the time"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linkset after another through the same steps: gather, file, remove, announce"
+)]
+fn derez(
+    world: &mut SceneFixtures,
+    assets: &crate::assets::GridAssets,
+    (identity, region): (&AvatarIdentity, &RegionIdentity),
+    (object_assets, announcement): (
+        crate::assets::ObjectAssetPolicy,
+        crate::inventory::InventoryAnnouncement,
+    ),
+    mint: &dyn Fn() -> uuid::Uuid,
+    sim: &mut SimSession,
+    request: &Derez<'_>,
+    now: Instant,
+) -> Vec<RegionChange> {
+    let policy = world.rez;
+    let destination = request.destination;
+    let returned = matches!(
+        destination,
+        DeRezDestination::ReturnToOwner | DeRezDestination::ReturnToLastOwner
+    );
+    let mut created = Vec::new();
+    let mut changes = Vec::new();
+    // What the kill names: every prim that went, or its linkset's root
+    // alone, as the grid being imitated does.
+    let mut killed = Vec::new();
+    let mut notices = Vec::new();
+    let mut handled: BTreeSet<RegionLocalObjectId> = BTreeSet::new();
+    for local_id in request.local_ids {
+        if !handled.insert(*local_id) {
+            // Already taken as another named object's child: a viewer
+            // that sent a whole linkset's ids must not file it twice.
+            continue;
+        }
+        let Some(object) = world.object_by_local_id(*local_id) else {
+            // The client believes in an object this region does not
+            // have. A real simulator kills it on the client rather
+            // than ignoring the request, so the two agree again — but
+            // it is *this* client that is out of step, and telling the
+            // region's other viewers to forget an object they may
+            // legitimately hold would spread the disagreement rather
+            // than settle it.
+            killed.push(*local_id);
+            continue;
+        };
+        let mut linkset = vec![object];
+        linkset.extend(
+            world
+                .objects
+                .iter()
+                .filter(|child| child.parent_id == *local_id)
+                .cloned(),
+        );
+        handled.extend(linkset.iter().map(|member| member.local_id));
+        // Each prim with its record as the region holds it, so that
+        // the item and the body state the name, the masks and the
+        // creation date of the object they were made from — also of
+        // a prim nobody has edited, which stores none.
+        for member in &mut linkset {
+            if let Some(record) = world.properties_of(member.local_id) {
+                member.properties = Some(record);
+            }
+        }
+        // Where the item goes. A delete names its folder and OpenSim
+        // files it in the agent's own Trash whatever that was; a return
+        // names none, and the owner's Lost And Found is where both
+        // grids put it. Only an agent's own object is returned to an
+        // inventory this session holds.
+        let own = linkset
+            .first()
+            .is_some_and(|root| root.owner_id == identity.agent_id.uuid());
+        let folder = match destination {
+            DeRezDestination::Trash(named) => Some(match policy.trash_folder {
+                crate::imitates::TrashFolder::Named => *named,
+                crate::imitates::TrashFolder::AgentsOwn => {
+                    folder_of_type(sim, FolderType::Trash).unwrap_or(*named)
+                }
+            }),
+            _returned if returned => own
+                .then(|| folder_of_type(sim, FolderType::LostAndFound))
+                .flatten(),
+            other => other.agent_folder(),
+        };
+        if let Some(folder) = folder {
+            // What each prim contains, gathered while the region still
+            // has it: an object update carries no contents, so a body
+            // that stated none would lose a scripted prim's scripts.
+            let contents: Vec<TaskInventory> = linkset
+                .iter()
+                .map(|member| {
+                    world
+                        .task_inventories
+                        .get(&member.local_id)
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect();
+            let item = taken_item(
+                &linkset,
+                folder,
+                identity.agent_id,
+                mint,
+                (object_assets, policy.taken_item_masks),
+            );
+            store_taken_asset(assets, &item, &linkset, &contents);
+            if returned && let Some(root) = linkset.first() {
+                notices.push(match request.off_world_at {
+                    Some(at) => off_world_notice(world, region, at, &item.name),
+                    None => return_notice(world, region, root, &item.name),
+                });
+            }
+            created.push(item);
+        }
+        if destination.removes_from_world() {
+            for (index, member) in linkset.iter().enumerate() {
+                let _removed = world.remove_object(member.local_id);
+                if index == 0 || policy.derez_kill == crate::imitates::DerezKill::EveryPrimOnce {
+                    killed.push(member.local_id);
+                }
+                changes.push(RegionChange::Killed(member.local_id));
+            }
+        }
+    }
+    // A return is never acknowledged, whether or not it filed anything
+    // this session can see.
+    if created.is_empty() && returned {
+    } else if created.is_empty() {
+        // Nothing was filed, so there is no created-item announcement
+        // to correlate the client's transaction with -- which is
+        // exactly what a `DeRezAck` is for.
+        if let Err(error) = sim.send_derez_ack(request.transaction_id, true, now) {
+            tracing::warn!("acknowledging a derez failed: {error}");
+        }
+    } else {
+        // Never under the derez's own transaction: Second Life states
+        // one of its own, OpenSim none.
+        let stated = if policy.announcement_states_a_transaction {
+            mint()
+        } else {
+            uuid::Uuid::nil()
+        };
+        announce_created_items(
+            announcement,
+            sim,
+            &created,
+            TransactionId::from(stated),
+            now,
+        );
+    }
+    for item in created {
+        sim.agent_inventory_mut().insert_item(item);
+    }
+    let kill_messages = match policy.derez_kill {
+        crate::imitates::DerezKill::EveryPrimOnce => 1,
+        crate::imitates::DerezKill::RootTwice => 2,
+    };
+    if !killed.is_empty() {
+        for _message in 0..kill_messages {
+            if let Err(error) = sim.send_kill_object(&killed, now) {
+                tracing::warn!("killing a derezzed object failed: {error}");
+            }
+        }
+    }
+    for text in notices {
+        let from = policy.return_notice;
+        let notice = sl_proto::InstantMessage {
+            // Second Life signs a return by the agent with the id
+            // of the agent it tells, and one of an object that went
+            // off-world with none.
+            from_agent_id: if from.states_an_id() && request.off_world_at.is_none() {
+                identity.agent_id
+            } else {
+                AgentKey::from(uuid::Uuid::nil())
+            },
+            from_agent_name: from.sender().to_owned(),
+            to_agent_id: identity.agent_id,
+            dialog: sl_proto::ImDialog::FromTask,
+            from_group: false,
+            region_id: None,
+            position: sl_types::map::RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: uuid::Uuid::nil(),
+            parent_estate_id: ESTATE_ID,
+            message: text,
+            binary_bucket: Vec::new(),
+        };
+        if let Err(error) = sim.send_instant_message(&notice, now) {
+            tracing::warn!("telling of a returned object failed: {error}");
+        }
+    }
+    changes
+}
+
+/// What an agent is told when its object went out of the world at `at`, filed
+/// under the name `name`.
+fn off_world_notice(
+    world: &SceneFixtures,
+    region: &RegionIdentity,
+    at: &Vector,
+    name: &str,
+) -> String {
+    let parcel = world
+        .parcel_at(at.x, at.y)
+        .map_or("", |parcel| parcel.name.as_str());
+    let region_name = region
+        .sim_name
+        .as_ref()
+        .map_or_else(String::new, ToString::to_string);
+    crate::imitates::EditPolicy::off_world_notice(name, parcel, &region_name, at)
 }
 
 /// What an agent is told when it returns its own object `root`, filed under
@@ -4248,11 +4405,11 @@ mod test {
             .motion
             .position = moved.clone();
 
-        let undone = world
+        let (_before, undone) = world
             .step_history(local_id, true)
             .ok_or("the undo restored nothing")?;
         assert_eq!(undone.motion.position, ZERO);
-        let redone = world
+        let (_before, redone) = world
             .step_history(local_id, false)
             .ok_or("the redo restored nothing")?;
         assert_eq!(redone.motion.position, moved);
@@ -4271,6 +4428,43 @@ mod test {
             z: 9.0,
         };
         assert_eq!(world.step_history(local_id, false), None);
+        Ok(())
+    }
+
+    /// An undo puts an object back where it stood and leaves everything else
+    /// about it as it is, and a history holds no more placements than the
+    /// grid keeps.
+    #[test]
+    fn an_undo_restores_a_placement_and_nothing_else() -> Result<(), String> {
+        let owner = agent(0x1);
+        let local_id = RegionLocalObjectId(4);
+        let mut world = SceneFixtures::new();
+        world.edit = crate::imitates::ImitatedGrid::OpenSim.edit_policy();
+        world.objects.push(box_prim(
+            local_id,
+            ObjectKey::from(uuid::Uuid::from_u128(4)),
+            owner,
+            ZERO,
+            ZERO,
+        ));
+        for step in 1..=8_u8 {
+            world.record_undo(local_id);
+            let held = world.object_mut(local_id).ok_or("the object went away")?;
+            held.motion.position.z = f32::from(step);
+            held.material = step;
+        }
+        let mut undone = 0_usize;
+        while world.step_history(local_id, true).is_some() {
+            undone = undone.saturating_add(1);
+        }
+        assert_eq!(undone, world.edit.undo_depth);
+        let held = world
+            .object_by_local_id(local_id)
+            .ok_or("the object went away")?;
+        // Eight moves, five undone: it stands where the third left it, and
+        // its material is the last one set.
+        assert!((held.motion.position.z - 3.0).abs() < f32::EPSILON);
+        assert_eq!(held.material, 8);
         Ok(())
     }
 

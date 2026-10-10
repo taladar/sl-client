@@ -52,13 +52,14 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use imitates::{
-    AbsentTile, ChildSale, ContentsAudience, DerezKill, DotName, EditEcho, EmptyCells,
-    EnvironmentChangeReply, ImitatedGrid, LandOrigin, LastOwner, LinkedRecord, LoginFields,
-    LoginRefusals, LogoutReply, MapLayerAnswer, MapPolicy, NameMatch, NoBuildAlert,
-    OPENSIM_ALL_PERMISSIONS, OPENSIM_FOLDED_BITS, OPENSIM_MAX_AGENT_GROUPS, ObjectDelete,
-    ParcelPolicy, PropertiesPolicy, RegionCapacity, RestoreToWorld, ReturnNotice, RezPolicy,
+    AbsentTile, ChildSale, ContentsAudience, CopiedSerial, DerezKill, DotName, EditEcho,
+    EditPolicy, EmptyCells, EnvironmentChangeReply, ImitatedGrid, LandOrigin, LastOwner,
+    LinkedRecord, LoginFields, LoginRefusals, LogoutReply, MapLayerAnswer, MapPolicy, MaskRules,
+    NameMatch, NoBuildAlert, OPENSIM_ALL_PERMISSIONS, OPENSIM_FOLDED_BITS,
+    OPENSIM_MAX_AGENT_GROUPS, ObjectDelete, OutOfWorld, ParcelPolicy, Placement, PropertiesPolicy,
+    RayAtNothing, RegionCapacity, RestoreToWorld, ReturnNotice, RezPolicy,
     SELECTED_PARCEL_SEQUENCE_ID, SIT_TARGET_RAISE_M, SecondLogin, SitPolicy, SitRefusal, StockDay,
-    TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
+    StoredText, TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
 };
 pub use inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,

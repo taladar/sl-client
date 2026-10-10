@@ -211,6 +211,15 @@ struct BuildNumericField {
     axis: usize,
 }
 
+/// The text the panel itself last left in a numeric field: what the sync
+/// wrote there, or what was typed there when it was committed.
+///
+/// A focused field that still reads it is not being typed into, and follows
+/// the object like any other; one that reads something else is, and is left
+/// alone until it is committed.
+#[derive(Component, Debug, Default)]
+struct FieldSynced(String);
+
 /// Marks the grid-unit field.
 #[derive(Component, Debug, Clone, Copy)]
 struct BuildGridUnitField;
@@ -610,9 +619,11 @@ fn spawn_build_tools_content(
     )
     .field;
     // Named by the caption beside it.
-    commands
-        .entity(grid_field)
-        .insert((BuildGridUnitField, LabelledBy(grid_label)));
+    commands.entity(grid_field).insert((
+        BuildGridUnitField,
+        FieldSynced::default(),
+        LabelledBy(grid_label),
+    ));
 
     // Selection summary.
     let summary_text = commands
@@ -788,6 +799,7 @@ fn spawn_build_tools_content(
             // "Position X", not the row's "Position" three times over.
             commands.entity(field).insert((
                 BuildNumericField { group, axis },
+                FieldSynced::default(),
                 Semantic::new(Role::SpinButton).name_key(format!("{element}-name")),
             ));
             if let Some(slot) = fields.get_mut(slot_index) {
@@ -1469,8 +1481,11 @@ struct NumericFieldWidgets<'w, 's> {
     editors: Query<'w, 's, &'static mut EditableText>,
     /// The row labels, greyed with their group.
     labels: Query<'w, 's, (&'static BuildTransformLabel, &'static mut ClassList)>,
-    /// The focused field, which is never overwritten.
+    /// The focused field, which is not overwritten while it is typed into.
     focus: Res<'w, InputFocus>,
+    /// What the panel last left in each field, which is how a field that is
+    /// being typed into is told from one that merely has the focus.
+    synced: Query<'w, 's, &'static mut FieldSynced>,
     /// The font context a programmatic [`EditableText`] rewrite relays through.
     font_cx: ResMut<'w, FontCx>,
     /// The layout context the same rewrite relays through.
@@ -1490,8 +1505,16 @@ struct TransformSource<'w, 's> {
 }
 
 /// Keep the nine transform fields (and the grid-unit field) displaying the
-/// live values — skipping whichever field the user is editing, so typing is
-/// never clobbered mid-edit.
+/// live values — skipping a field the user is typing into, so typing is never
+/// clobbered mid-edit.
+///
+/// Having the focus is not being typed into. `Enter` commits a field and
+/// leaves the focus in it, and what the grid then makes of the edit — a size
+/// kept within its limits, a move it refuses — has to show there: a field
+/// that kept reading the kilometre that was typed, over a prim the grid made
+/// 64 m, was the gap `gridspec-object-edit` found. So a focused field is left
+/// alone only while its text is not what the panel last left in it
+/// ([`FieldSynced`]).
 fn sync_numeric_fields(
     ui: Option<Res<BuildToolsUi>>,
     state: Res<EditToolState>,
@@ -1547,38 +1570,45 @@ fn sync_numeric_fields(
         }
     }
     for field in ui.fields {
-        if widgets.focus.get() == Some(field) {
-            continue;
-        }
         let Ok(marker) = widgets.markers.get(field) else {
             continue;
         };
         let want = transform_field_text(primary_motion, marker);
-        if let Ok(mut editor) = widgets.editors.get_mut(field)
-            && editor.value().to_string() != want
-        {
-            set_editor_text(
-                &mut editor,
-                &want,
-                &mut widgets.font_cx,
-                &mut widgets.layout_cx,
-            );
-        }
+        show_in_field(&mut widgets, field, &want);
     }
     // The grid-unit field mirrors the state (it can be changed by a future
     // grid-options floater too).
-    if widgets.focus.get() != Some(ui.grid_field) {
-        let want = format_metres(state.grid_unit);
-        if let Ok(mut editor) = widgets.editors.get_mut(ui.grid_field)
-            && editor.value().to_string() != want
-        {
-            set_editor_text(
-                &mut editor,
-                &want,
-                &mut widgets.font_cx,
-                &mut widgets.layout_cx,
-            );
-        }
+    let want = format_metres(state.grid_unit);
+    show_in_field(&mut widgets, ui.grid_field, &want);
+}
+
+/// Make `field` read `want`, unless the user is typing into it: it has the
+/// focus and no longer reads what the panel last left in it.
+fn show_in_field(widgets: &mut NumericFieldWidgets, field: Entity, want: &str) {
+    let Ok(mut editor) = widgets.editors.get_mut(field) else {
+        return;
+    };
+    let shown = editor.value().to_string();
+    let typing = widgets.focus.get() == Some(field)
+        && widgets
+            .synced
+            .get(field)
+            .is_ok_and(|synced| synced.0 != shown);
+    if typing {
+        return;
+    }
+    if shown != want {
+        set_editor_text(
+            &mut editor,
+            want,
+            &mut widgets.font_cx,
+            &mut widgets.layout_cx,
+        );
+    }
+    if let Ok(mut synced) = widgets.synced.get_mut(field)
+        && synced.0 != want
+    {
+        want.clone_into(&mut synced.0);
     }
 }
 
@@ -1602,15 +1632,15 @@ struct TransformCommit<'w, 's> {
 }
 
 /// Commit numeric edits: on `Enter` in a focused transform field, when focus
-/// leaves one, or when its spinner arrows step it ([`FieldCommits`]), parse
-/// its row and send the corresponding `MultipleObjectUpdate` for the primary
-/// selection — the exact command the gizmos send. The grid-unit field commits
+/// leaves one with something typed into it since the panel last wrote it, or
+/// when its spinner arrows step it ([`FieldCommits`]), parse its row and send the corresponding `MultipleObjectUpdate` for the
+/// primary selection — the exact command the gizmos send. The grid-unit field commits
 /// into [`EditToolState`] instead.
 fn commit_numeric_fields(
     ui: Option<Res<BuildToolsUi>>,
     mut state: ResMut<EditToolState>,
     mut commits: FieldCommits,
-    fields: NumericFieldWidgets,
+    mut fields: NumericFieldWidgets,
     mut commit_to: TransformCommit,
 ) {
     let Some(ui) = ui else {
@@ -1622,6 +1652,20 @@ fn commit_numeric_fields(
             continue;
         };
         let text = commit.text(editor);
+        // A field that still reads what the panel last left in it has had
+        // nothing typed into it, and there is nothing to commit: a blur is
+        // not an edit. Sending the row all the same would be an edit to the
+        // grid, which keeps one step of undo for it — so that the Ctrl+Z
+        // after clicking out of a field stepped back out of nothing.
+        let Ok(mut synced) = fields.synced.get_mut(commit.field) else {
+            continue;
+        };
+        if !commit.is_explicit() && synced.0 == text {
+            continue;
+        }
+        // What was typed is taken: from here the field follows the object
+        // again, focused or not, until it is typed into once more.
+        synced.0.clone_from(&text);
         if commit.field == ui.grid_field {
             if let Some(value) = parse_field(&text) {
                 state.grid_unit = value.clamp(0.01, 10.0);

@@ -1277,9 +1277,21 @@ region's own lock:
   root's frame, so a link restates it and a delink puts it back. Undo and
   redo are the *simulator's* — the messages name objects and nothing else,
   and address them by full id rather than by the region-local id the rest of
-  the family uses — so each edited object carries a short history of whole
-  `Object` snapshots (`EditHistory`), which is the only definition of "undo"
-  that composes across edits of different kinds.
+  the family uses — so each object carries a short history of how it was
+  placed before each move, turn and resize (`EditHistory`), and of nothing
+  else: neither live grid steps back out of a rename or a material. How many
+  it keeps is its flavour's, twenty or five.
+
+  What a grid makes of an edit it does not take as sent is the flavour's
+  too (`EditPolicy`, [Building § Editing](../gridspec/building.md#editing)):
+  the limits a prim's side is kept within, what becomes of a name that is
+  not ASCII, which bits of which mask an owner may change, whether a click
+  action is answered, and what becomes of an object moved under the ground,
+  off the region's edge or above the ceiling — which on a
+  Second-Life-flavoured grid is a return to its owner's Lost And Found. A
+  duplicate copies an object with its record and its contents, by an offset
+  or onto a ray's target; the grid casts no ray. With no groups in it, a
+  group set does nothing and a deed is refused.
 
   Part of an `ObjectUpdate` is **per viewer**: the `PrimFlags` that say what
   the receiving agent may do with the object (`OBJECT_MODIFY`, `_MOVE`,
@@ -1387,8 +1399,9 @@ What a **real** grid does on the same collision is still worth one run to
 confirm rather than assume (`test-asset-save-mutation-survey`); the expected
 finding is that nothing arbitrates.
 
-Offline conformance: `object-edit` (the whole build surface, including the
-transform, the undo stack and the read-back through `ObjectProperties`),
+Offline conformance: `object-edit` (what each edit is answered with, the
+sizes, names, masks and places a grid does not take, the undo stack and a
+duplicate, held to what both live grids were measured to answer),
 `object-link-delink`, `object-properties` and `object-select-scene` (what a
 select answers and who is told of a change), `parcel-edit` (the About Land
 form and the ban list, each refetched and restored), `region-info`,

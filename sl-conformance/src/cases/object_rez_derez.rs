@@ -91,10 +91,10 @@ const TEMPORARY_PRIMS: u8 = 3;
 const TEMPORARY_NOMINAL: Duration = Duration::from_secs(60);
 
 /// How far above the anchor the cubes are rezzed, in metres.
-const REZ_LIFT_M: f32 = 1.0;
+pub(crate) const REZ_LIFT_M: f32 = 1.0;
 
 /// How far apart along the region's x axis the cubes stand, in metres.
-const SPACING_M: f32 = 1.5;
+pub(crate) const SPACING_M: f32 = 1.5;
 
 /// The name the cube is given, so that the items made from it can be told
 /// from every other `Object` in an inventory.
@@ -449,6 +449,12 @@ pub(crate) struct Heard {
     /// The objects of the agent's region the stream named, and the form each
     /// came in.
     pub(crate) updated: Vec<(RegionLocalObjectId, ObjectUpdateForm)>,
+    /// Objects the session already held, as each read once an update had
+    /// changed it, in arrival order.
+    pub(crate) changed: Vec<Object>,
+    /// Objects sent anew down another circuit than the agent's own: a
+    /// neighbouring region's.
+    pub(crate) elsewhere: Vec<Object>,
 }
 
 impl Heard {
@@ -539,7 +545,7 @@ impl Heard {
 
     /// The forms `object` was sent in, `+`-joined, with `properties` where its
     /// record came too — or `nothing`.
-    fn brought(&self, object: &Object) -> String {
+    pub(crate) fn brought(&self, object: &Object) -> String {
         let mut parts = Vec::new();
         for (form, word) in [
             (ObjectUpdateForm::Full, "full update"),
@@ -614,6 +620,12 @@ pub(crate) async fn listen(
                         if root.is_none_or(|root| object.circuit == root) =>
                     {
                         heard.added.push((**object).clone());
+                    }
+                    Event::ObjectAdded(object) => heard.elsewhere.push((**object).clone()),
+                    Event::ObjectUpdated(object)
+                        if root.is_none_or(|root| object.circuit == root) =>
+                    {
+                        heard.changed.push((**object).clone());
                     }
                     Event::ObjectProperties(properties) => {
                         heard.properties.push((**properties).clone());
@@ -698,11 +710,11 @@ pub(crate) async fn listen(
 /// The objects the case rezzed and has to take away again, and the items its
 /// legs made.
 #[derive(Debug, Default)]
-struct Residue {
+pub(crate) struct Residue {
     /// The roots still standing.
-    roots: Vec<ScopedObjectId>,
+    pub(crate) roots: Vec<ScopedObjectId>,
     /// The inventory items the grid announced.
-    items: Vec<InventoryKey>,
+    pub(crate) items: Vec<InventoryKey>,
 }
 
 /// The folders of a login skeleton the case files things into.
@@ -851,22 +863,22 @@ impl GridTest for ObjectRezDerez {
 
 /// Everything a leg needs to know about the run.
 #[derive(Debug)]
-struct Run {
+pub(crate) struct Run {
     /// The agent's folders.
-    folders: Folders,
+    pub(crate) folders: Folders,
     /// The agent.
-    owner: AgentKey,
+    pub(crate) owner: AgentKey,
     /// How long to listen.
-    pace: Pace,
+    pub(crate) pace: Pace,
     /// Where the first cube stands; the others stand beside it.
-    position: Vector,
+    pub(crate) position: Vector,
     /// Every object sighted so far.
-    seen: HashSet<ScopedObjectId>,
+    pub(crate) seen: HashSet<ScopedObjectId>,
 }
 
 impl Run {
     /// The spot `slot` places along from the first cube's.
-    fn spot(&self, slot: u8) -> Vector {
+    pub(crate) fn spot(&self, slot: u8) -> Vector {
         Vector {
             x: f32::from(slot).mul_add(SPACING_M, self.position.x),
             y: self.position.y,
@@ -1320,12 +1332,12 @@ pub(crate) fn joined(texts: &[String]) -> String {
 }
 
 /// Notes every item `heard` announced, for the cleanup.
-fn note_items(residue: &mut Residue, heard: &Heard) {
+pub(crate) fn note_items(residue: &mut Residue, heard: &Heard) {
     residue.items.extend(heard.items().map(|item| item.item_id));
 }
 
 /// Rezzes a cube with `ObjectAdd` at `slot` and waits for it.
-async fn rez_cube(
+pub(crate) async fn rez_cube(
     session: &mut Session,
     run: &mut Run,
     residue: &mut Residue,
@@ -1702,7 +1714,7 @@ fn record_rezzed(
 
 /// Derezzes whatever the case left standing to the Trash, waits for each to
 /// go, and removes the items its legs made from the inventory.
-async fn clean_up(
+pub(crate) async fn clean_up(
     session: &mut Session,
     residue: &Residue,
     trash: InventoryFolderKey,

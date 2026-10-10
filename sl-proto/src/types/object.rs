@@ -32,6 +32,10 @@ pub mod prim_flags {
     /// The object is physical (`FLAGS_USE_PHYSICS`), the physics half of an
     /// `ObjectFlagUpdate`.
     pub const USE_PHYSICS: u32 = 1 << 0;
+    /// The object was rezzed or copied for a viewer that asked to have it
+    /// selected (`FLAGS_CREATE_SELECTED`): the viewer selects it on arrival.
+    /// It is also the bit a duplicate's `DuplicateFlags` asks for that with.
+    pub const CREATE_SELECTED: u32 = 1 << 1;
     /// The receiving agent may modify the object (`FLAGS_OBJECT_MODIFY`).
     /// Agent-relative, like every `OBJECT_*` bit: a simulator works it out
     /// for each viewer it sends the object to.

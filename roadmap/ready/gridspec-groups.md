@@ -5,7 +5,7 @@ topic: gridspec
 status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, viewer-social-group-extras,
-  viewer-group-notice-attachments]
+  viewer-group-notice-attachments, gridspec-object-edit]
 ---
 
 Context: [context/gridspec.md](../context/gridspec.md).
@@ -16,6 +16,16 @@ OpenSim auto-activates at creation, sends `AgentDropGroup` on leave / eject,
 has no accounting backend; SL caps names at 35, drops back-to-back creates,
 charges L$100. The fake grid has no group store and `SimSession` no group
 senders.
+
+An object's group and a deed were measured with no group and with a plain
+member ([[gridspec-object-edit]], `book/src/gridspec/building.md` § Editing
+and § Somebody else's object): a set to a group the agent is not in does
+nothing, a member's set is taken, and a deed without the power is refused —
+with an alert on Second Life, with the unchanged record on OpenSim. Left
+for this task: a deed by a member **with** the power (what the object's
+record, owner and masks read afterwards, and who may edit it), which needs
+a throwaway object and a group whose owner we are. The fake grid refuses
+every deed and ignores every group set until it has groups to ask.
 
 ## Discover
 

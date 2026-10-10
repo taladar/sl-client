@@ -29,6 +29,14 @@
 //! to leave the viewer's world, its item has to show in the inventory window
 //! under the object's name, and a rez of that item has to put an object of
 //! that name back.
+//!
+//! And a grid does not take every edit as it was sent
+//! ([[gridspec-object-edit]]): a prim's side is kept within limits that are
+//! Second Life's or OpenSim's, a move under the ground or off the region's
+//! edge is refused by one and not the other, and an object sent out of the
+//! world comes back to its owner's inventory on Second Life. The viewer
+//! shows a move and a resize the moment they are typed, so what it shows
+//! afterwards has to be what the grid kept and not what was typed.
 
 #[cfg(test)]
 mod test {
@@ -36,7 +44,7 @@ mod test {
 
     use serde_json::json;
     use sl_automation_proto::{
-        Locator, LogStream, Probe, Role, WorldKind, WorldLocator, WorldNode,
+        Locator, LogStream, NodeValue, Probe, Role, WorldKind, WorldLocator, WorldNode,
     };
     use sl_e2e::{BodyError, Grid, Need, Stage, StageBuilder};
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
@@ -706,6 +714,276 @@ mod test {
             .viewer("Alpha")
             .needs(Need::LiveGrid("a grid's own kill and its own item"))
             .run(a_prim_is_taken_and_rezzed_again)?;
+        Ok(())
+    }
+
+    /// The name the edit test gives its prim.
+    const EDITED: &str = "Edited By The Viewer";
+
+    /// A side no grid lets a prim have, in metres, as it is typed.
+    const TOO_LARGE: &str = "1000";
+
+    /// The side a rezzed prim has, as the Build window writes it.
+    const REZZED_SIDE: &str = "0.500";
+
+    /// The text of a numeric field of the Build window's Object tab, as a
+    /// number.
+    async fn reading(field: &UiLocator) -> Result<f32, BodyError> {
+        match field.value().await? {
+            Some(NodeValue::Number(number)) => Ok(number),
+            Some(NodeValue::Text(text)) => text
+                .parse::<f32>()
+                .map_err(|error| format!("the field reads {text:?}: {error}").into()),
+            other => Err(format!("the field holds {other:?}, not a number").into()),
+        }
+    }
+
+    /// Wait until the numeric field `field` reads `wanted` to the centimetre.
+    async fn reads(field: &UiLocator, wanted: f32, what: &str) -> Result<(), BodyError> {
+        let waited = tokio::time::timeout(WAIT, async {
+            loop {
+                if let Ok(read) = reading(field).await
+                    && (read - wanted).abs() < 0.01
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+        .await;
+        if waited.is_err() {
+            let read = field.value().await?;
+            return Err(format!("{what}: the field reads {read:?}, not {wanted}").into());
+        }
+        Ok(())
+    }
+
+    /// Wait until the object `prim` names is drawn as `wanted` says.
+    async fn drawn(
+        prim: &sl_viewer_driver::WorldHandle,
+        wanted: impl Fn(&WorldNode) -> bool + Send + Sync,
+        what: &str,
+    ) -> Result<(), BodyError> {
+        let waited = tokio::time::timeout(WAIT, async {
+            loop {
+                if let Ok(node) = prim.node().await
+                    && wanted(&node)
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+        .await;
+        if waited.is_err() {
+            let node = prim.node().await?;
+            return Err(format!(
+                "{what}: the prim is drawn at {:?}, {:?} large",
+                node.position, node.scale
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// Rez a prim and name it; type a side no grid takes into the Build
+    /// window and read back the grid's largest; type a place the grid refuses
+    /// and read back where the prim stands; move it, and step back out of the
+    /// move and forward again; and, where the grid sends an object out of the
+    /// world back to its owner, type such a place and find the prim gone and
+    /// its item in the inventory.
+    async fn an_edit_reads_what_the_grid_kept(
+        stage: &Stage,
+        like: ImitatedGrid,
+    ) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        let (build, spot) = rez_a_prim(stage, alpha).await?;
+        let name = if spot.is_some() {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| format!("the clock: {error}"))?
+                .as_secs();
+            format!("{EDITED} {stamp}")
+        } else {
+            EDITED.to_owned()
+        };
+        let field = build.test_id("build-name:field");
+        let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
+        let selected = alpha.selection().await?;
+        let [prim] = selected.as_slice() else {
+            return Err(format!("the rez left {selected:?} selected").into());
+        };
+        let prim_id = prim.full_id;
+        let _typed = field.fill(&name).await?;
+        field.press("Enter").await?;
+        let _kept = alpha
+            .expect(&field)
+            .timeout(WAIT)
+            .to_have_text(&name)
+            .await?;
+        let _object = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-object"))
+            .click()
+            .await?;
+        let policy = like.edit_policy();
+        let this_prim = || alpha.world().locator(WorldLocator::full_id(prim_id));
+
+        // A side of a kilometre: the grid keeps its own largest, and says so
+        // in the update it answers a resize with.
+        let side = build.test_id("build-size-x:field");
+        reads(&side, 0.5, "the side a prim is rezzed with").await?;
+        let _typed = side.fill(TOO_LARGE).await?;
+        side.press("Enter").await?;
+        reads(&side, policy.largest_prim_m, "a side of a kilometre").await?;
+        // The window shows a resize the moment it is typed, and OpenSim's
+        // largest is the viewer's own: what says the grid kept it is the prim
+        // as the grid sent it again.
+        drawn(
+            &this_prim(),
+            |node| {
+                node.scale
+                    .is_some_and(|scale| (scale[0] - policy.largest_prim_m).abs() < 0.01)
+            },
+            "a side of a kilometre",
+        )
+        .await?;
+        let _typed = side.fill(REZZED_SIDE).await?;
+        side.press("Enter").await?;
+        reads(&side, 0.5, "the side it was rezzed with").await?;
+
+        // A place the grid refuses: under the ground on Second Life, off the
+        // region's edge on OpenSim. The prim stays, and the grid sends it
+        // again — which has to put it back in the window and in the world.
+        let (east, up) = (
+            build.test_id("build-pos-x:field"),
+            build.test_id("build-pos-z:field"),
+        );
+        let stood = [reading(&east).await?, reading(&up).await?];
+        let (refused, back, what) = match like {
+            ImitatedGrid::SecondLife => (&up, stood[1], "a move under the ground"),
+            ImitatedGrid::OpenSim => (&east, stood[0], "a move off the region's edge"),
+        };
+        let _typed = refused
+            .fill(match like {
+                ImitatedGrid::SecondLife => "-50",
+                ImitatedGrid::OpenSim => "-10",
+            })
+            .await?;
+        refused.press("Enter").await?;
+        reads(refused, back, what).await?;
+        drawn(
+            &this_prim(),
+            |node| {
+                node.position.is_some_and(|at| {
+                    (at[0] - stood[0]).abs() < 0.05 && (at[2] - stood[1]).abs() < 0.05
+                })
+            },
+            what,
+        )
+        .await?;
+
+        // A move the grid takes, and a step back out of it: the undo is the
+        // grid's, which sends the prim again where it stood before. A chord
+        // typed into a text field is the field's, so the focus goes to a tab
+        // first.
+        let raised = stood[1] + 1.0;
+        let _typed = up.fill(&format!("{raised:.3}")).await?;
+        up.press("Enter").await?;
+        reads(&up, raised, "a move a metre up").await?;
+        let _tab = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-object"))
+            .click()
+            .await?;
+        alpha.press("Ctrl+Z").await?;
+        reads(&up, stood[1], "an undo of the move").await?;
+        alpha.press("Ctrl+Y").await?;
+        reads(&up, raised, "a redo of it").await?;
+
+        if like == ImitatedGrid::OpenSim {
+            // OpenSim keeps an object wherever else it is sent. The click
+            // that selected the prim left the world the keyboard, and Delete
+            // takes what is selected.
+            alpha.press("Escape").await?;
+            alpha.press("Delete").await?;
+            let _gone = alpha
+                .expect_world(&this_prim())
+                .timeout(SETTLE)
+                .to_be_detached()
+                .await?;
+            return Ok(());
+        }
+
+        // Off the region's edge, where no region is: Second Life sends the
+        // prim back to its owner's Lost And Found.
+        let _typed = east.fill("-10").await?;
+        east.press("Enter").await?;
+        let _gone = alpha
+            .expect_world(&this_prim())
+            .timeout(SETTLE)
+            .to_be_detached()
+            .await?;
+        alpha.press("Escape").await?;
+        alpha.press("Escape").await?;
+        alpha.press("Ctrl+B").await?;
+        let inventory = alpha.ui().window("inventory");
+        if !inventory.is_visible().await? {
+            alpha.press("Ctrl+I").await?;
+            let _shown = alpha.expect(&inventory).to_be_visible().await?;
+        }
+        let search = inventory.test_id("inventory:search").role(Role::Textbox);
+        let _searched = search.fill(&name).await?;
+        let row = inventory
+            .get(Locator::role(Role::TreeItem).named(&name))
+            .timeout(WAIT);
+        let _filed = alpha.expect(&row).timeout(WAIT).to_be_visible().await?;
+        Ok(())
+    }
+
+    /// **An edit a grid does not take as sent, on each fake flavour**: a side
+    /// of a kilometre reads Second Life's 64 m or OpenSim's 256 m once the
+    /// grid has answered; a move the grid refuses — under the ground on one,
+    /// off the edge on the other — is put back in the Build window and in the
+    /// world by the update the grid answers it with; Ctrl+Z puts a moved
+    /// prim back where it stood and Ctrl+Y where it was moved to; and on
+    /// Second Life a prim sent off the region's edge leaves the world and its
+    /// item shows in the inventory window.
+    #[test]
+    fn an_edit_reads_what_the_grid_kept_on_each_fake_flavour() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "edit_second_life"),
+            (ImitatedGrid::OpenSim, "edit_open_sim"),
+        ] {
+            StageBuilder::new(name)
+                .viewer_binary(VIEWER)
+                .viewer("Alpha")
+                .needs(Need::Content("the stock scene's unnamed box, to rez on"))
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async move |stage: &Stage| {
+                    an_edit_reads_what_the_grid_kept(stage, flavour).await
+                })?;
+        }
+        Ok(())
+    }
+
+    /// **An edit a grid does not take as sent, live**
+    /// (`SL_E2E_GRID=opensim|aditi`, where the avatar stands on land it may
+    /// build on): the same against the grid's own limits and its own
+    /// refusals. On Second Life the prim ends in the avatar's Lost And Found.
+    #[test]
+    fn an_edit_reads_what_the_grid_kept_on_a_live_grid() -> Result<(), TestError> {
+        StageBuilder::new("edit_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid("a grid's own limits and its own refusals"))
+            .run(async |stage: &Stage| {
+                let like = if stage.on_grid() == Grid::Aditi {
+                    ImitatedGrid::SecondLife
+                } else {
+                    ImitatedGrid::OpenSim
+                };
+                an_edit_reads_what_the_grid_kept(stage, like).await
+            })?;
         Ok(())
     }
 }

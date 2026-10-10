@@ -5,7 +5,8 @@ topic: viewer
 status: ready
 origin: user request during the edit-gizmo session (2026-07-23)
 blocked_by: [viewer-object-selection-core]
-refs: [viewer-transform-gizmos, viewer-object-edit-floater-shell]
+refs: [viewer-transform-gizmos, viewer-object-edit-floater-shell,
+  gridspec-object-edit]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -32,3 +33,13 @@ Reference (Firestorm, read-only): `LLSelectMgr::selectGetModify` /
 Builds on: the selection set's per-node `ObjectProperties`
 ([[viewer-object-selection-core]]) and the update-flags bits already used by
 the pie menu's enable gates.
+
+What each grid does with an edit the editor may not make is measured
+([[gridspec-object-edit]], `book/src/gridspec/building.md` § Somebody else's
+object): Second Life answers a refused move, turn, resize, shape or flag
+with an alert and an update that puts the object back, OpenSim mostly with
+nothing, and neither changes the object — so gating is a courtesy, and an
+ungated edit converges on the grid's update where there is one. On OpenSim
+a refused turn or resize is answered with **nothing**: there the local
+echo stays wrong until the object is sent again, which is the case gating
+has to prevent rather than repair.

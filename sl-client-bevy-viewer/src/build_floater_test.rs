@@ -431,6 +431,65 @@ mod tests {
         Ok(())
     }
 
+    /// **A committed field that keeps the focus shows what the grid kept.**
+    ///
+    /// `Enter` commits a transform field and leaves the focus in it. A grid
+    /// does not take every edit as sent — Second Life refuses a move under
+    /// the ground and answers with the prim where it stands, either grid
+    /// keeps a prim's side within its own limits — and the answer has to show
+    /// in the very field that was typed into, which the sync used to skip for
+    /// having the focus: it went on reading what was typed over a prim that
+    /// stood somewhere else. A field with the focus is left alone only while
+    /// it is being typed into, which the last assertion holds.
+    #[test]
+    fn a_committed_field_that_keeps_the_focus_shows_what_the_grid_kept() -> Result<(), TestError> {
+        let mut app = build_tools_app()?;
+        let (_scoped, _at) = select_a_fixture_prim(&mut app)?;
+        show_tab(&mut app, 1)?;
+        let field = transform_field("pos", "z");
+        let sent_again = |app: &mut App, z: f32| {
+            let prim = crate::world_test::fixture_prim(
+                1,
+                Vector {
+                    x: FIXTURE_AT.x,
+                    y: FIXTURE_AT.y,
+                    z,
+                },
+                0,
+            );
+            app.world_mut().write_message(sl_client_bevy::SlEvent(
+                sl_client_bevy::SlSessionEvent::ObjectUpdated(Box::new(prim)),
+            ));
+            settle(app, 4);
+        };
+
+        retype_and_commit(&mut app, &field, "-50")?;
+        assert_eq!(
+            field_text(&mut app, &field),
+            "-50.000",
+            "a committed field shows the move it made, as the fields write a number"
+        );
+
+        // The grid refuses the move: the prim comes again where it stands.
+        sent_again(&mut app, FIXTURE_AT.z);
+        assert_eq!(
+            field_text(&mut app, &field),
+            "30.000",
+            "the field that was committed must show where the grid has the prim"
+        );
+
+        // Typed into and not committed: the grid moving the prim leaves the
+        // text alone.
+        let _typed = in_app::fill(&mut app, &Locator::test_id(&field), "31")?;
+        sent_again(&mut app, 42.5);
+        assert_eq!(
+            field_text(&mut app, &field),
+            "31",
+            "a field being typed into must keep what is typed"
+        );
+        Ok(())
+    }
+
     /// **The summary line says what is selected.**
     ///
     /// `update_selection_summary` builds one line out of up to five segments,

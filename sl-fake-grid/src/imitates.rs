@@ -64,6 +64,17 @@
 //! | the instant message a return of the agent's own object is followed by ([`RezPolicy::return_notice`]) | from `Second Life`, under the agent's own id, naming the parcel | from `Server`, under no id, naming the spot and "parcel owner return" |
 //! | a rez on land that does not let the agent build ([`RezPolicy::no_build_add`], [`RezPolicy::no_build_rez_told`]) | an alert for an `ObjectAdd` and another for a rez out of the inventory | an alert for an `ObjectAdd`; a rez out of the inventory fails without a word |
 //! | a `RezRestoreToWorld` ([`RezPolicy::restore_to_world`]) | the object back where it stood, the item kept | nothing |
+//! | a click action and the search flag ([`EditPolicy::quiet_edits_resend`]) | answered with a full update | stored, and nobody told |
+//! | a move, a turn and a resize in one message ([`EditPolicy::takes_whole_transform`]) | taken | dropped |
+//! | a prim's smallest and largest side ([`EditPolicy::smallest_prim_m`], [`EditPolicy::largest_prim_m`]) | 0.01 m and 64 m | 0.001 m and 256 m |
+//! | a name that is not plain ASCII ([`EditPolicy::text`]) | a question mark a byte, and for a pipe | a hex dump of the field; an ASCII one is cut at a line break |
+//! | the masks an owner may edit ([`EditPolicy::masks`]) | its own owner mask; any bit but modify for everyone; a next-owner mask of transfer alone | not the owner mask; export for everyone only where every other mask has it; move always on the next-owner mask |
+//! | a deed the agent has no power to make ([`EditPolicy::deed_refusal`]) | refused with the alert `DeedFailedNoPermToDeedForGroup` | refused without a word |
+//! | how many transforms an undo steps back out of ([`EditPolicy::undo_depth`]) | 20 | 5 |
+//! | a copy asked for selected ([`EditPolicy::copy_flagged_selected`]) | flagged `CREATE_SELECTED` | not flagged |
+//! | a copy's contents serial ([`EditPolicy::copy_contents_serial`]) | the original's | two more than the original's |
+//! | a duplicate on a ray that names no target ([`EditPolicy::ray_at_nothing`]) | a copy standing on the ray's end | nothing |
+//! | an object moved out of the world ([`EditPolicy::out_of_world`]) | returned to the Lost And Found above 4,096 m and off the edge; a move under the ground refused | kept at any height; a move off the edge refused |
 //!
 //! **The inventory rows are the divergence a viewer is most likely to trip
 //! over**, which is why they are three rows rather than one setting. An
@@ -966,6 +977,55 @@ impl ImitatedGrid {
                 },
                 no_build_rez_told: false,
                 restore_to_world: RestoreToWorld::Ignored,
+            },
+        }
+    }
+
+    /// What this grid makes of an edit of an object where the two disagree —
+    /// measured by the `object-edit` conformance case on aditi and the local
+    /// OpenSim (2026-10-10, `book/src/gridspec/building.md` § Editing).
+    ///
+    /// They agree on the outline: a move and a turn come back in a terse
+    /// update and everything else in a full one; a name is kept to 63 bytes
+    /// and a description to 127; an `ObjectCategory` is ignored; nobody may
+    /// change a base mask, and a next-owner mask without copy keeps transfer;
+    /// an undo steps back out of moves, turns and resizes and of nothing
+    /// else; a duplicate copies the record, the contents and the creation
+    /// date, and names the agent as the copy's last owner.
+    #[must_use]
+    pub const fn edit_policy(self) -> EditPolicy {
+        match self {
+            Self::SecondLife => EditPolicy {
+                quiet_edits_resend: true,
+                takes_whole_transform: true,
+                smallest_prim_m: 0.01,
+                largest_prim_m: 64.0,
+                text: StoredText::Questioned,
+                masks: MaskRules::SecondLife,
+                deed_refusal: Some(NoBuildAlert {
+                    text: "Deed failed because you do not have permission to deed objects for \
+                           your group.",
+                    key: Some("DeedFailedNoPermToDeedForGroup"),
+                }),
+                undo_depth: 20,
+                copy_flagged_selected: true,
+                copy_contents_serial: CopiedSerial::Originals,
+                ray_at_nothing: RayAtNothing::CopiesAtItsEnd,
+                out_of_world: OutOfWorld::Returned,
+            },
+            Self::OpenSim => EditPolicy {
+                quiet_edits_resend: false,
+                takes_whole_transform: false,
+                smallest_prim_m: 0.001,
+                largest_prim_m: 256.0,
+                text: StoredText::HexDumped,
+                masks: MaskRules::OpenSim,
+                deed_refusal: None,
+                undo_depth: 5,
+                copy_flagged_selected: false,
+                copy_contents_serial: CopiedSerial::Advanced,
+                ray_at_nothing: RayAtNothing::Ignored,
+                out_of_world: OutOfWorld::Kept,
             },
         }
     }
@@ -2109,6 +2169,328 @@ pub struct NoBuildAlert {
     pub key: Option<&'static str>,
 }
 
+/// What a grid makes of an edit of an object ([`ImitatedGrid::edit_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EditPolicy {
+    /// Whether an `ObjectClickAction` and an `ObjectIncludeInSearch` send the
+    /// object again. Second Life answers each with a full update; OpenSim
+    /// stores the value and tells nobody, so a viewer learns of it the next
+    /// time something else sends the object.
+    pub quiet_edits_resend: bool,
+    /// Whether a `MultipleObjectUpdate` stating a position, a rotation and a
+    /// scale at once is taken. No build floater sends one; Second Life takes
+    /// it, and OpenSim logs "unknown packet type" for a type of 7 or 15 and
+    /// drops it.
+    pub takes_whole_transform: bool,
+    /// The smallest a prim's side may be, in metres. A smaller one is made
+    /// this, without a word.
+    pub smallest_prim_m: f32,
+    /// The largest a prim's side may be, in metres. A larger one is made
+    /// this, without a word.
+    pub largest_prim_m: f32,
+    /// What becomes of a name or a description that is not plain ASCII.
+    pub text: StoredText,
+    /// Which bits of which mask an owner may set and clear.
+    pub masks: MaskRules,
+    /// The alert a deed is refused with when the agent may not deed objects
+    /// for the group. Both grids leave the object the agent's; OpenSim says
+    /// nothing.
+    pub deed_refusal: Option<NoBuildAlert>,
+    /// How many moves, turns and resizes of one object an `Undo` steps back
+    /// out of.
+    pub undo_depth: usize,
+    /// Whether a copy made with `FLAGS_CREATE_SELECTED` in its duplicate
+    /// flags carries that flag in the update it arrives in.
+    pub copy_flagged_selected: bool,
+    /// The contents serial of a copy of an object with something in it.
+    pub copy_contents_serial: CopiedSerial,
+    /// What an `ObjectDuplicateOnRay` that names no target does.
+    pub ray_at_nothing: RayAtNothing,
+    /// What becomes of an object moved out of the world: above the ceiling,
+    /// or off a region's edge where no region is.
+    pub out_of_world: OutOfWorld,
+}
+
+impl Default for EditPolicy {
+    /// Second Life's, as the grid's own default flavour is.
+    fn default() -> Self {
+        ImitatedGrid::SecondLife.edit_policy()
+    }
+}
+
+impl EditPolicy {
+    /// The longest name a prim keeps, in bytes.
+    pub const NAME_BYTES: usize = 63;
+
+    /// The longest description a prim keeps, in bytes.
+    pub const DESCRIPTION_BYTES: usize = 127;
+
+    /// The height above which Second Life takes an object for off-world, in
+    /// metres. Measured with a move to 5,000 m; the limit itself is the
+    /// documented one.
+    pub const SECOND_LIFE_CEILING_M: f32 = 4096.0;
+
+    /// The side of a region, in metres.
+    const REGION_SIDE_M: f32 = 256.0;
+
+    /// A scale as the grid keeps it: each side within its limits.
+    #[must_use]
+    pub const fn kept_scale(&self, sent: &sl_proto::Vector) -> sl_proto::Vector {
+        sl_proto::Vector {
+            x: sent.x.clamp(self.smallest_prim_m, self.largest_prim_m),
+            y: sent.y.clamp(self.smallest_prim_m, self.largest_prim_m),
+            z: sent.z.clamp(self.smallest_prim_m, self.largest_prim_m),
+        }
+    }
+
+    /// A name or a description as the grid keeps it, `limit` bytes at most.
+    ///
+    /// Second Life reads the field a byte at a time and keeps a question mark
+    /// for every one that is not printable ASCII and for a pipe, which is the
+    /// separator of its own inventory listings: an `é` is two question marks.
+    ///
+    /// OpenSim's `Util.FieldToString` takes a field with a byte outside
+    /// printable ASCII for binary and stores a **hex dump** of it, terminator
+    /// included; a field that is all ASCII is cut at its first line break.
+    #[must_use]
+    pub fn kept_text(&self, sent: &str, limit: usize) -> String {
+        let kept: String = match self.text {
+            StoredText::Questioned => sent
+                .bytes()
+                .map(|byte| {
+                    if byte == b'|' || !(0x20..=0x7e).contains(&byte) {
+                        '?'
+                    } else {
+                        char::from(byte)
+                    }
+                })
+                .collect(),
+            StoredText::HexDumped => {
+                let binary = sent.bytes().any(|byte| {
+                    !(0x20..=0x7e).contains(&byte) && !matches!(byte, 0x09 | 0x0a | 0x0d)
+                });
+                if binary {
+                    hex_dump(sent.as_bytes())
+                } else {
+                    sent.split(['\r', '\n']).next().unwrap_or("").to_owned()
+                }
+            }
+        };
+        kept.chars().take(limit).collect()
+    }
+
+    /// Applies an `ObjectPermissions` edit by the object's owner to `masks`:
+    /// `bits` set on or cleared from the mask `field` names, as far as the
+    /// grid lets an owner.
+    ///
+    /// Neither grid lets an owner change the base mask, and both keep
+    /// transfer on a next-owner mask without copy. Second Life lets an owner
+    /// take bits off its own owner mask and sets any bit but modify for
+    /// everyone; OpenSim leaves the owner mask alone, keeps move on the
+    /// next-owner mask, and sets export for everyone only where the owner,
+    /// base and next-owner masks all have it.
+    pub const fn edit_masks(
+        &self,
+        masks: &mut sl_wire::Permissions5,
+        field: sl_proto::PermissionField,
+        set: bool,
+        bits: sl_wire::Permissions,
+    ) {
+        use sl_proto::PermissionField as Field;
+        use sl_wire::Permissions;
+        /// `current` with `bits` set or cleared, kept within `base`.
+        const fn applied(
+            current: Permissions,
+            set: bool,
+            bits: Permissions,
+            base: Permissions,
+        ) -> Permissions {
+            let edited = if set {
+                current.union(bits)
+            } else {
+                current.difference(bits)
+            };
+            Permissions::from_bits(edited.bits() & base.bits())
+        }
+        let base = masks.base;
+        match (self.masks, field) {
+            (MaskRules::SecondLife, Field::Owner) => {
+                masks.owner = applied(masks.owner, set, bits, base);
+            }
+            (MaskRules::SecondLife | MaskRules::OpenSim, Field::Group) => {
+                masks.group = applied(masks.group, set, bits, base);
+            }
+            (MaskRules::SecondLife, Field::Everyone) => {
+                masks.everyone =
+                    applied(masks.everyone, set, bits, base).difference(Permissions::MODIFY);
+            }
+            (MaskRules::OpenSim, Field::Everyone) => {
+                let exportable = masks.owner.contains(Permissions::EXPORT)
+                    && base.contains(Permissions::EXPORT)
+                    && masks.next_owner.contains(Permissions::EXPORT);
+                let bits = if set && !exportable {
+                    bits.difference(Permissions::EXPORT)
+                } else {
+                    bits
+                };
+                masks.everyone = applied(masks.everyone, set, bits, base);
+            }
+            (MaskRules::SecondLife | MaskRules::OpenSim, Field::NextOwner) => {
+                let rules = self.masks;
+                let mut next = applied(masks.next_owner, set, bits, base);
+                if !next.contains(Permissions::COPY) {
+                    next = next.union(Permissions::TRANSFER);
+                }
+                if matches!(rules, MaskRules::OpenSim) {
+                    next = next.union(Permissions::MOVE);
+                }
+                masks.next_owner = next;
+            }
+            // A base mask is nobody's to edit, nor is the owner mask on
+            // OpenSim, nor a mask this crate does not know of.
+            _ => {}
+        }
+    }
+
+    /// What becomes of an object moved to `to`, in a region with no
+    /// neighbour where `to` lies beyond its edge.
+    #[must_use]
+    pub fn placement(&self, to: &sl_proto::Vector) -> Placement {
+        let off_the_edge = !(0.0..=Self::REGION_SIDE_M).contains(&to.x)
+            || !(0.0..=Self::REGION_SIDE_M).contains(&to.y);
+        match self.out_of_world {
+            OutOfWorld::Returned if off_the_edge || to.z > Self::SECOND_LIFE_CEILING_M => {
+                Placement::Returned
+            }
+            OutOfWorld::Returned if to.z < 0.0 => Placement::Refused { in_full: false },
+            OutOfWorld::Kept if off_the_edge => Placement::Refused { in_full: true },
+            OutOfWorld::Returned | OutOfWorld::Kept => Placement::Taken,
+        }
+    }
+
+    /// The text of the instant message Second Life sends the owner of the
+    /// object `name` that went out of the world at `at`, over the parcel
+    /// `parcel` — which is empty off a region's edge — of the region
+    /// `region`.
+    #[must_use]
+    pub fn off_world_notice(
+        name: &str,
+        parcel: &str,
+        region: &str,
+        at: &sl_proto::Vector,
+    ) -> String {
+        format!(
+            "Your object '{name}' has been returned to your inventory Lost and Found folder \
+             from parcel '{parcel}' at {region} {:.0}, {:.0} because it went off-world.",
+            at.x, at.y
+        )
+    }
+}
+
+/// OpenSim's `Util.FieldToString` for a field it takes for binary: sixteen
+/// bytes a line, each as two hex digits and a space, a short line padded to
+/// the same width, and then the bytes again as text with a full stop for
+/// each that is not printable. The field's terminator is dumped with it.
+fn hex_dump(field: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut bytes = field.to_vec();
+    bytes.push(0);
+    let mut dump = String::new();
+    for (index, line) in bytes.chunks(16).enumerate() {
+        if index != 0 {
+            dump.push('\n');
+        }
+        for column in 0..16 {
+            match line.get(column) {
+                Some(byte) => {
+                    // Writing into a `String` cannot fail.
+                    let _written = write!(dump, "{byte:02X} ");
+                }
+                None => dump.push_str("   "),
+            }
+        }
+        for byte in line {
+            dump.push(if (0x20..0x7e).contains(byte) {
+                char::from(*byte)
+            } else {
+                '.'
+            });
+        }
+    }
+    dump
+}
+
+/// What becomes of a name that is not plain ASCII ([`EditPolicy::text`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoredText {
+    /// A question mark for every byte that is not printable ASCII, and for a
+    /// pipe: Second Life.
+    Questioned,
+    /// A hex dump of the whole field: OpenSim.
+    HexDumped,
+}
+
+/// Which bits of which mask an owner may change ([`EditPolicy::masks`],
+/// [`EditPolicy::edit_masks`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaskRules {
+    /// Second Life's.
+    SecondLife,
+    /// OpenSim's `SceneObjectPart.UpdatePermissions`.
+    OpenSim,
+}
+
+/// The contents serial of a copy ([`EditPolicy::copy_contents_serial`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopiedSerial {
+    /// The original's: Second Life.
+    Originals,
+    /// Two more than the original's: OpenSim, measured with one item in the
+    /// contents.
+    Advanced,
+}
+
+/// What an `ObjectDuplicateOnRay` that names no target does
+/// ([`EditPolicy::ray_at_nothing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RayAtNothing {
+    /// A copy standing on the ray's end: Second Life.
+    CopiesAtItsEnd,
+    /// Nothing: OpenSim copies only onto a prim.
+    Ignored,
+}
+
+/// What becomes of an object moved out of the world
+/// ([`EditPolicy::out_of_world`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutOfWorld {
+    /// It is returned to its owner's Lost And Found with an instant message,
+    /// "because it went off-world"; a move under the ground is refused and
+    /// the object stays: Second Life. The fake grid takes a height below zero
+    /// for under the ground — what was measured is a move to 50 m below
+    /// zero, with the ground at 46 m.
+    Returned,
+    /// It stands at any height it is sent to, and a move off the region's
+    /// edge is refused with a full update of where it stands: OpenSim.
+    Kept,
+}
+
+/// What a grid does with a move ([`EditPolicy::placement`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// The object goes where it was sent.
+    Taken,
+    /// The object stays where it stood, and the session that moved it is
+    /// sent it again: in a terse update on Second Life, in a full one on
+    /// OpenSim.
+    Refused {
+        /// Whether the object is sent again in full.
+        in_full: bool,
+    },
+    /// The object leaves the world for its owner's Lost And Found.
+    Returned,
+}
+
 /// How a grid answers a sit request ([`ImitatedGrid::sit_policy`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SitPolicy {
@@ -2305,6 +2687,7 @@ mod test {
         assert_ne!(sl.voice_backend(), opensim.voice_backend());
         assert_ne!(sl.legacy_udp_inventory(), opensim.legacy_udp_inventory());
         assert_ne!(sl.rez_policy(), opensim.rez_policy());
+        assert_ne!(sl.edit_policy(), opensim.edit_policy());
         assert_ne!(sl.upload_announcements(), opensim.upload_announcements());
         assert_ne!(sl.bakes(), opensim.bakes());
         assert_ne!(sl.region_protocol_bits(), opensim.region_protocol_bits());
@@ -2567,5 +2950,158 @@ mod test {
         );
         assert!(!UpdateCompletionItem::Omitted.names_item());
         assert!(UpdateCompletionItem::Echoed.names_item());
+    }
+
+    /// **A name is kept as each grid was measured keeping it**
+    /// (`object-edit`, 2026-10-10): Second Life a question mark for every
+    /// byte that is not printable ASCII and for a pipe, OpenSim a hex dump of
+    /// a field with such a byte in it and an ASCII one up to its first line
+    /// break; both 63 bytes of a name and 127 of a description.
+    #[test]
+    fn a_name_is_kept_as_each_grid_keeps_it() {
+        let sl = ImitatedGrid::SecondLife.edit_policy();
+        let opensim = ImitatedGrid::OpenSim.edit_policy();
+        let name = EditPolicy::NAME_BYTES;
+        assert_eq!(sl.kept_text("a|b\nc", name), "a?b?c");
+        assert_eq!(opensim.kept_text("a|b\nc", name), "a|b");
+        assert_eq!(sl.kept_text("on\u{e9}off \u{20ac}", name), "on??off ???");
+        assert_eq!(
+            opensim.kept_text("on\u{e9}off \u{20ac}", name),
+            "6F 6E C3 A9 6F 66 66 20 E2 82 AC 00             on..off ...."
+        );
+        assert_eq!(sl.kept_text("", name), "");
+        assert_eq!(opensim.kept_text("", name), "");
+        let long = "n".repeat(254);
+        for policy in [sl, opensim] {
+            assert_eq!(policy.kept_text(&long, name).len(), 63);
+            assert_eq!(
+                policy.kept_text(&long, EditPolicy::DESCRIPTION_BYTES).len(),
+                127
+            );
+        }
+    }
+
+    /// **An owner's edits of a prim's masks land as each grid was measured
+    /// landing them**, one after another on a prim nobody has edited: the
+    /// rows of `book/src/gridspec/building.md` § Masks.
+    #[test]
+    fn masks_are_edited_as_each_grid_edits_them() {
+        use sl_proto::PermissionField as Field;
+        use sl_wire::Permissions;
+        let everything = Permissions::ALL;
+        let four = Permissions::MOVE
+            .union(Permissions::COPY)
+            .union(Permissions::MODIFY)
+            .union(Permissions::TRANSFER);
+        // The edit, then the mask it names as Second Life and as OpenSim
+        // read afterwards.
+        let edits = [
+            (Field::NextOwner, true, everything, 0x7fff_ffff, 0x0009_e000),
+            (
+                Field::NextOwner,
+                false,
+                everything,
+                0x0000_2000,
+                0x0008_2000,
+            ),
+            (
+                Field::Everyone,
+                true,
+                Permissions::COPY.union(Permissions::MOVE),
+                0x0008_8000,
+                0x0008_8000,
+            ),
+            (
+                Field::Everyone,
+                true,
+                Permissions::MODIFY.union(Permissions::TRANSFER),
+                0x0008_a000,
+                0x0008_e000,
+            ),
+            (Field::Everyone, true, everything, 0x7fff_bfff, 0x0008_e000),
+            (Field::Everyone, false, everything, 0, 0),
+            (Field::Group, true, four, 0x0008_e000, 0x0008_e000),
+            (Field::Group, false, everything, 0, 0),
+            (
+                Field::Owner,
+                false,
+                Permissions::TRANSFER,
+                0x7fff_dfff,
+                0x0009_e000,
+            ),
+            (
+                Field::Base,
+                false,
+                Permissions::TRANSFER,
+                0x7fff_ffff,
+                0x0009_e000,
+            ),
+        ];
+        for (flavour, pick) in [
+            (ImitatedGrid::SecondLife, 0_usize),
+            (ImitatedGrid::OpenSim, 1),
+        ] {
+            let owner = flavour.properties_policy().new_prim_owner_mask;
+            let mut masks = sl_wire::Permissions5 {
+                base: owner,
+                owner,
+                group: Permissions::NONE,
+                everyone: Permissions::NONE,
+                next_owner: Permissions::MOVE.union(Permissions::TRANSFER),
+            };
+            for (field, set, bits, second_life, opensim) in edits {
+                flavour
+                    .edit_policy()
+                    .edit_masks(&mut masks, field, set, bits);
+                let read = match field {
+                    Field::Base => masks.base,
+                    Field::Owner => masks.owner,
+                    Field::Group => masks.group,
+                    Field::Everyone => masks.everyone,
+                    _next_owner => masks.next_owner,
+                };
+                let measured = if pick == 0 { second_life } else { opensim };
+                assert_eq!(
+                    format!("{:#010x}", read.bits()),
+                    format!("{measured:#010x}"),
+                    "{flavour:?}: {field:?} after {} {:#010x}",
+                    if set { "setting" } else { "clearing" },
+                    bits.bits()
+                );
+            }
+        }
+    }
+
+    /// **A move ends where each grid was measured ending it**: taken,
+    /// refused, or — on Second Life, above the ceiling and off the edge —
+    /// out of the world; and a side is kept within each grid's limits.
+    #[test]
+    fn a_place_and_a_size_are_kept_as_each_grid_keeps_them() {
+        let at = |x: f32, z: f32| sl_proto::Vector { x, y: 128.0, z };
+        let sl = ImitatedGrid::SecondLife.edit_policy();
+        let opensim = ImitatedGrid::OpenSim.edit_policy();
+        assert_eq!(sl.placement(&at(128.0, 30.0)), Placement::Taken);
+        assert_eq!(sl.placement(&at(128.0, 5000.0)), Placement::Returned);
+        assert_eq!(sl.placement(&at(-10.0, 30.0)), Placement::Returned);
+        assert_eq!(
+            sl.placement(&at(128.0, -50.0)),
+            Placement::Refused { in_full: false }
+        );
+        assert_eq!(opensim.placement(&at(128.0, 5000.0)), Placement::Taken);
+        assert_eq!(opensim.placement(&at(128.0, -50.0)), Placement::Taken);
+        assert_eq!(
+            opensim.placement(&at(-10.0, 30.0)),
+            Placement::Refused { in_full: true }
+        );
+
+        let sent = sl_proto::Vector {
+            x: 1000.0,
+            y: 0.001,
+            z: 0.5,
+        };
+        let kept = sl.kept_scale(&sent);
+        assert_eq!(format!("{} {} {}", kept.x, kept.y, kept.z), "64 0.01 0.5");
+        let kept = opensim.kept_scale(&sent);
+        assert_eq!(format!("{} {} {}", kept.x, kept.y, kept.z), "256 0.001 0.5");
     }
 }

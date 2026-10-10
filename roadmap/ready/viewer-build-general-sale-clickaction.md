@@ -5,7 +5,8 @@ topic: viewer
 status: ready
 origin: Firestorm full-parity audit (2026-08-19)
 refs: [viewer-prim-parameter-editing, viewer-object-menu-custom-verbs,
-       viewer-edit-permission-gating, viewer-object-mark-copy-key]
+       viewer-edit-permission-gating, viewer-object-mark-copy-key,
+       gridspec-object-edit]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -36,3 +37,11 @@ export perm exists anywhere in edit_params).
 Reference (Firestorm, read-only):
 `indra/newview/skins/default/xui/en/floater_tools.xml` (L1185-1310,
 1550), `indra/newview/llpanelpermissions.cpp`.
+
+Measured ([[gridspec-object-edit]], `book/src/gridspec/building.md`
+§ Editing): Second Life answers a click action and the search flag with a
+full `ObjectUpdate`; **OpenSim stores each and tells nobody**, so the
+controls must show what was set without waiting for an echo. "Locked" is
+the owner mask's move bit, which an owner may clear on Second Life and
+which OpenSim leaves alone whatever is sent — on OpenSim the checkbox has
+nothing to write.

@@ -125,9 +125,12 @@ full update carries:
   **absent** from `params` is cleared, so `ObjectExtraParams::default()` strips
   every extra parameter from the prim.
 
-These join the other object-edit commands (material, flags, group, …); the
-simulator confirms each the usual way, by pushing the changed object's
-`ObjectUpdate`.
+These join the other object-edit commands (material, flags, group, …). A
+grid answers most of them by pushing the changed object's `ObjectUpdate`,
+but not all and not always in full: a move and a turn come back terse,
+OpenSim says nothing of a click action, and either grid may keep something
+other than what was sent — see
+[Grid Behaviour → Building](../gridspec/building.md#editing).
 
 Ownership follows the same shape: `Command::SetObjectGroup` sets the group an
 object is *set to* (`ObjectGroup`), and `Command::DeedObjectsToGroup` then

@@ -37,6 +37,7 @@ use sl_proto::{
 use sl_types::key::{ObjectKey, OwnerKey};
 use sl_types::lsl::{Rotation, Vector};
 
+use crate::imitates::{CopiedSerial, EditPolicy, Placement, RayAtNothing};
 use crate::world::{RegionChange, SceneFixtures};
 
 /// The physics record both live grids send for a prim nobody has changed the
@@ -94,8 +95,9 @@ pub(crate) fn answer_object_edit(
         // them as it answers every other.
         ServerEvent::ObjectNameSet { local_id, name } => {
             let answer = world.properties.rename_answered.then_some((sim, now));
+            let kept = world.edit.kept_text(name, EditPolicy::NAME_BYTES);
             edit_properties(world, *local_id, answer, |properties| {
-                properties.name.clone_from(name);
+                properties.name = kept;
             });
         }
         ServerEvent::ObjectDescriptionSet {
@@ -103,13 +105,11 @@ pub(crate) fn answer_object_edit(
             description,
         } => {
             let answer = world.properties.rename_answered.then_some((sim, now));
+            let kept = world
+                .edit
+                .kept_text(description, EditPolicy::DESCRIPTION_BYTES);
             edit_properties(world, *local_id, answer, |properties| {
-                properties.description.clone_from(description);
-            });
-        }
-        ServerEvent::ObjectCategorySet { local_id, category } => {
-            edit_properties(world, *local_id, Some((sim, now)), |properties| {
-                properties.category = *category;
+                properties.description = kept;
             });
         }
         ServerEvent::ObjectSaleInfoSet {
@@ -123,7 +123,9 @@ pub(crate) fn answer_object_edit(
             });
         }
         // A grant sets the named bits and a revoke clears them: the message
-        // carries the bits being *changed*, not the mask's new value. What each
+        // carries the bits being *changed*, not the mask's new value — and
+        // which of them an owner may change is the grid's
+        // ([`EditPolicy::edit_masks`]). What each
         // viewer may do with the object follows from the masks and travels in
         // its update flags, so the object goes out again too — to each viewer
         // with its own.
@@ -134,13 +136,9 @@ pub(crate) fn answer_object_edit(
             mask,
             ..
         } => {
+            let policy = world.edit;
             edit_properties(world, *local_id, Some((&mut *sim, now)), |properties| {
-                let target = field.select_mut(&mut properties.permissions);
-                *target = if *set {
-                    target.union(*mask)
-                } else {
-                    target.difference(*mask)
-                };
+                policy.edit_masks(&mut properties.permissions, *field, *set, *mask);
             });
             let mut changes = Vec::new();
             if let Some(object) = world.object_by_local_id(*local_id) {
@@ -149,46 +147,35 @@ pub(crate) fn answer_object_edit(
             }
             return Some(changes);
         }
-        ServerEvent::ObjectGroupSet {
-            local_ids,
-            group_id,
-        } => {
-            for local_id in local_ids {
-                edit_properties(world, *local_id, Some((&mut *sim, now)), |properties| {
-                    properties.group = *group_id;
-                });
-            }
-        }
-        // A deed names the group as the owner and no agent, which is exactly
-        // what an `OwnerKey::Group` is; the object's own `owner_id` moves with
-        // it, since that is what an `ObjectUpdate` carries.
-        ServerEvent::ObjectOwnerSet {
-            local_ids, owner, ..
-        } => {
-            let mut changes = Vec::new();
-            for local_id in local_ids {
-                edit_properties(world, *local_id, Some((&mut *sim, now)), |properties| {
-                    properties.last_owner_id = properties.owner.uuid();
-                    properties.owner = *owner;
-                    if let sl_types::key::OwnerKey::Group(group) = *owner {
-                        properties.group = Some(group);
-                    }
-                });
-                if let Some(changed) = edit_object(world, *local_id, |object| {
-                    object.owner_id = owner.uuid();
-                }) {
-                    push_object(sim, &changed, now);
-                    changes.push(RegionChange::Updated(Box::new(changed)));
+        // Two edits that change nothing. A category is a field no viewer has
+        // set in years, and neither grid takes it: a record reads zero
+        // afterwards on both. And a group an object is set to, like a deed to
+        // it, is for an agent that is in the group — the fake grid has no
+        // groups, so its agents are in none: the object keeps the group it
+        // had and stays its owner's, as on both live grids, and Second Life
+        // says of the deed why.
+        ServerEvent::ObjectCategorySet { .. } | ServerEvent::ObjectGroupSet { .. } => {}
+        ServerEvent::ObjectOwnerSet { .. } => {
+            if let Some(alert) = world.edit.deed_refusal {
+                let info: Vec<sl_proto::AlertInfo> = alert
+                    .key
+                    .map(|key| sl_proto::AlertInfo {
+                        message: key.to_owned(),
+                        extra_params: String::new(),
+                    })
+                    .into_iter()
+                    .collect();
+                if let Err(error) = sim.send_alert_message(alert.text, &info, &[], now) {
+                    tracing::warn!("refusing a deed failed: {error}");
                 }
             }
-            return Some(changes);
         }
         // ----- edits to the object update itself ---------------------------
         ServerEvent::ObjectClickActionSet {
             local_id,
             click_action,
         } => {
-            return Some(update_object(world, *local_id, sim, now, |object| {
+            return Some(quiet_edit(world, *local_id, sim, now, |object| {
                 object.click_action = click_action.to_code();
             }));
         }
@@ -211,7 +198,7 @@ pub(crate) fn answer_object_edit(
             local_id,
             include_in_search,
         } => {
-            return Some(update_object(world, *local_id, sim, now, |object| {
+            return Some(quiet_edit(world, *local_id, sim, now, |object| {
                 set_flag(object, prim_flags::INCLUDE_IN_SEARCH, *include_in_search);
             }));
         }
@@ -267,7 +254,36 @@ pub(crate) fn answer_object_edit(
             } else {
                 *local_id
             };
-            return Some(update_object(world, target, sim, now, |object| {
+            let policy = world.edit;
+            let whole = transform.position.is_some()
+                && transform.rotation.is_some()
+                && transform.scale.is_some();
+            if whole && !policy.takes_whole_transform {
+                tracing::debug!("a move, a turn and a resize in one message is dropped");
+                return Some(Vec::new());
+            }
+            // A place the grid does not take. An object that leaves the world
+            // for it is the region's to file, which has the inventory and the
+            // asset store this module does not.
+            let placement = transform
+                .position
+                .as_ref()
+                .map_or(Placement::Taken, |position| policy.placement(position));
+            if placement == Placement::Returned {
+                return None;
+            }
+            if let Placement::Refused { in_full } = placement {
+                if let Some(object) = world.object_by_local_id(target) {
+                    if in_full {
+                        push_object(sim, &object, now);
+                    } else {
+                        push_terse(sim, &object, now);
+                    }
+                }
+                return Some(Vec::new());
+            }
+            world.record_undo(target);
+            let Some(changed) = edit_object(world, target, |object| {
                 if let Some(position) = &transform.position {
                     object.motion.position.clone_from(position);
                 }
@@ -275,9 +291,20 @@ pub(crate) fn answer_object_edit(
                     object.motion.rotation.clone_from(rotation);
                 }
                 if let Some(scale) = &transform.scale {
-                    object.scale.clone_from(scale);
+                    object.scale = policy.kept_scale(scale);
                 }
-            }));
+            }) else {
+                tracing::debug!("a transform named {target:?}, which this region does not have");
+                return Some(Vec::new());
+            };
+            // A move and a turn come back in a terse update on both grids, a
+            // resize in a full one.
+            if transform.scale.is_some() {
+                push_object(sim, &changed, now);
+            } else {
+                push_terse(sim, &changed, now);
+            }
+            return Some(vec![RegionChange::Updated(Box::new(changed))]);
         }
         // ----- linking, duplicating, deleting ------------------------------
         // The first id is the root the rest are parented to (the reference
@@ -367,23 +394,72 @@ pub(crate) fn answer_object_edit(
         // ids, so the duplicating client learns them the same way a rezzing one
         // does — from the `ObjectUpdate` that comes back.
         ServerEvent::ObjectsDuplicated {
-            local_ids, offset, ..
+            local_ids,
+            offset,
+            duplicate_flags,
+            ..
         } => {
             let mut changes = Vec::new();
             for local_id in local_ids {
                 let Some(original) = world.object_by_local_id(*local_id) else {
                     continue;
                 };
-                let mut copy = original;
-                copy.local_id = world.mint_local_id();
-                copy.full_id = ObjectKey::from(mint());
-                copy.motion.position = offset_by(&copy.motion.position, offset);
-                if let Some(properties) = copy.properties.as_mut() {
-                    properties.object_id = copy.full_id;
-                }
-                world.objects.push(copy.clone());
-                push_object(sim, &copy, now);
-                changes.push(RegionChange::Rezzed(Box::new(copy)));
+                let at = offset_by(&original.motion.position, offset);
+                changes.push(copy_object(
+                    world,
+                    mint,
+                    sim,
+                    &original,
+                    at,
+                    *duplicate_flags,
+                    now,
+                ));
+            }
+            return Some(changes);
+        }
+        // A copy stood where a ray ends rather than at an offset. The fake
+        // grid casts no ray: a copy aimed at a prim stands on top of it, which
+        // is where both grids put one whose ray comes down on that prim, and
+        // one aimed at nothing stands on the ray's end on Second Life and is
+        // not made on OpenSim, which copies only onto a prim.
+        ServerEvent::DuplicateObjectsOnRay {
+            local_ids,
+            ray_end,
+            ray_target_id,
+            duplicate_flags,
+            ..
+        } => {
+            let mut changes = Vec::new();
+            for local_id in local_ids {
+                let Some(original) = world.object_by_local_id(*local_id) else {
+                    continue;
+                };
+                let target = ray_target_id
+                    .and_then(|target| world.local_id_of(target))
+                    .and_then(|target| world.object_by_local_id(target));
+                let at = match target {
+                    Some(target) => Vector {
+                        x: target.motion.position.x,
+                        y: target.motion.position.y,
+                        z: target.motion.position.z
+                            + f32::midpoint(target.scale.z, original.scale.z),
+                    },
+                    None if world.edit.ray_at_nothing == RayAtNothing::CopiesAtItsEnd => Vector {
+                        x: ray_end.x,
+                        y: ray_end.y,
+                        z: ray_end.z + original.scale.z / 2.0,
+                    },
+                    None => continue,
+                };
+                changes.push(copy_object(
+                    world,
+                    mint,
+                    sim,
+                    &original,
+                    at,
+                    *duplicate_flags,
+                    now,
+                ));
             }
             return Some(changes);
         }
@@ -623,9 +699,8 @@ fn offset_by(position: &Vector, offset: &Vector) -> Vector {
     }
 }
 
-/// Applies `edit` to the object's stored [`ObjectProperties`], recording the
-/// object as it was for the undo stack, and answers the editing client with
-/// the new record where `answer` says there is an answer.
+/// Applies `edit` to the object's stored [`ObjectProperties`] and answers the
+/// editing client with the new record where `answer` says there is an answer.
 ///
 /// Nobody else is told. Neither live grid sends an edited record to another
 /// session, whether or not it holds the object selected: a resident looking
@@ -641,7 +716,6 @@ fn edit_properties(
         tracing::debug!("an object edit named {local_id:?}, which this region does not have");
         return;
     };
-    world.record_undo(local_id);
     let Some(object) = world.object_mut(local_id) else {
         return;
     };
@@ -659,14 +733,12 @@ fn edit_properties(
     }
 }
 
-/// Applies `edit` to the object itself, recording the object as it was for the
-/// undo stack, and returns the changed object.
+/// Applies `edit` to the object itself and returns the changed object.
 fn edit_object(
     world: &mut SceneFixtures,
     local_id: RegionLocalObjectId,
     edit: impl FnOnce(&mut Object),
 ) -> Option<Object> {
-    world.record_undo(local_id);
     let object = world.object_mut(local_id)?;
     edit(object);
     Some(object.clone())
@@ -689,8 +761,85 @@ fn update_object(
     vec![RegionChange::Updated(Box::new(changed))]
 }
 
-/// Steps each named object one place along its edit history — back on an undo,
-/// forward on a redo — and streams whatever that restored.
+/// An edit of the object that OpenSim stores and tells nobody of — a click
+/// action, the search flag — and that Second Life answers like any other.
+fn quiet_edit(
+    world: &mut SceneFixtures,
+    local_id: RegionLocalObjectId,
+    sim: &mut SimSession,
+    now: Instant,
+    edit: impl FnOnce(&mut Object),
+) -> Vec<RegionChange> {
+    if world.edit.quiet_edits_resend {
+        return update_object(world, local_id, sim, now, edit);
+    }
+    if edit_object(world, local_id, edit).is_none() {
+        tracing::debug!("an object edit named {local_id:?}, which this region does not have");
+    }
+    Vec::new()
+}
+
+/// Makes a copy of `original` standing at `at`, with its record, its contents
+/// and its creation date, streams it to the client and returns the change the
+/// region's other sessions are owed.
+///
+/// The copy's last owner is the agent that made it, on both grids — also
+/// where the original, a prim nobody has taken, names none.
+fn copy_object(
+    world: &mut SceneFixtures,
+    mint: &dyn Fn() -> uuid::Uuid,
+    sim: &mut SimSession,
+    original: &Object,
+    at: Vector,
+    duplicate_flags: u32,
+    now: Instant,
+) -> RegionChange {
+    let mut copy = original.clone();
+    copy.local_id = world.mint_local_id();
+    copy.full_id = ObjectKey::from(mint());
+    copy.motion.position = at;
+    let mut record = world.properties_of(original.local_id);
+    if let Some(record) = record.as_mut() {
+        record.object_id = copy.full_id;
+        if let Some(agent) = sim.agent_id() {
+            record.last_owner_id = agent.uuid();
+        }
+    }
+    copy.properties = record;
+    if let Some(contents) = world.task_inventories.get(&original.local_id).cloned() {
+        let serial = match world.edit.copy_contents_serial {
+            CopiedSerial::Originals => contents.serial,
+            CopiedSerial::Advanced => contents.serial.saturating_add(2),
+        };
+        let items = contents
+            .items
+            .into_iter()
+            .map(|item| sl_proto::TaskInventoryItem {
+                item_id: sl_types::key::InventoryKey::from(mint()),
+                parent_task: copy.full_id,
+                ..item
+            })
+            .collect();
+        let _none = world.task_inventories.insert(
+            copy.local_id,
+            crate::world::TaskInventory::stated(serial, items),
+        );
+    }
+    world.objects.push(copy.clone());
+    // The flag is for the session that asked for the copy selected, and is
+    // not the object's: nobody else is sent it.
+    let mut sent = copy.clone();
+    if world.edit.copy_flagged_selected && duplicate_flags & prim_flags::CREATE_SELECTED != 0 {
+        sent.update_flags |= prim_flags::CREATE_SELECTED;
+    }
+    push_object(sim, &sent, now);
+    RegionChange::Rezzed(Box::new(copy))
+}
+
+/// Steps each named object one place along its history of moves, turns and
+/// resizes — back on an undo, forward on a redo — and streams whatever that
+/// restored: in a full update where the object's size changed, in a terse one
+/// otherwise.
 ///
 /// The named objects are full ids, not region-local ones: the `Undo` / `Redo`
 /// messages are the one place in the object family where that is true.
@@ -707,18 +856,32 @@ fn step_history(
             tracing::debug!("an undo named {object_id}, which this region does not have");
             continue;
         };
-        let Some(restored) = world.step_history(local_id, backwards) else {
+        let Some((before, restored)) = world.step_history(local_id, backwards) else {
             // Nothing left to undo is not an error: the viewer's own undo stack
             // is deeper than the simulator's, and it keeps asking.
             continue;
         };
-        push_object(sim, &restored, now);
-        if let Some(record) = world.record_of(local_id) {
-            push_properties(sim, &record, now);
+        if before.scale == restored.scale {
+            push_terse(sim, &restored, now);
+        } else {
+            push_object(sim, &restored, now);
         }
         changes.push(RegionChange::Updated(Box::new(restored)));
     }
     changes
+}
+
+/// Sends the client a terse update of where one object stands, logging a
+/// send failure rather than failing the edit.
+fn push_terse(sim: &mut SimSession, object: &Object, now: Instant) {
+    let update = sl_proto::TerseUpdate {
+        local_id: object.local_id,
+        state: object.state,
+        motion: object.motion.clone(),
+    };
+    if let Err(error) = sim.send_terse_update(&[update], crate::world::REAL_TIME_DILATION, now) {
+        tracing::warn!("sending a terse update of an edited object failed: {error}");
+    }
 }
 
 /// Streams one object to the client, logging a send failure rather than
