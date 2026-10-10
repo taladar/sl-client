@@ -74,8 +74,11 @@ use crate::world_api::{
 /// The persisted setting section — shared with other input-behaviour settings.
 const INPUT_SECTION: &[&str] = &["input"];
 
-/// The maximum interval (seconds) between the two clicks of a double-click, and
-/// the maximum cursor travel (pixels) between them — matched to the minimap's.
+/// The maximum interval (seconds) between the two clicks of a double-click in
+/// an app with no picking settings to say — matched to the minimap's. With
+/// them, the interval is the app's own
+/// ([`PickingSettings::multi_click_interval`](bevy::picking::PickingSettings)),
+/// so the world and the widgets agree on what a double click is.
 const DOUBLE_CLICK_SECONDS: f64 = 0.4;
 
 /// The maximum cursor travel (pixels) between the two clicks of a double-click.
@@ -243,6 +246,12 @@ struct TeleportGate<'w, 's> {
     settings: Res<'w, ViewerSettings>,
     /// The window the cursor position is read from.
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
+    /// The app's multi-click interval: how far apart two presses may be and
+    /// still be one double click. Shared with the widgets' click counter, and
+    /// what the synthetic input pins while it plays a click or a double click
+    /// — a double click played two frames apart is one however long the
+    /// frames took, and two single clicks on one spot are never one.
+    picking: Option<Res<'w, bevy::picking::PickingSettings>>,
 }
 
 /// Detect a double-click and request the GPU ID-buffer pick under it (when
@@ -262,6 +271,7 @@ fn world_double_click_teleport(
         context,
         settings,
         windows,
+        picking,
     } = gate;
     // A mouse gesture is independent of keyboard focus (a click on the world
     // still teleports while a floater holds the keyboard) — occlusion is handled
@@ -293,8 +303,11 @@ fn world_double_click_teleport(
 
     // Track the double-click: the second qualifying press within the window.
     let now = time.elapsed_secs_f64();
+    let interval = picking.map_or(DOUBLE_CLICK_SECONDS, |picking| {
+        picking.multi_click_interval.as_secs_f64()
+    });
     let double = last_click.is_some_and(|(at, position)| {
-        now - at <= DOUBLE_CLICK_SECONDS && position.distance(cursor) <= DOUBLE_CLICK_SLOP
+        now - at <= interval && position.distance(cursor) <= DOUBLE_CLICK_SLOP
     });
     if !double {
         *last_click = Some((now, cursor));

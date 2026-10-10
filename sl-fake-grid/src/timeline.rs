@@ -47,8 +47,8 @@
 //! # What it is not
 //!
 //! There is no scheduler and no rewind: the steps of one timeline run strictly
-//! in order, and a step waiting for something that never happens stops the
-//! script rather than skipping ahead. A timeline is a script, not a simulation.
+//! in order, and a step waiting for something that never happens waits for as
+//! long as the session lasts rather than skipping ahead. A timeline is a script, not a simulation.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -88,18 +88,11 @@ pub type ParcelEdit = Arc<dyn Fn(&mut ParcelInfo) + Send + Sync>;
 /// ([`Action::ConfigureRegion`]).
 pub type RegionEdit = Arc<dyn Fn(&mut RegionLimits) + Send + Sync>;
 
-/// How long [`At::OnEvent`] waits for its event before giving the script up.
-///
-/// Generous, because the thing being waited for is usually a viewer doing real
-/// work (decoding a scene, finishing a teleport); finite, so a test harness
-/// reports a stalled script rather than hanging until its own timeout.
-pub const EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// How long [`At::OnMarkerAck`] waits for the client's acknowledgement.
 ///
-/// Shorter than [`EVENT_WAIT_TIMEOUT`]: an ack is one round trip over loopback,
-/// and unlike an event it is an ordering nicety rather than a precondition — a
-/// script whose ack never came carries on (see `wait_for_marker_ack`).
+/// An ack is one round trip over loopback, and unlike an event it is an
+/// ordering nicety rather than a precondition — a script whose ack never came
+/// carries on (see `wait_for_marker_ack`).
 pub const MARKER_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How often [`At::OnMarkerAck`] re-reads the session's unacknowledged set.
@@ -786,45 +779,43 @@ async fn wait_for_marker_ack(
     }
 }
 
-/// Waits for an event the predicate accepts.
+/// Waits for an event the predicate accepts, for as long as the session
+/// lasts.
 ///
 /// Unlike the ack, an event **is** a precondition — it is the whole content of
-/// the step's `at` — so one that never comes stops the script rather than letting
-/// the rest of it run against a world it was not written for.
+/// the step's `at` — so the script does not carry on without it. Nor does it
+/// give up on it: the wait has no deadline of its own. It had one, of thirty
+/// seconds from the moment the wait began — which for a script's first step is
+/// the session's arrival, not the moment a test says its cue. A viewer on a
+/// busy machine can take longer than that to be ready to say anything, and the
+/// script was gone before it did: the cue then fell on nothing, and the test
+/// waited out its own timeout for a marker nobody was left to send. What a
+/// test waits *for* has a timeout of the test's own, and that one reports
+/// what was outstanding; a second clock here could only fire first.
 async fn wait_for_event(
     predicate: &EventPredicate,
     events: &mut broadcast::Receiver<ServerEvent>,
     closed_rx: &mut watch::Receiver<bool>,
     shutdown_rx: &mut watch::Receiver<bool>,
 ) -> Wait {
-    let Some(deadline) = tokio::time::Instant::now().checked_add(EVENT_WAIT_TIMEOUT) else {
-        return Wait::Stop;
-    };
     loop {
         let received = tokio::select! {
-            received = tokio::time::timeout_at(deadline, events.recv()) => received,
+            received = events.recv() => received,
             () = stopped(closed_rx, shutdown_rx) => return Wait::Stop,
         };
         match received {
-            Ok(Ok(event)) => {
+            Ok(event) => {
                 if predicate(&event) {
                     return Wait::Ready;
                 }
             }
-            Ok(Err(broadcast::error::RecvError::Lagged(missed))) => {
+            Err(broadcast::error::RecvError::Lagged(missed)) => {
                 tracing::warn!(
                     "a timeline runner missed {missed} events while waiting for one of its own; \
                      the event it is waiting for may have been among them"
                 );
             }
-            Ok(Err(broadcast::error::RecvError::Closed)) => return Wait::Stop,
-            Err(_elapsed) => {
-                tracing::warn!(
-                    "no matching event within {EVENT_WAIT_TIMEOUT:?}; abandoning the rest of the \
-                     script"
-                );
-                return Wait::Stop;
-            }
+            Err(broadcast::error::RecvError::Closed) => return Wait::Stop,
         }
     }
 }
@@ -1176,7 +1167,41 @@ mod test {
 
     use pretty_assertions::assert_eq;
 
-    use super::{Action, At, Timeline};
+    use super::{Action, At, Timeline, Wait, wait_for_event};
+
+    /// **An event wait outlasts a slow start.** A script whose first step
+    /// waits for a cue is still waiting ten minutes after its session
+    /// arrived, and runs when the cue comes. The wait used to give the script
+    /// up after thirty seconds, which a viewer on a busy machine can take to
+    /// be ready to say anything.
+    #[tokio::test(start_paused = true)]
+    async fn an_event_wait_has_no_deadline_of_its_own() -> Result<(), String> {
+        let (events_tx, mut events) = tokio::sync::broadcast::channel(8);
+        let (_closed_tx, mut closed_rx) = tokio::sync::watch::channel(false);
+        let (_shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+        let predicate: super::EventPredicate = std::sync::Arc::new(|event| {
+            matches!(event, sl_proto::ServerEvent::ObjectsDeselected { .. })
+        });
+        let waiting = tokio::spawn(async move {
+            wait_for_event(&predicate, &mut events, &mut closed_rx, &mut shutdown_rx).await
+        });
+        tokio::time::advance(Duration::from_secs(600)).await;
+        tokio::task::yield_now().await;
+        if waiting.is_finished() {
+            return Err("the wait ended before its event came".to_owned());
+        }
+        events_tx
+            .send(sl_proto::ServerEvent::ObjectsDeselected {
+                local_ids: Vec::new(),
+            })
+            .map_err(|error| format!("nobody was waiting: {error}"))?;
+        let ended = waiting.await.map_err(|error| error.to_string())?;
+        if matches!(ended, Wait::Ready) {
+            Ok(())
+        } else {
+            Err("the wait stopped the script instead of running the step".to_owned())
+        }
+    }
 
     /// The builder appends in order, and `after` is the `AfterPrevious` spelling
     /// of the same step.

@@ -2144,9 +2144,13 @@ exactly what a test wants before it takes a second screenshot. It is also
 the one wait that does **not** stop the script when it times out: an
 ordering nicety that could strand a run would be worse than the
 reordering it prevents, which is the call `teleport.rs` already makes
-about its own `TeleportStart`. An `OnEvent` that times out *does* stop the
-script, because there the wait is the whole point of the step and the rest
-of the script was not written for a world where it never happened.
+about its own `TeleportStart`. An `OnEvent` has no timeout at all: the wait
+is the whole point of the step, so the script neither carries on without the
+event nor gives up on it while the session lasts. It used to give up after
+thirty seconds, counted from when the wait began — the session's arrival,
+for a first step — and a viewer on a busy machine that took longer than
+that to say its cue said it to a script that had already gone. The test
+waiting on the script's marker has a timeout of its own.
 
 The `Action` is anything a simulator does unprompted: `RezObject`,
 `MoveObject`, `UpdateObject`, `KillObject`, `Attach` / `Detach`,

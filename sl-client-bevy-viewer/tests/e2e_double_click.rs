@@ -41,14 +41,20 @@ mod test {
     /// The region east of home, across the border.
     const NEXT_DOOR: &str = "Next Door";
 
-    /// How many frames the flycam flies backwards: at its 10 m/s and the
-    /// headless viewer's 60 Hz, five metres — back and up, since it looks
-    /// down at the avatar, so everything ahead stays in view (flown forward
-    /// it would sink into the ground).
-    const FLY_FRAMES: u32 = 30;
+    /// How many frames at a time the flycam flies backwards — back and up,
+    /// since it looks down at the avatar, so everything ahead stays in view
+    /// (flown forward it would sink into the ground). Few, and repeated until
+    /// it has flown [`FLOWN`]: the flycam covers 10 m a second, so how far a
+    /// number of frames takes it is how long they took, and thirty of them
+    /// were five metres on an idle machine and sixty-one on a busy one.
+    const FLY_FRAMES: u32 = 2;
 
     /// How far a parked flycam must have flown from where it started.
     const FLOWN: f64 = 3.0;
+
+    /// How many times the flycam is flown [`FLY_FRAMES`] before the test
+    /// gives up on it moving: at 60 Hz one flight is a third of a metre.
+    const FLIGHTS: u32 = 60;
 
     /// How far ahead of the avatar the ground double-click lands, metres.
     const AHEAD: f32 = 14.0;
@@ -169,12 +175,17 @@ mod test {
             .at("/camera")
             .to_equal(json!(CameraView::Flycam))
             .await?;
-        alpha.hold("s", FLY_FRAMES).await?;
-        let parked = agent_until(alpha, |agent| {
-            global_eye(agent).is_ok_and(|eye| moved(eye, started) >= FLOWN)
-        })
-        .await?;
-        let eye = global_eye(&parked)?;
+        // By distance, not by frames: a short flight at a time until the eye
+        // is far enough, so a slow frame costs one flight's overshoot and not
+        // thirty frames' worth.
+        let mut eye = started;
+        for _flight in 0..FLIGHTS {
+            if moved(eye, started) >= FLOWN {
+                break;
+            }
+            alpha.hold("s", FLY_FRAMES).await?;
+            eye = global_eye(&alpha.agent().await?)?;
+        }
         assert!(
             moved(eye, started) >= FLOWN,
             "the flycam flew from {started:?} to {eye:?}"

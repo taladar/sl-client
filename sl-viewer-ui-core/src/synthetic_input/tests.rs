@@ -209,6 +209,36 @@ fn a_click_pins_the_multi_click_interval_only_while_it_runs() {
     assert_eq!(status(&app, click), ActionStatus::Done { frame: 4 });
 }
 
+/// **A double click pins the multi-click interval the other way**, to
+/// forever, and puts it back: its presses are two frames apart, and at five
+/// frames a second that is longer than the app's own interval — the second
+/// press would be a first.
+#[test]
+fn a_double_click_is_one_however_long_its_frames_took() {
+    let mut app = app();
+    app.init_resource::<PickingSettings>();
+    let original = app
+        .world()
+        .resource::<PickingSettings>()
+        .multi_click_interval;
+    let action = InputAction::double_click(Vec2::ONE, MouseButton::Left);
+    let frames = action.frames();
+    let double = enqueue(&mut app, action);
+    for frame in 1..=frames {
+        app.update();
+        let interval = app
+            .world()
+            .resource::<PickingSettings>()
+            .multi_click_interval;
+        if frame < frames {
+            assert_eq!(interval, super::FOREVER, "pinned in frame {frame}");
+        } else {
+            assert_eq!(interval, original, "restored at the end of the last frame");
+        }
+    }
+    assert!(matches!(status(&app, double), ActionStatus::Done { .. }));
+}
+
 /// **The pointer moves the window's cursor**, which the viewer's world readers
 /// (`cursor_position()`) see.
 #[test]

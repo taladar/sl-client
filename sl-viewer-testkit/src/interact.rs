@@ -725,6 +725,46 @@ mod tests {
         );
     }
 
+    /// **A [`double_click`] is one however slow the frames are.** Its presses
+    /// are two frames apart, and the click counter reads the wall clock: a
+    /// viewer under a full test suite's load has drawn frames slow enough to
+    /// put them further apart than the half-second a double click is allowed,
+    /// and the second press counted as a first. An app whose interval is zero
+    /// stands in for that machine here — no two presses are ever close enough
+    /// — and the double click, which pins the interval while it plays, is
+    /// still one.
+    #[test]
+    fn a_double_click_counts_two_whatever_the_frames_took() {
+        let mut app = interactive_app();
+        app.world_mut()
+            .resource_mut::<bevy::picking::PickingSettings>()
+            .multi_click_interval = core::time::Duration::ZERO;
+        let node = crate::spawn_under_root(&mut app, solid_node(10.0, 10.0, 100.0, 40.0));
+        observe_clicks(&mut app, node, "target");
+        settle(&mut app);
+
+        double_click(&mut app, Vec2::new(60.0, 30.0), MouseButton::Left);
+        let counts: Vec<u8> = app
+            .world()
+            .resource::<Clicks>()
+            .0
+            .iter()
+            .map(|(_name, count)| *count)
+            .collect();
+        assert_eq!(
+            counts,
+            vec![1, 2],
+            "a double click must be one where no two presses are close enough"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<bevy::picking::PickingSettings>()
+                .multi_click_interval,
+            core::time::Duration::ZERO,
+            "and the app's own interval is back afterwards"
+        );
+    }
+
     /// Which node saw which key press, in order.
     #[derive(Resource, Default)]
     struct Keys(Vec<(String, KeyCode)>);

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 358 |
 | blocked | 109 |
 | in-progress | 20 |
-| bugs | 38 |
-| done | 1341 |
+| bugs | 36 |
+| done | 1343 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2052** |
@@ -1602,7 +1602,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (38)
+## bugs (36)
 
 ### protocol
 
@@ -1691,17 +1691,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — object_asset_format fails only in a full-workspace run, and fails early
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
-- [`test-e2e-ground-double-click-fails-under-suite-load`](bugs/test-e2e-ground-double-click-fails-under-suite-load.md)
-  — The ground double-click e2e test flies its camera by frames and failed once
-  in the full suite
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
-- [`test-scripted-environment-change-marker-timeout`](bugs/test-scripted-environment-change-marker-timeout.md)
-  — The scripted environment change's `night` marker never arrived, once, in a
-  full suite run
 
-## done (1341)
+## done (1343)
 
 ### protocol
 
@@ -4183,6 +4177,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GetDisplayNames
 - [`test-draw-distance`](done/test-draw-distance-set-draw-distance-confirm-no-error-and-any-echoed-state.md)
   — set draw distance; confirm no error and any echoed state
+- [`test-e2e-ground-double-click-fails-under-suite-load`](done/test-e2e-ground-double-click-fails-under-suite-load.md)
+  — The ground double-click e2e test flies its camera by frames and failed once
+  in the full suite
 - [`test-e2e-live-grids`](done/test-e2e-live-grids.md) — Run end-to-end tests
   against the local OpenSim and aditi (blocked by `test-e2e-stage` (done))
 - [`test-e2e-live-verify-sweep`](done/test-e2e-live-verify-sweep.md) — Turn
@@ -4473,6 +4470,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — query/toggle script running, reset
 - [`test-script-upload`](done/test-script-upload-create-a-script-upload-source-read-the-compile.md)
   — create a script, upload source, read the compile
+- [`test-scripted-environment-change-marker-timeout`](done/test-scripted-environment-change-marker-timeout.md)
+  — The scripted environment change's `night` marker never arrived, once, in a
+  full suite run
 - [`test-server-appearance-bake`](done/test-server-appearance-bake-trigger-a-modern-server-side-appearance-bake-over-the-update.md)
   — trigger a modern **server-side** appearance bake over the UpdateAvatar
 - [`test-server-error`](done/test-server-error-provoke-and-assert-error-featuredisabled.md)

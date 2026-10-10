@@ -2,7 +2,7 @@
 id: test-scripted-environment-change-marker-timeout
 title: The scripted environment change's `night` marker never arrived, once, in a full suite run
 topic: test
-status: bugs
+status: done
 origin: gridspec-neighbours-crossing (2026-10-07)
 refs: [gridspec-neighbours-crossing, gridspec-terrain,
   test-e2e-ground-double-click-fails-under-suite-load]
@@ -78,3 +78,27 @@ and another build was using the machine all day. The timeout report now
 lists the last events and warnings: wind patches, `SimStats` and coarse
 locations to the end, no `ReliableGiveUp` and no abandoned-script warning
 among the last warnings shown.
+
+## Fixed (2026-10-10)
+
+The script's own deadline is gone. `At::OnEvent` gave a script up thirty
+seconds after its wait began (`EVENT_WAIT_TIMEOUT`), and a first step's wait
+begins at the session's arrival, not when the test says its cue: a viewer
+that took longer than that to be ready — 36 to 51 s in the 2026-10-08
+failures — said its cue to a script that had already gone, and the test
+then waited out its own sixty seconds for a marker nobody was left to send.
+An event wait now lasts as long as the session does; the test's wait for
+the marker is the one timeout, and it reports what was outstanding.
+
+New `timeline::test::an_event_wait_has_no_deadline_of_its_own`, on a paused
+clock: still waiting after ten minutes, and the step runs when its event
+comes. The old wait ends at thirty seconds there.
+
+What is and is not shown: the cause is read off the code and fits every
+failure's timing, but none of the failing runs' output held the
+abandonment warning, and whether the harness captures the fake grid's
+warnings was never settled. Four runs of both scripted tests with every
+core busy passed after the fix, in 20 to 35 s — a load too light to have
+failed before it, so they are no evidence either way. If a `moved` or
+`night` marker times out again, it is something else, and this is to be
+reopened rather than taken for the same thing.

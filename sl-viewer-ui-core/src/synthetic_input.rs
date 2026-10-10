@@ -35,8 +35,11 @@
 //! steps the cursor one frame at a time. A click also pins the multi-click
 //! interval to zero from its first frame to the end of its last, because the
 //! click counter is wall-clock and two synthetic clicks in consecutive frames
-//! would otherwise read as a double click. Actions run one after another,
-//! never interleaved, so an action's frames are contiguous.
+//! would otherwise read as a double click. A double click pins it the other
+//! way, to forever, for the same reason turned round: its two presses are two
+//! frames apart, and on a machine busy enough to draw five frames a second
+//! that is longer than any interval a double click is allowed. Actions run one
+//! after another, never interleaved, so an action's frames are contiguous.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -116,13 +119,20 @@ pub enum ImeStep {
     Disable,
 }
 
+/// The multi-click interval a synthetic double click runs under: long enough
+/// that no frame time separates its presses.
+pub const FOREVER: core::time::Duration = core::time::Duration::MAX;
+
 /// A gesture: the steps it takes, one per frame, in order.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct InputAction {
     /// The steps, first first.
     steps: Vec<InputStep>,
-    /// Whether the multi-click interval is pinned to zero while it runs.
-    single_clicks: bool,
+    /// What the multi-click interval is pinned to while it runs: zero for
+    /// clicks that must stay singles, [`FOREVER`] for ones that must count as
+    /// one multi-click however long the frames between them took. `None`
+    /// leaves the app's own.
+    pinned_interval: Option<core::time::Duration>,
 }
 
 impl InputAction {
@@ -131,7 +141,7 @@ impl InputAction {
     pub const fn from_steps(steps: Vec<InputStep>) -> Self {
         Self {
             steps,
-            single_clicks: false,
+            pinned_interval: None,
         }
     }
 
@@ -148,12 +158,12 @@ impl InputAction {
     }
 
     /// This action, then `next` — one action, so nothing is queued between
-    /// them. The pin to single clicks holds for the whole if either half asked
-    /// for it.
+    /// them. A pin of the multi-click interval holds for the whole if either
+    /// half asked for one, the first half's if both did.
     #[must_use]
     pub fn then(mut self, next: Self) -> Self {
         self.steps.extend(next.steps);
-        self.single_clicks = self.single_clicks || next.single_clicks;
+        self.pinned_interval = self.pinned_interval.or(next.pinned_interval);
         self
     }
 
@@ -187,22 +197,27 @@ impl InputAction {
                 InputStep::Release(button),
                 InputStep::Idle,
             ],
-            single_clicks: true,
+            pinned_interval: Some(core::time::Duration::ZERO),
         }
     }
 
-    /// Two clicks at `at` under the app's own multi-click interval, so the
-    /// second carries `count == 2` — the double click the widgets read.
+    /// Two clicks at `at` that count as one double click — the second
+    /// carries `count == 2`, which is what the widgets read — with the
+    /// multi-click interval pinned to [`FOREVER`], so they still do when the
+    /// two frames between the presses took longer than the app's interval.
     #[must_use]
     pub fn double_click(at: Vec2, button: MouseButton) -> Self {
-        Self::from_steps(vec![
-            InputStep::Move(at),
-            InputStep::Press(button),
-            InputStep::Release(button),
-            InputStep::Press(button),
-            InputStep::Release(button),
-            InputStep::Idle,
-        ])
+        Self {
+            steps: vec![
+                InputStep::Move(at),
+                InputStep::Press(button),
+                InputStep::Release(button),
+                InputStep::Press(button),
+                InputStep::Release(button),
+                InputStep::Idle,
+            ],
+            pinned_interval: Some(FOREVER),
+        }
     }
 
     /// Press at `from`, step the pointer to `to` across `steps` frames (at
@@ -510,11 +525,11 @@ impl SyntheticInput {
     }
 
     /// The step to apply this frame, starting the next queued action when none
-    /// is running, and whether that action has just started and asks for its
-    /// clicks to be pinned to singles. Actions with no steps are finished on the
-    /// way past. `None` when there is nothing to apply.
-    fn advance(&mut self) -> Option<(InputStep, bool)> {
-        let mut started_pinned = false;
+    /// is running, and — when that action has just started — the multi-click
+    /// interval it asks to be pinned to. Actions with no steps are finished on
+    /// the way past. `None` when there is nothing to apply.
+    fn advance(&mut self) -> Option<(InputStep, Option<core::time::Duration>)> {
+        let mut started_pinned = None;
         loop {
             if let Some(running) = self.running.as_mut() {
                 return running.steps.pop_front().map(|step| (step, started_pinned));
@@ -524,7 +539,7 @@ impl SyntheticInput {
                 self.finish(id);
                 continue;
             }
-            started_pinned = action.single_clicks;
+            started_pinned = action.pinned_interval;
             self.running = Some(Running {
                 id,
                 steps: action.steps.into(),
@@ -579,18 +594,13 @@ fn apply_synthetic_input(world: &mut World) {
         return;
     };
     input.frame = input.frame.saturating_add(1);
-    let Some((step, pins)) = input.advance() else {
+    let Some((step, pin)) = input.advance() else {
         return;
     };
-    if pins {
+    if let Some(interval) = pin {
         let saved = world
             .get_resource_mut::<PickingSettings>()
-            .map(|mut settings| {
-                core::mem::replace(
-                    &mut settings.multi_click_interval,
-                    core::time::Duration::ZERO,
-                )
-            });
+            .map(|mut settings| core::mem::replace(&mut settings.multi_click_interval, interval));
         if let Some(running) = world.resource_mut::<SyntheticInput>().running.as_mut() {
             running.saved_interval = saved;
         }
