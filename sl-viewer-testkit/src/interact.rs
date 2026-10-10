@@ -299,13 +299,24 @@ pub fn perform(app: &mut App, action: InputAction) {
         .world_mut()
         .resource_mut::<SyntheticInput>()
         .enqueue(action);
+    let mut frames = 0_u32;
     while matches!(
         app.world().resource::<SyntheticInput>().status(id),
         ActionStatus::Queued | ActionStatus::Running
     ) {
+        assert!(
+            frames < PERFORM_FRAMES,
+            "a synthetic input action was still not applied after {PERFORM_FRAMES} frames"
+        );
         app.update();
+        frames = frames.saturating_add(1);
     }
 }
+
+/// How many frames [`perform`] gives an action before it calls it stuck. The
+/// longest — a drag stepped a few pixels a frame — takes some hundreds; an
+/// injector that never finishes one would otherwise spin for ever.
+const PERFORM_FRAMES: u32 = 20_000;
 
 /// The pointer's current logical position, as the window knows it.
 #[must_use]

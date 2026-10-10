@@ -1062,19 +1062,22 @@ measured one. This is the one place the table deliberately deviates from a
 measurement, and it is written down in `imitates.rs` too.
 
 **The take's announcement.** `InventoryAnnouncement` says how a **taken**
-item is handed over: OpenSim's legacy UDP `UpdateCreateInventoryItem`
-(`SimSession::send_inventory_item_created`) or Second Life's
+item is handed over: the legacy UDP `UpdateCreateInventoryItem`
+(`SimSession::send_inventory_item_created`), which is what both live grids
+were measured sending (2026-10-10, [Building](../gridspec/building.md)), or a
 `BulkUpdateInventory` over the event queue
-(`SimSession::enqueue_bulk_update_inventory`).
+(`SimSession::enqueue_bulk_update_inventory`), which a test asks for with
+`FakeGridBuilder::inventory_announcement`. Until that measurement the
+Second-Life flavour announced in bulk, on reasoning nobody had checked.
 
-Flipping the default to Second Life immediately broke two conformance cases
-that waited only for the legacy message and reported a take that had worked
-as unacknowledged — which is exactly the failure a viewer would have had,
-and exactly why the pair is worth deciding. The fix is one shared helper,
+While the Second-Life flavour announced in bulk, two conformance cases that
+waited only for the legacy message reported a take that had worked as
+unacknowledged — which is exactly the failure a viewer would have against a
+grid that does. The fix was one shared helper,
 `support::created_item_announcement`, that accepts either shape and says
-which arrived; `object-asset-format` then asserts the shape against the
-grid's flavour, so a fake grid answering with the wrong one is a failure
-rather than something the helper papers over.
+which arrived; `object-asset-format` and `object-rez-derez` assert the shape,
+so a fake grid answering with the wrong one is a failure rather than
+something the helper papers over.
 
 It also moved the announcement in *time*, which nothing had predicted. A
 take sends the filed item and the world's `KillObject`s in one breath, but

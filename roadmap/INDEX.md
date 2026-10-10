@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 358 |
 | blocked | 109 |
 | in-progress | 20 |
-| bugs | 36 |
-| done | 1343 |
+| bugs | 38 |
+| done | 1344 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2052** |
+| **total** | **2055** |
 
 ## ideas (139)
 
@@ -1094,6 +1094,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-object-record-texture-ids`](ready/server-fake-grid-object-record-texture-ids.md)
   — Fake grid — list face textures in a Second Life object record
+- [`server-fake-grid-object-return`](ready/server-fake-grid-object-return.md) —
+  Fake grid — return somebody else's object, auto-return, and end a temporary
+  prim
 - [`server-fake-grid-object-update-forms`](ready/server-fake-grid-object-update-forms.md)
   — Fake grid — send compressed, terse and cached object updates as each grid
   does (blocked by `gridspec-object-update-stream` (done))
@@ -1174,8 +1177,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   order, limits and refusals on each grid
 - [`gridspec-object-media`](ready/gridspec-object-media.md) — Media on a prim:
   ObjectMedia, navigation and propagation on each grid
-- [`gridspec-object-rez-derez`](ready/gridspec-object-rez-derez.md) — Rez, take,
-  take-copy, delete, return and auto-return on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
   Current Outfit Folder and wearables on each grid
 - [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
@@ -1602,7 +1603,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (36)
+## bugs (38)
 
 ### protocol
 
@@ -1691,11 +1692,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — object_asset_format fails only in a full-workspace run, and fails early
 - [`test-conformance-object-edit-click-action-opensim`](bugs/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
+- [`test-e2e-objects-live-opensim-intermittent`](bugs/test-e2e-objects-live-opensim-intermittent.md)
+  — e2e_objects on the live OpenSim fails now and then, two ways
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
+- [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
+  — Test harnesses still hold waits that nothing bounds
 
-## done (1343)
+## done (1344)
 
 ### protocol
 
@@ -4648,6 +4653,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   agents, EnableSimulator and region crossing on each grid
 - [`gridspec-object-properties`](done/gridspec-object-properties.md) — Object
   properties and selection replies on each grid
+- [`gridspec-object-rez-derez`](done/gridspec-object-rez-derez.md) — Rez, take,
+  take-copy, delete, return and auto-return on each grid
 - [`gridspec-object-update-stream`](done/gridspec-object-update-stream.md) —
   Object update forms, the interest list and kills on each grid
 - [`gridspec-parcel-access-and-ban-lines`](done/gridspec-parcel-access-and-ban-lines.md)

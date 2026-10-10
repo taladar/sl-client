@@ -181,6 +181,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "object-properties",
     "object-select-scene",
     "object-rez-derez",
+    "object-rez-land",
     "parcel-edit",
     "parcel-access-list",
     "region-info",
@@ -385,14 +386,23 @@ impl FakeGridHarness {
         // it does not need.
         let notice = {
             let mut logins = self.logins.lock().await;
-            let found = loop {
-                let notice = logins.recv().await.map_err(|error| {
-                    TestFailure::Timeout(format!("the fake grid announced no login: {error}"))
-                })?;
-                if notice.first_name == avatar.first() && notice.last_name == avatar.last() {
-                    break notice;
+            // The harness holds the grid, so the stream never ends by itself:
+            // without a deadline a login that was never announced waits for
+            // ever.
+            let found = tokio::time::timeout(crate::support::REGION_TIMEOUT, async {
+                loop {
+                    let notice = logins.recv().await.map_err(|error| {
+                        TestFailure::Timeout(format!("the fake grid announced no login: {error}"))
+                    })?;
+                    if notice.first_name == avatar.first() && notice.last_name == avatar.last() {
+                        return Ok::<_, TestFailure>(notice);
+                    }
                 }
-            };
+            })
+            .await
+            .map_err(|_elapsed| {
+                TestFailure::Timeout("the fake grid announced no login for the avatar".to_owned())
+            })??;
             drop(logins);
             found
         };
@@ -415,7 +425,7 @@ impl FakeGridHarness {
     /// [`crate::context::login`] and the lookup failures of
     /// [`avatar`](Self::avatar) / [`control_for`](Self::control_for).
     pub async fn context(&self, test: &dyn GridTest) -> Result<TestContext, TestFailure> {
-        let wanted = usize::from(test.accounts());
+        let wanted = usize::from(test.accounts_on(self.flavour));
         if wanted == 0 || wanted > ACCOUNTS.len() {
             return Err(TestFailure::Assertion(format!(
                 "{} asks for {wanted} avatars; the fake grid registers {}",

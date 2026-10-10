@@ -8,15 +8,13 @@
 # in the default run — and therefore in the pre-commit hook — on purpose:
 # determinism and serialisation, not exclusion, is the fix.
 
-[test-groups.gpu]
-max-threads = 1
-
-# The end-to-end tier (`sl-client-bevy-viewer/tests/e2e_*.rs`, the `sl-e2e`
-# stage): each test starts a fake grid and several viewers — processes or
-# in-process Apps — on the one GPU, so they run one at a time, beside the gpu
-# group rather than inside it, with room for cold logins on both backends.
-[test-groups.e2e]
-max-threads = 1
+# No test waits for ever. A wait inside a test is bounded where it is written,
+# and this is what catches the one that is not: a test whose every event had
+# its own timeout sat for two hours on a grid that kept sending pings. Half
+# an hour is past the slowest test outside the groups below, which set their
+# own: the `ui_contract` sweeps take ten minutes and more in a debug build.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 30 }
 
 [[profile.default.overrides]]
 filter = "test(/^render_readback::/) | test(/^render_matrix::/) | test(/^full_stack_test::/) | test(/^world_test::gpu_/) | binary(viewer_processes)"
@@ -41,3 +39,13 @@ slow-timeout = { period = "180s", terminate-after = 4 }
 filter = "binary(/^e2e_/)"
 test-group = "e2e"
 slow-timeout = { period = "300s" }
+
+[test-groups.gpu]
+max-threads = 1
+
+# The end-to-end tier (`sl-client-bevy-viewer/tests/e2e_*.rs`, the `sl-e2e`
+# stage): each test starts a fake grid and several viewers — processes or
+# in-process Apps — on the one GPU, so they run one at a time, beside the gpu
+# group rather than inside it, with room for cold logins on both backends.
+[test-groups.e2e]
+max-threads = 1

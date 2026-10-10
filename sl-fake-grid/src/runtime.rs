@@ -1911,9 +1911,9 @@ impl FakeGridBuilder {
     }
 
     /// Overrides how a created inventory item is announced, which otherwise
-    /// follows [`imitates`](Self::imitates): OpenSim sends the legacy UDP
-    /// `UpdateCreateInventoryItem`, Second Life a `BulkUpdateInventory` over
-    /// the event queue.
+    /// follows [`imitates`](Self::imitates): both live grids send the legacy
+    /// UDP `UpdateCreateInventoryItem` for a derez, so this is how a test asks
+    /// for a `BulkUpdateInventory` over the event queue instead.
     #[must_use]
     pub const fn inventory_announcement(mut self, announcement: InventoryAnnouncement) -> Self {
         self.inventory_announcement = Some(announcement);
@@ -2034,6 +2034,7 @@ impl FakeGridBuilder {
                 capacity.allot(&mut fixtures.parcels);
                 fixtures.capacity = Some(capacity);
                 fixtures.properties = self.imitates.properties_policy();
+                fixtures.rez = self.imitates.rez_policy();
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 RegionEntry {

@@ -24,12 +24,11 @@
 //! fetchable on both is the grid's own seeded `Fixture Object`, which is what
 //! this case samples offline.
 //!
-//! The take leg also carries the **announcement** half of the inventory
-//! divergence (`take_announcement`): OpenSim answers a take with the legacy UDP
-//! `UpdateCreateInventoryItem`, Second Life with a `BulkUpdateInventory` over
-//! the event queue. The leg accepts either — it has to, or it would record a
-//! take that worked as unacknowledged — so the shape is asserted against the
-//! grid's flavour rather than left to whichever one happened to arrive.
+//! The take leg also records how the item is **announced**
+//! (`take_announcement`): both grids answer a take with the legacy UDP
+//! `UpdateCreateInventoryItem`. The leg accepts a `BulkUpdateInventory` over
+//! the event queue as well — a fake grid can be built to send one — so the
+//! shape is asserted rather than left to whichever one happened to arrive.
 //!
 //! **Second Life does not tell a viewer where an object item's asset lives.**
 //! Eleven of eleven object items in the test account came back with a nil
@@ -70,17 +69,16 @@ use crate::grid::Grid;
 use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    ANNOUNCED_BULK, ANNOUNCED_LEGACY, LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check,
+    ANNOUNCED_LEGACY, LONG_TIMEOUT, REGION_TIMEOUT, REPLY_TIMEOUT, check,
     created_item_announcement, is_aditi, is_fake,
 };
 
-/// How each grid announces the item a take creates: OpenSim with the legacy
-/// UDP `UpdateCreateInventoryItem`, Second Life with an event-queue
-/// `BulkUpdateInventory`.
+/// How each grid announces the item a take creates: both with the legacy
+/// UDP `UpdateCreateInventoryItem`.
 const TAKE_ANNOUNCEMENT: Measured<&str> = Measured {
-    second_life: ANNOUNCED_BULK,
+    second_life: ANNOUNCED_LEGACY,
     opensim: ANNOUNCED_LEGACY,
-    source: "object-rez-derez's take on aditi and OpenSim (ImitatedGrid audit, 2026-09-07)",
+    source: "book/src/gridspec/building.md § Rez and take (object-rez-derez, 2026-10-10)",
 };
 
 /// How many object assets to pull. Enough for a shape to be more than one

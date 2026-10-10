@@ -19,6 +19,16 @@
 //! something the region does not hold. The Build window has to fill from the
 //! answer, keep a name it wrote whether or not the grid said so, and leave
 //! the record's fields shut over an answer that never comes.
+//!
+//! And an object comes and goes by the resident's own hand
+//! ([[gridspec-object-rez-derez]]): taken into the inventory, dragged out of
+//! it again, deleted. Both grids announce the item a take makes with the
+//! legacy message, but say the object is gone differently — Second Life in
+//! one kill naming every prim, OpenSim in two naming the root — and stamp
+//! the item with different permission masks. Whichever it is, the object has
+//! to leave the viewer's world, its item has to show in the inventory window
+//! under the object's name, and a rez of that item has to put an object of
+//! that name back.
 
 #[cfg(test)]
 mod test {
@@ -31,6 +41,7 @@ mod test {
     use sl_e2e::{BodyError, Grid, Need, Stage, StageBuilder};
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
     use sl_proto::{RegionLocalObjectId, ServerEvent};
+    use sl_viewer_driver::UiLocator;
     use sl_viewer_driver::Viewer;
 
     /// A failed stage, or a test that could not set one up.
@@ -314,22 +325,23 @@ mod test {
     /// The name the record test gives its prim.
     const WRITTEN: &str = "Named By The Viewer";
 
-    /// Rez a prim, read its record off the Build window's General tab, rename
-    /// it and read the name back from a fresh selection. On a live grid the
-    /// prim is then deleted; on the fake one it is selected once more after
-    /// the grid has lost it without a word.
-    async fn the_build_window_follows_the_record(stage: &Stage) -> Result<(), BodyError> {
-        let alpha = &stage.viewer("Alpha")?;
-        arrived(alpha).await?;
+    /// Open the Build window, rez a prim with its Create tool and show the
+    /// General tab: on the stock scene's unnamed box on the fake grid, on the
+    /// ground beside the avatar on a live one. Returns the window and, on a
+    /// live grid, the spot on the ground.
+    async fn rez_a_prim(
+        stage: &Stage,
+        alpha: &Viewer,
+    ) -> Result<(UiLocator, Option<(f32, f32)>), BodyError> {
         alpha.press("Ctrl+B").await?;
         let build = alpha.ui().window("build-tools");
         let _create = build
             .get(Locator::role(Role::Radio).name_key("build-tool-create"))
             .click()
             .await?;
-        let fake = stage.on_grid() == Grid::Fake;
-        if fake {
+        let spot = if stage.on_grid() == Grid::Fake {
             let _placed = alpha.world().object_named(UNNAMED).place().await?;
+            None
         } else {
             // On the ground a few metres to the camera's right of the avatar
             // and a little ahead of it: the Build window takes the left of
@@ -346,21 +358,34 @@ mod test {
             let (ahead_x, ahead_y) = (spot[0] - eye[0], spot[1] - eye[1]);
             let length = ahead_x.hypot(ahead_y).max(0.001);
             let (ahead_x, ahead_y) = (ahead_x / length, ahead_y / length);
+            let (east, north) = (
+                spot[0] + aside * ahead_y + 3.0 * ahead_x,
+                spot[1] - aside * ahead_x + 3.0 * ahead_y,
+            );
             let _placed = alpha
                 .world()
-                .ground(
-                    stage.home_region(),
-                    spot[0] + aside * ahead_y + 3.0 * ahead_x,
-                    spot[1] - aside * ahead_x + 3.0 * ahead_y,
-                )
+                .ground(stage.home_region(), east, north)
                 .timeout(SETTLE)
                 .place()
                 .await?;
-        }
+            Some((east, north))
+        };
         let _general = build
             .get(Locator::role(Role::Tab).name_key("build-tab-general"))
             .click()
             .await?;
+        Ok((build, spot))
+    }
+
+    /// Rez a prim, read its record off the Build window's General tab, rename
+    /// it and read the name back from a fresh selection. On a live grid the
+    /// prim is then deleted; on the fake one it is selected once more after
+    /// the grid has lost it without a word.
+    async fn the_build_window_follows_the_record(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        let (build, _spot) = rez_a_prim(stage, alpha).await?;
+        let fake = stage.on_grid() == Grid::Fake;
 
         // The rez leaves the prim selected, and the select's answer names it.
         let field = build.test_id("build-name:field");
@@ -514,6 +539,173 @@ mod test {
                 "a grid's own answer to a select and to a rename",
             ))
             .run(the_build_window_follows_the_record)?;
+        Ok(())
+    }
+
+    /// The name the take test gives its prim.
+    const TAKEN: &str = "Taken By The Viewer";
+
+    /// A search no inventory item answers to.
+    const NO_SUCH_ITEM: &str = "no item is called this";
+
+    /// The slices of an object's pie that take it: the Take sub-pie, then
+    /// Take.
+    const TAKE: [&str; 2] = ["pie-object-take", "pie-object-take"];
+
+    /// The slices that delete it: More, then Delete.
+    const DELETE: [&str; 2] = ["pie-object-more", "pie-object-delete"];
+
+    /// Open the pie of the one object `object` names and follow `slices`
+    /// through it.
+    async fn pie(
+        alpha: &Viewer,
+        object: &sl_viewer_driver::WorldHandle,
+        slices: &[&str],
+    ) -> Result<(), BodyError> {
+        let _pie = object.open_pie().await?;
+        for key in slices {
+            let _slice = alpha
+                .pie_slice(Locator::role(Role::MenuItem).name_key(*key))
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Rez a prim and name it, take it from its pie, find its item in the
+    /// inventory window, drag that back into the world and delete what
+    /// appears.
+    async fn a_prim_is_taken_and_rezzed_again(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        let (build, spot) = rez_a_prim(stage, alpha).await?;
+        // A name of this run's own on a live grid, whose inventory keeps the
+        // items of the runs before it.
+        let name = if spot.is_some() {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| format!("the clock: {error}"))?
+                .as_secs();
+            format!("{TAKEN} {stamp}")
+        } else {
+            TAKEN.to_owned()
+        };
+        let field = build.test_id("build-name:field");
+        let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
+        let selected = alpha.selection().await?;
+        let [prim] = selected.as_slice() else {
+            return Err(format!("the rez left {selected:?} selected").into());
+        };
+        let prim_id = prim.full_id;
+        let _typed = field.fill(&name).await?;
+        field.press("Enter").await?;
+        let _kept = alpha
+            .expect(&field)
+            .timeout(WAIT)
+            .to_have_text(&name)
+            .await?;
+        // Out of the field, out of the selection, out of the Build window:
+        // a pie is a right click outside build mode.
+        alpha.press("Escape").await?;
+        alpha.press("Escape").await?;
+        let _cleared = alpha
+            .expect_state(Probe::Selection)
+            .to_equal(json!([]))
+            .await?;
+        alpha.press("Ctrl+B").await?;
+        let _closed = alpha.expect(&build).to_be_hidden().await?;
+
+        // Taken: the object goes, however the grid says so, and its item
+        // comes, under the object's name.
+        let rezzed = alpha
+            .world()
+            .locator(WorldLocator::full_id(prim_id))
+            .timeout(WAIT);
+        pie(alpha, &rezzed, &TAKE).await?;
+        let _gone = alpha
+            .expect_world(&rezzed)
+            .timeout(SETTLE)
+            .to_be_detached()
+            .await?;
+        let inventory = alpha.ui().window("inventory");
+        if !inventory.is_visible().await? {
+            alpha.press("Ctrl+I").await?;
+            let _shown = alpha.expect(&inventory).to_be_visible().await?;
+        }
+        // The list narrows to a search a moment after it is typed, and a row
+        // found before that is not where a drag will find it. So the item is
+        // searched away first: it can only show again once the list has
+        // narrowed to its name, which is where it stays.
+        let search = inventory.test_id("inventory:search").role(Role::Textbox);
+        let named = inventory.get(Locator::role(Role::TreeItem).named(&name));
+        let _searched = search.fill(NO_SUCH_ITEM).await?;
+        let _narrowed = alpha.expect(&named).timeout(WAIT).to_be_hidden().await?;
+        let _searched = search.fill(&name).await?;
+        let row = inventory
+            .get(Locator::role(Role::TreeItem).named(&name))
+            .timeout(WAIT);
+        let _filed = alpha.expect(&row).timeout(WAIT).to_be_visible().await?;
+
+        // Rezzed again: an object of that name stands in the world.
+        match spot {
+            Some((east, north)) => {
+                let _dropped = alpha
+                    .world()
+                    .ground(stage.home_region(), east, north)
+                    .timeout(SETTLE)
+                    .drop_from(&row)
+                    .await?;
+            }
+            None => {
+                let _dropped = alpha.world().object_named(UNNAMED).drop_from(&row).await?;
+            }
+        }
+        let again = alpha.world().object_named(&name).timeout(SETTLE);
+        let _back = alpha.expect_world(&again).to_be_attached().await?;
+        // The item is a copy's and stays where it was.
+        let _still = alpha.expect(&row).to_be_visible().await?;
+
+        // Deleted: gone again.
+        pie(alpha, &again, &DELETE).await?;
+        let _deleted = alpha
+            .expect_world(&again)
+            .timeout(SETTLE)
+            .to_be_detached()
+            .await?;
+        Ok(())
+    }
+
+    /// **Take, rez and delete on each fake flavour**: the object leaves the
+    /// viewer's world on Second Life's one kill and on OpenSim's two, its
+    /// item shows in the inventory window with either grid's masks, a drag
+    /// out of the window puts an object of the same name back, and Delete
+    /// takes that away.
+    #[test]
+    fn a_prim_is_taken_and_rezzed_again_on_each_fake_flavour() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "take_second_life"),
+            (ImitatedGrid::OpenSim, "take_open_sim"),
+        ] {
+            StageBuilder::new(name)
+                .viewer_binary(VIEWER)
+                .viewer("Alpha")
+                .needs(Need::Content("the stock scene's unnamed box, to rez on"))
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(a_prim_is_taken_and_rezzed_again)?;
+        }
+        Ok(())
+    }
+
+    /// **Take, rez and delete, live** (`SL_E2E_GRID=opensim|aditi`, where the
+    /// avatar stands on land it may build on): the same against the grid's
+    /// own kills and its own item. The item stays in the avatar's Objects
+    /// folder, and a copy of it in its Trash.
+    #[test]
+    fn a_prim_is_taken_and_rezzed_again_on_a_live_grid() -> Result<(), TestError> {
+        StageBuilder::new("take_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid("a grid's own kill and its own item"))
+            .run(a_prim_is_taken_and_rezzed_again)?;
         Ok(())
     }
 }

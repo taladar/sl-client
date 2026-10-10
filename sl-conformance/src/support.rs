@@ -150,12 +150,13 @@ pub fn count_metric(base: &str) -> String {
 }
 
 /// The [`created_item_announcement`] value for the legacy UDP
-/// `UpdateCreateInventoryItem`, which is what OpenSim answers a take with.
+/// `UpdateCreateInventoryItem`, which is what both live grids answer a take
+/// with (`object-rez-derez`, 2026-10-10).
 pub const ANNOUNCED_LEGACY: &str = "update-create-inventory-item";
 
 /// The [`created_item_announcement`] value for the event-queue
-/// `BulkUpdateInventory`, which is what Second Life answers a take with now
-/// that inventory lives behind AIS3.
+/// `BulkUpdateInventory`: not what either live grid answers a take with, and
+/// what a fake grid built to announce in bulk does.
 pub const ANNOUNCED_BULK: &str = "bulk-update-inventory";
 
 /// The [`UploadObservation::announced_for`] value for an upload the grid
@@ -340,14 +341,14 @@ fn collect_announcement(seen: &mut Vec<Announcement>, event: &Event) {
 /// Waits for the grid to announce an inventory item it just created, whichever
 /// of the **two shapes** it uses, and says which one arrived.
 ///
-/// The live grids disagree: OpenSim sends the legacy UDP
-/// `UpdateCreateInventoryItem` ([`Event::InventoryItemCreated`]) and Second Life
-/// pushes a `BulkUpdateInventory` over the event queue
-/// ([`Event::InventoryBulkUpdate`]). A case that waits for only one of them
-/// reports a take that worked as unacknowledged against the other grid — which
-/// is what the fake grid's `ImitatedGrid` switch makes reachable offline, and
-/// why this is one helper rather than a `match` copied into every case that
-/// takes something.
+/// Both live grids send the legacy UDP `UpdateCreateInventoryItem`
+/// ([`Event::InventoryItemCreated`]) for a take; a `BulkUpdateInventory` over
+/// the event queue ([`Event::InventoryBulkUpdate`]) is how Second Life
+/// announces other inventory changes and what a fake grid can be built to
+/// announce a take with. A case that waits for only one of them reports a
+/// take that worked as unacknowledged against a grid that uses the other,
+/// which is why this is one helper rather than a `match` copied into every
+/// case that takes something.
 ///
 /// `item_type` is the `LLAssetType` code the item must carry, because a bulk
 /// update announces every object it touched and only one of them is the item
@@ -971,7 +972,8 @@ const WALK_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Whether the agent `owner` owns `object`, by its owner id or by the
 /// per-viewer [`OBJECT_YOU_OWNER`](prim_flags::OBJECT_YOU_OWNER) flag.
-fn is_own(object: &Object, owner: Uuid) -> bool {
+#[must_use]
+pub fn is_own(object: &Object, owner: Uuid) -> bool {
     object.owner_id == owner || object.update_flags & prim_flags::OBJECT_YOU_OWNER != 0
 }
 

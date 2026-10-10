@@ -607,13 +607,24 @@ pub(crate) fn on_row_drag_start(
         root,
         time,
     } = facts;
+    debug!(
+        "inventory drag: start on {:?}, button {:?}, one already active: {}",
+        drag.entity,
+        drag.button,
+        state.active.is_some()
+    );
     if drag.button != PointerButton::Primary || state.active.is_some() {
         return;
     }
     let Ok(row) = rows.get(drag.entity) else {
+        debug!("inventory drag: {:?} is not a row", drag.entity);
         return;
     };
     let Some(display) = row.index.and_then(|index| view.rows().get(index)) else {
+        debug!(
+            "inventory drag: the row shows nothing (index {:?})",
+            row.index
+        );
         return;
     };
     // Dragging a selected row drags the whole selection, in view order.
@@ -639,8 +650,11 @@ pub(crate) fn on_row_drag_start(
         }
     }
     if sources.is_empty() {
+        let key = display.key();
+        debug!("inventory drag: the model knows none of the dragged rows ({key:?})");
         return;
     }
+    debug!("inventory drag: began with {} source(s)", sources.len());
     // The press that began this gesture already toggled the dragged folder
     // row; a drag is not a click, so put the expand state back.
     if let RowKey::Folder(key) = display.key() {
@@ -926,6 +940,7 @@ pub(crate) fn on_row_drag_end(
                 }
             }
         });
+    debug!("inventory drop: released at {cursor:?}, over the inventory list: {over_list}");
     if over_list {
         let dest = viewports
             .get(ui.viewport())
@@ -964,6 +979,7 @@ pub(crate) fn on_row_drag_end(
         .flat_map(|hits| hits.keys())
         .find_map(|hovered| agent_target_at(*hovered, &agent_targets, &pick_targets, &child_of));
     if let Some(agent) = ui_agent {
+        debug!("inventory drop: onto an avatar's UI node");
         report_broken_links(broken, &mut notices);
         drop_onto_agent(sources, agent, &identity, &model, &mut commands);
         return;
@@ -978,6 +994,7 @@ pub(crate) fn on_row_drag_end(
         .flat_map(|hits| hits.keys())
         .find_map(|hovered| contents_target_at(*hovered, &contents_targets, &child_of));
     if let Some((scoped, object)) = contents_object {
+        debug!("inventory drop: onto an object's contents list");
         report_broken_links(broken, &mut notices);
         let mut added = Vec::new();
         for (source, _from_library) in sources {
@@ -1014,6 +1031,7 @@ pub(crate) fn on_row_drag_end(
         .flat_map(|hits| hits.keys())
         .find_map(|hovered| notecard_target_at(*hovered, &notecard_targets, &child_of));
     if let Some(editor) = over_editable_notecard {
+        debug!("inventory drop: into a notecard");
         report_broken_links(broken, &mut notices);
         for (source, _from_library) in sources {
             if let MenuTarget::Item(item) = source {
@@ -1029,6 +1047,7 @@ pub(crate) fn on_row_drag_end(
 
     // 3. Any other blocking UI swallows the drop.
     if pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes) {
+        debug!("inventory drop: swallowed by the UI under the pointer");
         return;
     }
 
@@ -1040,6 +1059,7 @@ pub(crate) fn on_row_drag_end(
         return;
     };
     let Some(world_hit) = world_pick.hit else {
+        debug!("inventory drop: nothing of the world is under the pointer");
         return;
     };
     report_broken_links(broken, &mut notices);
@@ -1098,6 +1118,10 @@ pub(crate) fn on_row_drag_end(
                 // drop (`isWearingAttachment` → `ACCEPT_NO`) rather than pull
                 // the object off the avatar into the world.
                 let rez_selected = edit.as_ref().is_some_and(|edit| edit.active);
+                debug!(
+                    "inventory drop: rezzing {} from {start:?} to {end:?}, onto {face_entity:?}",
+                    item.item_id
+                );
                 commands.write(SlCommand(rez_object_command(
                     item,
                     start.clone(),

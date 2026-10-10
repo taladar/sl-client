@@ -15,6 +15,7 @@
 #[cfg(test)]
 mod tests {
     use std::thread::JoinHandle;
+    use std::time::Duration;
 
     use pretty_assertions::assert_eq;
 
@@ -24,6 +25,10 @@ mod tests {
     use lsp_types::{DocumentSymbol, SymbolInformation, SymbolKind};
     use serde_json::{Value as JsonValue, json};
     use sl_lsl::LslSyntax;
+
+    /// How long a test waits for the server's next message before it calls
+    /// the server stuck: a blocking receive would otherwise wait for ever.
+    const WAIT: Duration = Duration::from_secs(30);
 
     /// A test harness: the client end of an in-memory connection plus the join
     /// handle of the server thread, with a monotonic request-id counter.
@@ -82,7 +87,11 @@ mod tests {
                 .send(Message::Request(request))
                 .map_err(|err| err.to_string())?;
             loop {
-                let message = self.client.receiver.recv().map_err(|err| err.to_string())?;
+                let message = self
+                    .client
+                    .receiver
+                    .recv_timeout(WAIT)
+                    .map_err(|err| err.to_string())?;
                 if let Message::Response(Response { response_kind, .. }) = message {
                     return match response_kind {
                         ResponseKind::Ok { result } => Ok(result),
@@ -98,7 +107,11 @@ mod tests {
         /// its params (used to receive a pushed `publishDiagnostics`).
         fn recv_notification(&self, method: &str) -> Result<JsonValue, String> {
             loop {
-                let message = self.client.receiver.recv().map_err(|err| err.to_string())?;
+                let message = self
+                    .client
+                    .receiver
+                    .recv_timeout(WAIT)
+                    .map_err(|err| err.to_string())?;
                 if let Message::Notification(Notification {
                     method: got,
                     params,
@@ -341,7 +354,10 @@ mod tests {
             }))
             .map_err(|err| err.to_string())?;
         let result = loop {
-            let message = client_conn.receiver.recv().map_err(|err| err.to_string())?;
+            let message = client_conn
+                .receiver
+                .recv_timeout(WAIT)
+                .map_err(|err| err.to_string())?;
             if let Message::Response(Response { response_kind, .. }) = message {
                 match response_kind {
                     ResponseKind::Ok { result } => break result,
@@ -384,7 +400,10 @@ mod tests {
             }))
             .map_err(|err| err.to_string())?;
         loop {
-            let message = client_conn.receiver.recv().map_err(|err| err.to_string())?;
+            let message = client_conn
+                .receiver
+                .recv_timeout(WAIT)
+                .map_err(|err| err.to_string())?;
             if matches!(message, Message::Response(_)) {
                 break;
             }

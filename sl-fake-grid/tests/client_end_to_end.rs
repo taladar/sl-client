@@ -24,6 +24,13 @@ mod test {
     /// How long any single wait in these tests may take.
     const WAIT: Duration = Duration::from_secs(10);
 
+    /// When a wait for one thing among other events gives up: three `WAIT`s
+    /// from now, however many of those others arrive meanwhile.
+    fn whole_wait() -> tokio::time::Instant {
+        let now = tokio::time::Instant::now();
+        now.checked_add(WAIT.saturating_mul(3)).unwrap_or(now)
+    }
+
     /// Starts a grid, connects the real client, and returns both plus the
     /// grid-side agent handle.
     async fn connect() -> Result<(FakeGrid, Client, FakeAgent), TestError> {
@@ -152,8 +159,11 @@ mod test {
         let mut greeted = false;
         let mut handshaken = false;
         let mut features_seen = false;
+        // One deadline for the whole wait: a timeout on each event is
+        // never reached on a stream that keeps sending something else.
+        let deadline = whole_wait();
         while !(greeted && handshaken && features_seen) {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             match event {
@@ -187,8 +197,9 @@ mod test {
             })
             .await?;
         let mut events = server_events;
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, events.recv()).await??;
+            let event = tokio::time::timeout_at(deadline, events.recv()).await??;
             if let ServerEvent::Chat { message, .. } = &event
                 && message == "hello grid"
             {
@@ -213,8 +224,9 @@ mod test {
                 });
             })
             .await;
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             if let Event::DisplayNameUpdate(_) = event {
@@ -359,13 +371,15 @@ mod test {
     }
 
     /// Receives events from `events` until `pick` returns a value (the
-    /// field-level form, for borrowing the grid alongside).
+    /// field-level form, for borrowing the grid alongside), for three `WAIT`s
+    /// at the longest however many other events arrive meanwhile.
     async fn wait_on<T>(
         events: &mut mpsc::Receiver<Event>,
         mut pick: impl FnMut(&Event) -> Option<T>,
     ) -> Result<T, TestError> {
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, events.recv())
+            let event = tokio::time::timeout_at(deadline, events.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             if let Some(value) = pick(&event) {
@@ -375,15 +389,14 @@ mod test {
     }
 
     /// Waits for the item a take just filed, **whichever way this grid
-    /// announces one**: the legacy UDP `UpdateCreateInventoryItem` on an
-    /// OpenSim-flavoured grid, a `BulkUpdateInventory` over the event queue on
-    /// a Second-Life-flavoured one (`sl_fake_grid::InventoryAnnouncement`).
+    /// announces one**: the legacy UDP `UpdateCreateInventoryItem`, as both
+    /// flavours do, or a `BulkUpdateInventory` over the event queue on a grid
+    /// built to (`sl_fake_grid::InventoryAnnouncement`).
     ///
-    /// Waiting for only the first is how these tests hung when the flavour
-    /// started deciding it — and `wait_on`'s timeout is per *event*, so a grid
-    /// still sending pings never trips it. That is the same trap a viewer that
-    /// only listens for the legacy message falls into, which is the whole point
-    /// of the switch.
+    /// Waiting for only the first is how these tests failed when the flavour
+    /// started deciding it. That is the same trap a viewer that only listens
+    /// for the legacy message falls into, which is the whole point of the
+    /// switch.
     async fn wait_for_taken_item(
         events: &mut mpsc::Receiver<Event>,
     ) -> Result<sl_client_tokio::InventoryItem, TestError> {
@@ -1602,8 +1615,9 @@ mod test {
             })
             .await?;
         assert_eq!(byte_count, uploaded.len());
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
+            let event = tokio::time::timeout_at(deadline, server_events.recv()).await??;
             if let ServerEvent::XferReceived { filename, data, .. } = &event
                 && filename == "new.raw"
             {
@@ -1708,8 +1722,9 @@ mod test {
                 completed: false,
             })
             .await?;
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
+            let event = tokio::time::timeout_at(deadline, server_events.recv()).await??;
             if let ServerEvent::VoiceSignalingReceived {
                 viewer_session: seen,
                 candidates,
@@ -1814,8 +1829,9 @@ mod test {
         // had there been one, would have been enqueued before it.
         let mut features = None;
         let mut named_a_backend = false;
+        let deadline = whole_wait();
         while features.is_none() {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             match event {
@@ -1905,8 +1921,9 @@ mod test {
                 screenshot: None,
             })
             .await?;
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
+            let event = tokio::time::timeout_at(deadline, server_events.recv()).await??;
             if let ServerEvent::AbuseReportReceived(received) = &event {
                 assert_eq!(received.summary, "Griefing");
                 break;
@@ -1937,8 +1954,9 @@ mod test {
                 updates: Vec::new(),
             })
             .await?;
+        let deadline = whole_wait();
         loop {
-            let diagnostic = tokio::time::timeout(WAIT, diag_rx.recv())
+            let diagnostic = tokio::time::timeout_at(deadline, diag_rx.recv())
                 .await?
                 .ok_or("the diagnostics stream ended early")?;
             if let sl_proto::Diagnostic::ExpectedReplyMissing { request, .. } = diagnostic
@@ -1988,8 +2006,9 @@ mod test {
             // stream until it has both rather than asking for either.
             let mut protocols = None;
             let mut appearance = None;
+            let deadline = whole_wait();
             while protocols.is_none() || appearance.is_none() {
-                let event = tokio::time::timeout(WAIT, event_rx.recv())
+                let event = tokio::time::timeout_at(deadline, event_rx.recv())
                     .await?
                     .ok_or("client event stream ended early")?;
                 match event {
@@ -5526,11 +5545,9 @@ mod test {
         assert_eq!(seen.motion.position, position);
         assert_eq!(seen.scale, rezzed.scale);
 
-        // A return mints no inventory item, so the requester gets a `DeRezAck`
-        // rather than an `UpdateCreateInventoryItem` -- and both avatars get
-        // the kill.
-        let expected_transaction =
-            sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x0DE5));
+        // A return files the object in its owner's Lost And Found and says so
+        // the way a take does; neither grid answers one with a `DeRezAck`
+        // (`book/src/gridspec/building.md`). Both avatars get the kill.
         first
             .commands
             .send(Command::DerezObjects {
@@ -5539,32 +5556,33 @@ mod test {
                     rezzed.local_id,
                 )],
                 destination: sl_client_tokio::DeRezDestination::ReturnToOwner,
-                transaction_id: expected_transaction,
+                transaction_id: sl_client_tokio::TransactionId::from(uuid::Uuid::from_u128(0x0DE5)),
                 group_id: None,
             })
             .await?;
-        let acked = wait_on(&mut first.events, |event| match event {
-            Event::DeRezAck {
-                transaction,
-                success,
-            } if *transaction == expected_transaction => Some(*success),
+        // The item and the kill come in either order, and a wait for one
+        // throws the other away: the rezzer's two are one wait.
+        let (mut filed, mut killed) = (false, false);
+        wait_on(&mut first.events, |event| {
+            match event {
+                Event::InventoryItemCreated { item, .. }
+                    if i32::from(item.item_type) == sl_proto::AssetType::Object.to_code() =>
+                {
+                    filed = true;
+                }
+                Event::ObjectRemoved { local_id, .. } if local_id.id() == rezzed.local_id => {
+                    killed = true;
+                }
+                _ => {}
+            }
+            (filed && killed).then_some(())
+        })
+        .await?;
+        wait_on(&mut second.events, |event| match event {
+            Event::ObjectRemoved { local_id, .. } if local_id.id() == rezzed.local_id => Some(()),
             _ => None,
         })
         .await?;
-        assert!(acked, "a return of an object the region has is refused");
-        for (name, avatar) in [("the rezzer", &mut first), ("the bystander", &mut second)] {
-            let removed = wait_on(&mut avatar.events, |event| match event {
-                Event::ObjectRemoved { local_id, .. } if local_id.id() == rezzed.local_id => {
-                    Some(*local_id)
-                }
-                _ => None,
-            })
-            .await;
-            assert!(
-                removed.is_ok(),
-                "{name} was never told the returned object went away"
-            );
-        }
 
         // And the region itself has forgotten it, so the next avatar to arrive
         // is not shown a ghost.
@@ -6295,8 +6313,9 @@ mod test {
             .map(|local_id| sl_client_tokio::ScopedObjectId::new(avatar.circuit, local_id))
             .collect();
         let mut taken = None;
+        let deadline = whole_wait();
         while taken.is_none() || !standing.is_empty() {
-            let event = tokio::time::timeout(WAIT, avatar.events.recv())
+            let event = tokio::time::timeout_at(deadline, avatar.events.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             match event {

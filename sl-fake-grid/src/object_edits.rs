@@ -391,6 +391,10 @@ pub(crate) fn answer_object_edit(
         // trash. The ordinary delete-to-trash is a derez, and it is answered
         // where the takes are.
         ServerEvent::ObjectsDeleted { local_ids, .. } => {
+            // OpenSim has no handler for the message: the objects stand.
+            if world.rez.object_delete == crate::imitates::ObjectDelete::Ignored {
+                return Some(Vec::new());
+            }
             let mut killed = Vec::new();
             let mut changes = Vec::new();
             for local_id in local_ids {

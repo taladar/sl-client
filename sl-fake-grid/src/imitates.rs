@@ -24,7 +24,7 @@
 //! | the rest of `SimulatorFeatures` ([`stock_simulator_features`](ImitatedGrid::stock_simulator_features)) | 29 keys: the PBR, mirror and pathfinding switches, the estate and group limits, the dead-reckoning pair, the host's name, a 2048 px texture limit, four material requests a second | 14 keys and the 24 of `OpenSimExtras`: the grid's name and limits, the simulator's frame rate, `ExportSupported` as a string; five empty `menus`; no texture limit, three material requests a second |
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named two ways: `SimulatorFeatures.VoiceServerType` and the `RequiredVoiceVersion` push — **not** the login `voice-config`, which aditi does not send even when asked (2026-10-04) | none: a stock region loads no voice module, and nothing is advertised |
 //! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
-//! | how a **taken** item is announced ([`InventoryAnnouncement`]) | a `BulkUpdateInventory` over the event queue | the legacy UDP `UpdateCreateInventoryItem` |
+//! | how a **taken** item is announced ([`InventoryAnnouncement`]) | the legacy UDP `UpdateCreateInventoryItem` | the same |
 //! | how an item a capability upload **rewrote** is announced ([`UploadAnnouncements::saved`]) | the legacy UDP `UpdateCreateInventoryItem` | nothing: the capability's HTTP response is the whole answer |
 //! | how an item a capability upload **created** is announced ([`UploadAnnouncements::created`]) | nothing | nothing |
 //! | who composites an avatar ([`BakePolicy`]) | the grid: an `agent_appearance_service`, the central-bake protocol bit, an `AppearanceData` block on every appearance, and the `UpdateAvatarAppearance` trigger | every viewer for itself: none of those four |
@@ -55,19 +55,27 @@
 //! | a child prim's sale state in its record ([`PropertiesPolicy::child_sale`]) | its own | the root's |
 //! | a new prim's record ([`PropertiesPolicy::new_prim_owner_mask`], [`PropertiesPolicy::new_prim_last_owner`], [`PropertiesPolicy::ownership_cost`]) | base and owner masks `0x7fffffff`, no last owner, an ownership cost of 10 | masks `0x0009e000`, the rezzer as last owner, a cost of 0 |
 //!
+//! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
+//! | the kill a derez sends ([`RezPolicy::derez_kill`]) | one `KillObject` naming every prim of the linkset | two, each naming the root alone |
+//! | where a delete to "the Trash" files the item ([`RezPolicy::trash_folder`]) | the folder the derez named | the agent's own Trash, whatever it named |
+//! | a taken item's masks ([`RezPolicy::taken_item_masks`]) | the object's | base and owner `0x0008e00f`: the object's without export, its slam bits set |
+//! | the folder a rezzed object's record names ([`RezPolicy::rezzed_record_names_folder`]) | the item's | none |
+//! | the transaction a filed item's announcement states ([`RezPolicy::announcement_states_a_transaction`]) | one of the grid's own | nil |
+//! | the instant message a return of the agent's own object is followed by ([`RezPolicy::return_notice`]) | from `Second Life`, under the agent's own id, naming the parcel | from `Server`, under no id, naming the spot and "parcel owner return" |
+//! | a rez on land that does not let the agent build ([`RezPolicy::no_build_add`], [`RezPolicy::no_build_rez_told`]) | an alert for an `ObjectAdd` and another for a rez out of the inventory | an alert for an `ObjectAdd`; a rez out of the inventory fails without a word |
+//! | a `RezRestoreToWorld` ([`RezPolicy::restore_to_world`]) | the object back where it stood, the item kept | nothing |
+//!
 //! **The inventory rows are the divergence a viewer is most likely to trip
 //! over**, which is why they are three rows rather than one setting. An
 //! inventory implementation that still reaches for the UDP fetch, or that only
 //! listens for the legacy create, works against OpenSim and fails against the
 //! grid this workspace targets — silently, in both directions.
 //!
-//! **And the two announcement rows do not point the same way**, which is the
-//! part worth reading twice: on a take Second Life is the grid that pushes a
-//! `BulkUpdateInventory` and OpenSim the one that sends the legacy message,
-//! while after a capability upload it is Second Life that sends the legacy
-//! message and OpenSim that sends nothing at all. They are two enums because
-//! they are two measurements, taken in the [`inventory`](crate::inventory)
-//! module docs. Second Life's refusal is
+//! **And the announcement rows are two measurements**, which is why they are
+//! two enums: a take is announced with the legacy message on both grids, while
+//! after a capability upload it is Second Life that sends the legacy message
+//! and OpenSim that sends nothing at all — see the
+//! [`inventory`](crate::inventory) module docs. Second Life's refusal is
 //! the one deliberate deviation from the measurement in this table: aditi
 //! empirically *drops* the fetch without a word (2026-08-12), and
 //! [`LegacyUdpInventory::Ignored`] reproduces that, but of the two roads a grid
@@ -896,14 +904,69 @@ impl ImitatedGrid {
     /// How this grid announces an inventory item it just created — the item a
     /// take files away.
     ///
-    /// OpenSim sends the legacy UDP `UpdateCreateInventoryItem`; Second Life
-    /// delivers the new item as a `BulkUpdateInventory` over the event queue,
-    /// which is why `object-asset-format`'s take leg waits for either.
+    /// Both grids send the legacy UDP `UpdateCreateInventoryItem`, for a
+    /// take, a copy, a delete to the Trash and a return alike — measured by
+    /// the `object-rez-derez` conformance case on aditi and the local OpenSim
+    /// (2026-10-10, `book/src/gridspec/building.md` § Rez and take). Until
+    /// then this said Second Life pushed a `BulkUpdateInventory` over the
+    /// event queue, which nothing had measured. A grid that does can still be
+    /// built ([`FakeGridBuilder::inventory_announcement`](crate::FakeGridBuilder::inventory_announcement)),
+    /// and a client has to take either: the bulk form is what Second Life
+    /// announces other inventory changes with.
     #[must_use]
     pub const fn inventory_announcement(self) -> InventoryAnnouncement {
         match self {
-            Self::SecondLife => InventoryAnnouncement::BulkUpdate,
-            Self::OpenSim => InventoryAnnouncement::Legacy,
+            Self::SecondLife | Self::OpenSim => InventoryAnnouncement::Legacy,
+        }
+    }
+
+    /// How this grid takes an object out of a region and puts one back, where
+    /// the two disagree — measured by the `object-rez-derez` and
+    /// `object-rez-land` conformance cases on aditi and the local OpenSim
+    /// (2026-10-10, `book/src/gridspec/building.md`).
+    ///
+    /// They agree on the outline: every derez that files an item announces it
+    /// with the legacy `UpdateCreateInventoryItem`, whose transaction id is
+    /// never the derez's, and none sends a `DeRezAck`; a copy leaves the object
+    /// standing; a return of the agent's own object files it in its Lost And
+    /// Found; a rez sends the object in a full update and leaves a copyable
+    /// item where it was; the rezzed object's record carries the creation
+    /// date and the masks of the object the item was made from, names the
+    /// item, and names the agent as its last owner.
+    #[must_use]
+    pub const fn rez_policy(self) -> RezPolicy {
+        match self {
+            Self::SecondLife => RezPolicy {
+                object_delete: ObjectDelete::Deletes,
+                derez_kill: DerezKill::EveryPrimOnce,
+                trash_folder: TrashFolder::Named,
+                taken_item_masks: TakenItemMasks::Objects,
+                announcement_states_a_transaction: true,
+                rezzed_record_names_folder: true,
+                return_notice: ReturnNotice::SecondLife,
+                no_build_add: NoBuildAlert {
+                    text: "You cannot create objects here.  The owner of this land does not \
+                           allow it.  Use the land tool to see land ownership.",
+                    key: Some("CantCreateObjectParcelPerms"),
+                },
+                no_build_rez_told: true,
+                restore_to_world: RestoreToWorld::Rezzes,
+            },
+            Self::OpenSim => RezPolicy {
+                object_delete: ObjectDelete::Ignored,
+                derez_kill: DerezKill::RootTwice,
+                trash_folder: TrashFolder::AgentsOwn,
+                taken_item_masks: TakenItemMasks::Folded,
+                announcement_states_a_transaction: false,
+                rezzed_record_names_folder: false,
+                return_notice: ReturnNotice::Server,
+                no_build_add: NoBuildAlert {
+                    text: "You cannot create objects here.",
+                    key: None,
+                },
+                no_build_rez_told: false,
+                restore_to_world: RestoreToWorld::Ignored,
+            },
         }
     }
 
@@ -1858,6 +1921,194 @@ pub enum LinkedRecord {
     Root,
 }
 
+/// How a grid takes an object out of a region and puts one back
+/// ([`ImitatedGrid::rez_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RezPolicy {
+    /// What an `ObjectDelete` does: the reference viewer's force-delete.
+    pub object_delete: ObjectDelete,
+    /// What the session that derezzed an object is sent to say it is gone.
+    pub derez_kill: DerezKill,
+    /// Which folder a delete to the Trash files the item in.
+    pub trash_folder: TrashFolder,
+    /// The base and owner masks of the item a derez files.
+    pub taken_item_masks: TakenItemMasks,
+    /// Whether the announcement of that item states a transaction. Second
+    /// Life's states one, which is not the derez's; OpenSim's is nil.
+    pub announcement_states_a_transaction: bool,
+    /// Whether the record of an object rezzed out of an item names the folder
+    /// the item is in. Both grids name the item.
+    pub rezzed_record_names_folder: bool,
+    /// The instant message a return of the agent's own object is followed
+    /// by. Both grids send one; they word and sign it differently.
+    pub return_notice: ReturnNotice,
+    /// The alert an `ObjectAdd` on land that does not let the agent build is
+    /// answered with.
+    pub no_build_add: NoBuildAlert,
+    /// Whether a rez out of the inventory on such land is answered with an
+    /// alert naming the object, the spot and the parcel. OpenSim's fails
+    /// without a word.
+    pub no_build_rez_told: bool,
+    /// What a `RezRestoreToWorld` does: the reference viewer's Restore to
+    /// Last Position.
+    pub restore_to_world: RestoreToWorld,
+}
+
+impl Default for RezPolicy {
+    /// Second Life's, as the grid's own default flavour is.
+    fn default() -> Self {
+        ImitatedGrid::SecondLife.rez_policy()
+    }
+}
+
+impl RezPolicy {
+    /// The text of the alert a rez of the item `name` out of the inventory is
+    /// refused with at `at`, on the parcel `parcel` of the region `region` —
+    /// or [`None`] on a grid that says nothing.
+    #[must_use]
+    pub fn no_build_rez_alert(
+        &self,
+        name: &str,
+        at: &sl_proto::Vector,
+        parcel: &str,
+        region: &str,
+    ) -> Option<String> {
+        self.no_build_rez_told.then(|| {
+            format!(
+                "Can't rez object '{name}' at {{ {}, {}, {} }} on parcel '{parcel}' in region \
+                 {region} because the owner of this land does not allow it.  Use the land \
+                 tool to see land ownership.",
+                at.x, at.y, at.z
+            )
+        })
+    }
+
+    /// The text of the instant message a return of the object `name` by its
+    /// own owner is followed by, from `at` on the parcel `parcel` of the
+    /// region `region`.
+    #[must_use]
+    pub fn return_notice_text(
+        &self,
+        name: &str,
+        parcel: &str,
+        region: &str,
+        at: &sl_proto::Vector,
+    ) -> String {
+        match self.return_notice {
+            ReturnNotice::SecondLife => format!(
+                "Your object '{name}' has been returned to your inventory Lost and Found \
+                 folder by you from parcel '{parcel}' at {region} {:.0}, {:.0}.",
+                at.x, at.y
+            ),
+            ReturnNotice::Server => format!(
+                "Your object {name} was returned from <{}, {}, {}> in region {region} due to \
+                 parcel owner return",
+                at.x, at.y, at.z
+            ),
+        }
+    }
+}
+
+/// The instant message that tells an agent its object was returned
+/// ([`RezPolicy::return_notice`]). Both are of the dialog an object's
+/// message has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReturnNotice {
+    /// From `Second Life`, under the id of the agent it is sent to: "Your
+    /// object '…' has been returned to your inventory Lost and Found folder
+    /// by … from parcel '…' at …". It comes a second after the kill.
+    SecondLife,
+    /// From `Server`, under no id: "Your object … was returned from <…> in
+    /// region … due to …". OpenSim sends it with the region's next backup,
+    /// up to a third of a minute later, and one for all of an agent's
+    /// objects returned since the last; the fake grid sends one at once.
+    Server,
+}
+
+impl ReturnNotice {
+    /// The name the message says it is from.
+    #[must_use]
+    pub const fn sender(self) -> &'static str {
+        match self {
+            Self::SecondLife => "Second Life",
+            Self::Server => "Server",
+        }
+    }
+
+    /// Whether the message states a sender's id.
+    #[must_use]
+    pub const fn states_an_id(self) -> bool {
+        matches!(self, Self::SecondLife)
+    }
+}
+
+/// What an `ObjectDelete` does ([`RezPolicy::object_delete`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectDelete {
+    /// The object is gone and no inventory item is made of it: Second Life.
+    Deletes,
+    /// Nothing: OpenSim has no handler for the message.
+    Ignored,
+}
+
+/// What a `RezRestoreToWorld` does ([`RezPolicy::restore_to_world`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreToWorld {
+    /// The item is rezzed where the object it was made from stood, and
+    /// stays: Second Life.
+    Rezzes,
+    /// Nothing: OpenSim reads the message and nobody listens for it.
+    Ignored,
+}
+
+/// What the session that derezzed an object is sent to say it is gone
+/// ([`RezPolicy::derez_kill`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DerezKill {
+    /// One `KillObject` naming every prim of the linkset once: Second Life.
+    EveryPrimOnce,
+    /// Two `KillObject`s, each naming the linkset's root and no child:
+    /// OpenSim, whose `DeleteSceneObject` and `DeRezObjects` each send one.
+    RootTwice,
+}
+
+/// Which folder a delete to the Trash files the item in
+/// ([`RezPolicy::trash_folder`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrashFolder {
+    /// The folder the derez named, whatever its type: Second Life.
+    Named,
+    /// The agent's own Trash, whatever folder the derez named: OpenSim.
+    AgentsOwn,
+}
+
+/// The base and owner masks of the item a derez files
+/// ([`RezPolicy::taken_item_masks`]). The group, everyone and next-owner masks
+/// are the object's on both grids.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakenItemMasks {
+    /// The object's own: Second Life.
+    Objects,
+    /// The object's without the export bit and with the four slam bits OpenSim
+    /// folds a linkset's permissions into ([`OPENSIM_FOLDED_BITS`]): an
+    /// unedited prim's `0x0009e000` becomes `0x0008e00f`.
+    Folded,
+}
+
+/// The bits OpenSim sets on a taken item's base and owner masks: its
+/// `PermissionsUtil.FoldedMask`, shifted down.
+pub const OPENSIM_FOLDED_BITS: u32 = 0x0f;
+
+/// An alert a refused rez is answered with ([`RezPolicy::no_build_add`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoBuildAlert {
+    /// The alert's text.
+    pub text: &'static str,
+    /// The key of the `AlertInfo` block that comes with it, where there is
+    /// one.
+    pub key: Option<&'static str>,
+}
+
 /// How a grid answers a sit request ([`ImitatedGrid::sit_policy`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SitPolicy {
@@ -2053,10 +2304,7 @@ mod test {
         );
         assert_ne!(sl.voice_backend(), opensim.voice_backend());
         assert_ne!(sl.legacy_udp_inventory(), opensim.legacy_udp_inventory());
-        assert_ne!(
-            sl.inventory_announcement(),
-            opensim.inventory_announcement()
-        );
+        assert_ne!(sl.rez_policy(), opensim.rez_policy());
         assert_ne!(sl.upload_announcements(), opensim.upload_announcements());
         assert_ne!(sl.bakes(), opensim.bakes());
         assert_ne!(sl.region_protocol_bits(), opensim.region_protocol_bits());
@@ -2206,12 +2454,14 @@ mod test {
         );
     }
 
-    /// The inventory pair is the one place the flavour decides both ends of the
-    /// same divergence, and getting either backwards would let a viewer that
-    /// depends on the legacy path pass against a grid claiming to be Second
-    /// Life — the exact failure this task existed to make impossible.
+    /// Only OpenSim still serves the UDP inventory fetch, and getting that
+    /// backwards would let a viewer that depends on it pass against a grid
+    /// claiming to be Second Life. A **take** is another matter: both grids
+    /// were measured announcing its item with the legacy message
+    /// (`object-rez-derez`, 2026-10-10), where this test used to hold Second
+    /// Life to a `BulkUpdateInventory` nobody had measured.
     #[test]
-    fn only_the_open_sim_flavour_speaks_legacy_inventory() {
+    fn only_the_open_sim_flavour_serves_the_legacy_inventory_fetch() {
         assert_eq!(
             ImitatedGrid::OpenSim.legacy_udp_inventory(),
             LegacyUdpInventory::Served
@@ -2226,22 +2476,22 @@ mod test {
         );
         assert_eq!(
             ImitatedGrid::SecondLife.inventory_announcement(),
-            InventoryAnnouncement::BulkUpdate
+            InventoryAnnouncement::Legacy
         );
     }
 
-    /// A take and a *save* are announced by **opposite** rules, and each
-    /// flavour is on the other side of the two. Written as one test because
-    /// the mistake it guards against is reusing one answer for both questions:
-    /// every part of it is a measurement (`notecard-create-update`'s
-    /// `save_announcement`, `asset-upload`'s `upload_announcement`,
-    /// `object-asset-format`'s take leg), so a "tidying" that collapsed the two
-    /// enums would be wrong about a live grid in both directions at once.
+    /// A take and a *save* are announced by **different** rules: the grids
+    /// agree about the one and not about the other. Written as one test
+    /// because the mistake it guards against is reusing one answer for both
+    /// questions: every part of it is a measurement
+    /// (`notecard-create-update`'s `save_announcement`, `asset-upload`'s
+    /// `upload_announcement`, `object-rez-derez`'s take legs), so a "tidying"
+    /// that collapsed the two enums would be wrong about a live grid.
     #[test]
-    fn a_take_and_a_save_are_announced_by_opposite_rules() {
+    fn a_take_and_a_save_are_announced_by_different_rules() {
         assert_eq!(
             ImitatedGrid::SecondLife.inventory_announcement(),
-            InventoryAnnouncement::BulkUpdate
+            InventoryAnnouncement::Legacy
         );
         assert_eq!(
             ImitatedGrid::SecondLife.upload_announcements().saved,

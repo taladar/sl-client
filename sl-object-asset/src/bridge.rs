@@ -33,7 +33,7 @@ use uuid::Uuid;
 
 use crate::model::{
     LegacyFace, LegacyPathParams, LegacyPermissions, LegacyProfileParams, LegacySaleType,
-    LegacyShape, PrimBlock, PrimPlacement, PrimSound, ZERO_VECTOR,
+    LegacyShape, PrimBlock, PrimBookkeeping, PrimPlacement, PrimSound, ZERO_VECTOR,
 };
 
 /// Where a prim decoded from an asset is being rezzed: the ids only the region
@@ -107,6 +107,15 @@ impl PrimBlock {
                 .collect(),
             name_values: object.name_value.lines().map(str::to_owned).collect(),
             sale_info: sale_info_of(object),
+            // An object's creation date and the asset's `birthtime` are the
+            // same stamp: both are in microseconds, on both grids.
+            bookkeeping: PrimBookkeeping {
+                birth_time: object
+                    .properties
+                    .as_ref()
+                    .map_or(0, |properties| properties.creation_date),
+                ..PrimBookkeeping::default()
+            },
             ..Self::default()
         }
     }
@@ -222,10 +231,11 @@ impl PrimBlock {
             group: (!self.permissions.group_id.is_nil())
                 .then(|| GroupKey::from(self.permissions.group_id)),
             last_owner_id: self.permissions.last_owner_id,
-            // Not in the asset: `birthtime` is the simulator's own bookkeeping
-            // stamp in microseconds, not the item's creation date in seconds,
-            // and reading one as the other would be a date a century out.
-            creation_date: 0,
+            // The asset's `birthtime`, which like the record's date is in
+            // microseconds: an object rezzed out of an item was measured
+            // keeping the date of the object the item was made from, on both
+            // grids (`object-rez-derez`, 2026-10-10).
+            creation_date: self.bookkeeping.birth_time,
             permissions: Permissions5 {
                 base: Permissions::from_bits(self.permissions.base_mask),
                 owner: Permissions::from_bits(self.permissions.owner_mask),

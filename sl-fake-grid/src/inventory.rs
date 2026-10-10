@@ -1,43 +1,55 @@
 //! How this grid does inventory: whether the deprecated UDP fetch still works,
 //! and how a newly created item is announced.
 //!
-//! The two are one subject because they are the same divergence seen from
-//! either end. OpenSim's inventory is still the UDP one — a viewer may fetch a
-//! folder with `FetchInventoryDescendents` and is told about a new item with
-//! `UpdateCreateInventoryItem`. Second Life moved inventory to AIS3: the UDP
-//! fetch is gone, and the new item arrives as a `BulkUpdateInventory` over the
-//! event queue. A viewer that quietly depends on either legacy half works
-//! against one live grid and not the other, which is exactly what this grid
-//! exists to make visible, so both follow
+//! OpenSim's inventory is still the UDP one — a viewer may fetch a folder
+//! with `FetchInventoryDescendents`. Second Life moved inventory to AIS3 and
+//! the UDP fetch is gone. A viewer that quietly depends on the legacy fetch
+//! works against one live grid and not the other, which is exactly what this
+//! grid exists to make visible, so it follows
 //! [`ImitatedGrid`](crate::ImitatedGrid).
 //!
-//! # The announcement's *order* changes with it too
+//! # A take is announced the legacy way on both
+//!
+//! The item a **derez** files — a take, a copy, a delete to the Trash, a
+//! return — is announced with the legacy UDP `UpdateCreateInventoryItem` on
+//! Second Life and on OpenSim alike: measured by the `object-rez-derez`
+//! conformance case (aditi and the local OpenSim, 2026-10-10,
+//! `book/src/gridspec/building.md` § Rez and take). This module used to say
+//! Second Life's take arrived as a `BulkUpdateInventory` over the event queue
+//! "now that inventory lives behind AIS3". That was reasoning, not a
+//! measurement, and it was wrong about the take.
+//!
+//! [`InventoryAnnouncement::BulkUpdate`] stays, as something a test can ask a
+//! grid for: the bulk form is real — it is how Second Life announces other
+//! inventory changes — and a client that only listens for the legacy message
+//! has to be shown not to depend on it.
+//!
+//! # The announcement's *order* differs between the two forms
 //!
 //! Worth stating because it caught a test that had assumed otherwise. A take
 //! sends the filed item and the world's `KillObject`s in the same breath, but
-//! the two travel differently: the kills go out over UDP straight away, while a
-//! Second-Life-flavoured announcement rides the event queue and reaches the
-//! client on its next long-poll. So on that flavour **the item arrives after
-//! the kills**, and a consumer that waits for the item before looking for the
-//! kills has already discarded them.
+//! a bulk update travels differently: the kills go out over UDP straight away,
+//! while the event queue's message reaches the client on its next long-poll.
+//! So on a grid built to announce in bulk **the item arrives after the
+//! kills**, and a consumer that waits for the item before looking for the
+//! kills has already discarded them. On aditi the legacy message came some
+//! 40 ms *ahead* of the kill; on OpenSim the two came in the same instant.
 //!
 //! # An upload is announced by a different rule ([`UploadAnnouncements`])
 //!
 //! [`InventoryAnnouncement`] is what a **take** reads, and it would be a
 //! reasonable guess that an upload reads it too. It does not, and the two grids
-//! are the reason: measured (2026-09-08) they take *opposite* sides here from
-//! the ones they take on a take — and they only disagree about one of the two
-//! upload paths.
+//! are the reason: measured (2026-09-08) they agree about a take and
+//! disagree here — about one of the two upload paths.
 //!
 //! | after a CAPS upload completes | Second Life | OpenSim |
 //! | --- | --- | --- |
 //! | in-place asset save (`Update*AgentInventory`) | the legacy UDP `UpdateCreateInventoryItem` | nothing at all |
 //! | a `NewFileAgentInventory` completion | nothing at all | nothing at all |
 //!
-//! So on a take Second Life is the grid that pushes a `BulkUpdateInventory` and
-//! OpenSim the one that sends the legacy message, while after a save it is
-//! Second Life that sends the legacy message and OpenSim that sends nothing.
-//! One enum could not have described both, which is why the uploads have
+//! So a take is announced with the legacy message on both, while after a save
+//! it is Second Life that sends the legacy message and OpenSim that sends
+//! nothing. One enum could not have described both, which is why the uploads have
 //! [`UploadAnnouncement`] of their own — and one *value* could not describe
 //! both rows of the table above, which is why a grid carries an
 //! [`UploadAnnouncements`] pair rather than a single answer.
@@ -71,11 +83,10 @@
 //! what repoints it. Read that way the two rows stop being a contradiction: the
 //! push survives exactly where it still carries information.
 //!
-//! # The take and the save diverge for opposite reasons
+//! # The save diverges because OpenSim never sent the push
 //!
-//! Reading the two disagreements as "the grids simply disagree twice" would get
-//! the save backwards. **The push is the older behaviour and OpenSim is the
-//! grid that omits it** — it is not something Second Life added.
+//! **The push is the older behaviour and OpenSim is the grid that omits it** —
+//! it is not something Second Life added.
 //!
 //! OpenSim's own source says so. At the in-place save,
 //! `InventoryAccessModule.CapsUpdateInventoryItemAsset` ends on a
@@ -89,12 +100,11 @@
 //! beside the one that does announce. Both sites had the announcing call
 //! available and neither uses it.
 //!
-//! So the take is Second Life having **moved on** — inventory went behind AIS3
-//! and the take's announcement went with it — and the save is OpenSim having
-//! **never sent** what a Linden simulator sends. That is also why the save's
-//! Second Life side is the legacy message rather than a modern one: it is the
-//! same `UpdateCreateInventoryItem` that has always announced a created or
-//! rewritten item.
+//! So the save is OpenSim having **never sent** what a Linden simulator sends.
+//! That is also why the save's Second Life side is the legacy message rather
+//! than a modern one: it is the same `UpdateCreateInventoryItem` that has
+//! always announced a created or rewritten item — and still announces a taken
+//! one.
 //!
 //! Which means the two grids' agreement on the creation path is a **coincidence
 //! of two different omissions**, not a shared rule: OpenSim is quiet there
@@ -162,14 +172,17 @@ pub enum LegacyUdpInventory {
 pub enum InventoryAnnouncement {
     /// The legacy UDP `UpdateCreateInventoryItem`
     /// ([`SimSession::send_inventory_item_created`](sl_proto::SimSession::send_inventory_item_created)),
-    /// which is what OpenSim sends.
+    /// which is what both live grids send for a derez.
+    ///
+    /// The default, as it is both flavours'.
+    #[default]
     Legacy,
     /// A `BulkUpdateInventory` over the CAPS event queue
-    /// ([`SimSession::enqueue_bulk_update_inventory`](sl_proto::SimSession::enqueue_bulk_update_inventory)),
-    /// which is what Second Life sends now that inventory lives behind AIS3.
+    /// ([`SimSession::enqueue_bulk_update_inventory`](sl_proto::SimSession::enqueue_bulk_update_inventory)).
     ///
-    /// The default, because the default flavour is Second Life.
-    #[default]
+    /// Neither flavour's answer to a derez: a grid is built with it
+    /// ([`FakeGridBuilder::inventory_announcement`](crate::FakeGridBuilder::inventory_announcement))
+    /// to show that a client takes the bulk form too.
     BulkUpdate,
 }
 

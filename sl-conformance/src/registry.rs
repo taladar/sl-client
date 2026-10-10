@@ -39,6 +39,13 @@ pub trait GridTest: Send + Sync {
         1
     }
 
+    /// How many avatars the test needs on `grid`: [`accounts`](Self::accounts)
+    /// unless a grid gives a second avatar nothing to do — a case whose
+    /// second avatar owns the land, on a grid where we hold none.
+    fn accounts_on(&self, _grid: Grid) -> u8 {
+        self.accounts()
+    }
+
     /// Whether the primary session should run with the inventory disk cache
     /// enabled (default `false`). The runner then supplies a cleared per-case
     /// cache directory so the case starts cold and can observe the cache being
@@ -163,6 +170,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::object_properties::ObjectProperties),
         Box::new(crate::cases::object_select_scene::ObjectSelectScene),
         Box::new(crate::cases::object_rez_derez::ObjectRezDerez),
+        Box::new(crate::cases::object_rez_land::ObjectRezLand),
         Box::new(crate::cases::object_asset_format::ObjectAssetFormat),
         Box::new(crate::cases::object_touch_grab::ObjectTouchGrab),
         Box::new(crate::cases::object_link_delink::ObjectLinkDelink),

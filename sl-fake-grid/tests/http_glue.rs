@@ -338,7 +338,7 @@ mod test {
         let LoginResponse::Success(success) = parse_login_response(&text)? else {
             return Err("expected a successful login".into());
         };
-        let notice = logins.recv().await?;
+        let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
         let agent = grid.agent(&notice).await.ok_or("no live session")?;
 
         let http = reqwest::Client::new();

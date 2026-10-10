@@ -82,6 +82,7 @@ pub mod object_handshake_flags;
 pub mod object_link_delink;
 pub mod object_properties;
 pub mod object_rez_derez;
+pub mod object_rez_land;
 pub mod object_select_scene;
 pub mod object_touch_grab;
 pub mod object_update_decode;

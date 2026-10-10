@@ -229,10 +229,11 @@ that — but silence is indistinguishable from a lost packet, so it is not the
 default a test would have to wait out.
 
 **The take's announcement.** A take is answered with the legacy UDP
-`UpdateCreateInventoryItem` on OpenSim and with a `BulkUpdateInventory` over
-the event queue on Second Life. `InventoryAnnouncement` picks between them
-(`FakeGridBuilder::inventory_announcement` overrides). A client listening for
-only one of the two hears nothing at all from the other grid, which is why the
+`UpdateCreateInventoryItem` on both grids (measured 2026-10-10; the
+`BulkUpdateInventory` this used to claim for Second Life was never measured).
+`FakeGridBuilder::inventory_announcement` still builds a grid that announces
+over the event queue. A client listening for only one of the two hears nothing
+at all from a grid that uses the other, which is why the
 conformance cases that take something use one shared helper that accepts
 either and records which arrived.
 

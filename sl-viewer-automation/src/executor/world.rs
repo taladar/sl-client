@@ -410,6 +410,7 @@ impl GroundAct {
             GroundStage::Aim(aim) => match aim.poll(world) {
                 Ok(GroundProgress::Ready(target)) => match enqueue(world, target.input()) {
                     Ok(id) => {
+                        debug!("ground gesture: {target:?}");
                         self.stage = GroundStage::Play(id, Box::new(target));
                         Step::Pending
                     }

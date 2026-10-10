@@ -31,6 +31,13 @@ mod test {
     /// How long any single wait in these tests may take.
     const WAIT: Duration = Duration::from_secs(20);
 
+    /// When a wait for one thing among other events gives up: three `WAIT`s
+    /// from now, however many of those others arrive meanwhile.
+    fn whole_wait() -> tokio::time::Instant {
+        let now = tokio::time::Instant::now();
+        now.checked_add(WAIT.saturating_mul(3)).unwrap_or(now)
+    }
+
     /// How far ahead of the system clock the injected one runs. Large enough
     /// that no stamp drawn from it can be mistaken for an `Instant::now()`,
     /// and far enough out that the session machines' own deadlines simply
@@ -118,8 +125,11 @@ mod test {
         let (diag_tx, _diag_rx) = mpsc::channel(16);
         let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
+        // One deadline for the whole wait: a timeout on each event is
+        // never reached on a stream that keeps sending something else.
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             if matches!(
@@ -140,8 +150,9 @@ mod test {
                 channel: ChatChannel(0),
             })
             .await?;
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
+            let event = tokio::time::timeout_at(deadline, server_events.recv()).await??;
             if let ServerEvent::Chat { message, .. } = &event
                 && message == "what time is it"
             {

@@ -22,12 +22,13 @@ use crate::estate::EstateFixture;
 use crate::fixtures::{NpcAppearance, NpcFixture};
 use crate::terrain::TerrainFixture;
 use sl_proto::{
-    AnimationKey, AssetKey, AssetSource as _, AssetType, GlobalCoordinates, InventoryItem,
-    InventoryType, LandStatReportType, LandStatScore, Object, ObjectExtraParams, ObjectMotion,
-    ObjectPlayingAnimation, ObjectProperties, ParcelAccessEntry, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShape, PrimShapeParams,
-    RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionTerrainComposition, SaleType,
-    ServerEvent, SimSession, TaskInventoryItem, TerrainLayerType, TransactionId, pcode, prim_flags,
+    AnimationKey, AssetKey, AssetSource as _, AssetType, DeRezDestination, FolderType,
+    GlobalCoordinates, InventoryItem, InventoryType, LandStatReportType, LandStatScore, Object,
+    ObjectExtraParams, ObjectMotion, ObjectPlayingAnimation, ObjectProperties, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelInfo, ParcelRequestResult,
+    ParcelStatus, PrimShape, PrimShapeParams, RegionIdentity, RegionLocalObjectId,
+    RegionLocalParcelId, RegionTerrainComposition, SaleType, ServerEvent, SimSession,
+    TaskInventoryItem, TerrainLayerType, TransactionId, pcode, prim_flags,
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 use sl_types::lsl::{Rotation, Vector};
@@ -167,6 +168,10 @@ pub struct SceneFixtures {
     /// record ([`ImitatedGrid::properties_policy`](crate::ImitatedGrid::properties_policy)),
     /// set when the grid starts; Second Life's in a world no grid has adopted.
     pub(crate) properties: crate::imitates::PropertiesPolicy,
+    /// How the region takes an object out and puts one back
+    /// ([`ImitatedGrid::rez_policy`](crate::ImitatedGrid::rez_policy)), set
+    /// when the grid starts; Second Life's in a world no grid has adopted.
+    pub(crate) rez: crate::imitates::RezPolicy,
     /// The region's terrain textures and blend heights as an estate manager has
     /// changed them, or [`None`] while they are still the identity's.
     ///
@@ -382,22 +387,6 @@ const FIXTURE_CREATION_DATE: i32 = 1_700_000_000;
 /// in them.
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 
-/// Permissions with everything granted on every mask: what an inventory item
-/// the grid files away (a take) carries.
-///
-/// The fake grid enforces no permissions on an edit or a take — nothing is for
-/// sale, and the grid refuses no write — so an item mask that withheld anything
-/// would be a rule with no rule behind it. What a viewer is *told* it may do
-/// with an in-world object is another matter: that follows the object's own
-/// masks ([`as_seen_by`]).
-const FULL_PERMISSIONS: sl_wire::Permissions5 = sl_wire::Permissions5 {
-    base: sl_wire::Permissions::ALL,
-    owner: sl_wire::Permissions::ALL,
-    group: sl_wire::Permissions::ALL,
-    everyone: sl_wire::Permissions::ALL,
-    next_owner: sl_wire::Permissions::ALL,
-};
-
 /// The permissions of a prim nobody has changed the permissions of: OpenSim's
 /// `SceneObjectPart` defaults. The owner may do anything, the group and
 /// everyone else nothing, and a next owner may move and transfer it.
@@ -587,6 +576,7 @@ impl SceneFixtures {
             limits: None,
             capacity: None,
             properties: crate::imitates::PropertiesPolicy::default(),
+            rez: crate::imitates::RezPolicy::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
         }
@@ -864,6 +854,22 @@ impl SceneFixtures {
     pub fn parcel_at_position(&self, position: &Vector) -> Option<RegionLocalParcelId> {
         self.parcel_at(position.x, position.y)
             .map(|parcel| parcel.local_id)
+    }
+
+    /// The parcel that does not let `agent` rez at `position`, if one covers
+    /// it: one without "everyone may build" that the agent does not own.
+    ///
+    /// Group building is not modelled — the fake grid has no group roles to
+    /// ask — and neither is an estate manager's or a god's right to build
+    /// anywhere.
+    #[must_use]
+    pub fn refuses_rez(&self, agent: AgentKey, position: &Vector) -> Option<&ParcelInfo> {
+        self.parcel_at(position.x, position.y).filter(|parcel| {
+            !parcel
+                .flags()
+                .contains(sl_wire::ParcelFlags::CREATE_OBJECTS)
+                && parcel.owner != OwnerKey::Agent(agent)
+        })
     }
 
     /// One of a parcel's two access lists, as it stands.
@@ -1978,6 +1984,24 @@ pub(crate) fn answer_world_request(
         // region-local handle and the full key -- so the client cannot know
         // what it rezzed until the update comes back.
         ServerEvent::RezObject { params } => {
+            if world
+                .refuses_rez(identity.agent_id, &params.shape.position)
+                .is_some()
+            {
+                let alert = world.rez.no_build_add;
+                let info: Vec<sl_proto::AlertInfo> = alert
+                    .key
+                    .map(|key| sl_proto::AlertInfo {
+                        message: key.to_owned(),
+                        extra_params: String::new(),
+                    })
+                    .into_iter()
+                    .collect();
+                if let Err(error) = sim.send_alert_message(alert.text, &info, &[], now) {
+                    tracing::warn!("refusing a rez on no-build land failed: {error}");
+                }
+                return Vec::new();
+            }
             let local_id = world.mint_local_id();
             let object = prim_from_shape(
                 local_id,
@@ -1995,7 +2019,40 @@ pub(crate) fn answer_world_request(
         // take: the item names an asset, the asset holds the prims, and the
         // region mints every id they come back under.
         ServerEvent::RezObjectFromInventory { params } => {
-            return rez_from_inventory(world, assets, mint, sim, params, now);
+            return rez_from_inventory(
+                world,
+                assets,
+                (identity, region),
+                mint,
+                sim,
+                RezRequest {
+                    item_id: params.item.item_id,
+                    from_task_id: params.from_task_id,
+                    at: Some(&params.ray_end),
+                },
+                now,
+            );
+        }
+        // Restore to Last Position: the same rez, at the spot the object was
+        // taken from rather than one the resident aims at. OpenSim has no
+        // listener for it.
+        ServerEvent::RezRestoreToWorld { item } => {
+            if world.rez.restore_to_world == crate::imitates::RestoreToWorld::Ignored {
+                return Vec::new();
+            }
+            return rez_from_inventory(
+                world,
+                assets,
+                (identity, region),
+                mint,
+                sim,
+                RezRequest {
+                    item_id: item.item_id,
+                    from_task_id: None,
+                    at: None,
+                },
+                now,
+            );
         }
         // Local chat: said where the avatar stands, under its name.
         ServerEvent::Chat {
@@ -2035,9 +2092,17 @@ pub(crate) fn answer_world_request(
             transaction_id,
             ..
         } => {
+            let policy = world.rez;
+            let returned = matches!(
+                destination,
+                DeRezDestination::ReturnToOwner | DeRezDestination::ReturnToLastOwner
+            );
             let mut created = Vec::new();
             let mut changes = Vec::new();
+            // What the kill names: every prim that went, or its linkset's root
+            // alone, as the grid being imitated does.
             let mut killed = Vec::new();
+            let mut notices = Vec::new();
             let mut handled: BTreeSet<RegionLocalObjectId> = BTreeSet::new();
             for local_id in local_ids {
                 if !handled.insert(*local_id) {
@@ -2065,7 +2130,36 @@ pub(crate) fn answer_world_request(
                         .cloned(),
                 );
                 handled.extend(linkset.iter().map(|member| member.local_id));
-                if let Some(folder) = destination.agent_folder() {
+                // Each prim with its record as the region holds it, so that
+                // the item and the body state the name, the masks and the
+                // creation date of the object they were made from — also of
+                // a prim nobody has edited, which stores none.
+                for member in &mut linkset {
+                    if let Some(record) = world.properties_of(member.local_id) {
+                        member.properties = Some(record);
+                    }
+                }
+                // Where the item goes. A delete names its folder and OpenSim
+                // files it in the agent's own Trash whatever that was; a return
+                // names none, and the owner's Lost And Found is where both
+                // grids put it. Only an agent's own object is returned to an
+                // inventory this session holds.
+                let own = linkset
+                    .first()
+                    .is_some_and(|root| root.owner_id == identity.agent_id.uuid());
+                let folder = match destination {
+                    DeRezDestination::Trash(named) => Some(match policy.trash_folder {
+                        crate::imitates::TrashFolder::Named => *named,
+                        crate::imitates::TrashFolder::AgentsOwn => {
+                            folder_of_type(sim, FolderType::Trash).unwrap_or(*named)
+                        }
+                    }),
+                    _returned if returned => own
+                        .then(|| folder_of_type(sim, FolderType::LostAndFound))
+                        .flatten(),
+                    other => other.agent_folder(),
+                };
+                if let Some(folder) = folder {
                     // What each prim contains, gathered while the region still
                     // has it: an object update carries no contents, so a body
                     // that stated none would lose a scripted prim's scripts.
@@ -2079,19 +2173,35 @@ pub(crate) fn answer_world_request(
                                 .unwrap_or_default()
                         })
                         .collect();
-                    let item = taken_item(&linkset, folder, identity.agent_id, mint, object_assets);
+                    let item = taken_item(
+                        &linkset,
+                        folder,
+                        identity.agent_id,
+                        mint,
+                        (object_assets, policy.taken_item_masks),
+                    );
                     store_taken_asset(assets, &item, &linkset, &contents);
+                    if returned && let Some(root) = linkset.first() {
+                        notices.push(return_notice(world, region, root, &item.name));
+                    }
                     created.push(item);
                 }
                 if destination.removes_from_world() {
-                    for member in &linkset {
+                    for (index, member) in linkset.iter().enumerate() {
                         let _removed = world.remove_object(member.local_id);
-                        killed.push(member.local_id);
+                        if index == 0
+                            || policy.derez_kill == crate::imitates::DerezKill::EveryPrimOnce
+                        {
+                            killed.push(member.local_id);
+                        }
                         changes.push(RegionChange::Killed(member.local_id));
                     }
                 }
             }
-            if created.is_empty() {
+            // A return is never acknowledged, whether or not it filed anything
+            // this session can see.
+            if created.is_empty() && returned {
+            } else if created.is_empty() {
                 // Nothing was filed, so there is no created-item announcement
                 // to correlate the client's transaction with -- which is
                 // exactly what a `DeRezAck` is for.
@@ -2099,15 +2209,60 @@ pub(crate) fn answer_world_request(
                     tracing::warn!("acknowledging a derez failed: {error}");
                 }
             } else {
-                announce_created_items(announcement, sim, &created, *transaction_id, now);
+                // Never under the derez's own transaction: Second Life states
+                // one of its own, OpenSim none.
+                let stated = if policy.announcement_states_a_transaction {
+                    mint()
+                } else {
+                    uuid::Uuid::nil()
+                };
+                announce_created_items(
+                    announcement,
+                    sim,
+                    &created,
+                    TransactionId::from(stated),
+                    now,
+                );
             }
             for item in created {
                 sim.agent_inventory_mut().insert_item(item);
             }
-            if !killed.is_empty()
-                && let Err(error) = sim.send_kill_object(&killed, now)
-            {
-                tracing::warn!("killing a derezzed object failed: {error}");
+            let kill_messages = match policy.derez_kill {
+                crate::imitates::DerezKill::EveryPrimOnce => 1,
+                crate::imitates::DerezKill::RootTwice => 2,
+            };
+            if !killed.is_empty() {
+                for _message in 0..kill_messages {
+                    if let Err(error) = sim.send_kill_object(&killed, now) {
+                        tracing::warn!("killing a derezzed object failed: {error}");
+                    }
+                }
+            }
+            for text in notices {
+                let from = policy.return_notice;
+                let notice = sl_proto::InstantMessage {
+                    // Second Life signs it with the id of the agent it tells.
+                    from_agent_id: if from.states_an_id() {
+                        identity.agent_id
+                    } else {
+                        AgentKey::from(uuid::Uuid::nil())
+                    },
+                    from_agent_name: from.sender().to_owned(),
+                    to_agent_id: identity.agent_id,
+                    dialog: sl_proto::ImDialog::FromTask,
+                    from_group: false,
+                    region_id: None,
+                    position: sl_types::map::RegionCoordinates::new(0.0, 0.0, 0.0),
+                    offline: false,
+                    timestamp: None,
+                    id: uuid::Uuid::nil(),
+                    parent_estate_id: ESTATE_ID,
+                    message: text,
+                    binary_bucket: Vec::new(),
+                };
+                if let Err(error) = sim.send_instant_message(&notice, now) {
+                    tracing::warn!("telling of a returned object failed: {error}");
+                }
             }
             return changes;
         }
@@ -2600,6 +2755,19 @@ pub fn send_objects(
     sim.send_object_update(&seen, REAL_TIME_DILATION, now)
 }
 
+/// What a rez out of the inventory asks for.
+#[derive(Debug, Clone, Copy)]
+struct RezRequest<'a> {
+    /// The item to rez.
+    item_id: InventoryKey,
+    /// The prim whose contents the item is said to be in, when it is not the
+    /// agent's own inventory.
+    from_task_id: Option<ObjectKey>,
+    /// Where the root is to stand, or [`None`] for where the object was taken
+    /// from — a Restore to Last Position.
+    at: Option<&'a Vector>,
+}
+
 /// Rezzes an inventory item back into the world: the other half of a take.
 ///
 /// The item is resolved **by id alone**, out of the agent's own inventory. The
@@ -2638,13 +2806,14 @@ pub fn send_objects(
 fn rez_from_inventory(
     world: &mut SceneFixtures,
     assets: &crate::assets::GridAssets,
+    (identity, region): (&AvatarIdentity, &RegionIdentity),
     mint: &dyn Fn() -> uuid::Uuid,
     sim: &mut SimSession,
-    params: &sl_proto::RezObjectParams,
+    request: RezRequest<'_>,
     now: Instant,
 ) -> Vec<RegionChange> {
-    let item_id = params.item.item_id;
-    if let Some(task) = params.from_task_id {
+    let item_id = request.item_id;
+    if let Some(task) = request.from_task_id {
         tracing::debug!(
             "a rez named item {item_id} in the contents of {task}; \
              the fake grid rezzes from the agent's own inventory only"
@@ -2655,6 +2824,24 @@ fn rez_from_inventory(
         tracing::debug!("a rez named item {item_id}, which this agent does not hold");
         return Vec::new();
     };
+    // Land that does not let the agent build keeps the object out and the
+    // item where it was. Second Life says so; OpenSim says nothing.
+    if let Some(at) = request.at
+        && let Some(parcel) = world.refuses_rez(identity.agent_id, at)
+    {
+        let region_name = region
+            .sim_name
+            .as_ref()
+            .map_or_else(String::new, ToString::to_string);
+        if let Some(text) = world
+            .rez
+            .no_build_rez_alert(&item.name, at, &parcel.name, &region_name)
+            && let Err(error) = sim.send_alert_message(&text, &[], &[], now)
+        {
+            tracing::warn!("refusing a rez on no-build land failed: {error}");
+        }
+        return Vec::new();
+    }
     // A linkset this grid took is put back as it was taken. Anything else --
     // a fixture's seeded object item, which no take ever made -- is read out of
     // the published body, which is all there is for it. `store_taken_asset` and
@@ -2669,21 +2856,14 @@ fn rez_from_inventory(
             mint,
             &linkset,
             &item,
-            &params.ray_end,
+            request.at,
         ),
         None => {
             let Some(bytes) = taken_object_body(assets, &item) else {
                 tracing::debug!("a rez named item {item_id}, whose object body nothing holds");
                 return Vec::new();
             };
-            match rez_asset_body(
-                world,
-                sim.region_handle(),
-                mint,
-                &bytes,
-                &item,
-                &params.ray_end,
-            ) {
+            match rez_asset_body(world, sim.region_handle(), mint, &bytes, &item, request.at) {
                 Some(rezzed) => rezzed,
                 None => return Vec::new(),
             }
@@ -2726,7 +2906,7 @@ fn rez_taken_linkset(
     mint: &dyn Fn() -> uuid::Uuid,
     linkset: &[Object],
     item: &InventoryItem,
-    at: &Vector,
+    at: Option<&Vector>,
 ) -> Vec<Object> {
     let Some((root_object, children)) = linkset.split_first() else {
         return Vec::new();
@@ -2738,11 +2918,15 @@ fn rez_taken_linkset(
     root.local_id = root_local_id;
     root.parent_id = RegionLocalObjectId(0);
     root.full_id = ObjectKey::from(mint());
-    root.motion.position = at.clone();
+    // A restore names no spot: the root stands where it was taken from.
+    if let Some(at) = at {
+        root.motion.position = at.clone();
+    }
     root.properties = Some(rezzed_properties(
         &filed_prim(root_object, item, true),
         root.full_id,
         item,
+        world.rez.rezzed_record_names_folder,
     ));
     rezzed.push(root);
     for child_object in children {
@@ -2755,6 +2939,7 @@ fn rez_taken_linkset(
             &filed_prim(child_object, item, false),
             child.full_id,
             item,
+            world.rez.rezzed_record_names_folder,
         ));
         rezzed.push(child);
     }
@@ -2779,7 +2964,7 @@ fn rez_asset_body(
     mint: &dyn Fn() -> uuid::Uuid,
     bytes: &[u8],
     item: &InventoryItem,
-    at: &Vector,
+    at: Option<&Vector>,
 ) -> Option<Vec<Object>> {
     let mut rezzed = if is_scene_object_xml(bytes) {
         rez_scene_object_xml(world, region_handle, mint, bytes, item)?
@@ -2788,7 +2973,9 @@ fn rez_asset_body(
     };
     // Only the root moves to where the resident aimed; a child's position is
     // its offset from the root, and moving it would take the linkset apart.
-    rezzed.first_mut()?.motion.position = at.clone();
+    if let Some(at) = at {
+        rezzed.first_mut()?.motion.position = at.clone();
+    }
     Some(rezzed)
 }
 
@@ -2836,7 +3023,12 @@ fn rez_object_text(
         full_id: mint(),
         parent_id: RegionLocalObjectId(0),
     });
-    root.properties = Some(rezzed_properties(root_prim, root.full_id, item));
+    root.properties = Some(rezzed_properties(
+        root_prim,
+        root.full_id,
+        item,
+        world.rez.rezzed_record_names_folder,
+    ));
     let mut rezzed = vec![root];
     for child_prim in asset.children() {
         let mut child = child_prim.to_object(sl_object_asset::RezTarget {
@@ -2845,7 +3037,12 @@ fn rez_object_text(
             full_id: mint(),
             parent_id: root_local_id,
         });
-        child.properties = Some(rezzed_properties(child_prim, child.full_id, item));
+        child.properties = Some(rezzed_properties(
+            child_prim,
+            child.full_id,
+            item,
+            world.rez.rezzed_record_names_folder,
+        ));
         rezzed.push(child);
     }
     Some(rezzed)
@@ -2879,7 +3076,11 @@ fn rez_scene_object_xml(
         full_id: mint(),
         parent_id: RegionLocalObjectId(0),
     });
-    root.properties = Some(stamp_rezzed(group.root.to_properties(root.full_id), item));
+    root.properties = Some(stamp_rezzed(
+        group.root.to_properties(root.full_id),
+        item,
+        world.rez.rezzed_record_names_folder,
+    ));
     let mut rezzed = vec![root];
     for child_part in &group.other_parts {
         let mut child = child_part.to_object(sl_object_asset::RezTarget {
@@ -2888,7 +3089,11 @@ fn rez_scene_object_xml(
             full_id: mint(),
             parent_id: root_local_id,
         });
-        child.properties = Some(stamp_rezzed(child_part.to_properties(child.full_id), item));
+        child.properties = Some(stamp_rezzed(
+            child_part.to_properties(child.full_id),
+            item,
+            world.rez.rezzed_record_names_folder,
+        ));
         rezzed.push(child);
     }
     Some(rezzed)
@@ -2924,21 +3129,63 @@ fn rezzed_properties(
     prim: &sl_object_asset::PrimBlock,
     object_id: ObjectKey,
     item: &InventoryItem,
+    names_folder: bool,
 ) -> ObjectProperties {
-    stamp_rezzed(prim.to_properties(object_id), item)
+    stamp_rezzed(prim.to_properties(object_id), item, names_folder)
 }
 
-/// The three things the *region* knows about a just-rezzed prim and the body
-/// cannot: who holds it now, and which item and folder it came out of.
+/// The things the *region* knows about a just-rezzed prim and the body
+/// cannot: who holds it now and held it last, and which item it came out of.
+///
+/// Both live grids name the item and name the rezzing agent as the last
+/// owner; only Second Life names the item's folder too
+/// ([`RezPolicy::rezzed_record_names_folder`](crate::imitates::RezPolicy::rezzed_record_names_folder)).
 ///
 /// Both body formats go through this, so a prim rezzed from OpenSim's XML and
 /// one rezzed from the Linden text cannot end up disagreeing about whose object
 /// it is or where a viewer's "find in inventory" should lead.
-const fn stamp_rezzed(mut properties: ObjectProperties, item: &InventoryItem) -> ObjectProperties {
+fn stamp_rezzed(
+    mut properties: ObjectProperties,
+    item: &InventoryItem,
+    names_folder: bool,
+) -> ObjectProperties {
     properties.owner = item.owner;
+    properties.last_owner_id = item.owner.uuid();
     properties.item_id = item.item_id;
-    properties.folder_id = Some(item.folder_id);
+    properties.folder_id = names_folder.then_some(item.folder_id);
     properties
+}
+
+/// The agent inventory folder of the well-known type `folder_type`, if the
+/// session's inventory has one.
+fn folder_of_type(sim: &SimSession, folder_type: FolderType) -> Option<InventoryFolderKey> {
+    let code = folder_type.to_code();
+    sim.agent_inventory()
+        .folders()
+        .find(|folder| folder.folder_type == code)
+        .map(|folder| folder.folder_id)
+}
+
+/// What an agent is told when it returns its own object `root`, filed under
+/// the name `name`
+/// ([`RezPolicy::return_notice`](crate::imitates::RezPolicy::return_notice)).
+fn return_notice(
+    world: &SceneFixtures,
+    region: &RegionIdentity,
+    root: &Object,
+    name: &str,
+) -> String {
+    let position = &root.motion.position;
+    let parcel = world
+        .parcel_at(position.x, position.y)
+        .map_or("", |parcel| parcel.name.as_str());
+    let region_name = region
+        .sim_name
+        .as_ref()
+        .map_or_else(String::new, ToString::to_string);
+    world
+        .rez
+        .return_notice_text(name, parcel, &region_name, position)
 }
 
 /// The object asset a **take** authors, filed where the item says it lives.
@@ -3134,9 +3381,26 @@ fn taken_item(
     folder: InventoryFolderKey,
     owner: AgentKey,
     mint: &dyn Fn() -> uuid::Uuid,
-    object_assets: crate::assets::ObjectAssetPolicy,
+    (object_assets, masks): (
+        crate::assets::ObjectAssetPolicy,
+        crate::imitates::TakenItemMasks,
+    ),
 ) -> InventoryItem {
     let properties = linkset.first().and_then(|root| root.properties.as_ref());
+    // The object's own masks, which OpenSim folds: no export bit on the base
+    // and owner masks, and the four slam bits set.
+    let mut permissions =
+        properties.map_or(NEW_OBJECT_PERMISSIONS, |properties| properties.permissions);
+    if masks == crate::imitates::TakenItemMasks::Folded {
+        let fold = |mask: sl_wire::Permissions| {
+            sl_wire::Permissions::from_bits(
+                mask.difference(sl_wire::Permissions::EXPORT).bits()
+                    | crate::imitates::OPENSIM_FOLDED_BITS,
+            )
+        };
+        permissions.base = fold(permissions.base);
+        permissions.owner = fold(permissions.owner);
+    }
     let named = properties.map_or(DEFAULT_OBJECT_NAME, |properties| properties.name.as_str());
     InventoryItem {
         item_id: InventoryKey::from(mint()),
@@ -3158,7 +3422,7 @@ fn taken_item(
         last_owner_id: uuid::Uuid::nil(),
         creator_id: owner,
         group: None,
-        permissions: FULL_PERMISSIONS,
+        permissions,
     }
 }
 
@@ -3824,7 +4088,7 @@ mod test {
                 folder,
                 owner,
                 &|| uuid::Uuid::from_u128(id),
-                policy,
+                (policy, crate::imitates::TakenItemMasks::Objects),
             )
         };
 
@@ -3887,7 +4151,7 @@ mod test {
             &|| uuid::Uuid::from_u128(0x9E7),
             &[taken.clone()],
             &served,
-            &ZERO,
+            Some(&ZERO),
         );
         let root = rezzed.first().ok_or("the rez put nothing back")?;
         assert_eq!(root.extra, taken.extra, "the rez lost the light");
@@ -4059,7 +4323,10 @@ mod test {
             InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0)),
             owner,
             &|| uuid::Uuid::from_u128(0xC047),
-            crate::assets::ObjectAssetPolicy::Served,
+            (
+                crate::assets::ObjectAssetPolicy::Served,
+                crate::imitates::TakenItemMasks::Objects,
+            ),
         );
         store_taken_asset(
             &assets,
@@ -4127,7 +4394,10 @@ mod test {
             InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0)),
             owner,
             &|| uuid::Uuid::from_u128(0xDEFA),
-            crate::assets::ObjectAssetPolicy::Served,
+            (
+                crate::assets::ObjectAssetPolicy::Served,
+                crate::imitates::TakenItemMasks::Objects,
+            ),
         );
         let group = filed_group(&[root, child], &[], &item);
         let filed = group.other_parts.first().ok_or("the child was not filed")?;
@@ -4140,7 +4410,13 @@ mod test {
         TaskInventoryItem {
             item_id: InventoryKey::from(uuid::Uuid::from_u128(item)),
             parent_task: task,
-            permissions: FULL_PERMISSIONS,
+            permissions: sl_wire::Permissions5 {
+                base: sl_wire::Permissions::ALL,
+                owner: sl_wire::Permissions::ALL,
+                group: sl_wire::Permissions::ALL,
+                everyone: sl_wire::Permissions::ALL,
+                next_owner: sl_wire::Permissions::ALL,
+            },
             creator_id: agent(0x1),
             last_owner_id: agent(0x1),
             owner: OwnerKey::Agent(agent(0x1)),

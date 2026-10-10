@@ -234,26 +234,27 @@ async fn run(args: RunArgs) -> Result<(), Error> {
 
     // Avatar-availability precondition: refuse only when more avatars are needed
     // than the file provides, before any login happens.
-    let secondary = if test.accounts() >= 2 {
+    let accounts = test.accounts_on(args.grid);
+    let secondary = if accounts >= 2 {
         let resolved = resolve_secondary(&credentials, primary, args.secondary.as_deref());
         Some(resolved.ok_or_else(|| Error::NotEnoughAvatars {
             test: test.name().to_owned(),
-            needed: test.accounts(),
+            needed: accounts,
             found: 1,
         })?)
     } else {
         None
     };
-    let tertiary = if test.accounts() >= 3 {
+    let tertiary = if accounts >= 3 {
         let secondary = secondary.ok_or_else(|| Error::NotEnoughAvatars {
             test: test.name().to_owned(),
-            needed: test.accounts(),
+            needed: accounts,
             found: 1,
         })?;
         let resolved = resolve_tertiary(&credentials, primary, secondary, args.tertiary.as_deref());
         Some(resolved.ok_or_else(|| Error::NotEnoughAvatars {
             test: test.name().to_owned(),
-            needed: test.accounts(),
+            needed: accounts,
             found: 2,
         })?)
     } else {

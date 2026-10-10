@@ -31,6 +31,13 @@ mod test {
     /// How long any single wait in these tests may take.
     const WAIT: Duration = Duration::from_secs(20);
 
+    /// When a wait for one thing among other events gives up: three `WAIT`s
+    /// from now, however many of those others arrive meanwhile.
+    fn whole_wait() -> tokio::time::Instant {
+        let now = tokio::time::Instant::now();
+        now.checked_add(WAIT.saturating_mul(3)).unwrap_or(now)
+    }
+
     /// How long a script waits before its first step. Short enough not to slow
     /// a test down, long enough that the arrival burst — which streams the very
     /// object these scripts then move — has been sent first.
@@ -123,8 +130,11 @@ mod test {
 
         let mut moved = false;
         let mut marked = false;
+        // One deadline for the whole wait: a timeout on each event is
+        // never reached on a stream that keeps sending something else.
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             match event {
@@ -209,8 +219,9 @@ mod test {
         let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
         let mut seen = Vec::new();
+        let deadline = whole_wait();
         while seen.len() < 2 {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             if let Event::ExperienceEnvironmentPush(push) = event {
@@ -273,8 +284,9 @@ mod test {
         let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
         let mut seen = Vec::new();
+        let deadline = whole_wait();
         while seen.len() < 2 {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             if let Event::ExperienceEvent(report) = event {
@@ -324,8 +336,9 @@ mod test {
         let (diag_tx, _diag_rx) = mpsc::channel(16);
         let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             if let Event::GenericMessage(generic) = &event
@@ -338,8 +351,9 @@ mod test {
         command_tx
             .send(Command::RequestExperiencePermissions)
             .await?;
+        let deadline = whole_wait();
         let blocked = loop {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             if let Event::ExperiencePermissions { blocked, .. } = event {
@@ -402,8 +416,9 @@ mod test {
 
         let east_handle = grid.region_handle(EAST_REGION).ok_or("no eastern region")?;
         let mut arrived = false;
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             match event {
@@ -467,16 +482,18 @@ mod test {
         let (diag_tx, _diag_rx) = mpsc::channel(16);
         let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
 
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
+            let event = tokio::time::timeout_at(deadline, server_events.recv()).await??;
             if matches!(event, sl_proto::ServerEvent::AgentArrived) {
                 break;
             }
         }
         let arrived = std::time::Instant::now();
 
+        let deadline = whole_wait();
         loop {
-            let event = tokio::time::timeout(WAIT, event_rx.recv())
+            let event = tokio::time::timeout_at(deadline, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
             if let Event::GenericMessage(generic) = &event

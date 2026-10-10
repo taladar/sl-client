@@ -1172,8 +1172,13 @@ pub fn resolve_right_click_pick(
         }
         let cursor = pick.cursor;
         let Some(hit) = pick.hit.as_ref() else {
+            debug!("right click at {cursor:?}: the pick struck nothing");
             continue;
         };
+        debug!(
+            "right click at {cursor:?}: the pick struck {:?}",
+            hit.resolution
+        );
         match hit.resolution {
             PickResolution::Avatar { agent, worn: None } => {
                 requests.write(OpenAvatarMenu { agent, at: cursor });
@@ -1208,6 +1213,7 @@ pub fn resolve_right_click_pick(
                 // (a single-entity ray test, not a scene walk) for the exact
                 // struck surface — face index, ST/UV, position, normal.
                 let Some(object) = object_picker.pick_entity(pick.ray, &ray_cast, entity) else {
+                    debug!("right click: the ray found no surface of {entity:?}");
                     continue;
                 };
                 if object.summary.attachment {

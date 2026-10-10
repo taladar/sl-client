@@ -131,9 +131,10 @@ each grid's forms is `server-fake-grid-object-update-forms` and
 `server-world-update-scheduling`.
 
 Not measured: a viewer that answers probes from a cache of its own (ours
-keeps none between sessions); what a kill names when an object is deleted
-or taken, which is `gridspec-object-rez-derez`'s; an interest list that
-culls by view.
+keeps none between sessions); an interest list that culls by view. What a
+kill names when an object is deleted or taken is in
+[Building](building.md#what-a-derez-is-answered-with): every prim on Second
+Life, the root alone and twice on OpenSim.
 
 ## Properties
 

@@ -56,6 +56,7 @@
 - [World map](gridspec/world-map.md)
 - [Terrain, wind and clouds](gridspec/terrain.md)
 - [Objects](gridspec/objects.md)
+- [Building](gridspec/building.md)
 - [Capabilities](gridspec/capabilities.md)
 - [Land](gridspec/land.md)
 - [Environment](gridspec/environment.md)
