@@ -132,6 +132,14 @@ OpenSim says nothing of a click action, and either grid may keep something
 other than what was sent — see
 [Grid Behaviour → Building](../gridspec/building.md#editing).
 
+`Command::LinkObjects` (`ObjectLink`, the first id the root) and
+`Command::DelinkObjects` (`ObjectDelink`) are answered the same way: every
+prim of a set that changed comes again, with the parent it now has. Where
+the prims of a set are numbered, which of them becomes the root when a
+root is delinked alone, and the links a grid refuses — too far apart, too
+many, not the owner's to modify — are in
+[Grid Behaviour → Building](../gridspec/building.md#linking).
+
 Ownership follows the same shape: `Command::SetObjectGroup` sets the group an
 object is *set to* (`ObjectGroup`), and `Command::DeedObjectsToGroup` then
 **deeds** it — an `ObjectOwner` with a nil owner and no god-override, after

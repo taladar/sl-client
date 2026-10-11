@@ -51,7 +51,14 @@
 //! | who is sent an object's record when its name or description is edited ([`PropertiesPolicy::rename_answered`]) | the editor, selected or not | nobody |
 //! | who is sent it when something is written into its contents ([`PropertiesPolicy::contents_change_told_to`]) | every session holding it selected, the writer among them or not | the writer, selected or not |
 //! | what a select and a deselect bring besides the record ([`PropertiesPolicy::strangers_select_resends_object`], [`PropertiesPolicy::deselect_sends_terse`]) | a deselect brings a terse update of the object | a select of somebody else's object brings it again in full |
-//! | whose record a link sends the linker ([`PropertiesPolicy::link_sends`]) | each linked child's | the root's |
+//! | whether a link sends the linker the root's record ([`LinkPolicy::root_record`]) | where the linker holds the root selected | always |
+//! | where prims linked into a set are numbered ([`LinkPolicy::newcomers`]) | from 2 on, ahead of the prims the set had | after the prims the set had |
+//! | which prim becomes the root when a root is delinked alone ([`LinkPolicy::promotes`]) | link number 2 | the first of the set's part collection, which is not kept in the order of the link numbers |
+//! | the order a linkset's prims are sent in after a link or a delink ([`LinkPolicy::sent`]) | the last link number first, the root last | the root first |
+//! | how many prims a linkset may have ([`LinkPolicy::most_prims`]) | 256, a link past it refused whole with an alert | any number |
+//! | how far apart the prims of a linkset may stand ([`LinkPolicy::reach_m`]) | 64 m, a link past it refused whole with an alert | any distance |
+//! | a link or a delink of a prim the owner has taken modify off ([`LinkPolicy::unmodifiable`]) | refused with the alert `LinkFailedNoPermToEdit`, a delink with `Unlink failed: no edit permissions.` | an owner cannot take modify off |
+//! | how many prims a physical linkset may have ([`LinkPolicy::most_physical_prims`]) | 32, more refused with the alert `CantEnablePhysCostTooGreat` | any number |
 //! | a child prim's sale state in its record ([`PropertiesPolicy::child_sale`]) | its own | the root's |
 //! | a new prim's record ([`PropertiesPolicy::new_prim_owner_mask`], [`PropertiesPolicy::new_prim_last_owner`], [`PropertiesPolicy::ownership_cost`]) | base and owner masks `0x7fffffff`, no last owner, an ownership cost of 10 | masks `0x0009e000`, the rezzer as last owner, a cost of 0 |
 //!
@@ -581,7 +588,6 @@ impl ImitatedGrid {
                 contents_change_told_to: ContentsAudience::Selectors,
                 strangers_select_resends_object: false,
                 deselect_sends_terse: true,
-                link_sends: LinkedRecord::Children,
                 child_sale: ChildSale::Own,
                 new_prim_owner_mask: sl_wire::Permissions::ALL,
                 new_prim_last_owner: LastOwner::Nobody,
@@ -592,7 +598,6 @@ impl ImitatedGrid {
                 contents_change_told_to: ContentsAudience::Writer,
                 strangers_select_resends_object: true,
                 deselect_sends_terse: false,
-                link_sends: LinkedRecord::Root,
                 child_sale: ChildSale::Roots,
                 new_prim_owner_mask: OPENSIM_ALL_PERMISSIONS,
                 new_prim_last_owner: LastOwner::Rezzer,
@@ -1026,6 +1031,42 @@ impl ImitatedGrid {
                 copy_contents_serial: CopiedSerial::Advanced,
                 ray_at_nothing: RayAtNothing::Ignored,
                 out_of_world: OutOfWorld::Kept,
+            },
+        }
+    }
+
+    /// What this grid makes of a link and a delink — measured by the
+    /// `object-link-delink` conformance case on aditi and the local OpenSim
+    /// (2026-10-11, `book/src/gridspec/building.md` § Linking).
+    ///
+    /// They agree on the outline: the first prim a link names is the root; a
+    /// link that names a child brings the child's whole set; a link of one
+    /// prim does nothing; every prim of a set a link or a delink changed is
+    /// sent again in a full update; a delink of a child leaves the rest
+    /// linked, and a delink of a root alone makes another prim the root of
+    /// the rest.
+    #[must_use]
+    pub const fn link_policy(self) -> LinkPolicy {
+        match self {
+            Self::SecondLife => LinkPolicy {
+                root_record: RootRecord::WhenSelected,
+                newcomers: Newcomers::AfterTheRoot,
+                promotes: Promoted::LinkNumberTwo,
+                sent: SentOrder::RootLast,
+                most_prims: Some(256),
+                reach_m: Some(64.0),
+                unmodifiable: Some(LinkPolicy::NO_EDIT_PERMISSION),
+                most_physical_prims: Some(32),
+            },
+            Self::OpenSim => LinkPolicy {
+                root_record: RootRecord::Always,
+                newcomers: Newcomers::AtTheEnd,
+                promotes: Promoted::FirstOfParts,
+                sent: SentOrder::RootFirst,
+                most_prims: None,
+                reach_m: None,
+                unmodifiable: None,
+                most_physical_prims: None,
             },
         }
     }
@@ -1913,8 +1954,6 @@ pub struct PropertiesPolicy {
     pub strangers_select_resends_object: bool,
     /// Whether a deselect is answered with a terse update of the object.
     pub deselect_sends_terse: bool,
-    /// Whose record a link sends the session that linked.
-    pub link_sends: LinkedRecord,
     /// Whose sale type and price a child prim's record states.
     pub child_sale: ChildSale,
     /// The base and owner masks of a prim nobody has changed the permissions
@@ -1972,13 +2011,116 @@ pub enum LastOwner {
     Rezzer,
 }
 
-/// Whose record a link sends ([`PropertiesPolicy::link_sends`]).
+/// What a grid makes of a link and a delink ([`ImitatedGrid::link_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinkPolicy {
+    /// When a link sends the session that linked the root's record.
+    pub root_record: RootRecord,
+    /// Where the prims a link brings into a set are numbered.
+    pub newcomers: Newcomers,
+    /// Which prim becomes the root when a root is delinked alone.
+    pub promotes: Promoted,
+    /// The order a linkset's prims are sent in after a link or a delink.
+    pub sent: SentOrder,
+    /// The most prims a linkset may have. A link that would make more is
+    /// refused whole.
+    pub most_prims: Option<usize>,
+    /// The furthest apart two prims of a linkset may stand, centre to centre,
+    /// in metres. A link that would join prims further apart is refused
+    /// whole, whichever of them is the root.
+    pub reach_m: Option<f32>,
+    /// The alert a link is refused with when the owner mask of one of its
+    /// roots lacks modify. Where there is one, a delink that names such a
+    /// prim is answered with [`UNLINK_REFUSED`](Self::UNLINK_REFUSED).
+    pub unmodifiable: Option<NoBuildAlert>,
+    /// The most prims a linkset may have and be physical. Second Life's limit
+    /// is a physics cost; a fake region simulates no physics, and a cube
+    /// costs one.
+    pub most_physical_prims: Option<usize>,
+}
+
+impl LinkPolicy {
+    /// What Second Life says of a link that would make a set too large.
+    pub const TOO_MANY: NoBuildAlert = NoBuildAlert {
+        text: "Link failed -- Unable to link any pieces - too many pieces.",
+        key: Some("LinkFailed"),
+    };
+
+    /// What Second Life says of a link of prims too far apart.
+    pub const TOO_FAR: NoBuildAlert = NoBuildAlert {
+        text: "Link failed -- Unable to link any pieces - pieces are too far apart.",
+        key: Some("LinkFailed"),
+    };
+
+    /// What Second Life says of a link of a prim its owner may not modify.
+    pub const NO_EDIT_PERMISSION: NoBuildAlert = NoBuildAlert {
+        text: "Link failed because you do not have edit permission.",
+        key: Some("LinkFailedNoPermToEdit"),
+    };
+
+    /// What Second Life says of a delink that names a prim its owner may not
+    /// modify.
+    pub const UNLINK_REFUSED: NoBuildAlert = NoBuildAlert {
+        text: "Unlink failed: no edit permissions.",
+        key: None,
+    };
+
+    /// What Second Life says of a linkset too costly to be physical.
+    pub const TOO_MUCH_PHYSICS: NoBuildAlert = NoBuildAlert {
+        text: "Can't enable physics for object with physics resource cost greater than 32",
+        key: Some("CantEnablePhysCostTooGreat"),
+    };
+}
+
+impl Default for LinkPolicy {
+    /// Second Life's, as the grid's own default flavour is.
+    fn default() -> Self {
+        ImitatedGrid::SecondLife.link_policy()
+    }
+}
+
+/// When a link sends the linker the root's record
+/// ([`LinkPolicy::root_record`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LinkedRecord {
-    /// Each child's that came under the root: Second Life.
-    Children,
-    /// The root's: OpenSim.
-    Root,
+pub enum RootRecord {
+    /// Where the linker holds the root selected: Second Life.
+    WhenSelected,
+    /// Always: OpenSim.
+    Always,
+}
+
+/// Where the prims a link brings into a set are numbered
+/// ([`LinkPolicy::newcomers`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Newcomers {
+    /// From 2 on, in the order the link named them, each set that came whole
+    /// in its own order — and the prims the set already had after them:
+    /// Second Life.
+    AfterTheRoot,
+    /// After the prims the set already had: OpenSim.
+    AtTheEnd,
+}
+
+/// Which prim becomes the root when a root is delinked alone
+/// ([`LinkPolicy::promotes`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Promoted {
+    /// Link number 2, the rest keeping their order: Second Life.
+    LinkNumberTwo,
+    /// The first of the set's part collection, and the rest renumbered in
+    /// that collection's order: OpenSim, whose `SceneObjectGroup` keeps its
+    /// parts in a dictionary that hands a new part the slot the part removed
+    /// last gave up.
+    FirstOfParts,
+}
+
+/// The order a linkset's prims are sent in ([`LinkPolicy::sent`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SentOrder {
+    /// The last link number first and the root last: Second Life.
+    RootLast,
+    /// The root first, then the link numbers in order: OpenSim.
+    RootFirst,
 }
 
 /// How a grid takes an object out of a region and puts one back
@@ -2688,6 +2830,7 @@ mod test {
         assert_ne!(sl.legacy_udp_inventory(), opensim.legacy_udp_inventory());
         assert_ne!(sl.rez_policy(), opensim.rez_policy());
         assert_ne!(sl.edit_policy(), opensim.edit_policy());
+        assert_ne!(sl.link_policy(), opensim.link_policy());
         assert_ne!(sl.upload_announcements(), opensim.upload_announcements());
         assert_ne!(sl.bakes(), opensim.bakes());
         assert_ne!(sl.region_protocol_bits(), opensim.region_protocol_bits());

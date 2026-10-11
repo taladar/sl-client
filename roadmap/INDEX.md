@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 138 |
-| ready | 358 |
+| ideas | 139 |
+| ready | 357 |
 | blocked | 108 |
 | in-progress | 20 |
 | bugs | 37 |
-| done | 1347 |
+| done | 1348 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2055** |
+| **total** | **2056** |
 
-## ideas (138)
+## ideas (139)
 
 ### protocol
 
@@ -78,6 +78,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Inventory quality-of-life toggles
 - [`viewer-land-access-list-export-import`](ideas/viewer-land-access-list-export-import.md)
   — Access-list export / import / copy for parcel & estate lists
+- [`viewer-link-limit-from-open-region-settings`](ideas/viewer-link-limit-from-open-region-settings.md)
+  — Take the linkset prim limit from the region where the region states one
 - [`viewer-local-mesh`](ideas/viewer-local-mesh.md) — Local mesh — live-reload
   mesh from disk
 - [`viewer-lsl-oracle-misses`](ideas/viewer-lsl-oracle-misses.md) — Grid compile
@@ -359,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (358)
+## ready (357)
 
 ### protocol
 
@@ -1171,8 +1173,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   storage and enforcement on each grid
 - [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
   Notecards, embedded items and gestures on each grid
-- [`gridspec-object-link-delink`](ready/gridspec-object-link-delink.md) — Link
-  order, limits and refusals on each grid
 - [`gridspec-object-media`](ready/gridspec-object-media.md) — Media on a prim:
   ObjectMedia, navigation and propagation on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
@@ -1459,7 +1459,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-heartbeat`)
 - [`server-world-link-sets`](blocked/server-world-link-sets.md) — A real
   link-set model — link numbers, root and children (blocked by
-  `server-world-ecs-store`, `gridspec-object-link-delink`)
+  `server-world-ecs-store`, `gridspec-object-link-delink` (done))
 - [`server-world-sit-and-attach`](blocked/server-world-sit-and-attach.md) —
   Sitting and attaching as world state a script can read (blocked by
   `server-world-ecs-store`, `gridspec-attachments`)
@@ -1693,7 +1693,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1347)
+## done (1348)
 
 ### protocol
 
@@ -4650,6 +4650,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   agents, EnableSimulator and region crossing on each grid
 - [`gridspec-object-edit`](done/gridspec-object-edit.md) — Object edits on each
   grid: transforms, shape, flags, admin fields, undo, duplicate
+- [`gridspec-object-link-delink`](done/gridspec-object-link-delink.md) — Link
+  order, limits and refusals on each grid
 - [`gridspec-object-properties`](done/gridspec-object-properties.md) — Object
   properties and selection replies on each grid
 - [`gridspec-object-rez-derez`](done/gridspec-object-rez-derez.md) — Rez, take,

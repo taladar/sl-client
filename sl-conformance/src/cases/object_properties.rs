@@ -280,9 +280,11 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ),
     ("edits_with_nothing_selected_took", both(EVERY_EDIT)),
     // A linkset.
+    // With nothing selected. Second Life sends the root's record to a linker
+    // that holds the root selected (`object-link-delink`, 2026-10-11).
     (
         "link_brings",
-        each(Answer::Text("child"), Answer::Text("root")),
+        each(Answer::Text("nothing"), Answer::Text("root")),
     ),
     ("root_select_answers", both(Answer::Text("root"))),
     ("child_select_answers", both(Answer::Text("child"))),
@@ -967,6 +969,9 @@ async fn census(
             name: CHILD_NAME.to_owned(),
         })
         .await?;
+    // Second Life answers the rename with the cube's record, which is not
+    // the link's doing: it is heard out before the link is sent.
+    listen(primary, quiet).await?;
     primary
         .send(Command::LinkObjects {
             local_ids: vec![scoped, child_scoped],

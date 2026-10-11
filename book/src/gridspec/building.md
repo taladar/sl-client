@@ -381,6 +381,161 @@ Not measured: a deed by a member who has the power, which a plain resident
 cannot take back; an owner's friend with edit rights; an estate manager;
 what the owner is told of any of it beyond what it asks.
 
+## Linking
+
+An `ObjectLink` names prims by their region-local ids, the first of them
+the root the rest are to hang off; an `ObjectDelink` names the prims to
+take out of their sets. Neither is answered with a message of its own. And
+nothing a simulator sends states a **link number** — the root's 1, its
+children's 2 and up — though half the script library addresses a prim by
+one: a viewer can only watch which prim hangs off which, and a script is
+the one thing that can say where each stands.
+
+Measured on 2026-10-11 by the conformance case `object-link-delink`. One
+avatar rezzes four cubes on land it may build on, names them `A` to `D`,
+and puts a script into each that says, at its start and whenever its links
+change, its own link number and the names of the set's prims in the order
+of theirs (`llGetLinkNumber`, `llGetLinkName`, over `llOwnerSay`). It then
+asks one question a leg, listening after each for the updates and the form
+each comes in, the records, the alerts and what the scripts say. It ran
+four times on aditi (Mauve, the public sandbox parcel) and four on the
+local OpenSim, and once more on aditi with three cubes in a line linked in
+all six orders at four spacings. Every row below is checked on every run of
+both live grids and of both fake flavours, but for the ones marked **not
+held** and the ones marked **live only**, which are what the scripts said:
+the fake grid's scripts know nothing of link numbers yet
+(`server-world-link-sets`).
+
+### What a link and a delink are answered with
+
+| request | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a link of four free prims in one message, each held selected | every prim of the new set again, each in a full `ObjectUpdate` — the last link number first and the root last — and the **root's** record; no alert | every prim again in a full `ObjectUpdate`, the root first and then the link numbers in order, and the root's record; no alert | each flavour as its grid |
+| a link of prims nobody holds selected | takes, and no record comes | takes, and the root's record comes all the same | each flavour as its grid |
+| where a linked child reads as standing | at its offset from the root, in the root's frame: a root turned a quarter turn about z has a child that stood along the region's x at its own −y | the same | the same |
+| a link that names a child of another set, which no viewer sends | the child's whole set joins | the same | the same |
+| a link of one prim | nothing | nothing | nothing |
+| a delink of one child | the child stands free where it stood and the rest stays linked; the child, the root and a sibling each come again in a full `ObjectUpdate`; no record, no alert | the same | the same |
+| a delink of the root alone | the root stands free where it stood, and **another prim becomes the root of the rest**, where it stood; the old root, the new one and a child each come again in a full `ObjectUpdate`; no record, no alert | the same — but for which prim it is, below | each flavour as its grid |
+| a delink that names every prim of a set, as a viewer's Unlink does | every prim free; each again in a full `ObjectUpdate` | the same | the same |
+| an `ObjectDuplicate` of a linkset's root | a copy of the whole set | the same | the same |
+
+An earlier reading had Second Life sending a link's *children's* records
+([Objects § Properties](objects.md#properties), 2026-10-09). That was the
+answer to the rename the case sent just before its link, heard in the
+link's window; the record a link sends is the root's, and on Second Life
+only to a linker that holds the root selected.
+
+### The order of a linkset
+
+What the scripts said of each set, and which prim became the root when the
+root was delinked alone — again and again, until nothing was left linked.
+
+| set | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a prim on its own (**live only**) | says its link number is 0 | the same | — |
+| `A B C D`, linked in one message (**live only**) | numbered `A B C D`: the order they were named in | the same | — |
+| `C` linked into the set `A B` (**live only**) | numbered `A C B`: the newcomer is 2 | numbered `A B C`: the newcomer is last | — |
+| the set `C D` linked into the set `A B` (**live only**) | numbered `A C D B`: the set that joined comes whole, in its own order, ahead of the prims the root had | numbered `A B C D`: it comes after them | — |
+| which prim a root delinked alone is replaced by | **link number 2**, the rest keeping their order: `A B C D` without `A` is numbered `B C D` | **not a link number**: of the three sets above it was number 2, number 3 and number 4, and the rest was renumbered from it — `A B C D` without `A` was numbered `D C B` | each flavour as its grid |
+| the order the roots came out in, delinking the root until none was left | `A B C D`, `A C B`, `A C D B`: the link numbers | `A B C D`, `A C B`, `A D C B` | each flavour as its grid |
+
+So "the prim linked last is 2" holds on Second Life and not on OpenSim,
+where a prim keeps the number it was given and a newcomer takes the next.
+
+OpenSim's choice of a new root is an accident with a rule. `DelinkObjects`
+takes the first of `SceneObjectGroup.Parts`, and a group keeps its parts
+in a dictionary, which lists them slot by slot and hands a new part the
+slot the part removed last gave up. A group nothing was ever removed from
+lists its parts in the order they joined, which is the order of their link
+numbers; one that has lost parts and gained others does not. Followed
+through every link and delink of the case, that rule gives each of the
+orders above, and the fake grid's OpenSim flavour keeps the same slots
+(`link_sets::Parts`). The prim that is promoted then has the rest linked
+under it in that order, so the link numbers follow the dictionary from
+there on.
+
+### Links a grid refuses
+
+The distance leg moves one cube straight up from another and links the two,
+halving the distance until the furthest that links is known to the metre.
+The counting leg copies a linkset and joins it to its copy, eight times
+over, in a lattice a few metres across.
+
+| link | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| two cubes half a metre across | link 64 m apart, centre to centre, and not 65 m | link 256 m apart, the furthest tried | each flavour as its grid |
+| two cubes ten metres across | the same: 64 m and not 65 m | the same: 256 m | each flavour as its grid |
+| what a link too far is answered with | nothing links, and an `AlertMessage`: "Link failed -- Unable to link any pieces - pieces are too far apart.", keyed `LinkFailed`, stating `reason` 1, `total_pieces` 2 and `linkable_pieces` 1 | — | each flavour as its grid |
+| three cubes in a line 28 m apart, the ends 56 m | all three link, from an end and from the middle | — | each flavour as its grid |
+| three in a line 48 m apart, the ends 96 m | **nothing links, whichever is the root** — the middle one included, which stands 48 m from both; the same alert, with `total_pieces` 3 and `linkable_pieces` 2 | — | each flavour as its grid |
+| one more prim to a linkset of 256 | nothing links: "Link failed -- Unable to link any pieces - too many pieces.", keyed `LinkFailed`, `reason` 2 — with the set as the root and with the prim as the root | links: a set of 257 | each flavour as its grid |
+| a prim its owner has taken modify off (`ObjectPermissions`, the owner mask) | nothing links, as a child and as a root: "Link failed because you do not have edit permission.", keyed `LinkFailedNoPermToEdit` | links: an owner cannot take a bit off its own owner mask | each flavour as its grid |
+| a delink that names such a prim | "Unlink failed: no edit permissions.", with no key | nothing | each flavour as its grid |
+| a linkset of 32 made physical | takes | takes | takes |
+| a linkset of 64 made physical | refused: "Can't enable physics for object with physics resource cost greater than 32", keyed `CantEnablePhysCostTooGreat`, stating `MAX_OBJECTS` 32 | takes | each flavour as its grid; the fake grid counts a prim as a cost of one |
+| the same refusal twice within a few seconds (**not held**) | the second comes **without its alert**: of refusals six seconds apart every other one was silent, of refusals twenty seconds apart none | — | every refusal is told |
+
+Second Life's limit is on the set and not on a prim's distance from its
+root: a root 48 m from each of two prims that stand 96 m apart links
+neither. Two prims 64 m apart link whatever their size, so it is the
+centres that are measured. Whether it is every pair of prims or the box
+around them all was not told apart; the fake grid's Second-Life flavour
+refuses a link that would put a prim it brings into one set with a prim
+more than 64 m from it.
+
+A refusal is whole on Second Life. `LinkFailed`'s own parameters count the
+pieces it could have linked — one fewer than it was asked to, each time —
+and it links none of them.
+
+The reference viewer has no notification of the name `LinkFailed`, and
+shows the alert's text as it came.
+
+### Somebody else's prims
+
+Measured on 2026-10-11 by the conformance case `object-link-stranger`. The
+**owner** rezzes two cubes, `A` and `B`; the **stranger**, a second avatar
+with no right over them, rezzes a third of its own, `X`. After each attempt
+the owner asks the grid for all three again, so that what hangs off what is
+read from the grid. Before each attempt a third of a minute passes without
+a word, so that no alert goes unsent for having just been sent. It ran
+twice on aditi and twice on the local OpenSim (`--secondary secondary`);
+every row is checked on every run. The fake grid lets anybody edit anything
+(`server-fake-grid-edit-permission-enforcement`), so these are the live
+grids' answers alone.
+
+Nothing linked that joined prims of two owners, and nothing a stranger sent
+changed the owner's set, on either grid. OpenSim says nothing of any of it.
+
+| attempt | Second Life | OpenSim |
+| --- | --- | --- |
+| the stranger links the owner's two prims | nothing links; "Link failed because you do not have edit permission.", keyed `LinkFailedNoPermToEdit` | nothing links; nothing is said |
+| a link with the linker's own prim as the root and the other's under it — by the stranger, and by the owner | nothing links; "Link failed -- owners differ", keyed `LinkFailedOwnersDiffer` | nothing links; nothing is said |
+| a link with the other's prim as the root and the linker's own under it — by either | nothing links; `LinkFailedNoPermToEdit` | nothing links; nothing is said |
+| the stranger delinks a child of the owner's set, and then the whole set | the set stays; "Unlink failed: no edit permissions.", with no key | the set stays; nothing is said |
+
+Second Life asks first whether the linker may edit the root, and only then
+whose the rest are.
+
+The fake grid used to hang a named prim off the root and leave the prims
+under it where they were, free every child of a root that was delinked
+alone, copy a root without its set, and send only the children of a link.
+It keeps each set's order now (`link_sets`), numbers newcomers and
+promotes a root as its flavour's grid does, sends a changed set whole and
+in that grid's order, and refuses what Second Life refuses on the
+Second-Life flavour. Its scripts still cannot read a link number:
+`server-world-link-sets`.
+
+Not measured: whether Second Life's reach is every pair's or a box's, and
+whether it grows with prims larger than ten metres; the order a delink's
+updates come in; whether a set's order survives a take and a rez; where a
+seated avatar is numbered; a link of a prim the owner may not copy with
+one it may not transfer (`LinkFailedCantLinkNoCopyNoTrans`), of an
+attachment, of prims either side of a region's border, and by an owner's
+friend with edit rights; whether Second Life's limit of 32 for a physical
+set is a count or the cost it says; OpenSim's `LinksetPrims` set to
+anything but its default of no limit.
+
 ## What our viewer does with it
 
 - A take, a copy, a delete and a return are each one `DeRezObject` from the
@@ -437,6 +592,35 @@ world; a move under the ground (Second Life) or off the region's edge
 flavour a move off the edge takes the prim out of the world and shows its
 item in the inventory window. The same test runs against a live grid with
 `SL_E2E_GRID=opensim` and `=aditi`.
+
+A link, by the same measurements:
+
+- Link sends the selection's roots, the one selected last first, which is
+  the root on both grids; Unlink names every prim of the selected sets, so
+  that nothing is left for a grid to promote. Neither waits for an answer:
+  the prims are drawn as the grid sends them again, hanging off what it
+  says they hang off.
+- A refusal is the grid's to word. `LinkFailed` — too far apart, too many —
+  is a name no viewer has a notification for, and its text is shown as it
+  came; `LinkFailedNoPermToEdit`, `LinkFailedOwnersDiffer` and
+  `CantEnablePhysCostTooGreat` are shown from the viewer's own catalogue,
+  the last with the grid's number in it. Where Second Life leaves the
+  alert out of a refusal that follows another, and wherever OpenSim
+  refuses, nothing is shown and the prims stay as they were.
+- The link tool refuses a set of more than 256 prims itself, as the
+  reference viewer does: Second Life's limit, and one a stock OpenSim
+  region does not have (`viewer-link-limit-from-open-region-settings`).
+
+Checked through the viewer automation (`e2e_objects`): on each fake
+flavour, two prims are rezzed through the Build window, the second is
+moved a hundred metres up, both are selected and Ctrl+L is pressed. On the
+Second-Life flavour the viewer shows "pieces are too far apart" and draws
+both prims free; on the OpenSim flavour it draws one hanging off the
+other. The same test runs against a live grid with `SL_E2E_GRID=opensim`
+and `=aditi`, and passes on both; on the live OpenSim its first placement
+fails now and then, as the others' does
+(`test-e2e-objects-live-opensim-intermittent`). The link and unlink chords
+themselves are `e2e_live_checks`'.
 
 The fake grid neither returns somebody else's object, nor returns anything
 by itself, nor ends a temporary prim: `server-fake-grid-object-return`. It

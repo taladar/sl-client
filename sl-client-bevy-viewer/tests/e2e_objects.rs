@@ -37,6 +37,12 @@
 //! world comes back to its owner's inventory on Second Life. The viewer
 //! shows a move and a resize the moment they are typed, so what it shows
 //! afterwards has to be what the grid kept and not what was typed.
+//!
+//! And a link is the grid's to refuse ([[gridspec-object-link-delink]]):
+//! Second Life links nothing of a selection whose prims stand more than
+//! 64 m apart and says so in an alert no viewer has a template for; OpenSim
+//! links at any distance. The viewer has to show the one as the grid worded
+//! it and leave the prims free, and draw the other as one linkset.
 
 #[cfg(test)]
 mod test {
@@ -343,12 +349,31 @@ mod test {
     ) -> Result<(UiLocator, Option<(f32, f32)>), BodyError> {
         alpha.press("Ctrl+B").await?;
         let build = alpha.ui().window("build-tools");
+        let spot = place_a_prim(stage, alpha, &build, None, 0.0).await?;
+        Ok((build, spot))
+    }
+
+    /// With the Build window open, rez a prim with the Create tool — on the
+    /// object `on` on the fake grid, or on the stock scene's unnamed box;
+    /// `further` metres further to the side than [`rez_a_prim`]'s on a live
+    /// grid — and leave the window on its General tab.
+    async fn place_a_prim(
+        stage: &Stage,
+        alpha: &Viewer,
+        build: &UiLocator,
+        on: Option<sl_proto::Uuid>,
+        further: f32,
+    ) -> Result<Option<(f32, f32)>, BodyError> {
         let _create = build
             .get(Locator::role(Role::Radio).name_key("build-tool-create"))
             .click()
             .await?;
         let spot = if stage.on_grid() == Grid::Fake {
-            let _placed = alpha.world().object_named(UNNAMED).place().await?;
+            let on = on.map_or_else(
+                || alpha.world().object_named(UNNAMED),
+                |id| alpha.world().locator(WorldLocator::full_id(id)),
+            );
+            let _placed = on.place().await?;
             None
         } else {
             // On the ground a few metres to the camera's right of the avatar
@@ -359,7 +384,7 @@ mod test {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|error| format!("the clock: {error}"))?
                 .as_secs();
-            let aside = 3.0 + f32::from(u8::try_from(stamp % 6).unwrap_or(0));
+            let aside = 3.0 + further + f32::from(u8::try_from(stamp % 6).unwrap_or(0));
             let readout = alpha.agent().await?;
             let spot = readout.position.ok_or("Alpha has no position")?;
             let eye = readout.camera_eye.ok_or("Alpha has no camera")?;
@@ -382,7 +407,7 @@ mod test {
             .get(Locator::role(Role::Tab).name_key("build-tab-general"))
             .click()
             .await?;
-        Ok((build, spot))
+        Ok(spot)
     }
 
     /// Rez a prim, read its record off the Build window's General tab, rename
@@ -983,6 +1008,195 @@ mod test {
                     ImitatedGrid::OpenSim
                 };
                 an_edit_reads_what_the_grid_kept(stage, like).await
+            })?;
+        Ok(())
+    }
+    /// The names the link test gives its two prims.
+    const LINKED: [&str; 2] = ["Link Root", "Link Far"];
+
+    /// How far above the first the second prim is moved, in metres: further
+    /// than Second Life links.
+    const TOO_FAR_M: f32 = 100.0;
+
+    /// What Second Life's refusal says, in the grid's own words.
+    const TOO_FAR_APART: &str = "pieces are too far apart";
+
+    /// Rez and name a prim with the Build window open, and return its id: a
+    /// grid that does not answer a rename leaves the viewer's world without
+    /// the name to find it by.
+    async fn rez_named(
+        stage: &Stage,
+        alpha: &Viewer,
+        build: &UiLocator,
+        on: Option<sl_proto::Uuid>,
+        name: &str,
+        further: f32,
+    ) -> Result<sl_proto::Uuid, BodyError> {
+        let spot = place_a_prim(stage, alpha, build, on, further).await?;
+        let name = if spot.is_some() {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| format!("the clock: {error}"))?
+                .as_secs();
+            format!("{name} {stamp}")
+        } else {
+            name.to_owned()
+        };
+        let field = build.test_id("build-name:field");
+        let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
+        let selected = alpha.selection().await?;
+        let [prim] = selected.as_slice() else {
+            return Err(format!("the rez left {selected:?} selected").into());
+        };
+        let _typed = field.fill(&name).await?;
+        field.press("Enter").await?;
+        let _kept = alpha
+            .expect(&field)
+            .timeout(WAIT)
+            .to_have_text(&name)
+            .await?;
+        Ok(prim.full_id)
+    }
+
+    /// Rez two prims, move the second a hundred metres up, select both and
+    /// link them with the Build menu's chord. Second Life refuses and the
+    /// viewer shows the grid's words with both prims still free; OpenSim
+    /// links them and the viewer draws one hanging off the other.
+    async fn a_link_too_far_apart(stage: &Stage, like: ImitatedGrid) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        alpha.press("Ctrl+B").await?;
+        let build = alpha.ui().window("build-tools");
+        let [near, far] = LINKED;
+        // A prim a grid leaves unnamed in the viewer's world is a second
+        // "Object": the stock box is found by its id from here on.
+        let stock = if stage.on_grid() == Grid::Fake {
+            Some(alpha.world().object_named(UNNAMED).node().await?.full_id)
+        } else {
+            None
+        };
+        let near = rez_named(stage, alpha, &build, stock, near, 0.0).await?;
+        let far = rez_named(stage, alpha, &build, stock, far, 1.5).await?;
+        let prim = |id: sl_proto::Uuid| alpha.world().locator(WorldLocator::full_id(id));
+
+        // The second prim is the one selected: up it goes.
+        let object_tab = build.get(Locator::role(Role::Tab).name_key("build-tab-object"));
+        let _object = object_tab.click().await?;
+        let up = build.test_id("build-pos-z:field");
+        let raised = reading(&up).await? + TOO_FAR_M;
+        let _typed = up.fill(&format!("{raised:.3}")).await?;
+        up.press("Enter").await?;
+        reads(&up, raised, "a move a hundred metres up").await?;
+
+        // The first joins the selection and leads it, so it is the root a
+        // link names. A chord typed into a text field is the field's.
+        // The camera has to come round to it first, which on a live grid
+        // takes longer than an action's own patience.
+        let _added = prim(near).timeout(SETTLE).shift_select().await?;
+        let selected = alpha.selection().await?;
+        if selected.len() != 2 {
+            return Err(format!("both prims are to be selected: {selected:?}").into());
+        }
+        let _tab = object_tab.click().await?;
+        alpha.press("Ctrl+L").await?;
+
+        let linked = async || -> Result<bool, BodyError> {
+            let near = prim(near).node().await?;
+            let far = prim(far).node().await?;
+            Ok(near.parent.is_some() || far.parent.is_some())
+        };
+        match like {
+            ImitatedGrid::SecondLife => {
+                let told = tokio::time::timeout(WAIT, async {
+                    loop {
+                        if let Ok(shown) = alpha.notifications().await
+                            && shown
+                                .iter()
+                                .any(|notification| notification.text.contains(TOO_FAR_APART))
+                        {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                })
+                .await;
+                if told.is_err() {
+                    let shown = alpha.notifications().await?;
+                    return Err(format!(
+                        "the grid's refusal was never shown; the notifications are {shown:?}"
+                    )
+                    .into());
+                }
+                if linked().await? {
+                    return Err("a link the grid refused is drawn as a linkset".into());
+                }
+            }
+            ImitatedGrid::OpenSim => {
+                let taken = tokio::time::timeout(WAIT, async {
+                    loop {
+                        if matches!(linked().await, Ok(true)) {
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                })
+                .await;
+                if taken.is_err() {
+                    return Err("a link a hundred metres long was never drawn".into());
+                }
+            }
+        }
+
+        // Both are still selected, as two prims or as one linkset: Delete
+        // takes what is selected.
+        alpha.press("Escape").await?;
+        alpha.press("Delete").await?;
+        for id in [near, far] {
+            let _gone = alpha
+                .expect_world(&prim(id))
+                .timeout(SETTLE)
+                .to_be_detached()
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// **A link of prims a hundred metres apart, on each fake flavour**: the
+    /// Second-Life flavour refuses it with `LinkFailed`, an alert the viewer
+    /// has no template for and shows in the grid's own words, and the prims
+    /// stay free; the OpenSim flavour links them.
+    #[test]
+    fn a_link_too_far_apart_on_each_fake_flavour() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "link_second_life"),
+            (ImitatedGrid::OpenSim, "link_open_sim"),
+        ] {
+            StageBuilder::new(name)
+                .viewer_binary(VIEWER)
+                .viewer("Alpha")
+                .needs(Need::Content("the stock scene's unnamed box, to rez on"))
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async move |stage: &Stage| a_link_too_far_apart(stage, flavour).await)?;
+        }
+        Ok(())
+    }
+
+    /// **A link of prims a hundred metres apart, live**
+    /// (`SL_E2E_GRID=opensim|aditi`, where the avatar stands on land it may
+    /// build on): the same against the grid's own refusal, or its own link.
+    #[test]
+    fn a_link_too_far_apart_on_a_live_grid() -> Result<(), TestError> {
+        StageBuilder::new("link_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid("a grid's own refusal of a link"))
+            .run(async |stage: &Stage| {
+                let like = if stage.on_grid() == Grid::Aditi {
+                    ImitatedGrid::SecondLife
+                } else {
+                    ImitatedGrid::OpenSim
+                };
+                a_link_too_far_apart(stage, like).await
             })?;
         Ok(())
     }

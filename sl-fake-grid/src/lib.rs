@@ -19,6 +19,7 @@ mod http_answer;
 mod http_service;
 pub mod imitates;
 pub mod inventory;
+mod link_sets;
 mod login_endpoint;
 pub mod login_sections;
 mod map_tiles;
@@ -54,12 +55,12 @@ pub use fixtures::{
 pub use imitates::{
     AbsentTile, ChildSale, ContentsAudience, CopiedSerial, DerezKill, DotName, EditEcho,
     EditPolicy, EmptyCells, EnvironmentChangeReply, ImitatedGrid, LandOrigin, LastOwner,
-    LinkedRecord, LoginFields, LoginRefusals, LogoutReply, MapLayerAnswer, MapPolicy, MaskRules,
-    NameMatch, NoBuildAlert, OPENSIM_ALL_PERMISSIONS, OPENSIM_FOLDED_BITS,
-    OPENSIM_MAX_AGENT_GROUPS, ObjectDelete, OutOfWorld, ParcelPolicy, Placement, PropertiesPolicy,
-    RayAtNothing, RegionCapacity, RestoreToWorld, ReturnNotice, RezPolicy,
-    SELECTED_PARCEL_SEQUENCE_ID, SIT_TARGET_RAISE_M, SecondLogin, SitPolicy, SitRefusal, StockDay,
-    StoredText, TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
+    LinkPolicy, LoginFields, LoginRefusals, LogoutReply, MapLayerAnswer, MapPolicy, MaskRules,
+    NameMatch, Newcomers, NoBuildAlert, OPENSIM_ALL_PERMISSIONS, OPENSIM_FOLDED_BITS,
+    OPENSIM_MAX_AGENT_GROUPS, ObjectDelete, OutOfWorld, ParcelPolicy, Placement, Promoted,
+    PropertiesPolicy, RayAtNothing, RegionCapacity, RestoreToWorld, ReturnNotice, RezPolicy,
+    RootRecord, SELECTED_PARCEL_SEQUENCE_ID, SIT_TARGET_RAISE_M, SecondLogin, SentOrder, SitPolicy,
+    SitRefusal, StockDay, StoredText, TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
 };
 pub use inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,

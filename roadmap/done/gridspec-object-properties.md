@@ -37,7 +37,11 @@ Measured and written up in `book/src/gridspec/objects.md` § Properties.
   holding the prim selected (the writer only if it is one), OpenSim to the
   writer alone. Second Life answers a deselect with a terse update; OpenSim
   sends somebody else's object again in full on a select. A link sends the
-  linker the children's records on Second Life and the root's on OpenSim.
+  linker the children's records on Second Life and the root's on OpenSim
+  — **wrong for Second Life**, corrected by [[gridspec-object-link-delink]]
+  on 2026-10-11: what was heard was the answer to the rename sent just
+  before the link, and a link sends the root's record, to a linker that
+  holds the root selected.
   The two grids' new-prim records differ in masks, last owner, ownership
   cost and texture ids.
 - **Fake grid.** `PropertiesPolicy` (`imitates.rs`, six rows): who a rename

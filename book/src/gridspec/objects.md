@@ -232,7 +232,7 @@ the cube selected, with only itself, and with nobody.
 | a price or a permission (`ObjectSaleInfo`, `ObjectPermissions`) | the same: the editor, selected or not, and nobody else | the same | the same |
 | something written into its contents (`UpdateTaskInventory`) | the record, with its contents serial advanced, to **every session holding it selected** — the writer if it is one of them, and not otherwise | to the writer, selected or not, and nobody else | each flavour as its grid |
 | an edit made with nothing selected | takes | takes | takes |
-| a link | the record of each child that came under the root, to the linker | the root's record, to the linker | each flavour as its grid |
+| a link | the root's record, to a linker that holds the root selected; nothing to one that does not | the root's record, to the linker, selected or not | each flavour as its grid |
 
 A selection is therefore a subscription on Second Life alone, and to one
 thing: what is in the prim. An avatar looking at a prim somebody else

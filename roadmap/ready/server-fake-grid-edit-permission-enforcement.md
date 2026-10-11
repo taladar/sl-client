@@ -46,3 +46,12 @@ The deed leg needs groups: the fake grid has none, so today every group
 set is a no-op and every deed is refused, which is the measured answer for
 a group the agent is not in. A member's group set and a deed by a member
 with the power wait on the fake grid's groups ([[gridspec-groups]]).
+
+## Linking (2026-10-11)
+
+[[gridspec-object-link-delink]] added `object-link-stranger` (two avatars,
+live only): a stranger's link of an owner's two prims, a link of a prim of
+each of two owners from either side and either way round, and a stranger's
+delink of an owner's set. Written up in `book/src/gridspec/building.md`
+§ Linking § Somebody else's prims; its `MEASURED` table joins
+`object-edit-stranger`'s as this task's specification.

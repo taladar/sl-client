@@ -48,3 +48,17 @@ well be. Not caught with the log on.
   `sl_viewer_inventory`, and read which exit it took; make sure the filter
   reaches an in-process viewer first.
 - `open_pie` should end when a pie is open, not when the click is played.
+
+## Seen again (2026-10-11)
+
+`a_link_too_far_apart_on_a_live_grid` (added by
+[[gridspec-object-link-delink]]) met the first failure once in four runs
+with `SL_E2E_GRID=opensim`: its first ground placement, at about
+`<131.2, 121.0>`, timed out after 120 s with
+`GroundTimedOut { failed_check: InViewport, frames: 5545 }` — the same
+spot and the same stage, reporting the other check. The three other runs
+passed in 34 s each. (Two earlier failures of that test were its own: a
+shift-select left with an action's ten seconds, where the camera needs
+longer to come round to a prim on a live grid.) On a live grid the test's
+two prims land some twelve metres apart, because each placement derives
+its spot from the clock; untidy, and not what fails.

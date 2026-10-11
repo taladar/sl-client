@@ -50,3 +50,36 @@ Acceptance: a three-prim linkset reports link numbers 1, 2, 3 matching
 what the local OpenSim reports for the same build order (check it with
 `sl-repl` against a linked prim there); `LINK_ALL_OTHERS` from the root
 of a three-prim set names exactly two prims; and a single prim reports 0.
+
+## Measured (2026-10-11)
+
+[[gridspec-object-link-delink]] measured the order with a script in every
+prim of a set, on aditi and on the local OpenSim, and wrote it up in
+`book/src/gridspec/building.md` § Linking. Three things above are not what
+the grids do:
+
+- **"The prim linked last is 2" is Second Life's rule alone.** There the
+  prims a link brings are numbered from 2 on, in the order the link named
+  them, a set that joins whole keeping its own order, and the prims the
+  root already had come after. On OpenSim a prim keeps its number and a
+  newcomer takes the next: `A B` with `C` linked in is `A C B` on Second
+  Life and `A B C` on OpenSim. The acceptance check against "what the local
+  OpenSim reports" holds only for a set linked in one message.
+- **A root delinked alone is replaced by link number 2 on Second Life, and
+  by no link number on OpenSim**, which takes the first of a dictionary of
+  parts and renumbers the rest from it.
+- A single prim reports 0 on both, as written.
+
+The order itself is kept now: `sl-fake-grid/src/link_sets.rs` holds each
+set's children by link number and, for the OpenSim flavour, the slots of
+the part dictionary, both by flavour (`LinkPolicy`), and `object-link-delink`
+holds both flavours to the measured orders through the delinks alone.
+`link_sets::children_in_order` is what a link number is to be read
+from. What is left here is everything a **script** sees: the `llGetLink*`
+/ `llSetLink*` family and the `LINK_*` sentinels over that order,
+`llCreateLink` / `llBreakLink` through `link_sets`' own `link` and
+`delink`, seated avatars after the prims, and the order kept across a take
+and a rez and a save and a restore — and its move onto the entity store.
+The case's `MEASURED_LIVE` table (what the scripts said) is the
+specification: this task is done when the fake grid's scripts say the same
+and those rows move into `MEASURED`.

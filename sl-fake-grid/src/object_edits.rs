@@ -37,7 +37,9 @@ use sl_proto::{
 use sl_types::key::{ObjectKey, OwnerKey};
 use sl_types::lsl::{Rotation, Vector};
 
-use crate::imitates::{CopiedSerial, EditPolicy, Placement, RayAtNothing};
+use crate::imitates::{
+    CopiedSerial, EditPolicy, LinkPolicy, NoBuildAlert, Placement, RayAtNothing, RootRecord,
+};
 use crate::world::{RegionChange, SceneFixtures};
 
 /// The physics record both live grids send for a prim nobody has changed the
@@ -157,17 +159,7 @@ pub(crate) fn answer_object_edit(
         ServerEvent::ObjectCategorySet { .. } | ServerEvent::ObjectGroupSet { .. } => {}
         ServerEvent::ObjectOwnerSet { .. } => {
             if let Some(alert) = world.edit.deed_refusal {
-                let info: Vec<sl_proto::AlertInfo> = alert
-                    .key
-                    .map(|key| sl_proto::AlertInfo {
-                        message: key.to_owned(),
-                        extra_params: String::new(),
-                    })
-                    .into_iter()
-                    .collect();
-                if let Err(error) = sim.send_alert_message(alert.text, &info, &[], now) {
-                    tracing::warn!("refusing a deed failed: {error}");
-                }
+                send_alert(sim, alert, &[], now);
             }
         }
         // ----- edits to the object update itself ---------------------------
@@ -185,6 +177,21 @@ pub(crate) fn answer_object_edit(
             }));
         }
         ServerEvent::ObjectFlagsSet { local_id, flags } => {
+            // Second Life refuses to make a set physical that costs its
+            // physics more than 32; a cube costs one.
+            let prims = crate::link_sets::prims_of(world, world.root_of(*local_id));
+            if flags.use_physics
+                && let Some(most_physical) = world.linking.most_physical_prims
+                && prims > most_physical
+            {
+                send_alert(
+                    sim,
+                    LinkPolicy::TOO_MUCH_PHYSICS,
+                    &[("MAX_OBJECTS", most_physical)],
+                    now,
+                );
+                return Some(Vec::new());
+            }
             return Some(update_object(world, *local_id, sim, now, |object| {
                 set_flag(object, prim_flags::USE_PHYSICS, flags.use_physics);
                 set_flag(object, prim_flags::PHANTOM, flags.is_phantom);
@@ -308,85 +315,44 @@ pub(crate) fn answer_object_edit(
         }
         // ----- linking, duplicating, deleting ------------------------------
         // The first id is the root the rest are parented to (the reference
-        // packs the selection root-first, and OpenSim reads it that way).
-        //
-        // A child's placement on the wire is stated **in its root's frame**, so
-        // linking is not only a parent id: the child's region position and
-        // rotation have to be rewritten as an offset from the root, or every
-        // viewer draws the linkset with its children piled at the root.
+        // packs the selection root-first, and both grids read it that way).
+        // What a link makes of the order, and which links it refuses, is
+        // [`crate::link_sets`]'s.
         ServerEvent::ObjectsLinked { local_ids } => {
-            let Some((root, children)) = local_ids.split_first() else {
-                return Some(Vec::new());
-            };
-            let Some(parent) = world.object_by_local_id(*root) else {
-                tracing::debug!("a link named root {root:?}, which this region does not have");
-                return Some(Vec::new());
-            };
-            let mut changes = Vec::new();
-            for child in children {
-                changes.extend(update_object(world, *child, sim, now, |object| {
-                    object.parent_id = *root;
-                    let (position, rotation) = into_frame(
-                        &parent.motion.position,
-                        &parent.motion.rotation,
-                        &object.motion.position,
-                        &object.motion.rotation,
-                    );
-                    object.motion.position = position;
-                    object.motion.rotation = rotation;
-                }));
-            }
-            // A link is followed by a record, and whose is the grid's: each
-            // child's that came under the root, or the root's.
-            let told: Vec<RegionLocalObjectId> = match world.properties.link_sends {
-                crate::imitates::LinkedRecord::Children => children.to_vec(),
-                crate::imitates::LinkedRecord::Root => vec![*root],
-            };
-            for local_id in told {
-                if let Some(record) = world.record_of(local_id) {
-                    push_properties(sim, &record, now);
+            let root = match crate::link_sets::link(world, local_ids) {
+                Ok(Some(root)) => root,
+                Ok(None) => return Some(Vec::new()),
+                Err(refusal) => {
+                    send_alert(sim, refusal.alert(), &refusal.parameters(), now);
+                    return Some(Vec::new());
                 }
+            };
+            let changes = resend_set(world, sim, root, now);
+            // A link is followed by the root's record: always on OpenSim, and
+            // on Second Life where the linker holds the root selected.
+            let told = match world.linking.root_record {
+                RootRecord::Always => true,
+                RootRecord::WhenSelected => selection.contains(&root),
+            };
+            if told && let Some(record) = world.record_of(root) {
+                push_properties(sim, &record, now);
             }
             return Some(changes);
         }
-        // Everything named leaves its linkset, and a named *root* takes its
-        // children with it — "delink" on a root is what breaks a linkset up.
-        // Each freed child's placement goes back into the region's own frame,
-        // the inverse of what the link did to it.
+        // Everything named leaves its set. Every prim of a set that changed
+        // is sent again, the ones now on their own among them.
         ServerEvent::ObjectsDelinked { local_ids } => {
-            let mut orphaned: Vec<RegionLocalObjectId> = local_ids.clone();
-            for named in local_ids {
-                orphaned.extend(
-                    world
-                        .objects
-                        .iter()
-                        .filter(|object| object.parent_id == *named)
-                        .map(|object| object.local_id),
-                );
+            let allowed: Vec<RegionLocalObjectId> = local_ids
+                .iter()
+                .copied()
+                .filter(|prim| crate::link_sets::may_delink(world, *prim))
+                .collect();
+            if allowed.len() != local_ids.len() {
+                send_alert(sim, LinkPolicy::UNLINK_REFUSED, &[], now);
             }
-            orphaned.dedup();
             let mut changes = Vec::new();
-            for local_id in orphaned {
-                let parent = world
-                    .object_by_local_id(local_id)
-                    .filter(|object| object.parent_id.0 != 0)
-                    .and_then(|object| world.object_by_local_id(object.parent_id));
-                let Some(parent) = parent else {
-                    // A named object that was not a child in the first place:
-                    // the viewer sends its whole selection, roots included.
-                    continue;
-                };
-                changes.extend(update_object(world, local_id, sim, now, |object| {
-                    object.parent_id = RegionLocalObjectId(0);
-                    let (position, rotation) = out_of_frame(
-                        &parent.motion.position,
-                        &parent.motion.rotation,
-                        &object.motion.position,
-                        &object.motion.rotation,
-                    );
-                    object.motion.position = position;
-                    object.motion.rotation = rotation;
-                }));
+            for root in crate::link_sets::delink(world, &allowed) {
+                changes.extend(resend_set(world, sim, root, now));
             }
             return Some(changes);
         }
@@ -405,7 +371,7 @@ pub(crate) fn answer_object_edit(
                     continue;
                 };
                 let at = offset_by(&original.motion.position, offset);
-                changes.push(copy_object(
+                changes.extend(copy_set(
                     world,
                     mint,
                     sim,
@@ -451,7 +417,7 @@ pub(crate) fn answer_object_edit(
                     },
                     None => continue,
                 };
-                changes.push(copy_object(
+                changes.extend(copy_set(
                     world,
                     mint,
                     sim,
@@ -596,7 +562,7 @@ const fn set_flag(object: &mut Object, flag: u32, on: bool) {
 
 /// A placement stated in the region's frame, restated in `root`'s: what a
 /// prim's position and rotation become when it is linked under `root`.
-fn into_frame(
+pub(crate) fn into_frame(
     root_position: &Vector,
     root_rotation: &Rotation,
     position: &Vector,
@@ -611,7 +577,7 @@ fn into_frame(
 
 /// The inverse of [`into_frame`]: a child's placement in `root`'s frame,
 /// restated in the region's, which is where a delinked prim goes back to.
-fn out_of_frame(
+pub(crate) fn out_of_frame(
     root_position: &Vector,
     root_rotation: &Rotation,
     position: &Vector,
@@ -779,13 +745,70 @@ fn quiet_edit(
     Vec::new()
 }
 
-/// Makes a copy of `original` standing at `at`, with its record, its contents
-/// and its creation date, streams it to the client and returns the change the
+/// Sends the client the alert a refused edit is answered with — its
+/// `AlertInfo` stating `parameters`, as the map of integers Second Life
+/// states them in — logging a send failure rather than failing the edit.
+fn send_alert(
+    sim: &mut SimSession,
+    alert: NoBuildAlert,
+    parameters: &[(&str, usize)],
+    now: Instant,
+) {
+    let extra_params = if parameters.is_empty() {
+        String::new()
+    } else {
+        let entries: Vec<String> = parameters
+            .iter()
+            .map(|(key, value)| {
+                [
+                    "<key>",
+                    key,
+                    "</key><integer>",
+                    &value.to_string(),
+                    "</integer>",
+                ]
+                .concat()
+            })
+            .collect();
+        let entries = entries.concat();
+        format!("<? LLSD/XML ?>\n<llsd><map>{entries}</map></llsd>\n")
+    };
+    let info: Vec<sl_proto::AlertInfo> = alert
+        .key
+        .map(|key| sl_proto::AlertInfo {
+            message: key.to_owned(),
+            extra_params: extra_params.clone(),
+        })
+        .into_iter()
+        .collect();
+    if let Err(error) = sim.send_alert_message(alert.text, &info, &[], now) {
+        tracing::warn!("refusing an edit failed: {error}");
+    }
+}
+
+/// Streams every prim of the set `root` is the root of to the client, in the
+/// order the grid being imitated sends a set in, and returns the changes the
 /// region's other sessions are owed.
-///
-/// The copy's last owner is the agent that made it, on both grids — also
-/// where the original, a prim nobody has taken, names none.
-fn copy_object(
+fn resend_set(
+    world: &SceneFixtures,
+    sim: &mut SimSession,
+    root: RegionLocalObjectId,
+    now: Instant,
+) -> Vec<RegionChange> {
+    crate::link_sets::sent_in_order(world, root)
+        .into_iter()
+        .filter_map(|prim| world.object_by_local_id(prim))
+        .map(|object| {
+            push_object(sim, &object, now);
+            RegionChange::Updated(Box::new(object))
+        })
+        .collect()
+}
+
+/// [`copy_object`] of `original` and, where it is the root of a linkset, of
+/// every prim under it: a copy of a root is a copy of its set, in the set's
+/// order.
+fn copy_set(
     world: &mut SceneFixtures,
     mint: &dyn Fn() -> uuid::Uuid,
     sim: &mut SimSession,
@@ -793,11 +816,67 @@ fn copy_object(
     at: Vector,
     duplicate_flags: u32,
     now: Instant,
+) -> Vec<RegionChange> {
+    let children: Vec<Object> = crate::link_sets::children_in_order(world, original.local_id)
+        .into_iter()
+        .filter_map(|child| world.object_by_local_id(child))
+        .collect();
+    let root = copy_object(world, mint, sim, original, at, None, duplicate_flags, now);
+    let RegionChange::Rezzed(copied) = &root else {
+        return vec![root];
+    };
+    let copied_root = copied.local_id;
+    let mut changes = vec![root];
+    let mut copied_children = Vec::with_capacity(children.len());
+    for child in &children {
+        // A child stands where its update says, in its root's frame.
+        let change = copy_object(
+            world,
+            mint,
+            sim,
+            child,
+            child.motion.position.clone(),
+            Some(copied_root),
+            duplicate_flags,
+            now,
+        );
+        if let RegionChange::Rezzed(copy) = &change {
+            copied_children.push(copy.local_id);
+        }
+        changes.push(change);
+    }
+    crate::link_sets::note_copy(world, copied_root, copied_children);
+    changes
+}
+
+/// Makes a copy of `original` standing at `at` — under `parent`, for a copy of
+/// a child prim — with its record, its contents and its creation date,
+/// streams it to the client and returns the change the region's other
+/// sessions are owed.
+///
+/// The copy's last owner is the agent that made it, on both grids — also
+/// where the original, a prim nobody has taken, names none.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the world and what mints for it, the session, and the four things a copy is made from"
+)]
+fn copy_object(
+    world: &mut SceneFixtures,
+    mint: &dyn Fn() -> uuid::Uuid,
+    sim: &mut SimSession,
+    original: &Object,
+    at: Vector,
+    parent: Option<RegionLocalObjectId>,
+    duplicate_flags: u32,
+    now: Instant,
 ) -> RegionChange {
     let mut copy = original.clone();
     copy.local_id = world.mint_local_id();
     copy.full_id = ObjectKey::from(mint());
     copy.motion.position = at;
+    if let Some(parent) = parent {
+        copy.parent_id = parent;
+    }
     let mut record = world.properties_of(original.local_id);
     if let Some(record) = record.as_mut() {
         record.object_id = copy.full_id;

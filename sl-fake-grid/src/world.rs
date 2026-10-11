@@ -59,6 +59,9 @@ pub(crate) const REAL_TIME_DILATION: u16 = 0xFFFF;
 /// `SendLandUpdateToClient` sends).
 const UNSOLICITED_SEQUENCE_ID: i32 = 0;
 
+/// The most objects one `KillObject` names: its block count is a byte.
+const MOST_KILLS_A_MESSAGE: usize = 255;
+
 /// The parcels and objects of one region, pushed at every arriving agent
 /// and replayed on request.
 #[derive(Debug, Clone, Default)]
@@ -175,6 +178,13 @@ pub struct SceneFixtures {
     /// What the region makes of an edit of an object, where the live grids
     /// disagree. Second Life's unless the grid's flavour says otherwise.
     pub(crate) edit: crate::imitates::EditPolicy,
+    /// What the region makes of a link and a delink, where the live grids
+    /// disagree. Second Life's unless the grid's flavour says otherwise.
+    pub(crate) linking: crate::imitates::LinkPolicy,
+    /// The order each linkset keeps its prims in ([`crate::link_sets`]). Not
+    /// a fixture: a set nobody has linked or delinked is in the order its
+    /// prims were stated.
+    pub(crate) links: crate::link_sets::LinkSets,
     /// The region's terrain textures and blend heights as an estate manager has
     /// changed them, or [`None`] while they are still the identity's.
     ///
@@ -607,6 +617,8 @@ impl SceneFixtures {
             properties: crate::imitates::PropertiesPolicy::default(),
             rez: crate::imitates::RezPolicy::default(),
             edit: crate::imitates::EditPolicy::default(),
+            linking: crate::imitates::LinkPolicy::default(),
+            links: crate::link_sets::LinkSets::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
         }
@@ -802,6 +814,7 @@ impl SceneFixtures {
             .position(|object| object.local_id == local_id)?;
         let _contents = self.task_inventories.remove(&local_id);
         let _history = self.undo.remove(&local_id);
+        self.links.forget(local_id);
         Some(self.objects.remove(index))
     }
 
@@ -3158,11 +3171,9 @@ fn derez(
         };
         let mut linkset = vec![object];
         linkset.extend(
-            world
-                .objects
-                .iter()
-                .filter(|child| child.parent_id == *local_id)
-                .cloned(),
+            crate::link_sets::children_in_order(world, *local_id)
+                .into_iter()
+                .filter_map(|child| world.object_by_local_id(child)),
         );
         handled.extend(linkset.iter().map(|member| member.local_id));
         // Each prim with its record as the region holds it, so that
@@ -3269,8 +3280,12 @@ fn derez(
     };
     if !killed.is_empty() {
         for _message in 0..kill_messages {
-            if let Err(error) = sim.send_kill_object(&killed, now) {
-                tracing::warn!("killing a derezzed object failed: {error}");
+            // A message's block count is one byte: a linkset of 256 prims
+            // and a root beside it are more than one `KillObject` holds.
+            for named in killed.chunks(MOST_KILLS_A_MESSAGE) {
+                if let Err(error) = sim.send_kill_object(named, now) {
+                    tracing::warn!("killing a derezzed object failed: {error}");
+                }
             }
         }
     }

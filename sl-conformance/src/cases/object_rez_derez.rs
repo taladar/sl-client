@@ -455,6 +455,8 @@ pub(crate) struct Heard {
     /// Objects sent anew down another circuit than the agent's own: a
     /// neighbouring region's.
     pub(crate) elsewhere: Vec<Object>,
+    /// Every line of chat: who said it, and what.
+    pub(crate) chats: Vec<(String, String)>,
 }
 
 impl Heard {
@@ -673,12 +675,20 @@ pub(crate) async fn listen(
                         message,
                         alert_info,
                         ..
-                    } => heard.alerts.push(alert_info.first().map_or_else(
-                        || message.clone(),
-                        |info| format!("{message} [{}]", info.message),
-                    )),
+                    } => {
+                        tracing::debug!(message, ?alert_info, "an alert came");
+                        heard.alerts.push(alert_info.first().map_or_else(
+                            || message.clone(),
+                            |info| format!("{message} [{}]", info.message),
+                        ));
+                    }
                     Event::AgentAlertMessage { message, .. } => {
                         heard.alerts.push(message.clone());
+                    }
+                    Event::ChatReceived(chat) => {
+                        heard
+                            .chats
+                            .push((chat.from_name.clone(), chat.message.clone()));
                     }
                     Event::InstantMessageReceived(message) => {
                         heard.first_message_after.get_or_insert(since);

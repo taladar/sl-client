@@ -35,3 +35,12 @@ box-selecting a build reaches them.
   one bad request should not be the end of a login.
 - The encoder's error text should say blocks, not bytes, when it is counting
   blocks.
+
+## Also on the simulator's side (2026-10-11)
+
+`SimSession::send_kill_object` fails the same way with more than 255 ids:
+the fake grid's Second-Life flavour names every prim of a derezzed linkset
+in one `KillObject`, and a set of 256 prims derezzed beside another object
+was never killed on the client (found by `object-link-delink`). The fake
+grid splits the list itself now (`MOST_KILLS_A_MESSAGE` in `world.rs`); the
+senders in `sim_session.rs` that take a caller's list still do not.

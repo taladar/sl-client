@@ -1261,52 +1261,65 @@ region's own lock:
   messages, which is the thing to keep straight: the `Object` itself (its
   motion, scale, material, click action and `PrimFlags`) goes out in an
   `ObjectUpdate` and reaches the whole region, while its `ObjectProperties`
-  (name, description, category, sale state, permissions, owner, group) go
-  out in a message of their own, in answer to a select and to an edit. An
+  (name, description, category, sale state, permissions, owner, group) go out in
+  a message of their own, in answer to a select and to an edit. An
   `ObjectUpdate` carries none of those fields, so a client that renames an
-  object learns the rename took only from
-  `SimSession::send_object_properties` — on a Second-Life-flavoured grid;
-  an OpenSim-flavoured one answers a price or a permission and not a
-  rename, as measured (`PropertiesPolicy`,
-  [Objects § Properties](../gridspec/objects.md#properties)). A select is
-  also answered with the object's physics record over the event queue, and
-  per flavour with the object again (OpenSim, for somebody else's) or, on a
+  object learns the rename took only from `SimSession::send_object_properties` —
+  on a Second-Life-flavoured grid; an OpenSim-flavoured one answers a price or a
+  permission and not a rename, as measured (`PropertiesPolicy`,
+  [Objects § Properties](../gridspec/objects.md#properties)). A select is also
+  answered with the object's physics record over the event queue, and per
+  flavour with the object again (OpenSim, for somebody else's) or, on a
   deselect, a terse update of it (Second Life).
 
-  Linking is not only a parent id: a child's placement is stated in its
-  root's frame, so a link restates it and a delink puts it back. Undo and
-  redo are the *simulator's* — the messages name objects and nothing else,
-  and address them by full id rather than by the region-local id the rest of
-  the family uses — so each object carries a short history of how it was
-  placed before each move, turn and resize (`EditHistory`), and of nothing
-  else: neither live grid steps back out of a rename or a material. How many
-  it keeps is its flavour's, twenty or five.
+  Linking is not only a parent id: a child's placement is stated in its root's
+  frame, so a link restates it and a delink puts it back. And a linkset has an
+  **order** — its link numbers — which no message states and which decides the
+  order its prims are sent in and which of them becomes the root when the root
+  is delinked alone. The region keeps it beside the objects (`link_sets`), and
+  what a link and a delink make of it is the flavour's (`LinkPolicy`,
+  [Building § Linking](../gridspec/building.md#linking)): Second Life numbers
+  the prims a link brings from 2 on and promotes number 2; OpenSim numbers them
+  last and promotes the first of a dictionary of parts, whose slots the region
+  keeps as well (`link_sets::Parts`). A link that names a child brings its whole
+  set, a duplicate of a root copies its set, and every prim of a set a link or a
+  delink changed is sent again. The Second-Life flavour refuses, whole and with
+  Second Life's alerts, a link of prims more than 64 m apart, one that would
+  make a set of more than 256, and one of a prim whose owner mask lacks modify;
+  and it refuses to make a set of more than 32 prims physical. A script cannot
+  read a link number yet (`server-world-link-sets`).
 
-  What a grid makes of an edit it does not take as sent is the flavour's
-  too (`EditPolicy`, [Building § Editing](../gridspec/building.md#editing)):
-  the limits a prim's side is kept within, what becomes of a name that is
-  not ASCII, which bits of which mask an owner may change, whether a click
-  action is answered, and what becomes of an object moved under the ground,
-  off the region's edge or above the ceiling — which on a
-  Second-Life-flavoured grid is a return to its owner's Lost And Found. A
-  duplicate copies an object with its record and its contents, by an offset
-  or onto a ray's target; the grid casts no ray. With no groups in it, a
-  group set does nothing and a deed is refused.
+  Undo and redo are the *simulator's* — the messages name objects and nothing
+  else, and address them by full id rather than by the region-local id the rest
+  of the family uses — so each object carries a short history of how it was
+  placed before each move, turn and resize (`EditHistory`), and of nothing else:
+  neither live grid steps back out of a rename or a material. How many it keeps
+  is its flavour's, twenty or five.
 
-  Part of an `ObjectUpdate` is **per viewer**: the `PrimFlags` that say what
-  the receiving agent may do with the object (`OBJECT_MODIFY`, `_MOVE`,
-  `_COPY`, `_TRANSFER`, `_YOU_OWNER`, `_ANY_OWNER`, `_OWNER_MODIFY`), which a
-  viewer greys its edit controls and pie slices by. They are never stored on
-  the object: every update leaves the grid through `world::send_objects`,
-  which works them out for that session's agent (`as_seen_by`, OpenSim's
-  `GenerateClientFlags`) from the object's owner and masks. The owner gets
-  what the owner mask grants; anyone else what the everyone mask grants.
-  Group sharing is not modelled. A prim nobody has changed carries OpenSim's
-  new-prim masks — everything to the owner, nothing to anyone else — so a
-  prim one viewer rezzes is editable there and nowhere else, and a
-  permissions edit re-sends the object so each viewer's flags follow. Until
-  2026-09-30 the flags were whatever the rez sent (none), so on the fake grid
-  no viewer, the owner included, could edit anything.
+  What a grid makes of an edit it does not take as sent is the flavour's too
+  (`EditPolicy`, [Building § Editing](../gridspec/building.md#editing)): the
+  limits a prim's side is kept within, what becomes of a name that is not ASCII,
+  which bits of which mask an owner may change, whether a click action is
+  answered, and what becomes of an object moved under the ground, off the
+  region's edge or above the ceiling — which on a Second-Life-flavoured grid is
+  a return to its owner's Lost And Found. A duplicate copies an object with its
+  record and its contents, by an offset or onto a ray's target; the grid casts
+  no ray. With no groups in it, a group set does nothing and a deed is refused.
+
+  Part of an `ObjectUpdate` is **per viewer**: the `PrimFlags` that say what the
+  receiving agent may do with the object (`OBJECT_MODIFY`, `_MOVE`, `_COPY`,
+  `_TRANSFER`, `_YOU_OWNER`, `_ANY_OWNER`, `_OWNER_MODIFY`), which a viewer
+  greys its edit controls and pie slices by. They are never stored on the
+  object: every update leaves the grid through `world::send_objects`, which
+  works them out for that session's agent (`as_seen_by`, OpenSim's
+  `GenerateClientFlags`) from the object's owner and masks. The owner gets what
+  the owner mask grants; anyone else what the everyone mask grants. Group
+  sharing is not modelled. A prim nobody has changed carries OpenSim's new-prim
+  masks — everything to the owner, nothing to anyone else — so a prim one viewer
+  rezzes is editable there and nowhere else, and a permissions edit re-sends the
+  object so each viewer's flags follow. Until 2026-09-30 the flags were whatever
+  the rez sent (none), so on the fake grid no viewer, the owner included, could
+  edit anything.
 
 - **`parcel_edits.rs`** — About Land, and the land a client buys, deeds,
   abandons and reclaims. A parcel has **one** record and a
@@ -1402,8 +1415,10 @@ finding is that nothing arbitrates.
 Offline conformance: `object-edit` (what each edit is answered with, the
 sizes, names, masks and places a grid does not take, the undo stack and a
 duplicate, held to what both live grids were measured to answer),
-`object-link-delink`, `object-properties` and `object-select-scene` (what a
-select answers and who is told of a change), `parcel-edit` (the About Land
+`object-link-delink` (what a link and a delink are answered with, the order
+a set is kept in and the links a grid refuses, held likewise),
+`object-properties` and `object-select-scene` (what a select answers and who
+is told of a change), `parcel-edit` (the About Land
 form and the ban list, each refetched and restored), `region-info`,
 `estate-info`, `estate-access`, and `asset-round-trip` (every seeded
 inventory class fetched, every savable one saved and re-fetched, plus a prim
