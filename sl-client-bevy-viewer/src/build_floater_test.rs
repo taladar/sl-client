@@ -206,6 +206,90 @@ mod tests {
     // Addressing the window's controls
     // ------------------------------------------------------------------
 
+    /// The Trash the login skeleton would have delivered, merged into the
+    /// inventory model: what a Delete of the selection names. Returns its id.
+    fn seed_a_trash(app: &mut App) -> sl_client_bevy::InventoryFolderKey {
+        let trash = sl_client_bevy::InventoryFolderKey::from(Uuid::from_u128(0x77_A54));
+        app.world_mut()
+            .resource_mut::<crate::inventory::InventoryModel>()
+            .merge_folders(
+                &[sl_client_bevy::FolderInfo {
+                    folder_id: trash,
+                    parent_id: None,
+                    name: "Trash".to_owned(),
+                    folder_type: sl_client_bevy::FolderType::Trash,
+                    version: 1,
+                    state: sl_client_bevy::FolderState::Unknown,
+                }],
+                false,
+            );
+        trash
+    }
+
+    /// The objects each `DerezObjects` since the last drain named, with where
+    /// it sent them.
+    fn derezzes(app: &mut App) -> Vec<(Vec<ScopedObjectId>, sl_client_bevy::DeRezDestination)> {
+        drain_commands(app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::DerezObjects {
+                    local_ids,
+                    destination,
+                    ..
+                } => Some((local_ids, destination)),
+                _other => None,
+            })
+            .collect()
+    }
+
+    /// **Delete sends the selection to the Trash, once there is one**: with
+    /// the build tool on and the world holding the keyboard, the key derezzes
+    /// what is selected — and before the inventory has delivered a Trash it
+    /// derezzes nothing, into nowhere.
+    ///
+    /// No control of the window takes the keyboard from the world for this: a
+    /// click on a tab, a tool or a checkbox leaves it where it was, so a
+    /// Delete after one is still the selection's.
+    #[test]
+    fn delete_sends_the_selection_to_the_trash_once_there_is_one() -> Result<(), TestError> {
+        let mut app = build_tools_app()?;
+        let (scoped, _at) = select_a_fixture_prim(&mut app)?;
+
+        // A click on a control of the window, as a resident makes between
+        // selecting a prim and deleting it.
+        in_app::click(&mut app, &Locator::test_id("build-toggle-snap:checkbox"))?;
+        settle(&mut app, 3);
+        assert!(
+            app.world().resource::<SelectionSet>().is_selected(scoped),
+            "a click on a checkbox of the window keeps the selection"
+        );
+        assert_eq!(
+            *app.world().resource::<crate::world_api::InputContext>(),
+            crate::world_api::InputContext::World,
+            "and leaves the keyboard with the world"
+        );
+
+        // No Trash yet: nothing goes anywhere.
+        let _settling = drain_commands(&mut app);
+        interact::tap(&mut app, KeyCode::Delete, Key::Delete);
+        settle(&mut app, 2);
+        assert_eq!(
+            derezzes(&mut app),
+            Vec::new(),
+            "a Delete before the inventory has a Trash derezzes nothing"
+        );
+
+        let trash = seed_a_trash(&mut app);
+        interact::tap(&mut app, KeyCode::Delete, Key::Delete);
+        settle(&mut app, 2);
+        assert_eq!(
+            derezzes(&mut app),
+            vec![(vec![scoped], sl_client_bevy::DeRezDestination::Trash(trash))],
+            "Delete sends the selection to the Trash"
+        );
+        Ok(())
+    }
+
     /// The node name of one transform field: `group` is `pos` / `rot` / `size`,
     /// `axis` is `x` / `y` / `z`.
     fn transform_field(group: &str, axis: &str) -> String {

@@ -79,8 +79,33 @@ Left open: [[viewer-camera-framing-ends-inside-the-framed-object]]'s own
 observation — a glide *through* a cube on the way to a framing, on aditi —
 is not this and was not looked at; a right click whose refining ray
 misses still opens nothing in the viewer, where it could open the object's
-pie without a surface; and the Delete key's two silent conditions are the
-viewer's, not only a test's, to say something about.
+pie without a surface.
+
+## The Delete key, looked at again (2026-10-11)
+
+What left the link test's prim standing on aditi was not found. Three
+replays on aditi of what that run did deleted their prims by the key, on
+both backends each: the sweep's sequence on a prim of the same session; the
+same on a prim an earlier session had left, seconds after login; and the
+link test's own end — two prims, one a hundred metres up, a refused link,
+`Escape`, `Delete`. The same passed on the fake grid and on OpenSim.
+
+What was established: no control of the Build window takes the keyboard
+from the world — a click on a tab, a tool's radio button or a checkbox
+leaves the input context `World` — so "the world has the keyboard" was not
+what failed after such a click, as first supposed. That leaves the Trash
+not yet known to the inventory model (a sweep runs seconds after login),
+or the selection having been cleared by an `Escape` the world took rather
+than a toast, neither of which the failing run's log could tell apart,
+because the handler returned without a word in every case.
+
+It no longer does: `delete_selected_objects` says at debug why a press was
+not the selection's (the tool off, the UI holding the keyboard, nothing
+selected) and warns when it was and no Trash is known, as the object pie's
+Delete already did. A headless test holds the key to: a click on a
+checkbox of the window leaves the keyboard with the world, a Delete with
+no Trash derezzes nothing, and one with a Trash sends the selection there.
+The tests keep deleting by the pie.
 
 ## As filed
 

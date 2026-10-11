@@ -1290,9 +1290,10 @@ mod test {
 
         // Each goes by its own pie — the first takes the second with it
         // where they are one linkset now. The Delete key would do for both
-        // at once, but only while the world has the keyboard and the
-        // inventory has shown the viewer a Trash, and says nothing when
-        // either is not so.
+        // at once, but only while they are still selected, the world has
+        // the keyboard and the inventory has shown the viewer a Trash — and
+        // an Escape pressed first to be sure of the second undoes the
+        // first.
         for id in [near, far] {
             let this = prim(id).timeout(SETTLE);
             if this.count().await? == 0 {

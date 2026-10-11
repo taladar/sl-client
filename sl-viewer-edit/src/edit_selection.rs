@@ -884,6 +884,11 @@ fn clear_selection_on_escape(
 /// selection instead — the three delete handlers never fight over the key. Each
 /// selected part is resolved to its linkset **root** and deduplicated, matching
 /// the object pie's Delete; the simulator arbitrates the permission.
+///
+/// A press that deletes nothing says why in the log — at debug where the key
+/// was simply not the selection's, and as a warning where it was and there is
+/// no Trash to send anything to yet. It used to return without a word either
+/// way, which left a prim that "would not delete" with nothing to read.
 fn delete_selected_objects(
     tool: Res<EditToolState>,
     context: Res<InputContext>,
@@ -893,13 +898,32 @@ fn delete_selected_objects(
     inventory: Res<InventoryModel>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    if !tool.active || !context.is_world() || selection.is_empty() {
-        return;
-    }
     if !keyboard.just_pressed(KeyCode::Delete) {
         return;
     }
+    if !tool.active {
+        debug!("build-tools: Delete with the build tool off; not the selection's");
+        return;
+    }
+    if !context.is_world() {
+        debug!(
+            context = ?*context,
+            "build-tools: Delete while the UI has the keyboard; not the selection's"
+        );
+        return;
+    }
+    if selection.is_empty() {
+        debug!("build-tools: Delete with nothing selected");
+        return;
+    }
+    // A delete goes to the Trash, and the Trash comes with the inventory's
+    // skeleton: in the moments after a login there is none to name.
     let Some(trash) = inventory.folder_by_type(FolderType::Trash) else {
+        warn!(
+            "build-tools: Delete with {} object(s) selected and no Trash folder known yet; \
+             nothing was deleted",
+            selection.iter().count()
+        );
         return;
     };
     // The selected parts resolved to their linkset roots, deduplicated (derez
