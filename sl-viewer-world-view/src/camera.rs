@@ -467,6 +467,7 @@ impl Plugin for CameraPlugin {
                     aim_look.run_if(resource_equals(CameraMode::Mouselook)),
                     focus_on_object,
                     frame_object,
+                    log_focus_changes.after(frame_object).after(focus_on_object),
                     // The flycam writes the camera `Transform` itself rather
                     // than through `position_camera`, so it needs the same
                     // stand-aside while a 360 capture owns the pose.
@@ -997,10 +998,68 @@ fn framing_distance(radius: f32, vertical_fov: f32, aspect: f32) -> f32 {
     (2.0 * radius * FRAME_PADDING) / view.max(FRAME_MIN_VIEW).atan()
 }
 
+/// Say at debug what the camera orbits and in which mode, whenever either
+/// changes: a framing that does not hold was lost to one of the two, and
+/// nothing else in the log says which.
+pub(crate) fn log_focus_changes(
+    focus: Res<FocusTarget>,
+    mode: Res<CameraMode>,
+    mut last: Local<Option<String>>,
+) {
+    if !focus.is_changed() && !mode.is_changed() {
+        return;
+    }
+    let now = format!("{:?} in {:?}", *focus, *mode);
+    if last.as_deref() != Some(now.as_str()) {
+        debug!("camera: the focus is {now}");
+        *last = Some(now);
+    }
+}
+
+/// How many radii of a framed sphere camera collision may leave clear
+/// around its centre. The sphere itself always is; out to twice it,
+/// something that stands right at the edge of what is clear already is
+/// taken for part of the picture and not for a wall in front of it. Seen on
+/// a live grid: a prim rezzed a hand's width from where one had just been
+/// framed stopped the camera at the framed sphere's surface — inside the
+/// new prim, from where a click on it finds only the backs of its faces.
+/// A wall that stands clear of the sphere stops the camera as it always
+/// did.
+const FRAMED_CLEAR_RADII: f32 = 2.0;
+
+/// How far above level a framing looks down from at the least, as the
+/// vertical part of the unit vector from the centre to the eye: about 15°.
+const FRAMING_MIN_RISE: f32 = 0.26;
+
+/// The side a framing looks from: the unit vector from `center` towards
+/// `eye`, lifted so that the eye never stands below [`FRAMING_MIN_RISE`]
+/// above the centre's own level. `back` is the camera's own backward
+/// direction, for an eye that sits at the centre.
+///
+/// A framing from wherever the camera happens to be can be a framing from
+/// under the ground, which stops no camera. Seen on a live grid: the camera
+/// framed a point of the ground, a prim was rezzed on that point, and the
+/// collision with the prim brought the eye down onto the point — so that
+/// the framing of the prim that followed looked up at it from 1.6 m
+/// straight below, from under the ground and the water.
+fn framing_side(eye: Vec3, center: Vec3, back: Vec3) -> Vec3 {
+    let away = vsub(eye, center).try_normalize().unwrap_or(back);
+    if away.y >= FRAMING_MIN_RISE {
+        return away;
+    }
+    let level = Vec3::new(away.x, 0.0, away.z)
+        .try_normalize()
+        .or_else(|| Vec3::new(back.x, 0.0, back.z).try_normalize())
+        .unwrap_or(Vec3::X);
+    let along = FRAMING_MIN_RISE.mul_add(-FRAMING_MIN_RISE, 1.0).sqrt();
+    vadd(vscale(level, along), vscale(Vec3::Y, FRAMING_MIN_RISE))
+}
+
 /// **Frame an object** on a [`FrameObject`] request: focus the camera on its
-/// centre from the side the camera is on, at [`framing_distance`], in third
-/// person. The eye then glides there like any focus change, and camera
-/// collision pulls it in front of anything between that side and the object.
+/// centre from the side the camera is on — never from below it
+/// ([`framing_side`]) — at [`framing_distance`], in third person. The eye
+/// then glides there like any focus change, and camera collision pulls it in
+/// front of anything between that side and the framed sphere.
 pub(crate) fn frame_object(
     mut requests: MessageReader<FrameObject>,
     mut mode: ResMut<CameraMode>,
@@ -1020,19 +1079,24 @@ pub(crate) fn frame_object(
     };
     let distance = framing_distance(request.radius, fov, aspect);
     let eye = camera_transform.translation();
-    // From the side the camera is already on; a camera sitting at the centre
-    // backs out along its own view.
-    let away = vsub(eye, request.center)
-        .try_normalize()
-        .unwrap_or_else(|| camera_transform.back().as_vec3());
+    // From the side the camera is already on, and from above; a camera
+    // sitting at the centre backs out along its own view.
+    let away = framing_side(eye, request.center, camera_transform.back().as_vec3());
     rig.set_point_offset(vscale(away, distance));
     *focus = FocusTarget::Point(request.center);
     framed.center = request.center;
+    framed.radius = request.radius;
     framed.entities = request.passes_through;
     if *mode != CameraMode::ThirdPerson {
         *mode = CameraMode::ThirdPerson;
     }
     info!("camera: framing {:?} from {distance:.2} m", request.center);
+    debug!(
+        ?eye,
+        ?away,
+        seeded = rig.seeded,
+        "camera: the framing looks from the side the eye was on"
+    );
 }
 
 /// Mouselook aim from the (captured) mouse: raw motion aims the first-person view,
@@ -1375,6 +1439,11 @@ pub(crate) struct CameraColliders<'w> {
 pub(crate) struct FramedObject {
     /// The focus point the framing set.
     center: Vec3,
+    /// The radius of the sphere that was framed, metres. Nothing inside it
+    /// stops the camera: what is framed is what is in there — the object's
+    /// own prims, or whatever stands on a framed point of the ground, a prim
+    /// rezzed on it a moment later included.
+    radius: f32,
     /// The framed object's prims.
     entities: Vec<Entity>,
 }
@@ -1556,10 +1625,19 @@ pub(crate) fn position_camera(
                     (None, FocusTarget::Point(point)) if point == colliders.framed.center
                 );
                 let mut ignored = own_avatar_entities;
+                let mut clear = 0.0;
                 if framed {
                     ignored.extend(colliders.framed.entities.iter().copied());
+                    clear = colliders.framed.radius;
                 }
-                eye = collide_camera(&colliders.index, &colliders.dynamic, focus, eye, &ignored);
+                eye = collide_camera(
+                    &colliders.index,
+                    &colliders.dynamic,
+                    focus,
+                    eye,
+                    clear,
+                    &ignored,
+                );
             }
             // `&transform` reads through the `Mut` without marking it; the write
             // below is the only mutable deref, so a settled camera stays
@@ -1733,11 +1811,17 @@ fn apply_pose(
 /// included (they are visually solid); the query uses all collision layers. The
 /// one thing with no collider is an **avatar**, so the camera never pulls in for
 /// another avatar walking behind you (the reference behaviour).
+///
+/// Nothing within `clear` metres of the focus stops the camera: a framed
+/// sphere holds what is being looked at, and a surface in it that the focus
+/// sits on — a prim rezzed on a framed point of the ground — would bring the
+/// eye all the way in.
 fn collide_camera(
     index: &StaticRaycastIndex,
     dynamic: &DynamicColliders,
     focus: Vec3,
     eye: Vec3,
+    clear: f32,
     ignore: &std::collections::HashSet<Entity>,
 ) -> Vec3 {
     let offset = vsub(eye, focus);
@@ -1770,18 +1854,38 @@ fn collide_camera(
     // own avatar's entities are excluded so a nearby own-attachment collider does
     // not pull the camera into the head; other avatars carry no collider.
     let ray = direction.as_vec3();
-    let static_hit = index.cast_ray(focus, ray, distance, false, false, ignore);
-    let dynamic_hit = dynamic.cast_ray(focus, ray, distance, false, false, ignore);
-    // Nearest of the static-index and moving-collider hits.
-    let hit_distance = match (static_hit, dynamic_hit) {
-        (Some(a), Some(b)) => a.min(b),
-        (hit, None) | (None, hit) => match hit {
-            Some(distance) => distance,
-            None => return eye,
-        },
-    };
-    let pulled = (hit_distance - COLLISION_PADDING).max(0.0);
-    vadd(focus, vscale(ray, pulled))
+    // What stands right at the surface of the sphere left clear is touching
+    // what is framed, not standing in front of it: the cast starts over from
+    // further out, as far as [`FRAMED_CLEAR_RADII`] radii, rather than stop
+    // the eye there — inside the thing that touches.
+    let limit = (clear * FRAMED_CLEAR_RADII).clamp(0.0, distance);
+    let mut clear = clear.clamp(0.0, distance);
+    loop {
+        let from = vadd(focus, vscale(ray, clear));
+        let reach = distance - clear;
+        let static_hit = index.cast_ray(from, ray, reach, false, false, ignore);
+        let dynamic_hit = dynamic.cast_ray(from, ray, reach, false, false, ignore);
+        // Nearest of the static-index and moving-collider hits.
+        let hit_distance = match (static_hit, dynamic_hit) {
+            (Some(a), Some(b)) => a.min(b),
+            (hit, None) | (None, hit) => match hit {
+                Some(distance) => distance,
+                None => return eye,
+            },
+        };
+        if hit_distance < COLLISION_PADDING && clear < limit {
+            trace!(
+                hit_distance,
+                clear, "camera: what obstructs a framed view touches what is framed"
+            );
+            clear = (clear + (limit - clear).max(COLLISION_PADDING) * 0.5).min(limit);
+            continue;
+        }
+        // The padding steps back from the obstruction, and never into the
+        // stretch that was left clear.
+        let pulled = (clear + hit_distance - COLLISION_PADDING).max(clear);
+        return vadd(focus, vscale(ray, pulled));
+    }
 }
 
 /// The own avatar's Bevy world position (its body-root anchor) and **stable**
@@ -2119,6 +2223,96 @@ mod tests {
             "a wide window's horizontal view is the wider angle"
         );
         assert!(framing_distance(0.5, 0.0, 1.0).is_finite());
+    }
+
+    /// A framing keeps the side the camera is on and never looks up at its
+    /// target: an eye below the target's level is lifted to look down on it,
+    /// and an eye already above is left where it is.
+    #[test]
+    fn a_framing_never_looks_up_from_below() {
+        use super::{FRAMING_MIN_RISE, framing_side};
+
+        // The cube a live test framed, and the eye the collision with it had
+        // left a quarter of a metre under its centre.
+        let center = Vec3::new(130.858, 21.25, -119.888);
+        let eye = Vec3::new(130.832, 21.017, -119.980);
+        let side = framing_side(eye, center, Vec3::Z);
+        assert!(
+            (side.length() - 1.0).abs() < 1.0e-5,
+            "a unit vector: {side:?}"
+        );
+        assert!(
+            (side.y - FRAMING_MIN_RISE).abs() < 1.0e-5,
+            "lifted to look down: {side:?}"
+        );
+        let level = Vec3::new(eye.x - center.x, 0.0, eye.z - center.z).normalize();
+        assert!(
+            Vec3::new(side.x, 0.0, side.z)
+                .normalize()
+                .abs_diff_eq(level, 1.0e-4),
+            "on the side the camera was: {side:?}"
+        );
+
+        let above = Vec3::new(134.0, 26.0, -120.0);
+        assert!(
+            framing_side(above, center, Vec3::Z).abs_diff_eq((above - center).normalize(), 1.0e-6),
+            "an eye above its target is where the framing looks from"
+        );
+
+        // Straight below, and at the centre itself: out along the camera's
+        // own back, levelled.
+        let below = framing_side(center - Vec3::Y, center, Vec3::Z);
+        assert!(below.y > 0.0 && below.z > 0.9, "{below:?}");
+        let at = framing_side(center, center, Vec3::new(0.0, -1.0, 0.0));
+        assert!(at.y > 0.0 && at.is_finite(), "{at:?}");
+    }
+
+    /// Camera collision leaves a framed sphere clear: a collider the focus
+    /// sits on does not bring the eye in, one outside the sphere stops it
+    /// short of itself, and one right at the sphere's surface leaves the eye
+    /// on that surface rather than inside it.
+    #[test]
+    fn collision_leaves_the_framed_sphere_clear() {
+        use super::{COLLISION_PADDING, collide_camera};
+        use sl_viewer_kit::raycast_index::{DynamicColliders, StaticRaycastIndex};
+
+        let focus = Vec3::new(10.0, 21.0, -10.0);
+        let eye = focus + Vec3::X * 7.0;
+        let cube = |at: Vec3, half: f32| {
+            let mut colliders = DynamicColliders::default();
+            colliders.push(
+                bevy::prelude::Entity::PLACEHOLDER,
+                parry3d::shape::SharedShape::cuboid(half, half, half),
+                at,
+                bevy::math::Quat::IDENTITY,
+                true,
+            );
+            colliders
+        };
+        let index = StaticRaycastIndex::default();
+        let nothing = std::collections::HashSet::new();
+
+        // A half-metre cube standing on the focus: with nothing left clear
+        // it brings the eye all the way in, and a clear two metres pass it.
+        let on_the_focus = cube(focus + Vec3::Y * 0.25, 0.25);
+        let slammed = collide_camera(&index, &on_the_focus, focus, eye, 0.0, &nothing);
+        assert!(slammed.distance(focus) < 0.3, "{slammed:?}");
+        let passed = collide_camera(&index, &on_the_focus, focus, eye, 2.0, &nothing);
+        assert!(passed.abs_diff_eq(eye, 1.0e-5), "{passed:?}");
+
+        // A wall four metres out stops the eye short of itself either way.
+        let wall = cube(focus + Vec3::X * 4.5, 0.5);
+        let stopped = collide_camera(&index, &wall, focus, eye, 2.0, &nothing);
+        assert!(
+            (stopped.distance(focus) - (4.0 - COLLISION_PADDING)).abs() < 1.0e-4,
+            "{stopped:?}"
+        );
+
+        // One that touches the sphere, and ends within twice it: part of
+        // what is framed, and the eye passes it.
+        let touching = cube(focus + Vec3::X * 2.55, 0.5);
+        let past = collide_camera(&index, &touching, focus, eye, 2.0, &nothing);
+        assert!(past.abs_diff_eq(eye, 1.0e-5), "{past:?}");
     }
 
     /// The mouselook aim deltas scale linearly with the sensitivity, and the

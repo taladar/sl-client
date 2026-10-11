@@ -44,6 +44,16 @@ The aim now waits out an eye inside its target after a reveal
 (`world_aim.rs`, `eye_inside`), so this costs time rather than a failure. The
 camera should not do it at all.
 
+## Related, fixed (2026-10-11)
+
+[[test-e2e-objects-live-opensim-intermittent]] found two ways the camera *ended*
+inside a prim, neither of them a glide: collision with a prim rezzed on or
+beside a framed point stopped the eye at that point, and the framing after it
+looked from wherever that had left the eye. Collision now leaves the framed
+sphere clear, passes what touches it, and a framing never looks from below its
+target. The glide seen here, into a cube and out again, is still to be
+explained.
+
 ## What to do
 
 - On aditi, log the camera's target eye, eased eye, focus and mode every

@@ -68,9 +68,9 @@ Measured and written up in `book/src/gridspec/building.md` § Linking.
   the grid's refusal is shown in its own words — `LinkFailed` has no
   template in any viewer — and both prims are drawn free; on OpenSim one
   is drawn hanging off the other. It passes on both fake flavours, on
-  aditi and on the live OpenSim, where one run in four met the known
-  first-placement failure
-  ([[test-e2e-objects-live-opensim-intermittent]]). No gap in the viewer's
+  aditi and on the live OpenSim (the failures it met there at first were
+  the harness's, since fixed:
+  [[test-e2e-objects-live-opensim-intermittent]]). No gap in the viewer's
   linking was found.
 - **Not done here.** A script on the fake grid cannot read a link number:
   the order is kept, the `llGetLink*` family over it is

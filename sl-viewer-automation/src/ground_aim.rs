@@ -25,8 +25,8 @@ use sl_viewer_world_api::{
 
 use crate::pursuit::{DEFAULT_DEADLINE, DEFAULT_DEADLINE_FRAMES, PursuitError};
 use crate::world_aim::{
-    AimStage, CameraStill, REVEAL_SETTLE_FRAMES, WorldIntent, full_id_of, gesture, reach_the_world,
-    view,
+    AimStage, CameraStill, REVEAL_AGAIN_FRAMES, REVEAL_SETTLE_FRAMES, WorldIntent, full_id_of,
+    gesture, reach_the_world, view,
 };
 
 /// The radius of the sphere a reveal frames around the point, metres: the
@@ -137,6 +137,8 @@ pub struct GroundAim {
     probing: Option<Probing>,
     /// Whether the camera has framed the point already.
     revealed: bool,
+    /// The poll from which the camera may be asked to frame the point again.
+    reveal_again_from: u32,
     /// No pose is judged before this poll.
     settle_from: u32,
 }
@@ -156,6 +158,7 @@ impl GroundAim {
             still: CameraStill::default(),
             probing: None,
             revealed: false,
+            reveal_again_from: 0,
             settle_from: 0,
         }
     }
@@ -342,7 +345,19 @@ impl GroundAim {
         check: ActionabilityCheck,
         covered_by: Option<Uuid>,
     ) -> Result<GroundProgress, PursuitError> {
-        if self.reveal && !self.revealed && world.contains_resource::<Messages<FrameObject>>() {
+        if self.reveal
+            && (!self.revealed || self.frames >= self.reveal_again_from)
+            && world.contains_resource::<Messages<FrameObject>>()
+        {
+            if self.revealed {
+                // The framing did not hold, or was not enough: see
+                // `REVEAL_AGAIN_FRAMES`.
+                debug!(
+                    ?check,
+                    "ground aim: the camera settled and no click reaches the point; framing it \
+                     again"
+                );
+            }
             world.write_message(FrameObject {
                 center: located.point,
                 radius: FRAME_RADIUS,
@@ -350,6 +365,7 @@ impl GroundAim {
             });
             self.revealed = true;
             self.settle_from = self.frames.saturating_add(REVEAL_SETTLE_FRAMES);
+            self.reveal_again_from = self.frames.saturating_add(REVEAL_AGAIN_FRAMES);
             self.still.reset();
             return Ok(GroundProgress::Waiting(AimStage::Revealing(check)));
         }

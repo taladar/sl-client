@@ -100,8 +100,9 @@ nothing runs while none are queued.
   `select`, `shift_select`, `place` (rez with the Create tool), `drop_from`
   (a drag from a UI node). An aim point is a projected point the viewer's own
   pick resolver confirms lands on the target; a target nothing reaches is
-  framed by the camera once ("reveal") and looked at again until the
-  deadline.
+  framed by the camera ("reveal") and looked at again until the deadline,
+  and framed again where the camera has settled and still no click reaches
+  it. `open_pie` ends when a pie is open, not when the click is played.
 - **Ground actions** — the same gestures (but no select) on a point of the
   ground: `viewer.world().ground("Next Door", 20.0, 128.0).double_click()`.
   Bare ground has no id, so it is addressed by a region's name and a

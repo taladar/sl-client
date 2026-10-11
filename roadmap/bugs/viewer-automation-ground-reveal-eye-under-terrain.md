@@ -40,6 +40,13 @@ A test that aims at ground has to know the terrain round the point to pick
 one that works, which is what the ground action exists to spare it, and
 live ground is seldom flat.
 
+## Related, fixed (2026-10-11)
+
+A framing no longer looks from below its target's level
+(`camera::framing_side`, from [[test-e2e-objects-live-opensim-intermittent]]),
+which is one way an eye got under the ground. It is not this one: here the
+eye is above the point and under a rise beside it.
+
 ## What to do
 
 Have the reveal lift the eye clear of the terrain under it — the height of

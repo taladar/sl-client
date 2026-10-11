@@ -50,6 +50,16 @@ const STABLE_FRAMES: u32 = 2;
 /// moving yet looks exactly like one that has stopped.
 pub(crate) const REVEAL_SETTLE_FRAMES: u32 = 3;
 
+/// The polls after a reveal before the camera is asked to frame the target
+/// again, where it has settled and no click reaches the target still. A
+/// framing is a request the camera may lose: whatever returns its focus to
+/// the avatar a moment later — a movement key, a pose it had not taken yet
+/// just after login — leaves it settled somewhere else, and an aim that
+/// asked once then waited out its whole deadline looking at the wrong thing
+/// (seen on a live grid, two seconds after login). Long enough for a glide
+/// to end, short against any deadline.
+pub(crate) const REVEAL_AGAIN_FRAMES: u32 = 150;
+
 /// The most points probed per aim: the projected centre, the centre of each
 /// face towards the camera, and a lattice on those faces.
 const MAX_CANDIDATES: usize = 28;
@@ -636,6 +646,9 @@ pub struct WorldAim {
     stage: Stage,
     /// Whether the camera has framed the target already.
     revealed: bool,
+    /// The poll from which the camera may be asked to frame the target
+    /// again.
+    reveal_again_from: u32,
     /// No pose is judged before this poll.
     settle_from: u32,
     /// The last poll's pose, and for how many polls in a row it has held.
@@ -659,6 +672,7 @@ impl WorldAim {
             node: None,
             stage: Stage::Resolve,
             revealed: false,
+            reveal_again_from: 0,
             settle_from: 0,
             stability: None,
         }
@@ -805,6 +819,11 @@ impl WorldAim {
         // not an answer. Before one, it is a room the camera is meant to be in.
         if self.revealed && eye_inside(&sight.boxed, sight.eye) {
             self.stability = None;
+            if self.frames >= self.reveal_again_from {
+                // It has had time to pass through: it is staying in there.
+                debug!("world aim: the eye stays inside the target; framing it again");
+                self.frame(world, &sight);
+            }
             return Ok(AimProgress::Waiting(AimStage::Settling));
         }
         let (camera, transform) = &sight.camera;
@@ -931,16 +950,18 @@ impl WorldAim {
         check: ActionabilityCheck,
         covered_by: Option<Uuid>,
     ) -> Result<AimProgress, PursuitError> {
-        if self.reveal && !self.revealed && world.contains_resource::<Messages<FrameObject>>() {
-            let (center, radius) = sight.sphere();
-            world.write_message(FrameObject {
-                center,
-                radius,
-                passes_through: sight.prims.clone(),
-            });
-            self.revealed = true;
-            self.settle_from = self.frames.saturating_add(REVEAL_SETTLE_FRAMES);
-            self.stability = None;
+        if self.reveal
+            && (!self.revealed || self.frames >= self.reveal_again_from)
+            && world.contains_resource::<Messages<FrameObject>>()
+        {
+            if self.revealed {
+                debug!(
+                    ?check,
+                    "world aim: the camera settled and no click reaches the target; framing it \
+                     again"
+                );
+            }
+            self.frame(world, sight);
             self.stage = Stage::Settle;
             return Ok(AimProgress::Waiting(AimStage::Revealing(check)));
         }
@@ -961,6 +982,21 @@ impl WorldAim {
             covered_by,
         }
         .into())
+    }
+
+    /// Ask the camera to frame the target, and judge no pose until it has had
+    /// the polls to start moving.
+    fn frame(&mut self, world: &mut World, sight: &Sight) {
+        let (center, radius) = sight.sphere();
+        world.write_message(FrameObject {
+            center,
+            radius,
+            passes_through: sight.prims.clone(),
+        });
+        self.revealed = true;
+        self.settle_from = self.frames.saturating_add(REVEAL_SETTLE_FRAMES);
+        self.reveal_again_from = self.frames.saturating_add(REVEAL_AGAIN_FRAMES);
+        self.stability = None;
     }
 
     /// Record this poll's pose and say whether it has now held for

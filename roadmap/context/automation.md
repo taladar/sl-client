@@ -241,12 +241,21 @@ replaces that person.
   point is one a click lands on. A pick submission renders one pixel, so
   `GpuPicker::take_requests` serves one pixel's requests a frame and leaves
   the rest queued; never fold requests at different pixels into one pick.
-  A target no point reaches is framed once with `FrameObject` (the camera
-  keeps colliding, except with the framed object's own prims) and the camera
-  stays where that left it. After that reveal a target still off screen or
-  covered is looked at again until the deadline (`WorldTimedOut` names the
-  check): the camera eases into a framing, and the last stretch of the glide
-  is slow enough to pass the stability rule.
+  A target no point reaches is framed with `FrameObject` and the camera
+  stays where that left it. The camera keeps colliding, but not with
+  anything inside the framed sphere or touching it — the framed object's
+  own prims, or a prim rezzed on or beside a framed point of the ground a
+  moment later — and a
+  framing never looks from below its target's level, which under ground
+  that stops no camera is from where nothing is seen. After that reveal a
+  target still off screen or covered is looked at again until the deadline
+  (`WorldTimedOut` names the check): the camera eases into a framing, and
+  the last stretch of the glide is slow enough to pass the stability rule.
+  And it is framed **again** every `REVEAL_AGAIN_FRAMES` polls it stays
+  unreachable: a framing is a request the camera can lose, and an aim that
+  asked once waited out its deadline looking at the wrong thing
+  ([[test-e2e-objects-live-opensim-intermittent]]). The automation's own
+  debug lines go to a stage's `grid.log`, not to a viewer's `viewer.log`.
 - **State probes read models, and some models live in heavy crates**
   ([[viewer-automation-state-probes]]). `sl-viewer-automation` reads the
   light ones itself (identity, region entity, parcel, `CameraMode`,

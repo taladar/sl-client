@@ -333,8 +333,146 @@ mod test {
         Ok(())
     }
 
+    /// How many spots of the ground a live placement tries.
+    const GROUND_SPOTS: u64 = 12;
+
+    /// [`GROUND_SPOTS`], as the index of a spot.
+    const GROUND_SPOTS_U8: u8 = 12;
+
+    /// How long one spot is given: the camera comes round to it in a few
+    /// seconds where a click reaches it at all.
+    const GROUND_SPOT_WAIT: Duration = Duration::from_secs(20);
+
     /// The name a prim nobody has named has on both grids.
     const UNNAMED: &str = "Object";
+
+    /// What the name of every prim these tests name on a live grid ends in,
+    /// so that a later run can tell what an earlier one left standing from
+    /// anything else its avatar owns there.
+    const MARK: &str = "5d0c1b7e9a4f4c62b8e3f1a27c94d6e0";
+
+    /// The longest name a prim keeps, in bytes, on both grids.
+    const NAME_BYTES: usize = 63;
+
+    /// How far from the avatar a leftover is looked for, in metres: past
+    /// every spot a placement tries.
+    const LEFTOVER_RANGE_M: f32 = 12.0;
+
+    /// The most prims a sweep selects to read their names.
+    const LEFTOVERS_READ: usize = 16;
+
+    /// The name a test gives its prim: `label` on the fake grid, and on a
+    /// live one `label`, the time and [`MARK`] — a name of this run's own,
+    /// where an inventory keeps the items of the runs before it.
+    fn run_name(stage: &Stage, label: &str) -> Result<String, BodyError> {
+        if stage.on_grid() == Grid::Fake {
+            return Ok(label.to_owned());
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| format!("the clock: {error}"))?
+            .as_secs();
+        let name = format!("{label} {stamp} {MARK}");
+        if name.len() > NAME_BYTES {
+            return Err(format!("{name:?} is longer than a grid keeps a name").into());
+        }
+        Ok(name)
+    }
+
+    /// Whether `node` could be a prim one of these tests left: a root of the
+    /// default half-metre size, within [`LEFTOVER_RANGE_M`] of `at`.
+    fn could_be_a_leftover(node: &WorldNode, at: [f32; 3]) -> bool {
+        let default_size = node
+            .scale
+            .is_some_and(|scale| scale.iter().all(|side| (side - 0.5).abs() < 0.01));
+        let near = node.position.is_some_and(|position| {
+            (position[0] - at[0]).hypot(position[1] - at[1]) < LEFTOVER_RANGE_M
+        });
+        node.parent.is_none() && default_size && near
+    }
+
+    /// On a live grid, delete what earlier runs of these tests left standing
+    /// round the avatar: a run that fails half-way leaves its prim where it
+    /// aimed, and the next to aim there finds a cube on its ground.
+    ///
+    /// Only a prim whose **name** says so is deleted: one that ends in
+    /// [`MARK`], or a default cube still called "Object" — what a run leaves
+    /// that died between its rez and its rename. The avatar may be standing
+    /// among prims it owns for other reasons, so nothing goes for being
+    /// owned, near or small alone; those only decide which prims are
+    /// selected to have their names read.
+    async fn sweep_leftovers(stage: &Stage, alpha: &Viewer) -> Result<(), BodyError> {
+        if stage.on_grid() == Grid::Fake {
+            return Ok(());
+        }
+        let readout = alpha.agent().await?;
+        let (Some(me), Some(at)) = (readout.agent_id, readout.position) else {
+            return Ok(());
+        };
+        let mut candidates = alpha
+            .world()
+            .locator(WorldLocator::kind(WorldKind::Object).owned_by(me))
+            .nodes()
+            .await?;
+        candidates.retain(|node| could_be_a_leftover(node, at));
+        candidates.truncate(LEFTOVERS_READ);
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        let build = alpha.ui().window("build-tools");
+        if !build.is_visible().await? {
+            alpha.press("Ctrl+B").await?;
+        }
+        let _open = alpha.expect(&build).timeout(WAIT).to_be_visible().await?;
+        let _move = build
+            .get(Locator::role(Role::Radio).name_key("build-tool-move"))
+            .click()
+            .await?;
+        let field = build.test_id("build-name:field");
+        for node in candidates {
+            let prim = alpha
+                .world()
+                .locator(WorldLocator::full_id(node.full_id))
+                .timeout(GROUND_SPOT_WAIT);
+            // One no click reaches is left where it is: it is no more in a
+            // placement's way than it is in this one's.
+            if prim.select().await.is_err() {
+                continue;
+            }
+            let _general = build
+                .get(Locator::role(Role::Tab).name_key("build-tab-general"))
+                .click()
+                .await?;
+            if alpha
+                .expect(&field)
+                .timeout(GROUND_SPOT_WAIT)
+                .to_be_enabled()
+                .await
+                .is_err()
+            {
+                continue;
+            }
+            let Some(NodeValue::Text(name)) = field.value().await? else {
+                continue;
+            };
+            if !(name.ends_with(MARK) || name == UNNAMED) {
+                continue;
+            }
+            // By its pie, which asks nothing of where the keyboard is.
+            pie(alpha, &prim, &DELETE).await?;
+            let _gone = alpha
+                .expect_world(&prim)
+                .timeout(WAIT)
+                .to_be_detached()
+                .await?;
+        }
+        alpha.press("Escape").await?;
+        if build.is_visible().await? {
+            alpha.press("Ctrl+B").await?;
+        }
+        let _closed = alpha.expect(&build).timeout(WAIT).to_be_hidden().await?;
+        Ok(())
+    }
 
     /// The name the record test gives its prim.
     const WRITTEN: &str = "Named By The Viewer";
@@ -347,61 +485,88 @@ mod test {
         stage: &Stage,
         alpha: &Viewer,
     ) -> Result<(UiLocator, Option<(f32, f32)>), BodyError> {
+        sweep_leftovers(stage, alpha).await?;
         alpha.press("Ctrl+B").await?;
         let build = alpha.ui().window("build-tools");
-        let spot = place_a_prim(stage, alpha, &build, None, 0.0).await?;
+        let spot = place_a_prim(stage, alpha, &build, None).await?;
         Ok((build, spot))
     }
 
     /// With the Build window open, rez a prim with the Create tool — on the
-    /// object `on` on the fake grid, or on the stock scene's unnamed box;
-    /// `further` metres further to the side than [`rez_a_prim`]'s on a live
-    /// grid — and leave the window on its General tab.
+    /// object `on`; with none, on the stock scene's unnamed box on the fake
+    /// grid and on the ground beside the avatar on a live one — and leave
+    /// the window on its General tab. Returns the spot on the ground, where
+    /// it was the ground.
     async fn place_a_prim(
         stage: &Stage,
         alpha: &Viewer,
         build: &UiLocator,
         on: Option<sl_proto::Uuid>,
-        further: f32,
     ) -> Result<Option<(f32, f32)>, BodyError> {
         let _create = build
             .get(Locator::role(Role::Radio).name_key("build-tool-create"))
             .click()
             .await?;
-        let spot = if stage.on_grid() == Grid::Fake {
-            let on = on.map_or_else(
-                || alpha.world().object_named(UNNAMED),
-                |id| alpha.world().locator(WorldLocator::full_id(id)),
-            );
-            let _placed = on.place().await?;
+        let spot = if let Some(on) = on {
+            let _placed = alpha
+                .world()
+                .locator(WorldLocator::full_id(on))
+                .timeout(SETTLE)
+                .place()
+                .await?;
+            None
+        } else if stage.on_grid() == Grid::Fake {
+            let _placed = alpha.world().object_named(UNNAMED).place().await?;
             None
         } else {
             // On the ground a few metres to the camera's right of the avatar
             // and a little ahead of it: the Build window takes the left of
-            // the screen. Where exactly moves with the run, since a run that
-            // failed half-way leaves its prim where the next would aim.
+            // the screen. Which of a dozen spots comes first moves with the
+            // run, and a spot no click reaches gives way to the next: a run
+            // that failed half-way leaves its prim standing where it aimed,
+            // and the run after it that aimed there too used to wait two
+            // minutes for ground a cube covered.
             let stamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|error| format!("the clock: {error}"))?
                 .as_secs();
-            let aside = 3.0 + further + f32::from(u8::try_from(stamp % 6).unwrap_or(0));
+            let first = u8::try_from(stamp % GROUND_SPOTS).unwrap_or(0);
             let readout = alpha.agent().await?;
             let spot = readout.position.ok_or("Alpha has no position")?;
             let eye = readout.camera_eye.ok_or("Alpha has no camera")?;
             let (ahead_x, ahead_y) = (spot[0] - eye[0], spot[1] - eye[1]);
             let length = ahead_x.hypot(ahead_y).max(0.001);
             let (ahead_x, ahead_y) = (ahead_x / length, ahead_y / length);
-            let (east, north) = (
-                spot[0] + aside * ahead_y + 3.0 * ahead_x,
-                spot[1] - aside * ahead_x + 3.0 * ahead_y,
-            );
-            let _placed = alpha
-                .world()
-                .ground(stage.home_region(), east, north)
-                .timeout(SETTLE)
-                .place()
-                .await?;
-            Some((east, north))
+            let mut placed = None;
+            let mut refused = None;
+            for turn in 0..GROUND_SPOTS_U8 {
+                let index = first.wrapping_add(turn) % GROUND_SPOTS_U8;
+                // Six across, in two rows.
+                let aside = 3.0 + f32::from(index % 6);
+                let ahead = 3.0 + 2.0 * f32::from(index / 6);
+                let (east, north) = (
+                    spot[0] + aside * ahead_y + ahead * ahead_x,
+                    spot[1] - aside * ahead_x + ahead * ahead_y,
+                );
+                match alpha
+                    .world()
+                    .ground(stage.home_region(), east, north)
+                    .timeout(GROUND_SPOT_WAIT)
+                    .place()
+                    .await
+                {
+                    Ok(_placed) => {
+                        placed = Some((east, north));
+                        break;
+                    }
+                    Err(error) => refused = Some(error),
+                }
+            }
+            match (placed, refused) {
+                (Some(at), _) => Some(at),
+                (None, Some(error)) => return Err(error.into()),
+                (None, None) => return Err("no spot of the ground was tried".into()),
+            }
         };
         let _general = build
             .get(Locator::role(Role::Tab).name_key("build-tab-general"))
@@ -611,17 +776,7 @@ mod test {
         let alpha = &stage.viewer("Alpha")?;
         arrived(alpha).await?;
         let (build, spot) = rez_a_prim(stage, alpha).await?;
-        // A name of this run's own on a live grid, whose inventory keeps the
-        // items of the runs before it.
-        let name = if spot.is_some() {
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|error| format!("the clock: {error}"))?
-                .as_secs();
-            format!("{TAKEN} {stamp}")
-        } else {
-            TAKEN.to_owned()
-        };
+        let name = run_name(stage, TAKEN)?;
         let field = build.test_id("build-name:field");
         let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
         let selected = alpha.selection().await?;
@@ -743,7 +898,7 @@ mod test {
     }
 
     /// The name the edit test gives its prim.
-    const EDITED: &str = "Edited By The Viewer";
+    const EDITED: &str = "Edited By A Viewer";
 
     /// A side no grid lets a prim have, in metres, as it is typed.
     const TOO_LARGE: &str = "1000";
@@ -823,16 +978,8 @@ mod test {
     ) -> Result<(), BodyError> {
         let alpha = &stage.viewer("Alpha")?;
         arrived(alpha).await?;
-        let (build, spot) = rez_a_prim(stage, alpha).await?;
-        let name = if spot.is_some() {
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|error| format!("the clock: {error}"))?
-                .as_secs();
-            format!("{EDITED} {stamp}")
-        } else {
-            EDITED.to_owned()
-        };
+        let (build, _spot) = rez_a_prim(stage, alpha).await?;
+        let name = run_name(stage, EDITED)?;
         let field = build.test_id("build-name:field");
         let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
         let selected = alpha.selection().await?;
@@ -1030,18 +1177,9 @@ mod test {
         build: &UiLocator,
         on: Option<sl_proto::Uuid>,
         name: &str,
-        further: f32,
     ) -> Result<sl_proto::Uuid, BodyError> {
-        let spot = place_a_prim(stage, alpha, build, on, further).await?;
-        let name = if spot.is_some() {
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|error| format!("the clock: {error}"))?
-                .as_secs();
-            format!("{name} {stamp}")
-        } else {
-            name.to_owned()
-        };
+        let _spot = place_a_prim(stage, alpha, build, on).await?;
+        let name = run_name(stage, name)?;
         let field = build.test_id("build-name:field");
         let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
         let selected = alpha.selection().await?;
@@ -1065,6 +1203,7 @@ mod test {
     async fn a_link_too_far_apart(stage: &Stage, like: ImitatedGrid) -> Result<(), BodyError> {
         let alpha = &stage.viewer("Alpha")?;
         arrived(alpha).await?;
+        sweep_leftovers(stage, alpha).await?;
         alpha.press("Ctrl+B").await?;
         let build = alpha.ui().window("build-tools");
         let [near, far] = LINKED;
@@ -1075,8 +1214,10 @@ mod test {
         } else {
             None
         };
-        let near = rez_named(stage, alpha, &build, stock, near, 0.0).await?;
-        let far = rez_named(stage, alpha, &build, stock, far, 1.5).await?;
+        let near = rez_named(stage, alpha, &build, stock, near).await?;
+        // The second stands on the first on a live grid: ground that takes
+        // one click is not ground that takes two, with whatever grows there.
+        let far = rez_named(stage, alpha, &build, stock.or(Some(near)), far).await?;
         let prim = |id: sl_proto::Uuid| alpha.world().locator(WorldLocator::full_id(id));
 
         // The second prim is the one selected: up it goes.
@@ -1147,13 +1288,19 @@ mod test {
             }
         }
 
-        // Both are still selected, as two prims or as one linkset: Delete
-        // takes what is selected.
-        alpha.press("Escape").await?;
-        alpha.press("Delete").await?;
+        // Each goes by its own pie — the first takes the second with it
+        // where they are one linkset now. The Delete key would do for both
+        // at once, but only while the world has the keyboard and the
+        // inventory has shown the viewer a Trash, and says nothing when
+        // either is not so.
         for id in [near, far] {
+            let this = prim(id).timeout(SETTLE);
+            if this.count().await? == 0 {
+                continue;
+            }
+            pie(alpha, &this, &DELETE).await?;
             let _gone = alpha
-                .expect_world(&prim(id))
+                .expect_world(&this)
                 .timeout(SETTLE)
                 .to_be_detached()
                 .await?;

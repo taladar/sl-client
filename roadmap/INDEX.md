@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 357 |
 | blocked | 108 |
 | in-progress | 20 |
-| bugs | 37 |
-| done | 1348 |
+| bugs | 36 |
+| done | 1349 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2056** |
@@ -1598,7 +1598,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (37)
+## bugs (36)
 
 ### protocol
 
@@ -1685,15 +1685,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
-- [`test-e2e-objects-live-opensim-intermittent`](bugs/test-e2e-objects-live-opensim-intermittent.md)
-  — e2e_objects on the live OpenSim fails now and then, two ways
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1348)
+## done (1349)
 
 ### protocol
 
@@ -4185,6 +4183,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-e2e-live-verify-sweep`](done/test-e2e-live-verify-sweep.md) — Turn
   pending live-verify checks into end-to-end tests (blocked by
   `test-e2e-pilot-suite` (done))
+- [`test-e2e-objects-live-opensim-intermittent`](done/test-e2e-objects-live-opensim-intermittent.md)
+  — e2e_objects on the live OpenSim fails now and then, two ways
 - [`test-e2e-pilot-suite`](done/test-e2e-pilot-suite.md) — The first end-to-end
   tests — one viewer, two viewers, two regions (blocked by `test-e2e-stage`
   (done))

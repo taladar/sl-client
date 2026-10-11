@@ -8,11 +8,11 @@
 //! does, unless told not to — and plays the gesture there through the real
 //! input path.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sl_automation_proto::{
-    GroundPoint, Locator, RequestBody, ResponseBody, UiNode, WorldAction, WorldKind, WorldLocator,
-    WorldNode, WorldWaitCondition,
+    GroundPoint, Locator, NodeVisibility, RequestBody, ResponseBody, Role, UiNode, WorldAction,
+    WorldKind, WorldLocator, WorldNode, WorldWaitCondition,
 };
 
 use crate::artifacts::Subject;
@@ -25,6 +25,78 @@ const SIT_ON_OBJECT: &str = "pie-object-sit-here";
 
 /// The Fluent key of the own avatar pie's sit slice: sit on the ground.
 const SIT_DOWN: &str = "pie-avatar-sit-down";
+
+/// The test id of an open pie menu's own node: the viewer's
+/// `sl_viewer_ui_pie_menu::pie_menu::PIE_MENU_NAME`.
+const PIE_MENU: &str = "pie-menu";
+
+/// How long a right click is given to put a pie up before it is played
+/// again. A click that lands is answered within a frame or two.
+const PIE_OPENS_WITHIN: Duration = Duration::from_secs(3);
+
+/// How often the tree is read for a pie while one is waited for.
+const PIE_POLL: Duration = Duration::from_millis(100);
+
+/// The open pie menu of `viewer`.
+fn pie_of(viewer: &Viewer) -> UiLocator {
+    viewer.locator(Locator {
+        role: Some(Role::Menu),
+        ..Locator::test_id(PIE_MENU)
+    })
+}
+
+/// Whether `viewer` shows a pie menu now.
+async fn pie_is_open(viewer: &Viewer) -> Result<bool, DriverError> {
+    Ok(pie_of(viewer).nodes().await?.iter().any(|node| {
+        matches!(
+            node.visibility,
+            NodeVisibility::Visible | NodeVisibility::Covered
+        )
+    }))
+}
+
+/// Play `right_click` until a pie is open, for `wait` at most, and return
+/// what the click that opened it returned.
+///
+/// A right click that is played is not a pie that is open: the viewer's own
+/// pick may strike nothing — a prim whose mesh is a frame old — and then
+/// nothing says so. The click is played again rather than believed.
+async fn open_a_pie<T>(
+    viewer: &Viewer,
+    wait: Duration,
+    what: &str,
+    right_click: impl AsyncFn() -> Result<T, DriverError>,
+) -> Result<T, DriverError> {
+    let started = Instant::now();
+    let mut clicks = 0_u32;
+    loop {
+        let clicked = right_click().await?;
+        clicks = clicks.saturating_add(1);
+        let played = Instant::now();
+        while played.elapsed() < PIE_OPENS_WITHIN {
+            if pie_is_open(viewer).await? {
+                return Ok(clicked);
+            }
+            tokio::time::sleep(PIE_POLL).await;
+        }
+        if started.elapsed() >= wait {
+            tracing::warn!(what, clicks, "no right click opened a pie menu");
+            // The failure a missing pie is: the expectation's own, with the
+            // tree and the screenshot that go with one.
+            let _pie = viewer
+                .expect(&pie_of(viewer))
+                .timeout(PIE_POLL)
+                .to_be_visible()
+                .await?;
+            return Ok(clicked);
+        }
+        tracing::warn!(
+            what,
+            clicks,
+            "a right click opened no pie menu; playing it again"
+        );
+    }
+}
 
 /// The world of one viewer, to find things in.
 #[derive(Debug, Clone)]
@@ -188,7 +260,11 @@ impl WorldHandle {
     ///
     /// As [`touch`](Self::touch).
     pub async fn open_pie(&self) -> Result<WorldNode, DriverError> {
-        self.act(WorldAction::RightClick).await
+        let what = format!("open the pie of {}", self.locator);
+        open_a_pie(&self.viewer, self.wait(), &what, async || {
+            self.act(WorldAction::RightClick).await
+        })
+        .await
     }
 
     /// Rest the pointer on the one thing this names: its hover tip.
@@ -449,7 +525,11 @@ impl GroundHandle {
     ///
     /// As [`click`](Self::click).
     pub async fn open_pie(&self) -> Result<[f32; 3], DriverError> {
-        self.act(WorldAction::RightClick).await
+        let what = format!("open the land pie at {}", self.ground);
+        open_a_pie(&self.viewer, self.wait(), &what, async || {
+            self.act(WorldAction::RightClick).await
+        })
+        .await
     }
 
     /// Rest the pointer on the ground.

@@ -554,9 +554,9 @@ and on each live grid (`SL_E2E_GRID=opensim` and `=aditi`), a prim rezzed
 and named through the Build window is taken from its pie and leaves the
 world, its item shows in the inventory window under its name, a drag of
 that item into the world puts an object of that name back, and Delete from
-the pie takes it away again. On the live OpenSim the test fails now and
-then, in the harness's first placement or in opening the last pie
-(`test-e2e-objects-live-opensim-intermittent`).
+the pie takes it away again. A live run first deletes what earlier runs
+of these tests left standing round the avatar, by the marker their prims'
+names end in.
 
 An edit, by the same measurements:
 
@@ -617,10 +617,8 @@ moved a hundred metres up, both are selected and Ctrl+L is pressed. On the
 Second-Life flavour the viewer shows "pieces are too far apart" and draws
 both prims free; on the OpenSim flavour it draws one hanging off the
 other. The same test runs against a live grid with `SL_E2E_GRID=opensim`
-and `=aditi`, and passes on both; on the live OpenSim its first placement
-fails now and then, as the others' does
-(`test-e2e-objects-live-opensim-intermittent`). The link and unlink chords
-themselves are `e2e_live_checks`'.
+and `=aditi`, and passes on both. The link and unlink chords themselves
+are `e2e_live_checks`'.
 
 The fake grid neither returns somebody else's object, nor returns anything
 by itself, nor ends a temporary prim: `server-fake-grid-object-return`. It
