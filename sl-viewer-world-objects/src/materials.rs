@@ -1145,7 +1145,10 @@ pub fn apply_material_overrides(
         for (face, raw) in faces.iter().zip(overrides.iter()) {
             present.insert(*face);
             let key = (scoped, *face);
-            let decoded = parse_material_override(raw).unwrap_or_default();
+            let decoded = parse_material_override(raw).unwrap_or_else(|error| {
+                warn!("unreadable GLTF material override for {scoped} face {face}: {error}");
+                MaterialOverride::default()
+            });
             if decoded.is_empty() {
                 let _removed = manager.overrides.remove(&key);
             } else {

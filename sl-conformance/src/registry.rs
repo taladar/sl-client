@@ -174,6 +174,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::object_asset_format::ObjectAssetFormat),
         Box::new(crate::cases::object_touch_grab::ObjectTouchGrab),
         Box::new(crate::cases::object_media::ObjectMedia),
+        Box::new(crate::cases::materials::Materials),
         Box::new(crate::cases::object_link_delink::ObjectLinkDelink),
         Box::new(crate::cases::object_link_stranger::ObjectLinkStranger),
         Box::new(crate::cases::object_edit::ObjectEdit),

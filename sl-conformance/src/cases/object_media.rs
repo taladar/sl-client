@@ -1245,7 +1245,7 @@ fn changes(before: &State, after: &State) -> String {
 }
 
 /// An LLSD value as text: a scalar as written, a map's keys in order.
-fn rendered(value: &Llsd) -> String {
+pub(crate) fn rendered(value: &Llsd) -> String {
     match value {
         Llsd::Map(map) => {
             let mut entries: Vec<(&String, &Llsd)> = map.iter().collect();
@@ -1285,7 +1285,7 @@ fn rendered(value: &Llsd) -> String {
 
 /// What a capability answered, as a metric records it: the status and the
 /// kind of body, and an error spelt out.
-fn answered(answer: &CapAnswer) -> String {
+pub(crate) fn answered(answer: &CapAnswer) -> String {
     match answer.body.as_ref().and_then(|body| body.get("error")) {
         Some(error) => format!("{}: error {}", answer.status, rendered(error)),
         None => answer.shape(),

@@ -43,8 +43,8 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    Command, PrimFaceId, ScopedObjectId, SlCommand, TextureEntry, TextureFace, TextureKey, Uuid,
-    decode_texture_entry,
+    CAP_MODIFY_MATERIAL_PARAMS, Command, PrimFaceId, ScopedObjectId, SlCapabilities, SlCommand,
+    TextureEntry, TextureFace, TextureKey, Uuid, decode_texture_entry,
 };
 
 use crate::edit_params::set_disabled_class;
@@ -62,7 +62,9 @@ use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_spawn::{self, ButtonKind, ButtonSpec, UiLabel};
 use crate::ui_spinner::{FieldCommits, SpinStep, SpinnerSpec, spawn_spinner};
-use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
+use crate::ui_tab::{
+    DEFAULT_ELLIPSIS, TabButton, TabPlacement, TabSpec, TabStrip, spawn_tab_strip,
+};
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
@@ -492,6 +494,11 @@ impl Plugin for EditTexturePlugin {
             .init_resource::<TexturePreview>()
             .init_resource::<MatModeState>()
             .init_resource::<MatModeSelected>()
+            .init_resource::<PbrSupport>()
+            .add_message::<SlCapabilities>()
+            // Not gated on build mode: the capability map comes at login and
+            // on every region change, whether or not the floater is open.
+            .add_systems(Update, ingest_pbr_capability)
             // Fills the Build floater's Texture page once its lazily-built
             // content publishes the pages (`BuildTabPages` appears on first
             // open); ordered after the general parameter tabs, as before.
@@ -510,6 +517,7 @@ impl Plugin for EditTexturePlugin {
                 Update,
                 (
                     auto_select_material_mode,
+                    gate_pbr_mode,
                     read_material_mode,
                     apply_material_mode_visibility,
                     sync_texture_widgets,
@@ -802,6 +810,85 @@ fn spawn_tex_field_row(
     commands.entity(row_entity).insert(show_when);
     for &field in fields {
         spawn_tex_field(commands, row_entity, field, tab_index, font_size);
+    }
+}
+
+/// Whether the agent's region takes a PBR material edit: whether it grants
+/// `ModifyMaterialParams`, which every such edit goes to. Second Life grants
+/// it and a stock OpenSim does not (`book/src/gridspec/materials.md`), and a
+/// region that does not has no PBR material on any face either.
+///
+/// The reference asks `LLMaterialEditor::capabilitiesAvailable`, which reads
+/// the two capabilities a material is *saved* through; the three come and go
+/// together on both grids, and this is the one an edit needs.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct PbrSupport {
+    /// Whether the last capability map carried the cap.
+    supported: bool,
+}
+
+/// Fold each capability map into [`PbrSupport`].
+fn ingest_pbr_capability(
+    mut capabilities: MessageReader<SlCapabilities>,
+    mut support: ResMut<PbrSupport>,
+) {
+    for SlCapabilities(map) in capabilities.read() {
+        let supported = map.contains_key(CAP_MODIFY_MATERIAL_PARAMS);
+        if supported != support.supported {
+            info!(
+                "this region {} PBR material edits",
+                if supported { "takes" } else { "takes no" }
+            );
+        }
+        support.set_if_neq(PbrSupport { supported });
+    }
+}
+
+/// The matmedia mode the strip may show: `current`, or Material in place of
+/// PBR on a region that takes no PBR edit.
+const fn mode_the_region_allows(current: MatMedia, pbr_supported: bool) -> MatMedia {
+    if matches!(current, MatMedia::Pbr) && !pbr_supported {
+        MatMedia::Material
+    } else {
+        current
+    }
+}
+
+/// Grey the PBR tab on a region that takes no PBR edit, and leave it for
+/// Material where the strip was showing it — the reference's
+/// `enableTabButton(…, has_pbr_capabilities)` (`fspanelface.cpp`). The strip
+/// itself refuses a switch to a tab so marked.
+fn gate_pbr_mode(
+    support: Res<PbrSupport>,
+    ui: Option<Res<BuildTextureUi>>,
+    buttons: Query<(Entity, &TabButton, Has<bevy::ui::InteractionDisabled>)>,
+    mut strips: Query<&mut TabStrip>,
+    mut commands: Commands,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let pbr_tab = MatMedia::Pbr.radio_index();
+    for (entity, button, disabled) in &buttons {
+        if button.strip != ui.matmedia_strip || button.index != pbr_tab {
+            continue;
+        }
+        if support.supported && disabled {
+            commands
+                .entity(entity)
+                .remove::<bevy::ui::InteractionDisabled>();
+        } else if !support.supported && !disabled {
+            commands
+                .entity(entity)
+                .insert(bevy::ui::InteractionDisabled);
+        }
+    }
+    if let Ok(mut strip) = strips.get_mut(ui.matmedia_strip) {
+        let shown = MatMedia::from_radio_index(strip.active);
+        let allowed = mode_the_region_allows(shown, support.supported);
+        if allowed != shown {
+            strip.active = allowed.radio_index();
+        }
     }
 }
 
@@ -2161,7 +2248,56 @@ mod tests {
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{TextureFace, TextureKey, Uuid};
 
-    use super::{TexCycle, TexField, TexToggle, round_to_byte};
+    use super::{
+        PbrSupport, TexCycle, TexField, TexToggle, ingest_pbr_capability, mode_the_region_allows,
+        round_to_byte,
+    };
+    use crate::world_api::MatMedia;
+    use bevy::prelude::*;
+    use sl_client_bevy::{CAP_MODIFY_MATERIAL_PARAMS, SlCapabilities};
+    use std::collections::HashMap;
+
+    /// A region that takes no PBR edit shows Material where the strip would
+    /// show PBR, and leaves the other modes alone; one that does shows what
+    /// was picked.
+    #[test]
+    fn pbr_mode_needs_a_region_that_takes_the_edit() {
+        assert_eq!(
+            mode_the_region_allows(MatMedia::Pbr, false),
+            MatMedia::Material
+        );
+        assert_eq!(mode_the_region_allows(MatMedia::Pbr, true), MatMedia::Pbr);
+        for mode in [MatMedia::Material, MatMedia::Media] {
+            assert_eq!(mode_the_region_allows(mode, false), mode);
+            assert_eq!(mode_the_region_allows(mode, true), mode);
+        }
+    }
+
+    /// PBR support follows the capability map: granted with
+    /// `ModifyMaterialParams` in it, gone again with a map that has none (a
+    /// teleport to a region that grants none).
+    #[test]
+    fn pbr_support_follows_the_capability_map() {
+        let mut app = App::new();
+        app.add_message::<SlCapabilities>()
+            .init_resource::<PbrSupport>()
+            .add_systems(Update, ingest_pbr_capability);
+        app.update();
+        assert!(!app.world().resource::<PbrSupport>().supported);
+
+        let granted = HashMap::from([(
+            CAP_MODIFY_MATERIAL_PARAMS.to_owned(),
+            "http://127.0.0.1/cap".to_owned(),
+        )]);
+        app.world_mut().write_message(SlCapabilities(granted));
+        app.update();
+        assert!(app.world().resource::<PbrSupport>().supported);
+
+        app.world_mut()
+            .write_message(SlCapabilities(HashMap::new()));
+        app.update();
+        assert!(!app.world().resource::<PbrSupport>().supported);
+    }
 
     /// A neutral face for tests.
     fn face() -> TextureFace {

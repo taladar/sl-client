@@ -748,6 +748,56 @@ mod test {
         Ok(())
     }
 
+    /// **The Texture tab's PBR mode on each fake flavour**: the Second-Life
+    /// flavour grants `ModifyMaterialParams` and the tab is live; the OpenSim
+    /// flavour grants none, as a stock OpenSim grants none
+    /// (`book/src/gridspec/materials.md`), and the tab is greyed rather than
+    /// left to send edits nothing takes.
+    #[test]
+    fn the_pbr_mode_is_offered_where_the_grid_takes_it_on_each_fake_flavour()
+    -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "pbr_mode_second_life"),
+            (ImitatedGrid::OpenSim, "pbr_mode_open_sim"),
+        ] {
+            StageBuilder::new(name)
+                .viewer_binary(VIEWER)
+                .viewer("Alpha")
+                .needs(Need::Content("the stock scene's box, to select"))
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async move |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    arrived(alpha).await?;
+                    alpha.press("Ctrl+B").await?;
+                    let build = alpha.ui().window("build-tools");
+                    let _open = alpha.expect(&build).timeout(WAIT).to_be_visible().await?;
+                    let _moving = build
+                        .get(Locator::role(Role::Radio).name_key("build-tool-move"))
+                        .click()
+                        .await?;
+                    let _selected = alpha
+                        .world()
+                        .object_named(UNNAMED)
+                        .timeout(WAIT)
+                        .select()
+                        .await?;
+                    let _texture = build
+                        .get(Locator::role(Role::Tab).name_key("build-tab-texture"))
+                        .click()
+                        .await?;
+                    let pbr =
+                        build.get(Locator::role(Role::Tab).name_key("build-tex-matmedia-pbr"));
+                    let offered = alpha.expect(&pbr).timeout(WAIT);
+                    let _seen = match flavour {
+                        ImitatedGrid::SecondLife => offered.to_be_enabled().await?,
+                        ImitatedGrid::OpenSim => offered.to_be_disabled().await?,
+                    };
+                    Ok(())
+                })?;
+        }
+        Ok(())
+    }
+
     /// The name the take test gives its prim.
     const TAKEN: &str = "Taken By The Viewer";
 

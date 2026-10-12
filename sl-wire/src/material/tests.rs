@@ -10,14 +10,47 @@ use super::{
     RenderMaterialEntry, build_gltf_material_override, build_modify_material_params_request,
     build_modify_material_params_response, build_render_materials_put_request,
     build_render_materials_request, build_render_materials_response, parse_gltf_material_override,
-    parse_modify_material_params_request, parse_render_materials_put_request,
-    parse_render_materials_request, parse_render_materials_response,
+    parse_modify_material_params_request, parse_render_materials_envelope,
+    parse_render_materials_put_request, parse_render_materials_request,
+    parse_render_materials_response,
 };
 use crate::WireError;
 use crate::llsd::parse_llsd_binary;
 use sl_llsd::LlsdError;
 use sl_types::key::TextureKey;
 use uuid::Uuid;
+
+/// The envelope unzips to whatever it carries, read as none of the typed
+/// bodies: a PUT's map here. A body with no `Zipped` member is none, and one
+/// that is no LLSD an error.
+#[test]
+fn the_envelope_unzips_to_what_it_carries() -> Result<(), String> {
+    let put = build_render_materials_put_request(&[FaceMaterialPut {
+        local_id: 7,
+        face: 2,
+        material: None,
+    }]);
+    let carried = parse_render_materials_envelope(&put)
+        .map_err(|error| error.to_string())?
+        .ok_or("no envelope")?;
+    let faces = carried
+        .get("FullMaterialsPerFace")
+        .and_then(Llsd::as_array)
+        .ok_or("no FullMaterialsPerFace array")?;
+    let face = faces.first().ok_or("no entry")?;
+    assert_eq!(face.get("ID").and_then(Llsd::as_i32), Some(7));
+    assert_eq!(face.get("Face").and_then(Llsd::as_i32), Some(2));
+
+    assert_eq!(
+        parse_render_materials_envelope("<llsd><map /></llsd>"),
+        Ok(None)
+    );
+    assert!(matches!(
+        parse_render_materials_envelope("not llsd"),
+        Err(WireError::Xml { .. })
+    ));
+    Ok(())
+}
 
 /// A binary-LLSD value round-trips through the writer and reader.
 #[test]

@@ -177,8 +177,9 @@ pub use material::{
     build_modify_material_params_request, build_modify_material_params_response,
     build_render_materials_put_request, build_render_materials_request,
     build_render_materials_response, parse_gltf_material_override,
-    parse_modify_material_params_request, parse_render_materials_put_request,
-    parse_render_materials_request, parse_render_materials_response,
+    parse_modify_material_params_request, parse_render_materials_envelope,
+    parse_render_materials_put_request, parse_render_materials_request,
+    parse_render_materials_response,
 };
 pub use message::{Message, MessageId, MessageStatus};
 pub use messages::{AnyMessage, message_name, message_status};

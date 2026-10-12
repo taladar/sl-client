@@ -41,6 +41,9 @@ serde_json = { workspace = true }
 sl-anim = { workspace = true }
 sl-client-tokio = { workspace = true }
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
+# The materials case sends the overrides the viewer's own encoder writes and
+# reads a grid's answer with its decoder.
+sl-material = { workspace = true }
 sl-object-asset = { workspace = true }
 sl-repl = { workspace = true }
 # The seeded fixture table the fake grid's inventory is built from: the

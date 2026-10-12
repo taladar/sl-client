@@ -37,8 +37,9 @@ pub use gltf::{
 };
 pub use legacy::{
     build_render_materials_put_request, build_render_materials_request,
-    build_render_materials_response, parse_render_materials_put_request,
-    parse_render_materials_request, parse_render_materials_response,
+    build_render_materials_response, parse_render_materials_envelope,
+    parse_render_materials_put_request, parse_render_materials_request,
+    parse_render_materials_response,
 };
 pub use types::{
     FaceMaterialPut, GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial,

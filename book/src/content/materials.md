@@ -38,6 +38,13 @@ Both live on the [CAPS](../comms/caps.md) side:
   surfaced from the
   [event queue](../comms/caps.md#the-event-queue-eventqueueget).
 
+What each grid answers these with, what it keeps and whom it tells is
+measured in [Grid Behaviour: Materials](../gridspec/materials.md). In short:
+a stock OpenSim has legacy materials only; a legacy material's id is the
+region's to give and differs between the grids; and a PBR override belongs to
+the face rather than to its material, each override message naming every
+face of the object that has one.
+
 ---
 
 > **In this codebase**

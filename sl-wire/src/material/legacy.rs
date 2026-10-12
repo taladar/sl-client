@@ -120,6 +120,24 @@ fn parse_zipped_body(xml: &str, what: &'static str) -> Result<Option<Llsd>, Wire
     Ok(Some(parse_llsd_binary(&raw)?))
 }
 
+/// Unzips any `RenderMaterials` body — a request, a PUT or either's answer —
+/// into the binary-LLSD value it carries, without reading it as one of them.
+///
+/// The typed parsers each expect one shape. This is for a caller that has to
+/// say what a grid *did* send, a census of the capability's answers among
+/// them: what a PUT is answered with differs from grid to grid.
+///
+/// `Ok(None)` is a body with no `Zipped` member.
+///
+/// # Errors
+///
+/// Returns a [`WireError`] if the body is not LLSD-XML, if its `Zipped`
+/// member is not binary or does not inflate, or if what it inflates to is not
+/// binary LLSD.
+pub fn parse_render_materials_envelope(xml: &str) -> Result<Option<Llsd>, WireError> {
+    parse_zipped_body(xml, "RenderMaterials body")
+}
+
 /// Reads one `RenderMaterials` material id: the wire carries it as the 16 raw
 /// bytes of the UUID, and anything else is refused rather than skipped.
 fn material_id(item: &Llsd) -> Result<Uuid, WireError> {

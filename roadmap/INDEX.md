@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 139 |
 | ready | 357 |
-| blocked | 105 |
+| blocked | 104 |
 | in-progress | 20 |
 | bugs | 37 |
-| done | 1354 |
+| done | 1355 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2059** |
@@ -1098,6 +1098,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-object-edit` (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
+- [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
+  — Fake grid — apply legacy and PBR material edits and push overrides
 - [`server-fake-grid-object-media-region`](ready/server-fake-grid-object-media-region.md)
   — Fake grid — region-wide object media with version bumps and propagation
 - [`server-fake-grid-object-record-texture-ids`](ready/server-fake-grid-object-record-texture-ids.md)
@@ -1171,8 +1173,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   committed LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](ready/gridspec-marketplace.md) — Marketplace direct
   delivery on each grid
-- [`gridspec-materials`](ready/gridspec-materials.md) — Legacy and PBR material
-  edits and overrides on each grid
 - [`gridspec-money`](ready/gridspec-money.md) — Balance, L$ transfers, pay
   dialogs and buying objects on each grid
 - [`gridspec-mute-list`](ready/gridspec-mute-list.md) — Mute (block) list
@@ -1198,7 +1198,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
   Viewer effects and sound relays on each grid
 
-## blocked (105)
+## blocked (104)
 
 ### protocol
 
@@ -1398,9 +1398,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-inventory-udp-mutations`](blocked/server-fake-grid-inventory-udp-mutations.md)
   — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
   `gridspec-inventory-mutations`)
-- [`server-fake-grid-material-edits`](blocked/server-fake-grid-material-edits.md)
-  — Fake grid — apply legacy and PBR material edits and push overrides (blocked
-  by `gridspec-materials`)
 - [`server-fake-grid-mesh-upload-cost`](blocked/server-fake-grid-mesh-upload-cost.md)
   — Fake grid — mesh upload costing and refusals (blocked by
   `gridspec-asset-upload`)
@@ -1685,7 +1682,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1354)
+## done (1355)
 
 ### protocol
 
@@ -4644,6 +4641,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-logout`](done/gridspec-logout.md) — Logout reply, timing and what
   logout does to seats and child circuits
+- [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material
+  edits and overrides on each grid
 - [`gridspec-neighbours-crossing`](done/gridspec-neighbours-crossing.md) — Child
   agents, EnableSimulator and region crossing on each grid
 - [`gridspec-object-edit`](done/gridspec-object-edit.md) — Object edits on each

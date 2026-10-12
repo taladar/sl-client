@@ -39,7 +39,7 @@ What OpenSim refuses, grouped by what a viewer loses:
 | messages | `ReadOfflineMsgs` | the UDP `RetrieveInstantMessages` (the client falls back itself since 2026-10-04) |
 | account | `UserInfo` | the UDP `UserInfoRequest` / `UpdateUserInfo` |
 | appearance | `UpdateAvatarAppearance`, `IncrementCOFVersion` | the viewer bakes and uploads (`UploadBakedTexture`, which OpenSim grants) |
-| materials | `ModifyMaterialParams`, `UpdateMaterialAgentInventory`, `UpdateMaterialTaskInventory` | no PBR overrides or material saving; an edit is reported as failed rather than dropped (since 2026-10-04) |
+| materials | `ModifyMaterialParams`, `UpdateMaterialAgentInventory`, `UpdateMaterialTaskInventory` | no PBR overrides or material saving; the client logs an edit it cannot send (since 2026-10-04) and the viewer greys its PBR tab (since 2026-10-12, [Materials](materials.md)) |
 | objects | `InterestList` | nothing: OpenSim sends a region's objects whichever way the camera looks (since 2026-10-09) |
 | contents | `RequestTaskInventory`, `GetMetadata` | the UDP `RequestTaskInventory` and the listing's `Xfer`; no script is under an experience (since 2026-10-12, [Building](building.md#contents)) |
 | other | `DirectDelivery`, `SendUserReport`, `SendUserReportWithScreenshot`, `ObjectAnimation` | marketplace delivery reports its absence; a report goes over the UDP `UserReport`, without a screenshot (since 2026-10-04); `ObjectAnimation` is only named to opt in to the UDP stream |
