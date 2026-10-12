@@ -359,6 +359,10 @@ pub enum RegionChange {
     /// object updates it, and one that does not rezzes it. Keeping them apart
     /// is for the reader of a change stream, not for the wire.
     Updated(Box<Object>),
+    /// An object already in the region went somewhere or turned, and nothing
+    /// else about it changed: every other viewer needs its terse update, as
+    /// both live grids tell of a prim a held mouse button drags.
+    Moved(Box<Object>),
     /// An object left the region; every other viewer needs its `KillObject`.
     Killed(RegionLocalObjectId),
     /// Something was written into an object's task inventory, which its
@@ -2096,6 +2100,9 @@ pub(crate) fn answer_world_request(
     if let Some(changes) =
         crate::object_edits::answer_object_edit(world, mint, selection, sim, event, now)
     {
+        return changes;
+    }
+    if let Some(changes) = crate::grabs::answer_grab(world, identity.agent_id, sim, event, now) {
         return changes;
     }
     if let Some(changes) = crate::task_contents::answer_contents_write(

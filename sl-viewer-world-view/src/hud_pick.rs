@@ -20,32 +20,103 @@
 //!   touched; only if nothing HUD-ward is under the cursor does the click fall
 //!   through to a perspective world ray from the fly camera, exactly the
 //!   reference's HUD-first order.
-//! - **The surface the sim needs.** A touch carries a [`SurfaceInfo`](sl_client_bevy::SurfaceInfo) built from
+//! - **The surface the sim needs.** A touch carries a [`SurfaceInfo`] built from
 //!   the hit ([`surface_info_from_hit`]): the picked face index, its texture
 //!   (`UV`) and surface (`ST`) coordinates, and the intersection point / normal /
 //!   binormal — the reference's `LLPickInfo::getSurfaceInfo`, which is what a
 //!   script reads back through `llDetectedTouchFace` / `llDetectedTouchST` /
 //!   `llDetectedTouchUV` / `llDetectedTouchPos` and friends.
 //!
-//! The touch itself reuses the existing `Session::touch_object` path (an
-//! `ObjectGrab` immediately followed by an `ObjectDeGrab`, both now carrying the
-//! surface block), so a click reaches a scripted object's `touch_start` /
-//! `touch_end`.
+//! - **A touch lasts as long as the button is down.** The press sends an
+//!   `ObjectGrab`, the release an `ObjectDeGrab` ([`hold_touch`]), so a
+//!   script's `touch_start` and `touch_end` are as far apart as the user's
+//!   press and release — and on Second Life, which hands a script a `touch`
+//!   event on its own clock while a grab is open, a held button is a held
+//!   touch. OpenSim hands a script a `touch` only for an `ObjectGrabUpdate`,
+//!   so one follows the press and another every time the cursor moves to a
+//!   different point of the surface, which is when the reference viewer
+//!   sends them (`LLToolGrab::handleHoverNonPhysical`).
+//! - **Updates only for a prim whose script takes touches**
+//!   ([`FLAGS_HANDLE_TOUCH`] on it or its root). Both grids *move* a prim
+//!   that is not physical to an update's grab position when its owner sends
+//!   one and no script in it takes touches — the drag of the reference's grab
+//!   tool — so an update for any other prim would carry it off. Measured on
+//!   both grids, `book/src/gridspec/building.md` § Touch and grab.
 
 use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use sl_client_bevy::{Command, SlCommand};
+use sl_client_bevy::{Command, ObjectKey, ScopedObjectId, SlCommand, SurfaceInfo, Vector};
 
 use crate::hud::{HudCamera, HudScreen};
 use sl_viewer_world_api::targeted_ray_cast::{TargetVisibility, TargetedRayCast};
-use sl_viewer_world_api::{MediaWorldClick, pointer_over_blocking_ui, surface_info_from_hit};
+use sl_viewer_world_api::{
+    FLAGS_HANDLE_TOUCH, MediaWorldClick, ObjectState, SurfaceFrame, ViewerCamera,
+    pointer_over_blocking_ui, surface_info_from_hit,
+};
 use sl_viewer_world_objects::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 
 /// The mouse button a HUD (or fall-through world) touch is made with.
 const TOUCH_BUTTON: MouseButton = MouseButton::Left;
+
+/// No offset: a touch grabs a prim where the pick struck it.
+const NO_OFFSET: Vector = Vector {
+    x: 0.0,
+    y: 0.0,
+    z: 0.0,
+};
+
+/// The touch the left button is holding open, from its `ObjectGrab` until the
+/// `ObjectDeGrab` its release sends.
+#[derive(Debug, Resource, Default)]
+pub struct HeldTouch {
+    /// The touch, while the button is down on something.
+    held: Option<Held>,
+}
+
+impl HeldTouch {
+    /// The object the button is held on.
+    #[must_use]
+    pub fn object(&self) -> Option<ScopedObjectId> {
+        self.held.as_ref().map(|held| held.scoped)
+    }
+}
+
+/// One held touch.
+#[derive(Debug)]
+struct Held {
+    /// The touched prim.
+    scoped: ScopedObjectId,
+    /// Its entity: what a moved cursor is tested against.
+    object: Entity,
+    /// The prim's key, where a script takes its touches — and so where the
+    /// held button sends updates.
+    updates: Option<ObjectKey>,
+    /// Whether it is a HUD attachment, picked through the HUD camera.
+    hud: bool,
+    /// The surface the last message stated.
+    surface: SurfaceInfo,
+    /// Where the cursor was when the button was last looked at; `None` until
+    /// it has been.
+    cursor: Option<Vec2>,
+    /// When the last update was sent.
+    updated: core::time::Duration,
+}
+
+/// The surface a held button states when the cursor has left the prim: the
+/// reference's "no intersection" values.
+const fn no_surface() -> SurfaceInfo {
+    SurfaceInfo {
+        uv: [-1.0, -1.0],
+        st: [-1.0, -1.0],
+        face_index: -1,
+        position: NO_OFFSET,
+        normal: NO_OFFSET,
+        binormal: NO_OFFSET,
+    }
+}
 
 /// Everything the pick needs to identify and touch the object under a hit face.
 type FaceQuery<'world, 'state> =
@@ -117,6 +188,38 @@ pub struct TouchTargets<'w, 's> {
     globals: Query<'w, 's, &'static GlobalTransform>,
     /// The parent links walked up the linkset.
     parents: Query<'w, 's, &'static ChildOf>,
+    /// The object graph: whether a script in the prim takes touches.
+    state: Res<'w, ObjectState>,
+}
+
+impl TouchTargets<'_, '_> {
+    /// The prim the face or submesh `entity` belongs to, with its entity.
+    fn prim_of(&self, entity: Entity) -> Option<(ScopedObjectId, Entity)> {
+        let mut current = entity;
+        loop {
+            if let Ok(scene) = self.scene.get(current) {
+                return Some((scene.scoped_id, current));
+            }
+            current = self.parents.get(current).ok()?.parent();
+        }
+    }
+
+    /// The surface `hit` struck on the face `entity` of the prim whose entity
+    /// is `object`: in the prim's own frame for a HUD, in the region's for
+    /// anything in the world.
+    fn surface(&self, entity: Entity, object: Entity, hit: &RayMeshHit, hud: bool) -> SurfaceInfo {
+        let face = self.faces.get(entity).ok();
+        let frame = match self.globals.get(object) {
+            Ok(global) if hud => SurfaceFrame::Object(global),
+            _ => SurfaceFrame::Region,
+        };
+        surface_info_from_hit(
+            hit,
+            face.map(|(marker, _tf)| marker.face_id),
+            face.map(|(_marker, FaceTextureDebug(tf))| tf),
+            frame,
+        )
+    }
 }
 
 /// Where a resolved touch goes, bundled as one [`SystemParam`]: the wire command
@@ -133,6 +236,25 @@ pub struct TouchOut<'w> {
     writer: MessageWriter<'w, SlCommand>,
     /// The media system's click channel.
     media_clicks: MessageWriter<'w, MediaWorldClick>,
+    /// The touch the button is holding open.
+    held: ResMut<'w, HeldTouch>,
+    /// The mouse buttons: whether the press that made a touch is still down
+    /// when its pick resolves.
+    buttons: Res<'w, ButtonInput<MouseButton>>,
+    /// The clock an update's time since the last is read off.
+    time: Res<'w, Time>,
+}
+
+impl TouchOut<'_> {
+    /// Ends the held touch, if there is one, with an `ObjectDeGrab`.
+    fn release(&mut self) {
+        if let Some(held) = self.held.held.take() {
+            self.writer.write(SlCommand(Command::DegrabObject {
+                local_id: held.scoped,
+                surface: Some(held.surface),
+            }));
+        }
+    }
 }
 
 /// On a left click, touch the HUD face under the cursor — or, if none,
@@ -167,7 +289,7 @@ pub fn pick_and_touch(
     // 1. HUD first: an orthographic ray through the HUD camera at the cursor,
     //    limited to the HUD subtree.
     if let Some((entity, hit)) = hud.hit(cursor)
-        && touch_hit(entity, &hit, &targets, &mut out, "HUD")
+        && touch_hit(entity, &hit, &targets, &mut out, true)
     {
         return;
     }
@@ -204,7 +326,7 @@ pub fn resolve_touch_pick(
         else {
             continue;
         };
-        touch_hit(entity, &ray_hit, &targets, &mut out, "world");
+        touch_hit(entity, &ray_hit, &targets, &mut out, false);
     }
 }
 
@@ -266,47 +388,33 @@ impl HudRayCast<'_, '_> {
     }
 }
 
-/// Resolve a ray hit to its object and touch it, carrying the surface the ray
-/// struck. Returns whether a touch was sent (a hit that resolves to no object —
-/// e.g. an avatar's own mesh — sends nothing).
+/// Resolve a ray hit to its object and begin a touch of it, carrying the
+/// surface the ray struck. Returns whether the hit was taken (a hit that
+/// resolves to no object — e.g. an avatar's own mesh — is not).
+///
+/// The touch is an `ObjectGrab`, and for a prim whose script takes touches
+/// the `ObjectGrabUpdate` the reference follows it with. It stays open while
+/// the button is down ([`hold_touch`] ends it); a press that was let go
+/// before its pick resolved — the world pick answers a frame or two late —
+/// is ended here.
 fn touch_hit(
     entity: Entity,
-    hit: &bevy::picking::mesh_picking::ray_cast::RayMeshHit,
+    hit: &RayMeshHit,
     targets: &TouchTargets,
     out: &mut TouchOut,
-    which: &str,
+    hud: bool,
 ) -> bool {
-    // The ray strikes a face/submesh child entity: its Linden face index and the
-    // per-face texture placement give the surface coordinates the sim wants.
-    let face = targets.faces.get(entity).ok();
-
-    // Walk up the linkset to the object entity carrying the scene identity, whose
-    // global maps the world hit back into the object's own Second Life frame.
-    let mut current = entity;
-    let scoped = loop {
-        if let Ok(scene) = targets.scene.get(current) {
-            break Some(scene.scoped_id);
-        }
-        let Ok(child_of) = targets.parents.get(current) else {
-            break None;
-        };
-        current = child_of.parent();
-    };
-    let (Some(scoped), Ok(object_global)) = (scoped, targets.globals.get(current)) else {
+    // The ray strikes a face/submesh child entity; the prim is the first
+    // entity above it carrying the scene identity.
+    let Some((scoped, object)) = targets.prim_of(entity) else {
         return false;
     };
-
-    let surface = surface_info_from_hit(
-        hit,
-        face.map(|(marker, _tf)| marker.face_id),
-        face.map(|(_marker, FaceTextureDebug(tf))| tf),
-        object_global,
-    );
+    let surface = targets.surface(entity, object, hit, hud);
     // A face flagged for media-on-a-prim claims the click for the media
     // system (focus / interact, `crate::media_prim`) instead of a touch —
     // the reference's `handleMediaClick` running before `handleLeftClickPick`
     // dispatches the touch.
-    if let Some((marker, FaceTextureDebug(tf))) = face
+    if let Ok((marker, FaceTextureDebug(tf))) = targets.faces.get(entity)
         && tf.media_enabled()
     {
         out.media_clicks.write(MediaWorldClick {
@@ -318,14 +426,129 @@ fn touch_hit(
         return true;
     }
     info!(
-        "P35.3 touch ({which}) object {scoped:?} face={} pos=({:.2},{:.2},{:.2})",
-        surface.face_index, surface.position.x, surface.position.y, surface.position.z,
+        "touch ({}) object {scoped:?} face={} pos=({:.2},{:.2},{:.2})",
+        if hud { "HUD" } else { "world" },
+        surface.face_index,
+        surface.position.x,
+        surface.position.y,
+        surface.position.z,
     );
-    out.writer.write(SlCommand(Command::TouchObject {
+    // A touch already open is over before another begins.
+    out.release();
+    out.writer.write(SlCommand(Command::GrabObject {
         local_id: scoped,
-        surface: Some(surface),
+        grab_offset: NO_OFFSET,
+        surface: Some(surface.clone()),
     }));
+    let updates = targets
+        .state
+        .pick_summary(scoped)
+        .filter(|summary| summary.flags & FLAGS_HANDLE_TOUCH != 0)
+        .map(|summary| summary.picked_full);
+    let mut held = Held {
+        scoped,
+        object,
+        updates,
+        hud,
+        surface,
+        cursor: None,
+        updated: out.time.elapsed(),
+    };
+    send_update(&mut out.writer, &mut held, None, out.time.elapsed());
+    out.held.held = Some(held);
+    if !out.buttons.pressed(TOUCH_BUTTON) {
+        out.release();
+    }
     true
+}
+
+/// Sends the `ObjectGrabUpdate` of a held touch — where a script takes the
+/// prim's touches — stating `surface`, or the surface it already holds.
+fn send_update(
+    writer: &mut MessageWriter<SlCommand>,
+    held: &mut Held,
+    surface: Option<SurfaceInfo>,
+    now: core::time::Duration,
+) {
+    let Some(object_id) = held.updates else {
+        return;
+    };
+    if let Some(surface) = surface {
+        held.surface = surface;
+    }
+    let since = now.saturating_sub(held.updated);
+    held.updated = now;
+    writer.write(SlCommand(Command::GrabObjectUpdate {
+        object_id,
+        grab_offset_initial: NO_OFFSET,
+        // Where the grab is: the point of the surface under the cursor. A
+        // prim whose script takes touches is not moved by it.
+        grab_position: held.surface.position.clone(),
+        time_since_last: u32::try_from(since.as_millis()).unwrap_or(u32::MAX),
+        surface: Some(held.surface.clone()),
+    }));
+}
+
+/// Keeps a held touch up to date and ends it: an `ObjectGrabUpdate` when the
+/// cursor has moved to another point of the prim's surface (or off it), and
+/// the `ObjectDeGrab` when the button is let go.
+///
+/// Not gated on the build tool as the pick is: a touch begun before the tool
+/// was taken up still has to end.
+pub fn hold_touch(
+    pointer: TouchPointer,
+    hud: HudRayCast,
+    world_camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
+    targets: TouchTargets,
+    mut out: TouchOut,
+) {
+    if out.held.held.is_none() {
+        return;
+    }
+    if !out.buttons.pressed(TOUCH_BUTTON) {
+        out.release();
+        return;
+    }
+    let now = out.time.elapsed();
+    let Some(held) = out.held.held.as_mut() else {
+        return;
+    };
+    let Some(cursor) = pointer.cursor() else {
+        return;
+    };
+    // The first look is the press itself: its surface went out with the grab.
+    let moved = held.cursor.is_some_and(|last| last != cursor);
+    held.cursor = Some(cursor);
+    if held.updates.is_none() || !moved {
+        return;
+    }
+    let ray = if held.hud {
+        hud.ray(cursor)
+    } else {
+        world_camera
+            .single()
+            .ok()
+            .and_then(|(camera, transform)| camera.viewport_to_world(transform, cursor).ok())
+    };
+    // The prim's own faces only, as the reference re-picks against the one
+    // object it holds.
+    let surface = ray
+        .and_then(|ray| {
+            let faces =
+                core::iter::once(held.object).chain(hud.children.iter_descendants(held.object));
+            hud.cast.nearest(ray, faces, TargetVisibility::Any)
+        })
+        .filter(|(entity, _hit)| {
+            targets
+                .prim_of(*entity)
+                .is_some_and(|(scoped, _object)| scoped == held.scoped)
+        })
+        .map_or_else(no_surface, |(entity, hit)| {
+            targets.surface(entity, held.object, &hit, held.hud)
+        });
+    if surface != held.surface {
+        send_update(&mut out.writer, held, Some(surface), now);
+    }
 }
 
 #[cfg(test)]
@@ -336,7 +559,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use sl_client_bevy::PrimFaceId;
     use sl_client_bevy::TextureFace;
-    use sl_viewer_world_api::{surface_info_from_hit, vscale, vsub};
+    use sl_viewer_world_api::{SurfaceFrame, surface_info_from_hit, vscale, vsub};
 
     /// A ray hit with the given world point / normal / uv and a flat triangle in
     /// the XY plane, enough to exercise the surface-info build.
@@ -365,10 +588,15 @@ mod tests {
             &hit(Vec3::ZERO, Vec3::Z, Some(Vec2::new(0.25, 0.5))),
             Some(PrimFaceId::new(4)),
             None,
-            &object,
+            SurfaceFrame::Object(&object),
         );
         assert_eq!(with_face.face_index, 4);
-        let no_face = surface_info_from_hit(&hit(Vec3::ZERO, Vec3::Z, None), None, None, &object);
+        let no_face = surface_info_from_hit(
+            &hit(Vec3::ZERO, Vec3::Z, None),
+            None,
+            None,
+            SurfaceFrame::Object(&object),
+        );
         assert_eq!(no_face.face_index, -1);
     }
 
@@ -383,7 +611,7 @@ mod tests {
             &hit(Vec3::ZERO, Vec3::Z, Some(Vec2::new(0.25, 0.75))),
             Some(PrimFaceId::new(0)),
             Some(&default_face),
-            &object,
+            SurfaceFrame::Object(&object),
         );
         // ST: v flipped (1 - 0.75 = 0.25), u unchanged.
         assert!((info.st[0] - 0.25).abs() < 1e-6, "{:?}", info.st);
@@ -410,7 +638,7 @@ mod tests {
             &hit(Vec3::ZERO, Vec3::Z, Some(Vec2::new(0.2, 0.3))),
             Some(PrimFaceId::new(0)),
             Some(&face),
-            &object,
+            SurfaceFrame::Object(&object),
         );
         // The reference `xform` at a quarter turn: about the centre,
         // s' = t and t' = -s, then offset.
@@ -441,7 +669,7 @@ mod tests {
             &hit(Vec3::ZERO, Vec3::Z, Some(Vec2::new(1.0, 1.0))),
             Some(PrimFaceId::new(0)),
             Some(&face),
-            &object,
+            SurfaceFrame::Object(&object),
         );
         // ST is the un-flipped stored coordinate; UV tiles it about the centre, so
         // the two differ once the repeat is above one.
@@ -465,7 +693,7 @@ mod tests {
             &hit(Vec3::new(10.0, 0.0, 0.0), Vec3::X, Some(Vec2::ZERO)),
             Some(PrimFaceId::new(0)),
             None,
-            &object,
+            SurfaceFrame::Object(&object),
         );
         // The hit is at the object's own origin.
         assert!(info.position.x.abs() < 1e-5, "{:?}", info.position);
@@ -489,7 +717,7 @@ mod tests {
             &hit(Vec3::ZERO, Vec3::Z, Some(Vec2::ZERO)),
             Some(PrimFaceId::new(0)),
             None,
-            &object,
+            SurfaceFrame::Object(&object),
         );
         let dot = info.normal.x * info.binormal.x
             + info.normal.y * info.binormal.y

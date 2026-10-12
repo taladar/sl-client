@@ -140,6 +140,14 @@ root is delinked alone, and the links a grid refuses — too far apart, too
 many, not the owner's to modify — are in
 [Grid Behaviour → Building](../gridspec/building.md#linking).
 
+A touch is `Command::GrabObject` at the press and `Command::DegrabObject`
+at the release, with `Command::GrabObjectUpdate` between them
+(`Command::TouchObject` sends the first and the last at once). No grid
+answers them. What a script is handed for each, on which grid a held
+button raises `touch` events by itself, and what the same messages do to a
+prim with no script — its owner's update moves it — are in
+[Grid Behaviour → Building](../gridspec/building.md#touch-and-grab).
+
 Ownership follows the same shape: `Command::SetObjectGroup` sets the group an
 object is *set to* (`ObjectGroup`), and `Command::DeedObjectsToGroup` then
 **deeds** it — an `ObjectOwner` with a nil owner and no god-override, after

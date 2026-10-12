@@ -72,8 +72,8 @@ use sl_viewer_world_api::world_scoped::{WorldPurge, WorldScoped};
 use sl_viewer_world_api::{
     AVATAR_BOOST_PRIORITY, FLAGS_USE_PHYSICS, INITIAL_TREE_TIER, MAX_PARENT_WALK, ObjectLight,
     ObjectParticleSystem, ObjectPickSummary, ObjectReflectionProbe, ObjectState, PhysicalObject,
-    ShapeFingerprint, TrackedObject, TreeTier, ViewerCamera, is_hud_point, light_from_object,
-    particles_from_object, reflection_probe_from_object, surface_info_from_hit,
+    ShapeFingerprint, SurfaceFrame, TrackedObject, TreeTier, ViewerCamera, is_hud_point,
+    light_from_object, particles_from_object, reflection_probe_from_object, surface_info_from_hit,
 };
 
 use crate::legacy_materials::LegacyMaterialManager;
@@ -4357,11 +4357,18 @@ impl ObjectPicker<'_, '_> {
         let summary = self.state.pick_summary(scene.scoped_id)?;
         let face = self.faces.get(entity).ok();
         let object_global = self.globals.get(current).ok()?;
+        // An attachment's surface is stated in its own frame, a HUD having no
+        // place in a region; anything standing in the world in the region's.
+        let frame = if summary.attachment {
+            SurfaceFrame::Object(object_global)
+        } else {
+            SurfaceFrame::Region
+        };
         let surface = surface_info_from_hit(
             hit,
             face.map(|(marker, _tf)| marker.face_id),
             face.map(|(_marker, FaceTextureDebug(tf))| tf),
-            object_global,
+            frame,
         );
         Some(ObjectRayHit { summary, surface })
     }

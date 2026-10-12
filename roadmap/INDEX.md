@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 356 |
+| ready | 357 |
 | blocked | 106 |
 | in-progress | 20 |
-| bugs | 36 |
-| done | 1352 |
+| bugs | 37 |
+| done | 1353 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2056** |
+| **total** | **2059** |
 
 ## ideas (139)
 
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (356)
+## ready (357)
 
 ### protocol
 
@@ -694,6 +694,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-land-transactions`](ready/viewer-land-transactions.md) — Land sale &
   transfer actions — sell, deed, abandon, reclaim, buy pass
+- [`viewer-left-click-click-actions`](ready/viewer-left-click-click-actions.md)
+  — Carry out a prim's click action on a left click
 - [`viewer-linden-home`](ready/viewer-linden-home.md) — Linden Home management
   menu entry
 - [`viewer-local-light-count-setting`](ready/viewer-local-light-count-setting.md)
@@ -1011,6 +1013,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   VRAM budget & global discard bias
 - [`viewer-toolbar-customization`](ready/viewer-toolbar-customization.md) —
   Toolbar customization (toybox) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-touch-cursor`](ready/viewer-touch-cursor.md) — Show by the cursor
+  that a prim takes a touch or a click action
 - [`viewer-ui-baseline-regressions`](ready/viewer-ui-baseline-regressions.md) —
   UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`
@@ -1191,8 +1195,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
-- [`gridspec-touch-grab`](ready/gridspec-touch-grab.md) — Touch and grab on each
-  grid
 - [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
   Viewer effects and sound relays on each grid
 
@@ -1458,7 +1460,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-ecs-store`, `gridspec-attachments`)
 - [`server-world-touch-and-grab`](blocked/server-world-touch-and-grab.md) —
   Touch routing — a click on a prim reaches nothing (blocked by
-  `protocol-sim-script-messages`, `gridspec-touch-grab`)
+  `protocol-sim-script-messages`)
 - [`server-world-update-scheduling`](blocked/server-world-update-scheduling.md)
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`, `gridspec-circuit` (done),
@@ -1591,7 +1593,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (36)
+## bugs (37)
 
 ### protocol
 
@@ -1643,6 +1645,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-settings-subtree-shows-unloaded`](bugs/viewer-inventory-settings-subtree-shows-unloaded.md)
   — The Library root and its Environments subtree never read as loaded in the
   viewer model
+- [`viewer-left-click-touches-a-prim-that-takes-none`](bugs/viewer-left-click-touches-a-prim-that-takes-none.md)
+  — A left click sends a grab and a degrab to a prim that takes no touch
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
@@ -1684,7 +1688,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1352)
+## done (1353)
 
 ### protocol
 
@@ -4681,6 +4685,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   offers, requests and their answers on each grid
 - [`gridspec-terrain`](done/gridspec-terrain.md) — Terrain, wind and cloud
   layers as each grid sends them
+- [`gridspec-touch-grab`](done/gridspec-touch-grab.md) — Touch and grab on each
+  grid
 - [`gridspec-world-map`](done/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 

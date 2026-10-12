@@ -6,7 +6,7 @@ status: ready
 origin: Firestorm full-parity audit (2026-08-19)
 refs: [viewer-transform-gizmos, viewer-prim-linking,
        viewer-camera-focus-on-object, viewer-camera-controls-window,
-       viewer-automation-world-aim]
+       viewer-automation-world-aim, gridspec-touch-grab]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -26,6 +26,17 @@ the automation world aim a grab intent (`WorldIntent` in
 `sl-viewer-automation/src/world_aim.rs`; [[viewer-automation-world-aim]]
 covers every other drag and left this one out for want of a consumer) and a
 fixture test that the drag sends `GrabObjectUpdate`s for the aimed object.
+
+What the grids make of a drag is measured ([[gridspec-touch-grab]],
+`book/src/gridspec/building.md` § Touch and grab): an owner's
+`ObjectGrabUpdate` puts a prim that is not physical at the grab position
+and an `ObjectSpinUpdate` gives it the rotation stated, on both grids,
+unless a script in it takes touches; a physical prim is pulled by a force —
+weakly on OpenSim, and on Second Life hard enough that thirty updates
+asking half a metre sent a cube across the region. Find out what the
+reference sends differently before a user is handed that. The left click
+now holds its grab open (`hud_pick.rs`, `HeldTouch`), which is where a
+drag would grow from.
 
 Row-parity extras on the Edit panel: in-floater **Link / Unlink**
 buttons (`link_btn` / `unlink_btn` — the function exists via Ctrl+L /

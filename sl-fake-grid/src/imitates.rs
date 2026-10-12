@@ -90,6 +90,7 @@
 //! | a copy's contents serial ([`EditPolicy::copy_contents_serial`]) | the original's | two more than the original's |
 //! | a duplicate on a ray that names no target ([`EditPolicy::ray_at_nothing`]) | a copy standing on the ray's end | nothing |
 //! | an object moved out of the world ([`EditPolicy::out_of_world`]) | returned to the Lost And Found above 4,096 m and off the edge; a move under the ground refused | kept at any height; a move off the edge refused |
+//! | an update of a held button that moves nothing ([`EditPolicy::refused_drag`]) | nobody told | the prim sent to everybody in a terse update |
 //!
 //! **The inventory rows are the divergence a viewer is most likely to trip
 //! over**, which is why they are three rows rather than one setting. An
@@ -1025,6 +1026,7 @@ impl ImitatedGrid {
                 copy_contents_serial: CopiedSerial::Originals,
                 ray_at_nothing: RayAtNothing::CopiesAtItsEnd,
                 out_of_world: OutOfWorld::Returned,
+                refused_drag: RefusedDrag::Silent,
             },
             Self::OpenSim => EditPolicy {
                 quiet_edits_resend: false,
@@ -1039,6 +1041,7 @@ impl ImitatedGrid {
                 copy_contents_serial: CopiedSerial::Advanced,
                 ray_at_nothing: RayAtNothing::Ignored,
                 out_of_world: OutOfWorld::Kept,
+                refused_drag: RefusedDrag::Resent,
             },
         }
     }
@@ -2516,6 +2519,21 @@ pub struct EditPolicy {
     /// What becomes of an object moved out of the world: above the ceiling,
     /// or off a region's edge where no region is.
     pub out_of_world: OutOfWorld,
+    /// What an `ObjectGrabUpdate` or an `ObjectSpinUpdate` that moves nothing
+    /// — the prim is somebody else's, or a script in it takes the touch — is
+    /// answered with.
+    pub refused_drag: RefusedDrag,
+}
+
+/// What an update of a held mouse button that moves nothing is answered with
+/// ([`EditPolicy::refused_drag`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusedDrag {
+    /// Nobody is told: Second Life sends a prim only when it went somewhere.
+    Silent,
+    /// The prim is sent to everybody in a terse update: OpenSim sends one for
+    /// every update of a held button, moved or not.
+    Resent,
 }
 
 impl Default for EditPolicy {

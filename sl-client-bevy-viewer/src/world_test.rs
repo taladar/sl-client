@@ -4207,15 +4207,137 @@ mod hud_click_tests {
         )
     }
 
-    /// Every `TouchObject` the viewer has sent since the last drain.
+    /// The prim of every touch the viewer has begun since the last drain: a
+    /// left click's `ObjectGrab`.
     fn drain_touches(app: &mut App) -> Vec<ScopedObjectId> {
         drain_commands(app)
             .into_iter()
             .filter_map(|command| match command {
-                Command::TouchObject { local_id, .. } => Some(local_id),
+                Command::GrabObject { local_id, .. } => Some(local_id),
                 _other => None,
             })
             .collect()
+    }
+
+    /// What a held button sent since the last drain, a word a message: a
+    /// `grab`, an `update` and a `degrab`.
+    fn drain_held(app: &mut App) -> Vec<&'static str> {
+        drain_commands(app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::GrabObject { .. } => Some("grab"),
+                Command::GrabObjectUpdate { .. } => Some("update"),
+                Command::DegrabObject { .. } => Some("degrab"),
+                _other => None,
+            })
+            .collect()
+    }
+
+    /// **A held button is a held touch.** The press opens the touch and the
+    /// release closes it, so a script's `touch_start` and `touch_end` are as
+    /// far apart as the two; and a prim whose script takes touches is sent
+    /// the update the reference follows a grab with, and another when the
+    /// cursor has moved over its surface — which is all OpenSim hands a
+    /// script a `touch` event for.
+    ///
+    /// A prim with no such script gets no update at all: both grids move a
+    /// prim to an update's grab position when its owner sends one and no
+    /// script takes the touch, so one sent for every click would carry the
+    /// user's own builds off.
+    #[test]
+    fn a_held_button_holds_the_touch_open_and_updates_only_a_prim_that_takes_touches()
+    -> Result<(), TestError> {
+        let prim_at = Vector {
+            x: 128.0,
+            y: 128.0,
+            z: 30.0,
+        };
+        for (flags, pressed, moved) in [
+            (
+                sl_client_bevy::prim_flags::SCRIPTED | sl_client_bevy::prim_flags::HANDLE_TOUCH,
+                vec!["grab", "update"],
+                vec!["update"],
+            ),
+            (0, vec!["grab"], vec![]),
+        ] {
+            let mut app = world_app_with_hud()?;
+            let prim = super::seed_object(&mut app, super::fixture_prim(4, prim_at.clone(), flags));
+            settle(&mut app, 5);
+            let target =
+                scene_position_of(&mut app, prim).ok_or("the fixture prim has no entity")?;
+            install_camera(&mut app, target + Vec3::new(0.0, 0.0, 6.0), target);
+            settle(&mut app, 12);
+            let at = world_to_viewport(&mut app, target).ok_or("the prim projects nowhere")?;
+
+            let _stale = drain_commands(&mut app);
+            interact::hover(&mut app, at);
+            interact::press(&mut app, MouseButton::Left);
+            settle(&mut app, 6);
+            pretty_assertions::assert_eq!(
+                drain_held(&mut app),
+                pressed,
+                "a press opens the touch and leaves it open (flags {flags:#x})"
+            );
+            settle(&mut app, 6);
+            pretty_assertions::assert_eq!(
+                drain_held(&mut app),
+                Vec::<&str>::new(),
+                "a still cursor sends nothing more (flags {flags:#x})"
+            );
+            interact::hover(&mut app, at + Vec2::new(6.0, 4.0));
+            settle(&mut app, 3);
+            pretty_assertions::assert_eq!(
+                drain_held(&mut app),
+                moved,
+                "a cursor moved over the surface (flags {flags:#x})"
+            );
+            interact::release(&mut app, MouseButton::Left);
+            settle(&mut app, 2);
+            pretty_assertions::assert_eq!(
+                drain_held(&mut app),
+                vec!["degrab"],
+                "the release closes the touch (flags {flags:#x})"
+            );
+        }
+        Ok(())
+    }
+
+    /// **A touch in the world states where it landed in the region's frame**:
+    /// what a script reads as `llDetectedTouchPos`, which both grids hand it
+    /// exactly as the viewer sent it.
+    #[test]
+    fn a_world_touch_states_its_position_in_the_region() -> Result<(), TestError> {
+        let prim_at = Vector {
+            x: 128.0,
+            y: 128.0,
+            z: 30.0,
+        };
+        let (mut app, prim) = hud_world(false, &prim_at)?;
+        let target = scene_position_of(&mut app, prim).ok_or("the fixture prim has no entity")?;
+        install_camera(&mut app, target + Vec3::new(0.0, 0.0, 6.0), target);
+        settle(&mut app, 12);
+        let at = world_to_viewport(&mut app, target).ok_or("the prim projects nowhere")?;
+        let _stale = drain_commands(&mut app);
+        interact::click(&mut app, at, MouseButton::Left);
+        settle(&mut app, 5);
+        let surface = drain_commands(&mut app)
+            .into_iter()
+            .find_map(|command| match command {
+                Command::GrabObject { surface, .. } => surface,
+                _other => None,
+            })
+            .ok_or("the click began no touch with a surface")?;
+        let off = Vec3::new(
+            surface.position.x - prim_at.x,
+            surface.position.y - prim_at.y,
+            surface.position.z - prim_at.z,
+        );
+        assert!(
+            off.length() < 3.0,
+            "the touch is on the prim, in region metres: {:?}",
+            surface.position
+        );
+        Ok(())
     }
 
     /// **A left click on a HUD face touches the HUD, and a click beside it

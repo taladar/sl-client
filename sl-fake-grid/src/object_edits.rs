@@ -952,7 +952,7 @@ fn step_history(
 
 /// Sends the client a terse update of where one object stands, logging a
 /// send failure rather than failing the edit.
-fn push_terse(sim: &mut SimSession, object: &Object, now: Instant) {
+pub(crate) fn push_terse(sim: &mut SimSession, object: &Object, now: Instant) {
     let update = sl_proto::TerseUpdate {
         local_id: object.local_id,
         state: object.state,

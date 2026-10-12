@@ -798,6 +798,15 @@ pub(crate) async fn run_region_watcher(
                                         std::slice::from_ref(object.as_ref()),
                                         now,
                                     ),
+                                    RegionChange::Moved(object) => state.sim.send_terse_update(
+                                        &[sl_proto::TerseUpdate {
+                                            local_id: object.local_id,
+                                            state: object.state,
+                                            motion: object.motion.clone(),
+                                        }],
+                                        crate::world::REAL_TIME_DILATION,
+                                        now,
+                                    ),
                                     RegionChange::Killed(local_id) => {
                                         state.sim.send_kill_object(&[*local_id], now)
                                     }

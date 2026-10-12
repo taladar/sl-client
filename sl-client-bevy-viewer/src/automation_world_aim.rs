@@ -109,12 +109,13 @@ mod tests {
         }
     }
 
-    /// The region-local ids every `TouchObject` since the last drain named.
+    /// The region-local ids every touch begun since the last drain named: a
+    /// left click's `ObjectGrab`.
     fn touches(app: &mut App) -> Vec<u32> {
         drain_commands(app)
             .into_iter()
             .filter_map(|command| match command {
-                Command::TouchObject { local_id, .. } => Some(local_id.id.0),
+                Command::GrabObject { local_id, .. } => Some(local_id.id.0),
                 _other => None,
             })
             .collect()
@@ -525,7 +526,7 @@ mod tests {
         assert!(
             !commands
                 .iter()
-                .any(|command| matches!(command, Command::TouchObject { .. })),
+                .any(|command| matches!(command, Command::GrabObject { .. })),
             "a place touches nothing"
         );
         assert!(

@@ -62,6 +62,9 @@ tracing-journald = "0.3.2"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# The touch census plants a probe script; its test compiles the source the
+# way a grid would before a live run finds out it does not.
+sl-lsl-runtime = { workspace = true }
 # `test-util` for the paused clock the case-isolation timeout test runs on.
 tokio = { workspace = true, features = ["test-util"] }
 

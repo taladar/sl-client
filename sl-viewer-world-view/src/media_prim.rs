@@ -1203,7 +1203,7 @@ fn hover_media_faces(
             &hit,
             face.map(|(marker, _tf)| marker.face_id),
             face.map(|(_marker, FaceTextureDebug(tf))| tf),
-            object_global,
+            sl_viewer_world_api::SurfaceFrame::Object(object_global),
         );
         focus.hover = Some(target);
         focus.hover_normal = Some(hit.normal);

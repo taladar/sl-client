@@ -338,6 +338,96 @@ mod test {
         Ok(())
     }
 
+    /// **A left click is a touch from press to release**, on a grid of each
+    /// flavour: the grid hears an `ObjectGrab`, the `ObjectGrabUpdate` that
+    /// follows it for a prim whose script takes touches — the only thing
+    /// OpenSim hands a script a `touch` event for — and the `ObjectDeGrab`
+    /// of the release, in that order; and the grab says where on the prim it
+    /// landed in the region's frame, which is what both grids hand a script
+    /// as `llDetectedTouchPos`.
+    #[test]
+    fn a_left_click_reaches_the_grid_as_a_grab_an_update_and_a_degrab() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "left_click_touch_sl"),
+            (ImitatedGrid::OpenSim, "left_click_touch_opensim"),
+        ] {
+            stage(name, &["Alpha"])
+                .needs(Need::GridControl)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async move |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    rez_touch_box(stage, "Alpha").await?;
+                    let mut heard = stage.agent("Alpha").await?.events();
+
+                    let _touched = alpha
+                        .world()
+                        .object_named(TOUCH_BOX)
+                        .timeout(WAIT)
+                        .touch()
+                        .await?;
+
+                    let said = tokio::time::timeout(WAIT, async {
+                        let mut said = Vec::new();
+                        loop {
+                            match heard.recv().await {
+                                Ok(ServerEvent::ClientMessage(message)) => match *message {
+                                    AnyMessage::ObjectGrab(grab)
+                                        if grab.object_data.local_id == TOUCH_BOX_LOCAL_ID =>
+                                    {
+                                        let at = grab
+                                            .surface_info
+                                            .first()
+                                            .map(|surface| surface.position.clone());
+                                        said.push(("grab", at));
+                                    }
+                                    AnyMessage::ObjectGrabUpdate(_update) => {
+                                        said.push(("update", None));
+                                    }
+                                    AnyMessage::ObjectDeGrab(degrab)
+                                        if degrab.object_data.local_id == TOUCH_BOX_LOCAL_ID =>
+                                    {
+                                        said.push(("degrab", None));
+                                        return Ok(said);
+                                    }
+                                    _other => {}
+                                },
+                                Ok(_other) => {}
+                                Err(error) => return Err(error),
+                            }
+                        }
+                    })
+                    .await;
+                    let said = match said {
+                        Ok(Ok(said)) => said,
+                        Ok(Err(error)) => {
+                            return Err(format!("the grid's event stream: {error}").into());
+                        }
+                        Err(_elapsed) => {
+                            return Err(format!("{flavour:?}: the touch was never released").into());
+                        }
+                    };
+                    let words: Vec<&str> = said.iter().map(|(word, _at)| *word).collect();
+                    assert_eq!(
+                        words,
+                        vec!["grab", "update", "degrab"],
+                        "{flavour:?}: what a left click on a touch prim sends"
+                    );
+                    let at = said
+                        .first()
+                        .and_then(|(_word, at)| at.clone())
+                        .ok_or("the grab stated no surface")?;
+                    assert!(
+                        (at.x - 132.0).abs() < 1.0
+                            && (at.y - 124.0).abs() < 1.0
+                            && (at.z - 25.5).abs() < 1.0,
+                        "{flavour:?}: the grab is on the box, in region metres: {at:?}"
+                    );
+                    Ok(())
+                })?;
+        }
+        Ok(())
+    }
+
     /// The line Alpha says in the chat test.
     const LINE: &str = "Hello from the pilot suite";
 

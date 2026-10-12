@@ -5,8 +5,9 @@ topic: server
 status: blocked
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
-blocked_by: [protocol-sim-script-messages, gridspec-touch-grab]
-refs: [server-lsl-lib-detection-sensors, test-fake-grid-lsl-offline-cases]
+blocked_by: [protocol-sim-script-messages]
+refs: [server-lsl-lib-detection-sensors, test-fake-grid-lsl-offline-cases,
+  gridspec-touch-grab]
 ---
 
 Context: [context/lsl.md](../context/lsl.md).
@@ -49,6 +50,33 @@ The grab path is also the drag path: `ObjectGrabUpdate` on a physical
 prim is how a resident throws something. That half belongs to
 [[server-world-collision-and-physics]]; this task should decode and
 route it, and may leave the force application to that one.
+
+**Measured (2026-10-12, [[gridspec-touch-grab]],
+`book/src/gridspec/building.md` § Touch and grab)** — build to this, per
+flavour, where it differs from the rules above:
+
+- The repeating `touch` is the region's doing **on Second Life only**
+  (22.5 a second while a grab is open, and once for a bare click). OpenSim
+  raises one `touch` for each `ObjectGrabUpdate` and none otherwise.
+- A second `ObjectGrab` with a grab open is ignored on Second Life and a
+  second `touch_start` on OpenSim; an update with no grab opens a touch on
+  Second Life; a degrab with no grab is a `touch_end` on both.
+- `llPassTouches`: OpenSim passes for any value but 0, so `PASS_NEVER`
+  passes there. On Second Life a child with no handler under `PASS_NEVER`
+  tells nobody.
+- The detected block is the viewer's `SurfaceInfo` verbatim on both, of
+  the latest message of the touch on Second Life; `llDetectedGrab` and
+  `llDetectedType` differ, as tabled.
+- A child of a root that takes touches carries `FLAGS_HANDLE_TOUCH` on
+  Second Life and not on OpenSim.
+- The drag half is done for a prim that is not physical
+  (`sl-fake-grid/src/grabs.rs`), which stays where it is when its flags
+  say a script takes touches — the script engine has to keep those flags
+  true.
+
+The census's script legs are live-only until this lands: enrol them on the
+fake flavours (drop the `is_fake` early return in
+`sl-conformance/src/cases/object_touch_grab.rs`) as the acceptance.
 
 Acceptance: the `object-touch-grab` conformance case runs against the
 fake grid (it is OpenSim-only today) and a unit test shows a held grab

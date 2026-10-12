@@ -476,6 +476,15 @@ impl Plugin for ViewerWorldPlugins {
                 // one; the binary is where the two meet.
                 .run_if(crate::edit_tool::edit_tool_inactive),
         );
+        // A held touch ends when the button is let go, whatever tool has been
+        // taken up meanwhile.
+        app.init_resource::<crate::hud_pick::HeldTouch>();
+        app.add_systems(
+            Update,
+            crate::hud_pick::hold_touch
+                .after(pick_and_touch)
+                .after(crate::hud_pick::resolve_touch_pick),
+        );
     }
 }
 

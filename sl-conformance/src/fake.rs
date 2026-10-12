@@ -180,6 +180,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "object-link-delink",
     "object-properties",
     "object-select-scene",
+    "object-touch-grab",
     "object-rez-derez",
     "object-rez-land",
     "parcel-edit",

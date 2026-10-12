@@ -687,6 +687,147 @@ a friend with edit rights, and a group member with the power, in the
 stranger's place; a listing of more than a few items, and the serial at
 its sixteen-bit wrap.
 
+## Touch and grab
+
+A viewer has three messages for a mouse button on a prim: `ObjectGrab` at
+the press, `ObjectGrabUpdate` while it is held and `ObjectDeGrab` at the
+release — and three more for turning what it holds, `ObjectSpinStart`,
+`ObjectSpinUpdate` and `ObjectSpinStop`. Neither grid answers any of the
+six. What they do shows in what a script in the prim is handed
+(`touch_start`, `touch`, `touch_end`, and the `llDetected*` values), and in
+where the prim is afterwards: the same three messages are a **touch** of a
+prim whose script takes one and a **drag** of a prim that has none.
+
+Measured on 2026-10-12 by the conformance case `object-touch-grab`. One
+avatar rezzes cubes on land it may build on, a second stands by, and the
+two make one gesture a leg. The script is the probe: it says every event
+it is handed, with what it detects, to its owner. It ran seven times on
+aditi (Mauve, the public sandbox parcel) and eight on the local OpenSim
+(YEngine). Every row below is checked on every run of both live grids, but
+for the ones marked **not held**; the rows of *A prim with no script* are
+checked on both fake flavours as well, which run no scripts.
+
+### The events of a touch
+
+| gesture | Second Life | OpenSim |
+| --- | --- | --- |
+| a press and a release at once | `touch_start`, **one `touch`**, `touch_end` | `touch_start`, `touch_end` |
+| a press held for two seconds, nothing sent meanwhile | `touch` events **on the region's own clock**, 22.5 a second (45 in the two seconds, **not held**) | **no `touch` event at all** |
+| a press, ten `ObjectGrabUpdate`s a tenth of a second apart, a release | the same 22.5 a second: an update adds none | **one `touch` an update**, ten |
+| a release with no press before it | `touch_end` | `touch_end` |
+| two presses and one release | the second press is **ignored**: one `touch_start` | **two `touch_start`s** |
+| updates with no press before them | the first **opens a touch**: `touch_start`, and `touch` on the clock until a release | one `touch` an update, no `touch_start` |
+| how many touches an event is handed, one avatar touching | 1 | 1 |
+| the prim's click action set to *sit*, or to *disabled* | the events as before | the events as before |
+| a script with no touch handler | no event, and nothing else | the same |
+| what either avatar is sent after a touch | nothing | the prim in a **terse update, to everybody, for every `ObjectGrabUpdate`** |
+
+So a held button is a held touch on Second Life whatever the viewer sends
+between the press and the release, and on OpenSim only as far as the
+viewer keeps sending updates. A click action is the viewer's business on
+both: neither grid withholds a touch for one.
+
+### What a script detects
+
+| value | Second Life | OpenSim |
+| --- | --- | --- |
+| `llDetectedTouchFace`, `ST`, `UV`, `Pos`, `Normal`, `Binormal`, the message carrying a `SurfaceInfo` block | the block's values, **as sent**: a face a cube does not have (99), coordinates off the face (2.5, −1.5) and a normal three long come back unchanged | the same |
+| the same, the message carrying none | face −1, `ST` and `UV` `<-1, -1, 0>`, the three vectors zero | the same |
+| which message a `touch_start` reads | the `ObjectGrab` | the `ObjectGrab` |
+| which message a `touch` reads | the **latest** message of the touch: the `ObjectGrab` until an update comes, then the update — an update with no block reads as no surface | the `ObjectGrabUpdate` it was raised for |
+| which message a `touch_end` reads | the `ObjectDeGrab` | the `ObjectDeGrab` |
+| `llDetectedGrab` in a `touch_start` | zero | **the `GrabOffset` of the `ObjectGrab`** |
+| `llDetectedGrab` in a `touch` | the update's `GrabPosition`, less the prim's position, **less the `GrabOffsetInitial`** | the update's `GrabPosition`, less the prim's position |
+| `llDetectedGrab` in a `touch_end` | zero | zero |
+| `llDetectedKey` | whoever touched — the owner, or another avatar | the same |
+| `llDetectedType` of an avatar standing still | 3 (`AGENT \| ACTIVE`) | 1 (`AGENT`) |
+
+`llDetectedTouchPos` is documented in the region's coordinates and
+`llDetectedTouchNormal` in the region's axes. Neither grid computes either:
+a script reads what the viewer put in the block.
+
+### The flags a viewer reads
+
+| question | Second Life | OpenSim |
+| --- | --- | --- |
+| a prim with a running script that has a touch handler | `FLAGS_SCRIPTED` and `FLAGS_HANDLE_TOUCH`, in a full update to everybody as the script is saved | the same |
+| the script saved again with no touch handler | `FLAGS_SCRIPTED` alone, again in a full update to everybody | the same |
+| the script removed | neither flag, a full update to everybody | the same |
+| a **child** of a linkset whose root has such a script | carries **both flags** itself — and is not sent again when the root's script lands: a viewer that does not ask keeps the flags it had | carries `FLAGS_SCRIPTED` only, and is sent again in full |
+| a click action set by the owner | stored, and the prim sent in full to everybody | stored, and nobody told (§ Editing) |
+
+A viewer that wants to know whether a click on a prim reaches a script has
+to look at the prim's flags **and its root's**, on either grid.
+
+### Which prim of a linkset is told
+
+Two cubes linked, the other avatar clicking on the child. "root (link 2)"
+is the root's script handed the event with `llDetectedLinkNumber` 2.
+
+| scripts | Second Life | OpenSim |
+| --- | --- | --- |
+| a touch script in the root alone, a click on the child | root (link 2) | root (link 2) |
+| the same, a click on the root | root (link 1) | root (link 1) |
+| a touch script in both, nothing said of passing touches | child (link 2) alone | child (link 2) alone |
+| the child's script having called `llPassTouches(PASS_ALWAYS)` (1) | child and root, each told link 2 | the same |
+| `llPassTouches(PASS_IF_NOT_HANDLED)` (0) | child alone | child alone |
+| `llPassTouches(PASS_NEVER)` (2) | child alone | **child and root**: any value but 0 passes |
+| the child's script with no touch handler, and 0 or 1 | root (link 2) | root (link 2) |
+| the child's script with no touch handler, and `PASS_NEVER` | **nobody** | root (link 2) |
+
+### A prim with no script
+
+The same messages sent at a cube nothing takes touches in.
+
+| gesture | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a press and a release | nothing | nothing | nothing |
+| a press, five `ObjectGrabUpdate`s asking a metre aside, a release, by the owner | **the prim is put where the update says the grab is**; a terse update to everybody | the same | the same |
+| the five updates with no press before them | the same | the same | the same |
+| the same by another avatar | the prim stays, and nobody is sent anything | the prim stays, and **everybody is sent a terse update for every update** | each flavour as its grid |
+| a spin by the owner: five `ObjectSpinUpdate`s ending a quarter turn left | **the prim stands as the last update says**; a terse update to everybody | the same | the same |
+| a second spin ending a quarter turn right | as that one says: the rotation is the prim's, not a turn added to it | the same | the same |
+| a spin by another avatar | the prim stays, nobody is sent anything | the prim stays, a terse update | each flavour as its grid |
+| a prim whose script takes touches, dragged by its owner | the prim **stays**, the script has its `touch_start`, `touch` and `touch_end`, nobody is sent anything | the prim stays, the same events, a terse update for every update | a prim flagged `FLAGS_HANDLE_TOUCH`, or under a root that is, stays on both flavours; neither runs a script |
+| a prim whose script has no touch handler, dragged by its owner | moves, as a prim with no script | the same | the same |
+
+This is the drag of the reference viewer's grab tool, and it is why a
+viewer must not send an `ObjectGrabUpdate` for a click on a prim that
+takes no touch: on either grid an owner's update carries the prim off to
+wherever the update says the grab is.
+
+### A physical prim
+
+The cube made physical and left to come to rest; thirty updates asking it
+half a metre aside, three seconds of them.
+
+| gesture | Second Life | OpenSim |
+| --- | --- | --- |
+| a drag by another avatar | the prim stays | the prim stays |
+| a spin by the owner, by steps to a quarter turn | the prim turns, and not to where the last update says | the same |
+| a drag by the owner | the prim is **pulled away**: it was last seen some 80 m off, by the region's south-western corner, in every run | pushed a millimetre or two (0.08 m for a pull of two metres): a force of a tenth of the prim's mass times the distance, once an update |
+| who is sent what meanwhile (**not held**) | terse updates, and now and then a full one | a terse update for every update |
+
+Second Life's pull was not understood: the same messages that leave an
+OpenSim cube where it lies sent Second Life's across the region, twice off
+its edge. The census asks for half a metre and no more for that reason.
+
+Not measured: a touch from further off than a few metres; a touch on an
+attachment and on a HUD; two avatars touching at once, which is what an
+event's count of touches is for; a press never released, by an avatar that
+then logs out; `llDetectedTouchPos` and friends on a prim in a neighbouring
+region; a drag of a prim its owner has locked, or one the everyone mask
+lets anybody move; `llSetStatus(STATUS_BLOCK_GRAB)`; XEngine. What a
+`touch` reads on OpenSim after a click or a hold with no update cannot be
+asked: there is no such event there.
+
+The fake grid runs no scripts, so it hands nothing a touch event: that, and
+the detected values, are `server-world-touch-and-grab`. It moves and turns
+a dragged prim as above (`sl-fake-grid/src/grabs.rs`), with one row in
+`imitates.rs` for the one thing the grids differ in — OpenSim's terse
+update for an update that moved nothing. A physical prim stays where it is
+on both flavours: nothing there applies a force.
+
 ## What our viewer does with it
 
 - A take, a copy, a delete and a return are each one `DeRezObject` from the
@@ -813,6 +954,40 @@ saying it is being added goes, and the one script the grid last listed
 stays. The same test, without the experience and the lost prim, runs
 against a live grid with `SL_E2E_GRID=opensim` and `=aditi`, and passes on
 both.
+
+A touch, by the same measurements:
+
+- A left click on a prim is a touch from the press to the release: an
+  `ObjectGrab` when the pick lands, an `ObjectDeGrab` when the button is
+  let go. It used to send the two back to back, so a script saw every
+  press end at once and a held button was no touch at all on Second Life.
+- For a prim whose script takes touches — `FLAGS_HANDLE_TOUCH` on it or on
+  its root — an `ObjectGrabUpdate` follows the grab, and another whenever
+  the cursor has moved to a different point of the prim's surface, or off
+  it: when the reference viewer sends them, and all OpenSim hands a script
+  a `touch` event for. Every one carries the surface under the cursor,
+  since Second Life reads a `touch` from the latest message.
+- For any other prim no update is sent at all, on either grid: an owner's
+  update would carry the prim off.
+- The surface a touch in the world states is in the region's frame — the
+  point, the normal and the binormal. It used to be in the prim's own,
+  which both grids handed a script as `llDetectedTouchPos` unchanged. A
+  touch on a HUD still states the HUD's own frame.
+
+Checked in the viewer's own world tests (a held button on a prim that
+takes touches and on one that does not; the region frame of a world
+touch), and through the viewer automation on each fake flavour
+(`e2e_pilot`): a left click on a prim flagged as taking touches reaches the
+grid as a grab, an update and a degrab, in that order, the grab stating a
+point on the prim in region metres.
+
+Not done in the viewer: a click on a prim that takes no touch still sends
+the grab and the degrab, where the reference sends nothing
+(`viewer-left-click-touches-a-prim-that-takes-none`); a click action is
+not carried out and *disabled* does not stop a touch
+(`viewer-left-click-click-actions`); the cursor does not say a prim takes
+a touch (`viewer-touch-cursor`); and nothing drags or spins a prim
+(`viewer-build-tool-row-parity`).
 
 The fake grid neither returns somebody else's object, nor returns anything
 by itself, nor ends a temporary prim: `server-fake-grid-object-return`. It

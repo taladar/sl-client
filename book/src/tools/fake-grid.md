@@ -1324,6 +1324,17 @@ region's own lock:
   record and its contents, by an offset or onto a ray's target; the grid casts
   no ray. With no groups in it, a group set does nothing and a deed is refused.
 
+  A **held mouse button** moves a prim too
+  ([Building § Touch and grab](../gridspec/building.md#touch-and-grab),
+  `grabs.rs`): an owner's `ObjectGrabUpdate` puts a prim that is not physical
+  at the grab position it states and an `ObjectSpinUpdate` gives it the
+  rotation it states, as on both live grids, and everybody is sent a terse
+  update (`RegionChange::Moved`). A prim whose flags say a script takes
+  touches stays, and so does anybody else's; the OpenSim flavour sends its
+  terse update even then (`EditPolicy::refused_drag`). Nothing is
+  handed a touch event: no script runs (`server-world-touch-and-grab`).
+  `object-touch-grab` runs its plain-prim legs offline on both flavours.
+
   Part of an `ObjectUpdate` is **per viewer**: the `PrimFlags` that say what the
   receiving agent may do with the object (`OBJECT_MODIFY`, `_MOVE`, `_COPY`,
   `_TRANSFER`, `_YOU_OWNER`, `_ANY_OWNER`, `_OWNER_MODIFY`), which a viewer

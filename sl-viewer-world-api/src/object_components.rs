@@ -18,7 +18,7 @@ use sl_client_bevy::{
     SurfaceInfo, TextureFace, TextureKey, TextureUpload, Uuid, Vector, texture_face_uv_transform,
     upload_decoded,
 };
-use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
+use sl_viewer_kit::coords::{bevy_to_sl_vec, sl_rotation_to_quat, sl_to_bevy_rotation};
 
 /// A component marking an object entity as a **reflection probe**, carrying the
 /// decoded `LLReflectionProbeParams` parameters (in Second Life semantics) plus
@@ -686,6 +686,15 @@ pub fn vscale(v: Vec3, s: f32) -> Vec3 {
     Vec3::new(v.x * s, v.y * s, v.z * s)
 }
 
+/// The frame a touch states its position, normal and binormal in.
+#[derive(Debug, Clone, Copy)]
+pub enum SurfaceFrame<'a> {
+    /// The agent's region: Second Life region-local metres.
+    Region,
+    /// The touched object's own frame, given its world transform.
+    Object(&'a GlobalTransform),
+}
+
 /// Build the [`SurfaceInfo`] a touch carries from a ray hit, the picked face, and
 /// the touched object's world transform — the viewer's `LLPickInfo::getSurfaceInfo`.
 ///
@@ -697,33 +706,60 @@ pub fn vscale(v: Vec3, s: f32) -> Vec3 {
 /// - **UV** is `ST` with the face's texture placement (repeats / offset /
 ///   rotation, [`texture_face_uv_transform`]) applied — the coordinate as the
 ///   texture is actually sampled, matching the reference's `surfaceToTexture`.
-/// - **Position / normal / binormal** are given in the object's own Second Life
-///   frame (its global's inverse carries the world hit back into it). A HUD lives
-///   in screen space with no meaningful region position, so the object-local
-///   frame is the sensible finite choice; the reference instead reports region /
-///   HUD-matrix coordinates, a deliberate simplification here. The binormal is
-///   derived geometrically (perpendicular to the normal, along the hit triangle)
-///   rather than from a texture tangent the ray hit does not carry.
+/// - **Position / normal / binormal** are given in the `frame` asked for. A
+///   touch in the world states them in the agent's region
+///   ([`SurfaceFrame::Region`]), as the reference does and as both grids hand
+///   them to a script unchanged: `llDetectedTouchPos` is documented in region
+///   coordinates, and neither grid converts what a viewer sent. A HUD lives in
+///   screen space with no region position, so a touch on one states them in
+///   the object's own frame ([`SurfaceFrame::Object`]); the reference reports
+///   its HUD-matrix coordinates there, a deliberate simplification here. The
+///   binormal is derived geometrically (perpendicular to the normal, along the
+///   hit triangle) rather than from a texture tangent the ray hit does not
+///   carry.
 #[must_use]
 pub fn surface_info_from_hit(
     hit: &bevy::picking::mesh_picking::ray_cast::RayMeshHit,
     face_id: Option<PrimFaceId>,
     texture_face: Option<&TextureFace>,
-    object_global: &GlobalTransform,
+    frame: SurfaceFrame<'_>,
 ) -> SurfaceInfo {
-    let inverse = object_global.affine().inverse();
-    // The hit point / normal in the object's own Second Life frame (the object
-    // subtree lives in Second Life space under the root's basis change, so the
-    // inverse of its global lands here directly).
-    let position = inverse.transform_point3(hit.point);
-    let normal = inverse.transform_vector3(hit.normal).normalize_or_zero();
+    // The hit point, its normal and the hit triangle's first edge, in Second
+    // Life axes: in the agent's region (the scene's origin is that region's,
+    // so the axis map is the whole conversion), or in the object's own frame
+    // (the object subtree lives in Second Life space under the root's basis
+    // change, so the inverse of its global lands there directly).
+    let edge_of = |tri: [Vec3; 3]| {
+        let [first, second, _third] = tri;
+        vsub(second, first)
+    };
+    let (position, normal, edge) = match frame {
+        SurfaceFrame::Region => {
+            let in_region = |vector: Vec3| {
+                let sl = bevy_to_sl_vec(vector);
+                Vec3::new(sl.x, sl.y, sl.z)
+            };
+            (
+                in_region(hit.point),
+                in_region(hit.normal).normalize_or_zero(),
+                hit.triangle.map(|tri| in_region(edge_of(tri))),
+            )
+        }
+        SurfaceFrame::Object(object_global) => {
+            let inverse = object_global.affine().inverse();
+            (
+                inverse.transform_point3(hit.point),
+                inverse.transform_vector3(hit.normal).normalize_or_zero(),
+                hit.triangle
+                    .map(|tri| inverse.transform_vector3(edge_of(tri))),
+            )
+        }
+    };
 
     // The binormal: perpendicular to the normal and along the surface, derived
     // from the hit triangle's first edge projected off the normal.
-    let binormal = hit
-        .triangle
-        .map(|tri| {
-            let edge = inverse.transform_vector3(vsub(tri[1], tri[0]));
+    let binormal = edge
+        .map(|edge| {
             let along = vsub(edge, vscale(normal, edge.dot(normal)));
             normal.cross(along).normalize_or_zero()
         })

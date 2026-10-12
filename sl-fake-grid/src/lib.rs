@@ -15,6 +15,7 @@ pub mod error;
 pub mod estate;
 pub mod experiences;
 pub mod fixtures;
+mod grabs;
 mod http_answer;
 mod http_service;
 pub mod imitates;
