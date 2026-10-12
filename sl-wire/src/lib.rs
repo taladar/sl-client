@@ -886,6 +886,44 @@ mod test {
         Ok(())
     }
 
+    /// Both grids keep whatever text a navigation hands them, so a face may
+    /// state an address that is no URL. It reads as a face with media and no
+    /// address, and the other faces are read as they are.
+    #[test]
+    fn a_media_address_that_is_no_url_costs_only_itself() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let object = uuid::Uuid::from_u128(0x000b_1ec7);
+        let body = format!(
+            "<llsd><map><key>object_id</key><uuid>{object}</uuid>\
+             <key>object_media_version</key><string>x-mv:0000000004/{object}</string>\
+             <key>object_media_data</key><array>\
+             <map><key>current_url</key><string>https://not a url</string>\
+             <key>home_url</key><string>https://example.com/</string>\
+             <key>auto_play</key><boolean>1</boolean></map>\
+             <map><key>current_url</key><string>https://example.com/other</string></map>\
+             </array></map></llsd>"
+        );
+        let response = ObjectMediaResponse::from_llsd(&parse_llsd_xml(&body)?)
+            .map_err(|error| format!("{error:?}"))?;
+        assert_eq!(
+            response.faces.first(),
+            Some(&Some(MediaEntry {
+                current_url: None,
+                home_url: Some(url::Url::parse("https://example.com/")?),
+                auto_play: true,
+                ..MediaEntry::default()
+            }))
+        );
+        assert_eq!(
+            response.faces.get(1),
+            Some(&Some(MediaEntry {
+                current_url: Some(url::Url::parse("https://example.com/other")?),
+                ..MediaEntry::default()
+            }))
+        );
+        Ok(())
+    }
+
     #[test]
     fn upload_metadata_requests_round_trip() -> Result<(), WireError> {
         let folder = sl_types::key::InventoryFolderKey::from(uuid::Uuid::from_u128(0xf0));

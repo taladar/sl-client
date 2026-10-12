@@ -861,7 +861,7 @@ fn keys_of(value: Option<&Llsd>) -> String {
 
 /// The shape of an LLSD value: the kind of a scalar, and for a map each key
 /// with the shape of its value, in order.
-fn shape_of(value: &Llsd) -> String {
+pub(crate) fn shape_of(value: &Llsd) -> String {
     match value {
         Llsd::Map(map) => {
             let mut entries: Vec<(&String, &Llsd)> = map.iter().collect();

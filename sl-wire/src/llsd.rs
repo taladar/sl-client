@@ -967,6 +967,13 @@ impl MediaEntry {
     /// `ObjectMedia` response's `object_media_data` array). Missing fields fall
     /// back to the viewer's [`Default`] values.
     ///
+    /// An address that is no URL reads as [`None`], with a warning: both grids
+    /// keep whatever text an `ObjectMediaNavigate` hands them (Second Life as
+    /// `https://not a url`, OpenSim as `not a url`), anybody who may interact
+    /// with the face may send one, and refusing the record would cost the
+    /// viewer the media of every face of the object (`book/src/gridspec/
+    /// media.md`).
+    ///
     /// # Errors
     /// Returns [`WireError::Llsd`] if a present field is of the wrong
     /// LLSD kind.
@@ -975,11 +982,8 @@ impl MediaEntry {
         Ok(Self {
             alt_image_enable: llsd_bool(value, "alt_image_enable", default.alt_image_enable)?,
             controls: llsd_int(value, "controls", default.controls)?,
-            current_url: crate::optional_url_from_wire(
-                "current_url",
-                &llsd_string(value, "current_url")?,
-            )?,
-            home_url: crate::optional_url_from_wire("home_url", &llsd_string(value, "home_url")?)?,
+            current_url: llsd_media_url(value, "current_url")?,
+            home_url: llsd_media_url(value, "home_url")?,
             auto_loop: llsd_bool(value, "auto_loop", default.auto_loop)?,
             auto_play: llsd_bool(value, "auto_play", default.auto_play)?,
             auto_scale: llsd_bool(value, "auto_scale", default.auto_scale)?,
@@ -1139,6 +1143,24 @@ fn llsd_int(value: &Llsd, key: &'static str, default: i32) -> Result<i32, WireEr
 /// present key of the wrong LLSD kind is rejected (see [`Llsd::field_str`]).
 fn llsd_string(value: &Llsd, key: &'static str) -> Result<String, WireError> {
     Ok(value.field_str(key, key)?.unwrap_or_default().to_owned())
+}
+
+/// Reads an address field of a media entry: empty or absent is [`None`], and
+/// so — with a warning — is text that is no URL (see
+/// [`MediaEntry::from_llsd`]). A present key of the wrong LLSD kind is
+/// rejected.
+fn llsd_media_url(value: &Llsd, key: &'static str) -> Result<Option<url::Url>, WireError> {
+    let raw = llsd_string(value, key)?;
+    Ok(
+        crate::optional_url_from_wire(key, &raw).unwrap_or_else(|error| {
+            tracing::warn!(
+                field = key,
+                %error,
+                "a media entry's address is no URL; reading the face as having none"
+            );
+            None
+        }),
+    )
 }
 
 /// Reads a media-permission byte field, falling back to `default` when absent or

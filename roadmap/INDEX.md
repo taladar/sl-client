@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 139 |
 | ready | 357 |
-| blocked | 106 |
+| blocked | 105 |
 | in-progress | 20 |
 | bugs | 37 |
-| done | 1353 |
+| done | 1354 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2059** |
@@ -1098,6 +1098,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-object-edit` (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
+- [`server-fake-grid-object-media-region`](ready/server-fake-grid-object-media-region.md)
+  — Fake grid — region-wide object media with version bumps and propagation
 - [`server-fake-grid-object-record-texture-ids`](ready/server-fake-grid-object-record-texture-ids.md)
   — Fake grid — list face textures in a Second Life object record
 - [`server-fake-grid-object-return`](ready/server-fake-grid-object-return.md) —
@@ -1177,8 +1179,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   storage and enforcement on each grid
 - [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
   Notecards, embedded items and gestures on each grid
-- [`gridspec-object-media`](ready/gridspec-object-media.md) — Media on a prim:
-  ObjectMedia, navigation and propagation on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
   Current Outfit Folder and wearables on each grid
 - [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
@@ -1198,7 +1198,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
   Viewer effects and sound relays on each grid
 
-## blocked (106)
+## blocked (105)
 
 ### protocol
 
@@ -1410,9 +1410,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-mute-list`](blocked/server-fake-grid-mute-list.md) — Fake
   grid — mute list storage, the Xfer file and each grid's empty-list reply
   (blocked by `gridspec-mute-list`)
-- [`server-fake-grid-object-media-region`](blocked/server-fake-grid-object-media-region.md)
-  — Fake grid — region-wide object media with version bumps and propagation
-  (blocked by `gridspec-object-media`)
 - [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
   — Fake grid — enforce parcel access and push ban lines (blocked by
   `gridspec-parcel-access-and-ban-lines` (done),
@@ -1688,7 +1685,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1353)
+## done (1354)
 
 ### protocol
 
@@ -4653,6 +4650,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid: transforms, shape, flags, admin fields, undo, duplicate
 - [`gridspec-object-link-delink`](done/gridspec-object-link-delink.md) — Link
   order, limits and refusals on each grid
+- [`gridspec-object-media`](done/gridspec-object-media.md) — Media on a prim:
+  ObjectMedia, navigation and propagation on each grid
 - [`gridspec-object-properties`](done/gridspec-object-properties.md) — Object
   properties and selection replies on each grid
 - [`gridspec-object-rez-derez`](done/gridspec-object-rez-derez.md) — Rez, take,

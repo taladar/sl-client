@@ -82,6 +82,10 @@ pub struct MediaData {
     /// The media version string last *requested* per object, so one version
     /// is fetched once.
     requested: HashMap<ObjectKey, String>,
+    /// Which faces of an object carried the media flag in its texture entry
+    /// as last streamed, so a face that regains it is noticed (see
+    /// [`regained_media_flag`]).
+    flagged: HashMap<ObjectKey, Vec<bool>>,
 }
 
 impl WorldScoped for MediaData {
@@ -96,6 +100,7 @@ impl WorldScoped for MediaData {
     fn purge_world(&mut self, _purge: WorldPurge, _commands: &mut Commands) {
         self.objects.clear();
         self.requested.clear();
+        self.flagged.clear();
     }
 }
 
@@ -494,12 +499,16 @@ fn ingest_media_events(
                     continue;
                 }
                 let key = object.full_id;
+                let regained = regained_media_flag(&mut data, object);
                 let known = data.objects.get(&key).map(|media| media.version.as_str());
                 let requested = data.requested.get(&key).map(String::as_str);
-                if known == Some(version) || requested == Some(version) {
+                if !regained && (known == Some(version) || requested == Some(version)) {
                     continue;
                 }
-                debug!("media version {version} on object {key:?}: fetching ObjectMedia");
+                debug!(
+                    "media version {version} on object {key:?} (media flag regained: {regained}): \
+                     fetching ObjectMedia"
+                );
                 data.requested.insert(key, version.to_owned());
                 commands.write(SlCommand(Command::RequestObjectMedia { object_id: key }));
             }
@@ -569,6 +578,45 @@ fn ingest_media_events(
             _ => {}
         }
     }
+}
+
+/// Notes which faces of `object` carry the media flag, and says whether one
+/// that had lost it has it again.
+///
+/// A grid versions what the `ObjectMedia` capability is told and nothing
+/// else: an `ObjectImage` that clears a face's media flag takes the face's
+/// media away, and one that sets it again brings back an empty record on
+/// Second Life and the old one or none on OpenSim — all at the version the
+/// object already stated (`book/src/gridspec/media.md`). So the version alone
+/// would leave the record held from before the flag went showing on the face;
+/// the reference asks again whenever a face has the flag and no media of its
+/// own, on any change of a media flag (`MEDIA_FLAGS_CHANGED` in
+/// `LLVOVolume::processUpdateMessage`).
+///
+/// Only an object whose media is held is tracked: the count of faces the
+/// texture entry is unpacked to is the capability's.
+fn regained_media_flag(data: &mut MediaData, object: &sl_client_bevy::Object) -> bool {
+    let Some(face_count) = data
+        .objects
+        .get(&object.full_id)
+        .map(|media| media.faces.len())
+    else {
+        return false;
+    };
+    let flagged: Vec<bool> =
+        sl_client_bevy::decode_texture_entry(&object.texture_entry, face_count)
+            .faces
+            .iter()
+            .map(|face| face.media_enabled())
+            .collect();
+    let regained = data.flagged.get(&object.full_id).is_some_and(|before| {
+        flagged
+            .iter()
+            .zip(before)
+            .any(|(now, before)| *now && !*before)
+    });
+    data.flagged.insert(object.full_id, flagged);
+    regained
 }
 
 /// Keep each live prim surface's mixer input on its prim face, so its audio is
@@ -1548,10 +1596,120 @@ mod tests {
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{ObjectKey, Uuid};
 
-    use super::{
-        MediaData, ObjectMediaData, WorldPurge, WorldScoped as _, media_permission_allows,
-        media_pixel_from_uv, validated_media_url,
+    use bevy::prelude::{App, Messages, Update};
+    use sl_client_bevy::{
+        Command, MediaEntry, SlCommand, SlEvent, SlSessionEvent, TextureEntry, TextureFace,
+        TextureKey, encode_texture_entry,
     };
+    use sl_viewer_media::media_engine::MediaSurfaces;
+
+    use super::{
+        MediaData, MediaPrimState, ObjectMediaData, WorldPurge, WorldScoped as _,
+        ingest_media_events, media_permission_allows, media_pixel_from_uv, validated_media_url,
+    };
+
+    /// The object the ingest tests stream.
+    const CUBE: u128 = 0x000C_0BE0;
+
+    /// A six-faced prim stating the media version `serial`, with the media
+    /// flag on face 0 or on none.
+    fn cube(serial: u32, flagged: bool) -> Result<sl_client_bevy::Object, String> {
+        let mut object = sl_viewer_world_objects::objects::fixture_object(9);
+        object.full_id = ObjectKey::from(Uuid::from_u128(CUBE));
+        object.media_url = Some(
+            format!("x-mv:{serial:010}/{}", Uuid::nil())
+                .parse()
+                .map_err(|error| format!("the version is no URL: {error}"))?,
+        );
+        let mut faces = vec![TextureFace::new(TextureKey::from(Uuid::from_u128(7))); 6];
+        if flagged && let Some(face) = faces.first_mut() {
+            face.media_flags |= 0x01;
+        }
+        object.texture_entry = encode_texture_entry(&TextureEntry { faces });
+        Ok(object)
+    }
+
+    /// An app that runs [`ingest_media_events`] alone.
+    fn ingest_app() -> App {
+        let mut app = App::new();
+        app.add_message::<SlEvent>()
+            .add_message::<SlCommand>()
+            .init_resource::<MediaData>()
+            .init_resource::<MediaPrimState>()
+            .init_non_send::<MediaSurfaces>()
+            .add_systems(Update, ingest_media_events);
+        app
+    }
+
+    /// Streams `event` and returns how many `RequestObjectMedia` it brought.
+    fn fetches_after(app: &mut App, event: SlSessionEvent) -> usize {
+        app.world_mut().write_message(SlEvent(event));
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<SlCommand>>()
+            .drain()
+            .filter(|command| matches!(command.0, Command::RequestObjectMedia { .. }))
+            .count()
+    }
+
+    /// The `ObjectMedia` answer for [`cube`] at version `serial`: a page on
+    /// face 0.
+    fn answer(serial: u32) -> Result<SlSessionEvent, String> {
+        let page = "https://example.com/"
+            .parse()
+            .map_err(|error| format!("bad test url: {error}"))?;
+        let mut faces = vec![None; 6];
+        if let Some(face) = faces.first_mut() {
+            *face = Some(MediaEntry {
+                home_url: Some(page),
+                ..MediaEntry::default()
+            });
+        }
+        Ok(SlSessionEvent::ObjectMedia {
+            object_id: ObjectKey::from(Uuid::from_u128(CUBE)),
+            version: format!("x-mv:{serial:010}/{}", Uuid::nil()),
+            faces,
+        })
+    }
+
+    /// Both grids tell a viewer of a change to a prim's media by sending the
+    /// object again with a new version in its `MediaURL`
+    /// (`book/src/gridspec/media.md`): each version is fetched, once.
+    #[test]
+    fn a_new_media_version_is_fetched_once() -> Result<(), String> {
+        let mut app = ingest_app();
+        let added = SlSessionEvent::ObjectAdded(Box::new(cube(1, true)?));
+        assert_eq!(fetches_after(&mut app, added), 1);
+        // The same version again, before and after the answer.
+        let again = SlSessionEvent::ObjectUpdated(Box::new(cube(1, true)?));
+        assert_eq!(fetches_after(&mut app, again.clone()), 0);
+        assert_eq!(fetches_after(&mut app, answer(1)?), 0);
+        assert_eq!(fetches_after(&mut app, again), 0);
+        // A navigation by anybody is the next version.
+        let navigated = SlSessionEvent::ObjectUpdated(Box::new(cube(2, true)?));
+        assert_eq!(fetches_after(&mut app, navigated), 1);
+        Ok(())
+    }
+
+    /// An `ObjectImage` that clears a face's media flag and one that sets it
+    /// again both leave the version where it was, and the media the grid then
+    /// states is not what it stated before. The face that regains the flag is
+    /// fetched again.
+    #[test]
+    fn a_face_that_regains_its_media_flag_is_fetched_again() -> Result<(), String> {
+        let mut app = ingest_app();
+        let added = SlSessionEvent::ObjectAdded(Box::new(cube(1, true)?));
+        assert_eq!(fetches_after(&mut app, added), 1);
+        assert_eq!(fetches_after(&mut app, answer(1)?), 0);
+        let flagged = SlSessionEvent::ObjectUpdated(Box::new(cube(1, true)?));
+        assert_eq!(fetches_after(&mut app, flagged.clone()), 0);
+        let cleared = SlSessionEvent::ObjectUpdated(Box::new(cube(1, false)?));
+        assert_eq!(fetches_after(&mut app, cleared), 0);
+        assert_eq!(fetches_after(&mut app, flagged.clone()), 1);
+        // And once only.
+        assert_eq!(fetches_after(&mut app, flagged), 0);
+        Ok(())
+    }
 
     /// The URL on a prim face is whatever its owner typed. Only the network
     /// schemes reach an engine: a `file://` one would have GStreamer's

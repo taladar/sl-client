@@ -63,6 +63,12 @@ handled over [CAPS](../comms/caps.md):
   `ObjectMediaNavigate` capability points a surface at a new URL
   (`Command::NavigateObjectMedia`); results arrive as `Event::ObjectMedia`.
 
+What each grid keeps of a face's media, how it versions it, whom it lets
+change it and whom it tells is measured in
+[Grid Behaviour: Media](../gridspec/media.md). An address a grid states that is
+no URL — both keep whatever text a navigation hands them — reads as a face with
+media and no address, so it costs that face and not the object.
+
 Older **parcel media** (a single video/image for a whole parcel) is separate:
 its settings arrive as `Event::ParcelMediaUpdate`, and scripts can drive
 playback — play, stop, pause, unload, seek — surfaced as

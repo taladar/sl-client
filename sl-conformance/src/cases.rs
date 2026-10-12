@@ -82,6 +82,7 @@ pub mod object_edit_stranger;
 pub mod object_handshake_flags;
 pub mod object_link_delink;
 pub mod object_link_stranger;
+pub mod object_media;
 pub mod object_properties;
 pub mod object_rez_derez;
 pub mod object_rez_land;
