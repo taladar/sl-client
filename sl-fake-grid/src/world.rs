@@ -30,7 +30,9 @@ use sl_proto::{
     RegionLocalParcelId, RegionTerrainComposition, SaleType, ServerEvent, SimSession,
     TaskInventoryItem, TerrainLayerType, TransactionId, pcode, prim_flags,
 };
-use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
+use sl_types::key::{
+    AgentKey, ExperienceKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey,
+};
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::{Direction, LandArea, RegionCoordinates};
 use sl_types::money::LindenAmount;
@@ -181,6 +183,9 @@ pub struct SceneFixtures {
     /// What the region makes of a link and a delink, where the live grids
     /// disagree. Second Life's unless the grid's flavour says otherwise.
     pub(crate) linking: crate::imitates::LinkPolicy,
+    /// What the region says of a write into a prim's contents, where the live
+    /// grids disagree. Second Life's unless the grid's flavour says otherwise.
+    pub(crate) contents: crate::imitates::ContentsPolicy,
     /// The order each linkset keeps its prims in ([`crate::link_sets`]). Not
     /// a fixture: a set nobody has linked or delinked is in the order its
     /// prims were stated.
@@ -375,6 +380,15 @@ pub enum RegionChange {
         /// The record as it now stands, contents serial included.
         properties: Box<ObjectProperties>,
     },
+    /// A script in an object started, which on Second Life moves its contents
+    /// serial again: every session holding the object selected is sent a
+    /// `ReplyTaskInventory` it did not ask for, naming the listing as it now
+    /// stands. A subscription like [`PropertiesChanged`](Self::PropertiesChanged),
+    /// and one only a Second-Life-flavoured grid publishes.
+    ContentsListed {
+        /// The region-local id the selection subscription is keyed by.
+        local_id: RegionLocalObjectId,
+    },
     /// A parcel's record changed — an About Land save, a purchase, a deed, an
     /// abandonment. A parcel has one record and a simulator re-sends the whole
     /// of it as an unsolicited `ParcelProperties`, to the avatars standing on
@@ -450,6 +464,13 @@ pub struct TaskInventory {
     pub serial: i16,
     /// The items the object contains.
     pub items: Vec<TaskInventoryItem>,
+    /// The experience each script among them was last compiled under, for the
+    /// scripts that are under one: what a `GetMetadata` is answered from.
+    pub experiences: BTreeMap<InventoryKey, ExperienceKey>,
+    /// The scripts among them that are running: what a `GetScriptRunning` is
+    /// answered from. The fake grid runs no script; this is the state a
+    /// viewer's Running checkbox reads and writes.
+    pub running: BTreeSet<InventoryKey>,
 }
 
 impl TaskInventory {
@@ -457,7 +478,42 @@ impl TaskInventory {
     /// what an object contains before anybody logged in.
     #[must_use]
     pub const fn stated(serial: i16, items: Vec<TaskInventoryItem>) -> Self {
-        Self { serial, items }
+        Self {
+            serial,
+            items,
+            experiences: BTreeMap::new(),
+            running: BTreeSet::new(),
+        }
+    }
+
+    /// Advances the serial without changing the listing: what Second Life
+    /// does when a script in the prim starts or stops.
+    pub const fn touch(&mut self) {
+        self.serial = self.serial.saturating_add(1);
+    }
+
+    /// `name`, or `name` with the first number after it that no item here
+    /// has: both grids call the second copy of `Note` in a prim `Note 1`.
+    #[must_use]
+    pub fn free_name(&self, name: &str) -> String {
+        let taken = |candidate: &str| self.items.iter().any(|held| held.name == candidate);
+        if !taken(name) {
+            return name.to_owned();
+        }
+        (1_u32..)
+            .map(|number| format!("{name} {number}"))
+            .find(|candidate| !taken(candidate))
+            .unwrap_or_else(|| name.to_owned())
+    }
+
+    /// Takes the item `item_id` out and advances the serial. `None`, and the
+    /// serial left alone, when the object holds no such item.
+    pub fn remove(&mut self, item_id: InventoryKey) -> Option<TaskInventoryItem> {
+        let index = self.items.iter().position(|held| held.item_id == item_id)?;
+        let _experience = self.experiences.remove(&item_id);
+        let _was_running = self.running.remove(&item_id);
+        self.serial = self.serial.saturating_add(1);
+        Some(self.items.remove(index))
     }
 
     /// Writes `item` in, replacing an entry with the same id, and advances the
@@ -618,6 +674,7 @@ impl SceneFixtures {
             rez: crate::imitates::RezPolicy::default(),
             edit: crate::imitates::EditPolicy::default(),
             linking: crate::imitates::LinkPolicy::default(),
+            contents: crate::imitates::ContentsPolicy::default(),
             links: crate::link_sets::LinkSets::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
@@ -801,6 +858,21 @@ impl SceneFixtures {
         let held = self.object_mut(local_id)?;
         restored.place(held);
         Some((before, held.clone()))
+    }
+
+    /// The experience the item `item` in the prim `task` was last compiled
+    /// under — `Some(None)` for one under none — or `None` for an item the
+    /// prim does not hold.
+    #[must_use]
+    pub fn script_experience(
+        &self,
+        task: ObjectKey,
+        item: InventoryKey,
+    ) -> Option<Option<ExperienceKey>> {
+        let local_id = self.local_id_of(task)?;
+        let contents = self.task_inventories.get(&local_id)?;
+        let _held = contents.items.iter().find(|held| held.item_id == item)?;
+        Some(contents.experiences.get(&item).copied())
     }
 
     /// Removes the prim with the given region-local id, returning it.
@@ -2026,6 +2098,20 @@ pub(crate) fn answer_world_request(
     {
         return changes;
     }
+    if let Some(changes) = crate::task_contents::answer_contents_write(
+        crate::task_contents::ContentsStores {
+            world,
+            assets,
+            selection,
+            sim,
+        },
+        announcement,
+        mint,
+        event,
+        now,
+    ) {
+        return changes;
+    }
     if let Some(changes) =
         crate::parcel_edits::answer_parcel_edit(world, (region, identity), parcels, sim, event, now)
     {
@@ -2229,58 +2315,6 @@ pub(crate) fn answer_world_request(
             if let Err(error) = result {
                 tracing::warn!("serving the task inventory of {local_id:?} failed: {error}");
             }
-        }
-        // An agent inventory item dropped into a prim. The simulator resolves
-        // the item by id from the agent's *own* inventory rather than trusting
-        // the copy the client sent, mints a fresh task item id for it (a task
-        // copy is a new item, not the same one in two places), and the write
-        // advances the object's contents serial.
-        //
-        // That serial is the whole of a prim's contents freshness marker, and
-        // it does not travel in an `ObjectUpdate` — it is a field of the
-        // properties record. So the write owes two pushes: the writing client
-        // its own new record, and every *other* session holding the prim
-        // selected the same one, or a resident with the prim's contents open
-        // keeps a listing the region no longer holds and cannot tell.
-        ServerEvent::UpdateTaskInventory { local_id, item, .. } => {
-            let Some(object) = world.object_by_local_id(*local_id) else {
-                tracing::debug!("a task inventory write named {local_id:?}, which is not here");
-                return Vec::new();
-            };
-            let Some(source) = sim.agent_inventory().item(item.item_id).cloned() else {
-                tracing::debug!(
-                    "a task inventory write named item {}, which this agent does not hold",
-                    item.item_id
-                );
-                return Vec::new();
-            };
-            world
-                .task_inventories
-                .entry(*local_id)
-                .or_default()
-                .write(task_item_from(&source, object.full_id, mint));
-            let Some(properties) = world.record_of(*local_id) else {
-                return Vec::new();
-            };
-            // Who hears of it is the grid's: Second Life tells every session
-            // holding the prim selected, the writer among them or not;
-            // OpenSim tells the writer and nobody else.
-            let (to_writer, to_selectors) = match world.properties.contents_change_told_to {
-                crate::imitates::ContentsAudience::Selectors => {
-                    (selection.contains(local_id), true)
-                }
-                crate::imitates::ContentsAudience::Writer => (true, false),
-            };
-            if to_writer && let Err(error) = sim.send_object_properties(&properties, now) {
-                tracing::warn!("pushing a written prim's contents serial failed: {error}");
-            }
-            if !to_selectors {
-                return Vec::new();
-            }
-            return vec![RegionChange::PropertiesChanged {
-                local_id: *local_id,
-                properties: Box::new(properties),
-            }];
         }
         // The agent asked to sit on something. A simulator answers a sit on an
         // object it has with an `AvatarSitResponse`. One it does not have,
@@ -3610,7 +3644,7 @@ fn taken_item(
 /// The `BulkUpdateInventory` side carries no folder blocks: the folder the item
 /// went into already exists in the client's model — the client named it in the
 /// derez — and a real grid's bulk update announces the *changed* objects.
-fn announce_created_items(
+pub(crate) fn announce_created_items(
     announcement: crate::inventory::InventoryAnnouncement,
     sim: &mut SimSession,
     created: &[InventoryItem],
@@ -3643,39 +3677,6 @@ fn narrow_code(code: i32) -> i8 {
 /// LL's "no asset class" sentinel (`LLAssetType::AT_NONE`), which is also
 /// `LLInventoryType::IT_NONE`.
 const UNKNOWN_ASSET_CLASS: i8 = -1;
-
-/// The task-inventory entry an agent inventory item becomes when it is dropped
-/// into a prim.
-///
-/// The item id is **fresh**: a task copy is a new item that happens to name the
-/// same asset, which is why the conformance case matches the dropped item by
-/// name rather than by id. Everything else is carried across from the item the
-/// simulator holds, not from the copy the client sent.
-fn task_item_from(
-    source: &InventoryItem,
-    task: ObjectKey,
-    mint: &dyn Fn() -> uuid::Uuid,
-) -> TaskInventoryItem {
-    TaskInventoryItem {
-        item_id: InventoryKey::from(mint()),
-        parent_task: task,
-        permissions: source.permissions,
-        creator_id: source.creator_id,
-        last_owner_id: AgentKey::from(source.last_owner_id),
-        owner: source.owner,
-        group: source.group,
-        group_owned: source.owner.is_group(),
-        asset_id: Some(AssetKey::from(source.asset_id)),
-        asset_type: AssetType::from_code(i32::from(source.item_type)),
-        inv_type: InventoryType::from_code(i32::from(source.inv_type)),
-        flags: source.flags,
-        sale_type: SaleType::from_code(source.sale_type),
-        sale_price: source.sale_price.clone().unwrap_or(LindenAmount(0)),
-        name: source.name.clone(),
-        description: source.description.clone(),
-        creation_date: source.creation_date,
-    }
-}
 
 /// Rezzes the agent's own avatar **seated**: parented to `seat` (a
 /// region-local id) at `offset` from it, which is how a seated avatar travels
@@ -4088,6 +4089,34 @@ mod test {
     /// A task-inventory write advances the serial — which is the whole
     /// observable, since a viewer that sees the same serial twice keeps the
     /// listing it already downloaded — and re-writing one item replaces it
+    /// A second item of one name is given the first free number, as both
+    /// live grids give it; a remove advances the serial and forgets what
+    /// was kept about the item; and a remove of an item that is not there
+    /// leaves the serial alone.
+    #[test]
+    fn task_items_are_named_apart_and_removed_with_what_is_kept_of_them() {
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x7A5C));
+        let mut contents = TaskInventory::default();
+        assert_eq!(contents.free_name("Note"), "Note");
+        for (id, name) in [(1_u128, "Note"), (2, "Note 1")] {
+            let name = contents.free_name(name);
+            contents.write(task_item(task, id, &name));
+        }
+        assert_eq!(contents.free_name("Note"), "Note 2");
+        assert_eq!(contents.free_name("Other"), "Other");
+
+        let first = InventoryKey::from(uuid::Uuid::from_u128(1));
+        let _was = contents.running.insert(first);
+        let serial = contents.serial;
+        assert!(contents.remove(first).is_some());
+        assert_eq!(contents.serial, serial + 1);
+        assert!(contents.running.is_empty());
+        assert!(contents.remove(first).is_none());
+        assert_eq!(contents.serial, serial + 1, "nothing was removed");
+        contents.touch();
+        assert_eq!(contents.serial, serial + 2);
+    }
+
     /// rather than listing it twice.
     #[test]
     fn a_task_inventory_write_advances_the_serial() {

@@ -1100,6 +1100,7 @@ mod test {
                     running.circuit,
                     sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
                 ),
+                held_serial: None,
             })
             .await?;
         let (serial, items) = running
@@ -1224,6 +1225,7 @@ mod test {
                     running.circuit,
                     sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
                 ),
+                held_serial: None,
             })
             .await?;
         let mut spoke = false;
@@ -1466,6 +1468,7 @@ mod test {
                         running.circuit,
                         sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
                     ),
+                    held_serial: None,
                 })
                 .await?;
             let mut spoke = false;

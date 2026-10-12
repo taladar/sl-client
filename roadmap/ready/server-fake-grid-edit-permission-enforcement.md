@@ -55,3 +55,14 @@ each of two owners from either side and either way round, and a stranger's
 delink of an owner's set. Written up in `book/src/gridspec/building.md`
 § Linking § Somebody else's prims; its `MEASURED` table joins
 `object-edit-stranger`'s as this task's specification.
+
+## Contents (2026-10-12)
+
+[[gridspec-task-inventory]] added `task-inventory-stranger` (two avatars,
+live only): a stranger's listing of an owner's prim over UDP and over the
+capability, and its drop, its script, its move and its remove. Written up
+in `book/src/gridspec/building.md` § Contents § Somebody else's prim; its
+`MEASURED` table joins the two above. Second Life lists the prim to a
+stranger with every asset id nil and refuses each write with an alert of
+its own (`UnableEditItem`, `NoPermToEdit`, `NoPermToCopyInventory`,
+`NoPermissionToEdit`); OpenSim neither lists nor answers.

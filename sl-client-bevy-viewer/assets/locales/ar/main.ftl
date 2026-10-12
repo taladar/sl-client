@@ -117,6 +117,7 @@ menu-embedded-copy-to-inventory = نسخ إلى المخزون
 script-save = حفظ وترجمة
 script-readonly-note = ليس لديك إذن لتعديل هذا النص البرمجي.
 script-running = قيد التشغيل
+script-experience = التجربة: { $name }
 script-status-loading = جارٍ التحميل…
 script-status-saving = جارٍ الحفظ والترجمة…
 script-status-saved = تم الحفظ.

@@ -26,7 +26,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use sl_types::key::AgentKey;
+use sl_types::key::{AgentKey, ExperienceKey, InventoryKey, ObjectKey};
 use sl_wire::{
     AisUpdate, AssetUploadResponse, DisplayName, ExperiencePermission, InterestListReply,
     LandResourcesUrls, Llsd, ObjectMediaRequest, ObjectMediaResponse, Permissions,
@@ -81,6 +81,11 @@ use crate::session::{
 };
 use crate::sim_inventory::SimInventoryError;
 use crate::sim_session::{CapsUploadMetadata, SimSession};
+use crate::task_caps::{
+    TaskInventoryCapQuery, build_get_metadata_reply, build_task_inventory_cap_reply,
+    parse_get_metadata_request, parse_task_inventory_cap_query,
+};
+use crate::types::TaskInventoryItem;
 use crate::{
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
     CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
@@ -88,22 +93,24 @@ use crate::{
     CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
     CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES,
-    CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
-    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
+    CAP_GROUP_EXPERIENCES, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
+    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
+    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
-    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
-    CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
-    CHAT_SESSION_START_CONFERENCE, Event, InventoryFolder, InventoryItem, InventoryListing,
-    ServerEvent, VoiceProvisionRefusal, offline_messages_to_llsd,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_REQUEST_TASK_INVENTORY,
+    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
+    CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_GESTURE_TASK_INVENTORY,
+    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_TASK_INVENTORY,
+    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
+    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event,
+    InventoryFolder, InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal,
+    offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -153,6 +160,8 @@ const UPLOAD_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
     CAP_UPDATE_SETTINGS_TASK_INVENTORY,
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
+    CAP_UPDATE_GESTURE_TASK_INVENTORY,
+    CAP_UPDATE_MATERIAL_TASK_INVENTORY,
 ];
 
 /// The capability names this simulator can serve — the registry keys.
@@ -182,6 +191,11 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
     CAP_UPDATE_SETTINGS_TASK_INVENTORY,
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
+    CAP_UPDATE_GESTURE_TASK_INVENTORY,
+    CAP_UPDATE_MATERIAL_TASK_INVENTORY,
+    // A prim's contents.
+    CAP_REQUEST_TASK_INVENTORY,
+    CAP_GET_METADATA,
     CAP_UPDATE_AVATAR_APPEARANCE,
     CAP_INCREMENT_COF_VERSION,
     CAP_COPY_INVENTORY_FROM_NOTECARD,
@@ -259,6 +273,13 @@ pub enum CapHandler {
     AgentPreferences,
     /// The `InterestList` mode switch ([`SimSession::interest_list_mode`]).
     InterestList,
+    /// The `RequestTaskInventory` GET of a prim's contents. The prims are the
+    /// driver's, so the request is handed to it
+    /// ([`CapsDispatch::TaskInventory`]).
+    TaskInventory,
+    /// The `GetMetadata` POST asking a script's experience, handed to the
+    /// driver likewise ([`CapsDispatch::ScriptMetadata`]).
+    ScriptMetadata,
     /// The one-step `SendUserReport` abuse-report POST.
     UserReport,
     /// The two-step `SendUserReportWithScreenshot` uploader: the report POST
@@ -530,6 +551,18 @@ pub enum CapsDispatch {
     /// "nothing yet, re-poll" signal the reference viewer expects) when its
     /// hold (~30 s) expires.
     EventQueueWouldBlock,
+    /// A `RequestTaskInventory` GET. What a prim holds is the driver's to
+    /// know: it looks the prim up and answers with
+    /// [`SimCaps::task_inventory_response`].
+    TaskInventory(TaskInventoryCapQuery),
+    /// A `GetMetadata` POST asking which experience a script was compiled
+    /// under. The driver answers with [`SimCaps::script_metadata_response`].
+    ScriptMetadata {
+        /// The prim holding the script.
+        task: ObjectKey,
+        /// The script.
+        item: InventoryKey,
+    },
 }
 
 /// What a request path resolved to.
@@ -653,6 +686,8 @@ impl SimCaps {
             CAP_AVATAR_PICKER_SEARCH => Some(CapHandler::AvatarPickerSearch),
             CAP_AGENT_PREFERENCES => Some(CapHandler::AgentPreferences),
             CAP_INTEREST_LIST => Some(CapHandler::InterestList),
+            CAP_REQUEST_TASK_INVENTORY => Some(CapHandler::TaskInventory),
+            CAP_GET_METADATA => Some(CapHandler::ScriptMetadata),
             CAP_SEND_USER_REPORT => Some(CapHandler::UserReport),
             CAP_SEND_USER_REPORT_WITH_SCREENSHOT => Some(CapHandler::UserReportScreenshot),
             CAP_UPDATE_AVATAR_APPEARANCE => Some(CapHandler::AvatarAppearance),
@@ -798,6 +833,8 @@ impl SimCaps {
                 Some(CapHandler::InterestList) => {
                     CapsDispatch::Response(Self::dispatch_interest_list(sim, request))
                 }
+                Some(CapHandler::TaskInventory) => Self::dispatch_task_inventory(request),
+                Some(CapHandler::ScriptMetadata) => Self::dispatch_script_metadata(request),
                 Some(CapHandler::UserReport) => {
                     CapsDispatch::Response(Self::dispatch_user_report(sim, request))
                 }
@@ -1143,6 +1180,65 @@ impl SimCaps {
         }))
     }
 
+    /// Reads one `RequestTaskInventory` GET and hands it to the driver. A
+    /// request that names no prim is answered here, as one that names a prim
+    /// the region does not have is: `404`, which is what Second Life answers
+    /// both with.
+    fn dispatch_task_inventory(request: &CapsRequest<'_>) -> CapsDispatch {
+        if request.method != "GET" {
+            return CapsDispatch::Response(CapsResponse::method_not_allowed());
+        }
+        match request.query.and_then(parse_task_inventory_cap_query) {
+            Some(query) => CapsDispatch::TaskInventory(query),
+            None => CapsDispatch::Response(CapsResponse::not_found()),
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::TaskInventory`]: the prim's `contents`
+    /// (its serial and items), or `None` for a prim the region does not have.
+    ///
+    /// A request naming the serial the prim is at is answered `304` with no
+    /// body, a prim the region does not have `404`, and anything else the
+    /// listing.
+    #[must_use]
+    pub fn task_inventory_response(
+        query: TaskInventoryCapQuery,
+        contents: Option<(i16, &[TaskInventoryItem])>,
+    ) -> CapsResponse {
+        match contents {
+            None => CapsResponse::not_found(),
+            Some((serial, _items)) if query.held_serial == Some(serial) => CapsResponse::empty(304),
+            Some((serial, items)) => {
+                CapsResponse::llsd_xml(build_task_inventory_cap_reply(serial, items))
+            }
+        }
+    }
+
+    /// Reads one `GetMetadata` POST and hands it to the driver.
+    fn dispatch_script_metadata(request: &CapsRequest<'_>) -> CapsDispatch {
+        if request.method != "POST" {
+            return CapsDispatch::Response(CapsResponse::method_not_allowed());
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsDispatch::Response(CapsResponse::bad_request());
+        };
+        match parse_get_metadata_request(&body) {
+            Ok((task, item)) => CapsDispatch::ScriptMetadata { task, item },
+            Err(_) => CapsDispatch::Response(CapsResponse::bad_request()),
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::ScriptMetadata`]: the experience of a
+    /// script the prim holds — `Some(None)` for a script under none — or
+    /// `None`, and with it `404`, for a script the prim does not hold.
+    #[must_use]
+    pub fn script_metadata_response(script: Option<Option<ExperienceKey>>) -> CapsResponse {
+        match script {
+            Some(experience) => CapsResponse::llsd_xml(build_get_metadata_reply(experience)),
+            None => CapsResponse::not_found(),
+        }
+    }
+
     /// Serves one `SendUserReport` POST: parses the abuse report and routes
     /// it to the driver as
     /// [`ServerEvent::AbuseReportReceived`](crate::ServerEvent::AbuseReportReceived)
@@ -1307,8 +1403,8 @@ impl SimCaps {
     /// UTF-8 or not well-formed for the cap. The four agent-inventory `Update*`
     /// caps (gesture / notecard / settings / material) share the bare
     /// `{ item_id }` body and fall through to the catch-all arm; the two
-    /// task-inventory ones (notecard / settings) share the `{ task_id, item_id }`
-    /// body of the arm above it.
+    /// task-inventory ones (notecard / settings / gesture / material) share the
+    /// `{ task_id, item_id }` body of the arm above it.
     fn parse_upload_metadata(cap_name: &str, body: &[u8]) -> Option<CapsUploadMetadata> {
         let text = std::str::from_utf8(body).ok()?;
         let metadata = match cap_name {
@@ -1322,7 +1418,10 @@ impl SimCaps {
             CAP_UPDATE_SCRIPT_TASK => {
                 CapsUploadMetadata::UpdateScriptTask(parse_update_script_task_request(text).ok()?)
             }
-            CAP_UPDATE_NOTECARD_TASK_INVENTORY | CAP_UPDATE_SETTINGS_TASK_INVENTORY => {
+            CAP_UPDATE_NOTECARD_TASK_INVENTORY
+            | CAP_UPDATE_SETTINGS_TASK_INVENTORY
+            | CAP_UPDATE_GESTURE_TASK_INVENTORY
+            | CAP_UPDATE_MATERIAL_TASK_INVENTORY => {
                 let request = parse_update_task_item_asset_request(text).ok()?;
                 CapsUploadMetadata::UpdateTaskItem {
                     cap: cap_name.to_owned(),
@@ -2679,6 +2778,10 @@ mod tests {
             ("SendUserReportWithScreenshot", CapStatus::Served),
             ("DirectDelivery", CapStatus::Pending),
             ("InterestList", CapStatus::Served),
+            ("UpdateGestureTaskInventory", CapStatus::Served),
+            ("UpdateMaterialTaskInventory", CapStatus::Served),
+            ("RequestTaskInventory", CapStatus::Served),
+            ("GetMetadata", CapStatus::Served),
         ];
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES
             .iter()

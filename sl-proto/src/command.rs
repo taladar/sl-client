@@ -1750,9 +1750,35 @@ pub enum Command {
     /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)
     /// (the [`Event::TaskInventoryReply`](crate::Event::TaskInventoryReply) is
     /// still emitted first).
+    ///
+    /// Where the region grants the `RequestTaskInventory` capability the
+    /// runtimes read the listing over it instead, as current viewers do, and
+    /// no `TaskInventoryReply` is emitted: the capability answers with the
+    /// listing itself.
+    ///
+    /// A caller that already holds a listing names its serial in
+    /// `held_serial`; a prim still at that serial is answered with
+    /// [`Event::TaskInventoryUnchanged`](crate::Event::TaskInventoryUnchanged)
+    /// and nothing is downloaded, on either road.
     FetchTaskInventory {
         /// The object whose task inventory is requested.
         target: ScopedObjectId,
+        /// The serial of the listing the caller already holds, if it holds
+        /// one.
+        held_serial: Option<i16>,
+    },
+    /// Ask which experience a script in a prim was compiled under, over the
+    /// `GetMetadata` capability; the answer is
+    /// [`Event::ScriptExperience`](crate::Event::ScriptExperience). A save
+    /// of the script that does not name the experience again takes the
+    /// script out of it. Second Life only: where the region does not grant
+    /// the capability nothing is sent and nothing is answered, as in the
+    /// reference viewer.
+    RequestScriptExperience {
+        /// The prim holding the script.
+        task: ObjectKey,
+        /// The script.
+        item_id: InventoryKey,
     },
     /// Download an arbitrary named file over the legacy `Xfer` path
     /// (`RequestXfer`); the assembled bytes arrive as
@@ -3156,6 +3182,7 @@ impl Command {
             Self::DetachAttachmentIntoInventory { .. } => "DetachAttachmentIntoInventory",
             Self::RequestTaskInventory { .. } => "RequestTaskInventory",
             Self::FetchTaskInventory { .. } => "FetchTaskInventory",
+            Self::RequestScriptExperience { .. } => "RequestScriptExperience",
             Self::RequestXfer { .. } => "RequestXfer",
             Self::FetchTaskItemAsset { .. } => "FetchTaskItemAsset",
             Self::FetchEstateCovenantAsset => "FetchEstateCovenantAsset",

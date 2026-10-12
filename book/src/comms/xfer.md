@@ -29,7 +29,8 @@ against the Firestorm viewer and the OpenSim server sources):
   with no CAPS equivalent. The simulator regenerates the list file, which the
   viewer re-fetches over Xfer.
 - **Prim (task) inventory listing** (download): Xfer on OpenSim. Second Life
-  also offers a `RequestTaskInventory` **capability** (HTTP `?task_id=`), but
+  also offers a `RequestTaskInventory` **capability** (HTTP `?task_id=`),
+  which `Command::FetchTaskInventory` takes where it is granted, but
   **OpenSim has no such cap** — it serves the listing purely over UDP + Xfer. So
   this is a *dual-path* feature (CAPS on SL, UDP + Xfer on OpenSim), not
   CAPS-only.

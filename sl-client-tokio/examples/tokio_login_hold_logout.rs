@@ -499,6 +499,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::InventoryItemsMoved { .. }
             | Event::TaskInventoryReply(..)
             | Event::TaskInventoryContents { .. }
+            | Event::TaskInventoryUnchanged { .. }
+            | Event::TaskInventoryUnanswered { .. }
+            | Event::ScriptExperience { .. }
             | Event::XferDownloaded { .. }
             | Event::ServerFileDownloaded { .. }
             | Event::XferUploaded { .. }

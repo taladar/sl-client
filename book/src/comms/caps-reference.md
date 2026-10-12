@@ -31,7 +31,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `EnvironmentSettings` | yes | yes | deprecated by `ExtEnvironment` | not adopted |
 | `EstateAccess` | yes | yes | current | task `protocol-cap-estate-access` (UDP today) |
 | `EstateChangeInfo` | — | off | unused | not adopted (UDP) |
-| `GetMetadata` | yes | — | current | task `protocol-cap-get-metadata` |
+| `GetMetadata` | yes | — | current | **used** since 2026-10-12 (`Command::RequestScriptExperience`) |
 | `GroupAPIv1` | yes | — | current | task `protocol-cap-group-bans` |
 | `GroupProposalBallot` | yes | — | removed feature | not adopted |
 | `HomeLocation` | yes | yes | current | task `protocol-cap-home-location` (UDP today) |
@@ -47,7 +47,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `ProductInfoRequest` | yes | — | current | task `protocol-cap-product-info` |
 | `RegionObjects` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `RegionSchedule` | yes | — | current | task `viewer-region-restart-schedule` |
-| `RequestTaskInventory` | yes | — | current | task `protocol-request-task-inventory-cap` (UDP today) |
+| `RequestTaskInventory` | yes | — | current | **used** since 2026-10-12 (`Command::FetchTaskInventory`); UDP where not granted |
 | `RequestTextureDownload` | yes | — | never used | not adopted |
 | `RetrieveNavMeshSrc` | yes | — | current | task `viewer-pathfinding-navmesh-view` |
 | `SearchStatRequest` | yes | — | current | task `viewer-classified-click-stats` |
@@ -63,8 +63,8 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `UntrustedSimulatorMessage` | yes | yes | current (god actions) | task `viewer-god-tools` |
 | `UpdateAgentInformation` | yes | yes | current | task `protocol-cap-update-agent-information` |
 | `UpdateAgentLanguage` | yes | yes | current | task `viewer-i18n-agent-language` |
-| `UpdateGestureTaskInventory` | yes | yes | current | task `viewer-gesture-management-ui` |
-| `UpdateMaterialTaskInventory` | yes | — | current | task `viewer-material-save-to-object` |
+| `UpdateGestureTaskInventory` | yes | yes | current | **requested** since 2026-10-12 (`Command::UpdateInventoryAsset`); the editor is task `viewer-gesture-management-ui` |
+| `UpdateMaterialTaskInventory` | yes | — | current | **requested** since 2026-10-12 (`Command::UpdateInventoryAsset`); the editor is task `viewer-material-save-to-object` |
 | `UploadAgentProfileImage` | yes | — | current | task `viewer-profile-image-editing` |
 | `ViewerBenefits` | yes | — | never used | not adopted |
 | `ViewerMetrics` | yes | — | telemetry | task `viewer-telemetry-opt-in` |
@@ -192,8 +192,10 @@ arrives in the LLSD forms of `DirLandReply` / `PlacesReply`.
 
 **`RequestTaskInventory`** (`llviewerobject.cpp`). GET
 `{cap}?task_id=<object>[&inventory_serial=<n>]` → `{inventory_serial,
-contents:[items]}`, without the "Contents" folder; 304 when unchanged.
-Replaces UDP `RequestTaskInventory` → `ReplyTaskInventory` → Xfer.
+contents:[items]}`, without the "Contents" folder; 304 when unchanged; 404
+for a prim the region does not have. Replaces UDP `RequestTaskInventory` →
+`ReplyTaskInventory` → Xfer. An item's shape as Second Life writes it is in
+[Grid Behaviour → Building](../gridspec/building.md#the-listing).
 
 **`UpdateGestureTaskInventory`**, **`UpdateMaterialTaskInventory`**
 (`llpreviewgesture.cpp`, `llmaterialeditor.cpp`). Two-step upload with
@@ -204,7 +206,9 @@ with `{item_id}`, `{category_id}` or `{item_id, task_id}`, the image as
 JPEG2000, 64–256 px.
 
 **`GetMetadata`** (`llexperiencecache.cpp`). POST `{"object-id", "item-id",
-"fields":["experience"]}` → `{experience}`: a script's experience.
+"fields":["experience"]}` → `{experience}`: a script's experience. A script
+under none is answered with an undefined value; an item the prim does not
+hold with 404.
 
 **`MeshUploadFlag`** (`llfloatermodeluploadbase.cpp`). GET →
 `{mesh_upload_status}`; anything but `valid` or empty disables mesh upload.

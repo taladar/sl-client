@@ -748,7 +748,7 @@ fn quiet_edit(
 /// Sends the client the alert a refused edit is answered with — its
 /// `AlertInfo` stating `parameters`, as the map of integers Second Life
 /// states them in — logging a send failure rather than failing the edit.
-fn send_alert(
+pub(crate) fn send_alert(
     sim: &mut SimSession,
     alert: NoBuildAlert,
     parameters: &[(&str, usize)],

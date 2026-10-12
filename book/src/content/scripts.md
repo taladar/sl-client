@@ -9,19 +9,29 @@ task-script control surface and the existing dialog/permission events.
 ## Task inventory
 
 An in-world object ("task") has its own inventory — the scripts, notecards,
-animations, and other items dropped inside it. Four UDP commands read and mutate
-it, each targeting the object by [`ScopedObjectId`](world.md#objects):
+animations, and other items dropped inside it. These commands read and mutate
+it, each targeting the object by [`ScopedObjectId`](world.md#objects). What
+each grid answers them with — and who else it tells — is measured in
+[Grid Behaviour → Building](../gridspec/building.md#contents).
 
 - `Command::RequestTaskInventory { target }` asks for the contents listing; the
   reply is `Event::TaskInventoryReply(TaskInventoryReply)`, giving the contents
   `serial` (it increments on every change, so a client can tell whether a cached
   listing is stale) and the temporary Xfer `filename` to download the full
   listing from (empty when the task inventory is empty).
-- `Command::FetchTaskInventory { target }` goes one step further: it sends the
-  same request, then downloads and parses the Xfer listing the reply names,
-  surfacing the parsed items as `Event::TaskInventoryContents` (the
-  `TaskInventoryReply` is still emitted first). See [Xfer File
-  Transfer](../comms/xfer.md) for the download mechanism and the listing format.
+- `Command::FetchTaskInventory { target, held_serial }` reads the listing
+  itself, surfacing the parsed items as `Event::TaskInventoryContents`. Where
+  the region grants the `RequestTaskInventory` capability — Second Life — the
+  runtimes GET it, as current viewers do; elsewhere, for a prim in a
+  neighbouring region, and when the capability fails, they send the UDP
+  request and then download and parse the Xfer listing the reply names (the
+  `TaskInventoryReply` is emitted first on that road only). See [Xfer File
+  Transfer](../comms/xfer.md) for the download mechanism and the listing
+  format. A caller that holds a listing names its serial in `held_serial`,
+  and a prim still at that serial is answered with
+  `Event::TaskInventoryUnchanged` on either road, with nothing downloaded. A
+  request the grid never answers ends in `Event::TaskInventoryUnanswered`
+  after a minute, so that nothing waits on it for good.
   To read a listed item's *asset* — a script or notecard body — fetch it over
   the [UDP asset Transfer](../comms/transfer.md) path
   (`Command::FetchTaskItemAsset`), the only path for task-item assets on
@@ -33,6 +43,12 @@ it, each targeting the object by [`ScopedObjectId`](world.md#objects):
 - `Command::MoveTaskInventory { target, folder_id, item_id }` moves an item out
   of the object's inventory into an agent inventory folder.
 - `Command::RemoveTaskInventory { target, item_id }` deletes an item from it.
+
+No write is answered with a message of its own; the listing read again is
+what says it landed. On Second Life a write travels over UDP and the listing
+over HTTP, so a listing asked for straight after a write may be answered
+first: a client that expects a change and reads the old serial asks once
+more before it believes it.
 
 ## Rezzing & revoking
 
@@ -103,6 +119,13 @@ Life honours it (LSL Mono, legacy LSL, or Lua/SLua via Luau), while OpenSim
 ignores it and picks the language from a source-header comment. Lua and LSL
 share the same script asset type; the language is also recorded as an inventory
 *subtype* in the low byte of the item flags (`Lsl` = 0, `Luau` = 1).
+
+An `UpdateScriptTask` that names no `experience` compiles the script under
+none, so a client that saves a script it did not write asks first which one
+the script is under: `Command::RequestScriptExperience { task, item_id }`, a
+POST to the `GetMetadata` capability, answered with
+`Event::ScriptExperience`. Second Life only; where the region does not grant
+the capability nothing is sent.
 
 The completion reply carries the simulator's compile outcome: a `compiled`
 boolean and an `errors` array of diagnostic strings. A script can upload

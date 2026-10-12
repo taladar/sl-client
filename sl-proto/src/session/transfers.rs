@@ -86,6 +86,12 @@ pub(crate) struct Transfers {
     /// [`RELIABLE_REPLY_GRACE`] rather than silently upgrading some later,
     /// unrelated `RequestTaskInventory` for the same object.
     pub(super) pending_task_inventory: BTreeMap<ObjectKey, Instant>,
+    /// The serial of the listing a `fetch_task_inventory` caller said it
+    /// already holds, by prim. A `ReplyTaskInventory` stating the same serial
+    /// is answered with
+    /// [`Event::TaskInventoryUnchanged`](crate::Event::TaskInventoryUnchanged)
+    /// and no download.
+    pub(super) held_task_serials: BTreeMap<ObjectKey, i16>,
     /// A FIFO fallback for `fetch_task_inventory` calls whose target object was
     /// not yet in the cache (so its full id could not be resolved to key
     /// [`pending_task_inventory`](Self::pending_task_inventory)). Each entry
@@ -125,6 +131,7 @@ impl Transfers {
             pending_asset_uploads: BTreeMap::new(),
             pending_inventory_saves: BTreeMap::new(),
             pending_task_inventory: BTreeMap::new(),
+            held_task_serials: BTreeMap::new(),
             pending_task_inventory_unresolved: VecDeque::new(),
             texture_downloads: BTreeMap::new(),
             transfer_downloads: BTreeMap::new(),
@@ -148,21 +155,31 @@ impl Transfers {
     }
 
     /// Drops the task-inventory claims whose `ReplyTaskInventory` never
-    /// arrived, returning how many were lost (each is a caller still waiting).
+    /// arrived, returning the prim of each one lost — `None` for a claim made
+    /// before the prim was in the cache. Each is a caller still waiting.
     ///
     /// The unresolved queue is the one that matters: its entries are
     /// positional, so a claim left standing is filled by the next *unrelated*
     /// reply — an object whose contents nobody asked to read would be
     /// downloaded and parsed on a stale claim's behalf.
-    pub(crate) fn expire_task_claims(&mut self, now: Instant) -> usize {
+    pub(crate) fn expire_task_claims(&mut self, now: Instant) -> Vec<Option<ObjectKey>> {
         let fresh = |asked: &Instant| now.saturating_duration_since(*asked) < RELIABLE_REPLY_GRACE;
         let unresolved_before = self.pending_task_inventory_unresolved.len();
         self.pending_task_inventory_unresolved.retain(fresh);
-        let resolved_before = self.pending_task_inventory.len();
+        let unresolved =
+            unresolved_before.saturating_sub(self.pending_task_inventory_unresolved.len());
+        let mut lost: Vec<Option<ObjectKey>> = self
+            .pending_task_inventory
+            .iter()
+            .filter(|(_task, asked)| !fresh(asked))
+            .map(|(task, _asked)| Some(*task))
+            .collect();
         self.pending_task_inventory.retain(|_, asked| fresh(asked));
-        unresolved_before
-            .saturating_sub(self.pending_task_inventory_unresolved.len())
-            .saturating_add(resolved_before.saturating_sub(self.pending_task_inventory.len()))
+        let pending = &self.pending_task_inventory;
+        self.held_task_serials
+            .retain(|task, _serial| pending.contains_key(task));
+        lost.extend(std::iter::repeat_n(None, unresolved));
+        lost
     }
 
     /// The earliest instant at which any registry here has a sweep due, merged

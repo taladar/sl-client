@@ -694,6 +694,32 @@ pub const CAP_DIRECT_DELIVERY: &str = "DirectDelivery";
 /// commands.
 pub const CAP_INTEREST_LIST: &str = "InterestList";
 
+/// The HTTP capability for replacing the asset of a **gesture** inside an
+/// in-world object's task inventory (`UpdateGestureTaskInventory`): the
+/// two-step uploader of [`CAP_UPDATE_NOTECARD_TASK_INVENTORY`], carrying
+/// `task_id`/`item_id`. Both grids grant it.
+pub const CAP_UPDATE_GESTURE_TASK_INVENTORY: &str = "UpdateGestureTaskInventory";
+
+/// The HTTP capability for replacing the asset of a **material** inside an
+/// in-world object's task inventory (`UpdateMaterialTaskInventory`): the
+/// two-step uploader of [`CAP_UPDATE_NOTECARD_TASK_INVENTORY`], carrying
+/// `task_id`/`item_id`. Second Life only.
+pub const CAP_UPDATE_MATERIAL_TASK_INVENTORY: &str = "UpdateMaterialTaskInventory";
+
+/// The `RequestTaskInventory` capability: a prim's contents listing as LLSD.
+/// A GET of [`task_inventory_cap_url`](crate::task_inventory_cap_url) is
+/// answered with the serial and the items, or with `304` when the serial the
+/// request named is still the prim's. Second Life only; where it is not
+/// granted the listing is read over UDP and `Xfer`. Driven by the runtimes'
+/// `FetchTaskInventory` command.
+pub const CAP_REQUEST_TASK_INVENTORY: &str = "RequestTaskInventory";
+
+/// The `GetMetadata` capability: which experience a script in a prim was
+/// compiled under. A POST of
+/// [`build_get_metadata_request`](crate::build_get_metadata_request). Second
+/// Life only. Driven by the runtimes' `RequestScriptExperience` command.
+pub const CAP_GET_METADATA: &str = "GetMetadata";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -772,6 +798,10 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_DIRECT_DELIVERY,
     CAP_INTEREST_LIST,
+    CAP_UPDATE_GESTURE_TASK_INVENTORY,
+    CAP_UPDATE_MATERIAL_TASK_INVENTORY,
+    CAP_REQUEST_TASK_INVENTORY,
+    CAP_GET_METADATA,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

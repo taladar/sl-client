@@ -20,39 +20,39 @@ use sl_proto::{
     CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT,
     CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
-    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_SEND_USER_REPORT,
-    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, NeighbourCaps, NewFileAgentInventoryRequest, RECV_BUFFER_SIZE,
-    Session, UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url,
-    ais_category_url, ais_create_category_url, ais_item_url, associate_inventory_request,
-    avatar_picker_search_query, build_agent_preferences_request, build_ais_create_category_body,
-    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_create_inventory_category_request,
-    build_environment_update_request, build_interest_list_request,
-    build_modify_material_params_request, build_new_file_agent_inventory_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_properties_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_send_user_report, build_set_experience_permission_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_update_script_agent_request, build_update_script_task_request,
-    build_update_task_item_asset_request, build_upload_baked_texture_request,
-    build_user_info_update, build_voice_signaling_request, chat_session_agents_body,
-    chat_session_request_body, copy_inventory_from_notecard_body, create_listing_request,
-    delete_listing_request, display_names_query, environment_cap_url, experience_id_query,
-    experience_info_query, experience_query, find_experience_query, forget_experience_query,
-    group_experiences_query, group_invite_response_body, listing_request, listings_request,
-    merchant_status_request, parse_login_response, update_listing_request,
+    CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_METADATA, CAP_GET_TEXTURE,
+    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST,
+    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_REQUEST_TASK_INVENTORY, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
+    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO,
+    CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
+    CHAT_SESSION_START_CONFERENCE, INVENTORY_FETCH_MAX_IN_FLIGHT, NeighbourCaps,
+    NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, Session, UserInfoUpdate,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
+    build_create_inventory_category_request, build_environment_update_request,
+    build_interest_list_request, build_modify_material_params_request,
+    build_new_file_agent_inventory_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_properties_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_send_user_report,
+    build_set_experience_permission_request, build_update_experience_request,
+    build_update_item_asset_request, build_update_script_agent_request,
+    build_update_script_task_request, build_update_task_item_asset_request,
+    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
+    chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
+    create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
+    experience_id_query, experience_info_query, experience_query, find_experience_query,
+    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
+    listings_request, merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -113,22 +113,26 @@ pub use sl_proto::{
     RegionStats, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
     RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
     RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
-    SculptOrMeshKey, SequenceNumber, SessionMessage, SetDisplayNameReply, SimStatId,
-    SimulatorFeatures, SimulatorTime, SkySettings, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerBatch, TerrainLayerType,
-    TerrainPatch, TerrainPatchHeader, Texture, TextureAnimation, TextureEntry, TextureFace,
-    TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId,
-    TransferId, TransferStatus, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
-    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
-    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
-    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid,
-    Vector, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
-    XferListing, avatar_texture, decode_particle_system, decode_texture_anim, decode_texture_entry,
-    encode_texture_entry, grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c,
-    particle_pattern, pcode, prim_flags, sim_access, texture_anim_mode,
+    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptMetadata,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptTeleportRequest,
+    ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber, SessionMessage,
+    SetDisplayNameReply, SimStatId, SimulatorFeatures, SimulatorTime, SkySettings, SoundFlags,
+    SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot, TaskInventoryCapReply,
+    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
+    TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture,
+    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
+    ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit,
+    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
+    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
+    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, VoiceAccountInfo,
+    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, XferListing,
+    avatar_texture, build_get_metadata_request, decode_particle_system, decode_texture_anim,
+    decode_texture_entry, encode_texture_entry, grid_to_handle, group_powers, handle_to_global,
+    handle_to_grid, j2c, parse_get_metadata_reply, parse_task_inventory,
+    parse_task_inventory_cap_reply, particle_pattern, pcode, prim_flags, sim_access,
+    stamp_get_metadata_reply, stamp_task_inventory_cap_reply, task_inventory_cap_url,
+    texture_anim_mode,
 };
 // `sl_texture::TextureEntry` (the store's LOD-aware texture object) and
 // `TextureReadLease` are reachable as `sl_texture::…`; they are not re-exported
@@ -204,9 +208,9 @@ use crate::experiences::{
 use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
 use crate::http::{
     delete_caps_llsd, fetch_land_resources, fetch_lsl_syntax, get_avatar_picker_search,
-    get_caps_llsd, get_experience_query, patch_caps_llsd, post_caps_oneway,
+    get_caps_llsd, get_experience_query, get_task_inventory, patch_caps_llsd, post_caps_oneway,
     post_chat_session_fetch_history, post_chat_session_request, post_remote_parcel_request,
-    put_caps_llsd, settle_environment_change,
+    post_script_metadata, put_caps_llsd, settle_environment_change,
 };
 use crate::inventory::{
     fetch_ais3_folders, fetch_folder_contents, fetch_group_members, fetch_inventory,
@@ -2157,8 +2161,31 @@ impl Client {
                         Some(Command::RequestTaskInventory { target }) => {
                             self.session.request_task_inventory(target, Instant::now())?;
                         }
-                        Some(Command::FetchTaskInventory { target }) => {
-                            self.session.fetch_task_inventory(target, Instant::now())?;
+                        Some(Command::FetchTaskInventory { target, held_serial }) => {
+                            // Over the capability where this region grants
+                            // it, as current viewers read a prim's contents;
+                            // over UDP and `Xfer` otherwise. The capability
+                            // is the root region's and names a prim by its
+                            // full id, so a neighbour's prim, and one the
+                            // cache does not hold, go over UDP.
+                            let by_cap = caps
+                                .get(CAP_REQUEST_TASK_INVENTORY)
+                                .cloned()
+                                .filter(|_url| Some(target.circuit) == self.session.root_circuit_id())
+                                .zip(self.session.resolve_object_key(target));
+                            match by_cap {
+                                Some((base, task)) => {
+                                    tokio::spawn(get_task_inventory(base, task, held_serial, http.clone(), caps_tx.clone()));
+                                }
+                                None => {
+                                    self.session.fetch_task_inventory(target, held_serial, Instant::now())?;
+                                }
+                            }
+                        }
+                        Some(Command::RequestScriptExperience { task, item_id }) => {
+                            if let Some(url) = caps.get(CAP_GET_METADATA).cloned() {
+                                tokio::spawn(post_script_metadata(url, task, item_id, http.clone(), caps_tx.clone()));
+                            }
                         }
                         Some(Command::FetchTaskItemAsset {
                             task,

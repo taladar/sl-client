@@ -1164,6 +1164,7 @@ notecard-status-drop-restricted = That item's next-owner permissions are restric
 script-save = Save & Compile
 script-readonly-note = You do not have permission to modify this script.
 script-running = Running
+script-experience = Experience: { $name }
 script-status-loading = Loading…
 script-status-saving = Saving & compiling…
 script-status-saved = Saved.

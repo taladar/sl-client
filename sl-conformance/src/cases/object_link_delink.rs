@@ -1541,6 +1541,7 @@ async fn plant(session: &mut Session, run: &Run, cube: &Object) -> Result<Heard,
         session
             .send(Command::FetchTaskInventory {
                 target: cube.scoped_id(),
+                held_serial: None,
             })
             .await?;
         let found = crate::support::wait_for_task_listing(session, cube.full_id, STEP_TIMEOUT)

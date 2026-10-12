@@ -708,6 +708,9 @@ impl Survey {
             | Event::InventoryItemsMoved { .. }
             | Event::TaskInventoryReply(..)
             | Event::TaskInventoryContents { .. }
+            | Event::TaskInventoryUnchanged { .. }
+            | Event::TaskInventoryUnanswered { .. }
+            | Event::ScriptExperience { .. }
             | Event::XferDownloaded { .. }
             | Event::ServerFileDownloaded { .. }
             | Event::XferUploaded { .. }

@@ -117,6 +117,7 @@ menu-embedded-copy-to-inventory = Kopiuj do szafy
 script-save = Zapisz i skompiluj
 script-readonly-note = Nie masz uprawnień do modyfikacji tego skryptu.
 script-running = Uruchomiony
+script-experience = Przygoda: { $name }
 script-status-loading = Ładowanie…
 script-status-saving = Zapisywanie i kompilowanie…
 script-status-saved = Zapisano.

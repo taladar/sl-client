@@ -16,7 +16,10 @@ both grids and re-measured on adoption: with `ParcelPropertiesUpdate`
 (2026-10-05) the list is 68 names, aditi grants 66 and OpenSim 35, and the
 refused sets are unchanged. `InterestList` (2026-10-09) is the first adopted
 capability OpenSim does not grant: the list is 69 names, aditi grants 67, and
-OpenSim's refused set is one longer.
+OpenSim's refused set is one longer. The four a prim's contents are read and
+saved through (2026-10-12) make it 73: aditi grants all four, and OpenSim
+`UpdateGestureTaskInventory` alone, refusing `RequestTaskInventory`,
+`GetMetadata` and `UpdateMaterialTaskInventory`.
 
 ## The client's own list
 
@@ -36,8 +39,9 @@ What OpenSim refuses, grouped by what a viewer loses:
 | messages | `ReadOfflineMsgs` | the UDP `RetrieveInstantMessages` (the client falls back itself since 2026-10-04) |
 | account | `UserInfo` | the UDP `UserInfoRequest` / `UpdateUserInfo` |
 | appearance | `UpdateAvatarAppearance`, `IncrementCOFVersion` | the viewer bakes and uploads (`UploadBakedTexture`, which OpenSim grants) |
-| materials | `ModifyMaterialParams`, `UpdateMaterialAgentInventory` | no PBR overrides or material saving; an edit is reported as failed rather than dropped (since 2026-10-04) |
+| materials | `ModifyMaterialParams`, `UpdateMaterialAgentInventory`, `UpdateMaterialTaskInventory` | no PBR overrides or material saving; an edit is reported as failed rather than dropped (since 2026-10-04) |
 | objects | `InterestList` | nothing: OpenSim sends a region's objects whichever way the camera looks (since 2026-10-09) |
+| contents | `RequestTaskInventory`, `GetMetadata` | the UDP `RequestTaskInventory` and the listing's `Xfer`; no script is under an experience (since 2026-10-12, [Building](building.md#contents)) |
 | other | `DirectDelivery`, `SendUserReport`, `SendUserReportWithScreenshot`, `ObjectAnimation` | marketplace delivery reports its absence; a report goes over the UDP `UserReport`, without a screenshot (since 2026-10-04); `ObjectAnimation` is only named to opt in to the UDP stream |
 
 How each runtime handles each refused capability was audited on 2026-10-04,

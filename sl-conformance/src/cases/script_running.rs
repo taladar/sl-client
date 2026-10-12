@@ -222,6 +222,7 @@ impl GridTest for ScriptRunning {
                 session
                     .send(Command::FetchTaskInventory {
                         target: container_id,
+                        held_serial: None,
                     })
                     .await?;
                 let found =

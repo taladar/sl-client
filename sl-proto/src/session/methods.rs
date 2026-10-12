@@ -1037,6 +1037,67 @@ impl Session {
                 }
                 Err(error) => self.caps_decode_error(message, &error),
             },
+            // A prim's contents over the `RequestTaskInventory` capability:
+            // the listing itself, where the UDP road answers with a file to
+            // download.
+            CapsEvent::RequestTaskInventory => match crate::parse_task_inventory_cap_reply(body) {
+                Ok(reply) => self.events.push_back(Event::TaskInventoryContents {
+                    task: reply.task,
+                    serial: reply.serial,
+                    items: reply.items,
+                }),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            CapsEvent::TaskInventoryUnchanged => {
+                match crate::parse_task_inventory_unchanged(body) {
+                    Ok((task, serial)) => self
+                        .events
+                        .push_back(Event::TaskInventoryUnchanged { task, serial }),
+                    Err(error) => self.caps_decode_error(message, &error),
+                }
+            }
+            // The capability did not answer with a listing. UDP still does,
+            // on every grid: read the prim that way rather than leave whoever
+            // asked waiting on a listing that is not coming.
+            CapsEvent::TaskInventoryFailed => match crate::parse_task_inventory_failed(body) {
+                Ok((task, held_serial)) => {
+                    let target = self
+                        .world
+                        .objects()
+                        .find(|object| object.full_id == task)
+                        .map(Object::scoped_id);
+                    match target {
+                        Some(target) => {
+                            tracing::warn!(
+                                %task,
+                                "the task inventory capability failed; reading the prim over UDP"
+                            );
+                            self.fetch_task_inventory(target, held_serial, now)?;
+                        }
+                        None => {
+                            tracing::warn!(
+                                %task,
+                                "the task inventory capability failed for a prim no longer in view"
+                            );
+                            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                                request: super::CAP_REQUEST_TASK_INVENTORY.to_owned(),
+                                sequence: None,
+                            });
+                            self.events
+                                .push_back(Event::TaskInventoryUnanswered { task: Some(task) });
+                        }
+                    }
+                }
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            CapsEvent::GetMetadata => match crate::parse_get_metadata_reply(body) {
+                Ok(metadata) => self.events.push_back(Event::ScriptExperience {
+                    task: metadata.task,
+                    item_id: metadata.item,
+                    experience: metadata.experience,
+                }),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to an `AgentPreferences` POST: the agent's full stored
             // preferences after the (possibly empty) update.
             CapsEvent::AgentPreferences => match parse_agent_preferences(body) {
@@ -5040,8 +5101,14 @@ impl Session {
                 // listing directly when the task inventory is empty).
                 let claimed = self.transfers.pending_task_inventory.remove(&task).is_some()
                     || self.transfers.pending_task_inventory_unresolved.pop_front().is_some();
+                let held = self.transfers.held_task_serials.remove(&task);
                 if claimed {
-                    if filename.is_empty() {
+                    if held == Some(serial) {
+                        // The listing the caller holds is the prim's: there
+                        // is nothing to download.
+                        self.events
+                            .push_back(Event::TaskInventoryUnchanged { task, serial });
+                    } else if filename.is_empty() {
                         self.events.push_back(Event::TaskInventoryContents {
                             task,
                             serial,
@@ -6403,13 +6470,15 @@ impl Session {
     /// object whose contents nobody asked to read would be downloaded and parsed
     /// on a stale claim's behalf.
     fn expire_task_inventory_claims(&mut self, now: Instant) {
-        let lost = self.transfers.expire_task_claims(now);
-        for _ in 0..lost {
+        for task in self.transfers.expire_task_claims(now) {
             tracing::warn!("task inventory reply never arrived; claim dropped");
             self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
                 request: Diagnostic::TASK_INVENTORY_REQUEST.to_owned(),
                 sequence: None,
             });
+            // Whoever asked is told, so that it can stop waiting.
+            self.events
+                .push_back(Event::TaskInventoryUnanswered { task });
         }
     }
 
@@ -10356,6 +10425,14 @@ impl Session {
     /// the fetch falls back to matching the next otherwise-unclaimed reply, which
     /// cannot disambiguate concurrent uncached fetches.
     ///
+    /// `held_serial` is the serial of the listing the caller already holds. A
+    /// reply stating the same serial is surfaced as
+    /// [`Event::TaskInventoryUnchanged`] and its file is not downloaded. It
+    /// is honoured only for an object the cache holds.
+    ///
+    /// This is the UDP road. A runtime takes the `RequestTaskInventory`
+    /// capability instead where the region grants it.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::UnknownCircuit`] if `target`'s circuit has gone away, or
@@ -10363,11 +10440,20 @@ impl Session {
     pub fn fetch_task_inventory(
         &mut self,
         target: ScopedObjectId,
+        held_serial: Option<i16>,
         now: Instant,
     ) -> Result<(), Error> {
         match self.resolve_object_key(target) {
             Some(task) => {
                 let _previous = self.transfers.pending_task_inventory.insert(task, now);
+                match held_serial {
+                    Some(serial) => {
+                        let _previous = self.transfers.held_task_serials.insert(task, serial);
+                    }
+                    None => {
+                        let _previous = self.transfers.held_task_serials.remove(&task);
+                    }
+                }
             }
             None => self
                 .transfers
@@ -10381,7 +10467,14 @@ impl Session {
 
     /// Resolves a [`ScopedObjectId`] to the cached object's full [`ObjectKey`],
     /// or `None` when that object is not (yet) in the scene-graph cache.
-    fn resolve_object_key(&self, target: ScopedObjectId) -> Option<ObjectKey> {
+    ///
+    /// A runtime asks before a
+    /// [`Command::FetchTaskInventory`](crate::Command::FetchTaskInventory):
+    /// the `RequestTaskInventory` capability names a prim by its full id, so
+    /// a prim the cache does not hold is read over UDP, which names it by its
+    /// local one.
+    #[must_use]
+    pub fn resolve_object_key(&self, target: ScopedObjectId) -> Option<ObjectKey> {
         self.world.object(target).map(|object| object.full_id)
     }
 

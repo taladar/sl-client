@@ -2,11 +2,15 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
-    CAP_REMOTE_PARCEL_REQUEST, CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG,
-    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey, RemoteParcelRequest,
+    AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_LAND_RESOURCES,
+    CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
+    CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, Llsd, ObjectKey, ParcelKey, RemoteParcelRequest,
+    TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG, build_get_metadata_request,
     build_land_resources_request, build_remote_parcel_request, parse_land_resources_reply,
-    parse_llsd_xml, stamp_remote_parcel_request,
+    parse_llsd_xml, stamp_get_metadata_reply, stamp_remote_parcel_request,
+    stamp_task_inventory_cap_reply, task_inventory_cap_url, task_inventory_failed_body,
+    task_inventory_unchanged_body,
 };
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -592,6 +596,98 @@ pub(crate) async fn delete_caps_llsd(
             deliver(&caps_tx, (cap.to_owned(), llsd)).await;
         }
         Err(_error) => report_caps_failure(&caps_tx, cap).await,
+    }
+}
+
+/// GETs a prim's contents over the `RequestTaskInventory` capability and
+/// forwards the listing to `caps_tx` tagged [`CAP_REQUEST_TASK_INVENTORY`],
+/// stamped with the prim asked about (the answer does not name it). A `304`,
+/// the grid's "the listing you hold is current", is forwarded under
+/// [`TASK_INVENTORY_UNCHANGED_TAG`] with the serial the request named.
+/// Mirrors the bevy `run_task_inventory`.
+///
+/// A transient status is retried with the shared backoff, as every one-shot
+/// capability GET is; any other failure is forwarded under
+/// [`TASK_INVENTORY_FAILED_TAG`], on which the session reads the prim over UDP
+/// instead.
+pub(crate) async fn get_task_inventory(
+    base: String,
+    task: ObjectKey,
+    held_serial: Option<i16>,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let url = task_inventory_cap_url(&base, task, held_serial);
+    for attempt in 0..=MAX_TRANSIENT_RETRIES {
+        match http
+            .get(&url)
+            .header("Accept", "application/llsd+xml")
+            .send()
+            .await
+        {
+            Ok(response) if response.status() == reqwest::StatusCode::NOT_MODIFIED => {
+                if let Some(serial) = held_serial {
+                    let body = task_inventory_unchanged_body(task, serial);
+                    deliver(&caps_tx, (TASK_INVENTORY_UNCHANGED_TAG.to_owned(), body)).await;
+                    return;
+                }
+                tracing::warn!("a task inventory GET that named no serial was answered 304");
+                break;
+            }
+            Ok(response) if is_transient_status(response.status()) => {
+                tracing::debug!(
+                    status = %response.status(),
+                    attempt,
+                    "a task inventory GET answered a transient status"
+                );
+            }
+            Ok(response) if !response.status().is_success() => {
+                tracing::warn!(status = %response.status(), "a task inventory GET was rejected");
+                break;
+            }
+            Ok(response) => {
+                let listing = match response.text().await {
+                    Ok(text) => parse_llsd_xml(&text).ok(),
+                    Err(_) => None,
+                };
+                if let Some(listing) = listing {
+                    let stamped = stamp_task_inventory_cap_reply(listing, task);
+                    deliver(&caps_tx, (CAP_REQUEST_TASK_INVENTORY.to_owned(), stamped)).await;
+                    return;
+                }
+                tracing::warn!("a task inventory GET's answer could not be read");
+                break;
+            }
+            Err(error) => {
+                tracing::debug!(%error, attempt, "a task inventory GET failed");
+            }
+        }
+        if attempt < MAX_TRANSIENT_RETRIES {
+            tokio::time::sleep(transient_backoff(attempt)).await;
+        }
+    }
+    let failed = task_inventory_failed_body(task, held_serial);
+    deliver(&caps_tx, (TASK_INVENTORY_FAILED_TAG.to_owned(), failed)).await;
+}
+
+/// POSTs a `GetMetadata` request for the script `item` in the prim `task`
+/// and forwards the answer to `caps_tx` tagged [`CAP_GET_METADATA`], stamped
+/// with the two ids (the answer names neither). Mirrors the bevy
+/// `run_script_metadata`.
+pub(crate) async fn post_script_metadata(
+    cap_url: String,
+    task: ObjectKey,
+    item: InventoryKey,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let body = build_get_metadata_request(task, item);
+    match crate::voice::post_cap_llsd(&cap_url, body, &http).await {
+        Some(reply) => {
+            let stamped = stamp_get_metadata_reply(reply, task, item);
+            deliver(&caps_tx, (CAP_GET_METADATA.to_owned(), stamped)).await;
+        }
+        None => report_caps_failure(&caps_tx, CAP_GET_METADATA).await,
     }
 }
 

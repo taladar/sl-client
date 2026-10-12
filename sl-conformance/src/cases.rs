@@ -119,6 +119,7 @@ pub mod set_appearance;
 pub mod simulator_features;
 pub mod sit_stand;
 pub mod task_inventory;
+pub mod task_inventory_stranger;
 pub mod teleport_access_refused;
 pub mod teleport_cancel;
 pub mod teleport_cross_region;

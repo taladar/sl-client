@@ -234,6 +234,10 @@ the cube selected, with only itself, and with nobody.
 | an edit made with nothing selected | takes | takes | takes |
 | a link | the root's record, to a linker that holds the root selected; nothing to one that does not | the root's record, to the linker, selected or not | each flavour as its grid |
 
+What each way of writing into a prim's contents is told with besides the
+record — the prim sent again, a listing reply nobody asked for — is in
+[Building](building.md#who-is-told).
+
 A selection is therefore a subscription on Second Life alone, and to one
 thing: what is in the prim. An avatar looking at a prim somebody else
 renames, prices or re-permissions is not told on either grid, and shows the

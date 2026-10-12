@@ -4927,10 +4927,21 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "fetch_task_inventory",
-            usage: "<target-local_id>",
+            usage: "<target-local_id> [held_serial]",
             build: |args, ctx| {
                 Ok(Command::FetchTaskInventory {
                     target: scoped_object(ctx, args.req_parse(ctx, "target", 0, "u32")?)?,
+                    held_serial: args.opt_parse::<i16>(ctx, "held_serial", 1, "i16")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_script_experience",
+            usage: "<task_id> <item_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestScriptExperience {
+                    task: ObjectKey::from(args.req_uuid(ctx, "task_id", 0)?),
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
                 })
             },
         },

@@ -52,6 +52,15 @@
 //! (`RequestScriptRunning`) on open and shows a **Running** checkbox reflecting
 //! it, whose value the Save carries through — the reference's Running toggle.
 //!
+//! # Not silently taking a script out of its experience
+//!
+//! A task script may be compiled under an **experience**, and the save names
+//! it: an `UpdateScriptTask` that names none compiles the script under none.
+//! So the editor asks which one on open ([`Command::RequestScriptExperience`],
+//! the `GetMetadata` capability), shows it under the body, and the Save
+//! carries it back. A grid without the capability has no experiences, and
+//! answers nothing.
+//!
 //! # One window per script
 //!
 //! A script editor is a **keyed floater** ([`FloaterKey`]): opening a second
@@ -73,8 +82,8 @@ use bevy::ui_widgets::ValueChange;
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AssetKey, AssetType, Command, InventoryKey, ObjectKey, ScriptCompileError, ScriptTarget,
-    SlCommand, SlEvent, SlSessionEvent, Uuid,
+    AssetKey, AssetType, Command, ExperienceKey, InventoryKey, ObjectKey, ScriptCompileError,
+    ScriptTarget, SlCommand, SlEvent, SlSessionEvent, Uuid,
 };
 
 use crate::asset_editor::{
@@ -139,6 +148,7 @@ impl Plugin for EditScriptPlugin {
                 (
                     ingest_script_asset,
                     report_script_running,
+                    report_script_experience,
                     save_script,
                     report_script_save,
                 )
@@ -184,6 +194,15 @@ struct ScriptEditorState {
     running_check: Option<Entity>,
     /// The `(object, item)` a `RequestScriptRunning` awaits a reply for.
     pending_running: Option<(ObjectKey, InventoryKey)>,
+    /// The experience a task script was compiled under (asked on open), which
+    /// a save names again; `None` for a script under none, for an agent
+    /// script, and before the grid has answered.
+    experience: Option<ExperienceKey>,
+    /// The experience's name, once the grid has said it.
+    experience_name: Option<String>,
+    /// The line under the body that says which experience, hidden while
+    /// there is none.
+    experience_line: Option<Entity>,
 }
 
 /// The script editor floater's [`FloaterSpec`] — shared with the `FLOATERS`
@@ -262,6 +281,11 @@ fn open_script(
                 object_id: task_id,
                 item_id,
             }));
+            // And an experience the save must name again.
+            sl_commands.write(SlCommand(Command::RequestScriptExperience {
+                task: task_id,
+                item_id,
+            }));
         }
     }
 }
@@ -294,6 +318,9 @@ fn build_script_window(commands: &mut Commands, handle: FloaterHandle, open: &Op
             running: None,
             running_check: None,
             pending_running,
+            experience: None,
+            experience_name: None,
+            experience_line: None,
         },
     ));
 }
@@ -308,6 +335,7 @@ fn ingest_script_asset(
     mut events: MessageReader<SlEvent>,
     mut windows: Query<(Entity, &mut ScriptEditorState)>,
     children: Query<&Children>,
+    translator: Translator,
     mut commands: Commands,
 ) {
     // Collected once and replayed per window: a reader is consumed by the first
@@ -350,6 +378,11 @@ fn ingest_script_asset(
             state.status = built.status;
             state.errors = built.errors;
             state.running_check = built.running_check;
+            state.experience_line = built.experience_line;
+            // The answer may have come before the window had a line for it.
+            if let Some(line) = state.experience_line {
+                paint_experience(&mut commands, &translator, line, &state);
+            }
             // The source as it arrived is the baseline the unsaved-work guard
             // measures against; a read-only window has no buffer to lose and so
             // never gets one.
@@ -373,6 +406,8 @@ struct BuiltEditor {
     errors: Option<Entity>,
     /// The Running toggle's glyph node, when a task script is editable.
     running_check: Option<Entity>,
+    /// The line that says which experience, when a task script is editable.
+    experience_line: Option<Entity>,
 }
 
 /// What an editor's content is built from: the script itself, whether it may be
@@ -433,6 +468,22 @@ fn populate_editor(
 
     let running_check = (editable && source.is_task())
         .then(|| spawn_running_toggle(commands, content, running, font_size));
+    // Hidden until the grid says the script is under an experience.
+    let experience_line = (editable && source.is_task()).then(|| {
+        commands
+            .spawn((
+                Text::default(),
+                UiFont::Sans.at(font_size),
+                text_role(DIM_COLOR),
+                Node {
+                    display: Display::None,
+                    ..default()
+                },
+                Name::new("script-experience"),
+                ChildOf(content),
+            ))
+            .id()
+    });
 
     let (status, errors) = if editable {
         let bar = commands
@@ -505,6 +556,7 @@ fn populate_editor(
         status,
         errors,
         running_check,
+        experience_line,
     }
 }
 
@@ -538,7 +590,7 @@ fn save_script(
         let source = field.value().to_string();
         let running = state.running.unwrap_or(true);
         sl_commands.write(SlCommand(Command::UploadScript {
-            location: state.source.location(running),
+            location: state.source.location(running, state.experience),
             target: state.target,
             source: source.clone().into_bytes(),
         }));
@@ -585,6 +637,89 @@ fn report_script_running(
             set_running_tick(&mut commands, state.running_check, *running);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// The script's experience.
+// ---------------------------------------------------------------------------
+
+/// Take the grid's answer to which experience a task script is under, ask for
+/// that experience's name, and say both under the body.
+fn report_script_experience(
+    mut events: MessageReader<SlEvent>,
+    mut windows: Query<&mut ScriptEditorState>,
+    translator: Translator,
+    mut sl_commands: MessageWriter<SlCommand>,
+    mut commands: Commands,
+) {
+    let frame: Vec<&SlEvent> = events.read().collect();
+    if frame.is_empty() {
+        return;
+    }
+    for mut state in &mut windows {
+        let ScriptSource::Task { task_id, item_id } = state.source else {
+            continue;
+        };
+        let mut changed = false;
+        for event in &frame {
+            match &event.0 {
+                SlSessionEvent::ScriptExperience {
+                    task,
+                    item_id: item,
+                    experience,
+                } if *task == task_id && *item == item_id => {
+                    state.experience = *experience;
+                    state.experience_name = None;
+                    changed = true;
+                    if let Some(experience) = experience {
+                        sl_commands.write(SlCommand(Command::RequestExperienceInfo {
+                            experience_ids: vec![*experience],
+                        }));
+                    }
+                }
+                SlSessionEvent::ExperienceInfo(infos) => {
+                    let name = infos
+                        .iter()
+                        .find(|info| Some(info.public_id) == state.experience && !info.missing)
+                        .map(|info| info.name.clone());
+                    if name.is_some() {
+                        state.experience_name = name;
+                        changed = true;
+                    }
+                }
+                _other => {}
+            }
+        }
+        if let (true, Some(line)) = (changed, state.experience_line) {
+            paint_experience(&mut commands, &translator, line, &state);
+        }
+    }
+}
+
+/// Write the experience line of a window: the experience's name — its id
+/// until the grid has said the name — or nothing at all for a script under
+/// none.
+fn paint_experience(
+    commands: &mut Commands,
+    translator: &Translator,
+    line: Entity,
+    state: &ScriptEditorState,
+) {
+    let Some(experience) = state.experience else {
+        commands.entity(line).insert(Node {
+            display: Display::None,
+            ..default()
+        });
+        return;
+    };
+    let name = state
+        .experience_name
+        .clone()
+        .unwrap_or_else(|| experience.to_string());
+    commands.entity(line).insert((
+        Text::new(translator.format("script-experience", &TransArgs::new().text("name", &name))),
+        Node::default(),
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -873,26 +1008,29 @@ mod tests {
     use sl_client_bevy::ScriptUploadLocation;
     use sl_client_bevy::{InventoryKey, ObjectKey, Uuid};
 
-    /// A task upload carries the run state through as `is_script_running`, and no
-    /// experience is set; an agent upload has neither.
+    /// A task upload carries the run state through as `is_script_running` and
+    /// the experience the script is under; an agent upload has neither.
     #[test]
-    fn task_location_carries_run_state() {
+    fn task_location_carries_run_state_and_experience() {
         let item_id = InventoryKey::from(Uuid::from_u128(1));
         let task_id = ObjectKey::from(Uuid::from_u128(2));
+        let experience = sl_client_bevy::ExperienceKey::from(Uuid::from_u128(3));
 
-        let agent = ScriptSource::Agent { item_id }.location(true);
+        let agent = ScriptSource::Agent { item_id }.location(true, Some(experience));
         assert_eq!(agent, ScriptUploadLocation::AgentInventory { item_id });
 
-        let task = ScriptSource::Task { task_id, item_id }.location(false);
-        assert_eq!(
-            task,
-            ScriptUploadLocation::TaskInventory {
-                task_id,
-                item_id,
-                running: false,
-                experience: None,
-            }
-        );
+        for experience in [None, Some(experience)] {
+            let task = ScriptSource::Task { task_id, item_id }.location(false, experience);
+            assert_eq!(
+                task,
+                ScriptUploadLocation::TaskInventory {
+                    task_id,
+                    item_id,
+                    running: false,
+                    experience,
+                }
+            );
+        }
     }
 
     /// **One window per script** (`viewer-keyed-floater-audit`): the open path,

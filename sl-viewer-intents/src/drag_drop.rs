@@ -10,9 +10,9 @@ use std::collections::VecDeque;
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, AssetUpdateLocation, Command, ImSessionId, InventoryFolderKey, InventoryKey,
-    ObjectKey, RestoreItem, ScopedObjectId, ScriptLanguage, ScriptTarget, ScriptUploadLocation,
-    SettingsKind, TaskInventoryKey, Uuid,
+    AgentKey, AssetUpdateLocation, Command, ExperienceKey, ImSessionId, InventoryFolderKey,
+    InventoryKey, ObjectKey, RestoreItem, ScopedObjectId, ScriptLanguage, ScriptTarget,
+    ScriptUploadLocation, SettingsKind, TaskInventoryKey, Uuid,
 };
 
 /// A description of an item added to a prim's contents, for the pending-add
@@ -412,17 +412,23 @@ impl ScriptSource {
     }
 
     /// The upload location this source saves back to, carrying `running` for a
-    /// task script (`is_script_running`). No experience is set — a script is not
-    /// associated with an experience through this editor in v1.
+    /// task script (`is_script_running`) and the `experience` it was compiled
+    /// under. A save that names no experience takes the script out of the one
+    /// it had, so the editor passes back what the grid said the script is
+    /// under. An agent-inventory script has neither.
     #[must_use]
-    pub const fn location(self, running: bool) -> ScriptUploadLocation {
+    pub const fn location(
+        self,
+        running: bool,
+        experience: Option<ExperienceKey>,
+    ) -> ScriptUploadLocation {
         match self {
             Self::Agent { item_id } => ScriptUploadLocation::AgentInventory { item_id },
             Self::Task { task_id, item_id } => ScriptUploadLocation::TaskInventory {
                 task_id,
                 item_id,
                 running,
-                experience: None,
+                experience,
             },
         }
     }

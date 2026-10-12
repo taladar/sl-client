@@ -807,21 +807,39 @@ change what it holds, and all three are answered against the region world:
   new item that happens to name the same asset), and written in — which
   advances the object's contents serial. The listing a following
   `RequestTaskInventory` serves is re-generated from the live store, so it
-  can never disagree with the serial that announced it.
+  can never disagree with the serial that announced it. A second item of
+  one name is given a number, as both live grids give it.
+- **`RezScript`, `RemoveTaskInventory`, `MoveTaskInventory`** (the
+  `task_contents` module). A script is made new or resolved out of the
+  agent's inventory, and given the grid's own new-script body when it has
+  none; a remove takes the item out, and on the OpenSim flavour files a
+  copy in the agent's Trash; a move hands the agent a new item and leaves a
+  copyable one in the prim with its serial untouched. The grid runs no
+  script: it keeps whether each is *running*, which is what
+  `GetScriptRunning` answers and `SetScriptRunning` changes. How far the
+  serial moves, and who is sent the prim, its record and a listing reply
+  nobody asked for, is each flavour's (`ImitatedGrid::contents_policy`, as
+  measured in [Grid Behaviour → Building](../gridspec/building.md#contents)).
+- **The `RequestTaskInventory` and `GetMetadata` capabilities**, on the
+  Second-Life flavour. `SimCaps` reads the request and hands it to the
+  driver (`CapsDispatch::TaskInventory` / `ScriptMetadata`), because the
+  prims are the region's and not the session's; the driver answers from the
+  same store the UDP listing is generated from.
 
 Because the world is the region's, one avatar's rez is a change every
 avatar in the region sees. There is no simulation loop to sweep for it, so
 the session that made the change publishes a `RegionUpdate` and a
 per-session `run_region_watcher` task turns it back into the message its own
-circuit needs — an `ObjectUpdate`, a `KillObject`, or one of the three
+circuit needs — an `ObjectUpdate`, a `KillObject`, or one of the
 subscription pushes below — skipping the changes its own session published,
 which were sent directly. A watcher that falls behind
 its broadcast logs a warning rather than swallowing it: a lost `KillObject`
 is a ghost object standing in that viewer until its next refetch.
 
-`sl-conformance`'s `task-inventory` case runs the whole of this offline —
-rez a container, rez and take a donor, drop it in, watch the serial
-advance, read the listing back over Xfer, trash the container.
+`sl-conformance`'s `task-inventory` case runs the whole of this offline, on
+both flavours and with a second avatar watching — every way of writing into
+a prim, read back over both roads — and holds each flavour to what its live
+grid was measured to answer.
 
 ### A taken object's asset
 
@@ -1388,7 +1406,10 @@ different:
   of the record — a rename, a price, a permission — is published to nobody
   on either flavour, because neither live grid tells anybody but the
   editor: this push went to every selector until it was measured
-  (2026-10-09).
+  (2026-10-09). The same sessions are sent a `ReplyTaskInventory` they did
+  not ask for when a script in the prim has started, which moves Second
+  Life's serial a second time (`RegionChange::ContentsListed`,
+  2026-10-12).
 - **A parcel** goes to the avatars standing on it — OpenSim's
   `SendLandUpdateToAvatarsOverMe` — as a sequence-zero `ParcelProperties`,
   the same unsolicited form the arrival burst uses. The fake grid tracks no

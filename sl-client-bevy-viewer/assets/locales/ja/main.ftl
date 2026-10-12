@@ -109,6 +109,7 @@ menu-embedded-copy-to-inventory = 持ち物にコピー
 script-save = 保存してコンパイル
 script-readonly-note = このスクリプトを編集する権限がありません。
 script-running = 実行中
+script-experience = 体験: { $name }
 script-status-loading = 読み込み中…
 script-status-saving = 保存とコンパイル中…
 script-status-saved = 保存しました。

@@ -1787,6 +1787,7 @@ pub(crate) async fn contents(
     session
         .send(Command::FetchTaskInventory {
             target: object.scoped_id(),
+            held_serial: None,
         })
         .await?;
     let listing = crate::support::wait_for_task_listing(session, task, STEP_TIMEOUT).await?;

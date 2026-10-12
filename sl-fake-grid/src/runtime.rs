@@ -2037,6 +2037,7 @@ impl FakeGridBuilder {
                 fixtures.rez = self.imitates.rez_policy();
                 fixtures.edit = self.imitates.edit_policy();
                 fixtures.linking = self.imitates.link_policy();
+                fixtures.contents = self.imitates.contents_policy();
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 RegionEntry {

@@ -362,6 +362,7 @@ fn apply_caps_upload(
         }
         CapsUploadMetadata::UpdateScriptTask(request) => {
             repoint_task_item(world, request.task_id, request.item_id, new_asset);
+            set_script_experience(world, request.task_id, request.item_id, request.experience);
         }
         // `CapsUploadMetadata` is `#[non_exhaustive]`: a family added later
         // stores its bytes (that happened above) but binds no item until
@@ -475,6 +476,33 @@ fn repoint_task_item(
     // serial, and a listing whose bytes changed under an unchanged serial is
     // one no viewer will re-read (see [`TaskInventory`]).
     contents.write(item);
+    drop(world);
+}
+
+/// Records the experience a script in a prim was saved under: the one the
+/// save named, or none. A save that names none takes the script out of the
+/// experience it was under, which is why a viewer asks before it saves.
+fn set_script_experience(
+    world: &RegionWorld,
+    task_id: ObjectKey,
+    item_id: InventoryKey,
+    experience: Option<sl_proto::ExperienceKey>,
+) {
+    let mut world = world.lock();
+    let Some(local_id) = world.local_id_of(task_id) else {
+        return;
+    };
+    let Some(contents) = world.task_inventories.get_mut(&local_id) else {
+        return;
+    };
+    match experience {
+        Some(experience) => {
+            let _previous = contents.experiences.insert(item_id, experience);
+        }
+        None => {
+            let _previous = contents.experiences.remove(&item_id);
+        }
+    }
     drop(world);
 }
 

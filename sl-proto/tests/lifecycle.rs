@@ -7448,6 +7448,7 @@ mod test {
         // The object is not in the cache, so the fetch claims positionally.
         session.fetch_task_inventory(
             ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(77)),
+            None,
             now,
         )?;
         drain(&mut session)?;
@@ -7456,7 +7457,13 @@ mod test {
         let expired = after(now, 60_001)?;
         advance_alive(&mut session, now, expired, 500)?;
         drain(&mut session)?;
-        drain_events(&mut session);
+        // Whoever asked is told that no listing is coming.
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::TaskInventoryUnanswered { task: None })),
+            "a dropped claim is reported"
+        );
 
         // An unrelated object's reply now arrives; the stale claim must not take
         // it, so no `Xfer` for that object's listing goes out.
@@ -7474,6 +7481,147 @@ mod test {
                 .any(|m| matches!(m, AnyMessage::RequestXfer(_))),
             "a dropped claim does not follow someone else's reply"
         );
+        Ok(())
+    }
+
+    /// A fetch that names the serial of the listing its caller holds is
+    /// answered with "unchanged", and nothing is downloaded, when the reply
+    /// states that serial; any other serial is followed to its file.
+    #[test]
+    fn a_task_inventory_reply_at_the_held_serial_downloads_nothing() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+        drain(&mut session)?;
+        let position = Vector {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+        };
+        let update = object_update(100, 0x7A5C, position);
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let target = ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(100));
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x7A5C));
+        assert_eq!(session.resolve_object_key(target), Some(task));
+        let reply = |serial: i16| {
+            AnyMessage::ReplyTaskInventory(ReplyTaskInventory {
+                inventory_data: ReplyTaskInventoryInventoryDataBlock {
+                    task_id: task.uuid(),
+                    serial,
+                    filename: b"inventory.tmp\0".to_vec(),
+                },
+            })
+        };
+
+        session.fetch_task_inventory(target, Some(4), now)?;
+        drain(&mut session)?;
+        session.handle_datagram(sim_addr(), &server_message(&reply(4), 6, true)?, now)?;
+        assert!(
+            !drain(&mut session)?
+                .iter()
+                .any(|m| matches!(m, AnyMessage::RequestXfer(_))),
+            "a listing the caller holds is not downloaded again"
+        );
+        assert!(
+            drain_events(&mut session).iter().any(|event| matches!(
+                event,
+                Event::TaskInventoryUnchanged { task: of, serial: 4 } if *of == task
+            )),
+            "the caller is told its listing is current"
+        );
+
+        session.fetch_task_inventory(target, Some(4), now)?;
+        drain(&mut session)?;
+        session.handle_datagram(sim_addr(), &server_message(&reply(5), 7, true)?, now)?;
+        assert!(
+            drain(&mut session)?
+                .iter()
+                .any(|m| matches!(m, AnyMessage::RequestXfer(_))),
+            "a listing that moved is downloaded"
+        );
+        Ok(())
+    }
+
+    /// What a runtime forwards from the two capabilities a prim's contents
+    /// are read through becomes the events a caller waits for: the listing,
+    /// "unchanged" for the grid's `304`, a script's experience — and, when
+    /// the capability failed, the UDP request in its place, or "unanswered"
+    /// for a prim that has left the scene.
+    #[test]
+    fn task_inventory_capability_answers_become_events() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let position = Vector {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+        };
+        let update = object_update(100, 0x7A5C, position);
+        session.handle_datagram(sim_addr(), &server_message(&update, 5, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x7A5C));
+
+        let listing = sl_wire::parse_llsd_xml(&sl_proto::build_task_inventory_cap_reply(6, &[]))?;
+        session.handle_caps_event(
+            sl_proto::CAP_REQUEST_TASK_INVENTORY,
+            &sl_proto::stamp_task_inventory_cap_reply(listing, task),
+            now,
+        )?;
+        session.handle_caps_event(
+            sl_proto::TASK_INVENTORY_UNCHANGED_TAG,
+            &sl_proto::task_inventory_unchanged_body(task, 6),
+            now,
+        )?;
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x17E0));
+        let none = sl_wire::parse_llsd_xml(&sl_proto::build_get_metadata_reply(None))?;
+        session.handle_caps_event(
+            sl_proto::CAP_GET_METADATA,
+            &sl_proto::stamp_get_metadata_reply(none, task, item),
+            now,
+        )?;
+        let events = drain_events(&mut session);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::TaskInventoryContents { task: of, serial: 6, items }
+                if *of == task && items.is_empty()
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::TaskInventoryUnchanged { task: of, serial: 6 } if *of == task
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::ScriptExperience { task: of, item_id, experience: None }
+                if *of == task && *item_id == item
+        )));
+
+        // The capability failed: the prim is read over UDP instead.
+        session.handle_caps_event(
+            sl_proto::TASK_INVENTORY_FAILED_TAG,
+            &sl_proto::task_inventory_failed_body(task, Some(6)),
+            now,
+        )?;
+        assert!(
+            drain(&mut session)?
+                .iter()
+                .any(|m| matches!(m, AnyMessage::RequestTaskInventory(_))),
+            "a failed capability falls back to the UDP request"
+        );
+        // And for a prim the session no longer holds, the caller is told.
+        let gone = ObjectKey::from(uuid::Uuid::from_u128(0xDEAD));
+        session.handle_caps_event(
+            sl_proto::TASK_INVENTORY_FAILED_TAG,
+            &sl_proto::task_inventory_failed_body(gone, None),
+            now,
+        )?;
+        assert!(drain_events(&mut session).iter().any(|event| matches!(
+            event,
+            Event::TaskInventoryUnanswered { task: Some(of) } if *of == gone
+        )));
         Ok(())
     }
 

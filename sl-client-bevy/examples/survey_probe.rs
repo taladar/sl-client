@@ -237,6 +237,9 @@ fn on_events(
             | SlSessionEvent::InventoryItemsMoved { .. }
             | SlSessionEvent::TaskInventoryReply(..)
             | SlSessionEvent::TaskInventoryContents { .. }
+            | SlSessionEvent::TaskInventoryUnchanged { .. }
+            | SlSessionEvent::TaskInventoryUnanswered { .. }
+            | SlSessionEvent::ScriptExperience { .. }
             | SlSessionEvent::XferDownloaded { .. }
             | SlSessionEvent::ServerFileDownloaded { .. }
             | SlSessionEvent::XferUploaded { .. }

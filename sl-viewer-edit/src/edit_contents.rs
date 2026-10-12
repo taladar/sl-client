@@ -168,6 +168,45 @@ struct ContentsEntry {
     /// re-requested until the prim's contents serial moves (the same file
     /// would fail the same way); any earlier good listing stays shown.
     unreadable: bool,
+    /// The write this viewer sent into the prim and has not yet seen the
+    /// outcome of, if there is one.
+    awaited: Option<AwaitedChange>,
+}
+
+/// A write into a prim whose outcome the listing has not shown yet.
+///
+/// A listing asked for right after a write can be answered before the write
+/// is: on Second Life the write travels over UDP and the listing over the
+/// `RequestTaskInventory` capability, and nothing orders the two. So a listing
+/// that comes back at the serial the prim stood at before the write is not yet
+/// the verdict. It is asked for once more, [`CONTENTS_RECHECK_SECONDS`] later,
+/// and the answer to *that* is: a serial that still has not moved is a write
+/// the grid did not take. The reference does the same
+/// (`LLViewerObject::fetchInventoryFromCapCoro`, "stale inv_serial?").
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AwaitedChange {
+    /// The serial the listing stood at when the write was sent, if a listing
+    /// was held.
+    from: Option<i16>,
+    /// When to ask again, in seconds since startup, once a listing at the
+    /// old serial has come back.
+    again_at: Option<f32>,
+    /// Whether the second listing has been asked for.
+    asked_again: bool,
+}
+
+/// How long after an unchanged listing the prim is asked again: the
+/// reference's `INVENTORY_UPDATE_WAIT_TIME_OUTDATED`.
+const CONTENTS_RECHECK_SECONDS: f32 = 1.0;
+
+/// What a listing that arrived settled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Listed {
+    /// The listing is the prim's contents: any optimistic overlay goes.
+    Settled,
+    /// The listing predates a write this viewer is waiting on the outcome of,
+    /// and the prim is asked again shortly: the overlay stays.
+    AskAgain,
 }
 
 /// The session-lifetime cache of every fetched prim task inventory, keyed by the
@@ -196,14 +235,57 @@ impl TaskInventoryCache {
         true
     }
 
-    /// Store a freshly parsed listing for `task`.
-    fn store(&mut self, task: ObjectKey, serial: i16, items: Vec<TaskInventoryItem>) {
+    /// Store a freshly parsed listing for `task`, which arrived at `now`
+    /// seconds since startup.
+    fn store(
+        &mut self,
+        task: ObjectKey,
+        serial: i16,
+        items: Vec<TaskInventoryItem>,
+        now: f32,
+    ) -> Listed {
         let entry = self.entries.entry(task).or_default();
-        entry.serial = Some(serial);
         entry.items = items;
-        entry.fetching = false;
         entry.loaded = true;
         entry.unreadable = false;
+        entry.settle(serial, now)
+    }
+
+    /// The grid said the listing held for `task` is still its contents.
+    fn store_unchanged(&mut self, task: ObjectKey, serial: i16, now: f32) -> Listed {
+        self.entries.entry(task).or_default().settle(serial, now)
+    }
+
+    /// The grid never answered for `task` — or, with `None`, for a prim that
+    /// could not be named: nothing in flight is still awaited. What was
+    /// listed before stays listed; a prim never listed is asked about again
+    /// the next time it is shown.
+    fn give_up(&mut self, task: Option<&ObjectKey>) -> Vec<ObjectKey> {
+        self.entries
+            .iter_mut()
+            .filter(|(key, entry)| entry.fetching && task.is_none_or(|task| task == *key))
+            .map(|(key, entry)| {
+                entry.fetching = false;
+                entry.awaited = None;
+                *key
+            })
+            .collect()
+    }
+
+    /// The prims whose second listing is due at `now`, each with the serial
+    /// of the listing held. Each is returned once.
+    fn take_due_rechecks(&mut self, now: f32) -> Vec<(ObjectKey, Option<i16>)> {
+        self.entries
+            .iter_mut()
+            .filter_map(|(task, entry)| {
+                let awaited = entry.awaited.as_mut()?;
+                if awaited.again_at.is_none_or(|at| at > now) {
+                    return None;
+                }
+                awaited.again_at = None;
+                Some((*task, entry.serial))
+            })
+            .collect()
     }
 
     /// Record that `task`'s listing at `serial` arrived but failed to parse.
@@ -212,17 +294,17 @@ impl TaskInventoryCache {
         entry.serial = Some(serial);
         entry.fetching = false;
         entry.unreadable = true;
+        entry.awaited = None;
     }
 
     /// Record an empty task inventory (a reply whose Xfer filename was empty, so
     /// no `TaskInventoryContents` follows).
-    fn store_empty(&mut self, task: ObjectKey, serial: i16) {
+    fn store_empty(&mut self, task: ObjectKey, serial: i16, now: f32) -> Listed {
         let entry = self.entries.entry(task).or_default();
-        entry.serial = Some(serial);
         entry.items.clear();
-        entry.fetching = false;
         entry.loaded = true;
         entry.unreadable = false;
+        entry.settle(serial, now)
     }
 
     /// Mark a cached entry stale after we sent a mutation, so it is re-fetched
@@ -240,6 +322,25 @@ impl TaskInventoryCache {
     fn mark_stale(&mut self, task: &ObjectKey) {
         if let Some(entry) = self.entries.get_mut(task) {
             entry.fetching = true;
+        }
+    }
+
+    /// [`mark_stale`](Self::mark_stale) after a write of this viewer's own:
+    /// the listing that comes back is also expected to show the write, and
+    /// one that does not is not taken for the answer at once
+    /// ([`AwaitedChange`]).
+    fn expect_change(&mut self, task: &ObjectKey) {
+        if let Some(entry) = self.entries.get_mut(task) {
+            entry.fetching = true;
+            // A second write while the first is awaited is measured from the
+            // same listing.
+            if entry.awaited.is_none() {
+                entry.awaited = Some(AwaitedChange {
+                    from: entry.serial,
+                    again_at: None,
+                    asked_again: false,
+                });
+            }
         }
     }
 
@@ -263,6 +364,26 @@ impl TaskInventoryCache {
                 && !entry.fetching
                 && entry.serial.is_some_and(|cached| cached != serial)
         })
+    }
+}
+
+impl ContentsEntry {
+    /// Takes a listing at `serial`, which arrived at `now`, for what it
+    /// settles.
+    fn settle(&mut self, serial: i16, now: f32) -> Listed {
+        self.serial = Some(serial);
+        if let Some(awaited) = self.awaited.as_mut()
+            && awaited.from == Some(serial)
+            && !awaited.asked_again
+        {
+            // Still `fetching`: the second listing is on its way.
+            awaited.asked_again = true;
+            awaited.again_at = Some(now + CONTENTS_RECHECK_SECONDS);
+            return Listed::AskAgain;
+        }
+        self.awaited = None;
+        self.fetching = false;
+        Listed::Settled
     }
 }
 
@@ -1230,8 +1351,30 @@ fn ingest_task_inventory(
     mut cache: ResMut<TaskInventoryCache>,
     mut pending: ResMut<PendingMutations>,
     objects: Res<ObjectState>,
+    time: Res<Time>,
     mut commands: MessageWriter<SlCommand>,
 ) {
+    let now = time.elapsed_secs();
+    // The second listing of a prim whose first came back unchanged after a
+    // write: asked with the serial held, so a grid with nothing new to say
+    // says only that.
+    for (task, held_serial) in cache.take_due_rechecks(now) {
+        match objects.scoped_by_full_id(task.uuid()).first() {
+            Some(scoped) => {
+                commands.write(SlCommand(Command::FetchTaskInventory {
+                    target: *scoped,
+                    held_serial,
+                }));
+            }
+            // The prim left the scene while the answer was awaited.
+            None => {
+                if let Some(serial) = held_serial {
+                    let _settled = cache.store_unchanged(task, serial, now);
+                }
+                pending.clear_object(&task);
+            }
+        }
+    }
     for event in events.read() {
         match &event.0 {
             // A properties record is the only thing that carries a prim's
@@ -1247,12 +1390,7 @@ fn ingest_task_inventory(
                     .scoped_by_full_id(properties.object_id.uuid())
                     .first()
                 {
-                    reconcile_after_mutation(
-                        &mut cache,
-                        &mut commands,
-                        *scoped,
-                        properties.object_id,
-                    );
+                    refetch(&mut cache, &mut commands, *scoped, properties.object_id);
                 }
             }
             SlSessionEvent::TaskInventoryContents {
@@ -1260,17 +1398,44 @@ fn ingest_task_inventory(
                 serial,
                 items,
             } => {
-                cache.store(*task, *serial, items.clone());
-                // The authoritative listing supersedes every optimistic overlay.
-                pending.clear_object(task);
+                // The authoritative listing supersedes every optimistic
+                // overlay — unless it predates the write the overlay is for.
+                if cache.store(*task, *serial, items.clone(), now) == Listed::Settled {
+                    pending.clear_object(task);
+                }
+            }
+            SlSessionEvent::TaskInventoryUnchanged { task, serial } => {
+                if cache.store_unchanged(*task, *serial, now) == Listed::Settled {
+                    pending.clear_object(task);
+                }
             }
             SlSessionEvent::TaskInventoryReply(TaskInventoryReply {
                 task,
                 serial,
                 filename,
             }) if filename.is_empty() => {
-                cache.store_empty(*task, *serial);
-                pending.clear_object(task);
+                if cache.store_empty(*task, *serial, now) == Listed::Settled {
+                    pending.clear_object(task);
+                }
+            }
+            // No listing is coming. The rows stop saying a change is in
+            // flight: what the grid last listed is what there is to show.
+            SlSessionEvent::TaskInventoryUnanswered { task } => {
+                for given_up in cache.give_up(task.as_ref()) {
+                    pending.clear_object(&given_up);
+                }
+            }
+            // A reply nobody asked for: Second Life sends one to a viewer
+            // holding a prim selected when a script in it finishes compiling,
+            // which moves the serial a second time. The reply to a fetch of
+            // this viewer's own arrives while that fetch is in flight, and is
+            // not stale against it.
+            SlSessionEvent::TaskInventoryReply(TaskInventoryReply { task, serial, .. })
+                if cache.is_stale_against(task, *serial) =>
+            {
+                if let Some(scoped) = objects.scoped_by_full_id(task.uuid()).first() {
+                    refetch(&mut cache, &mut commands, *scoped, *task);
+                }
             }
             // The session has already logged the parse error; here it only has
             // to stop the list waiting for a listing that is not coming. The
@@ -1347,7 +1512,10 @@ fn drive_contents_fetch(
             .get(&full)
             .is_none_or(|entry| !entry.loaded && !entry.fetching && !entry.unreadable);
         if needs_fetch && cache.begin_fetch(full) {
-            commands.write(SlCommand(Command::FetchTaskInventory { target: scoped }));
+            commands.write(SlCommand(Command::FetchTaskInventory {
+                target: scoped,
+                held_serial: None,
+            }));
         }
     }
 }
@@ -2090,7 +2258,7 @@ fn run_contents_actions(
         };
         match request.action {
             ContentsAction::Refresh => {
-                reconcile_after_mutation(&mut store.cache, &mut outbox.commands, scoped, full);
+                refetch(&mut store.cache, &mut outbox.commands, scoped, full);
             }
             ContentsAction::Open => {
                 let Some(item_id) = model.selection.get(request.surface) else {
@@ -2163,11 +2331,14 @@ fn run_contents_actions(
                 // assigns the real task id) confirms the new script in the listing.
                 let phantom_id = InventoryKey::from(Uuid::new_v4());
                 let item = RestoreItem::new_script(creator, full, &name, Uuid::new_v4());
+                // Running, as the reference makes one
+                // (`LLPanelContents::onClickNewScript`): Second Life leaves a
+                // script made with the flag off stopped.
                 outbox.commands.write(SlCommand(Command::RezScript {
                     target: scoped,
                     params: Box::new(RezScriptParams {
                         group_id: None,
-                        enabled: false,
+                        enabled: true,
                         item,
                     }),
                 }));
@@ -2238,14 +2409,36 @@ fn run_contents_actions(
 /// [`TaskInventoryCache::mark_stale`]). The old listing stays visible until the
 /// reply lands, so there is no "loading" flash and a rejected mutation simply
 /// leaves the contents unchanged rather than drifting.
+///
+/// The listing is also *expected* to have moved: one that comes back at the
+/// serial the prim stood at is asked for once more before it is believed
+/// ([`AwaitedChange`]), and until then the row keeps saying what was asked.
 fn reconcile_after_mutation(
     cache: &mut TaskInventoryCache,
     commands: &mut MessageWriter<SlCommand>,
     scoped: ScopedObjectId,
     full: ObjectKey,
 ) {
+    cache.expect_change(&full);
+    commands.write(SlCommand(Command::FetchTaskInventory {
+        target: scoped,
+        held_serial: None,
+    }));
+}
+
+/// Re-read a prim's listing because the grid said it changed, or the resident
+/// asked: whatever comes back is its contents.
+fn refetch(
+    cache: &mut TaskInventoryCache,
+    commands: &mut MessageWriter<SlCommand>,
+    scoped: ScopedObjectId,
+    full: ObjectKey,
+) {
     cache.mark_stale(&full);
-    commands.write(SlCommand(Command::FetchTaskInventory { target: scoped }));
+    commands.write(SlCommand(Command::FetchTaskInventory {
+        target: scoped,
+        held_serial: None,
+    }));
 }
 
 /// Copy an object's whole contents into the agent's inventory (the Open
@@ -2698,7 +2891,7 @@ mod tests {
         // Nothing cached: absent, not stale — the fetch driver's job, not this.
         assert!(!cache.is_stale_against(&task, 3));
 
-        cache.store_empty(task, 3);
+        let _settled = cache.store_empty(task, 3, 0.0);
         assert!(
             !cache.is_stale_against(&task, 3),
             "the serial the listing was fetched at is not a change"
@@ -2739,12 +2932,57 @@ mod tests {
             "a moved serial names a new file"
         );
 
-        cache.store(task, 6, Vec::new());
+        let _settled = cache.store(task, 6, Vec::new(), 0.0);
         assert!(
             cache
                 .get(&task)
                 .is_some_and(|entry| entry.loaded && !entry.unreadable)
         );
+    }
+
+    /// **A write that does not land leaves the listing as the grid has it,
+    /// and is not mistaken for one that has not landed yet.**
+    ///
+    /// The listing asked for after a write can be answered before the write
+    /// is, so the first listing at the old serial is not the verdict: the
+    /// prim is asked once more, a moment later. A second answer at the old
+    /// serial — the grid's `304`, or the same listing again — is.
+    #[test]
+    fn an_unchanged_listing_after_a_write_is_asked_for_once_more() {
+        use super::{CONTENTS_RECHECK_SECONDS, Listed, ObjectKey, TaskInventoryCache};
+
+        let task = ObjectKey::from(sl_client_bevy::Uuid::from_bytes([3; 16]));
+        let mut cache = TaskInventoryCache::default();
+        assert_eq!(cache.store(task, 4, Vec::new(), 0.0), Listed::Settled);
+
+        // A write, and a listing that has not caught up with it.
+        cache.expect_change(&task);
+        assert_eq!(cache.store(task, 4, Vec::new(), 10.0), Listed::AskAgain);
+        assert!(
+            cache.get(&task).is_some_and(|entry| entry.fetching),
+            "the row keeps saying a change is in flight"
+        );
+        assert_eq!(cache.take_due_rechecks(10.5), Vec::new());
+        let due = 10.0 + CONTENTS_RECHECK_SECONDS;
+        assert_eq!(cache.take_due_rechecks(due), vec![(task, Some(4))]);
+        assert_eq!(
+            cache.take_due_rechecks(due + 1.0),
+            Vec::new(),
+            "it is asked for once"
+        );
+
+        // The second answer is the verdict, whichever way it goes.
+        assert_eq!(cache.store_unchanged(task, 4, due + 0.1), Listed::Settled);
+        assert!(cache.get(&task).is_some_and(|entry| !entry.fetching));
+
+        // A write that lands is settled by the first listing that shows it.
+        cache.expect_change(&task);
+        assert_eq!(cache.store(task, 5, Vec::new(), 20.0), Listed::Settled);
+        assert_eq!(cache.take_due_rechecks(30.0), Vec::new());
+
+        // A listing nobody wrote for is believed at once.
+        cache.mark_stale(&task);
+        assert_eq!(cache.store(task, 5, Vec::new(), 40.0), Listed::Settled);
     }
 
     /// **A contents action button acts from the keyboard as from the mouse.**

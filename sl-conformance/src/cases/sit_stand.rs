@@ -744,6 +744,7 @@ async fn plant_sit_target(session: &mut Session, seat: &Object) -> Result<bool, 
         session
             .send(Command::FetchTaskInventory {
                 target: seat.scoped_id(),
+                held_serial: None,
             })
             .await?;
         let found = wait_for_task_listing(session, seat.full_id, STEP_TIMEOUT)

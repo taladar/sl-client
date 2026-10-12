@@ -675,7 +675,12 @@ async fn fetch_task_item_id(
     task: ObjectKey,
     name: &str,
 ) -> Result<InventoryKey, TestFailure> {
-    session.send(Command::FetchTaskInventory { target }).await?;
+    session
+        .send(Command::FetchTaskInventory {
+            target,
+            held_serial: None,
+        })
+        .await?;
     let items = crate::support::wait_for_task_listing(session, task, LONG_TIMEOUT).await?;
     items
         .into_iter()

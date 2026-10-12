@@ -31,7 +31,7 @@
 //! | whether an update capability's completion names the item it rewrote ([`UpdateCompletionItem`]) | omitted: `new_asset` alone, and the client uses the id it sent | echoed: `new_inventory_item` carries the rewritten item |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
-//! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 34 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger, the interest-list switch |
+//! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 37 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger, the interest-list switch, a prim's contents and a script's experience over HTTP, a material saved into a prim |
 //! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
 //! | how a login is refused, and a second login of an avatar in world ([`login_refusals`](ImitatedGrid::login_refusals)) | `key` with a localisation key, its (empty) arguments and an incident id; the second login is admitted and the first session kicked | `key` with a text and nothing else; the second login is refused as `presence` and the first session kicked all the same |
 //! | whether a logout is answered ([`logout_reply`](ImitatedGrid::logout_reply)) | a `LogoutReply`, always | none: the session closes with the request unanswered and unacknowledged, which is what the live grid does six times in seven |
@@ -61,6 +61,14 @@
 //! | how many prims a physical linkset may have ([`LinkPolicy::most_physical_prims`]) | 32, more refused with the alert `CantEnablePhysCostTooGreat` | any number |
 //! | a child prim's sale state in its record ([`PropertiesPolicy::child_sale`]) | its own | the root's |
 //! | a new prim's record ([`PropertiesPolicy::new_prim_owner_mask`], [`PropertiesPolicy::new_prim_last_owner`], [`PropertiesPolicy::ownership_cost`]) | base and owner masks `0x7fffffff`, no last owner, an ownership cost of 10 | masks `0x0009e000`, the rezzer as last owner, a cost of 0 |
+//! | whether a write into a prim's contents sends the prim again ([`ContentsPolicy::resends`]) | after every write but a move, to every viewer | when a script lands and when something is removed |
+//! | what a script starting does to the contents serial ([`ContentsPolicy::script_start`]) | a step of its own, told to the sessions holding the prim selected in a `ReplyTaskInventory` nobody asked for | nothing |
+//! | a script made with the running flag off ([`ContentsPolicy::stopped_script`]) | left stopped | run anyway |
+//! | a drop naming an item the agent does not hold ([`ContentsPolicy::unheld_drop_alert`]) | refused with the alert `InventoryCreationInWorldObjectFailed` | not answered |
+//! | where a removed item goes ([`ContentsPolicy::removed_item`]) | nowhere | a copy into the agent's Trash, announced as a new item |
+//! | what a save into a prim over a capability tells the saver ([`ContentsPolicy::save_told`]) | what any write does | an alert, `Gesture updated` or `Notecard updated`, and no record |
+//! | the script a new script starts as ([`ContentsPolicy::new_script_body`]) | `Hello, Avatar!`, and `Touched.` on a touch | `Script running` |
+//! | a prim's contents and a script's experience over HTTP (`RequestTaskInventory`, `GetMetadata`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted: the listing is UDP and `Xfer` alone |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
 //! | the kill a derez sends ([`RezPolicy::derez_kill`]) | one `KillObject` naming every prim of the linkset | two, each naming the root alone |
@@ -1035,6 +1043,42 @@ impl ImitatedGrid {
         }
     }
 
+    /// What this grid says of a write into a prim's contents — measured by
+    /// the `task-inventory` conformance case on aditi and the local OpenSim
+    /// (2026-10-12, `book/src/gridspec/building.md` § Contents).
+    ///
+    /// They agree on the outline: a dropped item is a new item under a new
+    /// id that keeps its name, or its name with a number after it where the
+    /// prim has one of that name already; a script lands running unless
+    /// asked not to; a remove and a move of an item the prim does not hold,
+    /// and a script naming an item the agent does not hold, are answered
+    /// with nothing; a move leaves a copyable item in the prim, hands the
+    /// agent a new item with the legacy announcement, and neither moves the
+    /// serial nor tells anybody.
+    #[must_use]
+    pub const fn contents_policy(self) -> ContentsPolicy {
+        match self {
+            Self::SecondLife => ContentsPolicy {
+                resends: PrimResent::EveryWrite,
+                script_start: ScriptStart::MovesSerial,
+                stopped_script: StoppedScript::LeftStopped,
+                unheld_drop_alert: Some(ContentsPolicy::UNHELD_DROP),
+                removed_item: RemovedItem::Gone,
+                save_told: SaveTold::Record,
+                new_script_body: ContentsPolicy::SECOND_LIFE_NEW_SCRIPT,
+            },
+            Self::OpenSim => ContentsPolicy {
+                resends: PrimResent::ScriptsAndRemovals,
+                script_start: ScriptStart::Unmarked,
+                stopped_script: StoppedScript::RunAnyway,
+                unheld_drop_alert: None,
+                removed_item: RemovedItem::FiledInTrash,
+                save_told: SaveTold::Alert,
+                new_script_body: ContentsPolicy::OPENSIM_NEW_SCRIPT,
+            },
+        }
+    }
+
     /// What this grid makes of a link and a delink — measured by the
     /// `object-link-delink` conformance case on aditi and the local OpenSim
     /// (2026-10-11, `book/src/gridspec/building.md` § Linking).
@@ -1180,7 +1224,9 @@ pub const SECOND_LIFE_REFUSED_CAPABILITIES: &[&str] = &["ObjectAnimation", "Uplo
 /// What the local OpenSim's seed refused of the client's requested
 /// capabilities: AIS3 and the library fetches, every experience capability,
 /// voice (no voice module), the group-invite and offline-message capabilities
-/// (OpenSim does both over UDP), and the central-bake trigger.
+/// (OpenSim does both over UDP), the central-bake trigger, and the two reads
+/// of a prim's contents over HTTP (OpenSim lists them over UDP and `Xfer`, and
+/// has no experience to say a script is under).
 pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "AcceptGroupInvite",
     "AgentExperiences",
@@ -1196,6 +1242,7 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "GetCreatorExperiences",
     "GetExperienceInfo",
     "GetExperiences",
+    "GetMetadata",
     "GroupExperiences",
     "IncrementCOFVersion",
     "InterestList",
@@ -1209,11 +1256,13 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "ProvisionVoiceAccountRequest",
     "ReadOfflineMsgs",
     "RegionExperiences",
+    "RequestTaskInventory",
     "SendUserReport",
     "SendUserReportWithScreenshot",
     "UpdateAvatarAppearance",
     "UpdateExperience",
     "UpdateMaterialAgentInventory",
+    "UpdateMaterialTaskInventory",
     "UserInfo",
     "VoiceSignalingRequest",
 ];
@@ -2076,6 +2125,122 @@ impl Default for LinkPolicy {
     /// Second Life's, as the grid's own default flavour is.
     fn default() -> Self {
         ImitatedGrid::SecondLife.link_policy()
+    }
+}
+
+/// What a grid says of a write into a prim's contents
+/// ([`ImitatedGrid::contents_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentsPolicy {
+    /// Which writes send the prim again in full.
+    pub resends: PrimResent,
+    /// What a script starting, and a running script being removed, does to
+    /// the contents serial.
+    pub script_start: ScriptStart,
+    /// What becomes of a script made with the running flag off.
+    pub stopped_script: StoppedScript,
+    /// What a drop that names an item the agent does not hold is answered
+    /// with. Second Life sends an alert; OpenSim says nothing.
+    pub unheld_drop_alert: Option<NoBuildAlert>,
+    /// Where a removed item goes.
+    pub removed_item: RemovedItem,
+    /// What a save over an `Update*TaskInventory` capability tells the saver.
+    pub save_told: SaveTold,
+    /// The body a script made new in a prim is given.
+    pub new_script_body: &'static str,
+}
+
+/// Which writes into a prim's contents send the prim again in full
+/// ([`ContentsPolicy::resends`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimResent {
+    /// Every write — a drop, a script, a remove, a save — to every viewer
+    /// that has the prim in sight: Second Life.
+    EveryWrite,
+    /// A script landing and anything being removed; a drop and a save send
+    /// nothing to the region: OpenSim.
+    ScriptsAndRemovals,
+}
+
+/// What a script starting does to a prim's contents serial
+/// ([`ContentsPolicy::script_start`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptStart {
+    /// A step of its own, so that a script landing running moves the serial
+    /// by two and a running script removed does too; the second step is told
+    /// to the sessions holding the prim selected in a `ReplyTaskInventory`
+    /// they did not ask for: Second Life.
+    MovesSerial,
+    /// Nothing: OpenSim's serial moves by one.
+    Unmarked,
+}
+
+/// What becomes of a script made with the running flag off
+/// ([`ContentsPolicy::stopped_script`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoppedScript {
+    /// It is left stopped: Second Life.
+    LeftStopped,
+    /// It runs, as every script that lands does: OpenSim.
+    RunAnyway,
+}
+
+/// Where an item removed from a prim goes ([`ContentsPolicy::removed_item`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemovedItem {
+    /// Nowhere: Second Life.
+    Gone,
+    /// A copy into the agent's Trash, with the announcement that goes with a
+    /// new item: OpenSim's remove is a move into the Trash.
+    FiledInTrash,
+}
+
+/// What a save into a prim over a capability tells the saver
+/// ([`ContentsPolicy::save_told`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveTold {
+    /// The prim's record, as after any write: Second Life.
+    Record,
+    /// An alert naming what was saved
+    /// ([`ContentsPolicy::save_alert`]), and no record: OpenSim.
+    Alert,
+}
+
+impl ContentsPolicy {
+    /// What Second Life says of a drop naming an item the agent does not
+    /// hold.
+    pub const UNHELD_DROP: NoBuildAlert = NoBuildAlert {
+        text: "Inventory creation on in-world object failed.",
+        key: Some("InventoryCreationInWorldObjectFailed"),
+    };
+
+    /// Second Life's new script.
+    pub const SECOND_LIFE_NEW_SCRIPT: &'static str = "default\n{\n    state_entry()\n    {\n        llSay(0, \"Hello, Avatar!\");\n    }\n\n    touch_start(integer total_number)\n    {\n        llSay(0, \"Touched.\");\n    }\n}\n";
+
+    /// OpenSim's (`Scene.RezNewScript`).
+    pub const OPENSIM_NEW_SCRIPT: &'static str =
+        "default\n{\n    state_entry()\n    {\n        llSay(0, \"Script running\");\n    }\n}";
+
+    /// The alert a save of an item of `item_type` is answered with, where
+    /// this grid answers one with an alert: OpenSim's `Notecard updated` and
+    /// `Gesture updated`.
+    #[must_use]
+    pub const fn save_alert(&self, item_type: sl_proto::InventoryType) -> Option<&'static str> {
+        if matches!(self.save_told, SaveTold::Record) {
+            return None;
+        }
+        match item_type {
+            sl_proto::InventoryType::Notecard => Some("Notecard updated"),
+            sl_proto::InventoryType::Gesture => Some("Gesture updated"),
+            _ => None,
+        }
+    }
+}
+
+impl Default for ContentsPolicy {
+    /// Second Life's, as the grid's own default flavour is.
+    fn default() -> Self {
+        ImitatedGrid::SecondLife.contents_policy()
     }
 }
 

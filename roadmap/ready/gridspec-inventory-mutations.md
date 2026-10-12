@@ -30,3 +30,13 @@ Large — [[server-fake-grid-inventory-udp-mutations]].
 ## Viewer
 
 AIS on SL, UDP on OpenSim; check SL accepts the UDP ops the viewer still sends.
+
+## Seen on the way (2026-10-12)
+
+[[gridspec-task-inventory]] made a notecard, a script, a gesture and a
+material with `CreateInventoryItem` on both grids and recorded two things it
+does not hold the fake grid to. An item made on OpenSim has base and owner
+masks `0x0009e000`, on Second Life `0x7fffffff`; the fake grid gives
+`0x7fffffff` on both flavours. And a script made on Second Life names **no
+asset** until it is saved, where OpenSim's — and both fake flavours' — has
+one from the start.

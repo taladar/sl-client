@@ -23,14 +23,14 @@ use super::{
     CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
     CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA,
-    CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
-    CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
-    CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG,
+    CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
+    CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
+    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
+    CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, CAP_USER_INFO, CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
 };
 
 /// One recognised CAPS event tag.
@@ -112,6 +112,14 @@ pub(crate) enum CapsEvent {
     AgentPreferences,
     /// The interest-list mode the simulator switched to.
     InterestList,
+    /// A prim's contents listing, stamped with the prim asked about.
+    RequestTaskInventory,
+    /// A prim's contents are still at the serial the request named.
+    TaskInventoryUnchanged,
+    /// A prim's contents could not be read over the capability.
+    TaskInventoryFailed,
+    /// A script's experience, stamped with the prim and the script.
+    GetMetadata,
     /// The account's email address and its verification state.
     UserInfo,
     /// The land-impact cost of a set of objects.
@@ -224,6 +232,10 @@ impl CapsEvent {
             CAP_LSL_SYNTAX => Self::LslSyntax,
             CAP_AGENT_PREFERENCES => Self::AgentPreferences,
             CAP_INTEREST_LIST => Self::InterestList,
+            CAP_REQUEST_TASK_INVENTORY => Self::RequestTaskInventory,
+            crate::TASK_INVENTORY_UNCHANGED_TAG => Self::TaskInventoryUnchanged,
+            crate::TASK_INVENTORY_FAILED_TAG => Self::TaskInventoryFailed,
+            CAP_GET_METADATA => Self::GetMetadata,
             CAP_USER_INFO => Self::UserInfo,
             CAP_GET_OBJECT_COST => Self::GetObjectCost,
             CAP_RESOURCE_COST_SELECTED => Self::ResourceCostSelected,

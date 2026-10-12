@@ -2,9 +2,10 @@
 //! [`SimCaps`] / the asset caps, including the `EventQueueGet` long-poll
 //! hold the sans-I/O core deliberately leaves to its runtime.
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use sl_proto::{CapsDispatch, CapsRequest, CapsResponse};
+use sl_proto::{CapsDispatch, CapsRequest, CapsResponse, SimCaps};
 
 use crate::driver::{SharedSim, SimState, sleep_until_opt};
 
@@ -57,6 +58,26 @@ pub(crate) async fn dispatch_caps(
         };
         match dispatch {
             CapsDispatch::Response(response) => return response,
+            // A prim's contents are the region's: the listing is read out of
+            // the world the session shares with its neighbours.
+            CapsDispatch::TaskInventory(query) => {
+                let world = Arc::clone(&shared.state.lock().await.world);
+                let world = world.lock();
+                let contents = world.local_id_of(query.task).map(|local_id| {
+                    world
+                        .task_inventories
+                        .get(&local_id)
+                        .map_or((0, &[][..]), |held| (held.serial, held.items.as_slice()))
+                });
+                let response = SimCaps::task_inventory_response(query, contents);
+                drop(world);
+                return response;
+            }
+            CapsDispatch::ScriptMetadata { task, item } => {
+                let world = Arc::clone(&shared.state.lock().await.world);
+                let script = world.lock().script_experience(task, item);
+                return SimCaps::script_metadata_response(script);
+            }
             CapsDispatch::EventQueueWouldBlock => {
                 if *shutdown_rx.borrow_and_update() {
                     let guard = shared.state.lock().await;

@@ -125,7 +125,7 @@ mod test {
             CapsDispatch::Response(response) => {
                 Ok((response.status, String::from_utf8(response.body.clone())?))
             }
-            CapsDispatch::EventQueueWouldBlock => Err("unexpected would-block".into()),
+            other => Err(format!("unexpected {other:?}").into()),
         }
     }
 
@@ -157,8 +157,10 @@ mod test {
         // Library, CreateInventoryCategory), the nine
         // region/object-information caps, the parcel edit
         // (ParcelPropertiesUpdate), the thirteen experience caps, the three
-        // voice signalling caps, and the interest-list switch.
-        assert_eq!(granted.len(), 63);
+        // voice signalling caps, the interest-list switch, the two task
+        // uploads of a gesture and a material, and the two reads of a prim's
+        // contents (RequestTaskInventory, GetMetadata).
+        assert_eq!(granted.len(), 67);
         Ok(())
     }
 
@@ -405,7 +407,7 @@ mod test {
             CapsDispatch::Response(response) => {
                 assert_eq!(response.content_type, LLSD_XML_CONTENT_TYPE);
             }
-            CapsDispatch::EventQueueWouldBlock => return Err("unexpected would-block".into()),
+            other => return Err(format!("unexpected {other:?}").into()),
         }
         Ok(())
     }
@@ -880,6 +882,93 @@ mod test {
         let (status, reply) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map /></llsd>"))?;
         assert_eq!(status, 200);
         assert_eq!(parse_agent_preferences(&parse_llsd_xml(&reply)?)?, stored);
+        Ok(())
+    }
+
+    /// A `RequestTaskInventory` GET is the driver's to answer: the core reads
+    /// the query and hands it over, and builds the three answers a driver
+    /// gives — the listing, `304` for the serial the request named, and `404`
+    /// for a prim the region does not have.
+    #[test]
+    fn task_inventory_is_handed_to_the_driver_and_answered_three_ways() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "RequestTaskInventory")?;
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x7A5C));
+        let get = |query: Option<&'static str>| CapsRequest {
+            method: "GET",
+            path: &path,
+            query,
+            range: None,
+            body: &[],
+        };
+        let url = sl_proto::task_inventory_cap_url("http://sim/cap", task, Some(4));
+        let query = url.split_once('?').map(|(_path, query)| query.to_owned());
+        let asked = CapsRequest {
+            method: "GET",
+            path: &path,
+            query: query.as_deref(),
+            range: None,
+            body: &[],
+        };
+        let CapsDispatch::TaskInventory(query) = caps.dispatch(&mut sim, &asked) else {
+            return Err("a task inventory GET was not handed to the driver".into());
+        };
+        assert_eq!(query.task, task);
+        assert_eq!(query.held_serial, Some(4));
+
+        assert_eq!(SimCaps::task_inventory_response(query, None).status, 404);
+        let unchanged = SimCaps::task_inventory_response(query, Some((4, &[])));
+        assert_eq!(unchanged.status, 304);
+        assert!(unchanged.body.is_empty());
+        let listing = SimCaps::task_inventory_response(query, Some((5, &[])));
+        assert_eq!(listing.status, 200);
+        let body = parse_llsd_xml(&String::from_utf8(listing.body)?)?;
+        let reply = sl_proto::parse_task_inventory_cap_reply(
+            &sl_proto::stamp_task_inventory_cap_reply(body, task),
+        )?;
+        assert_eq!((reply.serial, reply.items.len()), (5, 0));
+
+        // No prim named, and the wrong verb.
+        let (status, _body) = respond(&mut caps, &mut sim, &get(None))?;
+        assert_eq!(status, 404);
+        let (status, _body) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map /></llsd>"))?;
+        assert_eq!(status, 405);
+        Ok(())
+    }
+
+    /// A `GetMetadata` POST is handed to the driver with the prim and the
+    /// script it names, and answered with the experience or with none.
+    #[test]
+    fn script_metadata_is_handed_to_the_driver() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "GetMetadata")?;
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x7A5C));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x17E0));
+        let body = sl_proto::build_get_metadata_request(task, item);
+        let CapsDispatch::ScriptMetadata {
+            task: asked_task,
+            item: asked_item,
+        } = caps.dispatch(&mut sim, &post(&path, &body))
+        else {
+            return Err("a metadata POST was not handed to the driver".into());
+        };
+        assert_eq!((asked_task, asked_item), (task, item));
+
+        let experience = ExperienceKey::from(uuid::Uuid::from_u128(0xE4));
+        assert_eq!(SimCaps::script_metadata_response(None).status, 404);
+        for answer in [Some(experience), None] {
+            let response = SimCaps::script_metadata_response(Some(answer));
+            assert_eq!(response.status, 200);
+            let body = parse_llsd_xml(&String::from_utf8(response.body)?)?;
+            let metadata = sl_proto::parse_get_metadata_reply(
+                &sl_proto::stamp_get_metadata_reply(body, task, item),
+            )?;
+            assert_eq!(metadata.experience, answer);
+        }
+        let (status, _body) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map /></llsd>"))?;
+        assert_eq!(status, 400);
         Ok(())
     }
 

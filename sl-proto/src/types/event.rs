@@ -892,6 +892,38 @@ pub enum Event {
         /// The parsed task inventory items.
         items: Vec<TaskInventoryItem>,
     },
+    /// The answer to a
+    /// [`Command::FetchTaskInventory`](crate::Command::FetchTaskInventory)
+    /// that named the serial of a listing the caller holds: the prim is still
+    /// at that serial, so the listing held is current and nothing was
+    /// downloaded.
+    TaskInventoryUnchanged {
+        /// The in-world object (task) asked about.
+        task: ObjectKey,
+        /// The serial it is still at.
+        serial: i16,
+    },
+    /// A
+    /// [`Command::FetchTaskInventory`](crate::Command::FetchTaskInventory)
+    /// was never answered: the grid said nothing of the prim for as long as
+    /// a reply can take, or its capability failed for a prim that has since
+    /// left the scene. No listing is coming, and whoever asked can stop
+    /// waiting for one.
+    TaskInventoryUnanswered {
+        /// The prim asked about, or `None` for a request made before the
+        /// prim was in the scene-graph cache.
+        task: Option<ObjectKey>,
+    },
+    /// The experience a script in a prim was compiled under, in reply to a
+    /// [`Command::RequestScriptExperience`](crate::Command::RequestScriptExperience).
+    ScriptExperience {
+        /// The prim holding the script.
+        task: ObjectKey,
+        /// The script.
+        item_id: InventoryKey,
+        /// The experience, or `None` for a script under none.
+        experience: Option<ExperienceKey>,
+    },
     /// A caller-initiated raw `Xfer` file download finished
     /// ([`Session::request_xfer`](crate::Session::request_xfer)): the assembled
     /// file bytes, tagged with the [`XferId`] the request returned so concurrent

@@ -276,11 +276,14 @@ pub(crate) fn parse_mute_line(line: &str) -> Result<Option<MuteEntry>, sl_wire::
 /// values. The leading `inv_object` folder section (the virtual "Contents"
 /// folder) and any other non-item block are skipped; only leaf `inv_item`
 /// blocks are returned. A present-but-malformed field (an unparsable id, mask,
-/// or integer) or a missing required field is a hard [`WireError`], rather than
+/// or integer) or a missing required field is a hard [`WireError`](sl_wire::WireError), rather than
 /// silently coercing it.
-pub(crate) fn parse_task_inventory(
-    bytes: &[u8],
-) -> Result<Vec<TaskInventoryItem>, sl_wire::WireError> {
+///
+/// # Errors
+///
+/// Returns a [`sl_wire::WireError`] naming the field that is missing or does
+/// not parse.
+pub fn parse_task_inventory(bytes: &[u8]) -> Result<Vec<TaskInventoryItem>, sl_wire::WireError> {
     let text = String::from_utf8_lossy(bytes);
     let mut items = Vec::new();
     let mut current: Option<TaskItemFields> = None;

@@ -8512,7 +8512,11 @@ mod test {
         drain_server(&mut sim);
         let circuit = client.root_circuit_id().ok_or("no circuit")?;
 
-        client.fetch_task_inventory(ScopedObjectId::new(circuit, RegionLocalObjectId(77)), now)?;
+        client.fetch_task_inventory(
+            ScopedObjectId::new(circuit, RegionLocalObjectId(77)),
+            None,
+            now,
+        )?;
         pump(&mut client, &mut sim, now)?;
         let server_events = drain_server(&mut sim);
         assert!(

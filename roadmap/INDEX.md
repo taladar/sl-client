@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 357 |
-| blocked | 108 |
+| ready | 356 |
+| blocked | 106 |
 | in-progress | 20 |
 | bugs | 36 |
-| done | 1349 |
+| done | 1352 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2056** |
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (357)
+## ready (356)
 
 ### protocol
 
@@ -1189,8 +1189,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   down when Second Life pushes a ban line
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
-- [`gridspec-task-inventory`](ready/gridspec-task-inventory.md) — Task inventory
-  reads and writes on each grid
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 - [`gridspec-touch-grab`](ready/gridspec-touch-grab.md) — Touch and grab on each
@@ -1198,7 +1196,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
   Viewer effects and sound relays on each grid
 
-## blocked (108)
+## blocked (106)
 
 ### protocol
 
@@ -1214,8 +1212,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-cap-estate-access`](blocked/protocol-cap-estate-access.md) — Read
   the estate access lists over the EstateAccess capability (blocked by
   `gridspec-estate`)
-- [`protocol-cap-get-metadata`](blocked/protocol-cap-get-metadata.md) — Read a
-  script's experience over GetMetadata (blocked by `gridspec-task-inventory`)
 - [`protocol-cap-group-bans`](blocked/protocol-cap-group-bans.md) — Group ban
   lists over the GroupAPIv1 capability (blocked by `gridspec-groups`)
 - [`protocol-cap-home-location`](blocked/protocol-cap-home-location.md) — Set
@@ -1225,9 +1221,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-friends-presence`)
 - [`protocol-cap-product-info`](blocked/protocol-cap-product-info.md) — Land
   type names over ProductInfoRequest (blocked by `gridspec-search-directory`)
-- [`protocol-request-task-inventory-cap`](blocked/protocol-request-task-inventory-cap.md)
-  — Fetch task inventory over the RequestTaskInventory capability (blocked by
-  `gridspec-task-inventory`)
 - [`protocol-sim-group-messages`](blocked/protocol-sim-group-messages.md) —
   SimSession — decode group requests and send group replies (blocked by
   `gridspec-groups`)
@@ -1691,7 +1684,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1349)
+## done (1352)
 
 ### protocol
 
@@ -1881,6 +1874,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   failure
 - [`protocol-audit-wire-error-contract`](done/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-cap-get-metadata`](done/protocol-cap-get-metadata.md) — Read a
+  script's experience over GetMetadata
 - [`protocol-cap-interest-list`](done/protocol-cap-interest-list.md) — Switch
   the interest list mode over the InterestList capability (blocked by
   `gridspec-object-update-stream` (done))
@@ -1906,6 +1901,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-reference-capabilities`](done/protocol-reference-capabilities.md) —
   Request and use the capabilities the reference viewer asks for and the grids
   grant
+- [`protocol-request-task-inventory-cap`](done/protocol-request-task-inventory-cap.md)
+  — Fetch task inventory over the RequestTaskInventory capability
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —
   Server-side agent-communication caps (blocked by `protocol-sim-caps-framework`
   (done))
@@ -4676,6 +4673,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   placement, refusals and alerts on each grid
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
+- [`gridspec-task-inventory`](done/gridspec-task-inventory.md) — Task inventory
+  reads and writes on each grid
 - [`gridspec-teleport`](done/gridspec-teleport.md) — Teleport phases, flags,
   failures, cancel and access refusals on each grid
 - [`gridspec-teleport-lures`](done/gridspec-teleport-lures.md) — Teleport

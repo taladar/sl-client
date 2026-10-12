@@ -536,6 +536,157 @@ friend with edit rights; whether Second Life's limit of 32 for a physical
 set is a count or the cost it says; OpenSim's `LinksetPrims` set to
 anything but its default of no limit.
 
+## Contents
+
+A prim holds an inventory of its own: scripts, notecards, objects. A viewer
+reads it as a **listing** and writes it five ways — an inventory item
+dropped in (`UpdateTaskInventory`), a script made new or dropped in
+(`RezScript`), an item removed (`RemoveTaskInventory`), an item moved out
+into the agent's inventory (`MoveTaskInventory`), and an item's asset saved
+over a capability (`Update…TaskInventory`). None of the five is answered
+with a message of its own. What says a write landed is the listing read
+again, and what says a listing is stale is its **serial**: a number the
+simulator moves on every change, carried in the `ReplyTaskInventory` and in
+the prim's properties record and nowhere else.
+
+Measured on 2026-10-12 by the conformance case `task-inventory`. One avatar
+rezzes a cube on land it may build on and asks one question a leg; a second
+stands by and is read after each. After every write the case listens for
+the prim's record, for a `ReplyTaskInventory` nobody asked for, for the
+prim sent again, for alerts and for inventory announcements, and then reads
+the listing back over UDP. It ran five times on aditi (Mauve, the public
+sandbox parcel) and five on the local OpenSim. Every row below is checked on
+every run of both live grids and of both fake flavours, but for the ones
+marked **not held**.
+
+### The listing
+
+| question | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the `RequestTaskInventory` capability | granted | not granted | `FakeSl` grants it, `FakeOpensim` does not |
+| the UDP road: `RequestTaskInventory`, a `ReplyTaskInventory` naming a file, the file over `Xfer` | answered | answered | answered |
+| an empty prim over UDP | serial 0 and **no file named** | the same | the same |
+| the capability, `GET <cap>?task_id=<prim>` | `200`, a map of `inventory_serial` and `contents`, an array with no "Contents" folder in it | — | as Second Life |
+| the same naming the serial the prim is at (`&inventory_serial=<n>`) | **`304`**, no body | — | as Second Life |
+| the same naming another serial | `200` and the listing | — | as Second Life |
+| a prim the region does not have, and no prim at all | `404` | — | as Second Life |
+| one item of `contents` | `item_id`, `parent_id` and `asset_id` as ids; `name`, `desc`; `type`, `inv_type` and the sale type **by their short names** (`notecard`, `notecard`, `not`); `flags` and `created_at` as integers; `permissions` with the five masks as integers, four ids and `is_owner_group`; `sale_info`; and an empty `metadata` map | — | as Second Life |
+| the two roads against each other, one prim, one moment | the same serial and the same items, field for field | — | the same |
+
+The capability is how a current viewer reads a prim
+(`LLViewerObject::fetchInventoryFromCapCoro`); UDP is what it falls back to,
+and all OpenSim has. `Command::FetchTaskInventory` takes the capability
+where the root region grants it and UDP otherwise — and after a capability
+request that failed. It takes the serial of a listing the caller holds: a
+prim still at it is answered `Event::TaskInventoryUnchanged` on both roads,
+by the `304` on one and by a reply whose file is not fetched on the other.
+
+### What a write does
+
+| write | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a drop of an inventory item | a new item under a **new id**, the agent's item kept; its name, masks and asset the agent item's; the serial up by 1 | the same | the same |
+| the same item dropped again | a second item, called `Name 1` | the same | the same |
+| a script made new (`RezScript` naming no item) | lands under the name asked for and **runs**; the serial up by **2** | the same, and the serial up by 1 | each flavour as its grid; neither runs a script, and each says it runs |
+| the same with the running flag off | lands **stopped**; the serial up by 1 | **runs anyway**; the serial up by 1 | each flavour as its grid |
+| what a new script says (**not held**) | `Hello, Avatar!` | `Script running` | each flavour stores its grid's script and runs none |
+| a script dropped out of the inventory | a new item under a new id, running; the serial up by 2 | the same, the serial up by 1 | each flavour as its grid |
+| a script made in the inventory and never saved (**not held**) | names no asset there; dropped, it runs the grid's new script | has an asset from the start | has one on both flavours |
+| a remove | the item goes; the serial up by 1, and by **2 for a running script**; nothing is filed | the item goes; the serial up by 1; **a copy of the item is filed in the agent's Trash**, announced with `UpdateCreateInventoryItem` | each flavour as its grid |
+| a move of an item the agent may copy | a new item, under a new id and the name it had in the prim, in the folder asked for, announced with `UpdateCreateInventoryItem`; **the prim keeps its item and its serial** | the same | the same |
+| a gesture saved over `UpdateGestureTaskInventory` | the item names the new asset, which is the one the capability's answer names; the serial up by 1 | the same | the same |
+| a material saved over `UpdateMaterialTaskInventory` | the same | no such capability | each flavour as its grid |
+
+The second step of Second Life's serial is the script **starting**: a
+script that lands stopped takes one step, and removing one that runs takes
+two.
+
+### Who is told
+
+The writer made each write three times: with both avatars holding the cube
+selected, with only itself, and with nobody.
+
+| what is sent | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the prim again, in a full update | to **every viewer that has it in sight, after every write** but a move | after a script lands and after a remove, to everybody; after a drop or a save, to nobody | each flavour as its grid |
+| the prim's record, with the new serial | to every session **holding the prim selected**, the writer among them or not | to the **writer**, selected or not, and nobody else | each flavour as its grid |
+| a `ReplyTaskInventory` nobody asked for | to every session holding the prim selected, **when a script has started** | never | each flavour as its grid |
+| after a save over a capability | as after any write | to the saver, an alert — `Gesture updated`, `Notecard updated` — and no record | each flavour as its grid |
+| after a move | nothing but the new item, to the mover | the same | the same |
+| the serial the record of a script's landing states (**not held**) | one or two more than before: the record and the script's start race | one more | one more |
+
+So a viewer that does not hold a prim selected is told of a write into it
+by an object update alone on Second Life — which says nothing of contents —
+and of another avatar's write by nothing at all on OpenSim unless a script
+landed or something was removed.
+
+### Writes that do not land
+
+| write | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a remove of an item the prim does not hold | nothing | nothing | nothing |
+| a move of one | nothing | nothing | nothing |
+| a script naming an item the agent does not hold | nothing | nothing | nothing |
+| a drop naming one | "Inventory creation on in-world object failed.", keyed `InventoryCreationInWorldObjectFailed` | nothing | each flavour as its grid |
+
+In every one of them the serial stays where it was. Silence is the usual
+answer on both grids, which is why a viewer cannot wait for a refusal.
+
+### A script's experience
+
+| question | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the `GetMetadata` capability | granted | not granted | `FakeSl` grants it, `FakeOpensim` does not |
+| a script under no experience | `200` and an **undefined** value, not a map | — | as Second Life |
+| an item the prim does not hold | `404` | — | as Second Life |
+
+A script under an experience was not measured: the test avatars own none.
+The fake grid answers with the experience the last save of the script
+named.
+
+### Somebody else's prim
+
+Measured on 2026-10-12 by the conformance case `task-inventory-stranger`.
+The **owner** rezzes a cube and puts a notecard and a running script in it;
+the **stranger**, a second avatar with no right over it, reads and writes.
+After each write the owner reads the listing back, and both are listened
+to. It ran twice on aditi and twice on the local OpenSim
+(`--secondary secondary`); every row is checked on every run. The fake grid
+lets anybody edit anything
+(`server-fake-grid-edit-permission-enforcement`), so these are the live
+grids' answers alone.
+
+| the stranger | Second Life | OpenSim |
+| --- | --- | --- |
+| lists the prim over UDP | answered: the owner's serial and items, under the owner's item ids, **every asset id nil** | **not answered** |
+| lists it over the capability | `200`, the same listing, no asset ids | no such capability |
+| asks a script's experience | `200`, undefined, as the owner is answered | no such capability |
+| drops a notecard of its own | nothing lands; "Unable to edit this!", keyed `UnableEditItem` | nothing lands; nothing is said |
+| makes a script | nothing lands; "Not permitted to edit this!", keyed `NoPermToEdit` | nothing lands; nothing is said |
+| moves the owner's notecard into its own inventory | nothing arrives; "Not permitted to copy that inventory.", keyed `NoPermToCopyInventory` | nothing arrives; nothing is said |
+| removes the owner's notecard | it stays; "Not permitted to edit this.", keyed `NoPermissionToEdit` | it stays; nothing is said |
+
+The owner is told of none of it, on either grid: no record, no update, no
+alert.
+
+The fake grid used to drop a `RezScript`, a remove and a move without a
+word, and answered a prim's listing over UDP alone. It lists a prim over
+the capability now on the Second-Life flavour, makes, removes and copies
+out items as its flavour's grid does, moves the serial as that grid does,
+and tells the sessions that grid tells (`task_contents`). It runs no script
+and keeps only whether each is running, which is what a viewer's Running
+box reads; it does not clear a prim's "inventory is empty" flag
+(`0x800`), which Second Life's full update after a first drop does.
+
+Not measured: a move of an item the agent may not copy, which should take
+it out of the prim (an owner cannot make itself one); a drop of a no-copy
+item, which should take it out of the inventory; a script under an
+experience; who is told when a notecard or a script in a prim is saved
+over (`test-asset-save-mutation-survey`); a prim in a neighbouring region;
+a friend with edit rights, and a group member with the power, in the
+stranger's place; a listing of more than a few items, and the serial at
+its sixteen-bit wrap.
+
 ## What our viewer does with it
 
 - A take, a copy, a delete and a return are each one `DeRezObject` from the
@@ -620,6 +771,49 @@ other. The same test runs against a live grid with `SL_E2E_GRID=opensim`
 and `=aditi`, and passes on both. The link and unlink chords themselves
 are `e2e_live_checks`'.
 
+A prim's contents, by the same measurements:
+
+- The Content tab and the Object Contents window read a prim over the
+  capability where the region grants it and over UDP where it does not, and
+  over UDP again when the capability fails. A listing that never comes —
+  the grid says nothing of a prim it does not have — ends the wait after a
+  minute (`Event::TaskInventoryUnanswered`): the rows stop saying a change
+  is on its way and show what the grid last listed.
+- Nothing waits for an answer to a write, because there is none. The row
+  says what was asked — "…adding", "…deleting", "…refreshing" — until the
+  listing is read again, and the listing is what is shown. On Second Life
+  the write goes over UDP and the listing over HTTP, and nothing orders the
+  two: a listing that comes back at the serial the prim stood at is asked
+  for once more a second later, naming that serial, and only the second
+  answer — a `304`, or the same listing — is taken to mean the grid did not
+  take the write. The reference viewer does the same.
+- A `ReplyTaskInventory` nobody asked for, and a record with a serial the
+  tab has not seen, each have the listing read again: that is how a script
+  that has finished starting, and another avatar's write on Second Life,
+  reach the tab.
+- New Script makes a script that runs, as the reference viewer's does. It
+  used to ask for a stopped one, which Second Life honours and OpenSim does
+  not.
+- The script editor asks which experience a task script is under when it
+  opens one (`Command::RequestScriptExperience`), says so under the body,
+  and names it again in the save. A save used to name none, which takes a
+  script out of its experience. Where the region has no `GetMetadata`
+  nothing is asked.
+- A grid's alert is shown as the grid worded it.
+
+Checked through the viewer automation (`e2e_objects`): on each fake
+flavour, a prim is rezzed through the Build window and two scripts are made
+in it from the Content tab, which shows the second as `New Script 1` — the
+grid's name for it — and loses its row when it is removed. On the
+Second-Life flavour the grid is then told the remaining script is under an
+experience: the script editor, opened from the tab, says which, and the
+save it sends names it. The grid then loses the prim without a word and a
+third script is made, which nothing answers over either road: the row
+saying it is being added goes, and the one script the grid last listed
+stays. The same test, without the experience and the lost prim, runs
+against a live grid with `SL_E2E_GRID=opensim` and `=aditi`, and passes on
+both.
+
 The fake grid neither returns somebody else's object, nor returns anything
 by itself, nor ends a temporary prim: `server-fake-grid-object-return`. It
 tells an agent of a return at once on both flavours, where OpenSim waits for
@@ -629,6 +823,6 @@ in three others — and puts several returns into one message.
 Not measured: a rez of an item its owner may not copy, which should take the
 item with it (a prim's owner cannot make itself one); who else in the region
 is sent the kill, and in which form; a `DRD_SAVE_INTO_AGENT_INVENTORY` and
-the save into a prim's contents, which is `gridspec-task-inventory`'s; a
+the save into a prim's contents; a
 return by somebody else and an auto-return on Second Life; a rez onto a full
 parcel or into a full region.

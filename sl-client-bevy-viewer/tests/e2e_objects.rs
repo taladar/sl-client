@@ -43,6 +43,14 @@
 //! 64 m apart and says so in an alert no viewer has a template for; OpenSim
 //! links at any distance. The viewer has to show the one as the grid worded
 //! it and leave the prims free, and draw the other as one linkset.
+//!
+//! And a prim's contents are the grid's to list ([[gridspec-task-inventory]]):
+//! over a capability on Second Life and over UDP on OpenSim, under names the
+//! grid chooses — a second script is `New Script 1` on both — and with
+//! nothing at all said of a write the grid does not take. The Content tab
+//! has to show a new script under the grid's name for it, lose a row the
+//! grid removed, and stop saying a change is on its way when no listing ever
+//! comes back.
 
 #[cfg(test)]
 mod test {
@@ -1345,6 +1353,256 @@ mod test {
                     ImitatedGrid::OpenSim
                 };
                 a_link_too_far_apart(stage, like).await
+            })?;
+        Ok(())
+    }
+
+    /// The name the contents test gives its prim.
+    const HOLDER: &str = "Holds A Script";
+
+    /// What both grids call a script made new in a prim, as the viewer asks.
+    const NEW_SCRIPT: &str = "New Script";
+
+    /// What both grids call the second of that name.
+    const SECOND_SCRIPT: &str = "New Script 1";
+
+    /// What a row whose item is being added says after its name
+    /// (`build-content-state-adding`).
+    const ADDING: &str = "adding";
+
+    /// What a row whose item is being removed says after its name
+    /// (`build-content-state-deleting`).
+    const DELETING: &str = "deleting";
+
+    /// How long a listing nobody answers is waited for before the viewer is
+    /// held to having given up: the session drops the request after a
+    /// minute.
+    const UNANSWERED_LISTING: Duration = Duration::from_secs(100);
+
+    /// Rez a prim, make two scripts in it from the Content tab and remove
+    /// the second: the rows are the grid's listing, under the grid's names.
+    /// On the fake grid the prim is then lost behind the viewer's back and a
+    /// third script made, which nothing answers: the row that says it is
+    /// being added goes, and the listing the grid last gave stays.
+    async fn a_prims_contents_follow_the_grid(
+        stage: &Stage,
+        like: ImitatedGrid,
+    ) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        sweep_leftovers(stage, alpha).await?;
+        alpha.press("Ctrl+B").await?;
+        let build = alpha.ui().window("build-tools");
+        let fake = stage.on_grid() == Grid::Fake;
+        let stock = if fake {
+            Some(alpha.world().object_named(UNNAMED).node().await?.full_id)
+        } else {
+            None
+        };
+        let prim_id = rez_named(stage, alpha, &build, stock, HOLDER).await?;
+        let selected = alpha.selection().await?;
+        let [prim] = selected.as_slice() else {
+            return Err(format!("the rez left {selected:?} selected").into());
+        };
+        let local_id = prim.local_id;
+        let _content = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-content"))
+            .click()
+            .await?;
+        // By what a row's name has in it: a row is called what its cells
+        // say, and one whose change is on its way says so after its name.
+        let row = |name: &str| build.get(Locator::role(Role::ListItem).name_containing(name));
+        let adding = build.get(Locator::role(Role::ListItem).name_containing(ADDING));
+        let deleting = build.get(Locator::role(Role::ListItem).name_containing(DELETING));
+        let new_script = build.test_id("contents-button:build-content-new-script");
+
+        // A script: its row settles under the name the grid lists it by.
+        let _made = new_script.click().await?;
+        let _listed = alpha
+            .expect(&row(NEW_SCRIPT))
+            .timeout(WAIT)
+            .to_be_visible()
+            .await?;
+        // A second of the same name is numbered by the grid, not by the
+        // viewer, which asked for `New Script` again.
+        let _made = new_script.click().await?;
+        let _numbered = alpha
+            .expect(&row(SECOND_SCRIPT))
+            .timeout(WAIT)
+            .to_be_visible()
+            .await?;
+        let _settled = alpha.expect(&adding).timeout(WAIT).to_be_hidden().await?;
+
+        // Removed: the row goes when the grid's listing no longer has it.
+        let _picked = row(SECOND_SCRIPT).click().await?;
+        let _removed = build
+            .test_id("contents-button:build-content-remove")
+            .click()
+            .await?;
+        let _gone = alpha
+            .expect(&row(SECOND_SCRIPT))
+            .timeout(WAIT)
+            .to_be_hidden()
+            .await?;
+        let _settled = alpha.expect(&deleting).timeout(WAIT).to_be_hidden().await?;
+        let _kept = alpha.expect(&row(NEW_SCRIPT)).to_be_visible().await?;
+
+        let this_prim = alpha
+            .world()
+            .locator(WorldLocator::full_id(prim_id))
+            .timeout(SETTLE);
+        if !fake {
+            // Nothing to lose the prim behind the viewer's back with.
+            alpha.press("Escape").await?;
+            alpha.press("Escape").await?;
+            alpha.press("Ctrl+B").await?;
+            pie(alpha, &this_prim, &DELETE).await?;
+            let _deleted = alpha
+                .expect_world(&this_prim)
+                .timeout(SETTLE)
+                .to_be_detached()
+                .await?;
+            return Ok(());
+        }
+
+        if like == ImitatedGrid::SecondLife {
+            a_scripts_experience_survives_a_save(stage, alpha, &build, prim_id, local_id).await?;
+        }
+
+        // The grid loses the prim and tells nobody. A script made now is
+        // answered by nothing — not the write, and not the listing asked
+        // for after it, over either road.
+        stage
+            .agent("Alpha")
+            .await?
+            .with_world(|world, _sim| {
+                world
+                    .objects
+                    .retain(|object| object.local_id != RegionLocalObjectId(local_id));
+            })
+            .await;
+        let _made = new_script.click().await?;
+        let _in_flight = alpha.expect(&adding).timeout(WAIT).to_be_visible().await?;
+        let _given_up = alpha
+            .expect(&adding)
+            .timeout(UNANSWERED_LISTING)
+            .to_be_hidden()
+            .await?;
+        let _still = alpha.expect(&row(NEW_SCRIPT)).to_be_visible().await?;
+        let _no_second = alpha.expect(&row(SECOND_SCRIPT)).to_be_hidden().await?;
+        Ok(())
+    }
+
+    /// The experience the fake grid is told the script is under.
+    const EXPERIENCE: u128 = 0xE4BE_71E4_CE00_0000_0000_0000_0000_0001;
+
+    /// With one script in the prim, the grid is told it was compiled under
+    /// an experience; the script is opened from the Content tab, the editor
+    /// says which experience, and its save names it again — a save that named
+    /// none would take the script out of it.
+    async fn a_scripts_experience_survives_a_save(
+        stage: &Stage,
+        alpha: &Viewer,
+        build: &UiLocator,
+        prim_id: sl_proto::Uuid,
+        local_id: u32,
+    ) -> Result<(), BodyError> {
+        let experience = sl_proto::ExperienceKey::from(sl_proto::Uuid::from_u128(EXPERIENCE));
+        let agent = stage.agent("Alpha").await?;
+        let script = agent
+            .with_world(|world, _sim| {
+                let contents = world
+                    .task_inventories
+                    .get_mut(&RegionLocalObjectId(local_id))?;
+                let script = contents.items.first()?.item_id;
+                let _previous = contents.experiences.insert(script, experience);
+                Some(script)
+            })
+            .await
+            .ok_or("the grid holds no script in the prim")?;
+
+        let row = build.get(Locator::role(Role::ListItem).name_containing(NEW_SCRIPT));
+        let _opened = row.double_click().await?;
+        let editor = alpha
+            .ui()
+            .window(&format!("script-editor#{prim_id}/{}", script.uuid()));
+        let line = editor.get(Locator::role(Role::Text).name_containing(experience.to_string()));
+        let _said = alpha.expect(&line).timeout(WAIT).to_be_visible().await?;
+
+        let mut heard = agent.events();
+        let _saved = editor
+            .get(Locator::role(Role::Button).name_key("script-save"))
+            .click()
+            .await?;
+        let named = tokio::time::timeout(WAIT, async {
+            loop {
+                match heard.recv().await {
+                    Ok(ServerEvent::CapsAssetUploaded { metadata, .. }) => {
+                        if let sl_proto::CapsUploadMetadata::UpdateScriptTask(request) = *metadata {
+                            return Ok(request.experience);
+                        }
+                    }
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        })
+        .await;
+        match named {
+            Ok(Ok(Some(named))) if named == experience => {}
+            Ok(Ok(named)) => {
+                return Err(format!("the save named the experience {named:?}").into());
+            }
+            Ok(Err(error)) => return Err(format!("the grid's event stream: {error}").into()),
+            Err(_elapsed) => return Err("the grid never heard the save".into()),
+        }
+        let _closed = editor.test_id("floater-button:close").click().await?;
+        let _gone = alpha.expect(&editor).timeout(WAIT).to_be_hidden().await?;
+        Ok(())
+    }
+
+    /// **A prim's contents on each fake flavour**: listed over the
+    /// capability on the Second-Life flavour and over UDP on the OpenSim one,
+    /// a new script shows under the grid's name for it and a second as
+    /// `New Script 1`, a removed one goes, and a script made in a prim the
+    /// grid no longer has — a write and a listing nothing answers — leaves
+    /// the Content tab showing what the grid last listed. On the Second-Life
+    /// flavour, which has experiences, the script editor says which one a
+    /// script is under and its save names it again.
+    #[test]
+    fn a_prims_contents_follow_the_grid_on_each_fake_flavour() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "contents_second_life"),
+            (ImitatedGrid::OpenSim, "contents_open_sim"),
+        ] {
+            StageBuilder::new(name)
+                .viewer_binary(VIEWER)
+                .viewer("Alpha")
+                .needs(Need::Content("the stock scene's unnamed box, to rez on"))
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async move |stage: &Stage| {
+                    a_prims_contents_follow_the_grid(stage, flavour).await
+                })?;
+        }
+        Ok(())
+    }
+
+    /// **A prim's contents, live** (`SL_E2E_GRID=opensim|aditi`, where the
+    /// avatar stands on land it may build on): the same rows against the
+    /// grid's own listing, without the write nothing answers.
+    #[test]
+    fn a_prims_contents_follow_the_grid_on_a_live_grid() -> Result<(), TestError> {
+        StageBuilder::new("contents_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid("a grid's own listing of a prim's contents"))
+            .run(async |stage: &Stage| {
+                let like = if stage.on_grid() == Grid::Aditi {
+                    ImitatedGrid::SecondLife
+                } else {
+                    ImitatedGrid::OpenSim
+                };
+                a_prims_contents_follow_the_grid(stage, like).await
             })?;
         Ok(())
     }

@@ -814,6 +814,31 @@ pub(crate) async fn run_region_watcher(
                                         }
                                         state.sim.send_object_properties(properties, now)
                                     }
+                                    // The same subscription: a script that
+                                    // started in a prim this client holds
+                                    // selected moved its contents serial, and
+                                    // Second Life says so with a listing
+                                    // reply nobody asked for.
+                                    RegionChange::ContentsListed { local_id } => {
+                                        if !state.selection.contains(local_id) {
+                                            return;
+                                        }
+                                        let listed = {
+                                            let world = state.world.lock();
+                                            world.object_by_local_id(*local_id).zip(
+                                                world.task_inventories.get(local_id).cloned(),
+                                            )
+                                        };
+                                        let Some((object, contents)) = listed else {
+                                            return;
+                                        };
+                                        state.sim.serve_task_inventory(
+                                            object.full_id,
+                                            contents.serial,
+                                            &contents.items,
+                                            now,
+                                        )
+                                    }
                                     // A parcel push goes to the avatars standing
                                     // on that parcel -- OpenSim's
                                     // `SendLandUpdateToAvatarsOverMe` -- so a
