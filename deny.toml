@@ -89,6 +89,13 @@ ignore = [
   # transitive dependency; parry/nalgebra's SIMD layer requires it. (The
   # maintained fork `pastey` exists but is not selectable from here.)
   { id = "RUSTSEC-2024-0436", reason = "paste unmaintained: a compile-time proc-macro via avian3d -> parry3d -> simba (physics colliders). No runtime footprint, no way to swap a transitive dep, and no vulnerability — just unmaintained." },
+  # The YAML parser under `serde_yaml`, which `bevy_fluent` reads a locale
+  # bundle's `.ftl.yml` manifest with. It is flagged as unmaintained (its
+  # repository is archived), not as vulnerable; `serde_yaml` is a hard
+  # dependency of `bevy_fluent` 0.15, the newest release, so there is nothing to
+  # upgrade to; and the only YAML it ever parses is the viewer's own shipped
+  # locale manifests. Drop this when `bevy_fluent` moves to another parser.
+  { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml unmaintained: via bevy_fluent -> serde_yaml, which parses only the viewer's own shipped locale manifests. Not a vulnerability, and bevy_fluent 0.15 (the newest) has no release without it." },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
