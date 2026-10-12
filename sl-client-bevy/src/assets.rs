@@ -121,6 +121,7 @@ impl BevyAssetFetcher {
                 return Ok(FetchChunk {
                     bytes: Bytes::new(),
                     whole: false,
+                    total: None,
                 });
             }
             // The poll service returns 503 while it queues the asset; retry with
@@ -137,10 +138,15 @@ impl BevyAssetFetcher {
                 return Err(FetchError::Transport(describe_failure(response)));
             }
             let whole = status == ReqwestStatusCode::OK;
+            let total = sl_client_common::ranges::stated_total(response.headers());
             let bytes = response
                 .bytes()
                 .map_err(|error| FetchError::Transport(error.to_string()))?;
-            return Ok(FetchChunk { bytes, whole });
+            return Ok(FetchChunk {
+                bytes,
+                whole,
+                total,
+            });
         }
     }
 }

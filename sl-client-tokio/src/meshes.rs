@@ -95,6 +95,7 @@ impl AssetFetcher<MeshKey> for ReqwestMeshFetcher {
                 return Ok(FetchChunk {
                     bytes: Bytes::new(),
                     whole: false,
+                    total: None,
                 });
             }
             // The `GetMesh2` service answers `503` while it queues the mesh; retry
@@ -112,6 +113,7 @@ impl AssetFetcher<MeshKey> for ReqwestMeshFetcher {
             }
             // 200 = the server ignored the range and returned the whole asset.
             let whole = status == ReqwestStatusCode::OK;
+            let total = sl_client_common::ranges::stated_total(response.headers());
             if !status.is_success() {
                 return Err(FetchError::Transport(format!("unexpected status {status}")));
             }
@@ -119,7 +121,11 @@ impl AssetFetcher<MeshKey> for ReqwestMeshFetcher {
                 .bytes()
                 .await
                 .map_err(|error| FetchError::Transport(error.to_string()))?;
-            return Ok(FetchChunk { bytes, whole });
+            return Ok(FetchChunk {
+                bytes,
+                whole,
+                total,
+            });
         }
     }
 }

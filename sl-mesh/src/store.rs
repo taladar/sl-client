@@ -428,7 +428,10 @@ impl MeshStore {
             let chunk = self.0.fetcher.fetch_range(entry.id, 0, want).await?;
             let data = chunk.bytes;
             if let Some((header, header_size)) = parse_header(&data) {
-                let flags = if chunk.whole {
+                // A probe that reached the end of the asset has all of it,
+                // whether the grid said so with a `200` or with the length.
+                let all = chunk.whole || chunk.total.is_some_and(|total| data.len() >= total);
+                let flags = if all {
                     all_present_flags(&header, header_size, data.len())
                 } else {
                     0
@@ -786,6 +789,7 @@ mod tests {
             Ok(FetchChunk {
                 bytes: self.asset.clone(),
                 whole: true,
+                total: None,
             })
         }
     }

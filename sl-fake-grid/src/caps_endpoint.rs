@@ -9,6 +9,15 @@ use sl_proto::{CapsDispatch, CapsRequest, CapsResponse, SimCaps};
 
 use crate::driver::{SharedSim, SimState, sleep_until_opt};
 
+/// The request headers a capability reads: only the asset-delivery ones do.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct AssetHeaders<'a> {
+    /// The `Range` header.
+    pub(crate) range: Option<&'a str>,
+    /// The `If-Modified-Since` header.
+    pub(crate) if_modified_since: Option<&'a str>,
+}
+
 /// Dispatches one CAPS request against a session, holding an empty
 /// `EventQueueGet` poll for up to `eq_hold` before answering the 502 the
 /// client reads as "nothing yet, re-poll". The hold also ends the moment the
@@ -25,7 +34,7 @@ pub(crate) async fn dispatch_caps(
     method: &str,
     path: &str,
     query: Option<&str>,
-    range: Option<&str>,
+    headers: AssetHeaders<'_>,
     body: &[u8],
 ) -> CapsResponse {
     // The hold deadline covers the whole poll, not each re-dispatch.
@@ -36,7 +45,8 @@ pub(crate) async fn dispatch_caps(
             method,
             path,
             query,
-            range,
+            range: headers.range,
+            if_modified_since: headers.if_modified_since,
             body,
         };
         let dispatch = {

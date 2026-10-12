@@ -100,6 +100,7 @@ pub(crate) async fn fetch_range_async(
             return Ok(FetchChunk {
                 bytes: Bytes::new(),
                 whole: false,
+                total: None,
             });
         }
         // The GetTexture / GetMesh / ViewerAsset services answer `503` while they
@@ -114,6 +115,7 @@ pub(crate) async fn fetch_range_async(
             return Err(FetchError::Unavailable(describe_failure(response).await));
         }
         let whole = status == ReqwestStatusCode::OK;
+        let total = sl_client_common::ranges::stated_total(response.headers());
         if !status.is_success() {
             return Err(FetchError::Transport(describe_failure(response).await));
         }
@@ -121,7 +123,11 @@ pub(crate) async fn fetch_range_async(
             .bytes()
             .await
             .map_err(|error| FetchError::Transport(error.to_string()))?;
-        return Ok(FetchChunk { bytes, whole });
+        return Ok(FetchChunk {
+            bytes,
+            whole,
+            total,
+        });
     }
 }
 

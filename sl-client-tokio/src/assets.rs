@@ -150,6 +150,7 @@ impl AssetFetcher<AssetRef> for ReqwestAssetFetcher {
                 return Ok(FetchChunk {
                     bytes: Bytes::new(),
                     whole: false,
+                    total: None,
                 });
             }
             // The service can return 503 transiently while it queues the asset;
@@ -168,11 +169,16 @@ impl AssetFetcher<AssetRef> for ReqwestAssetFetcher {
             // 200 = the whole asset (either an unranged request or a server that
             // ignored the range); 206 = exactly the requested range.
             let whole = status == ReqwestStatusCode::OK;
+            let total = sl_client_common::ranges::stated_total(response.headers());
             let bytes = response
                 .bytes()
                 .await
                 .map_err(|error| FetchError::Transport(error.to_string()))?;
-            return Ok(FetchChunk { bytes, whole });
+            return Ok(FetchChunk {
+                bytes,
+                whole,
+                total,
+            });
         }
     }
 }

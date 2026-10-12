@@ -612,6 +612,20 @@ over a small generic `xmlrpc` module):
   the Second Life flavour, OpenSim's tile of plain water on the OpenSim
   one. Only a Second Life flavoured grid sends `Cache-Control`, `ETag` and
   `Last-Modified` with a tile; OpenSim sends none of them.
+- **The asset capabilities** (`GetTexture`, `GetMesh`, `GetMesh2`,
+  `ViewerAsset`) are where the imitated grid has them
+  (`ImitatedGrid::asset_host`): on the OpenSim flavour under each session's
+  `/sim/<seq>/cap/…`, a token each; on the Second Life flavour **on a
+  second listener**, all four the bare root of `http://127.0.0.1:<port>`
+  with no token and no session, as aditi's asset host is. They answer a `Range`,
+  a `HEAD`, a `POST` and a request that names no asset as the imitated grid
+  does (`ImitatedGrid::asset_http_policy`, measured in
+  [Grid Behaviour: Assets](../gridspec/assets.md)): a suffix range is the
+  last bytes on the Second Life flavour and OpenSim's first eleven on the
+  OpenSim one, and only the Second Life flavour states an `ETag` and a
+  `Last-Modified`. On both, a range that starts at or past the end of an
+  asset is answered with the whole asset. A missing asset is `404` on both:
+  aditi's `503` is not imitated.
 - **`POST /currency.php`** and **`POST /landtool.php`** — the XML-RPC
   economy helpers behind the buy-L$ and buy-land floaters
   (`getCurrencyQuote`/`buyCurrency`, `preflightBuyLandPrep`/`buyLandPrep`).

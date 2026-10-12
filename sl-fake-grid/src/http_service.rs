@@ -52,8 +52,20 @@ const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(15);
 /// grid asked it to shut down, before it is dropped outright.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
 
+/// Which of the grid's hosts a listener is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Host {
+    /// The grid's own: the login, the helpers, the map tiles and every
+    /// session's capabilities.
+    Grid,
+    /// The asset host of a grid that has one
+    /// ([`crate::imitates::AssetHost::ItsOwn`]): every request is for an
+    /// asset, by whatever name the host was reached.
+    Assets,
+}
+
 /// The accept loop: serves connections until shutdown.
-pub(crate) async fn run_http(core: Arc<GridCore>, listener: TcpListener) {
+pub(crate) async fn run_http(core: Arc<GridCore>, listener: TcpListener, host: Host) {
     let mut shutdown_rx = core.shutdown_tx.subscribe();
     let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     loop {
@@ -76,6 +88,7 @@ pub(crate) async fn run_http(core: Arc<GridCore>, listener: TcpListener) {
                 };
                 tokio::spawn(serve_connection(
                     Arc::clone(&core),
+                    host,
                     stream,
                     core.shutdown_tx.subscribe(),
                     permit,
@@ -96,13 +109,14 @@ pub(crate) async fn run_http(core: Arc<GridCore>, listener: TcpListener) {
 /// [`SHUTDOWN_GRACE`], by dropping it.
 async fn serve_connection(
     core: Arc<GridCore>,
+    host: Host,
     stream: TcpStream,
     mut shutdown_rx: watch::Receiver<bool>,
     permit: OwnedSemaphorePermit,
 ) {
     let service = hyper::service::service_fn(move |request| {
         let core = Arc::clone(&core);
-        async move { handle_request(core, request).await }
+        async move { handle_request(core, host, request).await }
     });
     let mut builder = hyper::server::conn::http1::Builder::new();
     // The header-read timeout is inert without a timer.
@@ -139,6 +153,7 @@ async fn serve_connection(
 /// that session's CAPS surface, anything else → 404.
 async fn handle_request(
     core: Arc<GridCore>,
+    host: Host,
     request: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let method = request.method().as_str().to_owned();
@@ -146,11 +161,39 @@ async fn handle_request(
     let query = request.uri().query().map(str::to_owned);
     let content_type = header_string(&request, CONTENT_TYPE);
     let range = header_string(&request, http::header::RANGE);
+    let if_modified_since = header_string(&request, http::header::IF_MODIFIED_SINCE);
 
     let body = match collect_body(request).await {
         Ok(body) => body,
         Err(status) => return Ok(plain_status(status)),
     };
+
+    // A request to the asset host is for an asset, whatever its path, and
+    // never reaches the grid's own routes — whose root is the login.
+    if host == Host::Assets {
+        let Some(surface) = &core.asset_host else {
+            return Ok(plain_status(HttpStatusCode::NOT_FOUND));
+        };
+        let response = surface.dispatch(
+            &*core.assets.read(),
+            &sl_proto::CapsRequest {
+                method: &method,
+                path: &path,
+                query: query.as_deref(),
+                range: range.as_deref(),
+                if_modified_since: if_modified_since.as_deref(),
+                body: &body,
+            },
+        );
+        tracing::debug!(
+            "asset host {method} {path}{} -> {}",
+            query
+                .as_deref()
+                .map_or_else(String::new, |query| format!("?{query}")),
+            response.status
+        );
+        return Ok(caps_http_response(response));
+    }
 
     if path == "/" {
         if method != "POST" {
@@ -228,7 +271,10 @@ async fn handle_request(
             &method,
             &path,
             query.as_deref(),
-            range.as_deref(),
+            crate::caps_endpoint::AssetHeaders {
+                range: range.as_deref(),
+                if_modified_since: if_modified_since.as_deref(),
+            },
             &body,
         )
         .await;
@@ -287,8 +333,9 @@ async fn collect_body(request: Request<Incoming>) -> Result<Bytes, HttpStatusCod
 /// JPEG2000 codestream media type the `GetTexture` cap uses.
 const J2C_CONTENT_TYPE: &str = "image/x-j2c";
 
-/// Serves stored asset bytes, honouring a `Range` header the way the asset
-/// caps do: no range → `200` whole; a satisfiable range → `206` with the
+/// Serves a baked texture's bytes, honouring a `Range` header as HTTP has
+/// it (the appearance service is not the asset capabilities, and what a live
+/// one answers a range is not measured): no range → `200` whole; a satisfiable range → `206` with the
 /// slice and a `Content-Range`; a start past the end → `416`.
 ///
 /// The viewer's texture fetcher opens a texture with `Range: bytes=0-599` and
@@ -428,6 +475,13 @@ fn caps_http_response(caps: CapsResponse) -> Response<Full<Bytes>> {
         response
             .headers_mut()
             .insert(http::header::CONTENT_RANGE, value);
+    }
+    for (name, value) in caps.headers {
+        if let Ok(value) = http::header::HeaderValue::from_str(&value) {
+            response
+                .headers_mut()
+                .insert(http::header::HeaderName::from_static(name), value);
+        }
     }
     response
 }

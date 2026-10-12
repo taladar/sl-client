@@ -68,6 +68,8 @@
 //! | where a removed item goes ([`ContentsPolicy::removed_item`]) | nowhere | a copy into the agent's Trash, announced as a new item |
 //! | what a save into a prim over a capability tells the saver ([`ContentsPolicy::save_told`]) | what any write does | an alert, `Gesture updated` or `Notecard updated`, and no record |
 //! | the script a new script starts as ([`ContentsPolicy::new_script_body`]) | `Hello, Avatar!`, and `Touched.` on a touch | `Script running` |
+//! | where the asset capabilities are ([`asset_host`](ImitatedGrid::asset_host)) | a host of their own, all four its bare root | the simulator's, a token each |
+//! | how an asset capability reads a `Range` and answers what it cannot serve ([`asset_http_policy`](ImitatedGrid::asset_http_policy)) | a suffix is the last bytes, several ranges a multipart body, `bytes=0-0` one byte; an entity tag and a date stated, the date honoured with `304`; a `POST` refused | a suffix is the first eleven bytes, several ranges and `bytes=0-0` the whole asset, a backwards range one byte; nothing stated for a cache; a `POST` answered as a `GET`; a request that names no asset `400` |
 //! | a prim's contents and a script's experience over HTTP (`RequestTaskInventory`, `GetMetadata`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted: the listing is UDP and `Xfer` alone |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
@@ -1118,6 +1120,51 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid's `GetTexture`, `GetMesh`, `GetMesh2` and `ViewerAsset`
+    /// answer as HTTP — measured by the `asset-http` conformance case on
+    /// aditi and the local OpenSim (2026-10-12, `book/src/gridspec/assets.md`).
+    ///
+    /// They agree on more than they differ in: the whole asset is a `200`, a
+    /// range it has bytes for a `206` with a `Content-Range`, an end past the
+    /// asset is the asset's end, a `HEAD` states the length — and **a range
+    /// that starts at or past the end is a `200` with the whole asset**, not
+    /// a `416`.
+    ///
+    /// Two things aditi does are deliberately not imitated. It states
+    /// `Content-Encoding: binary/octet-stream`, which a viewer that decodes
+    /// content encodings may refuse. And it answers an asset it has not got
+    /// — and the four body parts and clothes the test avatar wears — with a
+    /// `503` from its proxy ("DNS failure"), which says that beta grid's
+    /// proxy cannot reach its store rather than what Second Life says of a
+    /// missing asset; the fake grid answers `404`.
+    #[must_use]
+    pub const fn asset_http_policy(self) -> sl_proto::AssetHttpPolicy {
+        match self {
+            Self::SecondLife => sl_proto::AssetHttpPolicy {
+                ranges: sl_proto::RangeReading::ByteRanges,
+                unreadable_status: 404,
+                answers_post: false,
+                validators: true,
+            },
+            Self::OpenSim => sl_proto::AssetHttpPolicy {
+                ranges: sl_proto::RangeReading::OpenSim,
+                unreadable_status: 400,
+                answers_post: true,
+                validators: false,
+            },
+        }
+    }
+
+    /// Where this grid's asset-delivery capabilities are — measured with
+    /// [`asset_http_policy`](Self::asset_http_policy).
+    #[must_use]
+    pub const fn asset_host(self) -> AssetHost {
+        match self {
+            Self::SecondLife => AssetHost::ItsOwn,
+            Self::OpenSim => AssetHost::TheSimulators,
+        }
+    }
+
     /// How this grid announces an item a **capability upload** created or
     /// rewrote — which is neither one answer nor how it announces a taken one.
     ///
@@ -2061,6 +2108,20 @@ pub enum LastOwner {
     Nobody,
     /// Whoever rezzed it: OpenSim.
     Rezzer,
+}
+
+/// Where a grid's asset-delivery capabilities are
+/// ([`ImitatedGrid::asset_host`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetHost {
+    /// On a host of their own, and all four the same URL: that host's root,
+    /// with no token and no path, the same for every agent. Second Life. The
+    /// fake grid's host is a second listener on a port of its own, which
+    /// answers by whatever name it is reached.
+    ItsOwn,
+    /// On the simulator's own host and port, each a URL with a token of its
+    /// own: OpenSim.
+    TheSimulators,
 }
 
 /// What a grid makes of a link and a delink ([`ImitatedGrid::link_policy`]).

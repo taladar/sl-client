@@ -105,6 +105,14 @@ exercises this end to end against a live grid: fetch and decode the plywood
 texture to RGBA8, confirm a second request is served from cache, and downgrade
 then re-upgrade its level of detail.
 
+What each grid's asset capabilities answer as HTTP — which ranges they
+honour, what they tell a cache, and what a missing asset gets — is measured
+in [Grid Behaviour: Assets](../gridspec/assets.md). The one a fetcher has to
+know: neither grid answers `416`, and a range that starts at or past the end
+of an asset is answered with the **whole asset**. The store therefore reads
+the asset's length from a partial answer's `Content-Range`
+(`FetchChunk::total`) and stops there.
+
 ## Bevy
 
 `sl-client-bevy` (on Bevy 0.19) bridges the store to Bevy's renderer:

@@ -21,9 +21,17 @@
 //! The wire contract (mirroring the client fetchers in
 //! `sl-client-tokio/src/{textures,meshes,assets}.rs`): a `GET` on the cap URL
 //! with a `?<class>_id=<uuid>` selector and an optional `Range: bytes=s-e`
-//! header. No range → `200` whole; a satisfiable range → `206` with the byte
-//! slice and a `Content-Range` header; a start past the end of an existing
-//! asset → `416`; a missing asset → `404`; a non-`GET` → `405`.
+//! header. No range → `200` whole; a range the asset has bytes for → `206`
+//! with the byte slice and a `Content-Range` header; a missing asset → `404`.
+//!
+//! Everything past that is where the two live grids part, and an
+//! [`AssetHttpPolicy`] says which way a surface goes: how a `Range` header is
+//! read, what a request that names no asset is answered with, whether a
+//! `POST` is answered, and whether an answer states what a cache needs. Both
+//! were measured with the `asset-http` conformance case (2026-10-12,
+//! `book/src/gridspec/assets.md`). One thing they agree on is not what HTTP
+//! says: **a range that starts at or past the end of the asset is answered
+//! `200` with the whole asset**, never `416`.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -42,10 +50,74 @@ const J2C_CONTENT_TYPE: &str = "image/x-j2c";
 /// viewer's `HTTP_CONTENT_VND_LL_MESH`).
 const MESH_CONTENT_TYPE: &str = "application/vnd.ll.mesh";
 
-/// The `Content-Type` a generic `ViewerAsset` fetch is served with. The
-/// client does not inspect it (it reads the raw bytes), so the generic
-/// media type is correct-but-uncritical; per-class refinement can come later.
+/// The `Content-Type` a generic `ViewerAsset` fetch is served with where the
+/// class has none of its own below.
 const OCTET_STREAM_CONTENT_TYPE: &str = "application/octet-stream";
+
+/// The `Content-Type` a `ViewerAsset` fetch under `key` is served with: the
+/// class's own media type for the classes the live grids were measured
+/// serving, the generic one for the rest.
+fn viewer_asset_content_type(key: &str) -> &'static str {
+    match key {
+        "texture_id" => J2C_CONTENT_TYPE,
+        "mesh_id" => MESH_CONTENT_TYPE,
+        "sound_id" => "application/ogg",
+        "bodypart_id" => "application/vnd.ll.bodypart",
+        "clothing_id" => "application/vnd.ll.clothing",
+        _ => OCTET_STREAM_CONTENT_TYPE,
+    }
+}
+
+/// The `Last-Modified` an answer states where the policy states one. An
+/// [`AssetSource`] keeps no dates, so every asset has the same.
+const LAST_MODIFIED: &str = "Thu, 01 Jan 2015 00:00:00 GMT";
+
+/// How an asset host reads a `Range` header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum RangeReading {
+    /// As Second Life's asset hosts do: one range, a suffix (`bytes=-10`, the
+    /// last ten bytes) or several (answered `206` with a multipart body under
+    /// the asset's own media type). A range that ends before it starts, or
+    /// that is no number, is no range.
+    #[default]
+    ByteRanges,
+    /// As OpenSim's `Util.TryParseHttpRange` does: the header split at every
+    /// `-` must make two parts, so several ranges are no range; an absent
+    /// start is `0`, so a suffix `bytes=-10` is the **first eleven** bytes;
+    /// an end that is not above zero is no range, so `bytes=0-0` is the whole
+    /// asset; and an end before the start is the one byte at the end.
+    OpenSim,
+}
+
+/// Where the asset-delivery capabilities of the two live grids part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssetHttpPolicy {
+    /// How a `Range` header is read.
+    pub ranges: RangeReading,
+    /// The status of a request that names no asset: no query, a key the
+    /// capability does not know, or text that is no id.
+    pub unreadable_status: u16,
+    /// Whether a `POST` is answered as a `GET` is, rather than refused.
+    pub answers_post: bool,
+    /// Whether an answer states `Accept-Ranges`, an `ETag` and a
+    /// `Last-Modified`, and a request whose `If-Modified-Since` is that date
+    /// is answered `304`. An `If-None-Match` is not honoured either way.
+    pub validators: bool,
+}
+
+impl Default for AssetHttpPolicy {
+    /// What the surface did before the grids were measured, where that is not
+    /// something both were found doing otherwise.
+    fn default() -> Self {
+        Self {
+            ranges: RangeReading::ByteRanges,
+            unreadable_status: 404,
+            answers_post: false,
+            validators: false,
+        }
+    }
+}
 
 /// The four asset-delivery capabilities this surface serves — the registry
 /// keys, grown alongside the pinned coverage table in
@@ -92,6 +164,11 @@ pub struct AssetCaps {
     /// One pre-minted URL token per asset capability
     /// ([`ASSET_CAPABILITIES`]).
     tokens: BTreeMap<&'static str, Uuid>,
+    /// Which live grid's HTTP the surface answers with.
+    policy: AssetHttpPolicy,
+    /// Whether the four capabilities are one URL, the base itself
+    /// ([`AssetCaps::at_the_root`]), rather than a token each under it.
+    at_the_root: bool,
 }
 
 impl AssetCaps {
@@ -107,7 +184,35 @@ impl AssetCaps {
             .iter()
             .map(|name| (*name, mint_token()))
             .collect::<BTreeMap<&'static str, Uuid>>();
-        Self { base_url, tokens }
+        Self {
+            base_url,
+            tokens,
+            policy: AssetHttpPolicy::default(),
+            at_the_root: false,
+        }
+    }
+
+    /// The surface as Second Life lays it out: **one URL for all four
+    /// capabilities, the bare `base_url`**, with no token and no path — the
+    /// same for every agent of the grid (measured on aditi 2026-10-12, where
+    /// each of the four is the root of the grid's asset host). A request is
+    /// told apart by its query key alone, so any of the four answers an
+    /// asset of any class, as that host does.
+    #[must_use]
+    pub fn at_the_root(base_url: Url) -> Self {
+        Self {
+            base_url,
+            tokens: BTreeMap::new(),
+            policy: AssetHttpPolicy::default(),
+            at_the_root: true,
+        }
+    }
+
+    /// The same surface answering as `policy` says.
+    #[must_use]
+    pub const fn with_http_policy(mut self, policy: AssetHttpPolicy) -> Self {
+        self.policy = policy;
+        self
     }
 
     /// Rebuilds an identical surface from a known token map — the
@@ -115,8 +220,13 @@ impl AssetCaps {
     /// simulator minted (via [`AssetCaps::tokens`], shipped out of band) and
     /// serves the same URLs the simulator advertised in its seed grant.
     #[must_use]
-    pub const fn from_tokens(base_url: Url, tokens: BTreeMap<&'static str, Uuid>) -> Self {
-        Self { base_url, tokens }
+    pub fn from_tokens(base_url: Url, tokens: BTreeMap<&'static str, Uuid>) -> Self {
+        Self {
+            base_url,
+            tokens,
+            policy: AssetHttpPolicy::default(),
+            at_the_root: false,
+        }
     }
 
     /// The minted token map, so the simulator process can ship it to a CDN
@@ -141,7 +251,11 @@ impl AssetCaps {
     /// Whether this surface serves the named capability.
     #[must_use]
     pub fn supports(&self, name: &str) -> bool {
-        self.tokens.contains_key(name)
+        if self.at_the_root {
+            ASSET_CAPABILITIES.contains(&name)
+        } else {
+            self.tokens.contains_key(name)
+        }
     }
 
     /// Grants asset-cap URLs for the requested names — the asset fragment
@@ -150,6 +264,16 @@ impl AssetCaps {
     /// negotiation); pure and stable, like its sim-cap sibling.
     #[must_use]
     pub fn grant(&self, requested: &[String]) -> HashMap<String, String> {
+        if self.at_the_root {
+            // The base with no path, written without the `/` a URL's text
+            // ends in: a viewer appends `/?texture_id=…` to what it is given.
+            let root = self.base_url.as_str().trim_end_matches('/').to_owned();
+            return requested
+                .iter()
+                .filter(|name| self.supports(name))
+                .map(|name| (name.clone(), root.clone()))
+                .collect();
+        }
         requested
             .iter()
             .filter_map(|name| {
@@ -172,69 +296,48 @@ impl AssetCaps {
     /// Serves one asset request from `source`.
     ///
     /// `&self`: asset fetches read only, so nothing mutates. Outcomes: an
-    /// unknown URL → `404`; a non-`GET` → `405`; a request whose query names
-    /// no known asset, or names a missing asset → `404`; a satisfiable
-    /// `Range` → `206` with the slice and a `Content-Range` header; a `Range`
-    /// whose start is past the end of an existing asset → `416`; otherwise
-    /// `200` with the whole asset.
+    /// unknown URL → `404`; a `POST` → `405` unless the policy answers one; a
+    /// request that names no asset → the policy's status; a missing asset →
+    /// `404`; a range the asset has bytes for → `206` with the slice and a
+    /// `Content-Range` header; otherwise — a range that starts at or past the
+    /// end among them — `200` with the whole asset. A `HEAD` is answered as a
+    /// `GET` is: the transport sends the headers and keeps the body.
     #[must_use]
     pub fn dispatch(&self, source: &dyn AssetSource, request: &CapsRequest<'_>) -> CapsResponse {
         let Some(name) = self.resolve(request.path) else {
             return CapsResponse::not_found();
         };
-        if request.method != "GET" {
+        let answered = match request.method {
+            "GET" | "HEAD" => true,
+            "POST" => self.policy.answers_post,
+            _ => false,
+        };
+        if !answered {
             return CapsResponse::method_not_allowed();
         }
-        match Self::handler_for(name) {
+        let named = match Self::handler_for(name) {
             Some(AssetCapHandler::GetTexture) => {
-                Self::serve(source, request, CAP_GET_TEXTURE_KEY, J2C_CONTENT_TYPE)
+                query_uuid(request.query, CAP_GET_TEXTURE_KEY).map(|id| (id, J2C_CONTENT_TYPE))
             }
             Some(AssetCapHandler::GetMesh) => {
-                Self::serve(source, request, CAP_GET_MESH_KEY, MESH_CONTENT_TYPE)
+                query_uuid(request.query, CAP_GET_MESH_KEY).map(|id| (id, MESH_CONTENT_TYPE))
             }
-            Some(AssetCapHandler::ViewerAsset) => Self::serve_viewer_asset(source, request),
+            Some(AssetCapHandler::ViewerAsset) => viewer_asset_uuid(request.query),
             // Tokens are only minted for served capabilities, so a resolved
             // name always has a handler; answer 404 rather than panic if that
             // invariant is ever broken.
-            None => CapsResponse::not_found(),
-        }
-    }
-
-    /// Serves a fixed-class fetch (`GetTexture` / `GetMesh`): the asset id
-    /// comes from the `expected_key` query parameter.
-    fn serve(
-        source: &dyn AssetSource,
-        request: &CapsRequest<'_>,
-        expected_key: &str,
-        content_type: &'static str,
-    ) -> CapsResponse {
-        let Some(id) = query_uuid(request.query, expected_key) else {
-            return CapsResponse::not_found();
+            None => return CapsResponse::not_found(),
         };
-        Self::serve_bytes(source, request, AssetKey::from(id), content_type)
-    }
-
-    /// Serves a generic `ViewerAsset` fetch: the asset id comes from the first
-    /// `?<class>_id=<uuid>` query parameter whose key names an
-    /// [`AssetType`]. The class only confirms the request is well-formed —
-    /// the store is keyed by UUID alone — and the response is always the
-    /// generic media type.
-    fn serve_viewer_asset(source: &dyn AssetSource, request: &CapsRequest<'_>) -> CapsResponse {
-        let Some(id) = viewer_asset_uuid(request.query) else {
-            return CapsResponse::not_found();
+        let Some((id, content_type)) = named else {
+            return CapsResponse::status(self.policy.unreadable_status);
         };
-        Self::serve_bytes(
-            source,
-            request,
-            AssetKey::from(id),
-            OCTET_STREAM_CONTENT_TYPE,
-        )
+        self.serve_bytes(source, request, AssetKey::from(id), content_type)
     }
 
     /// Looks `key` up in `source` and applies the request's `Range` (if any):
-    /// missing → `404`; whole → `200`; satisfiable range → `206`;
-    /// out-of-range start → `416`.
+    /// missing → `404`; whole → `200`; a range → `206`.
     fn serve_bytes(
+        &self,
         source: &dyn AssetSource,
         request: &CapsRequest<'_>,
         key: AssetKey,
@@ -244,17 +347,35 @@ impl AssetCaps {
             return CapsResponse::not_found();
         };
         let total = bytes.len();
-        match request
+        let validators = if self.policy.validators {
+            vec![
+                ("accept-ranges", "bytes".to_owned()),
+                ("etag", entity_tag(bytes)),
+                ("last-modified", LAST_MODIFIED.to_owned()),
+            ]
+        } else {
+            Vec::new()
+        };
+        if self.policy.validators && request.if_modified_since == Some(LAST_MODIFIED) {
+            return CapsResponse::status(304).with_headers(validators);
+        }
+        let range = request
             .range
-            .map_or(ByteRange::Whole, |header| parse_byte_range(header, total))
-        {
+            .map_or(ByteRange::Whole, |header| match self.policy.ranges {
+                RangeReading::ByteRanges => parse_byte_ranges(header, total),
+                RangeReading::OpenSim => parse_opensim_range(header, total),
+            });
+        let response = match range {
             ByteRange::Whole => CapsResponse::asset_whole(content_type, bytes.to_vec()),
             ByteRange::Partial { start, last } => {
                 let slice = bytes.get(start..=last).unwrap_or_default();
                 CapsResponse::asset_partial(content_type, slice.to_vec(), start, last, total)
             }
-            ByteRange::Unsatisfiable => CapsResponse::range_not_satisfiable(total),
-        }
+            ByteRange::Several(spans) => {
+                CapsResponse::asset_multipart(content_type, multipart(bytes, &spans, content_type))
+            }
+        };
+        response.with_headers(validators)
     }
 
     /// Resolves a request path to one of this surface's capability names, or
@@ -262,6 +383,11 @@ impl AssetCaps {
     /// path prefix works) and ignores any sub-path after the token — mirroring
     /// [`SimCaps`](crate::SimCaps)'s resolver.
     fn resolve(&self, path: &str) -> Option<&'static str> {
+        if self.at_the_root {
+            // One URL for every class: the generic handler, which reads the
+            // class off the query key.
+            return matches!(path, "" | "/").then_some(CAP_VIEWER_ASSET);
+        }
         let (_, after) = path.rsplit_once("/cap/")?;
         let token_str = after.split_once('/').map_or(after, |(token, _)| token);
         let token = Uuid::parse_str(token_str).ok()?;
@@ -290,65 +416,135 @@ const CAP_GET_TEXTURE_KEY: &str = "texture_id";
 /// The query-parameter name `GetMesh` / `GetMesh2` selects the asset by.
 const CAP_GET_MESH_KEY: &str = "mesh_id";
 
-/// The parsed outcome of a single `bytes=start-end` header against a known
-/// total asset length.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a `Range` header asks for, read against a known total asset length.
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ByteRange {
-    /// No usable range: serve the whole asset (`200`). Covers a missing,
-    /// unparsable, or multi-range header — a real server ignores what it
-    /// cannot honour.
+    /// No usable range: serve the whole asset (`200`). Covers a missing or
+    /// unreadable header, and a range that starts at or past the end of the
+    /// asset — which both live grids answer with the whole asset.
     Whole,
-    /// A satisfiable range: serve `start..=last` (inclusive) as `206`.
+    /// One range: serve `start..=last` (inclusive) as `206`.
     Partial {
         /// The first byte offset served.
         start: usize,
-        /// The last byte offset served (inclusive), clamped to `total - 1`.
+        /// The last byte offset served (inclusive), within the asset.
         last: usize,
     },
-    /// The range's start is at or past the end of the asset: `416`.
-    Unsatisfiable,
+    /// Several ranges, each first and last: serve them as one `206` with a
+    /// multipart body.
+    Several(Vec<(usize, usize)>),
 }
 
-/// Parses a single `bytes=start-end` header against `total`.
-///
-/// `end` is optional (an open `bytes=start-` means "to the end") and
-/// inclusive, matching the client's `bytes={start}-{end}` form. A start at or
-/// past `total` (including any range on a zero-length asset) is
-/// [`Unsatisfiable`](ByteRange::Unsatisfiable). Anything not of the form
-/// `bytes=<start>-<end?>` — a multi-range list (which our client never sends),
-/// a non-numeric bound, a suffix range — is treated leniently as
-/// [`Whole`](ByteRange::Whole).
-fn parse_byte_range(header: &str, total: usize) -> ByteRange {
+/// Reads one `start-end`, `start-` or `-suffix` range against `total`, as
+/// Second Life's asset hosts do. `None` where it is no range the asset has
+/// bytes for.
+fn parse_one_range(spec: &str, total: usize) -> Option<(usize, usize)> {
+    let (start, end) = spec.trim().split_once('-')?;
+    let last_offset = total.checked_sub(1)?;
+    if start.trim().is_empty() {
+        let suffix = end.trim().parse::<usize>().ok()?;
+        if suffix == 0 {
+            return None;
+        }
+        return Some((total.saturating_sub(suffix), last_offset));
+    }
+    let start = start.trim().parse::<usize>().ok()?;
+    if start >= total {
+        return None;
+    }
+    let last = match end.trim() {
+        "" => last_offset,
+        end => end.parse::<usize>().ok()?.min(last_offset),
+    };
+    (last >= start).then_some((start, last))
+}
+
+/// Reads a `Range` header against `total` as Second Life's asset hosts were
+/// measured reading it ([`RangeReading::ByteRanges`]).
+fn parse_byte_ranges(header: &str, total: usize) -> ByteRange {
     let Some(spec) = header.trim().strip_prefix("bytes=") else {
         return ByteRange::Whole;
     };
-    // Multi-range lists are valid HTTP but the viewer never sends them; ignore.
-    if spec.contains(',') {
-        return ByteRange::Whole;
+    let spans: Option<Vec<(usize, usize)>> = spec
+        .split(',')
+        .map(|one| parse_one_range(one, total))
+        .collect();
+    match spans.as_deref() {
+        Some([(start, last)]) => ByteRange::Partial {
+            start: *start,
+            last: *last,
+        },
+        Some([_, _, ..]) => ByteRange::Several(spans.unwrap_or_default()),
+        _ => ByteRange::Whole,
     }
-    let Some((start_str, end_str)) = spec.split_once('-') else {
+}
+
+/// Reads a `Range` header against `total` as OpenSim's
+/// `Util.TryParseHttpRange` and `GetAssetsHandler` do
+/// ([`RangeReading::OpenSim`]).
+fn parse_opensim_range(header: &str, total: usize) -> ByteRange {
+    let Some(spec) = header.strip_prefix("bytes=") else {
         return ByteRange::Whole;
     };
-    let Ok(start) = start_str.trim().parse::<usize>() else {
+    let parts: Vec<&str> = spec.split('-').collect();
+    let [raw_start, raw_end] = parts.as_slice() else {
         return ByteRange::Whole;
+    };
+    let start = match raw_start.trim() {
+        "" => 0,
+        text => match text.parse::<usize>() {
+            Ok(start) => start,
+            Err(_) => return ByteRange::Whole,
+        },
+    };
+    let end = match raw_end.trim() {
+        "" => None,
+        text => match text.parse::<usize>() {
+            // An end that is not above zero is no range at all.
+            Ok(end) if end > 0 => Some(end),
+            _ => return ByteRange::Whole,
+        },
     };
     if start >= total {
-        return ByteRange::Unsatisfiable;
-    }
-    // `start < total` here, so `total >= 1` and this never underflows.
-    let last_offset = total.saturating_sub(1);
-    let last = match end_str.trim() {
-        "" => last_offset,
-        end => end
-            .parse::<usize>()
-            .map_or(last_offset, |value| value.min(last_offset)),
-    };
-    // A backwards range (end < start) is malformed; fall back to the whole
-    // asset rather than emit an empty 206.
-    if last < start {
         return ByteRange::Whole;
     }
-    ByteRange::Partial { start, last }
+    let last_offset = total.saturating_sub(1);
+    let last = end.map_or(last_offset, |end| end.min(last_offset));
+    ByteRange::Partial {
+        start: start.min(last),
+        last,
+    }
+}
+
+/// The boundary between the parts of a multipart answer.
+const MULTIPART_BOUNDARY: &str = "sl-asset-byteranges";
+
+/// The body of an answer to several ranges: each span of `bytes` as a part
+/// with its media type and its `Content-Range`.
+fn multipart(bytes: &[u8], spans: &[(usize, usize)], content_type: &str) -> Vec<u8> {
+    let total = bytes.len();
+    let mut body = Vec::new();
+    for (start, last) in spans {
+        body.extend_from_slice(
+            format!(
+                "\r\n--{MULTIPART_BOUNDARY}\r\nContent-Type: {content_type}\r\n\
+                 Content-Range: bytes {start}-{last}/{total}\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(bytes.get(*start..=*last).unwrap_or_default());
+    }
+    body.extend_from_slice(format!("\r\n--{MULTIPART_BOUNDARY}--\r\n").as_bytes());
+    body
+}
+
+/// An entity tag for `bytes`: a quoted hash of them (FNV-1a), which is all a
+/// tag has to be — the same for the same bytes.
+fn entity_tag(bytes: &[u8]) -> String {
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("\"{hash:016x}\"")
 }
 
 /// The first `key=<uuid>` value in `query` whose key equals `expected_key`,
@@ -360,11 +556,14 @@ fn query_uuid(query: Option<&str>, expected_key: &str) -> Option<Uuid> {
 }
 
 /// The first `<class>_id=<uuid>` value in `query` whose key names an
-/// [`AssetType`], parsed as a UUID — the `ViewerAsset` selector.
-fn viewer_asset_uuid(query: Option<&str>) -> Option<Uuid> {
+/// [`AssetType`], parsed as a UUID, with the media type of that class — the
+/// `ViewerAsset` selector.
+fn viewer_asset_uuid(query: Option<&str>) -> Option<(Uuid, &'static str)> {
     query_pairs(query?)
         .find(|(key, _)| AssetType::from_asset_query_key(key).is_some())
-        .and_then(|(_, value)| Uuid::parse_str(value).ok())
+        .and_then(|(key, value)| {
+            Some((Uuid::parse_str(value).ok()?, viewer_asset_content_type(key)))
+        })
 }
 
 /// Splits a raw query string (no leading `?`) into its `key`/`value` pairs.
@@ -410,6 +609,7 @@ mod tests {
             path,
             query,
             range,
+            if_modified_since: None,
             body: b"",
         }
     }
@@ -426,41 +626,64 @@ mod tests {
         }
     }
 
-    /// `parse_byte_range` covers whole, partial, open-ended, out-of-range and
-    /// the lenient fallbacks.
+    /// One range, as Second Life's hosts read it.
     #[test]
-    fn parse_byte_range_cases() {
+    fn byte_ranges_as_second_life_reads_them() {
+        let partial = |start, last| ByteRange::Partial { start, last };
+        assert_eq!(parse_byte_ranges("bytes=0-9", 100), partial(0, 9));
+        assert_eq!(parse_byte_ranges("bytes=0-0", 100), partial(0, 0));
+        // An end past the asset is the asset's end; so is an absent one.
+        assert_eq!(parse_byte_ranges("bytes=90-999", 100), partial(90, 99));
+        assert_eq!(parse_byte_ranges("bytes=95-", 100), partial(95, 99));
+        // A suffix is the last bytes.
+        assert_eq!(parse_byte_ranges("bytes=-10", 100), partial(90, 99));
+        // Several ranges are several.
         assert_eq!(
-            parse_byte_range("bytes=0-9", 100),
-            ByteRange::Partial { start: 0, last: 9 }
+            parse_byte_ranges("bytes=0-9,20-29", 100),
+            ByteRange::Several(vec![(0, 9), (20, 29)])
         );
-        // End past the asset clamps to the last byte.
-        assert_eq!(
-            parse_byte_range("bytes=90-999", 100),
-            ByteRange::Partial {
-                start: 90,
-                last: 99
-            }
-        );
-        // Open-ended runs to the last byte.
-        assert_eq!(
-            parse_byte_range("bytes=95-", 100),
-            ByteRange::Partial {
-                start: 95,
-                last: 99
-            }
-        );
-        // Start at/after the end is unsatisfiable.
-        assert_eq!(
-            parse_byte_range("bytes=100-110", 100),
-            ByteRange::Unsatisfiable
-        );
-        assert_eq!(parse_byte_range("bytes=0-0", 0), ByteRange::Unsatisfiable);
-        // Lenient fallbacks: no prefix, multi-range, non-numeric, backwards.
-        assert_eq!(parse_byte_range("0-9", 100), ByteRange::Whole);
-        assert_eq!(parse_byte_range("bytes=0-9,20-29", 100), ByteRange::Whole);
-        assert_eq!(parse_byte_range("bytes=x-y", 100), ByteRange::Whole);
-        assert_eq!(parse_byte_range("bytes=50-40", 100), ByteRange::Whole);
+        // A start at or past the end, a backwards range, text that is no
+        // number and another unit are each no range: the whole asset.
+        for header in [
+            "bytes=100-110",
+            "bytes=110-",
+            "bytes=50-40",
+            "bytes=x-y",
+            "items=0-9",
+            "0-9",
+        ] {
+            assert_eq!(parse_byte_ranges(header, 100), ByteRange::Whole, "{header}");
+        }
+        assert_eq!(parse_byte_ranges("bytes=0-0", 0), ByteRange::Whole);
+    }
+
+    /// One range, as OpenSim's parser reads it — its mistakes included.
+    #[test]
+    fn byte_ranges_as_opensim_reads_them() {
+        let partial = |start, last| ByteRange::Partial { start, last };
+        assert_eq!(parse_opensim_range("bytes=0-9", 100), partial(0, 9));
+        assert_eq!(parse_opensim_range("bytes=90-999", 100), partial(90, 99));
+        assert_eq!(parse_opensim_range("bytes=95-", 100), partial(95, 99));
+        // A suffix is read as a range from the start, one byte too long.
+        assert_eq!(parse_opensim_range("bytes=-10", 100), partial(0, 10));
+        // A backwards range is the one byte at its end.
+        assert_eq!(parse_opensim_range("bytes=19-10", 100), partial(10, 10));
+        // An end of zero, several ranges, a start at or past the end, text
+        // that is no number and another unit: the whole asset.
+        for header in [
+            "bytes=0-0",
+            "bytes=0-9,20-29",
+            "bytes=100-110",
+            "bytes=110-",
+            "bytes=x-y",
+            "items=0-9",
+        ] {
+            assert_eq!(
+                parse_opensim_range(header, 100),
+                ByteRange::Whole,
+                "{header}"
+            );
+        }
     }
 
     /// A whole GetTexture fetch answers `200` with the full bytes and the J2C
@@ -516,7 +739,7 @@ mod tests {
     }
 
     /// A `ViewerAsset` fetch classifies by the `<class>_id` query key and
-    /// serves the generic media type.
+    /// serves that class's media type, the generic one where it has none.
     #[test]
     fn viewer_asset_by_class_key() -> Result<(), TestError> {
         let caps = caps()?;
@@ -527,47 +750,183 @@ mod tests {
         let query = format!("sound_id={id}");
         let response = caps.dispatch(&source, &get(&path, Some(&query), None));
         assert_eq!(response.status, 200);
-        assert_eq!(response.content_type, OCTET_STREAM_CONTENT_TYPE);
+        assert_eq!(response.content_type, "application/ogg");
         assert_eq!(response.body, bytes);
+        let query = format!("notecard_id={id}");
+        let response = caps.dispatch(&source, &get(&path, Some(&query), None));
+        assert_eq!(response.content_type, OCTET_STREAM_CONTENT_TYPE);
         Ok(())
     }
 
-    /// Out-of-range, missing asset, wrong method and unknown path each map to
-    /// their status.
+    /// A range past the end, a missing asset, a request that names none, a
+    /// `POST` and an unknown path, as each policy answers them.
     #[test]
-    fn error_paths() -> Result<(), TestError> {
-        let caps = caps()?;
+    fn what_is_not_there() -> Result<(), TestError> {
         let id = Uuid::from_u128(0xee);
-        let source = InMemoryAssetSource::new().with_asset(AssetKey::from(id), vec![0_u8; 20]);
+        let bytes = (0..20_u8).collect::<Vec<u8>>();
+        let source = InMemoryAssetSource::new().with_asset(AssetKey::from(id), bytes.clone());
+        let query = format!("texture_id={id}");
+        let opensim = AssetHttpPolicy {
+            ranges: RangeReading::OpenSim,
+            unreadable_status: 400,
+            answers_post: true,
+            validators: false,
+        };
+        for (policy, unreadable, post) in
+            [(AssetHttpPolicy::default(), 404, 405), (opensim, 400, 200)]
+        {
+            let caps = caps()?.with_http_policy(policy);
+            let path = granted_path(&caps, CAP_GET_TEXTURE)?;
+
+            // A start at the end of an existing asset → the whole asset.
+            let response = caps.dispatch(&source, &get(&path, Some(&query), Some("bytes=20-30")));
+            assert_eq!(response.status, 200);
+            assert_eq!(response.content_range, None);
+            assert_eq!(response.body, bytes);
+
+            // A UUID not in the source → 404.
+            let missing = format!("texture_id={}", Uuid::from_u128(0xff));
+            assert_eq!(
+                caps.dispatch(&source, &get(&path, Some(&missing), None))
+                    .status,
+                404
+            );
+
+            // No query, a key the capability does not know, text that is no id.
+            for query in [None, Some("asset_id=1"), Some("texture_id=plywood")] {
+                assert_eq!(
+                    caps.dispatch(&source, &get(&path, query, None)).status,
+                    unreadable,
+                    "{query:?}"
+                );
+            }
+
+            let mut request = get(&path, Some(&query), None);
+            request.method = "POST";
+            assert_eq!(caps.dispatch(&source, &request).status, post);
+            request.method = "HEAD";
+            assert_eq!(caps.dispatch(&source, &request).status, 200);
+            request.method = "DELETE";
+            assert_eq!(caps.dispatch(&source, &request).status, 405);
+
+            // Unknown path → 404.
+            let unknown = get(
+                "/cap/00000000-0000-0000-0000-0000000000ff",
+                Some(&query),
+                None,
+            );
+            assert_eq!(caps.dispatch(&source, &unknown).status, 404);
+        }
+        Ok(())
+    }
+
+    /// A surface at the root grants one bare URL for all four capabilities
+    /// and serves an asset of any class from it, by the query key.
+    #[test]
+    fn a_surface_at_the_root_is_one_url() -> Result<(), TestError> {
+        let caps = AssetCaps::at_the_root("http://cdn.example:8080/".parse()?);
+        let names: Vec<String> = ASSET_CAPABILITIES
+            .iter()
+            .map(|name| (*name).to_owned())
+            .chain(["EventQueueGet".to_owned()])
+            .collect();
+        let granted = caps.grant(&names);
+        assert_eq!(granted.len(), ASSET_CAPABILITIES.len());
+        for name in ASSET_CAPABILITIES {
+            assert_eq!(
+                granted.get(*name).map(String::as_str),
+                Some("http://cdn.example:8080"),
+                "{name}"
+            );
+        }
+        let id = Uuid::from_u128(0xad);
+        let source = InMemoryAssetSource::new().with_asset(AssetKey::from(id), vec![3_u8; 40]);
+        for (key, content_type) in [
+            ("texture_id", J2C_CONTENT_TYPE),
+            ("mesh_id", MESH_CONTENT_TYPE),
+            ("sound_id", "application/ogg"),
+        ] {
+            let query = format!("{key}={id}");
+            let response = caps.dispatch(&source, &get("/", Some(&query), None));
+            assert_eq!(response.status, 200, "{key}");
+            assert_eq!(response.content_type, content_type);
+        }
+        assert!(caps.handles_path("/"));
+        assert!(!caps.handles_path("/cap/00000000-0000-0000-0000-000000000001"));
+        assert!(!caps.handles_path("/get_grid_info"));
+        Ok(())
+    }
+
+    /// Several ranges are answered with a multipart body under the asset's
+    /// own media type, and no `Content-Range` of its own.
+    #[test]
+    fn several_ranges_are_a_multipart_body() -> Result<(), TestError> {
+        let caps = caps()?;
+        let id = Uuid::from_u128(0xab);
+        let source = InMemoryAssetSource::new().with_asset(
+            AssetKey::from(id),
+            b"0123456789abcdefghijklmnopqrstuvwxyz".to_vec(),
+        );
         let path = granted_path(&caps, CAP_GET_TEXTURE)?;
         let query = format!("texture_id={id}");
-
-        // Out-of-range start on an existing asset → 416.
-        let response = caps.dispatch(&source, &get(&path, Some(&query), Some("bytes=20-30")));
-        assert_eq!(response.status, 416);
-        assert_eq!(response.content_range.as_deref(), Some("bytes */20"));
-        assert!(response.body.is_empty());
-
-        // A UUID not in the source → 404.
-        let missing = format!("texture_id={}", Uuid::from_u128(0xff));
-        assert_eq!(
-            caps.dispatch(&source, &get(&path, Some(&missing), None))
-                .status,
-            404
+        let response = caps.dispatch(&source, &get(&path, Some(&query), Some("bytes=0-3,20-23")));
+        assert_eq!(response.status, 206);
+        assert_eq!(response.content_type, J2C_CONTENT_TYPE);
+        assert_eq!(response.content_range, None);
+        let body = String::from_utf8(response.body)?;
+        assert!(
+            body.contains("Content-Range: bytes 0-3/36\r\n\r\n0123\r\n"),
+            "{body}"
         );
-
-        // Wrong method on a known cap → 405.
-        let mut post = get(&path, Some(&query), None);
-        post.method = "POST";
-        assert_eq!(caps.dispatch(&source, &post).status, 405);
-
-        // Unknown path → 404.
-        let unknown = get(
-            "/cap/00000000-0000-0000-0000-0000000000ff",
-            Some(&query),
-            None,
+        assert!(
+            body.contains("Content-Range: bytes 20-23/36\r\n\r\nklmn\r\n"),
+            "{body}"
         );
-        assert_eq!(caps.dispatch(&source, &unknown).status, 404);
+        Ok(())
+    }
+
+    /// A surface that states validators states them on a whole answer and a
+    /// partial one, and answers the date it stated with `304`.
+    #[test]
+    fn validators_are_stated_and_the_date_honoured() -> Result<(), TestError> {
+        let caps = caps()?.with_http_policy(AssetHttpPolicy {
+            validators: true,
+            ..AssetHttpPolicy::default()
+        });
+        let id = Uuid::from_u128(0xac);
+        let source = InMemoryAssetSource::new().with_asset(AssetKey::from(id), vec![7_u8; 40]);
+        let path = granted_path(&caps, CAP_GET_TEXTURE)?;
+        let query = format!("texture_id={id}");
+        let names = |response: &CapsResponse| {
+            response
+                .headers
+                .iter()
+                .map(|(name, _value)| *name)
+                .collect::<Vec<_>>()
+        };
+        let whole = caps.dispatch(&source, &get(&path, Some(&query), None));
+        assert_eq!(names(&whole), ["accept-ranges", "etag", "last-modified"]);
+        let partial = caps.dispatch(&source, &get(&path, Some(&query), Some("bytes=0-9")));
+        assert_eq!(names(&partial), ["accept-ranges", "etag", "last-modified"]);
+
+        let mut request = get(&path, Some(&query), None);
+        request.if_modified_since = whole
+            .headers
+            .iter()
+            .find(|(name, _value)| *name == "last-modified")
+            .map(|(_name, value)| value.as_str());
+        let unchanged = caps.dispatch(&source, &request);
+        assert_eq!(unchanged.status, 304);
+        assert!(unchanged.body.is_empty());
+
+        // A surface that states none has none to honour.
+        let plain = self::caps()?;
+        let path = granted_path(&plain, CAP_GET_TEXTURE)?;
+        let mut request = get(&path, Some(&query), None);
+        request.if_modified_since = Some(LAST_MODIFIED);
+        let response = plain.dispatch(&source, &request);
+        assert_eq!(response.status, 200);
+        assert!(response.headers.is_empty());
         Ok(())
     }
 }

@@ -400,6 +400,7 @@ impl BevyTextureFetcher {
                 return Ok(FetchChunk {
                     bytes: Bytes::new(),
                     whole: false,
+                    total: None,
                 });
             }
             // The `GetTexture` service answers `503` while it queues the texture;
@@ -415,13 +416,18 @@ impl BevyTextureFetcher {
                 )));
             }
             let whole = status == ReqwestStatusCode::OK;
+            let total = sl_client_common::ranges::stated_total(response.headers());
             if !status.is_success() {
                 return Err(FetchError::Transport(format!("unexpected status {status}")));
             }
             let bytes = response
                 .bytes()
                 .map_err(|error| FetchError::Transport(error.to_string()))?;
-            return Ok(FetchChunk { bytes, whole });
+            return Ok(FetchChunk {
+                bytes,
+                whole,
+                total,
+            });
         }
     }
 }

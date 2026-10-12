@@ -59,6 +59,7 @@
 - [Building](gridspec/building.md)
 - [Media](gridspec/media.md)
 - [Materials](gridspec/materials.md)
+- [Assets](gridspec/assets.md)
 - [Capabilities](gridspec/capabilities.md)
 - [Land](gridspec/land.md)
 - [Environment](gridspec/environment.md)

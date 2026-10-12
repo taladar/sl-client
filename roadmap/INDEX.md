@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 357 |
+| ready | 356 |
 | blocked | 104 |
 | in-progress | 20 |
 | bugs | 37 |
-| done | 1355 |
+| done | 1356 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2059** |
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (357)
+## ready (356)
 
 ### protocol
 
@@ -1135,8 +1135,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid broadcasts them
 - [`gridspec-appearance-baking`](ready/gridspec-appearance-baking.md) —
   Appearance and baking on each grid
-- [`gridspec-asset-fetch-http`](ready/gridspec-asset-fetch-http.md) — HTTP asset
-  fetch details on each grid
 - [`gridspec-asset-upload`](ready/gridspec-asset-upload.md) — Asset uploads and
   their costs, refusals and announcements on each grid
 - [`gridspec-attachments`](ready/gridspec-attachments.md) — Attachments on each
@@ -1682,7 +1680,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1355)
+## done (1356)
 
 ### protocol
 
@@ -4626,6 +4624,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`gridspec-agent-movement`](done/gridspec-agent-movement.md) — How each grid
   moves an agent: AgentUpdate handling, speeds, terse updates
+- [`gridspec-asset-fetch-http`](done/gridspec-asset-fetch-http.md) — HTTP asset
+  fetch details on each grid
 - [`gridspec-avatar-presence`](done/gridspec-avatar-presence.md) — Other avatars
   in the region: full updates, coarse locations and kills
 - [`gridspec-circuit`](done/gridspec-circuit.md) — Circuit behaviour: acks,

@@ -111,6 +111,7 @@ mod test {
             path,
             query: None,
             range: None,
+            if_modified_since: None,
             body: body.as_bytes(),
         }
     }
@@ -219,6 +220,7 @@ mod test {
             path,
             query,
             range: None,
+            if_modified_since: None,
             body: b"",
         }
     }
@@ -378,6 +380,7 @@ mod test {
             path: &seed_path,
             query: None,
             range: None,
+            if_modified_since: None,
             body: b"",
         };
         let (status, _) = respond(&mut caps, &mut sim, &get)?;
@@ -900,6 +903,7 @@ mod test {
             path: &path,
             query,
             range: None,
+            if_modified_since: None,
             body: &[],
         };
         let url = sl_proto::task_inventory_cap_url("http://sim/cap", task, Some(4));
@@ -909,6 +913,7 @@ mod test {
             path: &path,
             query: query.as_deref(),
             range: None,
+            if_modified_since: None,
             body: &[],
         };
         let CapsDispatch::TaskInventory(query) = caps.dispatch(&mut sim, &asked) else {
@@ -1070,6 +1075,7 @@ mod test {
             path: &format!("{path}/screenshot"),
             query: None,
             range: None,
+            if_modified_since: None,
             body: b"jp2 bytes",
         };
         let (status, _) = respond(&mut caps, &mut sim, &premature)?;
@@ -1090,6 +1096,7 @@ mod test {
             path: uploader.path(),
             query: None,
             range: None,
+            if_modified_since: None,
             body: b"jp2 bytes",
         };
         let (status, reply) = respond(&mut caps, &mut sim, &screenshot)?;
@@ -1158,6 +1165,7 @@ mod test {
             path,
             query: Some(query),
             range,
+            if_modified_since: None,
             body: b"",
         }
     }
@@ -1165,7 +1173,7 @@ mod test {
     /// The seed grant advertises the four asset-delivery caps, and a
     /// `GetTexture` fetch round-trips: a whole `200`, a hand-rolled
     /// progressive `206` loop that reassembles the exact bytes the store
-    /// holds, an out-of-range `416`, and a missing-asset `404` — the client's
+    /// holds, the whole asset for a range past its end, and a missing-asset `404` — the client's
     /// byte-range contract, driven with no HTTP.
     #[test]
     fn asset_caps_round_trip() -> Result<(), TestError> {
@@ -1233,18 +1241,15 @@ mod test {
         // ceil(3.5 chunks) = 4 requests.
         assert_eq!(requests, 4);
 
-        // A range past the end of the existing asset → 416 (the client turns
-        // it into an empty chunk and stops).
+        // A range that starts at the end of the existing asset → the whole
+        // asset, as both live grids answer it.
         let over = format!("bytes={total}-{}", total + 10);
         let response = caps
             .assets()
             .dispatch(&source, &asset_get(&path, &query, Some(&over)));
-        assert_eq!(response.status, 416);
-        assert_eq!(
-            response.content_range.as_deref(),
-            Some(format!("bytes */{total}").as_str())
-        );
-        assert!(response.body.is_empty());
+        assert_eq!(response.status, 200);
+        assert_eq!(response.content_range, None);
+        assert_eq!(response.body, bytes);
 
         // A UUID not in the store → 404 (the client's hard NotFound).
         let missing = format!("texture_id={}", uuid::Uuid::from_u128(0xdead));
@@ -1265,6 +1270,7 @@ mod test {
             path,
             query: None,
             range: None,
+            if_modified_since: None,
             body,
         }
     }
@@ -1764,6 +1770,7 @@ mod test {
             path: &path,
             query: None,
             range: None,
+            if_modified_since: None,
             body: put_body.as_bytes(),
         };
         let (status, _) = respond(&mut caps, &mut sim, &put)?;
@@ -2054,6 +2061,7 @@ mod test {
             path: &path,
             query,
             range: None,
+            if_modified_since: None,
             body: body.as_bytes(),
         };
         respond(caps, sim, &request)
@@ -2788,6 +2796,7 @@ mod test {
             path,
             query,
             range: None,
+            if_modified_since: None,
             body: body.as_bytes(),
         }
     }
@@ -3743,6 +3752,7 @@ mod test {
             path,
             query,
             range: None,
+            if_modified_since: None,
             body: b"",
         }
     }

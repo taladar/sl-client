@@ -5038,19 +5038,21 @@ mod test {
         Ok(())
     }
 
-    /// A range that starts past the end of the asset is `416`, which the client
-    /// reports as a failed transfer rather than as an empty asset.
+    /// A range that starts past the end of the asset is answered with the
+    /// whole asset, as both live grids answer it (`asset-http`, 2026-10-12) —
+    /// not with a `416`, and not with an empty success.
     ///
-    /// The distinction is what a progressive fetcher walks a mesh with: it asks
-    /// for the next span until one of them is refused, and an empty *success*
-    /// would leave it asking forever.
+    /// That is what a fetcher must not walk into: it learns where an asset
+    /// ends from a partial answer's `Content-Range`, and one that asks for
+    /// the bytes after the end instead is sent the asset a second time.
     #[tokio::test]
-    async fn a_range_past_the_end_of_an_asset_is_refused() -> Result<(), TestError> {
+    async fn a_range_past_the_end_of_an_asset_is_the_whole_asset() -> Result<(), TestError> {
         use sl_fake_grid::fixtures::catalogue::MESH_ASSET;
 
         let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
         let mut running = start_in(vec![region]).await?;
-        let past_the_end = u32::try_from(sl_test_assets::mesh::unit_cube_mesh_asset()?.len())?;
+        let whole_mesh = sl_test_assets::mesh::unit_cube_mesh_asset()?;
+        let past_the_end = u32::try_from(whole_mesh.len())?;
         running
             .commands
             .send(Command::FetchMesh {
@@ -5058,20 +5060,23 @@ mod test {
                 byte_range: Some((past_the_end, past_the_end.saturating_add(63))),
             })
             .await?;
-        // Both outcomes are picked up, so an answer that served bytes anyway
-        // fails the assertion instead of hanging until the deadline.
-        let refused = running
+        // Both outcomes are picked up, so a refusal fails the assertion
+        // instead of hanging until the deadline.
+        let answered = running
             .wait_for(|event| match event {
                 Event::AssetTransferFailed { asset_id, .. } if *asset_id == MESH_ASSET.uuid() => {
-                    Some(true)
+                    Some(None)
                 }
-                Event::AssetReceived(fetched) if fetched.id == MESH_ASSET.uuid() => Some(false),
+                Event::AssetReceived(fetched) if fetched.id == MESH_ASSET.uuid() => {
+                    Some(Some(fetched.data.clone()))
+                }
                 _ => None,
             })
             .await?;
-        assert!(
-            refused,
-            "a range starting past the end of the asset came back as an asset"
+        assert_eq!(
+            answered.as_deref(),
+            Some(whole_mesh.as_slice()),
+            "a range starting past the end of the asset is the whole asset"
         );
         Ok(())
     }

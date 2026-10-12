@@ -19,6 +19,8 @@
 //!   into a [`Session`](sl_proto::Session) at login and saved back on a timer.
 //! - [`lsl_syntax_cache`] — the gzipped on-disk cache of the grid's
 //!   `LSLSyntax` capability document, keyed by the id the grid advertises.
+//! - [`ranges`] — what a partial answer says of the whole asset's length,
+//!   read from its `Content-Range`.
 //! - [`retry`] — the transient-HTTP-error retry policy (which statuses are
 //!   worth retrying, and the backoff before each attempt). It yields a
 //!   [`Duration`](std::time::Duration); *how* to wait it out is the caller's
@@ -32,4 +34,5 @@
 pub mod chat_log;
 pub mod inventory_cache;
 pub mod lsl_syntax_cache;
+pub mod ranges;
 pub mod retry;

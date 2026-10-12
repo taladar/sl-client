@@ -487,6 +487,13 @@ pub(crate) struct GridCore {
     /// How the region answers a sit request
     /// ([`ImitatedGrid::sit_policy`]).
     pub(crate) sit_policy: crate::imitates::SitPolicy,
+    /// How the asset-delivery capabilities answer as HTTP
+    /// ([`ImitatedGrid::asset_http_policy`]).
+    pub(crate) asset_http: sl_proto::AssetHttpPolicy,
+    /// The grid's asset host, where the imitated grid has one
+    /// ([`ImitatedGrid::asset_host`]): the one surface every session is
+    /// granted, served by a listener of its own.
+    pub(crate) asset_host: Option<sl_proto::AssetCaps>,
     /// How the grid answers the world map
     /// ([`ImitatedGrid::map_policy`]).
     pub(crate) map_policy: crate::imitates::MapPolicy,
@@ -993,7 +1000,11 @@ impl GridCore {
         let caps = {
             let minter = self.minter.clone();
             let mut caps =
-                sl_proto::SimCaps::new(base_url, self.minter.uuid(), move || minter.uuid());
+                sl_proto::SimCaps::new(base_url, self.minter.uuid(), move || minter.uuid())
+                    .with_asset_http_policy(self.asset_http);
+            if let Some(surface) = &self.asset_host {
+                caps = caps.with_asset_surface(surface.clone());
+            }
             if !self.bakes.grants_bake_capability() {
                 // A grid that does not central-bake offers no trigger to bake
                 // with, and a viewer that finds none composites the avatar
@@ -2002,6 +2013,24 @@ impl FakeGridBuilder {
 
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, self.http_port)).await?;
         let http_port = listener.local_addr()?.port();
+        // The asset host: a second listener, since its root is the URL and
+        // the first listener's root is the login.
+        let asset_listener = match self.imitates.asset_host() {
+            crate::imitates::AssetHost::ItsOwn => {
+                Some(TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?)
+            }
+            crate::imitates::AssetHost::TheSimulators => None,
+        };
+        let asset_host = match &asset_listener {
+            Some(listener) => {
+                let authority = format!("127.0.0.1:{}", listener.local_addr()?.port());
+                let surface =
+                    sl_proto::AssetCaps::at_the_root(format!("http://{authority}/").parse()?)
+                        .with_http_policy(self.imitates.asset_http_policy());
+                Some(surface)
+            }
+            None => None,
+        };
         let login_uri: url::Url = format!("http://127.0.0.1:{http_port}/").parse()?;
         let (shutdown_tx, _) = watch::channel(false);
         let (logins_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
@@ -2117,6 +2146,8 @@ impl FakeGridBuilder {
             withheld_capabilities: self.imitates.withheld_capabilities(),
             parcel_policy: self.imitates.parcel_policy(),
             sit_policy: self.imitates.sit_policy(),
+            asset_http: self.imitates.asset_http_policy(),
+            asset_host,
             map_policy: self.imitates.map_policy(),
             environment_change_reply: self.imitates.environment_change_reply(),
             logout_reply: self.imitates.logout_reply(),
@@ -2171,7 +2202,18 @@ impl FakeGridBuilder {
             teleports_tx,
             crossings_tx,
         });
-        tokio::spawn(crate::http_service::run_http(Arc::clone(&core), listener));
+        tokio::spawn(crate::http_service::run_http(
+            Arc::clone(&core),
+            listener,
+            crate::http_service::Host::Grid,
+        ));
+        if let Some(asset_listener) = asset_listener {
+            tokio::spawn(crate::http_service::run_http(
+                Arc::clone(&core),
+                asset_listener,
+                crate::http_service::Host::Assets,
+            ));
+        }
         Ok(FakeGrid { core })
     }
 }

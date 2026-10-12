@@ -105,6 +105,7 @@ mod test {
         server_appearance_bake => "server-appearance-bake" [fake_sl, fake_opensim],
         texture_fetch_http => "texture-fetch-http" [fake_sl, fake_opensim],
         asset_fetch_http => "asset-fetch-http" [fake_sl, fake_opensim],
+        asset_http => "asset-http" [fake_sl, fake_opensim],
         economy_data => "economy-data" [fake_sl, fake_opensim],
         parcel_info_dwell => "parcel-info-dwell" [fake_sl, fake_opensim],
         agent_alert => "agent-alert" [fake_sl, fake_opensim],

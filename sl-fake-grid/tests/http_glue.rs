@@ -6,7 +6,7 @@
 mod test {
     use std::time::Duration;
 
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_fake_grid::{
         AccountConfig, FakeGrid, FakeGridBuilder, ImitatedGrid, RegionConfig, Scenario,
     };
@@ -288,6 +288,131 @@ mod test {
             return Err("expected a successful LLSD login".into());
         };
         assert_eq!(success.last_name.as_deref(), Some("User"));
+        Ok(())
+    }
+
+    /// The asset capabilities live where the imitated grid has them, and the
+    /// two URL namespaces do not overlap.
+    ///
+    /// Second Life serves assets from a host of its own (a content delivery
+    /// network), every capability the bare root of it; OpenSim from the
+    /// simulator, a token each. Keeping the Second-Life-flavoured grid's
+    /// asset host a separate authority is what makes a client that builds an
+    /// asset URL on the wrong base fail here instead of working by accident:
+    /// an asset query to the grid's own base is no asset, and a session's
+    /// capability path on the asset host is not found.
+    #[tokio::test]
+    async fn asset_capabilities_have_a_namespace_of_their_own() -> Result<(), TestError> {
+        const ASSET_CAPS: [&str; 4] = ["GetTexture", "GetMesh", "GetMesh2", "ViewerAsset"];
+        let authority = |url: &str| -> Result<String, TestError> {
+            let url: reqwest::Url = url.parse()?;
+            Ok(format!(
+                "{}:{}",
+                url.host_str().ok_or("a capability URL names no host")?,
+                url.port_or_known_default().ok_or("no port")?
+            ))
+        };
+        let texture = format!("texture_id={}", sl_proto::DEFAULT_PRIM_TEXTURE);
+        let http = reqwest::Client::new();
+        for flavour in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let grid = FakeGridBuilder::new()
+                .account(AccountConfig::new("Test", "User", "password"))
+                .region(RegionConfig::default())
+                .imitates(flavour)
+                .event_queue_hold(Duration::from_millis(200))
+                .start()
+                .await?;
+            let text = post_login(
+                &grid,
+                "text/xml",
+                build_login_request(&login_request("password")),
+            )
+            .await?;
+            let LoginResponse::Success(success) = parse_login_response(&text)? else {
+                return Err("expected a successful login".into());
+            };
+            let mut names = ASSET_CAPS.to_vec();
+            names.push("EventQueueGet");
+            let reply = http
+                .post(success.seed_capability.clone())
+                .header("Content-Type", "application/llsd+xml")
+                .body(build_seed_request(&names))
+                .send()
+                .await?;
+            let granted = parse_seed_response(&reply.text().await?)?;
+            let cap = |name: &str| -> Result<String, TestError> {
+                Ok(granted
+                    .get(name)
+                    .ok_or_else(|| format!("{name} was not granted"))?
+                    .to_string())
+            };
+            let event_queue = cap("EventQueueGet")?;
+            let simulator = authority(&event_queue)?;
+            let get_texture = cap("GetTexture")?;
+
+            // Each capability serves the asset where it says it is, under
+            // the query key that capability reads.
+            for name in ASSET_CAPS {
+                let query = if name.starts_with("GetMesh") {
+                    texture.replacen("texture_id", "mesh_id", 1)
+                } else {
+                    texture.clone()
+                };
+                let status = http
+                    .get(format!("{}/?{query}", cap(name)?))
+                    .send()
+                    .await?
+                    .status()
+                    .as_u16();
+                assert_eq!(status, 200, "{flavour:?}: {name}");
+            }
+
+            match flavour {
+                ImitatedGrid::SecondLife => {
+                    let assets = authority(&get_texture)?;
+                    assert_ne!(assets, simulator, "the asset host is the simulator's");
+                    for name in ASSET_CAPS {
+                        assert_eq!(cap(name)?, get_texture, "{name} has a URL of its own");
+                    }
+                    assert_eq!(get_texture, format!("http://{assets}"));
+
+                    // The asset query on the grid's own base is no asset.
+                    let wrong_base = http
+                        .get(format!("http://{simulator}/?{texture}"))
+                        .send()
+                        .await?;
+                    assert_ne!(wrong_base.status().as_u16(), 200);
+                    // A session's capability path on the asset host is not
+                    // found, with or without an asset query.
+                    let path = reqwest::Url::parse(&event_queue)?.path().to_owned();
+                    for query in ["", texture.as_str()] {
+                        let status = http
+                            .get(format!("http://{assets}{path}?{query}"))
+                            .send()
+                            .await?
+                            .status()
+                            .as_u16();
+                        assert_eq!(status, 404, "{path}?{query} on the asset host");
+                    }
+                    // Nor is the grid's own root there to log in to.
+                    let login = http
+                        .post(format!("http://{assets}/"))
+                        .header("Content-Type", "text/xml")
+                        .body(build_login_request(&login_request("password")))
+                        .send()
+                        .await?;
+                    assert_ne!(login.status().as_u16(), 200);
+                }
+                ImitatedGrid::OpenSim => {
+                    assert_eq!(authority(&get_texture)?, simulator);
+                    let distinct: std::collections::BTreeSet<String> = ASSET_CAPS
+                        .iter()
+                        .map(|name| cap(name))
+                        .collect::<Result<_, _>>()?;
+                    assert_eq!(distinct.len(), ASSET_CAPS.len());
+                }
+            }
+        }
         Ok(())
     }
 

@@ -9,7 +9,7 @@
 //! [`CapsRequest`], dispatches it against [`AssetCaps`], and maps the
 //! [`CapsResponse`] back to a [`FetchChunk`] / [`FetchError`] using the *same*
 //! status rules the real `ReqwestAssetFetcher` applies (`200` → whole, `206`
-//! → range, `404` → `NotFound`, `416` → empty). Driving the real
+//! → range and the asset's length, `404` → `NotFound`). Driving the real
 //! [`sl_asset::AssetStore`] through it proves the client and server agree on
 //! the wire contract.
 
@@ -95,6 +95,7 @@ mod test {
                 path: &self.path,
                 query: Some(&query),
                 range: range.as_deref(),
+                if_modified_since: None,
                 body: b"",
             };
             let response: CapsResponse = self.caps.dispatch(&self.source, &request);
@@ -105,13 +106,21 @@ mod test {
                 416 => Ok(FetchChunk {
                     bytes: Bytes::new(),
                     whole: false,
+                    total: None,
                 }),
                 // 200 = whole asset; 206 = exactly the requested range.
                 200 => Ok(FetchChunk {
                     bytes: Bytes::from(response.body),
                     whole: true,
+                    total: None,
                 }),
                 206 => Ok(FetchChunk {
+                    // The asset's length, as the `Content-Range` states it.
+                    total: response
+                        .content_range
+                        .as_deref()
+                        .and_then(|range| range.rsplit_once('/'))
+                        .and_then(|(_span, total)| total.parse().ok()),
                     bytes: Bytes::from(response.body),
                     whole: false,
                 }),
@@ -162,8 +171,9 @@ mod test {
 
     /// The shim's `fetch_range` — carrying the same `CapsResponse` →
     /// `FetchChunk` mapping as the real fetcher — reassembles a multi-chunk
-    /// asset over a progressive `206` loop, and reports an out-of-range tail
-    /// as an empty, non-whole chunk.
+    /// asset over a progressive `206` loop, stopping where the answers say the
+    /// asset ends: a range past the end would be answered with the whole
+    /// asset again.
     #[tokio::test]
     async fn progressive_range_loop_reassembles() -> Result<(), TestError> {
         /// The byte span each progressive fetch pulls.
@@ -179,21 +189,27 @@ mod test {
         let asset_ref = AssetRef::new(id, AssetType::Mesh);
 
         let mut reassembled: Vec<u8> = Vec::new();
-        let mut start = 0_usize;
         loop {
+            let start = reassembled.len();
             let chunk = shim
                 .fetch_range(asset_ref, start, start.saturating_add(CHUNK))
                 .await?;
-            if chunk.bytes.is_empty() {
-                // The out-of-range tail: an empty, non-whole chunk ends the
-                // loop.
-                assert!(!chunk.whole);
+            assert!(
+                !chunk.whole,
+                "a range the asset has bytes for is never whole"
+            );
+            assert_eq!(chunk.total, Some(total));
+            reassembled.extend_from_slice(&chunk.bytes);
+            if chunk.total.is_some_and(|total| reassembled.len() >= total) {
                 break;
             }
-            assert!(!chunk.whole, "a ranged response is never whole");
-            reassembled.extend_from_slice(&chunk.bytes);
-            start = start.saturating_add(chunk.bytes.len());
         }
+        // Asking past the end is answered with the whole asset.
+        let past = shim
+            .fetch_range(asset_ref, total, total.saturating_add(CHUNK))
+            .await?;
+        assert!(past.whole);
+        assert_eq!(past.bytes.len(), total);
         assert_eq!(reassembled, bytes);
         Ok(())
     }

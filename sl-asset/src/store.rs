@@ -351,6 +351,7 @@ mod tests {
             Ok(FetchChunk {
                 bytes: self.blob.clone(),
                 whole: true,
+                total: None,
             })
         }
     }

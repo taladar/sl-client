@@ -299,12 +299,21 @@ So this family lives on its own session-free surface, `AssetCaps`
   content type (`image/x-j2c`, `application/vnd.ll.mesh`, or
   `application/octet-stream`). A satisfiable range → `206` with the byte
   slice and a `Content-Range: bytes start-last/total` header
-  (`CapsResponse` grew a `content_range` field). A start past the end of
-  an **existing** asset → `416` with `Content-Range: bytes */total`; a
-  missing asset → `404`; a non-`GET` → `405`. The `416`-on-overrun is
-  HTTP-correct and the client turns it into an empty chunk and stops;
-  OpenSim instead serves the whole asset there to dodge a reference-viewer
-  416 bug, but our client handles `416` cleanly so we stay spec-correct.
+  (`CapsResponse` grew a `content_range` field). A missing asset → `404`.
+- **Where the grids part.** An `AssetHttpPolicy` (`AssetCaps::with_http_policy`,
+  `SimCaps::with_asset_http_policy`) says how a `Range` header is read, what
+  a request that names no asset is answered with, whether a `POST` is
+  answered and whether an answer states an entity tag and a date. Both
+  grids' answers are measured in
+  [Grid Behaviour ▸ Assets](../gridspec/assets.md). One thing they agree on
+  is not what HTTP says, and the surface does it whatever the policy: a
+  range that **starts at or past the end** of an existing asset is answered
+  `200` with the whole asset, never `416`. The client learns where an asset
+  ends from a `206`'s `Content-Range` instead (`FetchChunk::total`).
+- **Second Life's layout.** `AssetCaps::at_the_root` is the surface as its
+  asset host has it: one URL for all four capabilities, the bare base, with
+  no token — a request is told apart by its query key alone.
+  `SimCaps::with_asset_surface` grants it in place of the minted one.
 
 `SimCaps` composes one `AssetCaps` purely so a single seed grant
 advertises the asset caps alongside the sim caps

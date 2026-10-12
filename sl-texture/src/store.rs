@@ -511,7 +511,13 @@ impl TextureStore {
         grown.extend_from_slice(&chunk.bytes);
         let grown = Bytes::from(grown);
         self.persist(entry.id, &grown);
-        store_codestream(entry, grown, false);
+        // The answer says how long the asset is: with that many bytes in hand
+        // the codestream is whole. Without this the grow loop asks once more,
+        // for a range that starts at the asset's end — which both live grids
+        // answer with the whole asset, a second download of every
+        // full-resolution texture.
+        let complete = chunk.total.is_some_and(|total| grown.len() >= total);
+        store_codestream(entry, grown, complete);
         Ok(true)
     }
 
@@ -680,6 +686,7 @@ mod tests {
             Ok(FetchChunk {
                 bytes: self.blob.clone(),
                 whole: true,
+                total: None,
             })
         }
     }
@@ -796,6 +803,7 @@ mod tests {
                 return Ok(FetchChunk {
                     bytes: self.full.clone(),
                     whole: true,
+                    total: None,
                 });
             }
             let start = start.min(end);
@@ -803,6 +811,7 @@ mod tests {
             Ok(FetchChunk {
                 bytes: Bytes::copy_from_slice(tail),
                 whole: false,
+                total: None,
             })
         }
     }
@@ -854,6 +863,95 @@ mod tests {
             .unwrap_or_else(|| unreachable!("a decoded image is present"));
         assert_eq!(image.discard_level, target);
         assert_eq!((image.width, image.height), (side / 2, side / 2));
+    }
+
+    /// A fetcher that answers as both live grids' asset hosts do: a range the
+    /// asset has bytes for with those bytes and the asset's length, a range
+    /// that starts at or past its end with the whole asset. It counts the
+    /// bytes it serves.
+    #[derive(Debug)]
+    struct GridLikeFetcher {
+        /// The complete encoded `.j2c` codestream.
+        full: Bytes,
+        /// How many bytes were served.
+        served: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl TextureFetcher for GridLikeFetcher {
+        async fn fetch_range(
+            &self,
+            _id: TextureKey,
+            _source: &RemoteTextureSource,
+            start: usize,
+            end: usize,
+        ) -> Result<FetchChunk, FetchError> {
+            let total = self.full.len();
+            let chunk = if start >= total {
+                FetchChunk {
+                    bytes: self.full.clone(),
+                    whole: true,
+                    total: None,
+                }
+            } else {
+                FetchChunk {
+                    bytes: self.full.slice(start..end.min(total)),
+                    whole: false,
+                    total: Some(total),
+                }
+            };
+            let _previous = self.served.fetch_add(chunk.bytes.len(), Ordering::SeqCst);
+            Ok(chunk)
+        }
+    }
+
+    /// A full-resolution texture is downloaded once. The store asks for more
+    /// bytes than the asset has (it knows only an upper bound), and used to
+    /// follow the answer with a request for the bytes after the asset's end —
+    /// which a grid answers with the whole asset again.
+    #[test]
+    #[cfg_attr(
+        not(feature = "encode"),
+        ignore = "requires the `encode` feature to build a real codestream"
+    )]
+    fn a_full_resolution_texture_is_downloaded_once() {
+        use crate::decode::DecodedImage;
+        let side: u32 = 128;
+        let pixels: Vec<u8> = (0..side.saturating_mul(side))
+            .flat_map(|index| {
+                let x = index % side;
+                let y = index / side;
+                let r = u8::try_from((x.wrapping_mul(7) ^ y.wrapping_mul(13)) & 0xFF).unwrap_or(0);
+                let g = u8::try_from((x.wrapping_mul(3) ^ y.wrapping_mul(29)) & 0xFF).unwrap_or(0);
+                [r, g, 0, 255]
+            })
+            .collect();
+        let source =
+            DecodedImage::new(side, side, 4, DiscardLevel::FULL, Bytes::from(pixels), None);
+        let full = Bytes::from(
+            crate::encode::encode_j2c(&source)
+                .unwrap_or_else(|_error| unreachable!("the `encode` feature builds a codestream")),
+        );
+        let total = full.len();
+        let served = Arc::new(AtomicUsize::new(0));
+        let fetcher: Arc<dyn TextureFetcher> = Arc::new(GridLikeFetcher {
+            full,
+            served: Arc::clone(&served),
+        });
+        let store = TextureStore::new(fetcher, None, crate::disk::CacheLimits::default())
+            .unwrap_or_else(|_error| unreachable!("no disk cache cannot fail"));
+        let id = TextureKey::from(sl_proto::Uuid::from_u128(12));
+        let entry = pollster::block_on(async {
+            store
+                .get(id, DiscardLevel::FULL, RemoteTextureSource::Default)
+                .await
+                .unwrap_or_else(|_error| unreachable!("the texture decodes"))
+        });
+        let image = entry
+            .image()
+            .unwrap_or_else(|| unreachable!("a decoded image is present"));
+        assert_eq!((image.width, image.height), (side, side));
+        assert_eq!(served.load(Ordering::SeqCst), total);
     }
 
     #[test]

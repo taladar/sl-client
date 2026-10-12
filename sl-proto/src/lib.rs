@@ -32,7 +32,7 @@ mod types;
 mod unacked;
 
 pub use appearance::{MAX_FACES, decode_texture_entry, encode_texture_entry};
-pub use asset_caps::{AssetCapHandler, AssetCaps};
+pub use asset_caps::{AssetCapHandler, AssetCaps, AssetHttpPolicy, RangeReading};
 pub use asset_keys::{AnimationKey, AssetKey};
 pub use asset_source::{AssetSource, InMemoryAssetSource};
 pub use bookkeeping_ids::{

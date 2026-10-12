@@ -156,7 +156,7 @@ impl GridTest for MeshFetchHttp {
 /// returning its [`MeshKey`], or `None` if none appears within the window. A
 /// single [`wait_for`](Session::wait_for) drains events until the predicate
 /// matches or the window elapses.
-async fn scan_for_mesh(session: &mut Session) -> Result<Option<MeshKey>, TestFailure> {
+pub(crate) async fn scan_for_mesh(session: &mut Session) -> Result<Option<MeshKey>, TestFailure> {
     let found = session
         .wait_for(MESH_SCAN_WINDOW, |event| match event {
             Event::ObjectAdded(object) | Event::ObjectUpdated(object) => object

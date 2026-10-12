@@ -419,6 +419,10 @@ pub struct CapsRequest<'a> {
     /// `bytes=0-1023`), if the client sent one. Consumed only by the
     /// asset-delivery caps' partial-content path.
     pub range: Option<&'a str>,
+    /// The raw `If-Modified-Since` header value, if the client sent one.
+    /// Consumed only by the asset-delivery caps, where the policy has them
+    /// state a date to send back.
+    pub if_modified_since: Option<&'a str>,
     /// The request body (LLSD-XML for seed and event-queue requests).
     pub body: &'a [u8],
 }
@@ -431,9 +435,13 @@ pub struct CapsResponse {
     /// The `Content-Type` header value.
     pub content_type: &'static str,
     /// The `Content-Range` header value without the header name (e.g.
-    /// `bytes 0-1023/4096`), set on the asset-delivery caps' `206` and `416`
-    /// responses and `None` otherwise.
+    /// `bytes 0-1023/4096`), set on the asset-delivery caps' `206` responses and
+    /// `None` otherwise.
     pub content_range: Option<String>,
+    /// Further headers, by lowercase name: what the asset-delivery caps state
+    /// for a cache (`accept-ranges`, `etag`, `last-modified`). Empty
+    /// otherwise.
+    pub headers: Vec<(&'static str, String)>,
     /// The response body.
     pub body: Vec<u8>,
 }
@@ -445,6 +453,7 @@ impl CapsResponse {
             status: 200,
             content_type: LLSD_XML_CONTENT_TYPE,
             content_range: None,
+            headers: Vec::new(),
             body: body.into_bytes(),
         }
     }
@@ -455,6 +464,7 @@ impl CapsResponse {
             status,
             content_type: TEXT_PLAIN_CONTENT_TYPE,
             content_range: None,
+            headers: Vec::new(),
             body: Vec::new(),
         }
     }
@@ -503,6 +513,7 @@ impl CapsResponse {
             status: 200,
             content_type,
             content_range: None,
+            headers: Vec::new(),
             body,
         }
     }
@@ -521,22 +532,35 @@ impl CapsResponse {
             status: 206,
             content_type,
             content_range: Some(format!("bytes {start}-{last}/{total}")),
+            headers: Vec::new(),
             body,
         }
     }
 
-    /// `416 Range Not Satisfiable` with `Content-Range: bytes */{total}` — a
-    /// range whose start is past the end of an *existing* asset. HTTP-correct;
-    /// the client turns it into an empty chunk and stops. (OpenSim instead
-    /// serves the whole asset here to dodge a reference-viewer 416 bug; our
-    /// client handles 416 cleanly, so we stay spec-correct.)
-    pub(crate) fn range_not_satisfiable(total: usize) -> Self {
+    /// `206 Partial Content` carrying several ranges as one multipart `body`
+    /// — under the asset's own media type and with no `Content-Range` of its
+    /// own, which is how Second Life's asset hosts answer several.
+    pub(crate) const fn asset_multipart(content_type: &'static str, body: Vec<u8>) -> Self {
         Self {
-            status: 416,
-            content_type: TEXT_PLAIN_CONTENT_TYPE,
-            content_range: Some(format!("bytes */{total}")),
-            body: Vec::new(),
+            status: 206,
+            content_type,
+            content_range: None,
+            headers: Vec::new(),
+            body,
         }
+    }
+
+    /// A body-less response with `status`, for the asset-delivery caps'
+    /// policy-chosen answers.
+    pub(crate) const fn status(status: u16) -> Self {
+        Self::empty(status)
+    }
+
+    /// The same response stating `headers` too.
+    #[must_use]
+    pub(crate) fn with_headers(mut self, headers: Vec<(&'static str, String)>) -> Self {
+        self.headers = headers;
+        self
     }
 }
 
@@ -632,6 +656,23 @@ impl SimCaps {
             assets,
             event_queue_done: false,
         }
+    }
+
+    /// The same surface granting `assets` as its asset-delivery capabilities
+    /// instead of the ones it minted — a surface another process serves, or
+    /// one laid out [at the root](AssetCaps::at_the_root) of an asset host.
+    #[must_use]
+    pub fn with_asset_surface(mut self, assets: AssetCaps) -> Self {
+        self.assets = assets;
+        self
+    }
+
+    /// The same surface with its asset-delivery capabilities answering as
+    /// `policy` says — which live grid's HTTP they speak.
+    #[must_use]
+    pub fn with_asset_http_policy(mut self, policy: crate::AssetHttpPolicy) -> Self {
+        self.assets = self.assets.with_http_policy(policy);
+        self
     }
 
     /// Creates the CAPS surface with the asset caps minted under a **separate**

@@ -20,6 +20,11 @@ pub struct FetchChunk {
     /// Whether `bytes` is the whole asset (a `200` response), so the store should
     /// replace rather than append and mark the fetch complete.
     pub whole: bool,
+    /// The whole asset's length, where the answer stated one (a `206`'s
+    /// `Content-Range: bytes 0-599/4096`). A store that has that many bytes
+    /// has the asset, and must not ask for more: both live grids answer a
+    /// range that starts at the end of an asset with the whole asset again.
+    pub total: Option<usize>,
 }
 
 /// An asset fetch failure.
