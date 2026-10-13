@@ -1,4 +1,4 @@
-# Local chat
+# Local chat and instant messages
 
 A viewer's `ChatFromViewer` and a script's `llSay` family come back as the
 same message, `ChatFromSimulator`: a type, a source and its kind, an owner, a
@@ -140,10 +140,198 @@ listener stands in.
 
 - A script's run-time error on the debug channel
   (`gridspec-lsl-runtime-errors`), a line from an attachment or a child
-  prim, `llInstantMessage`, and what a script's listen hears
-  (`gridspec-lsl-comms`).
+  prim, and what a script's listen hears (`gridspec-lsl-comms`).
 - Where exactly between 18.7 m and 36.5 m a debug line stops on Second Life.
   The fake grid takes it to be a say's 20 m.
 - A parcel that hides its avatars (`SeeAVs` off), which OpenSim's source
   keeps their chat inside of, and a muted speaker (`gridspec-mute-list`).
 - Which circuit Second Life sends a neighbour's line down.
+
+## Instant messages
+
+A viewer's `ImprovedInstantMessage` and a script's `llInstantMessage` reach
+their avatar as the same message: a dialog, who it is from and under what
+name, an id, a region and a place, whether it was kept while the avatar was
+away, a time, an estate, a bucket and a text.
+
+Measured on 2026-10-13 by the conformance case `instant-messages`: three
+runs on aditi (Mauve) and four on the local OpenSim, the last of each held
+to 95 answers. Avatar **A** writes and owns a probe prim; avatar **B** is
+written to, mutes A for a while, and logs out three times to be written to
+while away. No answer changed between two runs. The fake grid passes no
+instant message on yet (`server-fake-grid-im-relay`), so the table has no
+column for it.
+
+### What a message says of itself
+
+A viewer's ordinary message (dialog 0) as the other avatar is sent it. The
+viewer wrote the session id of the two avatars (their ids exclusive-ored)
+as the id, its avatar's name, and nothing else.
+
+| field | Second Life | OpenSim |
+| --- | --- | --- |
+| from, name, to, id, text (**held**) | as sent | as sent |
+| region (**held**) | an id | an id |
+| place (**held**) | where the sender stands | zero |
+| kept flag (**held**) | not kept | not kept |
+| time (**held**) | none | the time it was sent |
+| estate (**held**) | 1 | 1 |
+| bucket (**held**) | one zero byte | empty |
+
+What a viewer may claim (**held**): a message sent with a made-up name, id,
+region, place, time, estate and bucket.
+
+| | Second Life | OpenSim |
+| --- | --- | --- |
+| name | **rewritten** to the sender's | as sent |
+| id | **rewritten** to the session id of the two | as sent |
+| region, estate | rewritten to the sender's | rewritten to the sender's |
+| place | rewritten to where the sender stands | as sent |
+| time | **as sent** — the one thing Second Life takes a viewer's word for | rewritten to now |
+| bucket | rewritten to one zero byte | as sent |
+| a message flagged as kept | passed on at once, not flagged | the same |
+
+A viewer on OpenSim can therefore sign a message with any name: what says
+who wrote it is the agent id alone, on both grids.
+
+### What is passed on
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| the sender is told (**held**) | nothing | nothing |
+| a message without text, with a line break, a tab and spaces at the end (**held**) | as sent | as sent |
+| a long text (**held**) | the first **1023 bytes**: 1023 arrive whole, 1024, 1100, 2000 and 3000 are cut | the same |
+| typing start and stop (**held**) | passed on, id the session id; the typist is told nothing | the same |
+| an automatic reply, dialog 20 (**held**) | passed on as dialog 20 — from **no region, place zero, estate 0** | passed on as dialog 20, stated like an ordinary message |
+| a message to oneself (**held**) | arrives, its id the avatar's own (an id exclusive-ored with itself is nil; both grids state the avatar instead) | the same |
+| a message to an id that is nobody's (**held**) | "User not online - message will be stored and delivered later." | "User is not logged in. Message saved." |
+| a message to no id (**held**) | nothing | nothing |
+| dialog 1 (message box) and a dialog that is none (60) from a viewer (**held**) | dropped | dropped |
+| dialog 19 (a script's message) from a viewer (**held**) | **dropped** | **passed on** as dialog 19 from the avatar |
+| twenty messages in a second | **fourteen** arrive, in order; the sender is then told, by an ordinary message from no id signed "Second Life": "You have sent out excessive instant messages, and your ability to send IMs has been temporarily suspended. Try again later." Its next message, most of a minute later, was passed on (the notice **held**, the count not) | all twenty, in order (**held**) |
+
+### A script's message
+
+`llInstantMessage` from a prim A owns, to B. Dialog 19.
+
+| field | Second Life | OpenSim |
+| --- | --- | --- |
+| from (**held**) | the **owner's** agent id | the same |
+| name (**held**) | the prim's name | the same |
+| id (**held**) | the prim | the same |
+| region (**held**) | an id | an id |
+| place (**held**) | zero | where the prim stands |
+| time (**held**) | none | the time it was sent |
+| estate (**held**) | 1 | **101** (the viewer's message there says 1) |
+| bucket (**held**) | `Region/x/y/z`, where the prim stands | the same |
+| a text of 1500 bytes (**held**) | the first 1023 | the first 1023 |
+| a message without text (**held**) | arrives, empty | arrives, empty |
+| to its owner (**held**) | arrives, the same shape | the same |
+| to an id that is nobody's (**held**) | the owner is told nothing | the same |
+
+### A mute
+
+B mutes A (`UpdateMuteListEntry`, by agent), and its mute list then names A
+on both grids.
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| A's message to B (**held**) | **passed on** | **passed on** |
+| A's typing (**held**) | passed on | passed on |
+| the message of a prim A owns (**held**) | passed on | passed on |
+| B's message to the avatar it muted (**held**) | arrives | arrives |
+| A is told it is muted (**held**) | no | no |
+
+Neither grid keeps an instant message from an avatar that muted its sender:
+the mute list is storage, and the filter is the viewer's. Ours drops a muted
+resident's messages and typing notices (`sl-viewer-people`), as the
+reference does.
+
+### To an avatar that is away
+
+B logs out; A sends two messages, a typing notice, an automatic reply, a
+message of 2000 bytes and a script's message.
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| A is told, per ordinary message (**held**) | "User not online - message will be stored and delivered later." | "User is not logged in. Message saved." |
+| … as (**held**) | an ordinary message **from B's id**, signed "Second Life", id the session id, no region, place zero, no time, estate 0, a bucket of one zero byte | the same but signed "System", with the time and an empty bucket |
+| typing (**held**) | told nothing, nothing kept | the same |
+| an automatic reply (**held**) | told nothing; **kept** | **refused**: "Unable to send instant message. User is not logged in.", as dialog 20 from A's own id signed "System"; nothing kept |
+| a script's message (**held**) | the owner is told nothing; kept | the same |
+
+B logs in again.
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| sent without asking, in 25 s (**held**) | nothing | nothing |
+| `RetrieveInstantMessages` (**held**) | everything kept, in the order sent | everything kept, in the order sent |
+| the `ReadOfflineMsgs` capability (**held**) | 200, everything kept, in the order sent, on the first reading | no such capability |
+| asked again, by either road, and by the other road (**held**) | nothing: whichever road was asked first emptied the store for both | nothing |
+
+A kept message over `RetrieveInstantMessages` (**held**) is the message as
+it would have arrived, with these differences:
+
+| field | Second Life | OpenSim |
+| --- | --- | --- |
+| kept flag | kept | kept |
+| time | the time it was **sent** (a message that arrives at once states none) | the time it was sent |
+| the kept automatic reply | from no region, place zero, estate 0, as it arrives live | — |
+| a text of 2000 bytes | the first 1023 | the first 1023 |
+
+The capability answers **an array holding one array of records** — the one
+array form the reference reads (`*contents.beginArray()`). A record
+(**held**):
+
+| key | value |
+| --- | --- |
+| `from_agent_id`, `from_agent_name`, `to_agent_id`, `message`, `dialog`, `from_group` (a boolean) | as over UDP |
+| `transaction-id` | **nil, in every record** |
+| `asset_id` | the id the message carries over UDP: the session id of a typed message or an automatic reply, the prim of a script's message |
+| `offline` | 1 |
+| `timestamp` | the time it was sent |
+| `message_time` | the same as a date and time text |
+| `region_id`, `position` (an array of three), `parent_estate_id`, `estate_id` | the sender's region, place and estate (1) — for the automatic reply too, which over UDP states none of them |
+| `binary_bucket` | as over UDP |
+
+So Second Life's in-world read-back, recorded on 2026-08-12 as "stays
+empty", was never empty: our decoder read the outer array's one element as
+a record and found none. `sl-proto` now reads the nested array, and takes
+`asset_id` for the id of a typed message, an automatic reply and a script's
+message where `transaction-id` is nil, so that both roads hand a client the
+same message. An offer's or an invitation's id is left nil, which is what
+tells a viewer to answer it over the offline capabilities
+(`gridspec-friends-presence`).
+
+### What the viewer does with it
+
+- **The grid's notice is nobody's line.** Both grids sign "your message was
+  kept" with the id of the resident who is away and a name of their own
+  ("Second Life", "System"), from no region and no place. Our viewer used to
+  file that under the resident's conversation *as the resident* and take
+  the signature for their legacy name. It now shows the line in that
+  conversation under the grid's signature, linked to nobody, and learns no
+  name from it; a notice from no id (Second Life's suspension notice) goes
+  with the nearby chat instead of opening a conversation with nobody; and
+  the automatic reply does not answer either (`sl-viewer-people`, unit
+  tests).
+- **The drain stays on `RetrieveInstantMessages`.** It brings everything on
+  both grids, with every id, and empties the capability's store as well, so
+  nothing is shown twice. The capability brings nothing more, and brings an
+  offer without the id needed to answer it over UDP.
+- **Neither grid replays anything unasked**, so there is nothing to
+  de-duplicate.
+
+### Not measured
+
+- An offer kept for an avatar that is away — friendship, inventory, a group
+  invitation — over either road (`gridspec-friends-presence`,
+  `gridspec-inventory-offers`, `gridspec-groups`), and what Second Life
+  sends an accepter.
+- How long Second Life's suspension after a burst lasts, and the rate that
+  triggers it.
+- How many messages a grid keeps for one avatar, and for how long.
+- Messages forwarded as mail: both test accounts have it off.
+- A message between avatars in different regions; a session or a
+  conference (`gridspec-group-chat-and-conference`).
+- A mute by name or of an object (`gridspec-mute-list`).

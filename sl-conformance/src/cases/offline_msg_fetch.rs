@@ -87,9 +87,7 @@ const OFFLINE_FETCH_ATTEMPT: Duration = Duration::from_secs(10);
 /// explicit (the client never auto-requests offline IMs), so this also confirms
 /// the fetch command round-trips.
 ///
-/// `2av`. Green (complete) on OpenSim; **pass (partial) on Second Life**,
-/// where the read-back is not observable in the harness. Per-grid routing in
-/// several places:
+/// `2av`. Per-grid routing in several places:
 ///
 /// - The *stored* confirmation wording differs: OpenSim's V2 module says
 ///   "Message saved.", Second Life says "User not online - message will be
@@ -105,14 +103,13 @@ const OFFLINE_FETCH_ATTEMPT: Duration = Duration::from_secs(10);
 ///   the post-relogin handshake drain captures an early marker replay instead
 ///   of discarding it (recorded via the `auto_delivered_at_login` metric).
 ///
-/// **Second Life read-back gap:** live (2026-08-12) the write half always
-/// round-trips (the sender receives the "will be stored" reply), but the
-/// recipient's in-world `ReadOfflineMsgs` store stays empty across a generous
-/// retry budget — Second Life routes offline IMs to email / gates in-world
-/// retrieval on account state the harness cannot set. So on aditi the case
-/// records the write as proven and marks the read-back a legitimate partial
-/// (`read_back_observed = false`) rather than failing — the mirror of
-/// `avatar-notes`, whose SL read-back is likewise unobservable.
+/// **Second Life's read-back** was recorded on 2026-08-12 as unobservable:
+/// the capability's answer seemed empty across the whole retry budget. It was
+/// never empty — Second Life answers an array holding one array of records,
+/// and the client read the outer array's one element as a record
+/// (`instant-messages`, 2026-10-13, `book/src/gridspec/chat.md`). The client
+/// reads the nested form now; the partial branch below stays for a grid that
+/// really serves nothing back.
 /// [`Session::relogin`](crate::context::Session::relogin) waits out the aditi
 /// login cooldown rather than bypassing it, so the mid-run relogin slows an
 /// aditi run but does not block it.

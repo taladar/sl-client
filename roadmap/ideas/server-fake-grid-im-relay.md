@@ -51,3 +51,38 @@ flavour is measured (`book/src/gridspec/teleport.md`, *Offers and requests*):
   `teleport-request`, `teleport-lure-offline`, and `-rated` on the Second
   Life flavour) join the offline list when the relay exists; each already
   states both grids' answers as `Measured`.
+
+## From gridspec-instant-messages (2026-10-13)
+
+What a relayed instant message must look like per flavour is measured
+(`book/src/gridspec/chat.md`, *Instant messages*; the case
+`instant-messages` already states both grids' answers and joins the offline
+list when the relay exists):
+
+- **What is rewritten.** Second Life's flavour states the sender's name,
+  the session id of the two, the sender's region, estate 1, where the
+  sender stands, a bucket of one zero byte and no time — whatever the viewer
+  wrote, except a time, which it passes on. OpenSim's passes the viewer's
+  name, id, place and bucket on, states the region, estate 1 and the time
+  now, and an empty bucket stays empty.
+- **Dialogs.** 0, typing and 20 are relayed on both; 1 and unknown ones are
+  dropped on both; 19 from a viewer is dropped on Second Life's and relayed
+  on OpenSim's. An automatic reply on Second Life's states no region, place
+  zero and estate 0.
+- **Text** is cut at 1023 bytes on both.
+- **No mute is enforced** on either.
+- **A message to oneself** arrives with the avatar's own id as the id.
+- **Throttle (Second Life's only):** fourteen messages in a second, then a
+  notice from no id signed "Second Life".
+- **Away.** An ordinary message is kept and the sender told — from the
+  recipient's id, signed "Second Life" / "System", texts as in the book. An
+  unknown id is answered the same. Typing is dropped. An automatic reply is
+  kept on Second Life's and refused on OpenSim's (dialog 20 from the
+  sender's own id, signed "System"). A script's message is kept, its owner
+  told nothing.
+- **Reading back.** Nothing unasked. `RetrieveInstantMessages` on both, in
+  the order sent, flagged kept, with the time sent. `ReadOfflineMsgs` on
+  Second Life's only: an array holding one array of records, `transaction-id`
+  nil, the id under `asset_id`, `message_time`, `estate_id`, `offline` 1 —
+  `offline_messages_to_llsd` writes a bare array with the id as
+  `transaction-id` today. Either road empties the store for both.

@@ -53,7 +53,7 @@
 - [Teleport](gridspec/teleport.md)
 - [Movement](gridspec/movement.md)
 - [Avatars](gridspec/avatars.md)
-- [Local chat](gridspec/chat.md)
+- [Local chat and instant messages](gridspec/chat.md)
 - [World map](gridspec/world-map.md)
 - [Terrain, wind and clouds](gridspec/terrain.md)
 - [Objects](gridspec/objects.md)

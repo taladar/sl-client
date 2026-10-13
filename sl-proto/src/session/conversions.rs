@@ -4185,14 +4185,21 @@ fn llsd_port(value: &Llsd) -> Option<u16> {
 }
 
 /// Decodes the `ReadOfflineMsgs` capability reply (#28) into [`InstantMessage`]s.
-/// The body is either an array of per-message maps or a map with a `messages`
-/// array (both forms the viewer accepts); each record mirrors an
-/// `ImprovedInstantMessage` and is marked [`InstantMessage::offline`].
+/// Second Life answers an array whose one element is the array of
+/// per-message maps (measured on aditi, 2026-10-13 —
+/// `book/src/gridspec/chat.md`), which is also the only array form the
+/// reference viewer reads; a bare array of maps and a map with a `messages`
+/// array are read too. Each record mirrors an `ImprovedInstantMessage` and is
+/// marked [`InstantMessage::offline`].
 pub(crate) fn offline_messages_from_llsd(body: &Llsd) -> Vec<InstantMessage> {
-    let records = body
-        .as_array()
-        .or_else(|| body.get("messages").and_then(Llsd::as_array))
-        .unwrap_or_default();
+    let records = match body.as_array() {
+        Some([Llsd::Array(inner)]) => inner.as_slice(),
+        Some(records) => records,
+        None => body
+            .get("messages")
+            .and_then(Llsd::as_array)
+            .unwrap_or_default(),
+    };
     records
         .iter()
         .filter_map(offline_message_from_record)
@@ -4206,13 +4213,24 @@ pub(crate) fn offline_message_from_record(record: &Llsd) -> Option<InstantMessag
         return None;
     }
     let dialog = ImDialog::from_u8(u8::try_from(i32_member(record, "dialog")).unwrap_or(0));
-    // The session/transaction id falls back to the asset id for task messages,
-    // matching the viewer's offline-message processing.
-    let id = record
+    // Second Life states every record's `transaction-id` as nil and puts the
+    // id the same message carries over UDP into `asset_id`: the session id of
+    // a typed message or an automatic reply, the object's id for a script's.
+    // An offer's or an invitation's id stays nil, as the reference viewer
+    // keeps it: that nil is what says the offer must be answered over the
+    // offline capabilities.
+    let transaction_id = record
         .get("transaction-id")
         .or_else(|| record.get("transaction_id"))
-        .or_else(|| record.get("asset_id"))
-        .map_or_else(Uuid::nil, llsd_uuid);
+        .map(llsd_uuid)
+        .filter(|id| !id.is_nil());
+    let id = match (transaction_id, dialog) {
+        (Some(id), _) => id,
+        (None, ImDialog::Message | ImDialog::DoNotDisturbAutoResponse | ImDialog::FromTask) => {
+            record.get("asset_id").map_or_else(Uuid::nil, llsd_uuid)
+        }
+        (None, _) => Uuid::nil(),
+    };
     let binary_bucket = record
         .get("binary_bucket")
         .and_then(Llsd::as_binary)
@@ -9067,6 +9085,36 @@ mod caps_serializer_tests {
             environment_reply_from_llsd(&map(Vec::new())),
             EnvironmentReply::Malformed
         );
+    }
+
+    /// Second Life's answer: an array holding the array of records, each with
+    /// a nil `transaction-id` and the message's id under `asset_id`.
+    #[test]
+    fn offline_messages_as_second_life_sends_them() {
+        let record = |dialog: ImDialog, asset: u128| {
+            super::llsd_map(vec![
+                ("from_agent_id", Llsd::Uuid(Uuid::from_u128(0xa1))),
+                ("to_agent_id", Llsd::Uuid(Uuid::from_u128(0xa2))),
+                ("dialog", Llsd::Integer(i32::from(dialog.to_u8()))),
+                ("transaction-id", Llsd::Uuid(Uuid::nil())),
+                ("asset_id", Llsd::Uuid(Uuid::from_u128(asset))),
+                ("message", Llsd::String("kept".to_owned())),
+            ])
+        };
+        let body = Llsd::Array(vec![Llsd::Array(vec![
+            record(ImDialog::Message, 0xb1),
+            record(ImDialog::FromTask, 0xb2),
+            record(ImDialog::FriendshipOffered, 0xb3),
+        ])]);
+        let ids: Vec<Uuid> = offline_messages_from_llsd(&body)
+            .iter()
+            .map(|im| im.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![Uuid::from_u128(0xb1), Uuid::from_u128(0xb2), Uuid::nil()]
+        );
+        assert!(offline_messages_from_llsd(&Llsd::Array(Vec::new())).is_empty());
     }
 
     #[test]

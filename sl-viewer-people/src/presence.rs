@@ -485,6 +485,7 @@ fn auto_respond_to_ims(
         if im.dialog != ImDialog::Message
             || im.from_group
             || im.offline
+            || crate::conversations::is_grid_notice(im)
             || im.from_agent_id.uuid().is_nil()
             || facts.identity.agent_id == Some(im.from_agent_id)
         {

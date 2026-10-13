@@ -34,3 +34,13 @@ and Firestorm references: `book/src/comms/caps-reference.md`.
 This capability is adopted inside that gridspec task, which measures the
 feature on both grids over both paths, makes the fake grid serve the
 capability per flavour, and checks the viewer. Claim that task.
+
+## From gridspec-instant-messages (2026-10-13)
+
+Measured on aditi (`book/src/gridspec/chat.md`, *Instant messages*):
+`ReadOfflineMsgs` states `transaction-id` as nil in every record, and the
+client's decoder now reads its nested array. `RetrieveInstantMessages`
+brings the same messages on Second Life with every id, and either road
+empties the store for both — so the viewer's drain was left on UDP there,
+and the switch to the capability is this task's, together with the two
+answer commands.

@@ -59,6 +59,13 @@ dialog type. Inventory offers carried in an IM are accepted or declined with
 `Command::AcceptInventoryOffer` / `DeclineInventoryOffer` (see
 [Inventory](inventory.md)).
 
+Messages sent while the avatar was away are kept by the grid until asked
+for: `Command::RetrieveInstantMessages` on both grids, or Second Life's
+`ReadOfflineMsgs` capability (`Command::RequestOfflineMessages`). They
+arrive as ordinary `Event::InstantMessageReceived` with `offline` set. What
+each grid passes on, rewrites, keeps and tells the sender is measured in
+[Grid Behaviour: Instant messages](../gridspec/chat.md#instant-messages).
+
 ## Group and conference sessions
 
 Multi-party chat is modelled as a **session** keyed by an id (the group's id for

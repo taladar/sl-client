@@ -149,6 +149,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::typing_indicator::TypingIndicator),
         Box::new(crate::cases::local_chat::LocalChat),
         Box::new(crate::cases::chat_border::ChatBorder),
+        Box::new(crate::cases::instant_messages::InstantMessages),
         Box::new(crate::cases::im_1to1::Im1to1),
         Box::new(crate::cases::im_typing::ImTyping),
         Box::new(crate::cases::group_session_message::GroupSessionMessage),

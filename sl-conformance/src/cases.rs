@@ -57,6 +57,7 @@ pub mod group_roster;
 pub mod group_session_message;
 pub mod im_1to1;
 pub mod im_typing;
+pub mod instant_messages;
 pub mod inventory_cache_skip;
 pub mod inventory_fetch;
 pub mod inventory_item_ops;

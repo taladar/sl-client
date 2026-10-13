@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 354 |
+| ready | 353 |
 | blocked | 103 |
 | in-progress | 20 |
 | bugs | 39 |
-| done | 1359 |
+| done | 1360 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2061** |
@@ -268,7 +268,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-avatar-presence` (done), `gridspec-animations`)
 - [`server-fake-grid-im-relay`](ideas/server-fake-grid-im-relay.md) — Fake grid
   — relay IMs and offers between its sessions (blocked by
-  `gridspec-teleport-lures` (done), `gridspec-instant-messages`)
+  `gridspec-teleport-lures` (done), `gridspec-instant-messages` (done))
 - [`server-fake-grid-teleport-edges`](ideas/server-fake-grid-teleport-edges.md)
   — Fake grid — the teleport edges each grid was measured handling and the fake
   grid does not model
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (354)
+## ready (353)
 
 ### protocol
 
@@ -1154,8 +1154,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Group chat sessions and ad-hoc conferences on each grid
 - [`gridspec-groups`](ready/gridspec-groups.md) — Groups: membership, roles,
   notices, invitations and accounting on each grid
-- [`gridspec-instant-messages`](ready/gridspec-instant-messages.md) — Instant
-  messages, typing, busy replies and offline storage on each grid
 - [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
   skeleton, fetch caps, AIS3, the library and cache versions on each grid
 - [`gridspec-inventory-mutations`](ready/gridspec-inventory-mutations.md) —
@@ -1678,7 +1676,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1359)
+## done (1360)
 
 ### protocol
 
@@ -4635,6 +4633,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-infra-fake-flavour-conformance`](done/gridspec-infra-fake-flavour-conformance.md)
   — Run every conformance case against both fake-grid flavours, beside the live
   grids
+- [`gridspec-instant-messages`](done/gridspec-instant-messages.md) — Instant
+  messages, typing, busy replies and offline storage on each grid
 - [`gridspec-local-chat`](done/gridspec-local-chat.md) — Local chat and typing
   on each grid
 - [`gridspec-login`](done/gridspec-login.md) — Login response fields, the

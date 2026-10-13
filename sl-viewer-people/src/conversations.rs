@@ -597,6 +597,21 @@ impl ConversationModel {
         self.clear_typing(key, speaker_id);
     }
 
+    /// A line of the grid's own for `key`, under the name the grid signed it
+    /// with: it links to nobody, and clears nobody's typing flag.
+    fn push_notice(&mut self, key: ConversationKey, signed: &str, body: &str) {
+        self.push_line(
+            key,
+            TranscriptLine {
+                own: false,
+                speaker: signed.to_owned(),
+                speaker_link: SpeakerLink::None,
+                body: body.to_owned(),
+                chat_type: None,
+            },
+        );
+    }
+
     /// A remote nearby-chat line, whose speaker is an avatar or an in-world object
     /// (from the chat message's [`ChatSource`]) — so the sender name links to the
     /// right profile / inspector. It clears no typing flag (a nearby speaker's
@@ -1969,6 +1984,26 @@ fn ingest_conversation_notices(
     }
 }
 
+/// The names the grids sign their own instant messages with: Second Life's
+/// (the reference's `SYSTEM_FROM`) and OpenSim's.
+const GRID_NOTICE_NAMES: [&str; 2] = ["Second Life", "System"];
+
+/// Whether `im` is the grid's own notice rather than a resident's line.
+///
+/// Both grids tell the sender of a message to somebody who is away that it
+/// was kept, as an ordinary instant message **from the id of the resident
+/// who is away**, signed "Second Life" or "System", from no region and no
+/// place (`book/src/gridspec/chat.md`, *Instant messages*). The reference
+/// tells such a line by the same three things (`chat_from_system`). A
+/// resident's own message states a region or a place on both grids.
+pub(crate) fn is_grid_notice(im: &sl_client_bevy::InstantMessage) -> bool {
+    GRID_NOTICE_NAMES.contains(&im.from_agent_name.as_str())
+        && im.region_id.is_none()
+        && im.position.x() == 0.0
+        && im.position.y() == 0.0
+        && im.position.z() == 0.0
+}
+
 /// Whether the resident `id` / `name` names has their **text chat** blocked —
 /// the reference's `LLMuteList::isMuted(id, name, LLMute::flagTextChat)`, the
 /// one question every conversation surface asks of the mute list.
@@ -2115,13 +2150,27 @@ pub(crate) fn ingest_conversation_events(
                     && !im.from_group
                     && !text_muted(mutes, im.from_agent_id.uuid(), &im.from_agent_name) =>
             {
-                avatars.note_legacy_name(im.from_agent_id, &im.from_agent_name);
-                model.push_remote(
-                    ConversationKey::Direct(im.from_agent_id),
-                    im.from_agent_id,
-                    &im.from_agent_name,
-                    &im.message,
-                );
+                if is_grid_notice(im) {
+                    // The grid's own word — "User not online - message will be
+                    // stored and delivered later." — comes signed with the
+                    // id of the resident it is about, or with no id at all
+                    // (Second Life's "You have sent out excessive instant
+                    // messages"). It is nobody's line and nobody's name.
+                    let key = if im.from_agent_id.uuid().is_nil() {
+                        ConversationKey::Nearby
+                    } else {
+                        ConversationKey::Direct(im.from_agent_id)
+                    };
+                    model.push_notice(key, &im.from_agent_name, &im.message);
+                } else {
+                    avatars.note_legacy_name(im.from_agent_id, &im.from_agent_name);
+                    model.push_remote(
+                        ConversationKey::Direct(im.from_agent_id),
+                        im.from_agent_id,
+                        &im.from_agent_name,
+                        &im.message,
+                    );
+                }
             }
             SlSessionEvent::ImTyping {
                 from_agent_id,
@@ -4169,6 +4218,85 @@ mod tests {
             )
             .is_some(),
             "the conference line opens a tab"
+        );
+    }
+
+    /// The grid's "your message was kept" comes signed "Second Life" (or
+    /// "System" on OpenSim) from the id of the resident who is away, and its
+    /// throttle notice from no id at all: either is shown where it belongs,
+    /// links to nobody, and never becomes that resident's name.
+    #[test]
+    fn a_grid_notice_is_nobodys_line_and_nobodys_name() {
+        let away = AgentKey::from(Uuid::from_u128(0xA3A7));
+        let notice = |from: AgentKey, signed: &str, body: &str| {
+            SlSessionEvent::InstantMessageReceived(Box::new(InstantMessage {
+                from_agent_id: from,
+                from_agent_name: signed.to_owned(),
+                to_agent_id: AgentKey::from(Uuid::from_u128(1)),
+                dialog: ImDialog::Message,
+                from_group: false,
+                region_id: None,
+                position: RegionCoordinates::new(0.0, 0.0, 0.0),
+                offline: false,
+                timestamp: None,
+                id: Uuid::from_u128(0xDEF),
+                parent_estate_id: 0,
+                message: body.to_owned(),
+                binary_bucket: vec![0],
+            }))
+        };
+        let mut app = ingest_app(&[]);
+        ingest(
+            &mut app,
+            notice(
+                away,
+                "Second Life",
+                "User not online - message will be stored and delivered later.",
+            ),
+        );
+        ingest(
+            &mut app,
+            notice(away, "System", "User is not logged in. Message saved."),
+        );
+        ingest(
+            &mut app,
+            notice(
+                AgentKey::from(Uuid::nil()),
+                "Second Life",
+                "You have sent out excessive instant messages.",
+            ),
+        );
+        let model = app.world().resource::<ConversationModel>();
+        let direct: Vec<(&str, bool)> = get(model, ConversationKey::Direct(away))
+            .map(|entry| {
+                entry
+                    .lines
+                    .iter()
+                    .map(|line| {
+                        (
+                            line.speaker.as_str(),
+                            matches!(line.speaker_link, SpeakerLink::None),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(direct, vec![("Second Life", true), ("System", true)]);
+        assert_eq!(
+            get(model, ConversationKey::Nearby).map(|entry| entry.lines.len()),
+            Some(1),
+            "a notice from no id is shown with the nearby chat"
+        );
+        assert!(
+            get(model, ConversationKey::Direct(AgentKey::from(Uuid::nil()))).is_none(),
+            "a notice from no id opens no conversation"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::world_api::AvatarState>()
+                .name_of(away),
+            None,
+            "the grid's signature is not the resident's name"
         );
     }
 
