@@ -46,3 +46,13 @@ capability; without it, say "postcards are not available in this region".
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Protocol half done (2026-10-13)
+
+[[gridspec-asset-upload]] adopted the capability:
+`Command::SendPostcardViaCaps { postcard, image }` → `Event::PostcardSent` /
+`Event::PostcardFailed` in both runtimes, served by the Second-Life-flavoured
+fake grid (which hands the card to its driver and mails nothing). Aditi's
+first answer is measured (`book/src/gridspec/assets.md` § Uploads); its
+second is not — it sends a real e-mail, so the conformance case sends one
+only when `fixtures.aditi.toml` names a `postcard_to`.

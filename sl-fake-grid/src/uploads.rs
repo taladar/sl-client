@@ -189,6 +189,14 @@ pub(crate) fn answer_upload(
             store(assets, *asset_id, data.clone());
             true
         }
+        ServerEvent::InventoryThumbnailUploaded {
+            new_asset, data, ..
+        } => {
+            // The image only: the inventory this grid keeps has no place for
+            // a thumbnail yet, so the target is not told of it.
+            store(assets, *new_asset, data.clone());
+            true
+        }
         ServerEvent::UpdateAgentInventoryItems {
             items,
             transaction_id,

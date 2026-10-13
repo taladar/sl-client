@@ -591,6 +591,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::InventoryAssetSaved { .. }
             | Event::AssetUploadFailed { .. }
             | Event::ScriptUploaded { .. }
+            | Event::MeshUploadFlag(..)
+            | Event::InventoryThumbnailUploaded { .. }
+            | Event::InventoryThumbnailUploadFailed { .. }
+            | Event::PostcardSent
+            | Event::PostcardFailed { .. }
             | Event::VoiceAccountProvisioned(_)
             | Event::ParcelVoiceInfo(_)
             | Event::RegionChanged { .. }

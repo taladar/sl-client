@@ -38,6 +38,7 @@ mod session;
 pub(crate) mod sky_presets;
 mod sound;
 mod terrain;
+mod upload;
 mod voice;
 
 /// Build an [`OwnerKey`](sl_types::key::OwnerKey) from the wire's raw owner UUID
@@ -476,7 +477,9 @@ pub use avatar_profile::{
     ClassifiedInfo, ClassifiedUpdate, DirectoryVisibility, Friend, FriendRights, InterestsUpdate,
     LoginAccount, PickInfo, PickKey, PickUpdate, ProfileUpdate, UserInfo,
 };
-pub use benefits::{AccountBenefits, MIN_2K_TEXTURE_AREA, packages_from_llsd};
+pub use benefits::{
+    AccountBenefits, MIN_2K_TEXTURE_AREA, UploadClass, expected_upload_cost, packages_from_llsd,
+};
 pub use chat::{
     ChatAudible, ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume,
     GroupInvitationReceived, GroupNoticeItem, GroupNoticeReceived, ImDialog, InstantMessage,
@@ -583,6 +586,10 @@ pub use sound::{
 pub use terrain::{
     FlatPatches, LayerEncoding, LayerPacking, TerrainLayerBatch, TerrainLayerType, TerrainPatch,
     TerrainPatchHeader,
+};
+pub use upload::{
+    MeshUploadStatus, ThumbnailTarget, build_postcard_request, build_thumbnail_upload_request,
+    parse_postcard_request, parse_thumbnail_upload_request,
 };
 pub use voice::RequiredVoiceVersion;
 

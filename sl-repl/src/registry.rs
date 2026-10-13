@@ -87,9 +87,9 @@ use sl_proto::{
     RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId,
     ScopedParcelId, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
     SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey,
-    TerraformArea, TextureEntry, TextureFace, Throttle, TimestampFormat, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    TerraformArea, TextureEntry, TextureFace, Throttle, ThumbnailTarget, TimestampFormat,
+    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -5580,6 +5580,60 @@ fn all_specs() -> Vec<CommandSpec> {
                         0,
                     )?,
                     data: args.bytes_or_empty(ctx, "data", 109)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_mesh_upload_flag",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestMeshUploadFlag),
+        },
+        CommandSpec {
+            name: "upload_inventory_thumbnail",
+            usage: "[item_id=<id>] [category_id=<id>] [task_id=<id>] data=<hex>",
+            build: |args, ctx| {
+                let item = args.opt_uuid(ctx, "item_id", 100)?.map(InventoryKey::from);
+                let task = args.opt_uuid(ctx, "task_id", 102)?.map(ObjectKey::from);
+                let folder = args
+                    .opt_uuid(ctx, "category_id", 101)?
+                    .map(InventoryFolderKey::from);
+                let target = match (item, task, folder) {
+                    (Some(item), Some(task), _) => ThumbnailTarget::TaskItem { task, item },
+                    (Some(item), None, _) => ThumbnailTarget::Item(item),
+                    (None, _, Some(folder)) => ThumbnailTarget::Folder(folder),
+                    (None, _, None) => {
+                        return Err(ReplError::MissingArg {
+                            command: "upload_inventory_thumbnail".to_owned(),
+                            field: "item_id or category_id".to_owned(),
+                        });
+                    }
+                };
+                Ok(Command::UploadInventoryThumbnail {
+                    target,
+                    data: args.bytes_or_empty(ctx, "data", 103)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "send_postcard_via_caps",
+            usage: "<to> [subject] [message] [name] [from] [position=<x,y,z>] image=<hex>",
+            build: |args, ctx| {
+                let (pos_x, pos_y, pos_z) = args
+                    .opt_str(ctx, "position", 5)?
+                    .map(|value| parse_global("position", &value))
+                    .transpose()?
+                    .unwrap_or((0.0, 0.0, 0.0));
+                Ok(Command::SendPostcardViaCaps {
+                    postcard: Box::new(Postcard {
+                        pos_global: GlobalCoordinates::new(pos_x, pos_y, pos_z),
+                        to: args.req_str(ctx, "to", 0)?,
+                        from: args.opt_str(ctx, "from", 4)?.unwrap_or_default(),
+                        name: args.opt_str(ctx, "name", 3)?.unwrap_or_default(),
+                        subject: args.opt_str(ctx, "subject", 1)?.unwrap_or_default(),
+                        message: args.opt_str(ctx, "message", 2)?.unwrap_or_default(),
+                        ..Postcard::default()
+                    }),
+                    image: args.bytes_or_empty(ctx, "image", 100)?,
                 })
             },
         },

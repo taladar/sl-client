@@ -17,16 +17,17 @@ use super::{
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor, InventoryFolder,
     InventoryItem, InventoryItemMove, ItemInfo, Kick, LandStatItem, LandStatReportType,
     LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo,
-    MapRequestFlags, Maturity, MeanCollision, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo,
-    NeighborRetirement, Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily,
-    ObjectStreamBatch, OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
-    ParcelObjectOwnersPart, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation,
-    RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion, ScriptCompileError,
-    ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissionState,
-    ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags,
-    SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
-    TerrainLayerBatch, TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
+    MapRequestFlags, Maturity, MeanCollision, MeshUploadStatus, MoneyBalance, MuteEntry,
+    NavMeshStatus, NeighborInfo, NeighborRetirement, Object, ObjectPlayingAnimation,
+    ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch, OpenRegionInfo, ParcelAccessEntry,
+    ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
+    ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo, PickInfo, PlacesResult,
+    PlayingAnimation, RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion,
+    ScriptCompileError, ScriptControl, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissionState, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime,
+    SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
+    TerrainLayerBatch, TerrainPatch, Texture, ThumbnailTarget, TransferStatus, UserInfo,
+    ViewerEffect, Wearable,
 };
 use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
@@ -1865,6 +1866,38 @@ pub enum Event {
     /// omitted the uploader URL, or the HTTP request failed. Carries a
     /// human-readable reason (the grid's error message when one was supplied).
     AssetUploadFailed {
+        /// A description of the failure.
+        reason: String,
+    },
+    /// Whether the agent may upload mesh, in reply to a
+    /// [`Command::RequestMeshUploadFlag`](crate::Command::RequestMeshUploadFlag).
+    MeshUploadFlag(MeshUploadStatus),
+    /// An inventory thumbnail was uploaded
+    /// ([`Command::UploadInventoryThumbnail`](crate::Command::UploadInventoryThumbnail))
+    /// and the grid set it on its target.
+    InventoryThumbnailUploaded {
+        /// What the thumbnail is for.
+        target: ThumbnailTarget,
+        /// The thumbnail's texture asset.
+        new_asset: Uuid,
+    },
+    /// An inventory thumbnail upload failed: the region grants no
+    /// `InventoryThumbnailUpload`, the request failed, or the grid refused
+    /// the image.
+    InventoryThumbnailUploadFailed {
+        /// What the thumbnail was for.
+        target: ThumbnailTarget,
+        /// A description of the failure (the grid's own words where it gave
+        /// any).
+        reason: String,
+    },
+    /// A postcard sent over the `SendPostcard` capability
+    /// ([`Command::SendPostcardViaCaps`](crate::Command::SendPostcardViaCaps))
+    /// was taken by the grid.
+    PostcardSent,
+    /// A postcard could not be sent: the region grants no `SendPostcard`, the
+    /// request failed, or the grid refused it.
+    PostcardFailed {
         /// A description of the failure.
         reason: String,
     },

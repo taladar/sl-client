@@ -229,6 +229,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::asset_fetch_http::AssetFetchHttp),
         Box::new(crate::cases::asset_http::AssetHttp),
         Box::new(crate::cases::asset_upload::AssetUpload),
+        Box::new(crate::cases::upload_http::UploadHttp),
         Box::new(crate::cases::notecard_create_update::NotecardCreateUpdate),
         Box::new(crate::cases::baked_texture_upload::BakedTextureUpload),
         Box::new(crate::cases::server_appearance_bake::ServerAppearanceBake),

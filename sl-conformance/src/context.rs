@@ -1128,6 +1128,13 @@ impl TestContext {
         self.fixtures.ban_line_regions()
     }
 
+    /// The address the `upload-http` case sends a postcard to, if the
+    /// operator named one.
+    #[must_use]
+    pub fn postcard_to(&self) -> Option<&str> {
+        self.fixtures.postcard_to()
+    }
+
     /// The primary session.
     pub const fn primary(&mut self) -> &mut Session {
         &mut self.primary

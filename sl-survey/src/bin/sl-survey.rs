@@ -693,6 +693,11 @@ impl Survey {
             | Event::InventoryAssetSaved { .. }
             | Event::AssetUploadFailed { .. }
             | Event::ScriptUploaded { .. }
+            | Event::MeshUploadFlag(..)
+            | Event::InventoryThumbnailUploaded { .. }
+            | Event::InventoryThumbnailUploadFailed { .. }
+            | Event::PostcardSent
+            | Event::PostcardFailed { .. }
             | Event::AvatarAppearance(_)
             | Event::AgentWearables { .. }
             | Event::AvatarAnimation { .. }

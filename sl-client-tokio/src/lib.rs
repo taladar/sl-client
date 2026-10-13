@@ -22,27 +22,29 @@ use sl_proto::{
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_METADATA, CAP_GET_TEXTURE,
     CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST,
-    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_REQUEST_TASK_INVENTORY, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO,
-    CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
-    CHAT_SESSION_START_CONFERENCE, INVENTORY_FETCH_MAX_IN_FLIGHT, NeighbourCaps,
-    NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, Session, UserInfoUpdate,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
-    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_environment_update_request,
-    build_interest_list_request, build_modify_material_params_request,
-    build_new_file_agent_inventory_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_properties_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
+    CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
+    CAP_MESH_UPLOAD_FLAG, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_REQUEST_TASK_INVENTORY, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, NeighbourCaps, NewFileAgentInventoryRequest, RECV_BUFFER_SIZE,
+    Session, UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, associate_inventory_request,
+    avatar_picker_search_query, build_agent_preferences_request, build_ais_create_category_body,
+    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_environment_update_request, build_interest_list_request,
+    build_modify_material_params_request, build_new_file_agent_inventory_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_properties_update_request, build_parcel_voice_info_request,
+    build_postcard_request, build_provision_voice_account_request,
     build_region_experiences_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
@@ -93,10 +95,10 @@ pub use sl_proto::{
     MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
     MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
     MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
-    MediaEntry, MerchantStatus, MeshKey, MessageCursor, MfaChallenge, MoneyBalance,
-    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
-    NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement, NewInventoryItem,
-    NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+    MediaEntry, MerchantStatus, MeshKey, MeshUploadStatus, MessageCursor, MfaChallenge,
+    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
+    MuteType, NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement,
+    NewInventoryItem, NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
     ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectProperties,
     ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry, ObjectTransform,
     ObjectUpdateForm, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry,
@@ -122,17 +124,17 @@ pub use sl_proto::{
     TaskInventoryCapReply, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TeleportFlags,
     TerraformArea, TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture,
     TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
-    ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit,
-    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
-    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
-    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, XferListing,
-    avatar_texture, build_get_metadata_request, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, encode_texture_entry, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, j2c, parse_get_metadata_reply, parse_task_inventory,
-    parse_task_inventory_cap_reply, particle_pattern, pcode, prim_flags, sim_access,
-    stamp_get_metadata_reply, stamp_task_inventory_cap_reply, task_inventory_cap_url,
+    ThrottleError, ThumbnailTarget, TimestampFormat, TransactionId, TransferId, TransferStatus,
+    Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP,
+    UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT,
+    UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN,
+    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector,
+    VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId,
+    XferListing, avatar_texture, build_get_metadata_request, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, encode_texture_entry, expected_upload_cost,
+    grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c, parse_get_metadata_reply,
+    parse_task_inventory, parse_task_inventory_cap_reply, particle_pattern, pcode, prim_flags,
+    sim_access, stamp_get_metadata_reply, stamp_task_inventory_cap_reply, task_inventory_cap_url,
     texture_anim_mode,
 };
 // `sl_texture::TextureEntry` (the store's LOD-aware texture object) and
@@ -219,7 +221,10 @@ use crate::inventory::{
 use crate::marketplace::dispatch_marketplace_request;
 use crate::materials::{fetch_render_materials, post_modify_material_params, set_render_materials};
 use crate::media::{fetch_object_media, post_object_media};
-use crate::upload::{run_caps_upload, run_report_screenshot_upload, run_script_upload};
+use crate::upload::{
+    run_caps_upload, run_postcard_upload, run_report_screenshot_upload, run_script_upload,
+    run_thumbnail_upload,
+};
 use crate::voice::{post_voice_cap, post_voice_signaling};
 use sl_client_common::chat_log::ChatLog;
 use sl_client_common::inventory_cache::InventoryCache;
@@ -1755,6 +1760,26 @@ impl Client {
                         }
                         Some(Command::SendPostcard(postcard)) => {
                             self.session.send_postcard(&postcard, Instant::now())?;
+                        }
+                        Some(Command::SendPostcardViaCaps { postcard, image }) => {
+                            if let Some(url) = caps.get(CAP_SEND_POSTCARD).cloned() {
+                                let card = build_postcard_request(&postcard);
+                                tokio::spawn(run_postcard_upload(url, card, image, http.clone(), events.clone()));
+                            } else {
+                                deliver(&events, Event::PostcardFailed { reason: "SendPostcard capability not available".to_owned() }).await;
+                            }
+                        }
+                        Some(Command::RequestMeshUploadFlag) => {
+                            if let Some(url) = caps.get(CAP_MESH_UPLOAD_FLAG).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_MESH_UPLOAD_FLAG, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::UploadInventoryThumbnail { target, data }) => {
+                            if let Some(url) = caps.get(CAP_INVENTORY_THUMBNAIL_UPLOAD).cloned() {
+                                tokio::spawn(run_thumbnail_upload(url, target, data, http.clone(), events.clone()));
+                            } else {
+                                deliver(&events, Event::InventoryThumbnailUploadFailed { target, reason: "InventoryThumbnailUpload capability not available".to_owned() }).await;
+                            }
                         }
                         Some(Command::RequestObjects { local_ids }) => {
                             self.session.request_objects(&local_ids, Instant::now())?;

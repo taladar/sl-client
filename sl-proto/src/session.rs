@@ -673,6 +673,30 @@ pub const CAP_SEND_USER_REPORT: &str = "SendUserReport";
 /// `llfloaterreporter.cpp` `sendReportViaCaps` / `LLARScreenShotUploader`.
 pub const CAP_SEND_USER_REPORT_WITH_SCREENSHOT: &str = "SendUserReportWithScreenshot";
 
+/// The HTTP capability that says whether the agent may upload mesh
+/// (`MeshUploadFlag`): a GET answered with `{ mesh_upload_status, … }`. Driven
+/// by the runtimes' `RequestMeshUploadFlag` command and surfaced as
+/// [`Event::MeshUploadFlag`](crate::Event::MeshUploadFlag). Both grids grant
+/// it. The reference viewer (`llfloatermodeluploadbase.cpp`) asks before it
+/// offers an upload and takes a missing capability for "allowed".
+pub const CAP_MESH_UPLOAD_FLAG: &str = "MeshUploadFlag";
+
+/// The HTTP capability that uploads an **inventory thumbnail**
+/// (`InventoryThumbnailUpload`): the two-step uploader, the first request
+/// naming the item or folder (`{ item_id }`, `{ category_id }` or
+/// `{ item_id, task_id }`), the second carrying the image as JPEG-2000.
+/// Driven by the runtimes' `UploadInventoryThumbnail` command. Second Life
+/// only. Cross-checked against `llfloatersimplesnapshot.cpp`.
+pub const CAP_INVENTORY_THUMBNAIL_UPLOAD: &str = "InventoryThumbnailUpload";
+
+/// The HTTP capability that e-mails a **snapshot postcard** (`SendPostcard`):
+/// the two-step uploader, the first request carrying the card
+/// (`{ pos-global, to, name, subject, msg }`), the second the snapshot as
+/// JPEG. Driven by the runtimes' `SendPostcard` command where the region
+/// grants it. Second Life only; the reference viewer sends postcards no other
+/// way (`llpanelsnapshotpostcard.cpp`).
+pub const CAP_SEND_POSTCARD: &str = "SendPostcard";
+
 /// The HTTP capability for the **Second Life Marketplace (SLM)
 /// DirectDelivery API** (`DirectDelivery`): the base URL of the
 /// marketplace listing-management REST service. Unlike every other
@@ -802,6 +826,9 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_MATERIAL_TASK_INVENTORY,
     CAP_REQUEST_TASK_INVENTORY,
     CAP_GET_METADATA,
+    CAP_MESH_UPLOAD_FLAG,
+    CAP_INVENTORY_THUMBNAIL_UPLOAD,
+    CAP_SEND_POSTCARD,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

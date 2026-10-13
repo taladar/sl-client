@@ -468,7 +468,10 @@ fn caps_http_response(caps: CapsResponse) -> Response<Full<Bytes>> {
     let mut response = Response::new(Full::new(Bytes::from(caps.body)));
     *response.status_mut() =
         HttpStatusCode::from_u16(caps.status).unwrap_or(HttpStatusCode::INTERNAL_SERVER_ERROR);
-    set_content_type(&mut response, caps.content_type);
+    // An answer may state no media type at all.
+    if !caps.content_type.is_empty() {
+        set_content_type(&mut response, caps.content_type);
+    }
     if let Some(content_range) = caps.content_range
         && let Ok(value) = http::header::HeaderValue::from_str(&content_range)
     {

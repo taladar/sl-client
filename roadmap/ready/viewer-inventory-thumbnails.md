@@ -38,3 +38,15 @@ AIS3.
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Protocol half done (2026-10-13)
+
+[[gridspec-asset-upload]] adopted the capability:
+`Command::UploadInventoryThumbnail { target, data }` →
+`Event::InventoryThumbnailUploaded` / `Event::InventoryThumbnailUploadFailed`
+in both runtimes, served by the Second-Life-flavoured fake grid. Measured on
+aditi (`book/src/gridspec/assets.md` § Uploads): any first request is handed
+an uploader; an image up to 256 pixels wide is taken whatever its shape, a
+wider one refused; the grid sets the thumbnail on the item itself. **Still
+open here**: the inventory model carries no thumbnail (neither the client's
+nor the fake grid's), so nothing reads one back yet.

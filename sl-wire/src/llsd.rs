@@ -733,9 +733,17 @@ pub fn parse_asset_upload_response(xml: &str) -> Result<AssetUploadResponse, Wir
         .map(str::to_owned);
     let new_asset = upload_uuid(&root, "new_asset");
     let new_inventory_item = upload_uuid(&root, "new_inventory_item").filter(|id| !id.is_nil());
+    // A refusal carries its words under `error` (a text, or a map with a
+    // `message`); Second Life's thumbnail uploader states them as a bare
+    // `message` beside the state instead.
     let error = root
         .get("error")
         .and_then(upload_error_message)
+        .or_else(|| {
+            root.get("message")
+                .and_then(Llsd::as_str)
+                .map(str::to_owned)
+        })
         .filter(|message| !message.is_empty());
     // Script uploads (`UpdateScriptAgent`/`UpdateScriptTask`) additionally report
     // the simulator's compile result: a `compiled` boolean and an `errors` array

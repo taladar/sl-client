@@ -28,8 +28,8 @@ use crate::{
     RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
     Rotation, SaleType, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
     SimWideDeleteFlags, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey,
-    Throttle, TransactionId, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid,
-    Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    Throttle, ThumbnailTarget, TransactionId, UpdatableAssetType, UpdateGroupInfoParams,
+    UpdateListing, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1338,6 +1338,41 @@ pub enum Command {
     /// snapshot must already be uploaded as the referenced asset).
     /// Fire-and-forget; there is no reply.
     SendPostcard(Box<Postcard>),
+    /// Email a snapshot postcard over the `SendPostcard` **capability**: the
+    /// two-step upload the reference viewer sends every postcard by, the card
+    /// first and the snapshot as JPEG second. The card's
+    /// [`asset_id`](Postcard::asset_id) and publish flags are not sent — the
+    /// capability has no place for them. The result arrives as
+    /// [`Event::PostcardSent`](crate::Event::PostcardSent) or
+    /// [`Event::PostcardFailed`](crate::Event::PostcardFailed); a region that
+    /// does not grant the capability (every OpenSim region) fails it at once,
+    /// as OpenSim ignores the UDP message too.
+    SendPostcardViaCaps {
+        /// The card.
+        postcard: Box<Postcard>,
+        /// The snapshot, as JPEG.
+        image: Vec<u8>,
+    },
+    /// Ask whether the agent may upload mesh, over the `MeshUploadFlag`
+    /// capability; the answer is
+    /// [`Event::MeshUploadFlag`](crate::Event::MeshUploadFlag). Where the
+    /// region does not grant the capability nothing is sent and nothing is
+    /// answered, and the reference viewer takes that for "allowed".
+    RequestMeshUploadFlag,
+    /// Upload a thumbnail for an inventory item or folder over the
+    /// `InventoryThumbnailUpload` capability (Second Life only): the two-step
+    /// upload, the target first and the image as JPEG-2000 second. The grid
+    /// takes an image up to 256 pixels wide and sets it as the target's
+    /// thumbnail itself. The result arrives as
+    /// [`Event::InventoryThumbnailUploaded`](crate::Event::InventoryThumbnailUploaded)
+    /// or
+    /// [`Event::InventoryThumbnailUploadFailed`](crate::Event::InventoryThumbnailUploadFailed).
+    UploadInventoryThumbnail {
+        /// What the thumbnail is for.
+        target: ThumbnailTarget,
+        /// The image, as a JPEG-2000 codestream.
+        data: Vec<u8>,
+    },
     /// Request the full `ObjectUpdate` for the given region-local ids
     /// (`RequestMultipleObjects`); updates arrive as [`Event::ObjectAdded`](crate::Event::ObjectAdded) /
     /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated).
@@ -3134,6 +3169,9 @@ impl Command {
             Self::SendAbuseReport(..) => "SendAbuseReport",
             Self::SendAbuseReportViaCaps { .. } => "SendAbuseReportViaCaps",
             Self::SendPostcard(..) => "SendPostcard",
+            Self::SendPostcardViaCaps { .. } => "SendPostcardViaCaps",
+            Self::RequestMeshUploadFlag => "RequestMeshUploadFlag",
+            Self::UploadInventoryThumbnail { .. } => "UploadInventoryThumbnail",
             Self::RequestObjects { .. } => "RequestObjects",
             Self::ResendCachedObjects { .. } => "ResendCachedObjects",
             Self::RequestObjectProperties { .. } => "RequestObjectProperties",

@@ -5,7 +5,8 @@ use bevy::prelude::*;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
     AgentKey, AssetType, AssetUploadResponse, CAP_NEW_FILE_AGENT_INVENTORY, InventoryType,
-    NewFileAgentInventoryRequest, ScriptCompileError, build_new_file_agent_inventory_request,
+    NewFileAgentInventoryRequest, ScriptCompileError, ThumbnailTarget,
+    build_new_file_agent_inventory_request, build_thumbnail_upload_request,
     parse_asset_upload_response, uploaded_inventory_item,
 };
 
@@ -214,6 +215,67 @@ pub(crate) fn run_report_screenshot_upload(
         if let Err(reason) = caps_upload_step(&uploader, "application/octet-stream", screenshot) {
             tracing::warn!("abuse-report screenshot upload failed: {reason}");
         }
+    }
+}
+
+/// Both steps of a two-step upload that is not an asset upload (blocking):
+/// the LLSD `metadata` to the capability, then `data` under `content_type`
+/// to the uploader it names. Returns the second answer, or why there is none.
+fn two_step_upload(
+    cap_url: &str,
+    metadata: String,
+    content_type: &str,
+    data: Vec<u8>,
+) -> Result<AssetUploadResponse, String> {
+    let first = caps_upload_step(cap_url, "application/llsd+xml", metadata.into_bytes())?;
+    let Some(uploader) = first.uploader else {
+        return Err(first
+            .error
+            .unwrap_or_else(|| format!("upload request refused (state {})", first.state)));
+    };
+    caps_upload_step(&uploader, content_type, data)
+}
+
+/// Uploads an inventory thumbnail over `InventoryThumbnailUpload` (blocking,
+/// on the calling background thread) and returns the outcome as
+/// [`SessionEvent::InventoryThumbnailUploaded`] or
+/// [`SessionEvent::InventoryThumbnailUploadFailed`]. Mirrors the tokio
+/// `run_thumbnail_upload`.
+pub(crate) fn run_thumbnail_upload(
+    cap_url: &str,
+    target: ThumbnailTarget,
+    data: Vec<u8>,
+) -> SessionEvent {
+    let metadata = build_thumbnail_upload_request(&target);
+    match two_step_upload(cap_url, metadata, "application/jp2", data) {
+        Ok(response) => match response.new_asset {
+            Some(new_asset) => SessionEvent::InventoryThumbnailUploaded { target, new_asset },
+            None => SessionEvent::InventoryThumbnailUploadFailed {
+                target,
+                reason: response.error.unwrap_or_else(|| {
+                    format!(
+                        "thumbnail upload did not complete (state {})",
+                        response.state
+                    )
+                }),
+            },
+        },
+        Err(reason) => SessionEvent::InventoryThumbnailUploadFailed { target, reason },
+    }
+}
+
+/// Sends a postcard over `SendPostcard` (blocking) and returns the outcome as
+/// [`SessionEvent::PostcardSent`] or [`SessionEvent::PostcardFailed`].
+/// Mirrors the tokio `run_postcard_upload`.
+pub(crate) fn run_postcard_upload(cap_url: &str, card: String, image: Vec<u8>) -> SessionEvent {
+    match two_step_upload(cap_url, card, "application/octet-stream", image) {
+        Ok(response) if response.state == "complete" => SessionEvent::PostcardSent,
+        Ok(response) => SessionEvent::PostcardFailed {
+            reason: response
+                .error
+                .unwrap_or_else(|| format!("postcard was not taken (state {})", response.state)),
+        },
+        Err(reason) => SessionEvent::PostcardFailed { reason },
     }
 }
 

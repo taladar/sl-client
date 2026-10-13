@@ -1369,7 +1369,7 @@ impl Reply {
 }
 
 /// `text` with every `<…>` tag replaced by a space: an error page's words.
-fn without_tags(text: &str) -> String {
+pub(crate) fn without_tags(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut inside = false;
     for character in text.chars() {
@@ -1425,7 +1425,7 @@ fn parse_content_range(value: &str) -> Option<(Option<Span>, Option<usize>)> {
 /// `text` with every UUID replaced by `<id>` and every other run of four or
 /// more hexadecimal digits that has a digit in it by `<n>`: an error names
 /// the asset asked for, and a proxy's names the request.
-fn without_ids(text: &str) -> String {
+pub(crate) fn without_ids(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(first) = rest.chars().next() {

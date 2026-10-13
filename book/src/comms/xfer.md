@@ -216,6 +216,10 @@ grids:
   returned uploader URL), no Xfer involved. Both grids advertise it, so the
   runtimes' `UploadAsset` command is CAPS-only — there is no UDP fallback for
   minting a new item, and the `asset-upload` conformance case is CAPS-only.
+  **Which classes it takes is the grid's**: Second Life takes a texture, a
+  sound, an animation, a wearable and a mesh, each at a price it holds the
+  bytes to, and refuses the rest by name; OpenSim takes everything, free
+  ([Grid Behaviour: Assets](../gridspec/assets.md#uploads)).
 - **In-place saves of an existing item's asset** use the *update* caps where
   they exist (`UpdateNotecardAgentInventory`, `UpdateScriptAgent`,
   `UpdateGestureAgentInventory`, …, on both grids). But plain

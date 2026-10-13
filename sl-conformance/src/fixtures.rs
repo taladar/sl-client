@@ -55,6 +55,11 @@
 //! # logged in to has no parcel that keeps strangers out. Absent, only the
 //! # login region is looked at.
 //! ban_line_regions = ["Some Mainland Region", "Another One"]
+//!
+//! # The e-mail address the `upload-http` case sends one postcard to. Absent,
+//! # the case asks the `SendPostcard` capability for an uploader and posts
+//! # nothing to it, so no mail is sent.
+//! postcard_to = "somebody@example.org"
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -92,6 +97,9 @@ pub struct Fixtures {
     /// The regions the `parcel-ban-line` case visits, in order, looking for a
     /// parcel that keeps strangers out, when its login region has none.
     ban_line_regions: Vec<String>,
+    /// The address the `upload-http` case sends a postcard to; absent, it
+    /// sends none.
+    postcard_to: Option<String>,
 }
 
 /// The raw TOML shape, before ids are parsed into typed keys.
@@ -120,6 +128,9 @@ struct RawFixtures {
     /// The region names, verbatim ([`Fixtures::ban_line_regions`]).
     #[serde(default)]
     ban_line_regions: Vec<String>,
+    /// The postcard address, verbatim ([`Fixtures::postcard_to`]).
+    #[serde(default)]
+    postcard_to: Option<String>,
 }
 
 /// Why a fixtures file could not be turned into [`Fixtures`].
@@ -276,6 +287,7 @@ impl Fixtures {
             experience,
             build_location: raw.build_location,
             ban_line_regions: raw.ban_line_regions,
+            postcard_to: raw.postcard_to,
         })
     }
 
@@ -291,6 +303,13 @@ impl Fixtures {
     #[must_use]
     pub fn ban_line_regions(&self) -> &[String] {
         &self.ban_line_regions
+    }
+
+    /// The address the `upload-http` case sends a postcard to, if the
+    /// operator named one.
+    #[must_use]
+    pub fn postcard_to(&self) -> Option<&str> {
+        self.postcard_to.as_deref()
     }
 
     /// The region-local position named by [`build_location`](Self::build_location)
@@ -402,6 +421,7 @@ mod tests {
             experience: None,
             build_location: None,
             ban_line_regions: Vec::new(),
+            postcard_to: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.premade_group(0).is_some());
@@ -426,6 +446,7 @@ mod tests {
             experience: None,
             build_location: None,
             ban_line_regions: Vec::new(),
+            postcard_to: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.other_avatar().is_some());
@@ -443,6 +464,7 @@ mod tests {
             experience: None,
             build_location: None,
             ban_line_regions: Vec::new(),
+            postcard_to: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.mesh_asset().is_some());
@@ -460,6 +482,7 @@ mod tests {
             experience: None,
             build_location: None,
             ban_line_regions: Vec::new(),
+            postcard_to: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -480,6 +503,7 @@ mod tests {
             experience: None,
             build_location: None,
             ban_line_regions: Vec::new(),
+            postcard_to: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -501,6 +525,7 @@ mod tests {
             experience: None,
             build_location: None,
             ban_line_regions: Vec::new(),
+            postcard_to: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -522,6 +547,7 @@ mod tests {
             experience: Some("55555555-6666-7777-8888-999999999999".to_owned()),
             build_location: None,
             ban_line_regions: Vec::new(),
+            postcard_to: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.experience().is_some());
@@ -539,6 +565,7 @@ mod tests {
             experience: Some("not-a-uuid".to_owned()),
             build_location: None,
             ban_line_regions: Vec::new(),
+            postcard_to: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -561,6 +588,7 @@ mod tests {
                 experience: None,
                 build_location: Some(location.to_owned()),
                 ban_line_regions: Vec::new(),
+                postcard_to: None,
             })
         };
         let position = with("uri:Mauve&48&64&30")?.build_position();

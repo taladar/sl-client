@@ -36,10 +36,10 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `GroupProposalBallot` | yes | — | removed feature | not adopted |
 | `HomeLocation` | yes | yes | current | task `protocol-cap-home-location` (UDP today) |
 | `InterestList` | yes | — | current | adopted (`Command::SetInterestListMode`) |
-| `InventoryThumbnailUpload` | yes | — | current | task `viewer-inventory-thumbnails` |
+| `InventoryThumbnailUpload` | yes | — | current | **used** since 2026-10-13 (`Command::UploadInventoryThumbnail`); the viewer side is task `viewer-inventory-thumbnails` |
 | `MapLayer` | yes | yes | unused since viewer 2.0 | not adopted |
 | `MapLayerGod` | yes | — | unused | not adopted |
-| `MeshUploadFlag` | yes | yes | current | task `viewer-mesh-upload-sequence` |
+| `MeshUploadFlag` | yes | yes | current | **used** since 2026-10-13 (`Command::RequestMeshUploadFlag`); the upload itself is task `viewer-mesh-upload-sequence` |
 | `ModifyRegion` | yes | — | current | task `viewer-pbr-terrain` |
 | `NavMeshGenerationStatus` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `ObjectNavMeshProperties` | yes | — | current | task `viewer-pathfinding-floaters` |
@@ -52,7 +52,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `RetrieveNavMeshSrc` | yes | — | current | task `viewer-pathfinding-navmesh-view` |
 | `SearchStatRequest` | yes | — | current | task `viewer-classified-click-stats` |
 | `SearchStatTracking` | yes | — | telemetry | task `viewer-telemetry-opt-in` |
-| `SendPostcard` | yes | — | current | task `viewer-snapshot-postcard` |
+| `SendPostcard` | yes | — | current | **used** since 2026-10-13 (`Command::SendPostcardViaCaps`); the viewer side is task `viewer-snapshot-postcard` |
 | `ServerReleaseNotes` | yes | yes | current | task `viewer-about-release-notes` |
 | `SetDisplayName` | yes | — | current | task `viewer-display-name-set` |
 | `SimConsoleAsync` | yes | yes | current (admin) | task `viewer-region-debug-console` |
@@ -203,7 +203,9 @@ for a prim the region does not have. Replaces UDP `RequestTaskInventory` →
 
 **`InventoryThumbnailUpload`** (`llfloatersimplesnapshot.cpp`). Two-step upload
 with `{item_id}`, `{category_id}` or `{item_id, task_id}`, the image as
-JPEG2000, 64–256 px.
+JPEG2000, 64–256 px → `{state: "complete", new_asset}`, or `{state:
+"failure", message}`. What the grid takes and refuses is in
+[Grid Behaviour → Assets](../gridspec/assets.md#inventorythumbnailupload).
 
 **`GetMetadata`** (`llexperiencecache.cpp`). POST `{"object-id", "item-id",
 "fields":["experience"]}` → `{experience}`: a script's experience. A script
@@ -212,6 +214,8 @@ hold with 404.
 
 **`MeshUploadFlag`** (`llfloatermodeluploadbase.cpp`). GET →
 `{mesh_upload_status}`; anything but `valid` or empty disables mesh upload.
+Second Life sends the agent's name record beside it
+([Grid Behaviour → Assets](../gridspec/assets.md#meshuploadflag)).
 
 **`SendPostcard`** (`llpanelsnapshotpostcard.cpp`). Two-step upload with
 `{pos-global, to, name, subject, msg}` (and `from` off Second Life), the JPEG

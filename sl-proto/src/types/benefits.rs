@@ -101,6 +101,52 @@ pub struct AccountBenefits {
     pub large_texture_upload_costs: Vec<LindenAmount>,
 }
 
+/// What an upload is priced as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadClass {
+    /// A texture or a snapshot, by its size in pixels: a grid with a
+    /// benefits package prices a large one higher.
+    Texture {
+        /// The width.
+        width: u32,
+        /// The height.
+        height: u32,
+    },
+    /// A sound.
+    Sound,
+    /// An animation.
+    Animation,
+}
+
+/// The L$ to state as the `expected_upload_cost` of a `NewFileAgentInventory`
+/// upload of `class`.
+///
+/// Where the login carried a benefits package (Second Life) the price is the
+/// package's, and the grid refuses an upload whose stated cost is another
+/// ("The server expects a different upload fee") — it holds the cost to the
+/// bytes, so a large texture has to state the large price. Where it carried
+/// none (OpenSim) the price is the legacy `EconomyData` upload price, as in
+/// the reference viewer (`LLAgentBenefits::getTextureUploadCost` off Second
+/// Life); OpenSim reads the stated cost not at all. With neither, nothing.
+#[must_use]
+pub fn expected_upload_cost(
+    class: UploadClass,
+    benefits: Option<&AccountBenefits>,
+    economy: Option<&crate::EconomyData>,
+) -> LindenAmount {
+    match (benefits, economy) {
+        (Some(benefits), _) => match class {
+            UploadClass::Texture { width, height } => {
+                benefits.texture_upload_cost_for(width, height)
+            }
+            UploadClass::Sound => benefits.sound_upload_cost.clone(),
+            UploadClass::Animation => benefits.animation_upload_cost.clone(),
+        },
+        (None, Some(economy)) => economy.price_upload.clone(),
+        (None, None) => LindenAmount(0),
+    }
+}
+
 impl AccountBenefits {
     /// The L$ charged for a texture above [`MIN_2K_TEXTURE_AREA`]: the cheapest
     /// large-texture tier.

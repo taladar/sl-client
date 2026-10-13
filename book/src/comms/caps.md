@@ -356,6 +356,18 @@ runs:
   produces a temporary asset with **no** inventory item; a bytes-POST with no
   parked upload is a `400`.
 
+**Which grid's uploader.** `SimCaps::with_new_file_policy` makes
+`NewFileAgentInventory` one live grid's: `NewFilePolicy::SecondLife` takes
+five classes at a price, holds the stated cost to the bytes, validates them,
+states and charges a balance (`SimSession::set_money_balance`) and serves an
+uploader once; `NewFilePolicy::OpenSim` takes everything, free and unread,
+and sticks after an object. The default, `Plain`, is the machine above. The
+measurements behind both are in
+[Grid Behaviour → Assets](../gridspec/assets.md#uploads). The same module
+serves `MeshUploadFlag` and the two smaller two-step uploads,
+`InventoryThumbnailUpload` and `SendPostcard`
+(`ServerEvent::InventoryThumbnailUploaded`, `ServerEvent::PostcardUploaded`).
+
 A `NewFileAgentInventory` completion also reports the permissions it
 **granted** the created item (`new_next_owner_mask`, `new_group_mask`,
 `new_everyone_mask`), as both real grids do — OpenSim's `BunchOfCaps` copies

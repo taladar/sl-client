@@ -363,9 +363,14 @@ Two outbound, fire-and-forget viewer actions reach the grid here:
   referencing it — mirroring the viewer's `sendReportViaCaps`. With no
   screenshot (or on a grid without the cap) the plain `SendUserReport` POST is
   used.
-- **Postcards** — `Command::SendPostcard` emails a snapshot (already uploaded as
-  an asset) to one or more addresses with a subject and message, optionally
-  asking the grid to publish it on its web gallery. Fire-and-forget.
+- **Postcards** — `Command::SendPostcardViaCaps` sends a card and its snapshot
+  (a JPEG) over the `SendPostcard` capability, the only road the reference
+  viewer takes, and answers `Event::PostcardSent` or `Event::PostcardFailed`;
+  a region without the capability — every OpenSim region — fails it at once.
+  `Command::SendPostcard` is the older UDP message naming a snapshot already
+  uploaded as an asset, fire-and-forget, which OpenSim ignores. What the
+  capability answers is in
+  [Grid Behaviour: Assets](../gridspec/assets.md#sendpostcard).
 
 ## Simulator notifications
 

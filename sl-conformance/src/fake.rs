@@ -167,6 +167,8 @@ pub const OFFLINE_CASES: &[&str] = &[
     "texture-fetch-http",
     "asset-fetch-http",
     "asset-http",
+    "asset-upload",
+    "upload-http",
     "economy-data",
     "parcel-info-dwell",
     "agent-alert",

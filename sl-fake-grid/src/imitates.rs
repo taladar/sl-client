@@ -70,6 +70,9 @@
 //! | the script a new script starts as ([`ContentsPolicy::new_script_body`]) | `Hello, Avatar!`, and `Touched.` on a touch | `Script running` |
 //! | where the asset capabilities are ([`asset_host`](ImitatedGrid::asset_host)) | a host of their own, all four its bare root | the simulator's, a token each |
 //! | how an asset capability reads a `Range` and answers what it cannot serve ([`asset_http_policy`](ImitatedGrid::asset_http_policy)) | a suffix is the last bytes, several ranges a multipart body, `bytes=0-0` one byte; an entity tag and a date stated, the date honoured with `304`; a `POST` refused | a suffix is the first eleven bytes, several ranges and `bytes=0-0` the whole asset, a backwards range one byte; nothing stated for a cache; a `POST` answered as a `GET`; a request that names no asset `400` |
+//! | what `NewFileAgentInventory` takes, charges and refuses ([`new_file_policy`](ImitatedGrid::new_file_policy)) | a texture or snapshot, a sound, an animation, a body part, clothing and a mesh, each at a price; the other classes refused by name; the stated cost held to the bytes; the bytes validated; a balance stated, and an upload it does not cover refused; an uploader that serves once | every class, free and unvalidated; a class with no name of its own filed as a texture; an object that is no model answered as stored, stored nowhere, and the uploader stuck from then on |
+//! | whether an agent has a balance for uploads ([`upload_funds`](ImitatedGrid::upload_funds)) | L$ 10 000 a session | none kept |
+//! | a thumbnail and a postcard over HTTP (`InventoryThumbnailUpload`, `SendPostcard`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted |
 //! | a prim's contents and a script's experience over HTTP (`RequestTaskInventory`, `GetMetadata`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted: the listing is UDP and `Xfer` alone |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
@@ -1155,6 +1158,39 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid's `NewFileAgentInventory` answers — measured on aditi
+    /// and the local OpenSim (2026-10-13, `book/src/gridspec/assets.md`
+    /// § Uploads); [`sl_proto::NewFilePolicy`] has the detail.
+    ///
+    /// Two things are not imitated on either flavour. A mesh's first answer
+    /// carries no cost data (`server-fake-grid-mesh-upload-cost` is that
+    /// work). And the Second-Life flavour's words for an animation it cannot
+    /// read are this crate's own: aditi's are its verifier's Python errors.
+    #[must_use]
+    pub fn new_file_policy(self) -> sl_proto::NewFilePolicy {
+        match self {
+            Self::SecondLife => {
+                sl_proto::NewFilePolicy::SecondLife(sl_proto::UploadPrices::default())
+            }
+            Self::OpenSim => sl_proto::NewFilePolicy::OpenSim,
+        }
+    }
+
+    /// The L$ an agent of this grid has for uploads when it logs in, where
+    /// the grid states a balance in its upload answers at all.
+    ///
+    /// This is not a money ledger — nothing but an upload reads or moves it,
+    /// and it starts over with every login. It is here because Second Life
+    /// states the balance in the first answer of every upload and refuses
+    /// one it does not cover, and a viewer has to be shown both.
+    #[must_use]
+    pub const fn upload_funds(self) -> Option<i64> {
+        match self {
+            Self::SecondLife => Some(SECOND_LIFE_UPLOAD_FUNDS),
+            Self::OpenSim => None,
+        }
+    }
+
     /// Where this grid's asset-delivery capabilities are — measured with
     /// [`asset_http_policy`](Self::asset_http_policy).
     #[must_use]
@@ -1298,6 +1334,7 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "InterestList",
     "InventoryAPIv3",
     "IsExperienceAdmin",
+    "InventoryThumbnailUpload",
     "IsExperienceContributor",
     "LibraryAPIv3",
     "ModifyMaterialParams",
@@ -1307,6 +1344,7 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "ReadOfflineMsgs",
     "RegionExperiences",
     "RequestTaskInventory",
+    "SendPostcard",
     "SendUserReport",
     "SendUserReportWithScreenshot",
     "UpdateAvatarAppearance",
@@ -1316,6 +1354,10 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "UserInfo",
     "VoiceSignalingRequest",
 ];
+
+/// The L$ an agent of a Second-Life-flavoured grid starts a session with for
+/// uploads ([`ImitatedGrid::upload_funds`]).
+pub const SECOND_LIFE_UPLOAD_FUNDS: i64 = 10_000;
 
 /// `max-agent-groups` on a stock OpenSim grid: its login service's
 /// `MaxAgentGroups` default, which the local grid answered (2026-10-04).

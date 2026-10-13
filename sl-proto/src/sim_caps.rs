@@ -80,6 +80,7 @@ use crate::session::{
     parse_copy_inventory_from_notecard, server_appearance_update_to_llsd, session_history_to_llsd,
 };
 use crate::sim_inventory::SimInventoryError;
+use crate::sim_new_file::{self, FirstStep, NewFilePolicy, SideUpload};
 use crate::sim_session::{CapsUploadMetadata, SimSession};
 use crate::task_caps::{
     TaskInventoryCapQuery, build_get_metadata_reply, build_task_inventory_cap_reply,
@@ -95,14 +96,15 @@ use crate::{
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
     CAP_GROUP_EXPERIENCES, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
-    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_REQUEST_TASK_INVENTORY,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_GESTURE_TASK_INVENTORY,
+    CAP_RESOURCE_COST_SELECTED, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_GESTURE_TASK_INVENTORY,
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_TASK_INVENTORY,
     CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
@@ -180,6 +182,10 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_INTEREST_LIST,
     CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    // The smaller upload capabilities.
+    CAP_MESH_UPLOAD_FLAG,
+    CAP_INVENTORY_THUMBNAIL_UPLOAD,
+    CAP_SEND_POSTCARD,
     // The content upload/update, materials and MOAP cluster.
     CAP_NEW_FILE_AGENT_INVENTORY,
     CAP_UPLOAD_BAKED_TEXTURE,
@@ -286,6 +292,13 @@ pub enum CapHandler {
     /// answers with an uploader URL (a sub-path of the cap's own URL), the
     /// raw screenshot bytes complete it.
     UserReportScreenshot,
+    /// The `MeshUploadFlag` GET: whether the agent may upload mesh.
+    MeshUploadFlag,
+    /// The two-step `InventoryThumbnailUpload`: what the thumbnail is for,
+    /// then the image.
+    ThumbnailUpload,
+    /// The two-step `SendPostcard`: the card, then the snapshot.
+    Postcard,
     /// The shared two-stage asset-upload state machine serving every
     /// `UPLOAD_CAPABILITIES` entry (`NewFileAgentInventory`,
     /// `UploadBakedTexture`, and the `Update*{Agent,Task}Inventory` family):
@@ -455,6 +468,39 @@ impl CapsResponse {
             content_range: None,
             headers: Vec::new(),
             body: body.into_bytes(),
+        }
+    }
+
+    /// A response of `status` carrying an LLSD-XML body.
+    pub(crate) const fn llsd_xml_status(status: u16, body: String) -> Self {
+        Self {
+            status,
+            content_type: LLSD_XML_CONTENT_TYPE,
+            content_range: None,
+            headers: Vec::new(),
+            body: body.into_bytes(),
+        }
+    }
+
+    /// A response of `status` carrying an HTML page.
+    pub(crate) fn html(status: u16, page: &str) -> Self {
+        Self {
+            status,
+            content_type: "text/html",
+            content_range: None,
+            headers: Vec::new(),
+            body: page.as_bytes().to_vec(),
+        }
+    }
+
+    /// A response of `status` carrying `words` and stating no media type.
+    pub(crate) fn words(status: u16, words: &str) -> Self {
+        Self {
+            status,
+            content_type: "",
+            content_range: None,
+            headers: Vec::new(),
+            body: words.as_bytes().to_vec(),
         }
     }
 
@@ -628,6 +674,8 @@ pub struct SimCaps {
     assets: AssetCaps,
     /// Set once the client has polled with `done`; later polls answer `404`.
     event_queue_done: bool,
+    /// Which grid's `NewFileAgentInventory` this surface serves.
+    new_file_policy: NewFilePolicy,
 }
 
 impl SimCaps {
@@ -655,6 +703,7 @@ impl SimCaps {
             tokens,
             assets,
             event_queue_done: false,
+            new_file_policy: NewFilePolicy::Plain,
         }
     }
 
@@ -664,6 +713,14 @@ impl SimCaps {
     #[must_use]
     pub fn with_asset_surface(mut self, assets: AssetCaps) -> Self {
         self.assets = assets;
+        self
+    }
+
+    /// The same surface with its `NewFileAgentInventory` answering as
+    /// `policy` says — which live grid's uploader it is.
+    #[must_use]
+    pub const fn with_new_file_policy(mut self, policy: NewFilePolicy) -> Self {
+        self.new_file_policy = policy;
         self
     }
 
@@ -701,6 +758,7 @@ impl SimCaps {
             tokens,
             assets,
             event_queue_done: false,
+            new_file_policy: NewFilePolicy::Plain,
         }
     }
 
@@ -731,6 +789,9 @@ impl SimCaps {
             CAP_GET_METADATA => Some(CapHandler::ScriptMetadata),
             CAP_SEND_USER_REPORT => Some(CapHandler::UserReport),
             CAP_SEND_USER_REPORT_WITH_SCREENSHOT => Some(CapHandler::UserReportScreenshot),
+            CAP_MESH_UPLOAD_FLAG => Some(CapHandler::MeshUploadFlag),
+            CAP_INVENTORY_THUMBNAIL_UPLOAD => Some(CapHandler::ThumbnailUpload),
+            CAP_SEND_POSTCARD => Some(CapHandler::Postcard),
             CAP_UPDATE_AVATAR_APPEARANCE => Some(CapHandler::AvatarAppearance),
             CAP_INCREMENT_COF_VERSION => Some(CapHandler::IncrementCofVersion),
             CAP_COPY_INVENTORY_FROM_NOTECARD => Some(CapHandler::CopyInventoryFromNotecard),
@@ -854,141 +915,152 @@ impl SimCaps {
         match self.resolve(request.path) {
             ResolvedPath::Unknown => CapsDispatch::Response(CapsResponse::not_found()),
             ResolvedPath::Seed => CapsDispatch::Response(self.respond_seed(request)),
-            ResolvedPath::Capability(name) => match Self::handler_for(name) {
-                Some(CapHandler::EventQueue) => self.dispatch_event_queue(sim, request),
-                Some(CapHandler::ChatSession) => {
-                    CapsDispatch::Response(Self::dispatch_chat_session(sim, request))
+            ResolvedPath::Capability(name) => {
+                match Self::handler_for(name) {
+                    Some(CapHandler::EventQueue) => self.dispatch_event_queue(sim, request),
+                    Some(CapHandler::ChatSession) => {
+                        CapsDispatch::Response(Self::dispatch_chat_session(sim, request))
+                    }
+                    Some(CapHandler::OfflineMessages) => {
+                        CapsDispatch::Response(Self::dispatch_offline_messages(sim, request))
+                    }
+                    Some(CapHandler::DisplayNames) => {
+                        CapsDispatch::Response(Self::dispatch_display_names(sim, request))
+                    }
+                    Some(CapHandler::AvatarPickerSearch) => {
+                        CapsDispatch::Response(Self::dispatch_avatar_picker_search(sim, request))
+                    }
+                    Some(CapHandler::AgentPreferences) => {
+                        CapsDispatch::Response(Self::dispatch_agent_preferences(sim, request))
+                    }
+                    Some(CapHandler::InterestList) => {
+                        CapsDispatch::Response(Self::dispatch_interest_list(sim, request))
+                    }
+                    Some(CapHandler::TaskInventory) => Self::dispatch_task_inventory(request),
+                    Some(CapHandler::ScriptMetadata) => Self::dispatch_script_metadata(request),
+                    Some(CapHandler::UserReport) => {
+                        CapsDispatch::Response(Self::dispatch_user_report(sim, request))
+                    }
+                    Some(CapHandler::UserReportScreenshot) => {
+                        CapsDispatch::Response(self.dispatch_user_report_screenshot(sim, request))
+                    }
+                    Some(CapHandler::MeshUploadFlag) => {
+                        CapsDispatch::Response(self.dispatch_mesh_upload_flag(sim, request))
+                    }
+                    Some(CapHandler::ThumbnailUpload) => CapsDispatch::Response(
+                        self.dispatch_side_upload(sim, request, CAP_INVENTORY_THUMBNAIL_UPLOAD),
+                    ),
+                    Some(CapHandler::Postcard) => CapsDispatch::Response(
+                        self.dispatch_side_upload(sim, request, CAP_SEND_POSTCARD),
+                    ),
+                    Some(CapHandler::AssetUpload) => {
+                        CapsDispatch::Response(self.dispatch_caps_upload(sim, request, name))
+                    }
+                    Some(CapHandler::AvatarAppearance) => CapsDispatch::Response(
+                        Self::dispatch_update_avatar_appearance(sim, request),
+                    ),
+                    Some(CapHandler::IncrementCofVersion) => {
+                        CapsDispatch::Response(Self::dispatch_increment_cof_version(sim, request))
+                    }
+                    Some(CapHandler::CopyInventoryFromNotecard) => CapsDispatch::Response(
+                        Self::dispatch_copy_inventory_from_notecard(sim, request),
+                    ),
+                    Some(CapHandler::RenderMaterials) => {
+                        CapsDispatch::Response(Self::dispatch_render_materials(sim, request))
+                    }
+                    Some(CapHandler::ModifyMaterialParams) => {
+                        CapsDispatch::Response(Self::dispatch_modify_material_params(sim, request))
+                    }
+                    Some(CapHandler::ObjectMedia) => {
+                        CapsDispatch::Response(Self::dispatch_object_media(sim, request))
+                    }
+                    Some(CapHandler::ObjectMediaNavigate) => {
+                        CapsDispatch::Response(Self::dispatch_object_media_navigate(sim, request))
+                    }
+                    Some(CapHandler::FetchDescendents) => {
+                        CapsDispatch::Response(Self::dispatch_fetch_descendents(sim, request, name))
+                    }
+                    Some(CapHandler::FetchItems) => {
+                        CapsDispatch::Response(Self::dispatch_fetch_items(sim, request, name))
+                    }
+                    Some(CapHandler::Ais3) => {
+                        CapsDispatch::Response(Self::dispatch_ais3(sim, request, name))
+                    }
+                    Some(CapHandler::CreateInventoryCategory) => CapsDispatch::Response(
+                        Self::dispatch_create_inventory_category(sim, request),
+                    ),
+                    Some(CapHandler::SimulatorFeatures) => {
+                        CapsDispatch::Response(Self::dispatch_simulator_features(sim, request))
+                    }
+                    Some(CapHandler::LslSyntax) => {
+                        CapsDispatch::Response(Self::dispatch_lsl_syntax(sim, request))
+                    }
+                    Some(CapHandler::Environment) => {
+                        CapsDispatch::Response(Self::dispatch_environment(sim, request))
+                    }
+                    Some(CapHandler::RemoteParcel) => {
+                        CapsDispatch::Response(Self::dispatch_remote_parcel(sim, request))
+                    }
+                    Some(CapHandler::ParcelUpdate) => {
+                        CapsDispatch::Response(Self::dispatch_parcel_update(sim, request))
+                    }
+                    Some(CapHandler::ObjectCost) => {
+                        CapsDispatch::Response(Self::dispatch_object_cost(sim, request))
+                    }
+                    Some(CapHandler::ObjectPhysics) => {
+                        CapsDispatch::Response(Self::dispatch_object_physics(sim, request))
+                    }
+                    Some(CapHandler::ResourceCostSelected) => {
+                        CapsDispatch::Response(Self::dispatch_resource_cost_selected(sim, request))
+                    }
+                    Some(CapHandler::AttachmentResources) => {
+                        CapsDispatch::Response(Self::dispatch_attachment_resources(sim, request))
+                    }
+                    Some(CapHandler::LandResources) => {
+                        CapsDispatch::Response(self.dispatch_land_resources(sim, request))
+                    }
+                    Some(CapHandler::ExperienceInfo) => {
+                        CapsDispatch::Response(Self::dispatch_experience_info(sim, request))
+                    }
+                    Some(CapHandler::ExperienceSearch) => {
+                        CapsDispatch::Response(Self::dispatch_experience_search(sim, request))
+                    }
+                    Some(CapHandler::ExperiencePermissions) => {
+                        CapsDispatch::Response(Self::dispatch_experience_permissions(sim, request))
+                    }
+                    Some(CapHandler::ExperiencePreferences) => {
+                        CapsDispatch::Response(Self::dispatch_experience_preferences(sim, request))
+                    }
+                    Some(CapHandler::ExperienceIdList) => CapsDispatch::Response(
+                        Self::dispatch_experience_id_list(sim, request, name),
+                    ),
+                    Some(CapHandler::ExperienceStatus) => {
+                        CapsDispatch::Response(Self::dispatch_experience_status(sim, request, name))
+                    }
+                    Some(CapHandler::UpdateExperience) => {
+                        CapsDispatch::Response(Self::dispatch_update_experience(sim, request))
+                    }
+                    Some(CapHandler::RegionExperiences) => {
+                        CapsDispatch::Response(Self::dispatch_region_experiences(sim, request))
+                    }
+                    Some(CapHandler::ExperienceQuery) => {
+                        CapsDispatch::Response(Self::dispatch_experience_query(sim, request))
+                    }
+                    Some(CapHandler::ProvisionVoiceAccount) => {
+                        CapsDispatch::Response(Self::dispatch_provision_voice_account(sim, request))
+                    }
+                    Some(CapHandler::ParcelVoiceInfo) => {
+                        CapsDispatch::Response(Self::dispatch_parcel_voice_info(sim, request))
+                    }
+                    Some(CapHandler::VoiceSignaling) => {
+                        CapsDispatch::Response(Self::dispatch_voice_signaling(sim, request))
+                    }
+                    // Tokens are only minted for served capabilities, so a
+                    // resolved name always has a handler; answer 404 rather than
+                    // panic if that invariant is ever broken.
+                    None => CapsDispatch::Response(CapsResponse::not_found()),
                 }
-                Some(CapHandler::OfflineMessages) => {
-                    CapsDispatch::Response(Self::dispatch_offline_messages(sim, request))
-                }
-                Some(CapHandler::DisplayNames) => {
-                    CapsDispatch::Response(Self::dispatch_display_names(sim, request))
-                }
-                Some(CapHandler::AvatarPickerSearch) => {
-                    CapsDispatch::Response(Self::dispatch_avatar_picker_search(sim, request))
-                }
-                Some(CapHandler::AgentPreferences) => {
-                    CapsDispatch::Response(Self::dispatch_agent_preferences(sim, request))
-                }
-                Some(CapHandler::InterestList) => {
-                    CapsDispatch::Response(Self::dispatch_interest_list(sim, request))
-                }
-                Some(CapHandler::TaskInventory) => Self::dispatch_task_inventory(request),
-                Some(CapHandler::ScriptMetadata) => Self::dispatch_script_metadata(request),
-                Some(CapHandler::UserReport) => {
-                    CapsDispatch::Response(Self::dispatch_user_report(sim, request))
-                }
-                Some(CapHandler::UserReportScreenshot) => {
-                    CapsDispatch::Response(self.dispatch_user_report_screenshot(sim, request))
-                }
-                Some(CapHandler::AssetUpload) => {
-                    CapsDispatch::Response(self.dispatch_caps_upload(sim, request, name))
-                }
-                Some(CapHandler::AvatarAppearance) => {
-                    CapsDispatch::Response(Self::dispatch_update_avatar_appearance(sim, request))
-                }
-                Some(CapHandler::IncrementCofVersion) => {
-                    CapsDispatch::Response(Self::dispatch_increment_cof_version(sim, request))
-                }
-                Some(CapHandler::CopyInventoryFromNotecard) => CapsDispatch::Response(
-                    Self::dispatch_copy_inventory_from_notecard(sim, request),
-                ),
-                Some(CapHandler::RenderMaterials) => {
-                    CapsDispatch::Response(Self::dispatch_render_materials(sim, request))
-                }
-                Some(CapHandler::ModifyMaterialParams) => {
-                    CapsDispatch::Response(Self::dispatch_modify_material_params(sim, request))
-                }
-                Some(CapHandler::ObjectMedia) => {
-                    CapsDispatch::Response(Self::dispatch_object_media(sim, request))
-                }
-                Some(CapHandler::ObjectMediaNavigate) => {
-                    CapsDispatch::Response(Self::dispatch_object_media_navigate(sim, request))
-                }
-                Some(CapHandler::FetchDescendents) => {
-                    CapsDispatch::Response(Self::dispatch_fetch_descendents(sim, request, name))
-                }
-                Some(CapHandler::FetchItems) => {
-                    CapsDispatch::Response(Self::dispatch_fetch_items(sim, request, name))
-                }
-                Some(CapHandler::Ais3) => {
-                    CapsDispatch::Response(Self::dispatch_ais3(sim, request, name))
-                }
-                Some(CapHandler::CreateInventoryCategory) => {
-                    CapsDispatch::Response(Self::dispatch_create_inventory_category(sim, request))
-                }
-                Some(CapHandler::SimulatorFeatures) => {
-                    CapsDispatch::Response(Self::dispatch_simulator_features(sim, request))
-                }
-                Some(CapHandler::LslSyntax) => {
-                    CapsDispatch::Response(Self::dispatch_lsl_syntax(sim, request))
-                }
-                Some(CapHandler::Environment) => {
-                    CapsDispatch::Response(Self::dispatch_environment(sim, request))
-                }
-                Some(CapHandler::RemoteParcel) => {
-                    CapsDispatch::Response(Self::dispatch_remote_parcel(sim, request))
-                }
-                Some(CapHandler::ParcelUpdate) => {
-                    CapsDispatch::Response(Self::dispatch_parcel_update(sim, request))
-                }
-                Some(CapHandler::ObjectCost) => {
-                    CapsDispatch::Response(Self::dispatch_object_cost(sim, request))
-                }
-                Some(CapHandler::ObjectPhysics) => {
-                    CapsDispatch::Response(Self::dispatch_object_physics(sim, request))
-                }
-                Some(CapHandler::ResourceCostSelected) => {
-                    CapsDispatch::Response(Self::dispatch_resource_cost_selected(sim, request))
-                }
-                Some(CapHandler::AttachmentResources) => {
-                    CapsDispatch::Response(Self::dispatch_attachment_resources(sim, request))
-                }
-                Some(CapHandler::LandResources) => {
-                    CapsDispatch::Response(self.dispatch_land_resources(sim, request))
-                }
-                Some(CapHandler::ExperienceInfo) => {
-                    CapsDispatch::Response(Self::dispatch_experience_info(sim, request))
-                }
-                Some(CapHandler::ExperienceSearch) => {
-                    CapsDispatch::Response(Self::dispatch_experience_search(sim, request))
-                }
-                Some(CapHandler::ExperiencePermissions) => {
-                    CapsDispatch::Response(Self::dispatch_experience_permissions(sim, request))
-                }
-                Some(CapHandler::ExperiencePreferences) => {
-                    CapsDispatch::Response(Self::dispatch_experience_preferences(sim, request))
-                }
-                Some(CapHandler::ExperienceIdList) => {
-                    CapsDispatch::Response(Self::dispatch_experience_id_list(sim, request, name))
-                }
-                Some(CapHandler::ExperienceStatus) => {
-                    CapsDispatch::Response(Self::dispatch_experience_status(sim, request, name))
-                }
-                Some(CapHandler::UpdateExperience) => {
-                    CapsDispatch::Response(Self::dispatch_update_experience(sim, request))
-                }
-                Some(CapHandler::RegionExperiences) => {
-                    CapsDispatch::Response(Self::dispatch_region_experiences(sim, request))
-                }
-                Some(CapHandler::ExperienceQuery) => {
-                    CapsDispatch::Response(Self::dispatch_experience_query(sim, request))
-                }
-                Some(CapHandler::ProvisionVoiceAccount) => {
-                    CapsDispatch::Response(Self::dispatch_provision_voice_account(sim, request))
-                }
-                Some(CapHandler::ParcelVoiceInfo) => {
-                    CapsDispatch::Response(Self::dispatch_parcel_voice_info(sim, request))
-                }
-                Some(CapHandler::VoiceSignaling) => {
-                    CapsDispatch::Response(Self::dispatch_voice_signaling(sim, request))
-                }
-                // Tokens are only minted for served capabilities, so a
-                // resolved name always has a handler; answer 404 rather than
-                // panic if that invariant is ever broken.
-                None => CapsDispatch::Response(CapsResponse::not_found()),
-            },
+            }
         }
     }
 
@@ -1384,6 +1456,10 @@ impl SimCaps {
         request: &CapsRequest<'_>,
         cap_name: &'static str,
     ) -> CapsResponse {
+        if cap_name == CAP_NEW_FILE_AGENT_INVENTORY && self.new_file_policy != NewFilePolicy::Plain
+        {
+            return self.dispatch_new_file(sim, request);
+        }
         if request.method != "POST" {
             return CapsResponse::method_not_allowed();
         }
@@ -1436,6 +1512,244 @@ impl SimCaps {
                 }))
             }
             Some(_) => CapsResponse::not_found(),
+        }
+    }
+
+    /// Serves `MeshUploadFlag`.
+    ///
+    /// OpenSim answers a GET with `{ mesh_upload_status: "valid" }` and
+    /// nothing else, and has no handler for another method. Second Life
+    /// answers with the agent's name record and, on a GET, the account's
+    /// status beside it; a POST is answered with the record alone.
+    fn dispatch_mesh_upload_flag(
+        &self,
+        sim: &SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        let status = (
+            "mesh_upload_status".to_owned(),
+            Llsd::String("valid".to_owned()),
+        );
+        if self.new_file_policy == NewFilePolicy::OpenSim {
+            return if request.method == "GET" {
+                CapsResponse::llsd_xml(Llsd::Map(HashMap::from([status])).to_llsd_xml())
+            } else {
+                CapsResponse::not_found()
+            };
+        }
+        let mut body = match sim
+            .agent_id()
+            .and_then(|agent| sim.display_name(agent))
+            .map(sl_wire::DisplayName::to_llsd)
+        {
+            Some(Llsd::Map(record)) => record,
+            _other => HashMap::new(),
+        };
+        if request.method == "GET" {
+            let _previous = body.insert(status.0, status.1);
+        }
+        CapsResponse::llsd_xml(Llsd::Map(body).to_llsd_xml())
+    }
+
+    /// Serves the two-step uploads that are not asset uploads —
+    /// `InventoryThumbnailUpload` and `SendPostcard`, both Second Life's
+    /// alone — as it was measured to: any first request is handed an
+    /// uploader, whatever it names; the uploader serves once; and a request
+    /// that is no POST is answered `501`.
+    fn dispatch_side_upload(
+        &self,
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+        cap: &'static str,
+    ) -> CapsResponse {
+        let Some(sub_path) = cap_sub_path(request.path) else {
+            if request.method != "POST" {
+                return sim_new_file::not_implemented();
+            }
+            let body = std::str::from_utf8(request.body).unwrap_or_default();
+            let parked = if cap == CAP_SEND_POSTCARD {
+                SideUpload::Postcard(Box::new(
+                    crate::parse_postcard_request(body).unwrap_or_default(),
+                ))
+            } else {
+                SideUpload::Thumbnail(crate::parse_thumbnail_upload_request(body).ok().flatten())
+            };
+            let ticket = sim.park_side_upload(parked);
+            return CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
+                state: "upload".to_owned(),
+                uploader: Some(self.upload_uploader_url(cap, ticket).to_string()),
+                ..AssetUploadResponse::default()
+            }));
+        };
+        let Some(ticket) = upload_ticket(sub_path) else {
+            return CapsResponse::not_found();
+        };
+        let parked = sim.take_side_upload(ticket);
+        if request.method != "POST" {
+            return sim_new_file::not_implemented();
+        }
+        match parked {
+            None => sim_new_file::spent_uploader(ticket),
+            Some(SideUpload::Postcard(postcard)) => {
+                sim.push_side_upload(ServerEvent::PostcardUploaded {
+                    postcard,
+                    image: request.body.to_vec(),
+                });
+                CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
+                    state: "complete".to_owned(),
+                    ..AssetUploadResponse::default()
+                }))
+            }
+            Some(SideUpload::Thumbnail(target)) => {
+                if let Some(refusal) = sim_new_file::thumbnail_refusal(request.body) {
+                    return sim_new_file::side_upload_failure(refusal);
+                }
+                // An image for nothing, or for an item the agent does not
+                // hold, is a server error with nothing in it. What a prim
+                // holds is not looked at: an item in a prim nobody has is
+                // answered like any other.
+                let held = match target {
+                    None => false,
+                    Some(crate::ThumbnailTarget::Item(item)) => {
+                        sim.agent_inventory().item(item).is_some()
+                    }
+                    Some(
+                        crate::ThumbnailTarget::Folder(_) | crate::ThumbnailTarget::TaskItem { .. },
+                    ) => true,
+                };
+                let Some(target) = target.filter(|_target| held) else {
+                    return sim_new_file::server_error();
+                };
+                let new_asset = sim.mint_id();
+                sim.push_side_upload(ServerEvent::InventoryThumbnailUploaded {
+                    target,
+                    new_asset: crate::AssetKey::from(new_asset),
+                    data: request.body.to_vec(),
+                });
+                CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
+                    state: "complete".to_owned(),
+                    new_asset: Some(new_asset),
+                    ..AssetUploadResponse::default()
+                }))
+            }
+        }
+    }
+
+    /// Serves `NewFileAgentInventory` as the grid
+    /// [`with_new_file_policy`](Self::with_new_file_policy) named does: its
+    /// classes, its prices, its refusals and its words. See
+    /// [`NewFilePolicy`].
+    fn dispatch_new_file(&self, sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        let policy = self.new_file_policy;
+        let cap = CAP_NEW_FILE_AGENT_INVENTORY;
+        let Some(sub_path) = cap_sub_path(request.path) else {
+            let step =
+                sim_new_file::first_step(policy, request.method, request.body, sim.money_balance());
+            // OpenSim's uploader, once stuck, says so to every request it
+            // reads at all.
+            if policy == NewFilePolicy::OpenSim
+                && sim.uploader_stuck()
+                && !matches!(&step, FirstStep::Refused(refused) if refused.status != 200)
+            {
+                return sim_new_file::open_sim_refusal(sim_new_file::OPENSIM_BUSY);
+            }
+            return match step {
+                FirstStep::Refused(refused) => refused,
+                FirstStep::Taken {
+                    request,
+                    expected,
+                    upload_price,
+                } => {
+                    let ticket =
+                        sim.park_caps_upload(cap, CapsUploadMetadata::NewFileInventory(request));
+                    sim.note_upload_expectation(ticket, expected, upload_price);
+                    sim_new_file::uploader_answer(
+                        policy,
+                        self.upload_uploader_url(cap, ticket).as_str(),
+                        upload_price,
+                        sim.money_balance(),
+                    )
+                }
+            };
+        };
+        let Some(ticket) = upload_ticket(sub_path) else {
+            return CapsResponse::not_found();
+        };
+        let second_life = matches!(policy, NewFilePolicy::SecondLife(_));
+        if request.method != "POST" {
+            // Second Life's uploader is spent by any request; OpenSim has no
+            // handler for another method and keeps the uploader.
+            if second_life {
+                let _spent = sim.take_caps_upload(cap, ticket);
+                let _spent = sim.take_upload_expectation(ticket);
+                return sim_new_file::not_implemented();
+            }
+            return CapsResponse::html(404, sim_new_file::OPENSIM_NOT_FOUND);
+        }
+        let parked = sim.take_caps_upload(cap, ticket);
+        let (expected, _quoted) = sim
+            .take_upload_expectation(ticket)
+            .unwrap_or((sim_new_file::Expected::Unstated, 0));
+        let Some(CapsUploadMetadata::NewFileInventory(new_file)) = parked else {
+            // An uploader serves once.
+            return if second_life {
+                CapsResponse::words(
+                    404,
+                    &format!("cap not found: '{}'", Uuid::from_u128(ticket)),
+                )
+            } else {
+                CapsResponse::status(200)
+            };
+        };
+        match policy {
+            NewFilePolicy::SecondLife(prices) => {
+                let upload_price = match sim_new_file::second_life_bytes(
+                    prices,
+                    &new_file,
+                    expected,
+                    request.body,
+                    sim.money_balance(),
+                ) {
+                    Ok(upload_price) => upload_price,
+                    Err(refused) => return refused,
+                };
+                sim.charge(upload_price);
+                let transaction = sim.mint_id();
+                let (new_asset, new_item) = sim.complete_caps_upload(
+                    CapsUploadMetadata::NewFileInventory(new_file.clone()),
+                    request.body.to_vec(),
+                );
+                sim_new_file::second_life_completion(
+                    &new_file,
+                    new_asset.uuid(),
+                    new_item.map_or_else(Uuid::nil, |item| item.uuid()),
+                    transaction,
+                    upload_price,
+                )
+            }
+            NewFilePolicy::OpenSim | NewFilePolicy::Plain => {
+                match sim_new_file::open_sim_filed_as(&new_file) {
+                    Some(filed) => {
+                        let (new_asset, new_item) = sim.complete_caps_upload(
+                            CapsUploadMetadata::NewFileInventory(filed),
+                            request.body.to_vec(),
+                        );
+                        sim_new_file::open_sim_completion(
+                            &new_file,
+                            new_asset.uuid(),
+                            new_item.map_or_else(Uuid::nil, |item| item.uuid()),
+                        )
+                    }
+                    None => {
+                        // Nothing is stored and nothing filed, the answer
+                        // names both anyway, and the uploader is stuck.
+                        sim.stick_uploader();
+                        let new_asset = sim.mint_id();
+                        let new_item = sim.mint_id();
+                        sim_new_file::open_sim_completion(&new_file, new_asset, new_item)
+                    }
+                }
+            }
         }
     }
 
@@ -2823,6 +3137,9 @@ mod tests {
             ("UpdateMaterialTaskInventory", CapStatus::Served),
             ("RequestTaskInventory", CapStatus::Served),
             ("GetMetadata", CapStatus::Served),
+            ("MeshUploadFlag", CapStatus::Served),
+            ("InventoryThumbnailUpload", CapStatus::Served),
+            ("SendPostcard", CapStatus::Served),
         ];
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES
             .iter()

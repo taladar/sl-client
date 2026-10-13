@@ -222,6 +222,11 @@ fn on_events(
             | SlSessionEvent::InventoryAssetSaved { .. }
             | SlSessionEvent::AssetUploadFailed { .. }
             | SlSessionEvent::ScriptUploaded { .. }
+            | SlSessionEvent::MeshUploadFlag(..)
+            | SlSessionEvent::InventoryThumbnailUploaded { .. }
+            | SlSessionEvent::InventoryThumbnailUploadFailed { .. }
+            | SlSessionEvent::PostcardSent
+            | SlSessionEvent::PostcardFailed { .. }
             | SlSessionEvent::AvatarAppearance(_)
             | SlSessionEvent::AgentWearables { .. }
             | SlSessionEvent::AvatarAnimation { .. }

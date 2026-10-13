@@ -141,4 +141,5 @@ pub mod terrain_raw_upload;
 pub mod texture_fetch_http;
 pub mod throttle_set;
 pub mod typing_indicator;
+pub mod upload_http;
 pub mod wearables_request;

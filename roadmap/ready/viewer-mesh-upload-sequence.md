@@ -45,3 +45,14 @@ always answers `valid` when mesh upload is enabled.
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Protocol half done (2026-10-13)
+
+[[gridspec-asset-upload]] adopted the capability:
+`Command::RequestMeshUploadFlag` → `Event::MeshUploadFlag(MeshUploadStatus)`
+in both runtimes, served by the
+fake grid on both flavours. It also measured the first request of a model
+upload on both grids — the price, the cost data, the refusals — and that
+aditi refuses the upload itself for an account whose status is not `valid`
+(all the test accounts'): `book/src/gridspec/assets.md` § Uploads. The two
+requests of the upload are still this task's.

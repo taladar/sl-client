@@ -1683,6 +1683,26 @@ pub enum ServerEvent {
         /// The raw screenshot bytes from the second upload step.
         screenshot: Vec<u8>,
     },
+    /// The client uploaded a thumbnail for an inventory item or folder over
+    /// `InventoryThumbnailUpload`, and the simulator minted the asset id it
+    /// answered with. For the driver to store and to set on the target.
+    InventoryThumbnailUploaded {
+        /// What the thumbnail is for.
+        target: crate::ThumbnailTarget,
+        /// The asset id the simulator minted and returned to the client.
+        new_asset: AssetKey,
+        /// The image, a JPEG-2000 codestream.
+        data: Vec<u8>,
+    },
+    /// The client sent a snapshot postcard over the `SendPostcard`
+    /// capability: the card from the first step, the snapshot from the
+    /// second. For the driver to mail, or to keep for a test to read.
+    PostcardUploaded {
+        /// The card.
+        postcard: Box<crate::Postcard>,
+        /// The snapshot, as the client sent it (a JPEG).
+        image: Vec<u8>,
+    },
     /// A two-stage CAPS asset upload completed: the raw bytes arrived at the
     /// uploader URL and the simulator minted the stored asset id (plus, for the
     /// inventory-creating caps, an inventory item id). Covers
@@ -3219,6 +3239,19 @@ pub struct SimSession {
     /// shape as [`pending_report_screenshot`](Self::pending_report_screenshot)
     /// generalised across the whole `Update*`/`NewFile*` family.
     pending_caps_uploads: BTreeMap<(&'static str, u128), CapsUploadMetadata>,
+    /// The first requests of the two-step uploads that are not asset uploads
+    /// (a thumbnail, a postcard), parked by ticket until the bytes arrive.
+    pending_side_uploads: BTreeMap<u128, crate::sim_new_file::SideUpload>,
+    /// What each parked `NewFileAgentInventory` upload said it would cost and
+    /// what its first answer quoted, by ticket — what the bytes are held to
+    /// on a grid that holds them to anything.
+    upload_expectations: BTreeMap<u128, (crate::sim_new_file::Expected, i32)>,
+    /// The agent's L$ balance, where the grid this session imitates states
+    /// one in its upload answers; see [`SimSession::set_money_balance`].
+    money_balance: Option<i64>,
+    /// Whether the `NewFileAgentInventory` uploader is stuck, as OpenSim's is
+    /// after an object that is no mesh model.
+    uploader: crate::sim_new_file::UploaderState,
     /// A monotonic source for the ids the two-stage uploader mints on
     /// completion (`new_asset` / `new_inventory_item`) and the `ObjectMedia`
     /// version serials — a sim-server simplification. A real grid mints random
@@ -3535,6 +3568,10 @@ impl SimSession {
             teleport_cancel: TeleportCancelState::None,
             pending_report_screenshot: None,
             pending_caps_uploads: BTreeMap::new(),
+            pending_side_uploads: BTreeMap::new(),
+            upload_expectations: BTreeMap::new(),
+            money_balance: None,
+            uploader: crate::sim_new_file::UploaderState::Ready,
             next_sim_serial: 0,
             region_materials: BTreeMap::new(),
             object_media: BTreeMap::new(),
@@ -3913,6 +3950,87 @@ impl SimSession {
         let ticket = self.next_serial();
         self.pending_caps_uploads.insert((cap, ticket), metadata);
         ticket
+    }
+
+    /// Parks the first request of a thumbnail or postcard upload and returns
+    /// the ticket its uploader is minted under.
+    pub(crate) fn park_side_upload(&mut self, upload: crate::sim_new_file::SideUpload) -> u128 {
+        let ticket = self.next_serial();
+        let _previous = self.pending_side_uploads.insert(ticket, upload);
+        ticket
+    }
+
+    /// Takes the first request parked under `ticket`, if there is one.
+    pub(crate) fn take_side_upload(
+        &mut self,
+        ticket: u128,
+    ) -> Option<crate::sim_new_file::SideUpload> {
+        self.pending_side_uploads.remove(&ticket)
+    }
+
+    /// Routes a completed thumbnail or postcard upload to the driver.
+    pub(crate) fn push_side_upload(&mut self, event: ServerEvent) {
+        self.events.push_back(event);
+    }
+
+    /// Notes what the upload parked under `ticket` said it would cost and
+    /// what it was quoted.
+    pub(crate) fn note_upload_expectation(
+        &mut self,
+        ticket: u128,
+        expected: crate::sim_new_file::Expected,
+        quoted: i32,
+    ) {
+        let _previous = self.upload_expectations.insert(ticket, (expected, quoted));
+    }
+
+    /// Takes what the upload parked under `ticket` said it would cost, if
+    /// anything was noted.
+    pub(crate) fn take_upload_expectation(
+        &mut self,
+        ticket: u128,
+    ) -> Option<(crate::sim_new_file::Expected, i32)> {
+        self.upload_expectations.remove(&ticket)
+    }
+
+    /// A fresh id from the session's deterministic serial, for an answer that
+    /// names an id nothing is stored under.
+    pub(crate) const fn mint_id(&mut self) -> Uuid {
+        Uuid::from_u128(self.next_serial())
+    }
+
+    /// The agent's L$ balance, where one is kept.
+    #[must_use]
+    pub const fn money_balance(&self) -> Option<i64> {
+        self.money_balance
+    }
+
+    /// Sets the agent's L$ balance, or that none is kept (the default).
+    ///
+    /// A Second-Life-flavoured `NewFileAgentInventory` states the balance in
+    /// its first answer, refuses an upload it does not cover and takes the
+    /// price from it; with no balance kept it states none and refuses
+    /// nobody. Nothing else reads it: this is not a money ledger.
+    pub const fn set_money_balance(&mut self, balance: Option<i64>) {
+        self.money_balance = balance;
+    }
+
+    /// Takes `amount` L$ from the balance, where one is kept.
+    pub(crate) fn charge(&mut self, amount: i32) {
+        if let Some(balance) = self.money_balance {
+            self.money_balance = Some(balance.saturating_sub(i64::from(amount)));
+        }
+    }
+
+    /// Whether the `NewFileAgentInventory` uploader is stuck.
+    pub(crate) const fn uploader_stuck(&self) -> bool {
+        matches!(self.uploader, crate::sim_new_file::UploaderState::Stuck)
+    }
+
+    /// Leaves the `NewFileAgentInventory` uploader stuck for the rest of the
+    /// session.
+    pub(crate) const fn stick_uploader(&mut self) {
+        self.uploader = crate::sim_new_file::UploaderState::Stuck;
     }
 
     /// Takes the step-1 metadata parked for `cap` under `ticket`, if a first
@@ -12763,6 +12881,8 @@ impl SimSession {
         self.offline_messages = Vec::new();
         self.pending_report_screenshot = None;
         self.pending_caps_uploads = BTreeMap::new();
+        self.upload_expectations = BTreeMap::new();
+        self.pending_side_uploads = BTreeMap::new();
         self.events.push_back(reason);
     }
 }

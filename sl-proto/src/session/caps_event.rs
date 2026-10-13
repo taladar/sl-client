@@ -120,6 +120,8 @@ pub(crate) enum CapsEvent {
     TaskInventoryFailed,
     /// A script's experience, stamped with the prim and the script.
     GetMetadata,
+    /// Whether the agent may upload mesh.
+    MeshUploadFlag,
     /// The account's email address and its verification state.
     UserInfo,
     /// The land-impact cost of a set of objects.
@@ -236,6 +238,7 @@ impl CapsEvent {
             crate::TASK_INVENTORY_UNCHANGED_TAG => Self::TaskInventoryUnchanged,
             crate::TASK_INVENTORY_FAILED_TAG => Self::TaskInventoryFailed,
             CAP_GET_METADATA => Self::GetMetadata,
+            super::CAP_MESH_UPLOAD_FLAG => Self::MeshUploadFlag,
             CAP_USER_INFO => Self::UserInfo,
             CAP_GET_OBJECT_COST => Self::GetObjectCost,
             CAP_RESOURCE_COST_SELECTED => Self::ResourceCostSelected,

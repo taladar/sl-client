@@ -42,6 +42,7 @@ What OpenSim refuses, grouped by what a viewer loses:
 | materials | `ModifyMaterialParams`, `UpdateMaterialAgentInventory`, `UpdateMaterialTaskInventory` | no PBR overrides or material saving; the client logs an edit it cannot send (since 2026-10-04) and the viewer greys its PBR tab (since 2026-10-12, [Materials](materials.md)) |
 | objects | `InterestList` | nothing: OpenSim sends a region's objects whichever way the camera looks (since 2026-10-09) |
 | contents | `RequestTaskInventory`, `GetMetadata` | the UDP `RequestTaskInventory` and the listing's `Xfer`; no script is under an experience (since 2026-10-12, [Building](building.md#contents)) |
+| uploads | `InventoryThumbnailUpload`, `SendPostcard` | nothing: no thumbnails, and OpenSim ignores the UDP `SendPostcard` too (the commands fail at once, since 2026-10-13, [Assets](assets.md#uploads)) |
 | other | `DirectDelivery`, `SendUserReport`, `SendUserReportWithScreenshot`, `ObjectAnimation` | marketplace delivery reports its absence; a report goes over the UDP `UserReport`, without a screenshot (since 2026-10-04); `ObjectAnimation` is only named to opt in to the UDP stream |
 
 How each runtime handles each refused capability was audited on 2026-10-04,

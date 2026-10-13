@@ -490,6 +490,12 @@ pub(crate) struct GridCore {
     /// How the asset-delivery capabilities answer as HTTP
     /// ([`ImitatedGrid::asset_http_policy`]).
     pub(crate) asset_http: sl_proto::AssetHttpPolicy,
+    /// How `NewFileAgentInventory` answers
+    /// ([`ImitatedGrid::new_file_policy`]).
+    pub(crate) new_file: sl_proto::NewFilePolicy,
+    /// What an agent has for uploads at login
+    /// ([`ImitatedGrid::upload_funds`]).
+    pub(crate) upload_funds: Option<i64>,
     /// The grid's asset host, where the imitated grid has one
     /// ([`ImitatedGrid::asset_host`]): the one surface every session is
     /// granted, served by a listener of its own.
@@ -833,6 +839,7 @@ impl GridCore {
         sim.set_secure_session_id(ids.secure_session_id);
         sim.set_region_id(region.region_id);
         sim.set_update_completion_names_item(self.update_completion_item.names_item());
+        sim.set_money_balance(self.upload_funds);
         sim.set_parcel_dialect(self.parcel_policy.wire_types);
         sim.set_withholds_logout_reply(matches!(
             self.logout_reply,
@@ -1001,7 +1008,8 @@ impl GridCore {
             let minter = self.minter.clone();
             let mut caps =
                 sl_proto::SimCaps::new(base_url, self.minter.uuid(), move || minter.uuid())
-                    .with_asset_http_policy(self.asset_http);
+                    .with_asset_http_policy(self.asset_http)
+                    .with_new_file_policy(self.new_file);
             if let Some(surface) = &self.asset_host {
                 caps = caps.with_asset_surface(surface.clone());
             }
@@ -2147,6 +2155,8 @@ impl FakeGridBuilder {
             parcel_policy: self.imitates.parcel_policy(),
             sit_policy: self.imitates.sit_policy(),
             asset_http: self.imitates.asset_http_policy(),
+            new_file: self.imitates.new_file_policy(),
+            upload_funds: self.imitates.upload_funds(),
             asset_host,
             map_policy: self.imitates.map_policy(),
             environment_change_reply: self.imitates.environment_change_reply(),

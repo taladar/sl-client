@@ -1428,19 +1428,35 @@ mod test {
                     _ => None,
                 })
                 .await?;
+            // What each grid's uploader takes: Second Life no notecard at
+            // all, and a texture only at its price; OpenSim anything, free.
+            let (asset_type, inventory_type, expected_upload_cost, data) = match imitates {
+                ImitatedGrid::SecondLife => (
+                    sl_proto::AssetType::Texture,
+                    sl_proto::InventoryType::Texture,
+                    10,
+                    sl_test_assets::RgbaImage::solid(64, sl_test_assets::markers::RED).j2c()?,
+                ),
+                ImitatedGrid::OpenSim => (
+                    sl_proto::AssetType::Notecard,
+                    sl_proto::InventoryType::Notecard,
+                    0,
+                    b"Linden text version 2\n{\nLLEmbeddedItems version 1\n{\ncount 0\n}\nText length 0\n}\n".to_vec(),
+                ),
+            };
             running
                 .commands
                 .send(Command::UploadAsset {
                     folder_id: root,
-                    asset_type: sl_proto::AssetType::Notecard,
-                    inventory_type: sl_proto::InventoryType::Notecard,
+                    asset_type,
+                    inventory_type,
                     name: "created-by-upload".to_owned(),
                     description: "the item whose announcement is under test".to_owned(),
                     next_owner_mask: 0x0008_e000,
                     group_mask: 0,
                     everyone_mask: 0,
-                    expected_upload_cost: 0,
-                    data: b"Linden text version 2\n{\nLLEmbeddedItems version 1\n{\ncount 0\n}\nText length 0\n}\n".to_vec(),
+                    expected_upload_cost,
+                    data,
                 })
                 .await?;
             let mut created = None;
@@ -1520,8 +1536,10 @@ mod test {
                 filed.description,
                 "the item whose announcement is under test"
             );
-            assert_eq!(filed.asset_type, sl_proto::AssetType::Notecard);
-            assert_eq!(filed.inv_type, sl_proto::InventoryType::Notecard);
+            // The classes the request named: the client files the item from
+            // its own request and the completion.
+            assert_eq!(filed.asset_type, asset_type);
+            assert_eq!(filed.inv_type, inventory_type);
             // The grid reported what it granted, so those masks are the item's
             // — not the ones the request asked for, and not a guess.
             assert_eq!(

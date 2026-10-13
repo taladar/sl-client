@@ -1098,6 +1098,10 @@ impl Session {
                 }),
                 Err(error) => self.caps_decode_error(message, &error),
             },
+            CapsEvent::MeshUploadFlag => {
+                let status = crate::MeshUploadStatus::from_reply(body);
+                self.events.push_back(Event::MeshUploadFlag(status));
+            }
             // The reply to an `AgentPreferences` POST: the agent's full stored
             // preferences after the (possibly empty) update.
             CapsEvent::AgentPreferences => match parse_agent_preferences(body) {

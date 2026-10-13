@@ -3,8 +3,8 @@
 use crate::caps::deliver;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    AgentKey, Event, NewFileAgentInventoryRequest, ScriptCompileError, Uuid,
-    parse_asset_upload_response, uploaded_inventory_item,
+    AgentKey, Event, NewFileAgentInventoryRequest, ScriptCompileError, ThumbnailTarget, Uuid,
+    build_thumbnail_upload_request, parse_asset_upload_response, uploaded_inventory_item,
 };
 use tokio::sync::mpsc;
 
@@ -238,6 +238,79 @@ pub(crate) async fn run_report_screenshot_upload(
             tracing::warn!("abuse-report screenshot upload failed: {reason}");
         }
     }
+}
+
+/// Both steps of a two-step upload that is not an asset upload: the LLSD
+/// `metadata` to the capability, then `data` under `content_type` to the
+/// uploader it names. Returns the second answer, or why there is none.
+async fn two_step_upload(
+    http: &ReqwestClient,
+    cap_url: &str,
+    metadata: String,
+    content_type: &str,
+    data: Vec<u8>,
+) -> Result<sl_proto::AssetUploadResponse, String> {
+    let first =
+        caps_upload_step(http, cap_url, "application/llsd+xml", metadata.into_bytes()).await?;
+    let Some(uploader) = first.uploader else {
+        return Err(first
+            .error
+            .unwrap_or_else(|| format!("upload request refused (state {})", first.state)));
+    };
+    caps_upload_step(http, &uploader, content_type, data).await
+}
+
+/// Uploads an inventory thumbnail over `InventoryThumbnailUpload` and
+/// surfaces the outcome as [`Event::InventoryThumbnailUploaded`] or
+/// [`Event::InventoryThumbnailUploadFailed`]. Mirrors the bevy
+/// `run_thumbnail_upload`.
+pub(crate) async fn run_thumbnail_upload(
+    cap_url: String,
+    target: ThumbnailTarget,
+    data: Vec<u8>,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    let metadata = build_thumbnail_upload_request(&target);
+    let event = match two_step_upload(&http, &cap_url, metadata, "application/jp2", data).await {
+        Ok(response) => match response.new_asset {
+            Some(new_asset) => Event::InventoryThumbnailUploaded { target, new_asset },
+            None => Event::InventoryThumbnailUploadFailed {
+                target,
+                reason: response.error.unwrap_or_else(|| {
+                    format!(
+                        "thumbnail upload did not complete (state {})",
+                        response.state
+                    )
+                }),
+            },
+        },
+        Err(reason) => Event::InventoryThumbnailUploadFailed { target, reason },
+    };
+    deliver(&events, event).await;
+}
+
+/// Sends a postcard over `SendPostcard` and surfaces the outcome as
+/// [`Event::PostcardSent`] or [`Event::PostcardFailed`]. Mirrors the bevy
+/// `run_postcard_upload`.
+pub(crate) async fn run_postcard_upload(
+    cap_url: String,
+    card: String,
+    image: Vec<u8>,
+    http: ReqwestClient,
+    events: mpsc::Sender<Event>,
+) {
+    let event =
+        match two_step_upload(&http, &cap_url, card, "application/octet-stream", image).await {
+            Ok(response) if response.state == "complete" => Event::PostcardSent,
+            Ok(response) => Event::PostcardFailed {
+                reason: response.error.unwrap_or_else(|| {
+                    format!("postcard was not taken (state {})", response.state)
+                }),
+            },
+            Err(reason) => Event::PostcardFailed { reason },
+        };
+    deliver(&events, event).await;
 }
 
 /// POSTs one step of a CAPS upload and parses the LLSD response, returning the

@@ -56,13 +56,13 @@
 
 use sl_client_tokio::{
     AssetType, Command, Event, FolderInfo, FolderType, InventoryFolderKey, InventoryKey,
-    InventoryType, MoneyBalance, Throttle, Uuid,
+    InventoryType, MoneyBalance, Throttle, UploadClass, Uuid, expected_upload_cost,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, is_aditi, observe_upload};
+use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, observe_upload};
 
 /// The edge of the texture uploaded to a grid that charges for one.
 ///
@@ -90,7 +90,7 @@ impl GridTest for AssetUpload {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
@@ -144,7 +144,9 @@ impl GridTest for AssetUpload {
             // first and decline the run rather than reaching the grid's own
             // refusal — a case that quietly empties the test avatar's purse is
             // worse than one that says why it did not run.
-            let balance_before = if cost > 0 {
+            // The fake grid answers no balance request (it keeps no ledger),
+            // so there is nothing to check a fee against there.
+            let balance_before = if cost > 0 && !grid.is_fake() {
                 let balance = current_balance(ctx.primary()).await?;
                 if balance < cost {
                     ctx.mark_partial(&format!(
@@ -270,7 +272,7 @@ impl Subject {
     /// Returns an assertion failure when the fixture texture will not encode,
     /// which is a client-side fault rather than anything the grid did.
     fn for_grid(grid: Grid, tag: &str) -> Result<Self, TestFailure> {
-        if is_aditi(grid) {
+        if matches!(grid.behaves_like(), sl_fake_grid::ImitatedGrid::SecondLife) {
             // Second Life takes only the chargeable classes here; a texture is
             // the cheapest of them. The pixels are a checkerboard rather than a
             // solid so the codestream is not degenerate — a single-colour image
@@ -325,7 +327,9 @@ impl Subject {
             .ok_or_else(|| {
                 "the login response carried no benefits package to price the upload from".to_owned()
             })?;
-        i64::try_from(benefits.texture_upload_cost_for(width, height).0).map_err(|_overflow| {
+        let cost =
+            expected_upload_cost(UploadClass::Texture { width, height }, Some(benefits), None);
+        i64::try_from(cost.0).map_err(|_overflow| {
             "the benefits texture upload cost does not fit an L$ amount".to_owned()
         })
     }
@@ -343,7 +347,7 @@ impl Subject {
 /// # Errors
 ///
 /// Propagates the query's own timeout.
-async fn destination_folder(
+pub(crate) async fn destination_folder(
     session: &mut Session,
     folder_type: FolderType,
 ) -> Result<Option<InventoryFolderKey>, TestFailure> {
@@ -376,7 +380,7 @@ async fn destination_folder(
 ///
 /// Propagates the reply's own timeout — a grid with no money module answers
 /// nothing, and a case that needs a balance cannot proceed without one.
-async fn current_balance(session: &mut Session) -> Result<i64, TestFailure> {
+pub(crate) async fn current_balance(session: &mut Session) -> Result<i64, TestFailure> {
     session.send(Command::RequestMoneyBalance).await?;
     let balance: MoneyBalance = session
         .wait_for(LONG_TIMEOUT, |event| match event {

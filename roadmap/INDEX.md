@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 139 |
 | ready | 356 |
-| blocked | 104 |
+| blocked | 103 |
 | in-progress | 20 |
-| bugs | 37 |
-| done | 1356 |
+| bugs | 39 |
+| done | 1357 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2059** |
+| **total** | **2061** |
 
 ## ideas (139)
 
@@ -1100,6 +1100,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
   — Fake grid — apply legacy and PBR material edits and push overrides
+- [`server-fake-grid-mesh-upload-cost`](ready/server-fake-grid-mesh-upload-cost.md)
+  — Fake grid — mesh upload costing and refusals (blocked by
+  `gridspec-asset-upload` (done))
 - [`server-fake-grid-object-media-region`](ready/server-fake-grid-object-media-region.md)
   — Fake grid — region-wide object media with version bumps and propagation
 - [`server-fake-grid-object-record-texture-ids`](ready/server-fake-grid-object-record-texture-ids.md)
@@ -1135,8 +1138,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid broadcasts them
 - [`gridspec-appearance-baking`](ready/gridspec-appearance-baking.md) —
   Appearance and baking on each grid
-- [`gridspec-asset-upload`](ready/gridspec-asset-upload.md) — Asset uploads and
-  their costs, refusals and announcements on each grid
 - [`gridspec-attachments`](ready/gridspec-attachments.md) — Attachments on each
   grid: attach, detach, limits, HUDs, temporary
 - [`gridspec-avatar-render-info`](ready/gridspec-avatar-render-info.md) —
@@ -1196,7 +1197,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
   Viewer effects and sound relays on each grid
 
-## blocked (104)
+## blocked (103)
 
 ### protocol
 
@@ -1396,9 +1397,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-inventory-udp-mutations`](blocked/server-fake-grid-inventory-udp-mutations.md)
   — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
   `gridspec-inventory-mutations`)
-- [`server-fake-grid-mesh-upload-cost`](blocked/server-fake-grid-mesh-upload-cost.md)
-  — Fake grid — mesh upload costing and refusals (blocked by
-  `gridspec-asset-upload`)
 - [`server-fake-grid-money-ledger`](blocked/server-fake-grid-money-ledger.md) —
   Fake grid — a money ledger: balances, transfers, buying and paying (blocked by
   `gridspec-money`, `gridspec-land-transactions`)
@@ -1585,7 +1583,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (37)
+## bugs (39)
 
 ### protocol
 
@@ -1647,6 +1645,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A blocked avatar's mute entry is named by its first name, not its username
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-new-material-refused-on-second-life`](bugs/viewer-new-material-refused-on-second-life.md)
+  — Saving a PBR material to inventory is refused on Second Life
+- [`viewer-new-wearable-refused-on-second-life`](bugs/viewer-new-wearable-refused-on-second-life.md)
+  — New wearables and a wearable's Save As are refused on Second Life
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-parcel-audio-bar-backing-unskinned`](bugs/viewer-parcel-audio-bar-backing-unskinned.md)
@@ -1680,7 +1682,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1356)
+## done (1357)
 
 ### protocol
 
@@ -4626,6 +4628,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   moves an agent: AgentUpdate handling, speeds, terse updates
 - [`gridspec-asset-fetch-http`](done/gridspec-asset-fetch-http.md) — HTTP asset
   fetch details on each grid
+- [`gridspec-asset-upload`](done/gridspec-asset-upload.md) — Asset uploads and
+  their costs, refusals and announcements on each grid
 - [`gridspec-avatar-presence`](done/gridspec-avatar-presence.md) — Other avatars
   in the region: full updates, coarse locations and kills
 - [`gridspec-circuit`](done/gridspec-circuit.md) — Circuit behaviour: acks,

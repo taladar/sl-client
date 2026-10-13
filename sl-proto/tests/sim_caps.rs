@@ -160,8 +160,10 @@ mod test {
         // (ParcelPropertiesUpdate), the thirteen experience caps, the three
         // voice signalling caps, the interest-list switch, the two task
         // uploads of a gesture and a material, and the two reads of a prim's
-        // contents (RequestTaskInventory, GetMetadata).
-        assert_eq!(granted.len(), 67);
+        // contents (RequestTaskInventory, GetMetadata), and the three smaller
+        // upload capabilities (MeshUploadFlag, InventoryThumbnailUpload,
+        // SendPostcard).
+        assert_eq!(granted.len(), 70);
         Ok(())
     }
 
@@ -1117,6 +1119,260 @@ mod test {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// A `GET` or bytes-`POST` [`CapsRequest`].
+    fn request<'a>(method: &'a str, path: &'a str, body: &'a [u8]) -> CapsRequest<'a> {
+        CapsRequest {
+            method,
+            path,
+            query: None,
+            range: None,
+            if_modified_since: None,
+            body,
+        }
+    }
+
+    /// `MeshUploadFlag` states the status on a `GET`, as both grids do, and
+    /// the client reads it as leave to upload.
+    #[test]
+    fn mesh_upload_flag_states_a_status() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "MeshUploadFlag")?;
+        let (status, reply) = respond(&mut caps, &mut sim, &request("GET", &path, b""))?;
+        assert_eq!(status, 200);
+        let flag = sl_proto::MeshUploadStatus::from_reply(&parse_llsd_xml(&reply)?);
+        assert_eq!(flag, sl_proto::MeshUploadStatus::Valid);
+        assert!(flag.allows_upload());
+        Ok(())
+    }
+
+    /// `InventoryThumbnailUpload`: any first request is handed an uploader,
+    /// the image completes it once, and an image too wide is refused in the
+    /// words the client reports.
+    #[test]
+    fn inventory_thumbnail_upload_two_steps() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "InventoryThumbnailUpload")?;
+        let target = sl_proto::ThumbnailTarget::Item(InventoryKey::from(uuid::Uuid::from_u128(9)));
+        let first = sl_proto::build_thumbnail_upload_request(&target);
+        let image = sl_test_j2c(64, 64);
+
+        // An image for an item the agent does not hold is a server error.
+        let (_status, reply) = respond(&mut caps, &mut sim, &post(&path, &first))?;
+        let uploader: url::Url = parse_asset_upload_response(&reply)?
+            .uploader
+            .ok_or("expected an uploader URL")?
+            .parse()?;
+        let (status, _reply) = respond(
+            &mut caps,
+            &mut sim,
+            &request("POST", uploader.path(), &image),
+        )?;
+        assert_eq!(status, 500);
+        sim.agent_inventory_mut().insert_item(sample_inventory_item(
+            9,
+            InventoryFolderKey::from(uuid::Uuid::from_u128(7)),
+            "an item",
+        ));
+
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &first))?;
+        assert_eq!(status, 200);
+        let uploader: url::Url = parse_asset_upload_response(&reply)?
+            .uploader
+            .ok_or("expected an uploader URL")?
+            .parse()?;
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &request("POST", uploader.path(), &image),
+        )?;
+        assert_eq!(status, 200);
+        let done = parse_asset_upload_response(&reply)?;
+        assert_eq!(done.state, "complete");
+        let new_asset = done.new_asset.ok_or("expected a new asset")?;
+        match sim.poll_event() {
+            Some(ServerEvent::InventoryThumbnailUploaded {
+                target: of,
+                new_asset: stored,
+                data,
+            }) => {
+                assert_eq!(of, target);
+                assert_eq!(stored.uuid(), new_asset);
+                assert_eq!(data, image);
+            }
+            other => return Err(format!("expected a thumbnail, got {other:?}").into()),
+        }
+        // The uploader served once.
+        let (status, _reply) = respond(
+            &mut caps,
+            &mut sim,
+            &request("POST", uploader.path(), &image),
+        )?;
+        assert_eq!(status, 404);
+
+        // An image wider than a thumbnail may be.
+        let (_status, reply) = respond(&mut caps, &mut sim, &post(&path, &first))?;
+        let uploader: url::Url = parse_asset_upload_response(&reply)?
+            .uploader
+            .ok_or("expected an uploader URL")?
+            .parse()?;
+        let wide = sl_test_j2c(512, 512);
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &request("POST", uploader.path(), &wide),
+        )?;
+        assert_eq!(status, 200);
+        let refused = parse_asset_upload_response(&reply)?;
+        assert_eq!(refused.state, "failure");
+        assert_eq!(
+            refused.error.as_deref(),
+            Some("Invalid width: Value too large.")
+        );
+        Ok(())
+    }
+
+    /// The first bytes of a JPEG-2000 codestream `width` by `height`: the
+    /// start of the codestream and its size segment, which is all a grid
+    /// reads before it judges an image's size.
+    #[expect(
+        clippy::big_endian_bytes,
+        reason = "a JPEG-2000 codestream's fields are defined big-endian"
+    )]
+    fn sl_test_j2c(width: u32, height: u32) -> Vec<u8> {
+        let mut out = vec![0xFF, 0x4F, 0xFF, 0x51, 0x00, 0x2F, 0x00, 0x00];
+        out.extend_from_slice(&width.to_be_bytes());
+        out.extend_from_slice(&height.to_be_bytes());
+        // No offsets, one tile the size of the image, no tile offsets.
+        out.extend_from_slice(&[0; 8]);
+        out.extend_from_slice(&width.to_be_bytes());
+        out.extend_from_slice(&height.to_be_bytes());
+        out.extend_from_slice(&[0; 8]);
+        // Three components, eight bits each, not subsampled.
+        out.extend_from_slice(&[0x00, 0x03]);
+        for _component in 0..3 {
+            out.extend_from_slice(&[0x07, 0x01, 0x01]);
+        }
+        out
+    }
+
+    /// `SendPostcard`: the card, then the snapshot, both handed to the
+    /// driver.
+    #[test]
+    fn send_postcard_two_steps() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "SendPostcard")?;
+        let card = sl_proto::Postcard {
+            to: "somebody@example.org".to_owned(),
+            subject: "A view".to_owned(),
+            ..sl_proto::Postcard::default()
+        };
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &post(&path, &sl_proto::build_postcard_request(&card)),
+        )?;
+        assert_eq!(status, 200);
+        let uploader: url::Url = parse_asset_upload_response(&reply)?
+            .uploader
+            .ok_or("expected an uploader URL")?
+            .parse()?;
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &request("POST", uploader.path(), b"jpeg"),
+        )?;
+        assert_eq!(status, 200);
+        assert_eq!(parse_asset_upload_response(&reply)?.state, "complete");
+        match sim.poll_event() {
+            Some(ServerEvent::PostcardUploaded { postcard, image }) => {
+                assert_eq!(*postcard, card);
+                assert_eq!(image, b"jpeg");
+            }
+            other => return Err(format!("expected a postcard, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// A Second-Life-flavoured `NewFileAgentInventory` holds the bytes to the
+    /// stated cost, charges the balance it states, and refuses what the
+    /// balance does not cover; an OpenSim-flavoured one takes anything, and
+    /// does not come back from an object.
+    #[test]
+    fn new_file_agent_inventory_answers_as_its_grid() -> Result<(), TestError> {
+        let upload = |caps: &mut SimCaps,
+                      sim: &mut SimSession,
+                      asset_type: &str,
+                      inventory_type: &str,
+                      cost: i32,
+                      bytes: &[u8]|
+         -> Result<String, TestError> {
+            let path = granted_cap_path(caps, CAP_NEW_FILE_AGENT_INVENTORY)?;
+            let body = build_new_file_agent_inventory_request(&NewFileAgentInventoryRequest {
+                folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(7)),
+                asset_type: asset_type.to_owned(),
+                inventory_type: inventory_type.to_owned(),
+                name: "an upload".to_owned(),
+                description: String::new(),
+                next_owner_mask: 0,
+                group_mask: 0,
+                everyone_mask: 0,
+                expected_upload_cost: cost,
+            });
+            let (_status, reply) = respond(caps, sim, &post(&path, &body))?;
+            let Some(uploader) = parse_asset_upload_response(&reply)?.uploader else {
+                return Ok(reply);
+            };
+            let uploader: url::Url = uploader.parse()?;
+            Ok(respond(caps, sim, &request("POST", uploader.path(), bytes))?.1)
+        };
+
+        let mut caps = new_caps()?.with_new_file_policy(sl_proto::NewFilePolicy::SecondLife(
+            sl_proto::UploadPrices::default(),
+        ));
+        let mut sim = new_sim();
+        sim.set_money_balance(Some(25));
+        let small = sl_test_j2c(64, 64);
+        let differs = upload(&mut caps, &mut sim, "texture", "texture", 0, &small)?;
+        assert!(differs.contains("Upload_UploadPriceDiffers"), "{differs}");
+        assert_eq!(sim.money_balance(), Some(25));
+        let taken = upload(&mut caps, &mut sim, "texture", "texture", 10, &small)?;
+        assert_eq!(parse_asset_upload_response(&taken)?.state, "complete");
+        assert_eq!(sim.money_balance(), Some(15));
+        let large = upload(
+            &mut caps,
+            &mut sim,
+            "texture",
+            "texture",
+            10,
+            &sl_test_j2c(2048, 2048),
+        )?;
+        assert!(large.contains("Upload_UploadPriceDiffers"), "{large}");
+        let notecard = upload(&mut caps, &mut sim, "notecard", "notecard", 0, b"text")?;
+        assert!(
+            notecard.contains("Invalid asset type: notecard"),
+            "{notecard}"
+        );
+        sim.set_money_balance(Some(3));
+        let poor = upload(&mut caps, &mut sim, "texture", "texture", 10, &small)?;
+        assert!(
+            poor.contains("Upload_InsufficientLindenDollarBalance"),
+            "{poor}"
+        );
+
+        let mut caps = new_caps()?.with_new_file_policy(sl_proto::NewFilePolicy::OpenSim);
+        let mut sim = new_sim();
+        let notecard = upload(&mut caps, &mut sim, "notecard", "notecard", 0, b"text")?;
+        assert_eq!(parse_asset_upload_response(&notecard)?.state, "complete");
+        let object = upload(&mut caps, &mut sim, "object", "object", 0, b"<xml />")?;
+        assert_eq!(parse_asset_upload_response(&object)?.state, "complete");
+        let after = upload(&mut caps, &mut sim, "texture", "texture", 0, &small)?;
+        assert!(after.contains("Uploader busy"), "{after}");
         Ok(())
     }
 
