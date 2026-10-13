@@ -1424,12 +1424,12 @@ fn two_places(value: f32) -> String {
 }
 
 /// A vector as `<x,y,z>`, each to one place.
-fn vector_text(vector: &Vector) -> String {
+pub(crate) fn vector_text(vector: &Vector) -> String {
     format!("<{:.1},{:.1},{:.1}>", vector.x, vector.y, vector.z)
 }
 
 /// The distance between two points.
-fn distance(left: &Vector, right: &Vector) -> f32 {
+pub(crate) fn distance(left: &Vector, right: &Vector) -> f32 {
     let (dx, dy, dz) = (left.x - right.x, left.y - right.y, left.z - right.z);
     dz.mul_add(dz, dx.mul_add(dx, dy * dy)).sqrt()
 }

@@ -114,6 +114,8 @@ mod test {
         chat_self_echo => "chat-self-echo" [fake_sl, fake_opensim],
         chat_hear_other => "chat-hear-other" [fake_sl, fake_opensim],
         chat_whisper_shout_range => "chat-whisper-shout-range" [fake_sl, fake_opensim],
+        local_chat => "local-chat" [fake_sl, fake_opensim],
+        chat_border => "chat-border" [fake_sl, fake_opensim],
         server_error => "server-error" [fake_sl, fake_opensim],
         task_inventory => "task-inventory" [fake_sl, fake_opensim],
         asset_round_trip => "asset-round-trip" [fake_opensim],

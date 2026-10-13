@@ -22,7 +22,15 @@ carries:
 
 Sending is `Command::Chat { message, chat_type, channel }`; a typing indicator
 is `Command::Typing(bool)`. Incoming chat arrives as `Event::ChatReceived(..)`,
-and others' typing as `Event::ChatTyping`.
+and others' typing as `Event::ChatTyping`, which states how audible the grid
+says the typist is and where.
+
+Both are read on a child circuit as well as the root one: OpenSim sends a
+line said just over a border down the child circuit of the speaker's region.
+What each grid passes on, how far, and what it cuts — and that neither ever
+marks a *line* less than fully audible, while Second Life marks a distant
+typist's notices so — is measured in
+[Grid Behaviour: Local chat](../gridspec/chat.md).
 
 ## Instant messages
 

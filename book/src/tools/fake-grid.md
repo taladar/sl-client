@@ -1480,8 +1480,9 @@ this case rezzes and drops an item into).
 
 ### Local chat
 
-`chat.rs` routes a line said in a region the way OpenSim's
-`ChatModule.DeliverChatToAvatars` does, and every line takes one path: a
+`chat.rs` routes a line said in a region as the flavour's grid does
+([Local chat](../gridspec/chat.md), `ImitatedGrid::chat_policy`), and every
+line takes one path: a
 viewer's `ChatFromViewer` is said where its agent stands, under its name, an
 object speaks through `FakeAgent::say`, and both go through
 `SceneFixtures::say`, which offers the line to the region's **listens** and
@@ -1490,20 +1491,30 @@ whether its own avatar hears it — including the speaker's own session, whose
 echo is how a viewer shows the line it typed.
 
 - An avatar hears channel 0 and the debug channel only: a whisper within
-  10 m, a say within 20 m, a shout within 100 m; a region-say, a debug line
-  and the typing indicators at any distance; an owner-say only its owner. A
-  line on any other channel reaches no viewer at all — that is what a
-  dialog's reply channel relies on.
+  10 m, a say within 20 m, a shout within 100 m; an object's owner-say only
+  its owner. A line on any other channel reaches no viewer at all — that is
+  what a dialog's reply channel relies on.
+- Where the grids part, `ChatPolicy` decides: a viewer's line of a type no
+  viewer sends (dropped, or passed on to the whole region), a viewer's line
+  on the debug channel (kept as its type, or said as a debug line) and on a
+  negative channel, how far a typing notice and a debug line go and whether
+  a distant typist is marked barely audible, where a long text is cut, and
+  whether `RegionInfo` states the ranges.
 - A listen (`llListen`'s channel, name, key and message filter; switched off
   and on, removed) hears any channel, from its object's position, never its
   own object's lines. With no script engine yet, whoever registers it through
   `FakeAgent::listen` is its consumer and receives each line it hears.
 - An avatar is where it last arrived — its login, or an intra-region
   teleport, which records the new position — since the grid tracks no
-  walking. A child agent hears nothing; chat across a border is not modelled.
+  walking.
+- A line carries over a border by the same ranges, to where the hearer
+  stands next door. Second Life's flavour has the hearer's own region say
+  it, in its coordinates; OpenSim's sends it down the hearer's child circuit
+  in the speaker's region's.
 
-Offline conformance: `chat-self-echo`, `chat-hear-other` and
-`chat-whisper-shout-range`.
+Offline conformance: `chat-self-echo`, `chat-hear-other`,
+`chat-whisper-shout-range`, `local-chat` (everything but its script legs) and
+`chat-border`.
 
 ### A parcel's other half
 

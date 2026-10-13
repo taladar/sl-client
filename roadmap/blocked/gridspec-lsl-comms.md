@@ -12,6 +12,11 @@ Context: [context/gridspec.md](../context/gridspec.md).
 
 ## Known already
 
+What an *avatar* is sent of each say function was measured by
+[[gridspec-local-chat]] (`book/src/gridspec/chat.md` § A script's lines):
+types, owner, name, place, reach, the debug channel, an empty and a long
+text. What a *listen* hears is still this task's.
+
 No aditi or OpenSim measurements for this tranche beyond the library table's
 documented values.
 

@@ -281,7 +281,10 @@ pub struct ChatMessage {
     pub chat_type: ChatType,
     /// Whether the message was audible at the listener.
     pub audible: ChatAudible,
-    /// The speaker's region-local position, in metres.
+    /// The speaker's position, in metres, in the coordinates of the region
+    /// that sent the line. That is the listener's own region but for a line
+    /// said just over a border, which a grid may send down the child circuit
+    /// of the speaker's region and state in that region's coordinates.
     pub position: RegionCoordinates,
     /// The message text (UTF-8, with any trailing NUL padding removed).
     pub message: String,

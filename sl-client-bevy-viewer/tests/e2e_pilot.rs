@@ -457,6 +457,43 @@ mod test {
         Ok(())
     }
 
+    /// The line Alpha says on the debug channel.
+    const DEBUG_LINE: &str = "said on the debug channel";
+
+    /// **A line on the debug channel**, on a grid of each flavour
+    /// (`book/src/gridspec/chat.md`): Alpha types it with the chat bar's
+    /// channel prefix. Second Life passes it on as the say it was sent as;
+    /// OpenSim says it as a debug line. Beta's transcript shows it either
+    /// way, as the kind the grid made of it.
+    #[test]
+    fn a_line_on_the_debug_channel_is_heard_as_each_grid_says_it() -> Result<(), TestError> {
+        for (flavour, name, kind) in [
+            (ImitatedGrid::SecondLife, "debug_line_second_life", "normal"),
+            (ImitatedGrid::OpenSim, "debug_line_open_sim", "debug"),
+        ] {
+            stage(name, &["Alpha", "Beta"])
+                .needs(Need::GridControl)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    let beta = &stage.viewer("Beta")?;
+                    let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
+                    let _typed = bar.fill(&format!("/{} {DEBUG_LINE}", i32::MAX)).await?;
+                    bar.press("Enter").await?;
+                    let _heard = beta
+                        .expect_state(Probe::Conversations)
+                        .timeout(WAIT)
+                        .to_include(json!([{ "lines": [{
+                            "text": DEBUG_LINE,
+                            "chat_kind": kind,
+                        }] }]))
+                        .await?;
+                    Ok(())
+                })?;
+        }
+        Ok(())
+    }
+
     /// The region the teleport test starts in.
     const HOME: &str = "Catalogue";
 

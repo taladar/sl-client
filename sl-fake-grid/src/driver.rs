@@ -760,10 +760,6 @@ async fn deliver_datagram(shared: &SharedSim, from: SocketAddr, datagram: &[u8])
 /// The health an arriving agent is told it has: all of it.
 const FULL_HEALTH: f32 = 100.0;
 
-/// The `audible` byte of a line heard in full: OpenSim's
-/// `ChatAudibleLevel.Fully`, the only level it sends.
-const FULLY_AUDIBLE: u8 = 1;
-
 /// The region watcher: streams the changes *other* sessions in this region
 /// made to the shared world — an object rezzed, an object taken away — to this
 /// session's viewer.
@@ -781,6 +777,7 @@ const FULLY_AUDIBLE: u8 = 1;
 /// reported rather than swallowed, and the watcher resynchronises by carrying
 /// on with the changes it can still see.
 pub(crate) async fn run_region_watcher(
+    core: Arc<crate::runtime::GridCore>,
     shared: SharedSim,
     seq: u64,
     mut changes: broadcast::Receiver<RegionUpdate>,
@@ -808,7 +805,26 @@ pub(crate) async fn run_region_watcher(
                                     | RegionChange::Sound(_)
                             ) => {}
                     Ok(RegionUpdate { change, .. }) => {
+                        // A line is heard over a border too, by where the
+                        // hearer's avatar stands in the region next door.
+                        let over_the_border = match &change {
+                            RegionChange::Chat(_) => avatar_over_the_border(&core, &shared).await,
+                            _other => None,
+                        };
                         let now = shared.now();
+                        // Second Life has the hearer's own region say such a
+                        // line, in its own coordinates: this session only
+                        // works out that it is heard.
+                        if let (RegionChange::Chat(line), Some(over)) = (&change, &over_the_border)
+                        {
+                            let policy = shared.state.lock().await.world.lock().chat;
+                            if policy.over_borders
+                                == crate::chat::OverBorders::FromTheHearersRegion
+                            {
+                                say_from_the_hearers_region(&core, &policy, line, over, now).await;
+                                continue;
+                            }
+                        }
                         shared
                             .with_state(|state| {
                                 let result = match &change {
@@ -884,23 +900,32 @@ pub(crate) async fn run_region_watcher(
                                     RegionChange::RegionConfigured(limits) => {
                                         state.sim.send_region_info(limits, now)
                                     }
-                                    // Heard by a root agent in range; a child
-                                    // agent's avatar is in another region, and
-                                    // chat across a border is not modelled.
+                                    // Heard by whoever is in earshot: an
+                                    // avatar standing here, and — down the
+                                    // child circuit its viewer holds here —
+                                    // one standing just over the border.
                                     RegionChange::Chat(line) => {
-                                        if !state.sim.is_root_agent() {
+                                        let policy = state.world.lock().chat;
+                                        let standing = if state.sim.is_root_agent() {
+                                            crate::chat::agent_position(&state.sim)
+                                        } else if let Some(over) = &over_the_border {
+                                            over.standing.clone()
+                                        } else {
                                             return;
-                                        }
-                                        let standing = crate::chat::agent_position(&state.sim);
-                                        if !line.heard_by(state.avatar.agent_id, &standing) {
+                                        };
+                                        let Some(audible) = policy.hears(
+                                            line,
+                                            state.avatar.agent_id,
+                                            &standing,
+                                        ) else {
                                             return;
-                                        }
+                                        };
                                         state.sim.send_chat_from_simulator(
                                             &line.from_name,
                                             line.source,
                                             line.owner_id,
                                             line.chat_type,
-                                            FULLY_AUDIBLE,
+                                            audible,
                                             line.position.clone(),
                                             &line.message,
                                             now,
@@ -968,6 +993,108 @@ pub(crate) async fn run_region_watcher(
             }
         }
     }
+}
+
+/// The width of a region, in metres.
+const REGION_M: f32 = 256.0;
+
+/// An avatar standing in a region next to the one a session is a child in.
+struct OverTheBorder {
+    /// The agent.
+    agent: sl_types::key::AgentKey,
+    /// Where its avatar stands, in the coordinates of the session's region.
+    standing: sl_proto::Vector,
+    /// How many metres east and north of the session's region the avatar's
+    /// own region begins.
+    offset: (f32, f32),
+}
+
+/// Sends the agent of `over` the `line` said in the region next door, if it
+/// is in earshot of it, from the region its avatar stands in and in that
+/// region's coordinates: Second Life's way of carrying a line over a border.
+async fn say_from_the_hearers_region(
+    core: &Arc<crate::runtime::GridCore>,
+    policy: &crate::chat::ChatPolicy,
+    line: &crate::chat::Line,
+    over: &OverTheBorder,
+    now: Instant,
+) {
+    let Some(audible) = policy.hears(line, over.agent, &over.standing) else {
+        return;
+    };
+    // A typing notice past a say's reach, which Second Life marks barely
+    // audible within a region, mostly does not come over a border at all:
+    // one direction of one aditi run in four brought it (2026-10-13).
+    if audible == crate::chat::BARELY_AUDIBLE {
+        return;
+    }
+    let Some(root) = core.root_session_of(over.agent).await else {
+        return;
+    };
+    let position = sl_proto::Vector {
+        x: line.position.x - over.offset.0,
+        y: line.position.y - over.offset.1,
+        z: line.position.z,
+    };
+    let sent = root
+        .with_sim(|sim| {
+            sim.send_chat_from_simulator(
+                &line.from_name,
+                line.source,
+                line.owner_id,
+                line.chat_type,
+                audible,
+                position,
+                &line.message,
+                now,
+            )
+        })
+        .await;
+    if let Err(error) = sent {
+        tracing::debug!("saying a neighbouring region's line failed: {error}");
+    }
+}
+
+/// The avatar of `shared`'s agent, when `shared`'s region is not the one it
+/// stands in: where a child agent hears from. [`None`] for a root session,
+/// and for an agent with no root session to ask.
+async fn avatar_over_the_border(
+    core: &Arc<crate::runtime::GridCore>,
+    shared: &SharedSim,
+) -> Option<OverTheBorder> {
+    let (agent, here) = {
+        let state = shared.state.lock().await;
+        if state.sim.is_root_agent() {
+            return None;
+        }
+        (state.avatar.agent_id, state.region)
+    };
+    let root = core.root_session_of(agent).await?;
+    let (at, there) = {
+        let state = root.state.lock().await;
+        (crate::chat::agent_position(&state.sim), state.region)
+    };
+    let here = &core.region(here)?.config;
+    let there = &core.region(there)?.config;
+    let metres = |there: u32, here: u32| {
+        let slots = i64::from(there).saturating_sub(i64::from(here));
+        // Neighbours are a slot apart at most; anything else is far.
+        let slots = i16::try_from(slots).unwrap_or(i16::MAX);
+        f32::from(slots) * REGION_M
+    };
+    let offset = (
+        metres(there.grid_x, here.grid_x),
+        metres(there.grid_y, here.grid_y),
+    );
+    Some(OverTheBorder {
+        agent,
+        standing: sl_proto::Vector {
+            x: at.x + offset.0,
+            y: at.y + offset.1,
+            z: at.z,
+        },
+        offset,
+    })
 }
 
 /// Whether this session's avatar is standing on `parcel` — who a changed

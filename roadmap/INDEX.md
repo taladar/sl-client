@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 355 |
+| ready | 354 |
 | blocked | 103 |
 | in-progress | 20 |
 | bugs | 39 |
-| done | 1358 |
+| done | 1359 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2061** |
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (355)
+## ready (354)
 
 ### protocol
 
@@ -1166,8 +1166,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   selling, deeding, abandoning land and passes on each grid
 - [`gridspec-landmarks-home`](ready/gridspec-landmarks-home.md) — Landmarks and
   the home location on each grid
-- [`gridspec-local-chat`](ready/gridspec-local-chat.md) — Local chat and typing
-  on each grid
 - [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
   committed LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](ready/gridspec-marketplace.md) — Marketplace direct
@@ -1680,7 +1678,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1358)
+## done (1359)
 
 ### protocol
 
@@ -4637,6 +4635,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-infra-fake-flavour-conformance`](done/gridspec-infra-fake-flavour-conformance.md)
   — Run every conformance case against both fake-grid flavours, beside the live
   grids
+- [`gridspec-local-chat`](done/gridspec-local-chat.md) — Local chat and typing
+  on each grid
 - [`gridspec-login`](done/gridspec-login.md) — Login response fields, the
   options list and get_grid_info on each grid
 - [`gridspec-login-refusals`](done/gridspec-login-refusals.md) — Login refusal

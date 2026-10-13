@@ -175,6 +175,8 @@ pub const OFFLINE_CASES: &[&str] = &[
     "chat-self-echo",
     "chat-hear-other",
     "chat-whisper-shout-range",
+    "local-chat",
+    "chat-border",
     "server-error",
     "task-inventory",
     "asset-round-trip",

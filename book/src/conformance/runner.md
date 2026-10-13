@@ -101,6 +101,11 @@ avatar sounds (About Land's *avatar sounds: everyone* is off), and Second
 Life then passes no gesture sound on to anybody; the case measures that at
 the build location and everything else at the sound location.
 
+`local-chat` stands at the sound location too where one is named: a sandbox
+parcel may hide its avatars, and a parcel that does keeps their chat in.
+`chat-border` wants two regions that share a border and logs in at one
+(Ahern on aditi, the Default Region on OpenSim); it rezzes nothing.
+
 `parcel-ban-line` reads `ban_line_regions`, a list of region names. The case
 needs a parcel that is closed to strangers and looks for one where the login
 lands; a region without one is left for the next name on the list, by a map

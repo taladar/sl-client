@@ -62,7 +62,7 @@ use crate::terrain;
 use crate::types::EventId;
 use crate::types::{
     AlertInfo, Arrival, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
-    AvatarPickerResult, Camera, ChatType, Child, CircuitProbe, ClassifiedCategory,
+    AvatarPickerResult, Camera, ChatAudible, ChatType, Child, CircuitProbe, ClassifiedCategory,
     ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams, DeRezDestination,
     DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
     DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason,
@@ -2735,6 +2735,35 @@ impl Session {
                             .collect(),
                     }));
             }
+            // Local chat. A region sends a line to whoever is in earshot of
+            // it, and that includes an avatar standing just over its border:
+            // OpenSim sends that avatar the line down the child circuit its
+            // viewer holds to the speaker's region (`chat-border`,
+            // `book/src/gridspec/chat.md`). The line's position is in the
+            // coordinates of the region that sent it.
+            AnyMessage::ChatFromSimulator(chat) => {
+                let data = &chat.chat_data;
+                match ChatType::from_u8(data.chat_type) {
+                    // A typing animation trigger carries no text; surface it as a
+                    // distinct typing signal rather than an empty chat line.
+                    chat_type @ (ChatType::StartTyping | ChatType::StopTyping) => {
+                        self.events.push_back(Event::ChatTyping {
+                            from_name: trimmed_string(&data.from_name),
+                            source_id: data.source_id,
+                            typing: matches!(chat_type, ChatType::StartTyping),
+                            audible: ChatAudible::from_u8(data.audible),
+                            position: RegionCoordinates::new(
+                                data.position.x,
+                                data.position.y,
+                                data.position.z,
+                            ),
+                        });
+                    }
+                    _ => self
+                        .events
+                        .push_back(Event::ChatReceived(Box::new(chat_message(data)))),
+                }
+            }
             _ => return Ok(false),
         }
         Ok(true)
@@ -4115,23 +4144,6 @@ impl Session {
                         .map(|spawn| spawn.spawn_point_pos.clone())
                         .collect(),
                 }));
-            }
-            AnyMessage::ChatFromSimulator(chat) => {
-                let data = &chat.chat_data;
-                match ChatType::from_u8(data.chat_type) {
-                    // A typing animation trigger carries no text; surface it as a
-                    // distinct typing signal rather than an empty chat line.
-                    chat_type @ (ChatType::StartTyping | ChatType::StopTyping) => {
-                        self.events.push_back(Event::ChatTyping {
-                            from_name: trimmed_string(&data.from_name),
-                            source_id: data.source_id,
-                            typing: matches!(chat_type, ChatType::StartTyping),
-                        });
-                    }
-                    _ => self
-                        .events
-                        .push_back(Event::ChatReceived(Box::new(chat_message(data)))),
-                }
             }
             AnyMessage::ImprovedInstantMessage(im) => {
                 let block = &im.message_block;

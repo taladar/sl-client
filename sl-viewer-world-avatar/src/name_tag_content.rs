@@ -34,7 +34,7 @@
 use bevy::prelude::*;
 use std::collections::HashSet;
 
-use sl_client_bevy::{AgentKey, SlEvent, SlSessionEvent};
+use sl_client_bevy::{AgentKey, ChatAudible, SlEvent, SlSessionEvent};
 
 use sl_viewer_world_objects::name_tag_billboard::{NameTag, TagContent, TagLine, TagLineSize};
 
@@ -156,9 +156,18 @@ pub fn ingest_tag_statuses(
 ) {
     for event in events.read() {
         if let SlSessionEvent::ChatTyping {
-            source_id, typing, ..
+            source_id,
+            typing,
+            audible,
+            ..
         } = &event.0
         {
+            // Second Life sends a typist's notices out to a shout's reach,
+            // marked barely audible past a say's; like the reference, only a
+            // fully audible start shows. A stop always clears.
+            if *typing && !matches!(audible, ChatAudible::Fully) {
+                continue;
+            }
             let agent = AgentKey::from(*source_id);
             // The membership pre-check is load-bearing: `contains` goes
             // through the shared `Deref`, so a no-op signal never flags the

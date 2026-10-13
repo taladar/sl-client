@@ -190,6 +190,9 @@ pub struct SceneFixtures {
     /// viewers, where the live grids disagree. Second Life's unless the
     /// grid's flavour says otherwise.
     pub(crate) relays: crate::relays::RelayPolicy,
+    /// How the region passes local chat on, where the live grids disagree.
+    /// Second Life's unless the grid's flavour says otherwise.
+    pub(crate) chat: crate::chat::ChatPolicy,
     /// The order each linkset keeps its prims in ([`crate::link_sets`]). Not
     /// a fixture: a set nobody has linked or delinked is in the order its
     /// prims were stated.
@@ -693,6 +696,7 @@ impl SceneFixtures {
             linking: crate::imitates::LinkPolicy::default(),
             contents: crate::imitates::ContentsPolicy::default(),
             relays: crate::relays::RelayPolicy::default(),
+            chat: crate::chat::ChatPolicy::default(),
             links: crate::link_sets::LinkSets::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
@@ -1056,6 +1060,17 @@ impl SceneFixtures {
     /// grid's region of this product holds.
     fn stock_limits(&self, identity: &RegionIdentity) -> sl_proto::RegionLimits {
         let mut limits = region_limits(identity);
+        if self.chat.states_ranges {
+            limits.chat_settings = Some(sl_proto::RegionChatSettings {
+                whisper_range: crate::chat::WHISPER_RANGE_M,
+                normal_range: crate::chat::SAY_RANGE_M,
+                shout_range: crate::chat::SHOUT_RANGE_M,
+                whisper_offset: 0.0,
+                normal_offset: 0.0,
+                shout_offset: 0.0,
+                flags: 0,
+            });
+        }
         if let Some(capacity) = self.capacity {
             limits.max_agents = capacity.max_agents;
             limits.hard_max_agents = capacity.hard_max_agents;
@@ -2272,7 +2287,13 @@ pub(crate) fn answer_world_request(
                 position: crate::chat::agent_position(sim),
                 message: message.clone(),
             };
-            return vec![world.say(line)];
+            // As the grid's flavour says it, where it says it at all.
+            return world
+                .chat
+                .viewer_line(line)
+                .map(|line| world.say(line))
+                .into_iter()
+                .collect();
         }
         // A take, a save, a return, a delete to trash. What each does is the
         // destination's business, and the destination alone decides both

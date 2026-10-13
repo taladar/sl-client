@@ -7,14 +7,14 @@ use std::time::Duration;
 use super::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarClassified,
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarPickerResult,
-    AvatarProperties, ChatMessage, ClassifiedInfo, CoarseLocation, DirClassifiedResult,
-    DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-    DisconnectReason, DisplayNameUpdate, EconomyData, EnvironmentSettings, EstateAccessKind,
-    EstateCovenant, EstateInfo, EventInfo, FeatureDisabled, FolderInfo, FollowCamPropertyValue,
-    Friend, FriendRights, GenericMessage, GenericStreamingMessage, GroupAccountDetails,
-    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupMember,
-    GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor, InventoryFolder,
+    AvatarProperties, ChatAudible, ChatMessage, ClassifiedInfo, CoarseLocation,
+    DirClassifiedResult, DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult,
+    DirPlaceResult, DisconnectReason, DisplayNameUpdate, EconomyData, EnvironmentSettings,
+    EstateAccessKind, EstateCovenant, EstateInfo, EventInfo, FeatureDisabled, FolderInfo,
+    FollowCamPropertyValue, Friend, FriendRights, GenericMessage, GenericStreamingMessage,
+    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
+    GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember,
+    GroupTitle, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor, InventoryFolder,
     InventoryItem, InventoryItemMove, ItemInfo, Kick, LandStatItem, LandStatReportType,
     LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo,
     MapRequestFlags, Maturity, MeanCollision, MeshUploadStatus, MoneyBalance, MuteEntry,
@@ -642,6 +642,12 @@ pub enum Event {
         source_id: Uuid,
         /// `true` when typing started, `false` when it stopped.
         typing: bool,
+        /// Whether the simulator says the typist is audible at the listener.
+        /// The reference viewer shows nothing of a typist that is not
+        /// [`ChatAudible::Fully`].
+        audible: ChatAudible,
+        /// Where the simulator says the typist is, region-local metres.
+        position: RegionCoordinates,
     },
     /// An instant message was received (`ImprovedInstantMessage`): a 1:1 IM, a
     /// group/conference message, an inventory/teleport/group/friendship offer, an

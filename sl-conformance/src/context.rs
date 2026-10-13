@@ -270,6 +270,14 @@ impl Session {
         self.avatar.first()
     }
 
+    /// The avatar's own legacy name (`First Last`), from the login
+    /// credentials: what a grid shows its chat under. For comparing against a
+    /// name a grid sent — never for a metric or a record.
+    #[must_use]
+    pub fn avatar_legacy_name(&self) -> String {
+        format!("{} {}", self.avatar.first(), self.avatar.last())
+    }
+
     /// A snapshot of the protocol diagnostics seen so far on this session.
     ///
     /// Diagnostics are collected on a background task, so a case that has just

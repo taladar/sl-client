@@ -77,8 +77,9 @@ use sl_automation_proto::{
     ChatKind, ConversationReadout, ConversationRef, SpeakerKind, TranscriptLine as ReadoutLine,
 };
 use sl_client_bevy::{
-    AgentKey, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId, MessageCursor,
-    ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid, chat_text_muted,
+    AgentKey, ChatAudible, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId,
+    MessageCursor, ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    chat_text_muted,
 };
 
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
@@ -2071,7 +2072,7 @@ pub(crate) fn ingest_conversation_events(
                 // not to the person, and the RLV intake takes it: showing the
                 // commands a collar issues in the transcript is both noise and
                 // a leak of what it is doing.
-                if is_displayable(&message.chat_type, &message.message)
+                if is_displayable(&message.chat_type, &message.message, message.audible)
                     && !swallows_owner_say(
                         facts.settings.as_deref(),
                         facts.objects.as_deref(),
@@ -2094,11 +2095,13 @@ pub(crate) fn ingest_conversation_events(
                 from_name,
                 source_id,
                 typing,
+                audible,
+                ..
             } => {
                 // A blocked resident's "…is typing" is the one line of theirs
                 // that carries no text, and so would slip past the filter on
                 // `ChatReceived` and announce them anyway.
-                if !text_muted(mutes, *source_id, from_name) {
+                if typing_is_shown(*typing, *audible) && !text_muted(mutes, *source_id, from_name) {
                     model.set_typing(
                         ConversationKey::Nearby,
                         AgentKey::from(*source_id),
@@ -2455,10 +2458,22 @@ fn request_keyed_recall(
     }
 }
 
-/// Whether a nearby chat line should appear: it carries text and is not a
-/// typing-animation trigger (mirrors `crate::chat`).
-const fn is_displayable(chat_type: &ChatType, message: &str) -> bool {
-    !matches!(chat_type, ChatType::StartTyping | ChatType::StopTyping) && !message.is_empty()
+/// Whether a nearby chat line should appear: it carries text, is not a
+/// typing-animation trigger, and is fully audible (mirrors `crate::chat`).
+const fn is_displayable(chat_type: &ChatType, message: &str, audible: ChatAudible) -> bool {
+    !matches!(chat_type, ChatType::StartTyping | ChatType::StopTyping)
+        && !message.is_empty()
+        && matches!(audible, ChatAudible::Fully)
+}
+
+/// Whether a typing notice changes what is shown. Second Life sends the
+/// notices of a typist between a say's reach and a shout's too, marked
+/// *barely audible* (`book/src/gridspec/chat.md`), and the reference shows
+/// nothing of those: a resident sixty metres off is not "typing" at anybody.
+/// A stop is always taken, so a typist who walked out of earshot mid-line
+/// does not stay typing for good.
+const fn typing_is_shown(typing: bool, audible: ChatAudible) -> bool {
+    !typing || matches!(audible, ChatAudible::Fully)
 }
 
 // ---------------------------------------------------------------------------
@@ -4090,6 +4105,8 @@ mod tests {
                 from_name: "Troll Resident".to_owned(),
                 source_id: troll.uuid(),
                 typing: true,
+                audible: ChatAudible::Fully,
+                position: RegionCoordinates::new(0.0, 0.0, 0.0),
             },
             SlSessionEvent::InstantMessageReceived(Box::new(im)),
             SlSessionEvent::ImTyping {
@@ -4152,6 +4169,57 @@ mod tests {
             )
             .is_some(),
             "the conference line opens a tab"
+        );
+    }
+
+    /// What a grid does not call fully audible is out of earshot: a typist
+    /// between a say's reach and a shout's, whose notices Second Life sends
+    /// marked barely audible, is not shown typing, and a line so marked is
+    /// not shown. A stop is taken however it is marked.
+    #[test]
+    fn a_typist_out_of_earshot_is_not_shown_typing() {
+        let typist = AgentKey::from(Uuid::from_u128(TROLL));
+        let notice = |typing: bool, audible: ChatAudible| SlSessionEvent::ChatTyping {
+            from_name: "Far Resident".to_owned(),
+            source_id: typist.uuid(),
+            typing,
+            audible,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+        };
+        let typing = |app: &App| {
+            get(
+                app.world().resource::<ConversationModel>(),
+                ConversationKey::Nearby,
+            )
+            .map(|entry| entry.typing.len())
+        };
+        let mut app = ingest_app(&[]);
+        ingest(&mut app, notice(true, ChatAudible::Barely));
+        assert_eq!(typing(&app), Some(0), "a barely audible start");
+        ingest(&mut app, notice(true, ChatAudible::Fully));
+        assert_eq!(typing(&app), Some(1), "a fully audible start");
+        ingest(&mut app, notice(false, ChatAudible::Barely));
+        assert_eq!(typing(&app), Some(0), "a stop, however it is marked");
+        ingest(
+            &mut app,
+            SlSessionEvent::ChatReceived(Box::new(ChatMessage {
+                from_name: "Far Resident".to_owned(),
+                source: ChatSource::Agent(typist),
+                owner_id: None,
+                chat_type: ChatType::Normal,
+                audible: ChatAudible::Barely,
+                position: RegionCoordinates::new(0.0, 0.0, 0.0),
+                message: "too far to hear".to_owned(),
+            })),
+        );
+        assert_eq!(
+            get(
+                app.world().resource::<ConversationModel>(),
+                ConversationKey::Nearby
+            )
+            .map(|entry| entry.lines.len()),
+            Some(0),
+            "a barely audible line"
         );
     }
 

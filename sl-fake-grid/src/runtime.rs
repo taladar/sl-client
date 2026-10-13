@@ -1143,6 +1143,7 @@ impl GridCore {
         // that runs after this.
         if let Some(region) = self.region(prepared.region_index) {
             tokio::spawn(crate::driver::run_region_watcher(
+                Arc::clone(self),
                 prepared.shared.clone(),
                 prepared.seq,
                 region.changes.subscribe(),
@@ -2078,6 +2079,7 @@ impl FakeGridBuilder {
                 fixtures.linking = self.imitates.link_policy();
                 fixtures.contents = self.imitates.contents_policy();
                 fixtures.relays = self.imitates.relay_policy();
+                fixtures.chat = self.imitates.chat_policy();
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 RegionEntry {

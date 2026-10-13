@@ -27,7 +27,7 @@
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, ChatMessage, ChatSource, ChatType, SlEvent, SlIdentity, SlSessionEvent,
+    AgentKey, ChatAudible, ChatMessage, ChatSource, ChatType, SlEvent, SlIdentity, SlSessionEvent,
     chat_text_muted,
 };
 
@@ -254,11 +254,17 @@ fn is_faded(age: f32, hold: f32) -> bool {
 /// [`ChatTyping`](sl_client_bevy::SlSessionEvent::ChatTyping) rather than
 /// `ChatReceived`, but an empty-text message (or a stray typing type) is skipped
 /// defensively so blank lines never accumulate.
+///
+/// A line the simulator does not call fully audible is not shown either, as
+/// the reference shows none of it: neither live grid sends such a line today
+/// (`book/src/gridspec/chat.md`), and a grid that did would be saying the
+/// listener is out of earshot.
 const fn is_displayable(message: &ChatMessage) -> bool {
     !matches!(
         message.chat_type,
         ChatType::StartTyping | ChatType::StopTyping
     ) && !message.message.is_empty()
+        && matches!(message.audible, ChatAudible::Fully)
 }
 
 /// Startup system: spawn the overlay's column container, pinned to the
@@ -573,6 +579,11 @@ mod tests {
         assert!(!is_displayable(&message("A", ChatType::Normal, "")));
         assert!(!is_displayable(&message("A", ChatType::StartTyping, "")));
         assert!(!is_displayable(&message("A", ChatType::StopTyping, "x")));
+        for audible in [ChatAudible::Barely, ChatAudible::Not] {
+            let mut faint = message("A", ChatType::Normal, "hi");
+            faint.audible = audible;
+            assert!(!is_displayable(&faint), "{audible:?} is out of earshot");
+        }
     }
 
     /// A line is fully opaque through its hold time, then ramps linearly to fully

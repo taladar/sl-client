@@ -123,6 +123,10 @@ pub(crate) enum Answer {
     Flag(bool),
     /// A count.
     Count(i64),
+    /// Whatever was recorded: an answer that is the grid's but not one a run
+    /// can be held to — it turns on something of the run's own, such as how
+    /// long the avatar's name is. The metric still has to be recorded.
+    Any,
 }
 
 impl Answer {
@@ -132,6 +136,7 @@ impl Answer {
             (Self::Text(expected), MetricValue::Text(actual)) => expected == actual,
             (Self::Flag(expected), MetricValue::Bool(actual)) => expected == *actual,
             (Self::Count(expected), MetricValue::Int(actual)) => expected == *actual,
+            (Self::Any, _) => true,
             _ => false,
         }
     }

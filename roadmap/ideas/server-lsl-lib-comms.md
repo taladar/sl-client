@@ -11,6 +11,15 @@ refs: [server-world-link-sets, test-fake-grid-lsl-offline-cases]
 
 Context: [context/lsl.md](../context/lsl.md).
 
+**Measured (2026-10-13, [[gridspec-local-chat]],
+`book/src/gridspec/chat.md` § A script's lines):** what each say function's
+line looks like to an avatar on each grid — type, owner, name, place, reach
+and where a long text is cut. Build the `Line` each function says to that
+table per flavour: OpenSim's `llShout` and its debug-channel `llShout` /
+`llRegionSay` name nobody as owner, and its `llOwnerSay` names the prim as
+owner and the region's middle as the place; Second Life's debug lines stop
+within a say's reach; `llRegionSay` on channel 0 says nothing on either.
+
 How scripts talk — to residents, to each other, and to their own
 linkset. Small in function count, enormous in how much content it
 unlocks.

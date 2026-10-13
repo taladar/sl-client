@@ -1226,6 +1226,56 @@ mod test {
         Ok(())
     }
 
+    /// A line said just over a border is heard: OpenSim sends it down the
+    /// child circuit of the speaker's region, and so the session reads local
+    /// chat — a line and a typing notice alike — on a child circuit too.
+    #[test]
+    fn child_circuit_chat_is_heard() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        enable_neighbour_b(&mut session, 9, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let said = |chat_type: u8, message: &[u8]| {
+            AnyMessage::ChatFromSimulator(ChatFromSimulator {
+                chat_data: ChatFromSimulatorChatDataBlock {
+                    from_name: b"Neighbour Tester\0".to_vec(),
+                    source_id: uuid::Uuid::from_u128(0x42),
+                    owner_id: uuid::Uuid::from_u128(0x42),
+                    source_type: 1,
+                    chat_type,
+                    audible: 1,
+                    position: vec3(3.0, 128.0, 26.0),
+                    message: message.to_vec(),
+                },
+            })
+        };
+        session.handle_datagram(
+            sim_b(),
+            &server_message(&said(1, b"over here\0"), 11, true)?,
+            now,
+        )?;
+        session.handle_datagram(sim_b(), &server_message(&said(4, b"\0"), 12, true)?, now)?;
+        let events = drain_events(&mut session);
+        let line = events
+            .iter()
+            .find_map(|event| match event {
+                Event::ChatReceived(chat) => Some(chat.message.clone()),
+                _ => None,
+            })
+            .ok_or("expected the neighbour's line from the child circuit")?;
+        assert_eq!(line, "over here");
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::ChatTyping { typing: true, .. })),
+            "expected the neighbour's typing notice from the child circuit, got {events:?}"
+        );
+        Ok(())
+    }
+
     /// The arms a root circuit and a child-agent circuit share are **one**
     /// implementation, not two copies of one: the same message delivered on
     /// either circuit raises the same event.
@@ -1604,13 +1654,17 @@ mod test {
                     from_name,
                     source_id,
                     typing,
-                } => Some((from_name, source_id, typing)),
+                    audible,
+                    position,
+                } => Some((from_name, source_id, typing, audible, position)),
                 _ => None,
             })
             .ok_or("expected a ChatTyping event")?;
         assert_eq!(typing.0, "Resident Tester");
         assert_eq!(typing.1, uuid::Uuid::from_u128(0x42));
         assert!(typing.2, "StartTyping should set typing = true");
+        assert_eq!(typing.3, ChatAudible::Fully);
+        assert_eq!(typing.4, RegionCoordinates::new(1.0, 2.0, 3.0));
         Ok(())
     }
 

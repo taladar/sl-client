@@ -456,6 +456,8 @@ mod tests {
             from_name: "Troll Resident".to_owned(),
             source_id: troll.uuid(),
             typing: true,
+            audible: ChatAudible::Fully,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
         }));
     }
 

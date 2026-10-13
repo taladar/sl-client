@@ -1119,6 +1119,49 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid passes local chat on — measured by the `local-chat`
+    /// conformance case on aditi and the local OpenSim (2026-10-13,
+    /// `book/src/gridspec/chat.md`), and tabulated on
+    /// [`ChatPolicy`](crate::chat::ChatPolicy).
+    ///
+    /// They agree on the three ranges — a whisper's 10 m, a say's 20 m, a
+    /// shout's 100 m, measured between the two avatars and never from a
+    /// camera — on dropping a line out of range rather than marking it less
+    /// audible, on sending a speaker its own line back, on passing on a line
+    /// with no text, and on a typing notice carrying no text and none being
+    /// sent for a channel.
+    #[must_use]
+    pub const fn chat_policy(self) -> crate::chat::ChatPolicy {
+        use crate::chat::{
+            ChatPolicy, OddViewerTypes, OverBorders, SAY_RANGE_M, TextLimit, TypingReach,
+            ViewerDebugChannel,
+        };
+        match self {
+            Self::SecondLife => ChatPolicy {
+                odd_viewer_types: OddViewerTypes::Dropped,
+                viewer_debug_channel: ViewerDebugChannel::KeepsItsType,
+                viewer_negative_channels: false,
+                typing: TypingReach::ToAShout,
+                // Heard at 18.7 m and not at 36.5 m, whichever of the say
+                // functions said it: taken to be a say's reach.
+                debug_range_m: Some(SAY_RANGE_M),
+                text: TextLimit::WithTheName,
+                states_ranges: true,
+                over_borders: OverBorders::FromTheHearersRegion,
+            },
+            Self::OpenSim => ChatPolicy {
+                odd_viewer_types: OddViewerTypes::PassedOn,
+                viewer_debug_channel: ViewerDebugChannel::SaidAsDebug,
+                viewer_negative_channels: true,
+                typing: TypingReach::Everywhere,
+                debug_range_m: None,
+                text: TextLimit::CharactersThenBytes,
+                states_ranges: false,
+                over_borders: OverBorders::DownTheChildCircuit,
+            },
+        }
+    }
+
     /// What this grid makes of a link and a delink — measured by the
     /// `object-link-delink` conformance case on aditi and the local OpenSim
     /// (2026-10-11, `book/src/gridspec/building.md` § Linking).
