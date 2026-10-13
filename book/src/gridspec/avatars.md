@@ -117,6 +117,139 @@ in and out of it one at a time.
 
 OpenSim's source exempts a viewer in god mode and nobody else.
 
+## Effects and sounds
+
+Two things a viewer sends are meant for the *other viewers* and not for the
+simulator: a `ViewerEffect` (a gaze, a pointing, the editing beam, the
+spheres and spirals) and a `SoundTrigger` (the sound of a gesture). A region
+answers neither. Its whole part is to decide who is sent which, and that is
+where the two grids differ in nearly everything. A script's sounds reach a
+viewer in four more messages and in the prim's own update.
+
+Measured on 2026-10-13 by the conformance case `effects-sounds`: one avatar
+sends, a second one beside it listens, then climbs away in three steps (16,
+40 and 125 m). Six runs on aditi (Mauve; the first two wholly on the
+sandbox parcel, which bars avatar sounds, the rest on a parcel that lets
+everybody's play and at the end on the sandbox's) and seven on the local
+OpenSim, one of them as the land's owner. No answer changed between two
+runs at the same spot, and each run is now held to 157 of them. A
+probe script in a cube makes the script's sounds: it does what its owner
+says on a channel.
+
+### Viewer effects
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| who is sent an effect (**held**) | everybody, **the sender too** | everybody but the sender | as the flavour's grid |
+| which types (**held**, all twenty and two that are none) | every type but floating text (type 0), the unknown ones included | every type | as the flavour's grid |
+| how far (**held**) | at 122 m as at 3 m: no range | no range — but a message of **nothing but gazes and beams** only to a viewer whose **camera** is within 10 m of the sender's avatar: lost at 16 m, and back at once with the camera put beside the sender and the avatar left where it hovers | the same rule, by where the session's camera last was |
+| the agent an effect names (**held**) | made the sender, whoever the viewer named: the other avatar, a stranger, nobody | passed on as the viewer wrote it | as the flavour's grid |
+| the payload (**held**) | a gaze, a pointing and a beam have to **begin with the sender's id**: one of the other avatar's, one of three bytes, of none, and a beam of 255 bytes are dropped (a gaze with a byte too many is passed on); a sphere is passed on with no payload and with 255 bytes | passed on, whatever it is | as the flavour's grid |
+| duration and colour (**held**) | as sent: no time, minus five seconds, a billion | as sent | as sent |
+| three effects in one message (**held**) | one message of three | one message of three | one message of three |
+| the same effect twice, twenty in a second (**held**) | each passed on | each passed on | each passed on |
+
+OpenSim's source names its two exceptions *discardable*
+(`Scene.ProcessViewerEffect`): a message is held back only when every effect
+in it is a `LookAt` or a `Beam`. That is why a pointing and a sphere still
+arrive from 125 m. Both grids send effects down a child circuit as well
+([Teleports](teleport.md)).
+
+### A viewer's sound
+
+A viewer states the sound, a gain, a region handle and a position, and
+leaves the owner, the object and the parent nil.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| who is sent it (**held**) | everybody, the sender too | everybody **within 100 m of where the sound is said to be**, the sender too | as the flavour's grid, by where each avatar last arrived |
+| how far (**held**) | stated 15, 40, 90, 110 and 150 m above the sender, and heard by a listener 121 m off: always passed on | stated 15, 40 and 90 m up: passed on; 110 and 150 m up, and to a listener 126 m off: not | as the flavour's grid |
+| a position outside the region (**held**) | passed on | not (it is more than 100 m from anybody) | as the flavour's grid |
+| whose it says it is (**held**) | owner and object the sender, **parent nil** | owner, object **and parent** the sender | as the flavour's grid |
+| gain 2.5, −1 and 0 (**held**) | passed on as stated | passed on as stated | passed on as stated |
+| a nil sound, a sound nobody has (**held**) | passed on | passed on | passed on |
+| the handle of another region (**held**) | passed on with that handle | passed on with that handle | passed on with that handle |
+| ten in a second (**held**) | all ten | all ten | all ten |
+| on a parcel that **bars avatar sounds** | nobody is sent it, not even the sender (the sandbox parcel, `AnyAVSounds` false and our avatars not in its group; **held**) | the same (measured once as the land's owner, who turned both switches off and on again) | nobody is sent it where the sender's parcel says `any_av_sounds` false; group membership is not modelled |
+
+A region does not look at what it passes on. The listener has to: clamp the
+gain, skip a nil sound, and place a sound by the handle it states.
+
+### A script's sounds
+
+What the two avatars were sent for each call, the owner and the other alike
+unless said otherwise. *update* is a full `ObjectUpdate` of the prim, with
+its sound fields.
+
+| call | Second Life | OpenSim |
+| --- | --- | --- |
+| `llTriggerSound` (**held**) | `SoundTrigger`: owner, object the prim, **parent nil**, at the prim | the same with **parent the prim** (it is its own root) |
+| `llPlaySound` (**held**) | `AttachedSound`, flags none — and an update where the prim's flags still said *stop* | `AttachedSound`, flags none |
+| `llLoopSound` (**held**) | `AttachedSound` flags *loop* **and** an update: the sound, gain, *loop*, radius 0 | an update alone: the sound, gain, *loop*, **radius 100** |
+| `llLoopSoundMaster`, `llLoopSoundSlave` (**held**) | the same with *loop\|master*, *loop\|slave* | the same in its update |
+| `llPlaySoundSlave` (**held**) | `AttachedSound` flags *slave\|pending* | flags *slave* |
+| `llAdjustSoundVolume` (**held**) | `AttachedSoundGainChange` and an update at the new gain | `AttachedSoundGainChange` |
+| `llStopSound` (**held**) | `AttachedSound` with a nil sound, flags *stop*, and an update: no sound, *stop*, no owner | an update: no sound, *stop*, the owner still named |
+| `llPreloadSound` (**held**) | `PreloadSound`, owner the owner | `PreloadSound`, **owner the prim** |
+| `llSetSoundQueueing(TRUE)` (**held**) | an update, flags *queue\|stop* | nothing; the next `llPlaySound` carries *queue* |
+| `llSetSoundRadius(5)` (**held**) | an update, radius 5 | nothing; the next loop's update carries radius 5 |
+| `llTriggerSoundLimited`, box around both (**held**) | `SoundTrigger`, gain 0.50 | `SoundTrigger`, gain 0.49 |
+| the same, box elsewhere (**held**) | nothing | nothing |
+
+| how far a script's sound is sent (**held**) | Second Life | OpenSim |
+| --- | --- | --- |
+| `llTriggerSound` | at 15 and 36 m; not at 121 m | at 17 and 40 m; not at 126 m |
+| `llPlaySound`, `llPreloadSound` | at every step | at every step |
+
+| an arrival beside a looping prim (**held**) | Second Life | OpenSim |
+| --- | --- | --- |
+| what says so | the prim's full update: the sound, gain, *loop* | the same |
+| a sound message | none | none |
+
+Neither grid sends an arriving viewer a `PreloadSound` or an
+`AttachedSound`: a loop that is already running is on the prim.
+
+**Not measured:** a sound in a neighbouring region (whether a `SoundTrigger`
+goes down a child circuit); what a parcel's *group only* switch lets through
+for a member; `llSetSoundRadius` and a listener beyond it; collision sounds;
+a script's sound from a child prim of a linkset.
+
+### What the fake grid does about them
+
+`sl-fake-grid` passes a viewer's effects and sounds on by its flavour's
+rules (`relays.rs`, `ImitatedGrid::relay_policy`), the way it routes local
+chat: the session that received them publishes them to the region and every
+session's watcher asks the policy whether its own avatar is sent them.
+`effects-sounds` runs its viewer legs offline on both flavours and holds
+them to 95 of the answers above. Because the fake grid tracks no walking,
+distance is from where an avatar last arrived, and the camera rule from the
+last `AgentUpdate`; those two are checked by unit tests of the policy. A
+timeline can show a session effects and sounds of its own making
+(`Action::Effects`, `TriggerSound`, `AttachSound`, `AdjustAttachedSound`,
+`PreloadSounds`). No script runs, so nothing in the second half of this
+section happens there (`server-lsl-lib-comms` and its siblings).
+
+### What our viewer does with them
+
+It turns another avatar's gaze into a head turn and its pointing into a
+reach, and ignores an effect whose source is itself — which is what Second
+Life's echo of every effect needs. It draws no beam, sphere or edit sparkle
+(`viewer-viewer-effect-render`), and of its own it sends a pointing only: no
+gaze and no beam (`viewer-lookat-faithful`). A gaze it does send will be
+dropped by Second Life unless its payload names the agent itself.
+
+Sounds from both roads go through one place, as in the reference: a
+`SoundTrigger` is muted by owner or object, clamped by the mixer and placed
+by its region handle, and since this measurement a trigger with a nil sound
+asks for nothing. A loop that arrives as an `AttachedSound` *and* in the
+prim's update, as Second Life sends it, starts once; `llStopSound` ends it
+in either grid's form; and a prim's update that names no sound leaves a
+one-shot playing, which Second Life's update after an `llPlaySound` relies
+on. All of that is unit-tested in `world_sounds.rs`. The viewer plays no
+gestures yet (`viewer-gesture-runtime`), so it triggers no sound itself;
+when it does, the sound has to come from the grid's echo, which both grids
+send, and it will be silent on a parcel that bars avatar sounds.
+
 ## What the fake grid does about it
 
 `sl-fake-grid` now sends the coarse feed on each flavour's timer, as part of

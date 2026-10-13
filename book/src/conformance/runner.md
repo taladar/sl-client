@@ -95,6 +95,12 @@ are streamed by where the camera is), and rezzes there. Absent, the case
 keeps its own start location and records `partial` with the grid's refusal
 when the rez is refused.
 
+`effects-sounds` reads `sound_location` as well, a spot in the same region
+on a parcel that allows building *and* avatar sounds. A sandbox usually bars
+avatar sounds (About Land's *avatar sounds: everyone* is off), and Second
+Life then passes no gesture sound on to anybody; the case measures that at
+the build location and everything else at the sound location.
+
 `parcel-ban-line` reads `ban_line_regions`, a list of region names. The case
 needs a parcel that is closed to strangers and looks for one where the login
 lands; a region without one is left for the next name on the list, by a map

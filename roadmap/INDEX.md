@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 356 |
+| ready | 355 |
 | blocked | 103 |
 | in-progress | 20 |
 | bugs | 39 |
-| done | 1357 |
+| done | 1358 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2061** |
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (356)
+## ready (355)
 
 ### protocol
 
@@ -1194,8 +1194,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
-- [`gridspec-viewer-effects-sounds`](ready/gridspec-viewer-effects-sounds.md) —
-  Viewer effects and sound relays on each grid
 
 ## blocked (103)
 
@@ -1682,7 +1680,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1357)
+## done (1358)
 
 ### protocol
 
@@ -4689,6 +4687,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   layers as each grid sends them
 - [`gridspec-touch-grab`](done/gridspec-touch-grab.md) — Touch and grab on each
   grid
+- [`gridspec-viewer-effects-sounds`](done/gridspec-viewer-effects-sounds.md) —
+  Viewer effects and sound relays on each grid
 - [`gridspec-world-map`](done/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 

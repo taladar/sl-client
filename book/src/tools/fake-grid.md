@@ -1349,6 +1349,14 @@ region's own lock:
   handed a touch event: no script runs (`server-world-touch-and-grab`).
   `object-touch-grab` runs its plain-prim legs offline on both flavours.
 
+  A viewer's **effects and sounds** are passed on to the region's other
+  sessions as each flavour's grid passes them on
+  ([Avatars § Effects and sounds](../gridspec/avatars.md#effects-and-sounds),
+  `relays.rs`): who is sent them, the sender included or not, what Second
+  Life drops and renames, OpenSim's camera rule for gazes and its 100 m for
+  sounds, and no sound at all off a parcel that bars avatar sounds.
+  `effects-sounds` runs its viewer legs offline on both flavours.
+
   Part of an `ObjectUpdate` is **per viewer**: the `PrimFlags` that say what the
   receiving agent may do with the object (`OBJECT_MODIFY`, `_MOVE`, `_COPY`,
   `_TRANSFER`, `_YOU_OWNER`, `_ANY_OWNER`, `_OWNER_MODIFY`), which a viewer
@@ -2234,7 +2242,8 @@ The `Action` is anything a simulator does unprompted: `RezObject`,
 `AnimateAvatar`, `SetAppearance`, `Chat`, `Im`, `SetEnvironment`,
 `PushExperienceEnvironment`, `ReportExperienceEvent`,
 `SetExperiencePreference`, `ConfigureRegion`, `ChangeParcel`, `Teleport`,
-`CrossRegion`, `SimStats`, `SimulatorTime`, `Marker`, and `Custom` for a hook.
+`CrossRegion`, `Effects`, `TriggerSound`, `AttachSound`, `AdjustAttachedSound`,
+`PreloadSounds`, `SimStats`, `SimulatorTime`, `Marker`, and `Custom` for a hook.
 
 `SetEnvironment` and `ConfigureRegion` go together, and the pairing is a
 protocol fact rather than an inconvenience. Nothing carries new environment

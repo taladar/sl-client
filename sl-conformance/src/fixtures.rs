@@ -51,6 +51,12 @@
 //! # the last location and records `partial` when the rez is refused.
 //! build_location = "uri:Some Sandbox&128&128&25"
 //!
+//! # Where the `effects-sounds` case stands, in the build location's region:
+//! # a parcel that allows building *and* avatar sounds (About Land's "avatar
+//! # sounds: everyone"). A sandbox usually bars them, and a grid then passes
+//! # no gesture sound on at all. Absent, the case stays at the build location.
+//! sound_location = "uri:Some Sandbox&40&200&25"
+//!
 //! # Regions the `parcel-ban-line` case visits, in order, when the region it
 //! # logged in to has no parcel that keeps strangers out. Absent, only the
 //! # login region is looked at.
@@ -94,12 +100,27 @@ pub struct Fixtures {
     /// [`start_location`](crate::registry::GridTest::start_location) — see
     /// [`GridTest::rezzes_objects`](crate::registry::GridTest::rezzes_objects).
     build_location: Option<String>,
+    /// Where the `effects-sounds` case stands, in the build location's
+    /// region: a parcel that allows building and avatar sounds.
+    sound_location: Option<String>,
     /// The regions the `parcel-ban-line` case visits, in order, looking for a
     /// parcel that keeps strangers out, when its login region has none.
     ban_line_regions: Vec<String>,
     /// The address the `upload-http` case sends a postcard to; absent, it
     /// sends none.
     postcard_to: Option<String>,
+}
+
+/// The region-local position a login `start` string names
+/// (`"uri:Region&x&y&z"`).
+fn position_of(location: &str) -> Option<Vector> {
+    let mut parts = location.split('&').skip(1);
+    let mut coordinate = || parts.next()?.trim().parse::<f32>().ok();
+    Some(Vector {
+        x: coordinate()?,
+        y: coordinate()?,
+        z: coordinate()?,
+    })
 }
 
 /// The raw TOML shape, before ids are parsed into typed keys.
@@ -125,6 +146,9 @@ struct RawFixtures {
     /// The build location, verbatim ([`Fixtures::build_location`]).
     #[serde(default)]
     build_location: Option<String>,
+    /// The sound location, verbatim ([`Fixtures::sound_position`]).
+    #[serde(default)]
+    sound_location: Option<String>,
     /// The region names, verbatim ([`Fixtures::ban_line_regions`]).
     #[serde(default)]
     ban_line_regions: Vec<String>,
@@ -286,6 +310,7 @@ impl Fixtures {
             mesh_asset,
             experience,
             build_location: raw.build_location,
+            sound_location: raw.sound_location,
             ban_line_regions: raw.ban_line_regions,
             postcard_to: raw.postcard_to,
         })
@@ -320,13 +345,15 @@ impl Fixtures {
     /// rather than next to wherever the avatar arrived.
     #[must_use]
     pub fn build_position(&self) -> Option<Vector> {
-        let mut parts = self.build_location()?.split('&').skip(1);
-        let mut coordinate = || parts.next()?.trim().parse::<f32>().ok();
-        Some(Vector {
-            x: coordinate()?,
-            y: coordinate()?,
-            z: coordinate()?,
-        })
+        position_of(self.build_location()?)
+    }
+
+    /// The region-local position of the spot the `effects-sounds` case stands
+    /// at, if the operator named one: a parcel of the build location's region
+    /// that allows building and avatar sounds.
+    #[must_use]
+    pub fn sound_position(&self) -> Option<Vector> {
+        position_of(self.sound_location.as_deref()?)
     }
 
     /// The `index`-th pre-made group, if one is configured at that position for
@@ -420,6 +447,7 @@ mod tests {
             mesh_asset: None,
             experience: None,
             build_location: None,
+            sound_location: None,
             ban_line_regions: Vec::new(),
             postcard_to: None,
         };
@@ -445,6 +473,7 @@ mod tests {
             mesh_asset: None,
             experience: None,
             build_location: None,
+            sound_location: None,
             ban_line_regions: Vec::new(),
             postcard_to: None,
         };
@@ -463,6 +492,7 @@ mod tests {
             mesh_asset: Some("44444444-5555-6666-7777-888888888888".to_owned()),
             experience: None,
             build_location: None,
+            sound_location: None,
             ban_line_regions: Vec::new(),
             postcard_to: None,
         };
@@ -481,6 +511,7 @@ mod tests {
             mesh_asset: Some("not-a-uuid".to_owned()),
             experience: None,
             build_location: None,
+            sound_location: None,
             ban_line_regions: Vec::new(),
             postcard_to: None,
         };
@@ -502,6 +533,7 @@ mod tests {
             mesh_asset: None,
             experience: None,
             build_location: None,
+            sound_location: None,
             ban_line_regions: Vec::new(),
             postcard_to: None,
         };
@@ -524,6 +556,7 @@ mod tests {
             mesh_asset: None,
             experience: None,
             build_location: None,
+            sound_location: None,
             ban_line_regions: Vec::new(),
             postcard_to: None,
         };
@@ -546,6 +579,7 @@ mod tests {
             mesh_asset: None,
             experience: Some("55555555-6666-7777-8888-999999999999".to_owned()),
             build_location: None,
+            sound_location: None,
             ban_line_regions: Vec::new(),
             postcard_to: None,
         };
@@ -564,6 +598,7 @@ mod tests {
             mesh_asset: None,
             experience: Some("not-a-uuid".to_owned()),
             build_location: None,
+            sound_location: None,
             ban_line_regions: Vec::new(),
             postcard_to: None,
         };
@@ -587,6 +622,7 @@ mod tests {
                 mesh_asset: None,
                 experience: None,
                 build_location: Some(location.to_owned()),
+                sound_location: None,
                 ban_line_regions: Vec::new(),
                 postcard_to: None,
             })

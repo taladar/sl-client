@@ -1087,6 +1087,38 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid passes a viewer's effects and sounds on to the other
+    /// viewers — measured by the `effects-sounds` conformance case on aditi
+    /// and the local OpenSim (2026-10-13, `book/src/gridspec/avatars.md`
+    /// § Effects and sounds), and tabulated in [`crate::relays`].
+    ///
+    /// Second Life sends an effect to everybody in the region, its sender
+    /// too, under the sender's name, and drops floating text and a gaze, a
+    /// pointing or a beam that does not begin with the sender's id; it sends
+    /// a viewer's sound to everybody, wherever the sound is said to be.
+    /// OpenSim sends an effect as it came to everybody but the sender — a
+    /// message of nothing but gazes and beams only to a camera within 10 m —
+    /// and a sound to whoever stands within 100 m of where it is said to be.
+    #[must_use]
+    pub const fn relay_policy(self) -> crate::relays::RelayPolicy {
+        match self {
+            Self::SecondLife => crate::relays::RelayPolicy {
+                effects_echo: true,
+                effects: crate::relays::EffectsVetting::Vetted,
+                gaze_camera_range_m: None,
+                sound_range_m: None,
+                sound_names_a_parent: false,
+            },
+            Self::OpenSim => crate::relays::RelayPolicy {
+                effects_echo: false,
+                effects: crate::relays::EffectsVetting::AsSent,
+                gaze_camera_range_m: Some(crate::relays::OPENSIM_GAZE_RANGE_M),
+                sound_range_m: Some(crate::relays::OPENSIM_SOUND_RANGE_M),
+                sound_names_a_parent: true,
+            },
+        }
+    }
+
     /// What this grid makes of a link and a delink — measured by the
     /// `object-link-delink` conformance case on aditi and the local OpenSim
     /// (2026-10-11, `book/src/gridspec/building.md` § Linking).

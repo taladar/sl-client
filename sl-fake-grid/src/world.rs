@@ -186,6 +186,10 @@ pub struct SceneFixtures {
     /// What the region says of a write into a prim's contents, where the live
     /// grids disagree. Second Life's unless the grid's flavour says otherwise.
     pub(crate) contents: crate::imitates::ContentsPolicy,
+    /// How the region passes a viewer's effects and sounds on to the other
+    /// viewers, where the live grids disagree. Second Life's unless the
+    /// grid's flavour says otherwise.
+    pub(crate) relays: crate::relays::RelayPolicy,
     /// The order each linkset keeps its prims in ([`crate::link_sets`]). Not
     /// a fixture: a set nobody has linked or delinked is in the order its
     /// prims were stated.
@@ -411,6 +415,15 @@ pub enum RegionChange {
     /// reaches the session that made it too: a speaker hears its own line,
     /// which is how its viewer shows it.
     Chat(Box<crate::chat::Line>),
+    /// A viewer sent effects — a gaze, a pointing, a beam — for the other
+    /// viewers ([`crate::relays`]). Each session's watcher asks the grid's
+    /// policy whether its own is sent them; on Second Life that includes the
+    /// session that sent them.
+    Effects(Box<crate::relays::EffectsSent>),
+    /// A viewer triggered a sound — a gesture's — for the avatars around it
+    /// ([`crate::relays`]). Like a line of chat it reaches the session that
+    /// made it too, on both grids.
+    Sound(Box<sl_proto::TriggeredSound>),
 }
 
 /// Where the object `key` among `objects` hears from, region-local metres:
@@ -679,6 +692,7 @@ impl SceneFixtures {
             edit: crate::imitates::EditPolicy::default(),
             linking: crate::imitates::LinkPolicy::default(),
             contents: crate::imitates::ContentsPolicy::default(),
+            relays: crate::relays::RelayPolicy::default(),
             links: crate::link_sets::LinkSets::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
@@ -2198,6 +2212,50 @@ pub(crate) fn answer_world_request(
                 },
                 now,
             );
+        }
+        // A viewer's effects, for the other viewers: passed on as the grid's
+        // flavour passes them on, or not at all.
+        ServerEvent::ViewerEffect(effects) => {
+            let at = crate::chat::agent_position(sim);
+            return world
+                .relays
+                .effects_passed_on(identity.agent_id, at, effects)
+                .map(|sent| RegionChange::Effects(Box::new(sent)))
+                .into_iter()
+                .collect();
+        }
+        // A viewer's sound — a gesture's. A parcel that bars avatar sounds
+        // lets none out: nobody is sent it, the sender included.
+        ServerEvent::TriggerSound {
+            sound,
+            gain,
+            region_handle,
+            position,
+        } => {
+            let standing = crate::chat::agent_position(sim);
+            let barred = world
+                .parcel_at(standing.x, standing.y)
+                .is_some_and(|parcel| parcel.any_av_sounds == Some(false));
+            if barred {
+                return Vec::new();
+            }
+            let sound = world.relays.sound_passed_on(
+                identity.agent_id,
+                sl_proto::TriggeredSound {
+                    sound: *sound,
+                    owner: sl_types::key::OwnerKey::Agent(identity.agent_id),
+                    object: ObjectKey::from(identity.agent_id.uuid()),
+                    parent: None,
+                    region_handle: *region_handle,
+                    position: Vector {
+                        x: position.x(),
+                        y: position.y(),
+                        z: position.z(),
+                    },
+                    gain: *gain,
+                },
+            );
+            return vec![RegionChange::Sound(Box::new(sound))];
         }
         // Local chat: said where the avatar stands, under its name.
         ServerEvent::Chat {

@@ -34,6 +34,7 @@ pub mod dir_places_land_classified;
 pub mod display_names;
 pub mod draw_distance;
 pub mod economy_data;
+pub mod effects_sounds;
 pub mod environment;
 pub mod estate_access;
 pub mod estate_info;

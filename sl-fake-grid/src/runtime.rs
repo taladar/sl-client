@@ -1081,6 +1081,8 @@ impl GridCore {
             },
             avatar,
             selection: crate::object_edits::Selection::new(),
+            camera_at: None,
+            arrived_at: None,
             seq,
             region: region_index,
             ids,
@@ -2075,6 +2077,7 @@ impl FakeGridBuilder {
                 fixtures.edit = self.imitates.edit_policy();
                 fixtures.linking = self.imitates.link_policy();
                 fixtures.contents = self.imitates.contents_policy();
+                fixtures.relays = self.imitates.relay_policy();
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 RegionEntry {
@@ -2559,6 +2562,17 @@ impl FakeAgent {
     #[must_use]
     pub fn now(&self) -> Instant {
         self.shared.now()
+    }
+
+    /// When the grid handled this session's arrival — the instant its
+    /// timeline's [`At::AfterArrival`](crate::At::AfterArrival) steps are
+    /// timed from — or [`None`] while the agent has not arrived.
+    ///
+    /// The grid's own stamp, which is what a test that times a step has to
+    /// measure from: the instant its own task *hears* of the arrival is later
+    /// by however long the scheduler took to wake it.
+    pub async fn arrived_at(&self) -> Option<Instant> {
+        self.shared.state.lock().await.arrived_at
     }
 
     /// Runs `f` against the live session machine, then flushes transmits,

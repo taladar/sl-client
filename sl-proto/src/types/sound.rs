@@ -15,7 +15,40 @@
 //! do: the ids are shared between the viewer that asks for them and the grid
 //! fixture that answers them, and neither should own the other's copy.
 
+use sl_types::key::{ObjectKey, OwnerKey};
+use sl_types::lsl::Vector;
 use uuid::Uuid;
+
+use crate::{AssetKey, RegionHandle};
+
+/// A one-shot sound as a simulator states it in a `SoundTrigger`: what
+/// [`SimSession::send_triggered_sound`](crate::SimSession::send_triggered_sound)
+/// sends and [`Event::SoundTrigger`](crate::Event::SoundTrigger) surfaces.
+///
+/// It is a record of its own, rather than seven arguments, because a region
+/// that passes a viewer's sound on to the avatars around it carries the whole
+/// of it from the session that asked to every session that hears.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TriggeredSound {
+    /// The sound asset to play.
+    pub sound: AssetKey,
+    /// Whose sound it is: the owner of the object that made it, or the avatar
+    /// itself for a viewer's own. A viewer mutes by it.
+    pub owner: OwnerKey,
+    /// What made it: the prim, or the avatar for a viewer's own.
+    pub object: ObjectKey,
+    /// The linkset root of `object`, where the message states one. The two
+    /// live grids differ in what they state for a root prim and for an avatar
+    /// (`book/src/gridspec/avatars.md` § Effects and sounds).
+    pub parent: Option<ObjectKey>,
+    /// The region `position` is in.
+    pub region_handle: RegionHandle,
+    /// Where the sound is, region-local metres.
+    pub position: Vector,
+    /// The linear gain. A grid may pass on a gain outside `0.0..=1.0` as it
+    /// was asked for; clamping is the listener's business.
+    pub gain: f32,
+}
 
 /// A generic button click (`UISndClick`, and `UISndClickRelease`, which the
 /// reference defaults to the same asset).

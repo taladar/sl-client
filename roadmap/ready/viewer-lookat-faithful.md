@@ -49,3 +49,11 @@ local look-at (`PrivateLocalLookAtTarget`) and point-at
 avatar's head tracks the pointer); and the static-eyes option
 (`FSStaticEyes` + UUID — a priority animation suppressing idle eye
 motion; our `LLEyeMotion` port is done but has no suppression toggle).
+
+## Measured (2026-10-13, [[gridspec-viewer-effects-sounds]])
+
+Second Life passes a gaze on only when its payload **begins with the
+sender's own agent id**, sends it to everybody in the region at any distance
+and to the sender itself; OpenSim sends a gaze only to a viewer whose camera
+is within 10 m of the gazing avatar. Tables in
+`book/src/gridspec/avatars.md` § Effects and sounds.

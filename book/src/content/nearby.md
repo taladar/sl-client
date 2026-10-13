@@ -53,6 +53,10 @@ does not match its type) is kept verbatim as `ViewerEffectData::Raw`.
 A client sends effects with `Command::ViewerEffect` (a batch — one message may
 carry several) and receives others' effects as `Event::ViewerEffect`.
 
+Which effects a grid passes on, to whom, and what it changes in them — Second
+Life sends a viewer its own effects back, under its own name — are measured
+in [Grid Behaviour: Avatars](../gridspec/avatars.md#effects-and-sounds).
+
 ## Agent tracking
 
 Two estate/lookup messages locate a specific agent:

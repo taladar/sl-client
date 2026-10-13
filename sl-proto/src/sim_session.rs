@@ -7923,18 +7923,50 @@ impl SimSession {
         gain: f32,
         now: Instant,
     ) -> Result<(), Error> {
+        let region_handle = self.region_handle;
+        self.send_triggered_sound(
+            &crate::TriggeredSound {
+                sound,
+                owner,
+                object,
+                parent,
+                region_handle,
+                position,
+                gain,
+            },
+            now,
+        )
+    }
+
+    /// Sends a `SoundTrigger` that states its own region: a viewer's sound
+    /// passed on to the avatars around it, which OpenSim sends with the handle
+    /// the viewer asked for rather than the region's own. Everything else is
+    /// [`send_sound_trigger`](Self::send_sound_trigger).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_triggered_sound(
+        &mut self,
+        sound: &crate::TriggeredSound,
+        now: Instant,
+    ) -> Result<(), Error> {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
         let message = AnyMessage::SoundTrigger(SoundTrigger {
             sound_data: SoundTriggerSoundDataBlock {
-                sound_id: sound.uuid(),
-                owner_id: owner.uuid(),
-                object_id: object.uuid(),
-                parent_id: parent.as_ref().map_or_else(Uuid::nil, ObjectKey::uuid),
-                handle: self.region_handle.0,
-                position,
-                gain,
+                sound_id: sound.sound.uuid(),
+                owner_id: sound.owner.uuid(),
+                object_id: sound.object.uuid(),
+                parent_id: sound
+                    .parent
+                    .as_ref()
+                    .map_or_else(Uuid::nil, ObjectKey::uuid),
+                handle: sound.region_handle.0,
+                position: sound.position.clone(),
+                gain: sound.gain,
             },
         });
         self.send(&message, Reliability::Reliable, now)?;

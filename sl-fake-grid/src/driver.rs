@@ -123,6 +123,15 @@ pub(crate) struct SimState {
     /// residents may hold the same prim selected at once, and neither of them
     /// is thereby holding a lock on it.
     pub(crate) selection: crate::object_edits::Selection,
+    /// When the grid handled this session's arrival: the instant its
+    /// timeline's steps are timed from ([`crate::timeline`]). Stamped where
+    /// the arrival is handled, not where a task that heard of it wakes up —
+    /// two tasks woken by one event read two different clocks.
+    pub(crate) arrived_at: Option<Instant>,
+    /// Where this session's viewer last said its camera is, region-local
+    /// metres; [`None`] until an `AgentUpdate` says. OpenSim sends a gaze only
+    /// to a camera near the avatar gazing ([`crate::relays`]).
+    pub(crate) camera_at: Option<sl_types::lsl::Vector>,
     /// This session's sequence number (its CAPS path component and the key
     /// in the grid's session table).
     pub(crate) seq: u64,
@@ -303,6 +312,9 @@ impl SharedSim {
     pub(crate) fn flush_locked(&self, state: &mut SimState) -> FlushOutcome {
         while let Some(event) = state.sim.poll_event() {
             let now = self.now();
+            if let ServerEvent::AgentUpdate(update) = &event {
+                state.camera_at = Some(update.camera.center.clone());
+            }
             // The greeting goes out as soon as the circuit is open, as a real
             // simulator does on `UseCircuitCode`: the viewer waits for the
             // `RegionHandshake` before it sends `CompleteAgentMovement`, and
@@ -376,6 +388,7 @@ impl SharedSim {
                 );
             }
             if matches!(event, ServerEvent::AgentArrived) {
+                state.arrived_at = Some(now);
                 state.own_appearance_owed = state.sim.handshake_reply_flags().is_none();
                 // What Second Life tells an arriving agent about itself and
                 // OpenSim does not: its health, and — over the event queue —
@@ -783,10 +796,17 @@ pub(crate) async fn run_region_watcher(
             }
             received = changes.recv() => {
                 match received {
-                    // A speaker hears its own line; every other change its
-                    // session was told about in the same breath.
+                    // A speaker hears its own line, and whoever made a sound
+                    // or an effect may be sent it back; every other change
+                    // its session was told about in the same breath.
                     Ok(RegionUpdate { source, change })
-                        if source == seq && !matches!(change, RegionChange::Chat(_)) => {}
+                        if source == seq
+                            && !matches!(
+                                change,
+                                RegionChange::Chat(_)
+                                    | RegionChange::Effects(_)
+                                    | RegionChange::Sound(_)
+                            ) => {}
                     Ok(RegionUpdate { change, .. }) => {
                         let now = shared.now();
                         shared
@@ -885,6 +905,37 @@ pub(crate) async fn run_region_watcher(
                                             &line.message,
                                             now,
                                         )
+                                    }
+                                    // To whoever the grid's flavour sends
+                                    // them: by the viewer's camera, where
+                                    // the grid asks how near it is.
+                                    RegionChange::Effects(sent) => {
+                                        let policy = state.world.lock().relays;
+                                        let camera = state.camera_at.clone().unwrap_or_else(|| {
+                                            crate::chat::agent_position(&state.sim)
+                                        });
+                                        if !policy.effects_reach(
+                                            sent,
+                                            state.avatar.agent_id,
+                                            &camera,
+                                        ) {
+                                            return;
+                                        }
+                                        state.sim.send_viewer_effect(sent.from, &sent.effects, now)
+                                    }
+                                    // Heard by a root agent in range of where
+                                    // the sound is said to be, where the
+                                    // grid's flavour has a range.
+                                    RegionChange::Sound(sound) => {
+                                        if !state.sim.is_root_agent() {
+                                            return;
+                                        }
+                                        let policy = state.world.lock().relays;
+                                        let standing = crate::chat::agent_position(&state.sim);
+                                        if !policy.sound_reaches(sound, &standing) {
+                                            return;
+                                        }
+                                        state.sim.send_triggered_sound(sound, now)
                                     }
                                     RegionChange::TerrainRetextured(composition) => {
                                         let mut identity = state.identity.clone();

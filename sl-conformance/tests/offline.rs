@@ -123,6 +123,7 @@ mod test {
         object_properties => "object-properties" [fake_sl, fake_opensim],
         object_select_scene => "object-select-scene" [fake_sl, fake_opensim],
         object_touch_grab => "object-touch-grab" [fake_sl, fake_opensim],
+        effects_sounds => "effects-sounds" [fake_sl, fake_opensim],
         object_rez_derez => "object-rez-derez" [fake_sl, fake_opensim],
         object_rez_land => "object-rez-land" [fake_sl, fake_opensim],
         parcel_edit => "parcel-edit" [fake_sl, fake_opensim],

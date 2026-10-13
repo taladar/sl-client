@@ -34,3 +34,13 @@ Builds on: `animations.rs` / `locomotion.rs` playback.
 Parity-audit extension: a master enable for gesture-triggered sounds
 (`EnableGestureSounds`, sound tab) — play/skip the sound steps when
 executing gestures.
+
+## Measured (2026-10-13, [[gridspec-viewer-effects-sounds]])
+
+A gesture's sound step is a `Command::TriggerSound`, and **both grids send it
+back to the sender**: play it from that echo, as the reference does, not
+locally as well. Second Life sends it to the whole region and OpenSim to
+whoever is within 100 m of the stated position; neither passes it on from a
+parcel that bars avatar sounds (`any_av_sounds`), where the gesture is then
+silent for its own avatar too. Tables in `book/src/gridspec/avatars.md`
+§ Effects and sounds.

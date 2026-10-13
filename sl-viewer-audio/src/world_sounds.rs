@@ -285,6 +285,12 @@ pub(crate) fn ingest_world_sound_events(
                 gain,
                 ..
             } => {
+                // A trigger that names no sound: both live grids pass one on
+                // as a viewer sent it (`book/src/gridspec/avatars.md`
+                // § Effects and sounds), and there is nothing to fetch.
+                if sound_id.is_nil() {
+                    continue;
+                }
                 if muted(&mutes, *owner_id, object_id.uuid()) {
                     continue;
                 }

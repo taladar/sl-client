@@ -184,6 +184,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "object-properties",
     "object-select-scene",
     "object-touch-grab",
+    "effects-sounds",
     "object-rez-derez",
     "object-rez-land",
     "parcel-edit",

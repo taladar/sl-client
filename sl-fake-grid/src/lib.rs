@@ -28,6 +28,7 @@ pub mod marker;
 pub mod neighbours;
 mod object_edits;
 mod parcel_edits;
+pub mod relays;
 pub mod runtime;
 pub mod scenario;
 mod task_contents;
@@ -74,6 +75,9 @@ pub use marker::{
     neighbour_marker_region,
 };
 pub use neighbours::NeighbourPolicy;
+pub use relays::{
+    EffectsSent, EffectsVetting, OPENSIM_GAZE_RANGE_M, OPENSIM_SOUND_RANGE_M, RelayPolicy,
+};
 pub use runtime::{
     CrossingNotice, FakeAgent, FakeGrid, FakeGridBuilder, GridIdentity, LoginNotice, RegionConfig,
     TeleportNotice,

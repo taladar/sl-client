@@ -457,10 +457,13 @@ mod test {
     /// before its half-second is up, which is what a runner that read the `at`
     /// and ignored it would do.
     ///
-    /// The baseline is the **grid's** own `AgentArrived`, which is the instant
-    /// the step is timed from. The client's handshake is not: it reaches the
-    /// test through a channel, and it arrived a few milliseconds *after* the
-    /// grid's own arrival often enough to fail this by four.
+    /// The baseline is the **grid's** own stamp of the arrival
+    /// ([`FakeAgent::arrived_at`](sl_fake_grid::FakeAgent::arrived_at)), which
+    /// is the instant the step is timed from. Nothing this test's task hears
+    /// is: the client's handshake reaches it through a channel, and so does
+    /// the grid's `AgentArrived` — the timeline's task woke to that one five
+    /// milliseconds before this one did, on a loaded machine, and the marker
+    /// then came "early" by as much.
     ///
     /// Real time rather than a paused timer, deliberately: everything in this
     /// tier is real I/O, and tokio's paused clock auto-advances whenever every
@@ -489,7 +492,10 @@ mod test {
                 break;
             }
         }
-        let arrived = std::time::Instant::now();
+        let arrived = agent
+            .arrived_at()
+            .await
+            .ok_or("the grid announced an arrival it has no instant for")?;
 
         let deadline = whole_wait();
         loop {

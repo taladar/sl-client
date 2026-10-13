@@ -1105,6 +1105,13 @@ impl TestContext {
         self.fixtures.build_position()
     }
 
+    /// Where the `effects-sounds` case stands, if the fixtures name a spot
+    /// that allows avatar sounds (see [`Fixtures::sound_position`]).
+    #[must_use]
+    pub fn sound_position(&self) -> Option<sl_client_tokio::Vector> {
+        self.fixtures.sound_position()
+    }
+
     /// The configured fetchable mesh asset the `mesh-fetch-http` case pulls, if
     /// any. When absent the case scans the region's object stream for a
     /// mesh-shaped prim instead.

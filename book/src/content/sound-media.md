@@ -42,6 +42,10 @@ viewer→sim counterpart of the inbound `Event::SoundTrigger`. The
 owner/object/parent ids are left for the simulator to fill, and (like the
 reference viewer) it is sent unreliably as best-effort.
 
+Who a grid passes such a sound on to, how far, and what each of a script's
+sound calls has a viewer sent are measured in
+[Grid Behaviour: Avatars](../gridspec/avatars.md#effects-and-sounds).
+
 ## Streaming music
 
 Each [parcel](world.md#parcels) can advertise a **streaming audio URL** — an

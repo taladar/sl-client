@@ -55,13 +55,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sl_proto::{
-    ArrivalPlacement, AvatarAppearance, ChatSource, ChatType, EnvironmentSettings,
+    ArrivalPlacement, AssetKey, AvatarAppearance, ChatSource, ChatType, EnvironmentSettings,
     ExperienceEnvironmentPush, ExperienceEvent, ExperiencePermission, InstantMessage, Object,
     ParcelInfo, PlayingAnimation, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
-    RegionStats, SequenceNumber, ServerEvent, SimSession, SimulatorTime,
-    attachment_state_from_point,
+    RegionStats, SequenceNumber, ServerEvent, SimSession, SimulatorTime, SoundFlags, SoundPreload,
+    TriggeredSound, ViewerEffect, attachment_state_from_point,
 };
-use sl_types::key::{ExperienceKey, InventoryKey};
+use sl_types::key::{AgentKey, ExperienceKey, InventoryKey, ObjectKey, OwnerKey};
 use sl_types::lsl::Vector;
 use sl_types::map::{RegionCoordinates, TeleportFlags};
 use tokio::sync::{broadcast, watch};
@@ -370,6 +370,44 @@ pub enum Action {
         /// The velocity it carries over, which is what keeps a walk a walk.
         velocity: Vector,
     },
+    /// Shows the session viewer effects of another avatar's — a gaze, a
+    /// pointing, an editing beam — as a region passes them on.
+    Effects {
+        /// The avatar the message says they are from.
+        from: AgentKey,
+        /// The effects, each with the agent it names itself.
+        effects: Vec<ViewerEffect>,
+    },
+    /// Plays a one-shot sound somewhere in the region: a script's
+    /// `llTriggerSound`, a collision, or another avatar's gesture.
+    TriggerSound(Box<TriggeredSound>),
+    /// Starts, or with [`SoundFlags::STOP`] stops, a sound on an object: a
+    /// script's `llPlaySound`. A sound that is already looping when the
+    /// viewer arrives belongs on the prim instead
+    /// ([`Object::sound`](sl_proto::Object::sound)).
+    AttachSound {
+        /// The object the sound follows.
+        object: ObjectKey,
+        /// Its owner.
+        owner: OwnerKey,
+        /// The sound.
+        sound: AssetKey,
+        /// The linear gain.
+        gain: f32,
+        /// Loop, sync, queue or stop.
+        flags: SoundFlags,
+    },
+    /// Changes the gain of the sound attached to an object: a script's
+    /// `llAdjustSoundVolume`.
+    AdjustAttachedSound {
+        /// The object.
+        object: ObjectKey,
+        /// The new linear gain.
+        gain: f32,
+    },
+    /// Asks the viewer to fetch sounds ahead of their playing: a script's
+    /// `llPreloadSound`.
+    PreloadSounds(Vec<SoundPreload>),
     /// Reports a frame of region statistics.
     SimStats(Box<RegionStats>),
     /// Reports the simulator's world clock and sun state.
@@ -449,6 +487,25 @@ impl std::fmt::Debug for Action {
                 .field("region", region)
                 .field("position", position)
                 .finish_non_exhaustive(),
+            Self::Effects { from, effects } => f
+                .debug_struct("Effects")
+                .field("from", from)
+                .field("effects", &effects.len())
+                .finish(),
+            Self::TriggerSound(sound) => f.debug_tuple("TriggerSound").field(&sound.sound).finish(),
+            Self::AttachSound { object, sound, .. } => f
+                .debug_struct("AttachSound")
+                .field("object", object)
+                .field("sound", sound)
+                .finish_non_exhaustive(),
+            Self::AdjustAttachedSound { object, gain } => f
+                .debug_struct("AdjustAttachedSound")
+                .field("object", object)
+                .field("gain", gain)
+                .finish(),
+            Self::PreloadSounds(sounds) => {
+                f.debug_tuple("PreloadSounds").field(&sounds.len()).finish()
+            }
             Self::SimStats(_) => f.write_str("SimStats(<stats>)"),
             Self::SimulatorTime(_) => f.write_str("SimulatorTime(<time>)"),
             Self::Marker(name) => f.debug_tuple("Marker").field(name).finish(),
@@ -544,7 +601,14 @@ pub(crate) fn run_timeline(
         if !wait_for_arrival(&mut events, &mut closed_rx, &mut shutdown_rx).await {
             return;
         }
-        let arrival = shared.now();
+        // The grid's own stamp of the arrival, not this task's waking up to
+        // it: a step is timed from when the avatar got here.
+        let arrival = shared
+            .state
+            .lock()
+            .await
+            .arrived_at
+            .unwrap_or_else(|| shared.now());
         // The base of the first `AfterPrevious`: a script whose first step is
         // "half a second after the previous one" and has no previous step means
         // half a second after the avatar got here.
@@ -1047,6 +1111,64 @@ async fn execute(
             {
                 tracing::warn!("a scripted crossing into {region:?} failed: {error}");
             }
+        }
+        Action::Effects { from, effects } => {
+            let (from, effects) = (*from, effects.clone());
+            shared
+                .with_sim(move |sim| {
+                    if let Err(error) = sim.send_viewer_effect(from, &effects, now) {
+                        tracing::warn!("scripted viewer effects failed to send: {error}");
+                    }
+                })
+                .await;
+        }
+        Action::TriggerSound(sound) => {
+            let sound = sound.clone();
+            shared
+                .with_sim(move |sim| {
+                    if let Err(error) = sim.send_triggered_sound(&sound, now) {
+                        tracing::warn!("a scripted sound failed to send: {error}");
+                    }
+                })
+                .await;
+        }
+        Action::AttachSound {
+            object,
+            owner,
+            sound,
+            gain,
+            flags,
+        } => {
+            let (object, owner, sound, gain, flags) = (*object, *owner, *sound, *gain, *flags);
+            shared
+                .with_sim(move |sim| {
+                    if let Err(error) =
+                        sim.send_attached_sound(object, owner, sound, gain, flags, now)
+                    {
+                        tracing::warn!("a scripted attached sound failed to send: {error}");
+                    }
+                })
+                .await;
+        }
+        Action::AdjustAttachedSound { object, gain } => {
+            let (object, gain) = (*object, *gain);
+            shared
+                .with_sim(move |sim| {
+                    if let Err(error) = sim.send_attached_sound_gain_change(object, gain, now) {
+                        tracing::warn!("a scripted sound gain change failed to send: {error}");
+                    }
+                })
+                .await;
+        }
+        Action::PreloadSounds(sounds) => {
+            let sounds = sounds.clone();
+            shared
+                .with_sim(move |sim| {
+                    if let Err(error) = sim.send_preload_sound(&sounds, now) {
+                        tracing::warn!("a scripted sound preload failed to send: {error}");
+                    }
+                })
+                .await;
         }
         Action::SimStats(stats) => {
             let stats = stats.clone();

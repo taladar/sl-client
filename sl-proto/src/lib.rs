@@ -232,7 +232,7 @@ pub use types::{
     TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags,
     TerraformArea, TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture,
     TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError,
-    ThumbnailTarget, TransferStatus, Transmit, UI_SOUND_ALERT, UI_SOUND_CLICK,
+    ThumbnailTarget, TransferStatus, Transmit, TriggeredSound, UI_SOUND_ALERT, UI_SOUND_CLICK,
     UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP,
     UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING,
     UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams,
