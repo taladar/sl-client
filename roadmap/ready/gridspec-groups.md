@@ -50,3 +50,7 @@ tolerates silence.
 
 [[protocol-cap-group-bans]]: group ban lists over `GroupAPIv1` (Second Life
 only).
+
+[[protocol-cap-offline-group-invite-answers]]: answering offline group
+invitations over `AcceptGroupInvite` / `DeclineGroupInvite`, measured with
+an invitation kept while the invitee is away.

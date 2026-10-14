@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 139 |
 | ready | 353 |
-| blocked | 103 |
+| blocked | 105 |
 | in-progress | 20 |
 | bugs | 39 |
 | done | 1360 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2061** |
+| **total** | **2063** |
 
 ## ideas (139)
 
@@ -1191,7 +1191,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (103)
+## blocked (105)
 
 ### protocol
 
@@ -1214,8 +1214,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-cap-offline-friendship-answers`](blocked/protocol-cap-offline-friendship-answers.md)
   — Answer offline friendship offers over AcceptFriendship / DeclineFriendship
   (blocked by `gridspec-friends-presence`)
+- [`protocol-cap-offline-group-invite-answers`](blocked/protocol-cap-offline-group-invite-answers.md)
+  — Answer offline group invitations over AcceptGroupInvite / DeclineGroupInvite
+  (blocked by `gridspec-groups`)
 - [`protocol-cap-product-info`](blocked/protocol-cap-product-info.md) — Land
   type names over ProductInfoRequest (blocked by `gridspec-search-directory`)
+- [`protocol-cap-read-offline-msgs`](blocked/protocol-cap-read-offline-msgs.md)
+  — Drain kept messages over ReadOfflineMsgs where the answer capabilities exist
+  (blocked by `protocol-cap-offline-friendship-answers`,
+  `protocol-cap-offline-group-invite-answers`)
 - [`protocol-sim-group-messages`](blocked/protocol-sim-group-messages.md) —
   SimSession — decode group requests and send group replies (blocked by
   `gridspec-groups`)

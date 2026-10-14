@@ -4,7 +4,8 @@ title: Answer offline friendship offers over AcceptFriendship / DeclineFriendshi
 topic: protocol
 status: blocked
 origin: protocol-reference-capabilities triage (2026-10-04)
-refs: [protocol-reference-capabilities, viewer-offline-im-drain]
+refs: [protocol-reference-capabilities, viewer-offline-im-drain,
+  protocol-cap-read-offline-msgs]
 blocked_by: [gridspec-friends-presence]
 ---
 
@@ -19,9 +20,9 @@ Decline: DELETE `{cap}?from=<uuid>` → `{success}`. Online offers stay on UDP.
 
 Our viewer drains offline messages over UDP `RetrieveInstantMessages` on
 purpose, so every offer has a transaction id ([[viewer-offline-im-drain]]
-says to revisit once these exist). Add the two commands, switch the offline
-drain to `ReadOfflineMsgs` when all three capabilities are granted, and answer
-cap-delivered offers over these.
+says to revisit once these exist). Add the two commands and answer
+cap-delivered offers over these; the switch of the drain itself is
+[[protocol-cap-read-offline-msgs]].
 
 Every capability adopted here goes into `REQUESTED_CAPABILITIES`
 (`sl-proto/src/session.rs`), is used where the region grants it, keeps the
@@ -41,6 +42,6 @@ Measured on aditi (`book/src/gridspec/chat.md`, *Instant messages*):
 `ReadOfflineMsgs` states `transaction-id` as nil in every record, and the
 client's decoder now reads its nested array. `RetrieveInstantMessages`
 brings the same messages on Second Life with every id, and either road
-empties the store for both — so the viewer's drain was left on UDP there,
-and the switch to the capability is this task's, together with the two
-answer commands.
+empties the store for both — so the viewer's drain was left on UDP there.
+The switch to the capability waits on these two answer commands and the
+group-invitation pair ([[protocol-cap-read-offline-msgs]]).
