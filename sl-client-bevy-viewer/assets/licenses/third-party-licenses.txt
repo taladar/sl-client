@@ -10256,7 +10256,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: ruzstd 0.8.3
+used-by: ruzstd 0.9.1
 
 MIT License
 
