@@ -32,3 +32,9 @@ decline, an offer to a friend, calling cards at accept and at offer, the
 see-online mask in `ChangeUserRights`, `Prey` with the map right, the
 vanish timeout, a kept offer handed over unasked (OpenSim) or kept (SL), and
 the `AcceptFriendship` / `DeclineFriendship` capabilities on `FakeSl`.
+
+Until `FakeSl` grants `AcceptFriendship` and `AcceptGroupInvite` (both
+`Pending` in `sim_caps.rs`), the client's drain (`RequestOfflineMessages`,
+[[protocol-cap-read-offline-msgs]]) reads its kept messages over the UDP
+`RetrieveInstantMessages`, which the fake grid does not answer: grant them
+with the store, and answer the UDP trigger for `FakeOpensim`.

@@ -422,6 +422,18 @@ pub const CAP_ACCEPT_FRIENDSHIP: &str = "AcceptFriendship";
 /// [`CAP_ACCEPT_FRIENDSHIP`]: a DELETE of `{cap}?from=<offerer>`.
 pub const CAP_DECLINE_FRIENDSHIP: &str = "DeclineFriendship";
 
+/// The capabilities a region must grant for the kept messages to be read over
+/// [`CAP_READ_OFFLINE_MSGS`]: the capability itself and the two that answer
+/// what it hands over without a transaction id — a friendship offer and a
+/// group invitation. Without any of them the reference reads over the UDP
+/// `RetrieveInstantMessages` instead (`LLIMProcessing::requestOfflineMessages`),
+/// as [`Command::RequestOfflineMessages`](crate::Command::RequestOfflineMessages) does.
+pub const OFFLINE_DRAIN_CAPABILITIES: [&str; 3] = [
+    CAP_READ_OFFLINE_MSGS,
+    CAP_ACCEPT_FRIENDSHIP,
+    CAP_ACCEPT_GROUP_INVITE,
+];
+
 /// The capability that reads and writes a group's **ban list**: a GET of
 /// `{cap}?group_id=<group>` answers `{ group_id, ban_list: { <agent>: {
 /// ban_date } } }`, and a POST of `{ ban_action: 1 (ban) | 2 (unban), ban_ids:

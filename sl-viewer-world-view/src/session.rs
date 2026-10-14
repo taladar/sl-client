@@ -22,10 +22,11 @@
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowCloseRequested};
 use sl_client_bevy::{
-    AnimationKey, Camera, Command, Distance, LOGOUT_TIMEOUT, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent,
+    AnimationKey, Camera, Command, Distance, LOGOUT_TIMEOUT, SlCapabilities, SlCommand, SlEvent,
+    SlIdentity, SlSessionEvent,
 };
 use sl_settings::SettingValue;
+use sl_viewer_social::MuteModel;
 
 use sl_viewer_kit::coords::bevy_to_sl_vec;
 use sl_viewer_settings::ViewerSettings;
@@ -82,14 +83,53 @@ pub struct ViewerSession {
     /// Whether the `--play-animation` debug animation has been triggered yet, so
     /// it fires once on the first region handshake rather than on every one.
     play_on_login_done: bool,
-    /// Whether the login-time offline-instant-message drain has been requested, so
-    /// it fires once (on the first region handshake) rather than on every region
-    /// cross.
-    offline_messages_requested: bool,
     /// The wall-clock deadline (`Time::elapsed_secs`) at which a pending quit
     /// forces an exit even without a `LoggedOut`; `None` until quit is
     /// requested.
     quit_deadline: Option<f32>,
+}
+
+/// Where the login-time read of the kept messages stands
+/// ([`request_offline_messages`]).
+#[derive(Debug, Resource, Default)]
+pub struct OfflineDrain {
+    /// Whether the first region handshake has completed.
+    region_handshaken: bool,
+    /// Whether the region's capabilities have arrived: the drain waits for
+    /// them, as the reference does (`capabilitiesReceived`), since they decide
+    /// whether it reads over `ReadOfflineMsgs` or UDP.
+    capabilities_received: bool,
+    /// Whether the drain has been requested, so it fires once rather than on
+    /// every region cross.
+    requested: bool,
+}
+
+impl OfflineDrain {
+    /// Whether the agent's kept messages are to be read now — once, after the
+    /// first region handshake, once the region's capabilities are in and once
+    /// the mute list has settled (`mutes_settled`, the reference's
+    /// `LLMuteList::updateLoadState`: an offer from a muted resident is
+    /// answered as muted, which needs the list): the
+    /// reference `LLIMProcessing::requestOfflineMessages`, which the simulator
+    /// otherwise holds and re-delivers on every login until read (OpenSim
+    /// deletes them as it hands them over). They arrive as ordinary
+    /// `InstantMessageReceived` events with `offline` set, folding into the
+    /// conversations, offers and group-notice surfaces like any live IM. The
+    /// capabilities decide the road: the modern `ReadOfflineMsgs` where the
+    /// region also grants the two that answer a kept offer, which the
+    /// capability hands over without the transaction id a UDP answer needs,
+    /// and the UDP `RetrieveInstantMessages` otherwise
+    /// ([`Command::RequestOfflineMessages`]).
+    const fn take(&mut self, mutes_settled: bool) -> bool {
+        let due = self.region_handshaken
+            && self.capabilities_received
+            && mutes_settled
+            && !self.requested;
+        if due {
+            self.requested = true;
+        }
+        due
+    }
 }
 
 /// The session driver: what turns a live grid connection into the frame's world,
@@ -116,6 +156,7 @@ pub struct SessionDriverPlugin {
 impl Plugin for SessionDriverPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ViewerSession>()
+            .init_resource::<OfflineDrain>()
             // The process's signal flag, unless the host gave this App its own.
             .init_resource::<TerminationFlag>()
             // The viewer inserts the real one from its command line; this is
@@ -128,6 +169,7 @@ impl Plugin for SessionDriverPlugin {
                 Update,
                 (
                     drive_session,
+                    request_offline_messages,
                     // Announce the (user-tunable) draw distance on handshake and
                     // whenever the quick-preferences slider moves it.
                     apply_draw_distance,
@@ -632,23 +674,6 @@ pub fn drive_session(
                 // the bandwidth throttle by the network & cache tab's
                 // `apply_throttle` (`sl_viewer_preferences::preferences_network_cache`) — both
                 // re-send their (user-tunable) setting on every handshake.
-                // Drain the agent's stored offline instant messages, once — the
-                // reference `LLIMProcessing::requestOfflineMessages`, which the
-                // simulator otherwise holds and re-delivers on every login until
-                // retrieved (OpenSim deletes them as it hands them over). They
-                // arrive as ordinary `InstantMessageReceived` events with `offline`
-                // set, folding into the conversations, offers and group-notice
-                // surfaces like any live IM. The legacy UDP `RetrieveInstantMessages`
-                // is used (not the modern `ReadOfflineMsgs` cap) because it carries
-                // the per-message transaction ids our UDP accept paths need — the
-                // cap path drops them, which is why the reference only uses the cap
-                // when the AcceptFriendship / AcceptGroupInvite caps are also
-                // present (a path we do not wire yet).
-                if !session.offline_messages_requested {
-                    info!("requesting stored offline instant messages");
-                    commands.write(SlCommand(Command::RetrieveInstantMessages));
-                    session.offline_messages_requested = true;
-                }
                 // Kick off the `--play-animation` debug animations on the agent's
                 // own avatar, once, so its skeleton is driven (P18.3 / P18.4) — the
                 // sim broadcasts the agent's own `AvatarAnimation` back, which the
@@ -686,6 +711,34 @@ pub fn drive_session(
     }
 }
 
+/// Read the messages kept while the agent was away, once, when
+/// `OfflineDrain::take` says it is time: after the first
+/// region handshake, the region's capabilities and the mute list.
+pub fn request_offline_messages(
+    mut events: MessageReader<SlEvent>,
+    mut capabilities: MessageReader<SlCapabilities>,
+    mutes: Option<Res<MuteModel>>,
+    time: Res<Time>,
+    mut drain: ResMut<OfflineDrain>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if events
+        .read()
+        .any(|event| matches!(event.0, SlSessionEvent::RegionHandshakeComplete))
+    {
+        drain.region_handshaken = true;
+    }
+    if capabilities.read().count() > 0 {
+        drain.capabilities_received = true;
+    }
+    // Without the mute plugin there is no list to wait for.
+    let mutes_settled = mutes.is_none_or(|mutes| mutes.is_settled(time.elapsed()));
+    if drain.take(mutes_settled) {
+        info!("requesting stored offline instant messages");
+        commands.write(SlCommand(Command::RequestOfflineMessages));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bevy::prelude::*;
@@ -693,11 +746,33 @@ mod tests {
     use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
     use sl_settings::{Scope, SettingValue};
 
-    use super::{SETTING_DRAW_DISTANCE, apply_draw_distance, register_settings};
+    use super::{OfflineDrain, SETTING_DRAW_DISTANCE, apply_draw_distance, register_settings};
     use sl_viewer_settings::ViewerSettings;
 
     /// A boxed error so tests can use `?`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// The kept messages are read once, only after the first handshake, the
+    /// region's capabilities and a settled mute list, in any order.
+    #[test]
+    fn the_offline_drain_waits_for_the_capabilities_and_the_mutes() {
+        let mut drain = OfflineDrain {
+            region_handshaken: true,
+            ..OfflineDrain::default()
+        };
+        assert!(!drain.take(true));
+        drain.capabilities_received = true;
+        assert!(!drain.take(false));
+        assert!(drain.take(true));
+        assert!(!drain.take(true));
+        let mut drain = OfflineDrain {
+            capabilities_received: true,
+            ..OfflineDrain::default()
+        };
+        assert!(!drain.take(true));
+        drain.region_handshaken = true;
+        assert!(drain.take(true));
+    }
 
     /// Collects the `SetDrawDistance` commands `apply_draw_distance` emits.
     #[derive(Resource, Default)]

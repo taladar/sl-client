@@ -315,10 +315,17 @@ presence](friends.md)).
   with the nearby chat instead of opening a conversation with nobody; and
   the automatic reply does not answer either (`sl-viewer-people`, unit
   tests).
-- **The drain stays on `RetrieveInstantMessages`.** It brings everything on
-  both grids, with every id, and empties the capability's store as well, so
-  nothing is shown twice. The capability brings nothing more, and brings an
-  offer without the id needed to answer it over UDP.
+- **The drain reads `ReadOfflineMsgs` as the reference does**: where the
+  region grants it and both answer capabilities (`AcceptFriendship`,
+  `AcceptGroupInvite`), once the region's capabilities are in and the mute
+  list has settled (an offer from a muted sender is declined or ignored as
+  the reference does), and over
+  `RetrieveInstantMessages` otherwise or when the GET fails. Either road
+  empties the other's store, so nothing is shown twice. What the capability
+  hands over without an id is read as the UDP message would be: an inventory
+  offer's transaction id, an invitation's or a notice's group come from
+  `asset_id`, and an offer or invitation is answered over the capabilities
+  (`protocol-cap-read-offline-msgs`).
 - **Neither grid replays anything unasked**, so there is nothing to
   de-duplicate.
 

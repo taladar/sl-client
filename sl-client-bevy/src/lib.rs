@@ -32,16 +32,17 @@ use sl_proto::{
     CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
     Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, NeighbourCaps,
-    NewFileAgentInventoryRequest, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session,
-    SessionMessage, UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url,
-    ais_category_url, ais_create_category_url, ais_item_url, associate_inventory_request,
-    avatar_picker_search_query, build_agent_preferences_request, build_ais_create_category_body,
-    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_create_inventory_category_request,
-    build_environment_update_request, build_interest_list_request,
-    build_modify_material_params_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_properties_update_request,
-    build_parcel_voice_info_request, build_postcard_request, build_provision_voice_account_request,
+    NewFileAgentInventoryRequest, OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE,
+    REQUESTED_CAPABILITIES, Session, SessionMessage, UserInfoUpdate,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
+    build_create_inventory_category_request, build_environment_update_request,
+    build_interest_list_request, build_modify_material_params_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_properties_update_request, build_parcel_voice_info_request,
+    build_postcard_request, build_provision_voice_account_request,
     build_region_experiences_request, build_render_materials_put_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
@@ -1569,6 +1570,14 @@ fn advance_running(
                             sequence: None,
                         }),
                     );
+                }
+                // A failed read of the kept messages is read again over UDP, as
+                // the reference falls back.
+                if cap == CAP_READ_OFFLINE_MSGS {
+                    tracing::warn!("reading the kept messages over UDP instead");
+                    if let Err(error) = session.retrieve_instant_messages(now) {
+                        tracing::warn!("the kept messages could not be asked for: {error}");
+                    }
                 }
             } else if let Err(error) = session.handle_caps_event(&message, &body, now) {
                 tracing::warn!(capability = %message, "CAPS payload rejected: {error}");
@@ -4796,15 +4805,18 @@ fn apply_command(
         Command::RequestOfflineMessages => {
             if let Some(caps) = caps
                 && let Some(url) = caps.map.get(CAP_READ_OFFLINE_MSGS).cloned()
+                && OFFLINE_DRAIN_CAPABILITIES
+                    .iter()
+                    .all(|cap| caps.map.contains_key(*cap))
             {
                 let events_tx = caps.events_tx.clone();
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_READ_OFFLINE_MSGS, &events_tx);
                 });
             } else {
-                // A grid without the capability (a stock OpenSim) delivers
-                // stored messages over the UDP `RetrieveInstantMessages`, as the
-                // reference viewer falls back to.
+                // A region without the capability, or without the two that
+                // answer what it hands over (a stock OpenSim), is read over the
+                // UDP `RetrieveInstantMessages`, as the reference does.
                 session.retrieve_instant_messages(now)?;
             }
         }

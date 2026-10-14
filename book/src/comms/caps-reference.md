@@ -122,7 +122,8 @@ presence](../gridspec/friends.md)); our client uses them for every kept offer
 invitation carries a nil `transaction-id` and names its group only in
 `asset_id`. On aditi the decline answers `200` `{success: true}` and the accept
 takes an invitation read over UDP too ([Groups](../gridspec/groups.md)); our
-client uses them for every kept invitation (`Command::AcceptGroupInvitation` /
+client uses them for every kept invitation without a transaction id
+(`Command::AcceptGroupInvitation` /
 `DeclineGroupInvitation` with `use_offline_cap`), over UDP where the region
 lacks them.
 

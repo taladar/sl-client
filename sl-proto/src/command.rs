@@ -2814,8 +2814,15 @@ pub enum Command {
     /// (`RetrieveInstantMessages`); they arrive as offline
     /// [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived)s.
     RetrieveInstantMessages,
-    /// Read stored offline instant messages over the modern `ReadOfflineMsgs`
-    /// capability; they arrive as offline [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived)s.
+    /// Read the messages kept while the agent was away as the reference viewer
+    /// does (`LLIMProcessing::requestOfflineMessages`): over the modern
+    /// `ReadOfflineMsgs` capability where the region grants it and the two
+    /// capabilities that answer a kept offer
+    /// ([`OFFLINE_DRAIN_CAPABILITIES`](crate::OFFLINE_DRAIN_CAPABILITIES)),
+    /// over the UDP `RetrieveInstantMessages` otherwise and when the GET
+    /// fails. They arrive as offline [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived)s;
+    /// an offer read over the capability is answered through the capabilities
+    /// ([`InstantMessage::answered_over_capabilities`](crate::InstantMessage::answered_over_capabilities)).
     RequestOfflineMessages,
     /// Teleport to a landmark (`TeleportLandmarkRequest`). `None` teleports to
     /// the agent's home location.

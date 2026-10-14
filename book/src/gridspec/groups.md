@@ -130,13 +130,14 @@ B comes back three times and answers each way.
 | what B is sent unasked (**held**) | nothing of it | nothing of it |
 | asked with `RetrieveInstantMessages` (**held**) | the invitation, kept, under its own id, no region | the same with a region |
 | accepted over UDP with that id (**held**) | taken: as a live accept | taken |
-| accepted as the client accepts a kept one (`AcceptGroupInvite`) (**held**) | taken: as a live accept | no such capability: our client answers over UDP, taken |
+| read as our client reads (`RequestOfflineMessages`) and accepted as it answers (**held**) | read over the capability, as from the group (its `asset_id`), no id; accepted through `AcceptGroupInvite`: taken, as a live accept | read over UDP (no capability), accepted over UDP: taken |
 | read over `ReadOfflineMsgs` (**held**) | dialog 3, `from_agent_id` **A** (not the group), `from_group` false, `asset_id` **the group**, `transaction-id` nil, the bucket, kept | no such capability |
 | declined through `DeclineGroupInvite` (`{group}`) (**held**) | `200`, `{success: true}`; nobody told; nothing kept afterwards | no such capability |
 
 So an invitation read over the capability names its group only in
 `asset_id`, and can be answered only through the capabilities — which take
-an invitation however it was read.
+an invitation however it was read (the first runs accepted one read over
+UDP through `AcceptGroupInvite`).
 
 ## A deed by the owner
 
@@ -165,6 +166,10 @@ seen there. A deed without the power is in [Building](building.md).
   naming nobody — read as empty.
 - **A kept invitation is answered over the capabilities** where the region
   grants them, over UDP otherwise, and a refusal is logged.
+- **The kept messages are read over `ReadOfflineMsgs`** where the region
+  grants it and both answer capabilities; an invitation read that way names
+  its group from `asset_id`, as the reference reads it, and the census's
+  second away round reads and accepts as the viewer does.
 - **Bans** are read and changed over `GroupAPIv1` (`Command::RequestGroupBans`,
   `BanGroupMembers`, `UnbanGroupMembers`, `Event::GroupBans`); the panel is
   `viewer-social-group-extras`, as are a founding dialog that warns of the

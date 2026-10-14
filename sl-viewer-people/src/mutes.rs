@@ -41,7 +41,7 @@ use bevy::prelude::*;
 
 use sl_client_bevy::{
     Command, MUTE_LIST_LIMIT, MuteEntry, MuteFlags, MuteType, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent, Uuid,
+    SlSessionEvent, Uuid, XferListing,
 };
 
 use crate::intents::RequestBlock;
@@ -85,10 +85,11 @@ impl Plugin for MutesPlugin {
 /// produced an agent id).
 pub fn request_mute_list(
     identity: Res<SlIdentity>,
+    time: Res<Time>,
     mut model: ResMut<MuteModel>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    if identity.agent_id.is_none() || !model.claim_request() {
+    if identity.agent_id.is_none() || !model.claim_request(time.elapsed()) {
         return;
     }
     commands.write(SlCommand(Command::RequestMuteList));
@@ -96,11 +97,22 @@ pub fn request_mute_list(
 
 /// Fold a received mute list into the model (`MuteList` replaces the list;
 /// `MuteListUnchanged` means the cached copy the request named is current —
-/// nothing to do, and the locally-noted entries stay).
+/// nothing to do, and the locally-noted entries stay). Any of them, and a
+/// list file that would not parse, answers the request
+/// ([`MuteModel::is_settled`]).
 pub fn ingest_mute_list(mut events: MessageReader<SlEvent>, mut model: ResMut<MuteModel>) {
     for event in events.read() {
-        if let SlSessionEvent::MuteList(entries) = &event.0 {
-            model.replace(entries.clone());
+        match &event.0 {
+            SlSessionEvent::MuteList(entries) => {
+                model.replace(entries.clone());
+                model.note_answered();
+            }
+            SlSessionEvent::MuteListUnchanged
+            | SlSessionEvent::XferDecodeFailed {
+                file: XferListing::MuteList,
+                ..
+            } => model.note_answered(),
+            _ => {}
         }
     }
 }

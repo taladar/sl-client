@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 354 |
+| ready | 353 |
 | blocked | 99 |
 | in-progress | 20 |
 | bugs | 38 |
-| done | 1367 |
+| done | 1368 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2064** |
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (354)
+## ready (353)
 
 ### protocol
 
@@ -375,10 +375,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Re-exports and derived login state reach only the bevy runtime
 - [`protocol-audit-sim-session-stores`](ready/protocol-audit-sim-session-stores.md)
   — SimSession's 54 fields mix the driver's serving stores with the circuit
-- [`protocol-cap-read-offline-msgs`](ready/protocol-cap-read-offline-msgs.md) —
-  Drain kept messages over ReadOfflineMsgs where the answer capabilities exist
-  (blocked by `protocol-cap-offline-friendship-answers` (done),
-  `protocol-cap-offline-group-invite-answers` (done))
 - [`protocol-cap-update-agent-information`](ready/protocol-cap-update-agent-information.md)
   — Set the maturity preference over UpdateAgentInformation
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
@@ -1669,7 +1665,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1367)
+## done (1368)
 
 ### protocol
 
@@ -1874,6 +1870,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-groups` (done))
 - [`protocol-cap-parcel-properties-update`](done/protocol-cap-parcel-properties-update.md)
   — Edit parcels over the ParcelPropertiesUpdate capability
+- [`protocol-cap-read-offline-msgs`](done/protocol-cap-read-offline-msgs.md) —
+  Drain kept messages over ReadOfflineMsgs where the answer capabilities exist
+  (blocked by `protocol-cap-offline-friendship-answers` (done),
+  `protocol-cap-offline-group-invite-answers` (done))
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
   — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-experience-parcel-recheck`](done/protocol-experience-parcel-recheck.md)

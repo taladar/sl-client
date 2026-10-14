@@ -41,3 +41,9 @@ sent or not; bans over `GroupAPIv1` (Second Life only, `201` "Created" /
 `ReadOfflineMsgs` / `AcceptGroupInvite` / `DeclineGroupInvite`; accounts and
 proposals answered (Second Life) or silent (OpenSim); and a deed of an
 unshared object ignored (Second Life) or taken (OpenSim).
+
+`FakeSl` grants `ReadOfflineMsgs` but not `AcceptGroupInvite` /
+`DeclineGroupInvite`; the client drains over the capability only with both
+answer capabilities granted ([[protocol-cap-read-offline-msgs]]), so the kept
+invitation needs them too, and a record shaped as Second Life's (the inviter
+as sender, the group in `asset_id`, a nil `transaction-id`).

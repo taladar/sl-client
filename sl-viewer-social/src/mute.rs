@@ -4,8 +4,15 @@
 //! state only a viewer has: whether it has already asked the grid for the
 //! list.
 
+use core::time::Duration;
+
 use bevy::prelude::*;
 use sl_client_bevy::{MuteEntry, MuteList, Uuid};
+
+/// How long the list is waited for before what depends on it goes ahead
+/// without it: the reference's `LLMuteList::updateLoadState`, which gives up
+/// on the request after 30 seconds.
+pub const MUTE_LIST_WAIT: Duration = Duration::from_secs(30);
 
 /// The agent's mute list as a Bevy resource: the pure [`MuteList`] the session
 /// runtime also keeps, plus the one piece of state only a viewer has — whether
@@ -22,20 +29,42 @@ pub struct MuteModel {
     /// [`MuteList`](sl_client_bevy::SlSessionEvent::MuteList) event and the
     /// outgoing mute/unmute commands.
     list: MuteList,
-    /// Whether the one-per-session `RequestMuteList` has been sent.
-    requested: bool,
+    /// When the one-per-session `RequestMuteList` was sent (the app's
+    /// elapsed time), `None` before.
+    requested_at: Option<Duration>,
+    /// Whether the grid has answered the request: with the list, with "the
+    /// cached one is current", or with a file that would not parse.
+    answered: bool,
 }
 
 impl MuteModel {
-    /// Claim the one-per-session `RequestMuteList` slot: true the first time
-    /// it is called, false every time after. The latch lives with the model so
-    /// a second requester cannot race a duplicate request onto the wire.
-    pub const fn claim_request(&mut self) -> bool {
-        if self.requested {
+    /// Claim the one-per-session `RequestMuteList` slot at `now` (the app's
+    /// elapsed time): true the first time it is called, false every time
+    /// after. The latch lives with the model so a second requester cannot race
+    /// a duplicate request onto the wire.
+    pub const fn claim_request(&mut self, now: Duration) -> bool {
+        if self.requested_at.is_some() {
             return false;
         }
-        self.requested = true;
+        self.requested_at = Some(now);
         true
+    }
+
+    /// Record that the grid answered the request, however it answered.
+    pub const fn note_answered(&mut self) {
+        self.answered = true;
+    }
+
+    /// Whether the list is as loaded as it will get at `now`: answered, or
+    /// asked for [`MUTE_LIST_WAIT`] ago without an answer — the reference's
+    /// `LLMuteList::updateLoadState`, which what acts on a sender's mute
+    /// (the read of the kept messages) waits for.
+    #[must_use]
+    pub fn is_settled(&self, now: Duration) -> bool {
+        self.answered
+            || self
+                .requested_at
+                .is_some_and(|at| now.saturating_sub(at) >= MUTE_LIST_WAIT)
     }
 
     /// The list itself — the whole pure model, for the callers that ask it a
@@ -125,7 +154,8 @@ impl MuteModel {
 
 #[cfg(test)]
 mod tests {
-    use super::MuteModel;
+    use super::{MUTE_LIST_WAIT, MuteModel};
+    use core::time::Duration;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{MuteEntry, MuteFlags, MuteType, Uuid};
 
@@ -158,7 +188,23 @@ mod tests {
     #[test]
     fn the_request_latch_is_claimed_once() {
         let mut model = MuteModel::default();
-        assert_eq!(model.claim_request(), true);
-        assert_eq!(model.claim_request(), false);
+        assert_eq!(model.claim_request(Duration::from_secs(1)), true);
+        assert_eq!(model.claim_request(Duration::from_secs(2)), false);
+    }
+
+    /// The list is settled once answered, or once it has been waited for as
+    /// long as the reference waits; never before it is asked for.
+    #[test]
+    fn the_list_settles_on_an_answer_or_after_the_wait() {
+        let start = Duration::from_secs(5);
+        let mut model = MuteModel::default();
+        assert_eq!(model.is_settled(start), false);
+        model.claim_request(start);
+        assert_eq!(model.is_settled(start), false);
+        assert_eq!(model.is_settled(start + MUTE_LIST_WAIT), true);
+        let mut answered = MuteModel::default();
+        answered.claim_request(start);
+        answered.note_answered();
+        assert_eq!(answered.is_settled(start), true);
     }
 }

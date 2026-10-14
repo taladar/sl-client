@@ -25,10 +25,11 @@
 //!    - B vanishes without logging out (A is told B went, and when); B comes
 //!      back (A is told B came, B is told A is there), with the rights each
 //!      grants the other in its login's buddy list.
-//!    - A ends the friendship, B logs out, A offers; B comes back, asks with
-//!      `RetrieveInstantMessages` and accepts as the client does for an offer
-//!      that was kept ([`Command::AcceptFriendship`] with `use_offline_cap`:
-//!      the `AcceptFriendship` capability where the region grants it).
+//!    - A ends the friendship, B logs out, A offers; B comes back, reads as
+//!      the viewer does ([`Command::RequestOfflineMessages`]) and accepts as
+//!      the client does for an offer that was kept ([`Command::AcceptFriendship`]
+//!      with `use_offline_cap`: the `AcceptFriendship` capability where the
+//!      region grants it).
 //!    - A ends the friendship, B logs out, A offers; B comes back, reads the
 //!      `ReadOfflineMsgs` capability itself and declines by deleting through
 //!      the `DeclineFriendship` capability.
@@ -307,7 +308,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "client_kept_offer",
         each(
             Answer::Text(
-                "FriendshipOffered from avatar A, A's name, to avatar B, id another id, no region, kept, text as sent, a bucket of one zero byte",
+                "FriendshipOffered from avatar A, A's name, to avatar B, id nobody, a region, kept, text as sent, a bucket of one zero byte",
             ),
             Answer::Text(
                 "FriendshipOffered from avatar A, A's name, to avatar B, id avatar A, a region, not kept, text \"Will you be my friend?\", no bucket",
@@ -1023,7 +1024,8 @@ async fn card_folder(
 enum Answering {
     /// `RetrieveInstantMessages`, then `AcceptFriendship` over UDP.
     Udp,
-    /// `RetrieveInstantMessages`, then the client's accept for a kept offer.
+    /// The client's drain ([`Command::RequestOfflineMessages`]), then the
+    /// client's accept for a kept offer.
     Client,
     /// The `ReadOfflineMsgs` capability read by the case, then a delete
     /// through the `DeclineFriendship` capability.
@@ -1511,7 +1513,13 @@ impl Census<'_> {
         if answering == Answering::Capability {
             return self.capability_round(metrics, &text).await;
         }
-        self.b.send(Command::RetrieveInstantMessages).await?;
+        self.b
+            .send(if answering == Answering::Client {
+                Command::RequestOfflineMessages
+            } else {
+                Command::RetrieveInstantMessages
+            })
+            .await?;
         let got = watch_for(self.b, FETCH_WINDOW, FETCH_QUIET, Got::any_kept).await?;
         let mut all = unasked;
         all.absorb(got);
@@ -1530,7 +1538,10 @@ impl Census<'_> {
         let brought = self
             .act(
                 Who::B,
-                vec![self.accept(&offer, answering == Answering::Client)],
+                vec![self.accept(
+                    &offer,
+                    answering == Answering::Client && offer.answered_over_capabilities(),
+                )],
             )
             .await?;
         self.record(metrics, &format!("{round}_accept"), &brought, None);

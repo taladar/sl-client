@@ -46,7 +46,7 @@ use std::collections::BTreeMap;
 
 use sl_client_bevy::{
     AssetType, Command, GroupKey, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, ImDialog,
-    SlCommand, SlEvent, SlSessionEvent, TextureKey, Uuid,
+    InstantMessage, MuteList, MuteType, SlCommand, SlEvent, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 
@@ -205,6 +205,42 @@ struct NoticeSinks<'w, 's> {
     commands: Commands<'w, 's>,
 }
 
+/// What decides whether a notice raises a card at all, bundled as one
+/// [`SystemParam`](bevy::ecs::system::SystemParam): the alerts-tab setting and
+/// the mute list.
+#[derive(bevy::ecs::system::SystemParam)]
+struct NoticeGates<'w> {
+    /// The alerts-tab group-notice toast setting.
+    settings: Option<Res<'w, crate::settings::ViewerSettings>>,
+    /// The mute list a notice's sender is checked against.
+    mutes: Option<Res<'w, crate::social::MuteModel>>,
+}
+
+/// Whether `im`, a notice of `group`, was posted by a resident `mutes`
+/// blocks: by its sender's id where the sender is not the group (Second
+/// Life), else by the poster's name (OpenSim sends the group as the sender;
+/// the reference looks the name up in its name cache, and an entry for a
+/// muted resident carries the name), in whichever form either is written.
+fn notice_sender_muted(im: &InstantMessage, group: GroupKey, mutes: &MuteList) -> bool {
+    let from = im.from_agent_id.uuid();
+    if from != group.uuid() {
+        return mutes.is_muted(from);
+    }
+    // A name in any of the forms it is written in — "First Last", a legacy
+    // "Name Resident", or the username ("first.last", "name") a mute entry
+    // may carry (`viewer-mute-entry-name-is-not-the-username`).
+    let bare = |name: &str| {
+        let lower = name.trim().to_lowercase().replace('.', " ");
+        lower.strip_suffix(" resident").unwrap_or(&lower).to_owned()
+    };
+    let poster = bare(&im.from_agent_name);
+    !poster.is_empty()
+        && mutes
+            .entries()
+            .iter()
+            .any(|entry| entry.mute_type == MuteType::Agent && bare(&entry.name) == poster)
+}
+
 /// What one ingested notice raises, bundled as one
 /// [`SystemParam`](bevy::ecs::system::SystemParam): the wire request for a group
 /// name the roster has not seen, and the persistence of the notice itself.
@@ -222,7 +258,7 @@ struct NoticeOut<'w> {
 /// notifications ([`crate::notification_host`]) rather than in a channel of its own.
 fn ingest_group_notices(
     mut events: MessageReader<SlEvent>,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
+    gates: NoticeGates,
     mut sinks: NoticeSinks,
     groups: Res<GroupsModel>,
     mut requested: ResMut<RequestedGroupNotices>,
@@ -248,11 +284,22 @@ fn ingest_group_notices(
         if asked_for || im.dialog == ImDialog::GroupNoticeRequested {
             continue;
         }
+        // A notice posted by a muted resident is dropped, as the reference
+        // drops it (`LLIMProcessing::processNewMessage`).
+        if gates
+            .mutes
+            .as_deref()
+            .is_some_and(|mutes| notice_sender_muted(im, notice.group_id, mutes.list()))
+        {
+            info!("group notice from muted {} dropped", im.from_agent_name);
+            continue;
+        }
         // The alerts-tab gate: while group-notice toasts are off, raise no
         // card and skip the relogin persist too (a persisted notice would
         // re-raise a card at the next login, defeating the setting); the
         // notice stays readable in the group's server-side Notices tab.
-        let show_toasts = settings
+        let show_toasts = gates
+            .settings
             .as_deref()
             .and_then(|settings| settings.store().get_bool(SETTING_GROUP_NOTICE_TOASTS).ok())
             .unwrap_or(true);
@@ -1028,9 +1075,59 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod tests {
-    use super::{attachment_glyph, decode_group_notice, encode_group_notice};
+    use super::{attachment_glyph, decode_group_notice, encode_group_notice, notice_sender_muted};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AssetType, GroupKey, GroupNoticeItem, GroupNoticeReceived, Uuid};
+
+    /// A notice's poster is found muted by id where the sender is a resident
+    /// (Second Life), and by name where the sender is the group (OpenSim).
+    #[test]
+    fn a_muted_posters_notice_is_recognised() {
+        use sl_client_bevy::{
+            AgentKey, ImDialog, InstantMessage, MuteEntry, MuteFlags, MuteList, MuteType,
+            RegionCoordinates,
+        };
+        let troll = Uuid::from_u128(0x81);
+        let group = GroupKey::from(Uuid::from_u128(0x82));
+        let mut mutes = MuteList::new();
+        mutes.note_mute(MuteEntry {
+            id: troll,
+            name: "Troll Resident".to_owned(),
+            mute_type: MuteType::Agent,
+            flags: MuteFlags::default(),
+        });
+        let notice = |from: Uuid, name: &str| InstantMessage {
+            from_agent_id: AgentKey::from(from),
+            from_agent_name: name.to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(0x83)),
+            dialog: ImDialog::GroupNotice,
+            from_group: true,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: Uuid::from_u128(0x84),
+            parent_estate_id: 0,
+            message: "subject|body".to_owned(),
+            binary_bucket: Vec::new(),
+        };
+        assert!(notice_sender_muted(&notice(troll, "troll"), group, &mutes));
+        assert!(notice_sender_muted(
+            &notice(group.uuid(), "Troll"),
+            group,
+            &mutes
+        ));
+        assert!(!notice_sender_muted(
+            &notice(group.uuid(), "Friend"),
+            group,
+            &mutes
+        ));
+        assert!(!notice_sender_muted(
+            &notice(Uuid::from_u128(0x85), "Troll"),
+            group,
+            &mutes
+        ));
+    }
 
     /// A few asset classes map to distinct glyphs, and an unknown class falls back
     /// to the generic package — so the attachment row always shows something.

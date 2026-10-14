@@ -77,7 +77,7 @@ use bevy_flair::style::components::ClassList;
 
 use sl_client_bevy::{
     AgentKey, AssetType, Command, FolderType, FriendKey, ImDialog, InstantMessage,
-    InventoryFolderKey, InventoryOffer, LureId, Maturity, MuteType, SlCommand, SlEvent,
+    InventoryFolderKey, InventoryOffer, LureId, Maturity, MuteList, MuteType, SlCommand, SlEvent,
     SlSessionEvent, TransactionId,
 };
 
@@ -290,6 +290,9 @@ struct OfferFacts<'w> {
     groups: Option<Res<'w, crate::social::GroupsModel>>,
     /// The inventory an auto-accepted item is filed into.
     inventory: Res<'w, InventoryModel>,
+    /// The mute list, which answers an offer from a muted sender before
+    /// anything else does ([`muted_offer`]).
+    mutes: Option<Res<'w, crate::social::MuteModel>>,
 }
 
 /// Read the event stream; for each received offer / invite IM, build its card and
@@ -352,6 +355,16 @@ fn ingest_offers_invites(
         }
     }
     for im in &pending {
+        // An offer from a muted sender is answered as the reference answers it
+        // and never reaches the screen.
+        if let Some(muted) = facts
+            .mutes
+            .as_deref()
+            .and_then(|mutes| muted_offer(im, mutes.list()))
+        {
+            answer_muted_offer(im, muted, &facts.inventory, &mut sl);
+            continue;
+        }
         // The standing auto-reject modes (`crate::auto_reject`) answer a whole
         // class of offer before it can raise a card: the canned reply goes out,
         // the offer is declined on the wire, and nothing reaches the screen.
@@ -454,6 +467,74 @@ fn ingest_offers_invites(
     }
 }
 
+/// What the reference does with an offer from a muted sender
+/// (`LLIMProcessing::processNewMessage`, `inventory_offer_handler`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MutedOffer {
+    /// Declined on the wire: an inventory offer (`IOR_MUTE`, `IOR_DECLINE`)
+    /// and a friendship offer (the `OfferFriendship` notification forced to
+    /// Decline).
+    Decline,
+    /// Dropped unanswered: a teleport offer or request, and a group
+    /// invitation from a muted group or inviter.
+    Ignore,
+}
+
+/// Whether `im` is an offer from a sender `mutes` blocks, and what the
+/// reference does with it then. An inventory offer is muted by any entry for
+/// its giver, or a by-name entry for its name (`isMuted(id, name)` and
+/// `isMuted(null, name)`); the rest by the text-chat test every message
+/// gets (`isMuted(from, name, flagTextChat)`) — for an invitation the group
+/// is the sender, and its inviter is tried by name.
+fn muted_offer(im: &InstantMessage, mutes: &MuteList) -> Option<MutedOffer> {
+    let from = im.from_agent_id.uuid();
+    let name = im.from_agent_name.as_str();
+    match im.dialog {
+        ImDialog::InventoryOffered | ImDialog::TaskInventoryOffered => (mutes.is_muted(from)
+            || (!name.is_empty() && mutes.has_by_name(name)))
+        .then_some(MutedOffer::Decline),
+        ImDialog::FriendshipOffered => mutes.text_muted(from, name).then_some(MutedOffer::Decline),
+        ImDialog::LureUser | ImDialog::TeleportRequest | ImDialog::GroupInvitation => {
+            mutes.text_muted(from, name).then_some(MutedOffer::Ignore)
+        }
+        _ => None,
+    }
+}
+
+/// Answer an offer from a muted sender as [`muted_offer`] decided, and log
+/// it so the user can see what the mute list swallowed. The reference also
+/// sends its busy reply to a muted group's invitation; it is addressed to the
+/// group, which reads no reply, so none is sent here.
+fn answer_muted_offer(
+    im: &InstantMessage,
+    muted: MutedOffer,
+    inventory: &InventoryModel,
+    sl: &mut MessageWriter<SlCommand>,
+) {
+    info!(
+        "offers: {:?} from muted {} ({}) {}",
+        im.dialog,
+        im.from_agent_name,
+        im.from_agent_id,
+        match muted {
+            MutedOffer::Decline => "declined",
+            MutedOffer::Ignore => "ignored",
+        }
+    );
+    if muted == MutedOffer::Ignore {
+        return;
+    }
+    if im.dialog == ImDialog::FriendshipOffered {
+        if let Some(decline) = decline_command(im, crate::auto_reject::RejectKind::Friendship) {
+            sl.write(SlCommand(decline));
+        }
+    } else if let Some(offer) = im.inventory_offer() {
+        decline_inventory(inventory, &offer, sl);
+    } else {
+        warn!("offers: a muted inventory offer could not be read, so it was not declined");
+    }
+}
+
 /// The auto-reject class an offer dialog falls under, or `None` for one no
 /// reject mode covers (an inventory offer — the reject family is about *people*
 /// reaching for the user's attention, and an item can simply be auto-filed or
@@ -510,24 +591,17 @@ fn decline_command(im: &InstantMessage, kind: crate::auto_reject::RejectKind) ->
         RejectKind::Friendship => Some(Command::DeclineFriendship {
             transaction_id: TransactionId::from(im.id),
             friend_id: FriendKey::from(im.from_agent_id.uuid()),
-            use_offline_cap: im.offline,
+            use_offline_cap: im.answered_over_capabilities(),
         }),
         RejectKind::GroupInvite | RejectKind::AlreadyJoinedGroup => {
             let invite = im.group_invitation()?;
             Some(Command::DeclineGroupInvitation {
                 group_id: invite.group_id,
                 transaction_id: TransactionId::from(invite.transaction_id),
-                use_offline_cap: uses_offline_cap(im),
+                use_offline_cap: im.answered_over_capabilities(),
             })
         }
     }
-}
-
-/// The reference `use_offline_cap`: an invitation delivered while the agent was
-/// offline carries a null session id (transaction id) and must be answered over
-/// the offline cap, since a nil id cannot be echoed back over UDP.
-const fn uses_offline_cap(im: &InstantMessage) -> bool {
-    im.id.is_nil() && im.offline
 }
 
 /// The resolved content of one offer / invite card, ready to render — the live
@@ -1069,7 +1143,7 @@ fn spawn_friendship_card(
     // region grants them (`friendship_offer_callback`), whichever road brought
     // it: an offer read over `ReadOfflineMsgs` has no transaction id to answer
     // over UDP.
-    let use_offline_cap = im.offline;
+    let use_offline_cap = im.answered_over_capabilities();
     let lead = translator.format(
         "offer-friendship-from",
         &TransArgs::new().text("name", &im.from_agent_name),
@@ -1199,7 +1273,7 @@ fn spawn_group_invite_card(
     let root = card.root;
     let group_id = invite.group_id;
     let transaction_id = TransactionId::from(invite.transaction_id);
-    let use_offline_cap = uses_offline_cap(im);
+    let use_offline_cap = im.answered_over_capabilities();
 
     // Accept: join the group.
     commands.entity(card.accept).observe(
@@ -1467,7 +1541,8 @@ fn wire_specimen_actions(commands: &mut Commands, card: &OfferCard, element: &'s
 #[cfg(test)]
 mod tests {
     use super::{
-        decline_command, lure_rating_key, offer_class, teleport_request_answer, uses_offline_cap,
+        MutedOffer, decline_command, lure_rating_key, muted_offer, offer_class,
+        teleport_request_answer,
     };
     use crate::auto_reject::{OfferClass, RejectKind};
     use pretty_assertions::assert_eq;
@@ -1495,6 +1570,80 @@ mod tests {
             message: "come over".to_owned(),
             binary_bucket: Vec::new(),
         }
+    }
+
+    /// A muted sender's inventory and friendship offers are declined, its
+    /// teleport offers and a muted group's invitations ignored; a by-name
+    /// mute reaches an inventory offer and an inviter's name; a sender who
+    /// is muted but allowed text chat still offers friendship.
+    #[test]
+    fn offers_from_the_muted_are_answered_as_the_reference_answers_them() {
+        use sl_client_bevy::{MuteEntry, MuteFlags, MuteList, MuteType};
+        let troll = Uuid::from_u128(0x71);
+        let group = Uuid::from_u128(0x72);
+        let mut mutes = MuteList::new();
+        mutes.note_mute(MuteEntry {
+            id: troll,
+            name: "Troll Resident".to_owned(),
+            mute_type: MuteType::Agent,
+            flags: MuteFlags::default(),
+        });
+        mutes.note_mute(MuteEntry {
+            id: Uuid::nil(),
+            name: "Named Spammer".to_owned(),
+            mute_type: MuteType::ByName,
+            flags: MuteFlags::default(),
+        });
+        let from = |dialog, sender| offer(dialog, sender, Uuid::from_u128(0x73));
+        assert_eq!(
+            muted_offer(&from(ImDialog::InventoryOffered, troll), &mutes),
+            Some(MutedOffer::Decline)
+        );
+        assert_eq!(
+            muted_offer(&from(ImDialog::FriendshipOffered, troll), &mutes),
+            Some(MutedOffer::Decline)
+        );
+        assert_eq!(
+            muted_offer(&from(ImDialog::LureUser, troll), &mutes),
+            Some(MutedOffer::Ignore)
+        );
+        assert_eq!(
+            muted_offer(&from(ImDialog::TeleportRequest, troll), &mutes),
+            Some(MutedOffer::Ignore)
+        );
+        let stranger = Uuid::from_u128(0x74);
+        assert_eq!(
+            muted_offer(&from(ImDialog::InventoryOffered, stranger), &mutes),
+            None
+        );
+        let mut named = from(ImDialog::TaskInventoryOffered, stranger);
+        named.from_agent_name = "named spammer".to_owned();
+        assert_eq!(muted_offer(&named, &mutes), Some(MutedOffer::Decline));
+        let mut invitation = from(ImDialog::GroupInvitation, group);
+        assert_eq!(muted_offer(&invitation, &mutes), None);
+        invitation.from_agent_name = "Named Spammer".to_owned();
+        assert_eq!(muted_offer(&invitation, &mutes), Some(MutedOffer::Ignore));
+        mutes.note_mute(MuteEntry {
+            id: group,
+            name: "A Group".to_owned(),
+            mute_type: MuteType::Group,
+            flags: MuteFlags::default(),
+        });
+        assert_eq!(
+            muted_offer(&from(ImDialog::GroupInvitation, group), &mutes),
+            Some(MutedOffer::Ignore)
+        );
+        let chatty = Uuid::from_u128(0x75);
+        mutes.note_mute(MuteEntry {
+            id: chatty,
+            name: "Chatty Resident".to_owned(),
+            mute_type: MuteType::Agent,
+            flags: MuteFlags(MuteFlags::ALLOW_TEXT_CHAT),
+        });
+        assert_eq!(
+            muted_offer(&from(ImDialog::FriendshipOffered, chatty), &mutes),
+            None
+        );
     }
 
     /// A Second Life offer names its destination's rating in the bucket, and
@@ -1662,7 +1811,7 @@ mod tests {
         // The same invitation, stored and forwarded: nil id + offline.
         let mut offline = offer(ImDialog::GroupInvitation, group, Uuid::nil());
         offline.offline = true;
-        assert!(uses_offline_cap(&offline));
+        assert!(offline.answered_over_capabilities());
         assert!(
             matches!(
                 decline_command(&offline, RejectKind::AlreadyJoinedGroup),

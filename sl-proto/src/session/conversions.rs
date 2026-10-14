@@ -4224,27 +4224,56 @@ pub(crate) fn offline_message_from_record(record: &Llsd) -> Option<InstantMessag
         .or_else(|| record.get("transaction_id"))
         .map(llsd_uuid)
         .filter(|id| !id.is_nil());
+    // The reference viewer hands `asset_id` on as its `aux_id`
+    // (`LLIMProcessing::processNewMessage`), which says what the UDP message
+    // carries elsewhere: an inventory offer's transaction id, an invitation's
+    // or a notice's group. It is folded back in here, so a record reads as the
+    // same message over UDP does.
+    let aux_id = record
+        .get("asset_id")
+        .map(llsd_uuid)
+        .filter(|id| !id.is_nil());
     let id = match (transaction_id, dialog) {
         (Some(id), _) => id,
-        (None, ImDialog::Message | ImDialog::DoNotDisturbAutoResponse | ImDialog::FromTask) => {
-            record.get("asset_id").map_or_else(Uuid::nil, llsd_uuid)
-        }
+        (
+            None,
+            ImDialog::Message
+            | ImDialog::DoNotDisturbAutoResponse
+            | ImDialog::FromTask
+            | ImDialog::InventoryOffered
+            | ImDialog::TaskInventoryOffered,
+        ) => aux_id.unwrap_or_else(Uuid::nil),
         (None, _) => Uuid::nil(),
     };
-    let binary_bucket = record
+    let mut binary_bucket = record
         .get("binary_bucket")
         .and_then(Llsd::as_binary)
         .map(<[u8]>::to_vec)
         .unwrap_or_default();
+    let mut from_agent_id = uuid_member_lenient(record, "from_agent_id");
+    let mut from_group = record.get("from_group").is_some_and(llsd_flag);
+    match (dialog, aux_id) {
+        // Second Life names the inviter, not the group, as an invitation's
+        // sender, and the group in `asset_id` (measured on aditi, 2026-10-14
+        // — `book/src/gridspec/groups.md`); over UDP the group is the sender.
+        (ImDialog::GroupInvitation, Some(group)) if !from_group => {
+            from_agent_id = group;
+            from_group = true;
+        }
+        // A notice's group is in `asset_id` and its attachment in a text
+        // bucket, `type|wearable type|name`; the UDP bucket is rebuilt from
+        // them.
+        (ImDialog::GroupNotice | ImDialog::GroupNoticeRequested, Some(group)) => {
+            binary_bucket = notice_bucket_from_text(group, &binary_bucket);
+        }
+        _ => {}
+    }
     Some(InstantMessage {
-        from_agent_id: AgentKey::from(uuid_member_lenient(record, "from_agent_id")),
+        from_agent_id: AgentKey::from(from_agent_id),
         from_agent_name: string_member(record, "from_agent_name"),
         to_agent_id: AgentKey::from(uuid_member_lenient(record, "to_agent_id")),
         dialog,
-        from_group: record
-            .get("from_group")
-            .and_then(Llsd::as_bool)
-            .unwrap_or(false),
+        from_group,
         region_id: crate::types::optional_uuid_from_wire(uuid_member_lenient(record, "region_id")),
         position: offline_message_position(record),
         offline: true,
@@ -4254,6 +4283,45 @@ pub(crate) fn offline_message_from_record(record: &Llsd) -> Option<InstantMessag
         message: string_member(record, "message"),
         binary_bucket,
     })
+}
+
+/// Reads an offline-IM record's `from_group`: a boolean, an integer, or the
+/// string `"Y"` (the reference reads all three).
+fn llsd_flag(value: &Llsd) -> bool {
+    match value {
+        Llsd::Boolean(flag) => *flag,
+        Llsd::Integer(number) => *number != 0,
+        Llsd::String(text) => text == "Y",
+        _ => false,
+    }
+}
+
+/// Rebuilds the UDP bucket of a group notice — `has inventory`, the asset
+/// type, the group and the item's NUL-terminated name — from the text bucket
+/// `ReadOfflineMsgs` carries, `type|wearable type|name`, which the reference
+/// reads only when it is longer than one byte.
+fn notice_bucket_from_text(group: Uuid, text: &[u8]) -> Vec<u8> {
+    let mut bucket = Vec::with_capacity(19);
+    let attachment = (text.len() > 1)
+        .then(|| {
+            let text = String::from_utf8_lossy(text);
+            let text = text.trim_end_matches('\0');
+            let mut parts = text.split('|');
+            let asset_type = parts.next()?.trim().parse::<u8>().ok()?;
+            let _wearable_type = parts.next();
+            Some((asset_type, parts.next().unwrap_or("").to_owned()))
+        })
+        .flatten();
+    let (has_inventory, asset_type, name) = attachment
+        .map_or((0, 0, String::new()), |(asset_type, name)| {
+            (1, asset_type, name)
+        });
+    bucket.push(has_inventory);
+    bucket.push(asset_type);
+    bucket.extend_from_slice(group.as_bytes());
+    bucket.extend_from_slice(name.as_bytes());
+    bucket.push(0);
+    bucket
 }
 
 /// Reads an offline-IM record's region-local position, from either a `position`
@@ -9255,6 +9323,55 @@ mod caps_serializer_tests {
             vec![Uuid::from_u128(0xb1), Uuid::from_u128(0xb2), Uuid::nil()]
         );
         assert!(offline_messages_from_llsd(&Llsd::Array(Vec::new())).is_empty());
+    }
+
+    /// What Second Life keeps of an invitation, an inventory offer and a
+    /// notice reads as the same message over UDP: the group as the
+    /// invitation's sender, the offer's transaction id, and the notice's
+    /// group and attachment in the UDP bucket.
+    #[test]
+    fn kept_records_read_as_their_udp_messages() -> Result<(), String> {
+        let group = Uuid::from_u128(0x6a);
+        let record = |dialog: ImDialog, asset: Uuid, bucket: &[u8]| {
+            super::llsd_map(vec![
+                ("from_agent_id", Llsd::Uuid(Uuid::from_u128(0xa1))),
+                ("from_agent_name", Llsd::String("inviter".to_owned())),
+                ("dialog", Llsd::Integer(i32::from(dialog.to_u8()))),
+                ("from_group", Llsd::Boolean(false)),
+                ("transaction-id", Llsd::Uuid(Uuid::nil())),
+                ("asset_id", Llsd::Uuid(asset)),
+                ("message", Llsd::String("subject|body".to_owned())),
+                ("binary_bucket", Llsd::Binary(bucket.to_vec())),
+            ])
+        };
+        let mut invite_bucket = vec![0_u8; 4];
+        invite_bucket.extend_from_slice(Uuid::nil().as_bytes());
+        let body = Llsd::Array(vec![Llsd::Array(vec![
+            record(ImDialog::GroupInvitation, group, &invite_bucket),
+            record(ImDialog::InventoryOffered, Uuid::from_u128(0xb4), &[7]),
+            record(ImDialog::GroupNotice, group, b"7|0|a notecard"),
+            record(ImDialog::GroupNoticeRequested, group, &[0]),
+        ])]);
+        let ims = offline_messages_from_llsd(&body);
+        let [invitation, offer, notice, plain] = ims.as_slice() else {
+            return Err(format!("four messages expected, read {}", ims.len()));
+        };
+        let invited = invitation
+            .group_invitation()
+            .ok_or("the invitation reads as one")?;
+        assert_eq!(invited.group_id.uuid(), group);
+        assert!(invitation.from_group);
+        assert!(invitation.id.is_nil());
+        assert_eq!(offer.id, Uuid::from_u128(0xb4));
+        let notice = notice.group_notice().ok_or("the notice reads as one")?;
+        assert_eq!(notice.group_id.uuid(), group);
+        let attachment = notice.attachment.ok_or("the notice has its notecard")?;
+        assert_eq!(attachment.item_name, "a notecard");
+        assert_eq!(attachment.asset_type.to_code(), 7);
+        let plain = plain.group_notice().ok_or("the second notice reads too")?;
+        assert_eq!(plain.group_id.uuid(), group);
+        assert!(plain.attachment.is_none());
+        Ok(())
     }
 
     #[test]

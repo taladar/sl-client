@@ -60,9 +60,17 @@ dialog type. Inventory offers carried in an IM are accepted or declined with
 [Inventory](inventory.md)).
 
 Messages sent while the avatar was away are kept by the grid until asked
-for: `Command::RetrieveInstantMessages` on both grids, or Second Life's
-`ReadOfflineMsgs` capability (`Command::RequestOfflineMessages`). They
-arrive as ordinary `Event::InstantMessageReceived` with `offline` set. What
+for: `Command::RetrieveInstantMessages` on both grids, or
+`Command::RequestOfflineMessages`, which reads Second Life's
+`ReadOfflineMsgs` capability where the region grants it with
+`AcceptFriendship` and `AcceptGroupInvite` (`OFFLINE_DRAIN_CAPABILITIES`),
+and falls back to UDP otherwise and when the GET fails, as the reference
+does. They arrive as ordinary `Event::InstantMessageReceived` with
+`offline` set; a record the capability hands over is read as the same
+message over UDP (the group of an invitation or a notice, an inventory
+offer's transaction id, all from its `asset_id`), and
+`InstantMessage::answered_over_capabilities` says which offers are to be
+answered with `use_offline_cap`. What
 each grid passes on, rewrites, keeps and tells the sender is measured in
 [Grid Behaviour: Instant messages](../gridspec/chat.md#instant-messages).
 

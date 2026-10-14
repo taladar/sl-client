@@ -702,6 +702,23 @@ impl InstantMessage {
             message: self.message.clone(),
         })
     }
+
+    /// Whether an answer to this offer goes over the offline answer
+    /// capabilities (`AcceptFriendship` / `DeclineFriendship`,
+    /// `AcceptGroupInvite` / `DeclineGroupInvite`) where the region grants
+    /// them — the `use_offline_cap` of [`Command::AcceptFriendship`](crate::Command::AcceptFriendship)
+    /// and its kin. The reference's rule: any friendship offer that was kept
+    /// while the agent was away (`friendship_offer_callback`), and a kept
+    /// invitation without a transaction id to echo over UDP, which is how
+    /// `ReadOfflineMsgs` hands one over (`LLIMProcessing::processNewMessage`).
+    #[must_use]
+    pub const fn answered_over_capabilities(&self) -> bool {
+        match self.dialog {
+            ImDialog::FriendshipOffered => self.offline,
+            ImDialog::GroupInvitation => self.offline && self.id.is_nil(),
+            _ => false,
+        }
+    }
 }
 
 /// A received group notice, decoded from an [`ImDialog::GroupNotice`]
@@ -1255,6 +1272,23 @@ mod tests {
         );
         im.dialog = ImDialog::Message;
         assert!(im.group_invitation().is_none());
+    }
+
+    /// A kept friendship offer is answered over the capabilities whatever its
+    /// id; a kept invitation only when it has no id to echo over UDP; a live
+    /// one never.
+    #[test]
+    fn kept_offers_are_answered_over_the_capabilities() {
+        let mut im = group_invite_im(Uuid::from_u128(0x950a), Uuid::nil(), Vec::new());
+        assert!(!im.answered_over_capabilities());
+        im.offline = true;
+        assert!(im.answered_over_capabilities());
+        im.id = Uuid::from_u128(0x950b);
+        assert!(!im.answered_over_capabilities());
+        im.dialog = ImDialog::FriendshipOffered;
+        assert!(im.answered_over_capabilities());
+        im.offline = false;
+        assert!(!im.answered_over_capabilities());
     }
 
     /// An [`AgentKey`] is a transparent wrapper over its [`Uuid`]: wrapping a raw

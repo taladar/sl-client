@@ -27,9 +27,10 @@
 //!    invites B, who is a member.
 //! 10. **Bans** over `GroupAPIv1`: A bans B, B tries to join, A unbans B.
 //! 11. **Away**, three times: B logs out and A invites it; B comes back, and
-//!     answers the kept invitation over UDP, as the client does for a kept
-//!     invitation (`use_offline_cap`), and by reading `ReadOfflineMsgs` and
-//!     declining through `DeclineGroupInvite` itself.
+//!     answers the kept invitation: read and accepted over UDP; read and
+//!     accepted as the viewer does ([`Command::RequestOfflineMessages`], then
+//!     the accept the client makes of what it read); and by reading
+//!     `ReadOfflineMsgs` and declining through `DeclineGroupInvite` itself.
 //! 12. **Leaving a group one founded**, and founding one with a name of 36
 //!     characters.
 //!
@@ -288,7 +289,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "client_kept_invitation",
         each(
             Answer::Text(
-                "GroupInvitation from the group (a group), A's name, to avatar B, id the invitation's id, no region, kept, text \"<A> (<A>) has invited you to join a group.\\nThere is no cost to join this group.\\nGroup:\\n<the group's name>: gr-2-charter\\n\\n\", a bucket of 20 bytes: fee 0, role nobody",
+                "GroupInvitation from the group (a group), A's name, to avatar B, id nobody, no region, kept, text \"<A> (<A>) has invited you to join a group.\\nThere is no cost to join this group.\\nGroup:\\n<the group's name>: gr-2-charter\\n\\n\", a bucket of 20 bytes: fee 0, role nobody",
             ),
             Answer::Text(
                 "GroupInvitation from the group (a group), A's name, to avatar B, id the invitation's id, a region, kept, text \"<A> has invited you to join a group called <the group's name>. There is no cost to join this group.\", a bucket of 20 bytes: fee 0, role nobody",
@@ -1855,8 +1856,8 @@ fn without_dates(text: &str) -> String {
 enum Answering {
     /// `RetrieveInstantMessages`, then an accept over UDP.
     Udp,
-    /// `RetrieveInstantMessages`, then the client's accept for a kept
-    /// invitation.
+    /// The client's drain ([`Command::RequestOfflineMessages`]), then the
+    /// accept the viewer makes of what it read.
     Client,
     /// The `ReadOfflineMsgs` capability read by the case, then a decline
     /// through the `DeclineGroupInvite` capability.
@@ -2864,22 +2865,32 @@ impl Census<'_> {
             .cloned()
     }
 
-    /// B's answer to `invitation` over UDP, or as the client answers a kept
-    /// one.
-    fn answer(&self, invitation: &InstantMessage, accept: bool, use_offline_cap: bool) -> Command {
+    /// B's accept of `invitation` as the viewer makes it: the group the
+    /// client read from it, over the capabilities where the client says so.
+    fn client_accept(invitation: &InstantMessage) -> Option<Command> {
+        let read = invitation.group_invitation()?;
+        Some(Command::AcceptGroupInvitation {
+            group_id: read.group_id,
+            transaction_id: TransactionId::from(read.transaction_id),
+            use_offline_cap: invitation.answered_over_capabilities(),
+        })
+    }
+
+    /// B's answer to `invitation` over UDP.
+    fn answer(&self, invitation: &InstantMessage, accept: bool) -> Command {
         let group_id = self.group();
         let transaction_id = TransactionId::from(invitation.id);
         if accept {
             Command::AcceptGroupInvitation {
                 group_id,
                 transaction_id,
-                use_offline_cap,
+                use_offline_cap: false,
             }
         } else {
             Command::DeclineGroupInvitation {
                 group_id,
                 transaction_id,
-                use_offline_cap,
+                use_offline_cap: false,
             }
         }
     }
@@ -2903,7 +2914,7 @@ impl Census<'_> {
                 continue;
             };
             let brought = self
-                .act(Who::B, vec![self.answer(&invitation, accept, false)])
+                .act(Who::B, vec![self.answer(&invitation, accept)])
                 .await?;
             if accept {
                 self.b_is_member = true;
@@ -2918,7 +2929,7 @@ impl Census<'_> {
                 .named
                 .push((invitation.id, "the invitation's id"));
             // Answer it, so that nothing is left pending.
-            self.b.send(self.answer(&invitation, false, false)).await?;
+            self.b.send(self.answer(&invitation, false)).await?;
             watch(self.b, SETTLE).await?;
         }
         self.b.send(Command::RequestAgentDataUpdate).await?;
@@ -3010,7 +3021,7 @@ impl Census<'_> {
         let brought = self.act(Who::A, vec![self.invite()]).await?;
         self.record(metrics, "invite_while_banned", &brought, None);
         if let Some(invitation) = Self::the_invitation(&brought.b) {
-            self.b.send(self.answer(&invitation, false, false)).await?;
+            self.b.send(self.answer(&invitation, false)).await?;
             watch(self.b, SETTLE).await?;
         }
 
@@ -3090,7 +3101,13 @@ impl Census<'_> {
         if answering == Answering::Capability {
             return self.capability_round(metrics, unasked).await;
         }
-        self.b.send(Command::RetrieveInstantMessages).await?;
+        self.b
+            .send(if answering == Answering::Client {
+                Command::RequestOfflineMessages
+            } else {
+                Command::RetrieveInstantMessages
+            })
+            .await?;
         let got = watch_for(self.b, FETCH_WINDOW, FETCH_QUIET, Got::any_kept).await?;
         let mut all = unasked;
         all.absorb(got);
@@ -3110,12 +3127,12 @@ impl Census<'_> {
         let Some(invitation) = invitation else {
             return Ok(());
         };
-        let brought = self
-            .act(
-                Who::B,
-                vec![self.answer(&invitation, true, answering == Answering::Client)],
-            )
-            .await?;
+        let answer = if answering == Answering::Client {
+            Self::client_accept(&invitation)
+        } else {
+            Some(self.answer(&invitation, true))
+        };
+        let brought = self.act(Who::B, answer.into_iter().collect()).await?;
         self.record(metrics, &format!("{round}_accept"), &brought, None);
         tokio::time::sleep(SETTLE).await;
         self.b.send(Command::RequestAgentDataUpdate).await?;
@@ -3190,7 +3207,7 @@ impl Census<'_> {
             }
             None => {
                 if let Some(invitation) = &udp_invitation {
-                    self.b.send(self.answer(invitation, false, false)).await?;
+                    self.b.send(self.answer(invitation, false)).await?;
                 }
                 NO_CAPABILITY.to_owned()
             }

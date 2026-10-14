@@ -87,11 +87,12 @@ told nothing on either grid (**held**). B then comes back.
 | asked with `RetrieveInstantMessages` (**held**) | the offer, kept, its transaction id, no region, A's text, a bucket of one zero byte | nothing more (it was already handed over) |
 | read over `ReadOfflineMsgs` (**held**) | the offer, `transaction-id` **nil**, `asset_id` the session of the two avatars, `offline` 1 and every other field as for a message | no such capability |
 | accepted over UDP with the kept transaction id (**held**) | taken: A is told as for a live accept | taken |
-| accepted through `AcceptFriendship`, for an offer read over UDP (**held**) | taken: A is told as for a live accept | no such capability: our client answers over UDP |
+| read as our client reads (`RequestOfflineMessages`) and accepted as it answers (**held**) | read over the capability: no id, a region; accepted through `AcceptFriendship`: taken, A is told as for a live accept | read over UDP (no capability), accepted over UDP: taken |
 | declined through `DeclineFriendship` (**held**) | `200`, `{success: true}`; A is told nothing, and nothing is kept for B afterwards | no such capability |
 
 So an offer read over the capability can only be answered through the
-capabilities, and the capabilities take an offer however it was read: a
+capabilities, and the capabilities take an offer however it was read — the
+first runs accepted one read over UDP through `AcceptFriendship` too: a
 viewer can answer every kept offer that way, as the reference does
 (`friendship_offer_callback`), where the region grants them.
 
@@ -103,6 +104,9 @@ viewer can answer every kept offer that way, as the reference does
   that arrived kept, and the client POSTs `?from=<offerer>&agent_name=` or sends
   a DELETE of `?from=<offerer>`, logging a refusal; without the capability it
   answers over UDP as before.
+- **The kept messages are read over `ReadOfflineMsgs`** where the region
+  grants it and both answer capabilities, and the census's client round
+  reads and accepts as the viewer does.
 - **The Friends list no longer claims to show whether a friend lets you see
   them online.** Second Life never says, and a friend who hides simply looks
   offline: the list shows the reference's five rights columns.
