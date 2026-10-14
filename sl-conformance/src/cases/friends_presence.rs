@@ -929,7 +929,7 @@ impl Scene {
 }
 
 /// The messages a `ReadOfflineMsgs` answer holds.
-fn kept_records(body: Option<&Llsd>) -> Vec<Llsd> {
+pub(crate) fn kept_records(body: Option<&Llsd>) -> Vec<Llsd> {
     match body {
         Some(Llsd::Array(items)) => match items.first() {
             Some(Llsd::Array(inner)) => inner.clone(),
@@ -946,7 +946,7 @@ fn kept_records(body: Option<&Llsd>) -> Vec<Llsd> {
 
 /// A capability's answer as a metric states it: the status, and the body's
 /// keys and values where it is LLSD, its first words where it is not.
-fn answer_text(status: u16, text: &str) -> String {
+pub(crate) fn answer_text(status: u16, text: &str) -> String {
     let body = if text.contains("<llsd") {
         match parse_llsd_xml(text) {
             Ok(Llsd::Map(map)) => {

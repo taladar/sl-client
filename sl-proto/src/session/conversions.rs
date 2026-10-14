@@ -13,9 +13,9 @@ use crate::types::{
     DirLandResult, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
     EnvironmentUpdate, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow,
     GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
-    GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupBan, GroupBanAction, GroupMember,
+    GroupMembership, GroupName, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle,
+    GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
     InventoryListing, InventoryType, LandStatExtended, LandStatItem, LandStatReportType,
     LandStatScore, LandingType, MapBlockBatch, MapBlockRecord, MapItem, MapItemType, MapLayer,
     MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags,
@@ -4515,6 +4515,62 @@ pub fn group_invite_response_body(group_id: GroupKey) -> String {
     llsd_map(vec![("group", Llsd::Uuid(group_id.uuid()))]).to_llsd_xml()
 }
 
+/// The `GroupAPIv1` URL for `group`'s ban list: `{cap_url}?group_id=<group>`,
+/// for the GET that reads it and the POST that changes it (the reference
+/// `getGroupBanRequestCoro` / `postGroupBanRequestCoro`).
+#[must_use]
+pub fn group_bans_url(cap_url: &str, group: GroupKey) -> String {
+    format!("{cap_url}?group_id={}", group.uuid())
+}
+
+/// The LLSD-XML body of a `GroupAPIv1` POST that bans, or lifts the bans of,
+/// `agents`: `{ ban_action, ban_ids: [<agent>…] }`.
+#[must_use]
+pub fn group_ban_request_body(action: GroupBanAction, agents: &[AgentKey]) -> String {
+    llsd_map(vec![
+        ("ban_action", Llsd::Integer(action.to_i32())),
+        (
+            "ban_ids",
+            Llsd::Array(
+                agents
+                    .iter()
+                    .map(|agent| Llsd::Uuid(agent.uuid()))
+                    .collect(),
+            ),
+        ),
+    ])
+    .to_llsd_xml()
+}
+
+/// Decodes a `GroupAPIv1` ban list — `{ group_id, ban_list: { <agent>: {
+/// ban_date } } }` — into [`Event::GroupBans`]; `None` for an answer that is
+/// no ban list. Second Life writes the `group_id` as a string, not an LLSD
+/// uuid (`book/src/gridspec/groups.md` § Bans); either is read. An entry whose
+/// key is no id is skipped.
+pub(crate) fn group_bans_from_caps_llsd(body: &Llsd) -> Option<Event> {
+    let group_id = GroupKey::from(match body.get("group_id")? {
+        Llsd::Uuid(id) => *id,
+        Llsd::String(text) => Uuid::parse_str(text).ok()?,
+        _ => return None,
+    });
+    let Some(Llsd::Map(list)) = body.get("ban_list") else {
+        return None;
+    };
+    let mut bans: Vec<GroupBan> = list
+        .iter()
+        .filter_map(|(agent, entry)| {
+            let agent_id = AgentKey::from(Uuid::parse_str(agent).ok()?);
+            let ban_date = match entry.get("ban_date") {
+                Some(Llsd::Date(date) | Llsd::String(date)) => Some(date.clone()),
+                _ => None,
+            };
+            Some(GroupBan { agent_id, ban_date })
+        })
+        .collect();
+    bans.sort_by_key(|ban| ban.agent_id.uuid());
+    Some(Event::GroupBans { group_id, bans })
+}
+
 /// The URL that answers a friendship offer kept while the agent was offline:
 /// `{cap_url}?from=<offerer>` for the [`DeclineFriendship`](crate::CAP_DECLINE_FRIENDSHIP)
 /// DELETE, and with `&agent_name="<name>"` (the accepter's own legacy name,
@@ -7951,8 +8007,9 @@ mod caps_serializer_tests {
         region_coords_to_llsd, u32_to_llsd, u64_to_llsd, vec3_to_llsd,
     };
     use crate::types::{
-        Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
-        InventoryItem, LandingType, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus,
+        Event, GroupBan, GroupBanAction, GroupMember, GroupMembership, ImDialog, InstantMessage,
+        InventoryFolder, InventoryItem, LandingType, ParcelCategory, ParcelInfo,
+        ParcelRequestResult, ParcelStatus,
     };
     use sl_types::lsl::Vector;
     use sl_wire::RegionHandle;
@@ -8745,6 +8802,46 @@ mod caps_serializer_tests {
         assert_eq!(
             parsed.get("group").and_then(Llsd::as_uuid),
             Some(group.uuid())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_ban_list_names_each_banned_avatar() -> Result<(), String> {
+        let group = Uuid::from_u128(0x9602);
+        let banned = Uuid::from_u128(0x9603);
+        let body = format!(
+            "<?xml version=\"1.0\" ?><llsd><map><key>group_id</key><string>{group}</string>\
+             <key>ban_list</key><map><key>{banned}</key><map><key>ban_date</key>\
+             <date>2026-10-14T12:00:00Z</date></map></map></map></llsd>"
+        );
+        let parsed = sl_wire::parse_llsd_xml(&body).map_err(|error| error.to_string())?;
+        assert_eq!(
+            super::group_bans_from_caps_llsd(&parsed),
+            Some(Event::GroupBans {
+                group_id: GroupKey::from(group),
+                bans: vec![GroupBan {
+                    agent_id: AgentKey::from(banned),
+                    ban_date: Some("2026-10-14T12:00:00Z".to_owned()),
+                }],
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_ban_request_names_its_action_and_avatars() -> Result<(), String> {
+        let banned = AgentKey::from(Uuid::from_u128(0x9604));
+        let body = super::group_ban_request_body(GroupBanAction::Unban, &[banned]);
+        let parsed = sl_wire::parse_llsd_xml(&body).map_err(|error| error.to_string())?;
+        assert_eq!(parsed.get("ban_action").and_then(Llsd::as_i32), Some(2));
+        assert_eq!(
+            parsed.get("ban_ids"),
+            Some(&Llsd::Array(vec![Llsd::Uuid(banned.uuid())]))
+        );
+        assert_eq!(
+            super::group_bans_url("https://cap", GroupKey::from(Uuid::from_u128(1))),
+            "https://cap?group_id=00000000-0000-0000-0000-000000000001"
         );
         Ok(())
     }

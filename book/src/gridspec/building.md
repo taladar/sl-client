@@ -236,6 +236,10 @@ else is forced onto it, and modify is the one bit everyone cannot be given.
 | an `ObjectGroup` naming a group the agent is not in | the object's group stays none; no alert | the same | the same |
 | an `ObjectOwner` deeding the object to that group | the object stays the agent's; an `AlertMessage`: "Deed failed because you do not have permission to deed objects for your group.", with an `AlertInfo` keyed `DeedFailedNoPermToDeedForGroup` | the object stays the agent's; nothing said | each flavour as its grid |
 
+A deed by a member **with** the power — the group's owner — is in
+[Groups](groups.md): Second Life ignores a deed of an object not shared with
+the group, OpenSim takes it.
+
 The fake grid has no groups, so an agent of its is in none and every group
 set and every deed is one of these two. It used to set whatever group it
 was told and hand the object to it.

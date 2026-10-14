@@ -2,7 +2,7 @@
 id: protocol-cap-offline-group-invite-answers
 title: Answer offline group invitations over AcceptGroupInvite / DeclineGroupInvite
 topic: protocol
-status: blocked
+status: done
 origin: gridspec-instant-messages follow-up (2026-10-14)
 refs: [protocol-cap-offline-friendship-answers, viewer-offline-im-drain,
   protocol-cap-read-offline-msgs]
@@ -44,3 +44,16 @@ This capability is adopted inside that gridspec task, which measures
 invitations on both grids, including one kept while the invitee is away and
 read back over both roads, makes the fake grid serve the capability per
 flavour, and checks the viewer. Claim that task.
+
+## Done (2026-10-14, with gridspec-groups)
+
+Measured on aditi: an invitation kept while the invitee is away is read over
+UDP under its own transaction id and over `ReadOfflineMsgs` with a nil
+`transaction-id` and the group only in `asset_id`; `AcceptGroupInvite`
+takes an invitation read over UDP as well, and `DeclineGroupInvite` answers
+`200` `{success: true}` and leaves nothing kept. OpenSim grants neither.
+Both runtimes now answer a kept invitation (`use_offline_cap`) over the
+capability where the region grants it and over UDP otherwise (it was thrown
+away there), logging a refusal (`answer_group_invitation`). The reply shape
+is in `book/src/comms/caps-reference.md`; the fake grid's flavours have no
+groups yet ([[server-fake-grid-groups]]).

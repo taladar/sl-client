@@ -2,8 +2,8 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_LAND_RESOURCES,
-    CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
+    AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_GROUP_API_V1,
+    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
     CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG, Llsd, ObjectKey, ParcelKey, RemoteParcelRequest,
     TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG, build_get_metadata_request,
@@ -70,6 +70,33 @@ pub(crate) async fn answer_friendship(url: String, accept: bool, http: ReqwestCl
     } else {
         "the DeclineFriendship request"
     };
+    report_answer(what, request).await;
+}
+
+/// POSTs `{group}` to the `AcceptGroupInvite` or `DeclineGroupInvite`
+/// capability `url`, the answer to a group invitation that was kept, and logs
+/// an answer the grid did not take.
+pub(crate) async fn answer_group_invitation(
+    url: String,
+    body: String,
+    accept: bool,
+    http: ReqwestClient,
+) {
+    let what = if accept {
+        "the AcceptGroupInvite request"
+    } else {
+        "the DeclineGroupInvite request"
+    };
+    let request = http
+        .post(&url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body);
+    report_answer(what, request).await;
+}
+
+/// Sends `request`, an answer to an offer or an invitation, and logs it where
+/// the grid did not answer `{ success: true }`.
+async fn report_answer(what: &str, request: reqwest::RequestBuilder) {
     match request
         .header("Accept", "application/llsd+xml")
         .send()
@@ -86,6 +113,52 @@ pub(crate) async fn answer_friendship(url: String, accept: bool, http: ReqwestCl
         }
         Ok(response) => tracing::warn!(status = %response.status(), "{what} was rejected"),
         Err(error) => tracing::warn!("{what} could not be sent: {error}"),
+    }
+}
+
+/// Changes a group's ban list over the `GroupAPIv1` capability `url` (the
+/// group's `?group_id=` URL) where `change` is a POST body, then reads the
+/// list and forwards it over `caps_tx` tagged [`CAP_GROUP_API_V1`], as the
+/// reference re-reads it after a change.
+pub(crate) async fn group_bans(
+    url: String,
+    change: Option<String>,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    if let Some(body) = change {
+        match http
+            .post(&url)
+            .header("Content-Type", "application/llsd+xml")
+            .header("Accept", "application/llsd+xml")
+            .body(body)
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => {}
+            Ok(response) => {
+                tracing::warn!(status = %response.status(), "a group ban change was rejected");
+            }
+            Err(error) => tracing::warn!("a group ban change could not be sent: {error}"),
+        }
+    }
+    match http
+        .get(&url)
+        .header("Accept", "application/llsd+xml")
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            let text = response.text().await.unwrap_or_default();
+            match parse_llsd_xml(&text) {
+                Ok(llsd) => deliver(&caps_tx, (CAP_GROUP_API_V1.to_owned(), llsd)).await,
+                Err(error) => tracing::warn!("a group's ban list did not parse: {error}"),
+            }
+        }
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "a group's ban list was refused");
+        }
+        Err(error) => tracing::warn!("a group's ban list could not be read: {error}"),
     }
 }
 

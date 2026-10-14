@@ -384,6 +384,37 @@ pub struct GroupNoticeAttachment {
     pub owner_id: Uuid,
 }
 
+/// One avatar banned from a group, from a `GroupAPIv1` ban list.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GroupBan {
+    /// The banned avatar.
+    pub agent_id: AgentKey,
+    /// When the ban was made, as the grid states it (an ISO-8601 date), where
+    /// the entry carries one.
+    pub ban_date: Option<String>,
+}
+
+/// What a `GroupAPIv1` POST does to the avatars it names (`ban_action`, the
+/// reference `LLGroupMgr::EBanAction`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum GroupBanAction {
+    /// Ban them.
+    Ban,
+    /// Lift their bans.
+    Unban,
+}
+
+impl GroupBanAction {
+    /// The wire `ban_action` value.
+    #[must_use]
+    pub const fn to_i32(self) -> i32 {
+        match self {
+            Self::Ban => 1,
+            Self::Unban => 2,
+        }
+    }
+}
+
 /// A group's financial summary for an accounting interval, parsed from
 /// `GroupAccountSummaryReply` (the answer to
 /// [`Command::RequestGroupAccountSummary`](crate::Command::RequestGroupAccountSummary)).

@@ -2,7 +2,7 @@
 id: protocol-cap-group-bans
 title: Group ban lists over the GroupAPIv1 capability
 topic: protocol
-status: blocked
+status: done
 origin: protocol-reference-capabilities triage (2026-10-04)
 refs: [protocol-reference-capabilities, viewer-social-group-extras]
 blocked_by: [gridspec-groups]
@@ -31,3 +31,16 @@ and Firestorm references: `book/src/comms/caps-reference.md`.
 This capability is adopted inside that gridspec task, which measures the
 feature on both grids over both paths, makes the fake grid serve the
 capability per flavour, and checks the viewer. Claim that task.
+
+## Done (2026-10-14, with gridspec-groups)
+
+`CAP_GROUP_API_V1` is requested; `Command::RequestGroupBans`,
+`BanGroupMembers`, `UnbanGroupMembers` and `Event::GroupBans` in both
+runtimes and the REPL (a change POSTs, then the list is read again, as the
+reference does); the decoder reads Second Life's `group_id`, which is a
+string. Measured on aditi: a ban answers `201` "Created", an unban `200`
+"OK" (neither LLSD), a banned join is refused with an alert and an
+invitation to a banned avatar is not sent (`book/src/gridspec/groups.md`
+§ Bans). The fake grid has no groups to ban from, so serving the capability
+for its Second Life flavour moved to [[server-fake-grid-groups]]; the panel
+is [[viewer-social-group-extras]].

@@ -344,6 +344,10 @@ pub enum ImDialog {
     GotoUrl,
     /// A group notice (`IM_GROUP_NOTICE`).
     GroupNotice,
+    /// A group notice the agent asked for again from the group's notice list
+    /// (`IM_GROUP_NOTICE_REQUESTED`): the same body as a
+    /// [`GroupNotice`](Self::GroupNotice), but no news.
+    GroupNoticeRequested,
     /// A friendship offer (`IM_FRIENDSHIP_OFFERED`).
     FriendshipOffered,
     /// A friendship offer was accepted (`IM_FRIENDSHIP_ACCEPTED`).
@@ -396,6 +400,7 @@ impl ImDialog {
             32 => Self::GroupNotice,
             35 => Self::GroupInvitationAccept,
             36 => Self::GroupInvitationDecline,
+            37 => Self::GroupNoticeRequested,
             38 => Self::FriendshipOffered,
             39 => Self::FriendshipAccepted,
             40 => Self::FriendshipDeclined,
@@ -432,6 +437,7 @@ impl ImDialog {
             Self::GroupNotice => 32,
             Self::GroupInvitationAccept => 35,
             Self::GroupInvitationDecline => 36,
+            Self::GroupNoticeRequested => 37,
             Self::FriendshipOffered => 38,
             Self::FriendshipAccepted => 39,
             Self::FriendshipDeclined => 40,
@@ -555,7 +561,8 @@ impl InstantMessage {
         })
     }
 
-    /// Decodes a received **group notice** ([`ImDialog::GroupNotice`]) into the
+    /// Decodes a received **group notice** ([`ImDialog::GroupNotice`], or one asked
+    /// for again, [`ImDialog::GroupNoticeRequested`]) into the
     /// pieces a viewer displays: the posting group, the sender's name, the subject
     /// and body, the timestamp, and the optional inventory attachment descriptor.
     ///
@@ -577,7 +584,10 @@ impl InstantMessage {
     /// dialog.
     #[must_use]
     pub fn group_notice(&self) -> Option<GroupNoticeReceived> {
-        if !matches!(self.dialog, ImDialog::GroupNotice) {
+        if !matches!(
+            self.dialog,
+            ImDialog::GroupNotice | ImDialog::GroupNoticeRequested
+        ) {
             return None;
         }
         // `subject|body`; a body containing `|`s keeps them (only the first splits).

@@ -3094,6 +3094,43 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_group_bans",
+            usage: "<group_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestGroupBans(GroupKey::from(
+                    args.req_uuid(ctx, "group_id", 0)?,
+                )))
+            },
+        },
+        CommandSpec {
+            name: "ban_group_members",
+            usage: "<group_id> <agent_ids: id,id,…>",
+            build: |args, ctx| {
+                Ok(Command::BanGroupMembers {
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
+                    agent_ids: args
+                        .vec_uuid(ctx, "agent_ids", 1)?
+                        .into_iter()
+                        .map(AgentKey::from)
+                        .collect(),
+                })
+            },
+        },
+        CommandSpec {
+            name: "unban_group_members",
+            usage: "<group_id> <agent_ids: id,id,…>",
+            build: |args, ctx| {
+                Ok(Command::UnbanGroupMembers {
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
+                    agent_ids: args
+                        .vec_uuid(ctx, "agent_ids", 1)?
+                        .into_iter()
+                        .map(AgentKey::from)
+                        .collect(),
+                })
+            },
+        },
+        CommandSpec {
             name: "send_group_notice",
             usage: "<group_id> <subject> <message> [attachment_item=] [attachment_owner=]",
             build: |args, ctx| {

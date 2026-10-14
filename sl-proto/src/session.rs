@@ -422,6 +422,13 @@ pub const CAP_ACCEPT_FRIENDSHIP: &str = "AcceptFriendship";
 /// [`CAP_ACCEPT_FRIENDSHIP`]: a DELETE of `{cap}?from=<offerer>`.
 pub const CAP_DECLINE_FRIENDSHIP: &str = "DeclineFriendship";
 
+/// The capability that reads and writes a group's **ban list**: a GET of
+/// `{cap}?group_id=<group>` answers `{ group_id, ban_list: { <agent>: {
+/// ban_date } } }`, and a POST of `{ ban_action: 1 (ban) | 2 (unban), ban_ids:
+/// [<agent>…] }` to the same URL changes it. There is no UDP equivalent.
+/// Second Life grants it; OpenSim does not.
+pub const CAP_GROUP_API_V1: &str = "GroupAPIv1";
+
 /// The `ChatSessionRequest` method that accepts (joins) a chat-session invitation,
 /// for both text and voice channels (the voice-join signalling is layered on top
 /// — see chat task B8). The reply carries the session's current agent roster.
@@ -816,6 +823,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_DECLINE_GROUP_INVITE,
     CAP_ACCEPT_FRIENDSHIP,
     CAP_DECLINE_FRIENDSHIP,
+    CAP_GROUP_API_V1,
     CAP_INVENTORY_API_V3,
     CAP_LIBRARY_API_V3,
     CAP_CREATE_INVENTORY_CATEGORY,
@@ -2018,15 +2026,16 @@ pub use conversions::{
     day_cycle_from_asset, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
     environment_asset_from_bytes, environment_asset_to_bytes, environment_cap_url,
     environment_reply_needs_refetch, environment_to_llsd, establish_agent_communication_to_llsd,
-    fetch_inventory_items_to_llsd, friendship_answer_url, group_invite_response_body,
-    group_members_to_caps_llsd, group_memberships_to_caps_llsd, inventory_descendents_to_llsd,
-    land_stat_reply_to_caps_llsd, nav_mesh_status_to_llsd, offline_messages_to_llsd,
-    open_region_info_to_llsd, parcel_info_to_llsd, parcel_object_owners_to_caps_llsd,
-    required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
-    set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
-    sky_with_blended_values, sky_with_pushed_values, teleport_failed_to_caps_llsd,
-    teleport_finish_to_llsd, water_settings_from_asset, water_with_blended_values,
-    water_with_pushed_values, windlight_refresh_to_llsd,
+    fetch_inventory_items_to_llsd, friendship_answer_url, group_ban_request_body, group_bans_url,
+    group_invite_response_body, group_members_to_caps_llsd, group_memberships_to_caps_llsd,
+    inventory_descendents_to_llsd, land_stat_reply_to_caps_llsd, nav_mesh_status_to_llsd,
+    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
+    parcel_object_owners_to_caps_llsd, required_voice_version_to_llsd,
+    server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
+    sim_console_response_to_llsd, sky_settings_from_asset, sky_with_blended_values,
+    sky_with_pushed_values, teleport_failed_to_caps_llsd, teleport_finish_to_llsd,
+    water_settings_from_asset, water_with_blended_values, water_with_pushed_values,
+    windlight_refresh_to_llsd,
 };
 pub(crate) use conversions::{
     ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,

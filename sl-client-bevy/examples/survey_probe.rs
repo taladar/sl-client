@@ -174,6 +174,7 @@ fn on_events(
             | SlSessionEvent::GroupTitles { .. }
             | SlSessionEvent::GroupProfileReceived(_)
             | SlSessionEvent::GroupNotices { .. }
+            | SlSessionEvent::GroupBans { .. }
             | SlSessionEvent::GroupSessionMessage { .. }
             | SlSessionEvent::GroupSessionParticipant { .. }
             | SlSessionEvent::CreateGroupResult { .. }

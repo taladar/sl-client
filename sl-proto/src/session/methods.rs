@@ -14,10 +14,10 @@ use super::conversions::{
     environment_reply_from_llsd, establish_agent_communication_from_llsd,
     estate_access_from_params, estate_info_from_params, fetch_inventory_items_from_llsd, friend,
     grid_coordinates_from_handle, group_account_details, group_account_summary,
-    group_account_transactions, group_active_proposal_item, group_member,
-    group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
-    group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
-    instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
+    group_account_transactions, group_active_proposal_item, group_bans_from_caps_llsd,
+    group_member, group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd,
+    group_names, group_notice, group_profile, group_role, group_title, group_vote_history_item,
+    index_into, instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
     inventory_item_from_create, inventory_offer_bucket, invite_channel_from_llsd,
     land_stat_reply_from_caps_llsd, map_block_batch, map_item, map_layer, map_region_info,
     money_balance, nav_mesh_status_from_llsd, neighbor_info, object_from_full_update,
@@ -901,6 +901,13 @@ impl Session {
             }
             // The response to a `GroupMemberData` capability POST (the modern
             // group roster fetch).
+            CapsEvent::GroupApiV1 => {
+                if let Some(event) = group_bans_from_caps_llsd(body) {
+                    self.events.push_back(event);
+                } else {
+                    self.caps_decode_failed(message);
+                }
+            }
             CapsEvent::GroupMemberData => {
                 if let Some(event) = group_members_from_caps_llsd(body) {
                     self.events.push_back(event);
@@ -5696,9 +5703,12 @@ impl Session {
                     group_id: GroupKey::from(reply.group_data.group_id),
                     request_id: reply.group_data.request_id,
                     member_count: reply.group_data.member_count,
+                    // A reply with no members (Second Life's to an outsider)
+                    // carries one block naming nobody; the reference skips it.
                     members: reply
                         .member_data
                         .iter()
+                        .filter(|member| !member.agent_id.is_nil())
                         .map(group_member)
                         .collect::<Result<_, _>>()?,
                 });
@@ -5708,7 +5718,16 @@ impl Session {
                     group_id: GroupKey::from(reply.group_data.group_id),
                     request_id: reply.group_data.request_id,
                     role_count: reply.group_data.role_count,
-                    roles: reply.role_data.iter().map(group_role).collect(),
+                    // A reply with no roles (Second Life's to an outsider)
+                    // carries one nameless block for no role.
+                    roles: reply
+                        .role_data
+                        .iter()
+                        .filter(|role| {
+                            !(role.role_id.is_nil() && role.name.iter().all(|byte| *byte == 0))
+                        })
+                        .map(group_role)
+                        .collect(),
                 });
             }
             AnyMessage::GroupRoleMembersReply(reply) => {
@@ -5742,7 +5761,15 @@ impl Session {
             AnyMessage::GroupNoticesListReply(reply) => {
                 self.events.push_back(Event::GroupNotices {
                     group_id: GroupKey::from(reply.agent_data.group_id),
-                    notices: reply.data.iter().map(group_notice).collect(),
+                    // A group without notices is answered with one entry of
+                    // no id ("No notices."), which the reference shows as the
+                    // list's empty text rather than as a notice.
+                    notices: reply
+                        .data
+                        .iter()
+                        .filter(|notice| !notice.notice_id.is_nil())
+                        .map(group_notice)
+                        .collect(),
                 });
             }
             AnyMessage::GroupAccountSummaryReply(reply) => {

@@ -4,7 +4,8 @@ Groups are the protocol's membership organizations: a named group an avatar can
 join, with **roles** that bundle **powers**, a **member** roster, **titles**,
 and **notices**. Group chat is covered in the
 [Chat](chat.md#group-and-conference-sessions) chapter; this chapter is about the
-group data and administration.
+group data and administration. What Second Life and OpenSim each answer, leg by
+leg, is measured in [Grid Behaviour: Groups](../gridspec/groups.md).
 
 ## The model
 

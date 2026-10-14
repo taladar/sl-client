@@ -641,6 +641,7 @@ impl Survey {
             | Event::GroupTitles { .. }
             | Event::GroupProfileReceived(_)
             | Event::GroupNotices { .. }
+            | Event::GroupBans { .. }
             | Event::GroupSessionMessage { .. }
             | Event::GroupSessionParticipant { .. }
             | Event::CreateGroupResult { .. }

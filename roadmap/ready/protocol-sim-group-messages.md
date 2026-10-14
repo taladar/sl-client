@@ -2,7 +2,7 @@
 id: protocol-sim-group-messages
 title: SimSession — decode group requests and send group replies
 topic: protocol
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey]
 blocked_by: [gridspec-groups]

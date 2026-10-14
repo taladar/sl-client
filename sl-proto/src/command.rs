@@ -645,6 +645,29 @@ pub enum Command {
         /// The agent ids to eject.
         member_ids: Vec<AgentKey>,
     },
+    /// Read a group's ban list over the `GroupAPIv1` capability. The list
+    /// arrives as an [`Event::GroupBans`](crate::Event::GroupBans); a region
+    /// without the capability (OpenSim) answers nothing, and the runtime logs
+    /// that.
+    RequestGroupBans(GroupKey),
+    /// Ban avatars from a group over the `GroupAPIv1` capability, then read
+    /// the list again ([`Event::GroupBans`](crate::Event::GroupBans)), as the
+    /// reference does. The reference ejects a member it bans as well; what a
+    /// ban alone does to a member is not measured.
+    BanGroupMembers {
+        /// The group to ban them from.
+        group_id: GroupKey,
+        /// The avatars to ban.
+        agent_ids: Vec<AgentKey>,
+    },
+    /// Lift avatars' bans from a group over the `GroupAPIv1` capability, then
+    /// read the list again ([`Event::GroupBans`](crate::Event::GroupBans)).
+    UnbanGroupMembers {
+        /// The group to lift their bans from.
+        group_id: GroupKey,
+        /// The avatars whose bans to lift.
+        agent_ids: Vec<AgentKey>,
+    },
     /// Request a group's financial summary (`GroupAccountSummaryRequest`) for an
     /// accounting interval. The reply arrives as
     /// [`Event::GroupAccountSummary`](crate::Event::GroupAccountSummary).
@@ -3101,6 +3124,9 @@ impl Command {
             Self::ChangeGroupRoleMembers { .. } => "ChangeGroupRoleMembers",
             Self::EjectGroupMembers { .. } => "EjectGroupMembers",
             Self::RequestGroupAccountSummary { .. } => "RequestGroupAccountSummary",
+            Self::RequestGroupBans(..) => "RequestGroupBans",
+            Self::BanGroupMembers { .. } => "BanGroupMembers",
+            Self::UnbanGroupMembers { .. } => "UnbanGroupMembers",
             Self::RequestGroupAccountDetails { .. } => "RequestGroupAccountDetails",
             Self::RequestGroupAccountTransactions { .. } => "RequestGroupAccountTransactions",
             Self::RequestGroupActiveProposals { .. } => "RequestGroupActiveProposals",

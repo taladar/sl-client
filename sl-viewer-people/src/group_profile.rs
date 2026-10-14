@@ -363,12 +363,12 @@ const ABILITIES: [(u64, &str); 14] = [
 // ---------------------------------------------------------------------------
 
 /// The set of group-notice ids the Notices tab has explicitly **requested** (by
-/// clicking a notice in the list). The reply arrives as an
-/// `ImDialog::GroupNotice` IM indistinguishable from an unsolicited push, so
-/// the group-notice toast host ([`crate::group_notice`]) consults this set to
-/// suppress a toast for a notice the user pulled up to read here — the reference
-/// distinction between `IM_GROUP_NOTICE_REQUESTED` (no popup) and a fresh
-/// `IM_GROUP_NOTICE`.
+/// clicking a notice in the list). OpenSim answers with the requested-notice
+/// dialog (`IM_GROUP_NOTICE_REQUESTED`), which raises no popup anyway; a grid
+/// that answers with a plain `ImDialog::GroupNotice` IM makes the reply
+/// indistinguishable from an unsolicited push, so the group-notice toast host
+/// ([`crate::group_notice`]) consults this set to suppress a toast for a notice
+/// the user pulled up to read here.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct RequestedGroupNotices(HashSet<GroupNoticeKey>);
 
@@ -1686,7 +1686,10 @@ fn ingest_for_window(
                 state.notices_revision = state.notices_revision.wrapping_add(1);
             }
             SlSessionEvent::InstantMessageReceived(im)
-                if im.dialog == ImDialog::GroupNotice && state.pending_notice.is_some() =>
+                if matches!(
+                    im.dialog,
+                    ImDialog::GroupNotice | ImDialog::GroupNoticeRequested
+                ) && state.pending_notice.is_some() =>
             {
                 if let Some(notice_id) = state.pending_notice.take() {
                     let body = split_notice(&im.message).1.to_owned();

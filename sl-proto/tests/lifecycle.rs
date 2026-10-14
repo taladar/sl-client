@@ -4046,6 +4046,47 @@ mod test {
         Ok(())
     }
 
+    /// Second Life answers an outsider's roster request with a member count
+    /// of 0 and one block naming nobody: that block is no member.
+    #[test]
+    fn an_empty_group_members_reply_names_nobody() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6705);
+        let message = AnyMessage::GroupMembersReply(GroupMembersReply {
+            agent_data: GroupMembersReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+            },
+            group_data: GroupMembersReplyGroupDataBlock {
+                group_id: group,
+                request_id: uuid::Uuid::nil(),
+                member_count: 0,
+            },
+            member_data: vec![GroupMembersReplyMemberDataBlock {
+                agent_id: uuid::Uuid::nil(),
+                contribution: 0,
+                online_status: b"\0".to_vec(),
+                agent_powers: 0,
+                title: b"\0".to_vec(),
+                is_owner: false,
+            }],
+        });
+        let datagram = server_message(&message, 9, true)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+
+        let members = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::GroupMembers { members, .. } => Some(members),
+                _ => None,
+            })
+            .ok_or("expected a GroupMembers event")?;
+        assert_eq!(members, Vec::new());
+        Ok(())
+    }
+
     #[test]
     fn group_role_data_reply_surfaces_role_count() -> Result<(), TestError> {
         let now = Instant::now();

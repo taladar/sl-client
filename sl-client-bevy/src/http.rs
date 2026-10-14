@@ -7,8 +7,8 @@ use crossbeam_channel::Sender;
 use sl_client_common::lsl_syntax_cache::LslSyntaxCache;
 use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 use sl_proto::{
-    AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_LAND_RESOURCES,
-    CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
+    AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_GROUP_API_V1,
+    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
     CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ObjectKey, ParcelKey, RemoteParcelRequest,
     TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG, Uuid, build_get_metadata_request,
@@ -115,15 +115,8 @@ pub(crate) fn answer_friendship(url: &str, accept: bool) {
     } else {
         "the DeclineFriendship request"
     };
-    let http = match crate::http_proxy::blocking_client_builder()
-        .timeout(EVENT_QUEUE_TIMEOUT)
-        .build()
-    {
-        Ok(http) => http,
-        Err(error) => {
-            tracing::warn!("could not build the HTTP client for {what}: {error}");
-            return;
-        }
+    let Some(http) = answer_client(what) else {
+        return;
     };
     let request = if accept {
         http.post(url)
@@ -132,6 +125,46 @@ pub(crate) fn answer_friendship(url: &str, accept: bool) {
     } else {
         http.delete(url)
     };
+    report_answer(what, request);
+}
+
+/// POSTs `{group}` to the `AcceptGroupInvite` or `DeclineGroupInvite`
+/// capability `url` (blocking), the answer to a group invitation that was
+/// kept, and logs an answer the grid did not take.
+pub(crate) fn answer_group_invitation(url: &str, body: String, accept: bool) {
+    let what = if accept {
+        "the AcceptGroupInvite request"
+    } else {
+        "the DeclineGroupInvite request"
+    };
+    let Some(http) = answer_client(what) else {
+        return;
+    };
+    let request = http
+        .post(url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body);
+    report_answer(what, request);
+}
+
+/// The blocking HTTP client an answer is sent with, or `None` (logged) where
+/// it cannot be built.
+fn answer_client(what: &str) -> Option<reqwest::blocking::Client> {
+    match crate::http_proxy::blocking_client_builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    {
+        Ok(http) => Some(http),
+        Err(error) => {
+            tracing::warn!("could not build the HTTP client for {what}: {error}");
+            None
+        }
+    }
+}
+
+/// Sends `request`, an answer to an offer or an invitation, and logs it where
+/// the grid did not answer `{ success: true }`.
+fn report_answer(what: &str, request: reqwest::blocking::RequestBuilder) {
     match request.header("Accept", "application/llsd+xml").send() {
         Ok(response) if response.status().is_success() => {
             let text = response.text().unwrap_or_default();
@@ -144,6 +177,48 @@ pub(crate) fn answer_friendship(url: &str, accept: bool) {
         }
         Ok(response) => tracing::warn!(status = %response.status(), "{what} was rejected"),
         Err(error) => tracing::warn!("{what} could not be sent: {error}"),
+    }
+}
+
+/// Changes a group's ban list over the `GroupAPIv1` capability `url` (the
+/// group's `?group_id=` URL, blocking) where `change` is a POST body, then
+/// reads the list and forwards it over `caps_tx` tagged [`CAP_GROUP_API_V1`],
+/// as the reference re-reads it after a change.
+pub(crate) fn group_bans(url: &str, change: Option<String>, caps_tx: &Sender<(String, Llsd)>) {
+    let Some(http) = answer_client("a group's ban list") else {
+        return;
+    };
+    if let Some(body) = change {
+        match http
+            .post(url)
+            .header("Content-Type", "application/llsd+xml")
+            .header("Accept", "application/llsd+xml")
+            .body(body)
+            .send()
+        {
+            Ok(response) if response.status().is_success() => {}
+            Ok(response) => {
+                tracing::warn!(status = %response.status(), "a group ban change was rejected");
+            }
+            Err(error) => tracing::warn!("a group ban change could not be sent: {error}"),
+        }
+    }
+    match http
+        .get(url)
+        .header("Accept", "application/llsd+xml")
+        .send()
+    {
+        Ok(response) if response.status().is_success() => {
+            let text = response.text().unwrap_or_default();
+            match parse_llsd_xml(&text) {
+                Ok(llsd) => deliver(caps_tx, (CAP_GROUP_API_V1.to_owned(), llsd)),
+                Err(error) => tracing::warn!("a group's ban list did not parse: {error}"),
+            }
+        }
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "a group's ban list was refused");
+        }
+        Err(error) => tracing::warn!("a group's ban list could not be read: {error}"),
     }
 }
 

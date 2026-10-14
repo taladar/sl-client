@@ -13,21 +13,21 @@ use super::{
     EstateAccessKind, EstateCovenant, EstateInfo, EventInfo, FeatureDisabled, FolderInfo,
     FollowCamPropertyValue, Friend, FriendRights, GenericMessage, GenericStreamingMessage,
     GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
-    GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember,
-    GroupTitle, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor, InventoryFolder,
-    InventoryItem, InventoryItemMove, ItemInfo, Kick, LandStatItem, LandStatReportType,
-    LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo,
-    MapRequestFlags, Maturity, MeanCollision, MeshUploadStatus, MoneyBalance, MuteEntry,
-    NavMeshStatus, NeighborInfo, NeighborRetirement, Object, ObjectPlayingAnimation,
-    ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch, OpenRegionInfo, ParcelAccessEntry,
-    ParcelAccessScope, ParcelDetails, ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo, PickInfo, PlacesResult,
-    PlayingAnimation, RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion,
-    ScriptCompileError, ScriptControl, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissionState, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime,
-    SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
-    TerrainLayerBatch, TerrainPatch, Texture, ThumbnailTarget, TransferStatus, UserInfo,
-    ViewerEffect, Wearable,
+    GroupBan, GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole,
+    GroupRoleMember, GroupTitle, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor,
+    InventoryFolder, InventoryItem, InventoryItemMove, ItemInfo, Kick, LandStatItem,
+    LandStatReportType, LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem, MapItemType,
+    MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeshUploadStatus,
+    MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, NeighborRetirement, Object,
+    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch,
+    OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
+    ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits,
+    RegionStats, RequiredVoiceVersion, ScriptCompileError, ScriptControl, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissionState, ScriptTeleportRequest, ServerError,
+    SetDisplayNameReply, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryItem,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerBatch, TerrainPatch, Texture,
+    ThumbnailTarget, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
@@ -1146,6 +1146,16 @@ pub enum Event {
         group_id: GroupKey,
         /// The notice headers.
         notices: Vec<GroupNotice>,
+    },
+    /// A group's ban list, read over the `GroupAPIv1` capability in response
+    /// to [`Command::RequestGroupBans`](crate::Command::RequestGroupBans) and
+    /// after every [`Command::BanGroupMembers`](crate::Command::BanGroupMembers)
+    /// / [`Command::UnbanGroupMembers`](crate::Command::UnbanGroupMembers).
+    GroupBans {
+        /// The group whose bans these are.
+        group_id: GroupKey,
+        /// Every avatar banned from it, in id order.
+        bans: Vec<GroupBan>,
     },
     /// A group's financial summary (`GroupAccountSummaryReply`), in response to
     /// [`Command::RequestGroupAccountSummary`](crate::Command::RequestGroupAccountSummary).

@@ -32,7 +32,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `EstateAccess` | yes | yes | current | task `protocol-cap-estate-access` (UDP today) |
 | `EstateChangeInfo` | — | off | unused | not adopted (UDP) |
 | `GetMetadata` | yes | — | current | **used** since 2026-10-12 (`Command::RequestScriptExperience`) |
-| `GroupAPIv1` | yes | — | current | task `protocol-cap-group-bans` |
+| `GroupAPIv1` | yes | — | current | **used** since 2026-10-14 (`Command::RequestGroupBans`, `BanGroupMembers`, `UnbanGroupMembers`); the panel is task `viewer-social-group-extras` |
 | `GroupProposalBallot` | yes | — | removed feature | not adopted |
 | `HomeLocation` | yes | yes | current | task `protocol-cap-home-location` (UDP today) |
 | `InterestList` | yes | — | current | adopted (`Command::SetInterestListMode`) |
@@ -116,9 +116,21 @@ decline answers `200` `{success: true}` ([Friends and
 presence](../gridspec/friends.md)); our client uses them for every kept offer
 (`Command::AcceptFriendship` / `DeclineFriendship` with `use_offline_cap`).
 
+**`AcceptGroupInvite` / `DeclineGroupInvite`** (`llviewermessage.cpp`
+`response_group_invitation_coro`). For an invitation delivered offline over
+`ReadOfflineMsgs` only: POST `{group: <uuid>}` → `{success}`. A cap-delivered
+invitation carries a nil `transaction-id` and names its group only in
+`asset_id`. On aditi the decline answers `200` `{success: true}` and the accept
+takes an invitation read over UDP too ([Groups](../gridspec/groups.md)); our
+client uses them for every kept invitation (`Command::AcceptGroupInvitation` /
+`DeclineGroupInvitation` with `use_offline_cap`), over UDP where the region
+lacks them.
+
 **`GroupAPIv1`** (`llgroupmgr.cpp`). Group bans. GET `{cap}?group_id=<id>` →
 `{group_id, ban_list:{<agent>:{ban_date}}}`. POST `{cap}?group_id=<id>`
-`{ban_action: 1 create | 2 delete, ban_ids:[uuid]}`, then re-fetch.
+`{ban_action: 1 create | 2 delete, ban_ids:[uuid]}`, then re-fetch. On aditi the
+GET's `group_id` is a **string**, a ban answers `201` with the text "Created"
+and an unban `200` "OK" — neither LLSD ([Groups](../gridspec/groups.md)).
 
 **`UpdateAgentInformation`** (`llagent.cpp`). The maturity preference: POST
 `{access_prefs:{max:"PG"|"M"|"A"}}`, the reply echoing `{access_prefs:{max}}`.

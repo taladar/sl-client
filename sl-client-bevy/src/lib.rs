@@ -20,12 +20,12 @@ use sl_proto::{
     CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
     CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
     CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_METADATA,
-    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
-    CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INTEREST_LIST,
+    CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
+    CAP_MESH_UPLOAD_FLAG, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO, CAP_VOICE_SIGNALING,
@@ -50,9 +50,9 @@ use sl_proto::{
     chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
     create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
     experience_id_query, experience_info_query, experience_query, find_experience_query,
-    forget_experience_query, friendship_answer_url, group_experiences_query,
-    group_invite_response_body, listing_request, listings_request, merchant_status_request,
-    parse_login_response, update_listing_request,
+    forget_experience_query, friendship_answer_url, group_ban_request_body, group_bans_url,
+    group_experiences_query, group_invite_response_body, listing_request, listings_request,
+    merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -81,8 +81,8 @@ pub use sl_proto::{
     ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
     ExperienceSearchPage, ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData,
     FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence, FriendRights,
-    GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates,
-    GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
+    GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupBan,
+    GroupBanAction, GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
     GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile,
     GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
     GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
@@ -433,10 +433,11 @@ use crate::caps::{CAPS_FAILURE_PREFIX, fetch_neighbour_caps, start_caps};
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
-    answer_friendship, run_avatar_picker_search, run_caps_oneway, run_chat_session_fetch_history,
-    run_chat_session_request, run_delete_caps_llsd, run_environment_change, run_experience_query,
-    run_fetch_lsl_syntax, run_get_caps_llsd, run_land_resources, run_patch_caps_llsd,
-    run_put_caps_llsd, run_remote_parcel_request, run_script_metadata, run_task_inventory,
+    answer_friendship, answer_group_invitation, group_bans, run_avatar_picker_search,
+    run_caps_oneway, run_chat_session_fetch_history, run_chat_session_request,
+    run_delete_caps_llsd, run_environment_change, run_experience_query, run_fetch_lsl_syntax,
+    run_get_caps_llsd, run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
+    run_remote_parcel_request, run_script_metadata, run_task_inventory,
 };
 use crate::inventory::{
     fetch_folder_contents, run_ais3_folder_fetches, run_group_members_fetch,
@@ -1398,6 +1399,23 @@ enum Ais3Verb {
 /// this gates the branch (mirroring the reference viewer's `AISAPI::isAvailable`).
 fn has_ais3(caps: Option<&Caps>) -> bool {
     caps.is_some_and(|caps| caps.map.contains_key(CAP_INVENTORY_API_V3))
+}
+
+/// Reads `group`'s ban list over the `GroupAPIv1` capability on a background
+/// thread, after POSTing `change` to it where there is one; the list arrives as
+/// a [`SessionEvent::GroupBans`]. A region without the capability (OpenSim) has
+/// no group bans, and that is logged.
+fn bans_over_the_capability(caps: Option<&Caps>, group: GroupKey, change: Option<String>) {
+    match caps.and_then(|caps| {
+        caps.map
+            .get(CAP_GROUP_API_V1)
+            .map(|url| (group_bans_url(url, group), caps.events_tx.clone()))
+    }) {
+        Some((url, events_tx)) => {
+            crate::log_context::spawn_thread(move || group_bans(&url, change, &events_tx));
+        }
+        None => tracing::warn!("the region has no GroupAPIv1 capability: no group bans"),
+    }
 }
 
 /// Route an inventory mutation through AIS3 (Second Life): spawn its HTTP request
@@ -2527,17 +2545,27 @@ fn apply_command(
             transaction_id,
             use_offline_cap,
         } => {
-            // An online invitation is answered over UDP; an offline one (null
-            // session id) POSTs to the AcceptGroupInvite cap when present.
-            if *use_offline_cap {
-                if let Some(caps) = caps
-                    && let Some(url) = caps.map.get(CAP_ACCEPT_GROUP_INVITE).cloned()
-                {
+            // A kept invitation is answered over the capability where the
+            // region grants it, as the reference does; a live invitation, or a
+            // region without it, over UDP.
+            match caps
+                .filter(|_caps| *use_offline_cap)
+                .and_then(|caps| caps.map.get(CAP_ACCEPT_GROUP_INVITE).cloned())
+            {
+                Some(url) => {
                     let body = group_invite_response_body(*group_id);
-                    crate::log_context::spawn_thread(move || run_caps_oneway(&url, body));
+                    crate::log_context::spawn_thread(move || {
+                        answer_group_invitation(&url, body, true);
+                    });
                 }
-            } else {
-                session.accept_group_invitation(*group_id, *transaction_id, now)?;
+                None => {
+                    if transaction_id.get().is_nil() {
+                        tracing::warn!(
+                            "accepting a group invitation over UDP without its transaction id"
+                        );
+                    }
+                    session.accept_group_invitation(*group_id, *transaction_id, now)?;
+                }
             }
         }
         Command::DeclineGroupInvitation {
@@ -2545,16 +2573,42 @@ fn apply_command(
             transaction_id,
             use_offline_cap,
         } => {
-            if *use_offline_cap {
-                if let Some(caps) = caps
-                    && let Some(url) = caps.map.get(CAP_DECLINE_GROUP_INVITE).cloned()
-                {
+            match caps
+                .filter(|_caps| *use_offline_cap)
+                .and_then(|caps| caps.map.get(CAP_DECLINE_GROUP_INVITE).cloned())
+            {
+                Some(url) => {
                     let body = group_invite_response_body(*group_id);
-                    crate::log_context::spawn_thread(move || run_caps_oneway(&url, body));
+                    crate::log_context::spawn_thread(move || {
+                        answer_group_invitation(&url, body, false);
+                    });
                 }
-            } else {
-                session.decline_group_invitation(*group_id, *transaction_id, now)?;
+                None => {
+                    if transaction_id.get().is_nil() {
+                        tracing::warn!(
+                            "declining a group invitation over UDP without its transaction id"
+                        );
+                    }
+                    session.decline_group_invitation(*group_id, *transaction_id, now)?;
+                }
             }
+        }
+        Command::RequestGroupBans(group_id) => {
+            bans_over_the_capability(caps, *group_id, None);
+        }
+        Command::BanGroupMembers {
+            group_id,
+            agent_ids,
+        } => {
+            let body = group_ban_request_body(GroupBanAction::Ban, agent_ids);
+            bans_over_the_capability(caps, *group_id, Some(body));
+        }
+        Command::UnbanGroupMembers {
+            group_id,
+            agent_ids,
+        } => {
+            let body = group_ban_request_body(GroupBanAction::Unban, agent_ids);
+            bans_over_the_capability(caps, *group_id, Some(body));
         }
         Command::SetGroupAcceptNotices {
             group_id,

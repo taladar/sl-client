@@ -31,12 +31,12 @@
 //!
 //! # Coordinating with the Notices tab
 //!
-//! The group profile's Notices tab also fetches a notice's body on demand, and its
-//! reply is an `ImDialog::GroupNotice` IM indistinguishable from a fresh push.
-//! The tab records the ids it requested in `RequestedGroupNotices`; this host
-//! consults it and **suppresses** the toast for a notice the user pulled up to
-//! read — the reference `IM_GROUP_NOTICE_REQUESTED` (no popup) vs. a fresh
-//! `IM_GROUP_NOTICE`.
+//! The group profile's Notices tab also fetches a notice's body on demand. OpenSim
+//! answers with the requested-notice dialog (`IM_GROUP_NOTICE_REQUESTED`), which
+//! raises no toast; a grid that answers with a plain `ImDialog::GroupNotice` IM
+//! makes the reply indistinguishable from a fresh push, so the tab records the
+//! ids it requested in `RequestedGroupNotices` and this host consults it and
+//! **suppresses** the toast for a notice the user pulled up to read.
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
@@ -45,8 +45,8 @@ use bevy_flair::style::components::ClassList;
 use std::collections::BTreeMap;
 
 use sl_client_bevy::{
-    AssetType, Command, GroupKey, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, SlCommand,
-    SlEvent, SlSessionEvent, TextureKey, Uuid,
+    AssetType, Command, GroupKey, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, ImDialog,
+    SlCommand, SlEvent, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 
@@ -240,9 +240,12 @@ fn ingest_group_notices(
             continue;
         };
         // The IM's `id` is the notice id (its `imSessionID`). Suppress the toast
-        // for a notice the Notices tab pulled up to read itself.
+        // for a notice the Notices tab pulled up to read itself — whether the
+        // grid answers with the requested-notice dialog (OpenSim) or a plain
+        // notice.
         let notice_id = GroupNoticeKey::from(im.id);
-        if requested.take_requested(notice_id) {
+        let asked_for = requested.take_requested(notice_id);
+        if asked_for || im.dialog == ImDialog::GroupNoticeRequested {
             continue;
         }
         // The alerts-tab gate: while group-notice toasts are off, raise no

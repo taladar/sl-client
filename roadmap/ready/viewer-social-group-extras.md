@@ -47,3 +47,14 @@ Group bans ride `GroupAPIv1` (Second Life only); the protocol half is
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Measured (gridspec-groups, 2026-10-14)
+
+From `book/src/gridspec/groups.md`: Second Life cuts a group name to 35
+characters and still charges L$100 for it (the founding dialog should say
+both before sending); OpenSim answers no accounting or proposal request at
+all (the money tab must show "no data" rather than wait); bans exist only
+where the region grants `GroupAPIv1` (hide the panel elsewhere); and an
+invitation to an avatar banned from the group is not sent, with an alert to
+the inviter. The protocol side of bans is done (`Command::RequestGroupBans`,
+`BanGroupMembers`, `UnbanGroupMembers`, `Event::GroupBans`).

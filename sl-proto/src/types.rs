@@ -512,10 +512,10 @@ pub use generic::{GenericMessage, GenericStreamingMessage};
 pub use group::{
     ActiveGroup, CreateGroupParams, GroupAccountDetails, GroupAccountDetailsEntry,
     GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
-    GroupActiveProposalItem, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupNoticeKey, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, GroupVote, GroupVoteHistoryItem,
-    ProposalCandidateId, ProposalVoteId, UpdateGroupInfoParams, group_powers,
+    GroupActiveProposalItem, GroupBan, GroupBanAction, GroupMember, GroupMembership, GroupNotice,
+    GroupNoticeAttachment, GroupNoticeKey, GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit,
+    GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, GroupVote,
+    GroupVoteHistoryItem, ProposalCandidateId, ProposalVoteId, UpdateGroupInfoParams, group_powers,
 };
 pub use inventory::{
     Child, FolderInfo, FolderType, GestureActivation, InventoryCursor, InventoryFolder,

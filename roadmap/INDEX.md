@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 353 |
-| blocked | 103 |
+| ready | 354 |
+| blocked | 99 |
 | in-progress | 20 |
 | bugs | 38 |
-| done | 1363 |
+| done | 1367 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2063** |
+| **total** | **2064** |
 
 ## ideas (139)
 
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (353)
+## ready (354)
 
 ### protocol
 
@@ -375,10 +375,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Re-exports and derived login state reach only the bevy runtime
 - [`protocol-audit-sim-session-stores`](ready/protocol-audit-sim-session-stores.md)
   — SimSession's 54 fields mix the driver's serving stores with the circuit
+- [`protocol-cap-read-offline-msgs`](ready/protocol-cap-read-offline-msgs.md) —
+  Drain kept messages over ReadOfflineMsgs where the answer capabilities exist
+  (blocked by `protocol-cap-offline-friendship-answers` (done),
+  `protocol-cap-offline-group-invite-answers` (done))
 - [`protocol-cap-update-agent-information`](ready/protocol-cap-update-agent-information.md)
   — Set the maturity preference over UpdateAgentInformation
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
+- [`protocol-sim-group-messages`](ready/protocol-sim-group-messages.md) —
+  SimSession — decode group requests and send group replies (blocked by
+  `gridspec-groups` (done))
 - [`protocol-sim-lsl-syntax-document`](ready/protocol-sim-lsl-syntax-document.md)
   — The fake grid serves an empty LSLSyntax document (blocked by
   `server-lsl-library-surface-table` (done))
@@ -1153,8 +1160,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   answers them
 - [`gridspec-group-chat-and-conference`](ready/gridspec-group-chat-and-conference.md)
   — Group chat sessions and ad-hoc conferences on each grid
-- [`gridspec-groups`](ready/gridspec-groups.md) — Groups: membership, roles,
-  notices, invitations and accounting on each grid
 - [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
   skeleton, fetch caps, AIS3, the library and cache versions on each grid
 - [`gridspec-inventory-mutations`](ready/gridspec-inventory-mutations.md) —
@@ -1192,7 +1197,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (103)
+## blocked (99)
 
 ### protocol
 
@@ -1208,22 +1213,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-cap-estate-access`](blocked/protocol-cap-estate-access.md) — Read
   the estate access lists over the EstateAccess capability (blocked by
   `gridspec-estate`)
-- [`protocol-cap-group-bans`](blocked/protocol-cap-group-bans.md) — Group ban
-  lists over the GroupAPIv1 capability (blocked by `gridspec-groups`)
 - [`protocol-cap-home-location`](blocked/protocol-cap-home-location.md) — Set
   home over the HomeLocation capability (blocked by `gridspec-landmarks-home`)
-- [`protocol-cap-offline-group-invite-answers`](blocked/protocol-cap-offline-group-invite-answers.md)
-  — Answer offline group invitations over AcceptGroupInvite / DeclineGroupInvite
-  (blocked by `gridspec-groups`)
 - [`protocol-cap-product-info`](blocked/protocol-cap-product-info.md) — Land
   type names over ProductInfoRequest (blocked by `gridspec-search-directory`)
-- [`protocol-cap-read-offline-msgs`](blocked/protocol-cap-read-offline-msgs.md)
-  — Drain kept messages over ReadOfflineMsgs where the answer capabilities exist
-  (blocked by `protocol-cap-offline-friendship-answers` (done),
-  `protocol-cap-offline-group-invite-answers`)
-- [`protocol-sim-group-messages`](blocked/protocol-sim-group-messages.md) —
-  SimSession — decode group requests and send group replies (blocked by
-  `gridspec-groups`)
 - [`protocol-sim-profile-messages`](blocked/protocol-sim-profile-messages.md) —
   SimSession — decode profile requests and send profile replies (blocked by
   `gridspec-profiles`)
@@ -1385,7 +1378,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid — god tools as OpenSim answers them (blocked by `gridspec-god-tools`)
 - [`server-fake-grid-groups`](blocked/server-fake-grid-groups.md) — Fake grid —
   a group store: membership, roles, notices, invitations and group sessions
-  (blocked by `gridspec-groups`, `gridspec-group-chat-and-conference`,
+  (blocked by `gridspec-groups` (done), `gridspec-group-chat-and-conference`,
   `protocol-sim-group-messages`)
 - [`server-fake-grid-inventory-offers`](blocked/server-fake-grid-inventory-offers.md)
   — Fake grid — inventory offers, filing and object gives (blocked by
@@ -1676,7 +1669,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1363)
+## done (1367)
 
 ### protocol
 
@@ -1868,12 +1861,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — sl-wire's public parse surface has five different failure disciplines
 - [`protocol-cap-get-metadata`](done/protocol-cap-get-metadata.md) — Read a
   script's experience over GetMetadata
+- [`protocol-cap-group-bans`](done/protocol-cap-group-bans.md) — Group ban lists
+  over the GroupAPIv1 capability (blocked by `gridspec-groups` (done))
 - [`protocol-cap-interest-list`](done/protocol-cap-interest-list.md) — Switch
   the interest list mode over the InterestList capability (blocked by
   `gridspec-object-update-stream` (done))
 - [`protocol-cap-offline-friendship-answers`](done/protocol-cap-offline-friendship-answers.md)
   — Answer offline friendship offers over AcceptFriendship / DeclineFriendship
   (blocked by `gridspec-friends-presence` (done))
+- [`protocol-cap-offline-group-invite-answers`](done/protocol-cap-offline-group-invite-answers.md)
+  — Answer offline group invitations over AcceptGroupInvite / DeclineGroupInvite
+  (blocked by `gridspec-groups` (done))
 - [`protocol-cap-parcel-properties-update`](done/protocol-cap-parcel-properties-update.md)
   — Edit parcels over the ParcelPropertiesUpdate capability
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
@@ -2517,6 +2515,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-group-notice-display`](done/viewer-group-notice-display.md) — Group
   notice display — image, title, body, item toast (blocked by
   `viewer-ui-notification-host` (done), `viewer-social-group-profile` (done))
+- [`viewer-groups-list-keeps-a-group-the-agent-was-ejected-from`](done/viewer-groups-list-keeps-a-group-the-agent-was-ejected-from.md)
+  — The Groups list keeps a group the agent was ejected from on Second Life
 - [`viewer-groups-pane-empty-on-opensim`](done/viewer-groups-pane-empty-on-opensim.md)
   — The Groups pane lists nothing while the profile's group list has the same
   groups
@@ -4637,6 +4637,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   environments (EEP) on each grid
 - [`gridspec-friends-presence`](done/gridspec-friends-presence.md) — Friendship,
   rights, presence notifications and calling cards on each grid
+- [`gridspec-groups`](done/gridspec-groups.md) — Groups: membership, roles,
+  notices, invitations and accounting on each grid
 - [`gridspec-infra-fake-flavour-conformance`](done/gridspec-infra-fake-flavour-conformance.md)
   — Run every conformance case against both fake-grid flavours, beside the live
   grids

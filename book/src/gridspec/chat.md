@@ -324,9 +324,9 @@ presence](friends.md)).
 
 ### Not measured
 
-- An inventory offer or a group invitation kept for an avatar that is away,
-  over either road (`gridspec-inventory-offers`, `gridspec-groups`). A
-  friendship offer is measured in [Friends and presence](friends.md).
+- An inventory offer kept for an avatar that is away, over either road
+  (`gridspec-inventory-offers`). A friendship offer is measured in [Friends
+  and presence](friends.md), a group invitation in [Groups](groups.md).
 - How long Second Life's suspension after a burst lasts, and the rate that
   triggers it.
 - How many messages a grid keeps for one avatar, and for how long.

@@ -338,6 +338,7 @@ impl Plugin for GroupsPlugin {
                     refresh_groups,
                     refresh_group_actions,
                     drive_leave_confirm,
+                    refresh_memberships_when_shown,
                 )
                     .chain()
                     .before(layout_virtual_lists),
@@ -872,6 +873,40 @@ fn refresh_groups(
     }
 }
 
+/// Ask the grid for the agent's memberships again each time the group list
+/// comes into view (the floater opened, the Groups sub-tab chosen).
+///
+/// The list is otherwise only ever corrected by a drop or a new membership
+/// list, and Second Life sends an ejected member neither — only an instant
+/// message from the ejecter (`book/src/gridspec/groups.md` § Ejection). A
+/// hidden list lays out to no size at all, so its viewport's size says when
+/// it comes into view.
+fn refresh_memberships_when_shown(
+    ui: Option<Res<GroupsUi>>,
+    nodes: Query<&ComputedNode>,
+    mut shown: Local<bool>,
+    mut sl: MessageWriter<SlCommand>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let size = nodes
+        .get(ui.viewport)
+        .map_or(Vec2::ZERO, ComputedNode::size);
+    if comes_into_view(&mut shown, size) {
+        sl.write(SlCommand(Command::RequestAgentDataUpdate));
+    }
+}
+
+/// Whether a list whose viewport now lays out to `size` has just come into
+/// view, given whether it was in view before (`shown`, updated).
+fn comes_into_view(shown: &mut bool, size: Vec2) -> bool {
+    let now = size.x > 0.0 && size.y > 0.0;
+    let came = now && !*shown;
+    *shown = now;
+    came
+}
+
 /// Grey each action button the current selection cannot support, from the same
 /// [`action_enabled`] predicate its press refusal uses — so the "no group" row
 /// shows Info, IM and Leave as unavailable instead of offering three buttons that
@@ -1148,8 +1183,8 @@ fn on_group_row_press(
 mod tests {
     use super::{
         ACTIONS, COUNT_KEY, Command, GroupAction, GroupChoice, GroupRow, GroupsModel, GroupsUi,
-        GroupsView, ROW_HEIGHT, VirtualList, action_enabled, group_command, rebuild_groups_view,
-        refresh_groups,
+        GroupsView, ROW_HEIGHT, VirtualList, action_enabled, comes_into_view, group_command,
+        rebuild_groups_view, refresh_groups,
     };
     use crate::i18n::install_untranslated;
     use bevy::prelude::*;
@@ -1268,6 +1303,16 @@ mod tests {
     /// Each action maps to its command: Activate / Leave produce a command, while
     /// Info (opens the profile floater via a message) and IM (opens a tab + starts
     /// the session elsewhere) produce none.
+    #[test]
+    fn memberships_are_asked_for_again_each_time_the_list_comes_into_view() {
+        let mut shown = false;
+        assert!(!comes_into_view(&mut shown, Vec2::ZERO));
+        assert!(comes_into_view(&mut shown, Vec2::new(200.0, 300.0)));
+        assert!(!comes_into_view(&mut shown, Vec2::new(200.0, 310.0)));
+        assert!(!comes_into_view(&mut shown, Vec2::ZERO));
+        assert!(comes_into_view(&mut shown, Vec2::new(200.0, 300.0)));
+    }
+
     #[test]
     fn action_command_mapping() {
         let group = GroupChoice::Group(GroupKey::from(Uuid::from_u128(7)));

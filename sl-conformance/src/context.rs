@@ -1130,6 +1130,12 @@ impl TestContext {
         self.fixtures.premade_group(index)
     }
 
+    /// The group the `groups` census measures in, if the fixtures name one.
+    #[must_use]
+    pub const fn census_group(&self) -> Option<GroupKey> {
+        self.fixtures.census_group()
+    }
+
     /// The configured second avatar whose profile the `avatar-properties` case
     /// reads, if any. Needed only on Second Life (which has no built-in second
     /// avatar); OpenSim falls back to the local secondary test avatar.

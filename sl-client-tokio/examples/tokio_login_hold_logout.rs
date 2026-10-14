@@ -520,6 +520,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::GroupTitles { .. }
             | Event::GroupProfileReceived(_)
             | Event::GroupNotices { .. }
+            | Event::GroupBans { .. }
             | Event::GroupSessionParticipant { .. }
             | Event::CreateGroupResult { .. }
             | Event::JoinGroupResult { .. }

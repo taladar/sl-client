@@ -2,7 +2,7 @@
 id: protocol-cap-read-offline-msgs
 title: Drain kept messages over ReadOfflineMsgs where the answer capabilities exist
 topic: protocol
-status: blocked
+status: ready
 origin: gridspec-instant-messages follow-up (2026-10-14)
 refs: [viewer-offline-im-drain, gridspec-instant-messages,
   test-offline-msg-fetch, test-offline-msg-fetch-aditi]
