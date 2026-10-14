@@ -162,6 +162,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::chat_invite_accept_decline::ChatInviteAcceptDecline),
         Box::new(crate::cases::session_mark_read::SessionMarkRead),
         Box::new(crate::cases::offline_msg_fetch::OfflineMsgFetch),
+        Box::new(crate::cases::friends_presence::FriendsPresence),
         Box::new(crate::cases::friendship_offer_accept::FriendshipOfferAccept),
         Box::new(crate::cases::friendship_terminate::FriendshipTerminate),
         Box::new(crate::cases::presence_online_offline::PresenceOnlineOffline),

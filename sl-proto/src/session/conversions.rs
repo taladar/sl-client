@@ -4515,6 +4515,33 @@ pub fn group_invite_response_body(group_id: GroupKey) -> String {
     llsd_map(vec![("group", Llsd::Uuid(group_id.uuid()))]).to_llsd_xml()
 }
 
+/// The URL that answers a friendship offer kept while the agent was offline:
+/// `{cap_url}?from=<offerer>` for the [`DeclineFriendship`](crate::CAP_DECLINE_FRIENDSHIP)
+/// DELETE, and with `&agent_name="<name>"` (the accepter's own legacy name,
+/// percent-escaped) for the [`AcceptFriendship`](crate::CAP_ACCEPT_FRIENDSHIP)
+/// POST — the reference `accept_friendship_coro` / `decline_friendship_coro`.
+#[must_use]
+pub fn friendship_answer_url(cap_url: &str, from: FriendKey, agent_name: Option<&str>) -> String {
+    let mut url = format!("{cap_url}?from={}", from.uuid());
+    if let Some(name) = agent_name {
+        url.push_str("&agent_name=%22");
+        for byte in name.bytes() {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+                url.push(char::from(byte));
+            } else {
+                url.push('%');
+                for nibble in [byte >> 4, byte & 0x0f] {
+                    if let Some(digit) = char::from_digit(u32::from(nibble), 16) {
+                        url.push(digit.to_ascii_uppercase());
+                    }
+                }
+            }
+        }
+        url.push_str("%22");
+    }
+    url
+}
+
 /// The LLSD-XML body of a `CopyInventoryFromNotecard` capability POST — the
 /// `{notecard-id, object-id, item-id, folder-id, callback-id}` payload the
 /// reference `copy_inventory_from_notecard` (`llviewerinventory.cpp`) posts to
@@ -9084,6 +9111,22 @@ mod caps_serializer_tests {
         assert_eq!(
             environment_reply_from_llsd(&map(Vec::new())),
             EnvironmentReply::Malformed
+        );
+    }
+
+    /// The answer to a kept friendship offer names the offerer, and the
+    /// accept the accepter's own name, quoted and escaped as the reference
+    /// escapes it.
+    #[test]
+    fn a_friendship_answer_names_the_offerer() {
+        let from = sl_types::key::FriendKey::from(Uuid::from_u128(0x0a));
+        assert_eq!(
+            super::friendship_answer_url("https://cap/x", from, None),
+            "https://cap/x?from=00000000-0000-0000-0000-00000000000a"
+        );
+        assert_eq!(
+            super::friendship_answer_url("https://cap/x", from, Some("Ann Ö-Tester")),
+            "https://cap/x?from=00000000-0000-0000-0000-00000000000a&agent_name=%22Ann%20%C3%96-Tester%22"
         );
     }
 

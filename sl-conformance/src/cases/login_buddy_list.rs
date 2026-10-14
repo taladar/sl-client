@@ -109,6 +109,7 @@ impl GridTest for LoginBuddyList {
                     transaction_id: TransactionId::from(offer),
                     friend_id: primary_id.uuid().into(),
                     calling_card_folder: InventoryFolderKey::from(Uuid::nil()),
+                    use_offline_cap: false,
                 })
                 .await?;
             ctx.primary()

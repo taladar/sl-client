@@ -54,6 +54,7 @@
 - [Movement](gridspec/movement.md)
 - [Avatars](gridspec/avatars.md)
 - [Local chat and instant messages](gridspec/chat.md)
+- [Friends and presence](gridspec/friends.md)
 - [World map](gridspec/world-map.md)
 - [Terrain, wind and clouds](gridspec/terrain.md)
 - [Objects](gridspec/objects.md)

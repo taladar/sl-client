@@ -110,7 +110,11 @@ offers delivered offline over `ReadOfflineMsgs` only. Accept: POST
 `{cap}?from=<uuid>&agent_name="<name>"`, empty body → `{success}`. Decline:
 DELETE `{cap}?from=<uuid>` → `{success}`. Firestorm reads offline messages over
 `ReadOfflineMsgs` only when this pair and `AcceptGroupInvite` are all granted,
-because cap-delivered offers carry no transaction id for the UDP answers.
+because cap-delivered offers carry no transaction id for the UDP answers. On
+aditi both take an offer however it was read, UDP or capability, and the
+decline answers `200` `{success: true}` ([Friends and
+presence](../gridspec/friends.md)); our client uses them for every kept offer
+(`Command::AcceptFriendship` / `DeclineFriendship` with `use_offline_cap`).
 
 **`GroupAPIv1`** (`llgroupmgr.cpp`). Group bans. GET `{cap}?group_id=<id>` →
 `{group_id, ban_list:{<agent>:{ban_date}}}`. POST `{cap}?group_id=<id>`

@@ -34,7 +34,7 @@ resident's own session and of those NPCs.
 | where the agent's own entry stands | second of two in all three runs: the one who logged in first was first | first in one run and second in two: the order of its presence list | last |
 | `You` (**held**) | the index of the agent's own entry | the same | the same |
 | `Prey` before anything is tracked | absent (−1) | absent | absent |
-| `Prey` after a `TrackAgent` for the other resident | still absent in every update of the next twelve seconds. The two are not friends, and no map rights were granted: with those it is not measured | absent: its encoder never sets it (the code that would is commented out) | absent |
+| `Prey` after a `TrackAgent` for the other resident | still absent in every update of the next twelve seconds. The two are not friends, and no map rights were granted: with them it points at the resident ([Friends and presence](friends.md)) | absent: its encoder never sets it (the code that would is commented out) | absent |
 | how a position becomes `X` and `Y` | **rounded** to the nearest metre: 7.64 is 8, 6.85 is 7, 8.35 is 8 | **cut off**: 127.82 is 127, 69.82 is 69 | each flavour's (`CoarseRounding`) |
 | how a height becomes `Z` | a quarter of it, rounded: 235.74 m is 59 (236 m), 40.54 m is 10 | a quarter of it, cut off: 226.56 m is 56 (224 m), 29.19 m is 7 | each flavour's |
 | a height above what a byte holds | 1,163 m is sent as 255 (1,020 m) | 1,177 m is sent as **0**: anything above 1,024 m is | each flavour's |

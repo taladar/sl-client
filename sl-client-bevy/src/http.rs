@@ -103,6 +103,50 @@ pub(crate) fn blocking_get_llsd(url: &str, cap: &str) -> Option<Llsd> {
     None
 }
 
+/// Answers a friendship offer that was kept over the `AcceptFriendship`
+/// (`accept`: a POST with an empty LLSD body) or `DeclineFriendship` (a DELETE)
+/// capability (blocking), at `url` from [`sl_proto::friendship_answer_url`].
+/// The grid answers `{ "success": bool }`; there is no event to carry it, so a
+/// failed request, a rejecting status or `success` false is logged. Mirrors
+/// the tokio `answer_friendship`; the URL is not logged.
+pub(crate) fn answer_friendship(url: &str, accept: bool) {
+    let what = if accept {
+        "the AcceptFriendship request"
+    } else {
+        "the DeclineFriendship request"
+    };
+    let http = match crate::http_proxy::blocking_client_builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    {
+        Ok(http) => http,
+        Err(error) => {
+            tracing::warn!("could not build the HTTP client for {what}: {error}");
+            return;
+        }
+    };
+    let request = if accept {
+        http.post(url)
+            .header("Content-Type", "application/llsd+xml")
+            .body(Llsd::Undef.to_llsd_xml())
+    } else {
+        http.delete(url)
+    };
+    match request.header("Accept", "application/llsd+xml").send() {
+        Ok(response) if response.status().is_success() => {
+            let text = response.text().unwrap_or_default();
+            let success = parse_llsd_xml(&text)
+                .ok()
+                .and_then(|reply| reply.get("success").and_then(Llsd::as_bool));
+            if success != Some(true) {
+                tracing::warn!("{what} was not taken: {text}");
+            }
+        }
+        Ok(response) => tracing::warn!(status = %response.status(), "{what} was rejected"),
+        Err(error) => tracing::warn!("{what} could not be sent: {error}"),
+    }
+}
+
 /// POSTs `body` to a capability URL and ignores the *reply* (blocking): the
 /// shared body of every fire-and-forget capability call, where the simulator
 /// answers with an HTTP status and nothing else.

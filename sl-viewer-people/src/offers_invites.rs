@@ -507,7 +507,11 @@ fn decline_command(im: &InstantMessage, kind: crate::auto_reject::RejectKind) ->
             })
         }
         RejectKind::Teleport => None,
-        RejectKind::Friendship => Some(Command::DeclineFriendship(TransactionId::from(im.id))),
+        RejectKind::Friendship => Some(Command::DeclineFriendship {
+            transaction_id: TransactionId::from(im.id),
+            friend_id: FriendKey::from(im.from_agent_id.uuid()),
+            use_offline_cap: im.offline,
+        }),
         RejectKind::GroupInvite | RejectKind::AlreadyJoinedGroup => {
             let invite = im.group_invitation()?;
             Some(Command::DeclineGroupInvitation {
@@ -1060,6 +1064,12 @@ fn spawn_friendship_card(
     im: &InstantMessage,
 ) {
     let transaction_id = TransactionId::from(im.id);
+    // The reference answers an offer that was kept while the agent was away
+    // over the AcceptFriendship / DeclineFriendship capabilities wherever the
+    // region grants them (`friendship_offer_callback`), whichever road brought
+    // it: an offer read over `ReadOfflineMsgs` has no transaction id to answer
+    // over UDP.
+    let use_offline_cap = im.offline;
     let lead = translator.format(
         "offer-friendship-from",
         &TransArgs::new().text("name", &im.from_agent_name),
@@ -1106,6 +1116,7 @@ fn spawn_friendship_card(
                     transaction_id,
                     friend_id,
                     calling_card_folder,
+                    use_offline_cap,
                 }));
                 // The session adds the friend as it accepts, and says so in no
                 // friend event: re-read the buddy list, after the accept.
@@ -1124,7 +1135,11 @@ fn spawn_friendship_card(
             move |_activate: On<Activate>,
                   mut sl: MessageWriter<SlCommand>,
                   mut resolves: MessageWriter<ResolveNotification>| {
-                sl.write(SlCommand(Command::DeclineFriendship(transaction_id)));
+                sl.write(SlCommand(Command::DeclineFriendship {
+                    transaction_id,
+                    friend_id,
+                    use_offline_cap,
+                }));
                 resolves.write(ResolveNotification {
                     toast: root,
                     button: None,
@@ -1457,8 +1472,8 @@ mod tests {
     use crate::auto_reject::{OfferClass, RejectKind};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
-        AgentKey, Command, GroupKey, ImDialog, InstantMessage, RegionCoordinates, TransactionId,
-        Uuid,
+        AgentKey, Command, FriendKey, GroupKey, ImDialog, InstantMessage, RegionCoordinates,
+        TransactionId, Uuid,
     };
 
     /// An offer IM of the given dialog, from `from`, carrying `id` as its
@@ -1599,9 +1614,28 @@ mod tests {
         assert!(
             matches!(
                 decline_command(&im, RejectKind::Friendship),
-                Some(Command::DeclineFriendship(id)) if id == TransactionId::from(transaction)
+                Some(Command::DeclineFriendship {
+                    transaction_id,
+                    friend_id,
+                    use_offline_cap: false,
+                }) if transaction_id == TransactionId::from(transaction)
+                    && friend_id == FriendKey::from(Uuid::from_u128(0x11))
             ),
             "expected the friendship decline under the offer's transaction id"
+        );
+        // The same offer, kept while the agent was away: answered over the
+        // DeclineFriendship capability, as the reference does.
+        let mut kept = im;
+        kept.offline = true;
+        assert!(
+            matches!(
+                decline_command(&kept, RejectKind::Friendship),
+                Some(Command::DeclineFriendship {
+                    use_offline_cap: true,
+                    ..
+                })
+            ),
+            "a kept friendship offer is declined over the capability"
         );
     }
 

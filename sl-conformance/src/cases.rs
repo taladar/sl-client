@@ -43,6 +43,7 @@ pub mod event_info;
 pub mod experience_admin_contributor;
 pub mod experience_info;
 pub mod experience_permissions;
+pub mod friends_presence;
 pub mod friendship_offer_accept;
 pub mod friendship_terminate;
 pub mod gestures;

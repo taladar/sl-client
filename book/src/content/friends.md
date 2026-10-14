@@ -33,6 +33,11 @@ To locate an agent in-world (a friend on the map, or any avatar nearby), see
 - **Offer / respond** — `Command::OfferFriendship`, then the recipient's
   `Command::AcceptFriendship` or `DeclineFriendship`. The offer itself travels
   as an [instant message](chat.md#instant-messages) with the friendship dialog.
+  An offer that was kept while the recipient was away is answered with
+  `use_offline_cap` set: through the `AcceptFriendship` / `DeclineFriendship`
+  capabilities where the region grants them (Second Life), over UDP where it
+  does not. An offer read over `ReadOfflineMsgs` has no transaction id, so the
+  capabilities are its only answer.
 - **Remove** — `Command::TerminateFriendship`. When a friendship ends — whether
   the *other* party removed you or a removal you requested is confirmed — the
   simulator pushes `Event::FriendshipTerminated { other }`. A client mirroring
@@ -59,8 +64,10 @@ offer/accept handshake correlated by a `TransactionId`:
   `Event::CallingCardDeclined { agent, transaction }`. The accepter's
   destination folder is theirs, not the offerer's, so it is not surfaced.
 
-Calling cards are largely a Second Life feature; OpenSim does not surface
-calling-card offers.
+What each grid actually sends for all of this — who is told of an offer, an
+answer, a rights change, a calling card; when a friend is said to come and go;
+what Second Life masks — is measured in
+[Grid Behaviour: Friends and presence](../gridspec/friends.md).
 
 ## The server side
 

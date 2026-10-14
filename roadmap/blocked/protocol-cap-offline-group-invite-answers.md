@@ -22,9 +22,15 @@ that the answer cannot be sent. Every other invitation keeps the UDP
 `ImprovedInstantMessage` answers (`GroupInvitationAccept` /
 `GroupInvitationDecline`) with its transaction id.
 
-Add the two commands to the client (both runtimes), answer a
-capability-delivered invitation over them in the viewer, and record the
-reply shape in `book/src/comms/caps-reference.md`.
+The client already has them: `Command::AcceptGroupInvitation` /
+`DeclineGroupInvitation` carry `use_offline_cap`, both runtimes POST
+`group_invite_response_body` to the capability, and the viewer sets it for a
+nil-id offline invitation (`uses_offline_cap`, `sl-viewer-people`). Left: the
+measurement — whether Second Life takes the answer, for an invitation read
+over either road (Firestorm only answers a nil-id one over the capability) —
+an answer that reports `{success}` rather than being thrown away when the
+capability is missing, and the reply shape in
+`book/src/comms/caps-reference.md`.
 
 Every capability adopted here goes into `REQUESTED_CAPABILITIES`
 (`sl-proto/src/session.rs`), is used where the region grants it, keeps the

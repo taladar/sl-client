@@ -7293,6 +7293,14 @@ impl Session {
         Ok(())
     }
 
+    /// Notes a friendship this agent accepted over the
+    /// [`AcceptFriendship`](crate::CAP_ACCEPT_FRIENDSHIP) capability rather
+    /// than [`Session::accept_friendship`]: the runtime sends the request, and
+    /// the friend is added to the buddy cache as the UDP accept adds it.
+    pub fn note_friendship_accepted(&mut self, friend_id: FriendKey) {
+        self.add_friend(friend_id);
+    }
+
     /// Inserts a freshly-formed friendship into the buddy cache with the default
     /// `CAN_SEE_ONLINE` grant in both directions (the rights a new friendship is
     /// born with on OpenSim and SL; any later `ChangeUserRights` corrects a

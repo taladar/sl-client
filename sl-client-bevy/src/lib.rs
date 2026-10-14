@@ -13,18 +13,19 @@ use std::collections::{BTreeSet, HashMap};
 
 use sl_proto::{
     AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_PAGE_SIZE,
-    CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
+    CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
-    CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE,
-    CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT,
-    CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
-    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
-    CAP_INTEREST_LIST, CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD,
-    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_FRIENDSHIP,
+    CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES,
+    CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_METADATA,
+    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
+    CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
+    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO, CAP_VOICE_SIGNALING,
@@ -49,8 +50,9 @@ use sl_proto::{
     chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
     create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
     experience_id_query, experience_info_query, experience_query, find_experience_query,
-    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
-    listings_request, merchant_status_request, parse_login_response, update_listing_request,
+    forget_experience_query, friendship_answer_url, group_experiences_query,
+    group_invite_response_body, listing_request, listings_request, merchant_status_request,
+    parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -431,7 +433,7 @@ use crate::caps::{CAPS_FAILURE_PREFIX, fetch_neighbour_caps, start_caps};
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
-    run_avatar_picker_search, run_caps_oneway, run_chat_session_fetch_history,
+    answer_friendship, run_avatar_picker_search, run_caps_oneway, run_chat_session_fetch_history,
     run_chat_session_request, run_delete_caps_llsd, run_environment_change, run_experience_query,
     run_fetch_lsl_syntax, run_get_caps_llsd, run_land_resources, run_patch_caps_llsd,
     run_put_caps_llsd, run_remote_parcel_request, run_script_metadata, run_task_inventory,
@@ -2413,11 +2415,52 @@ fn apply_command(
             transaction_id,
             friend_id,
             calling_card_folder,
+            use_offline_cap,
         } => {
-            session.accept_friendship(*transaction_id, *friend_id, *calling_card_folder, now)?;
+            // A kept offer is answered over the capability where the region
+            // grants it, as the reference does; a live offer, or a region
+            // without it, over UDP.
+            if let Some(url) = caps
+                .and_then(|caps| caps.map.get(CAP_ACCEPT_FRIENDSHIP))
+                .filter(|_url| *use_offline_cap)
+            {
+                let url =
+                    friendship_answer_url(url, *friend_id, Some(&session.agent_legacy_name()));
+                crate::log_context::spawn_thread(move || answer_friendship(&url, true));
+                session.note_friendship_accepted(*friend_id);
+            } else {
+                if transaction_id.get().is_nil() {
+                    tracing::warn!(
+                        "accepting a friendship offer over UDP without its transaction id"
+                    );
+                }
+                session.accept_friendship(
+                    *transaction_id,
+                    *friend_id,
+                    *calling_card_folder,
+                    now,
+                )?;
+            }
         }
-        Command::DeclineFriendship(transaction_id) => {
-            session.decline_friendship(*transaction_id, now)?;
+        Command::DeclineFriendship {
+            transaction_id,
+            friend_id,
+            use_offline_cap,
+        } => {
+            if let Some(url) = caps
+                .and_then(|caps| caps.map.get(CAP_DECLINE_FRIENDSHIP))
+                .filter(|_url| *use_offline_cap)
+            {
+                let url = friendship_answer_url(url, *friend_id, None);
+                crate::log_context::spawn_thread(move || answer_friendship(&url, false));
+            } else {
+                if transaction_id.get().is_nil() {
+                    tracing::warn!(
+                        "declining a friendship offer over UDP without its transaction id"
+                    );
+                }
+                session.decline_friendship(*transaction_id, now)?;
+            }
         }
         Command::OfferCallingCard {
             to_agent_id,

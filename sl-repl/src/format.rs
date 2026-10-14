@@ -537,7 +537,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::OfferFriendship { .. } => "offer_friendship",
         Command::TerminateFriendship(..) => "terminate_friendship",
         Command::AcceptFriendship { .. } => "accept_friendship",
-        Command::DeclineFriendship(..) => "decline_friendship",
+        Command::DeclineFriendship { .. } => "decline_friendship",
         Command::OfferCallingCard { .. } => "offer_calling_card",
         Command::AcceptCallingCard { .. } => "accept_calling_card",
         Command::DeclineCallingCard(..) => "decline_calling_card",

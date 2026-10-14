@@ -137,6 +137,7 @@ impl GridTest for FriendshipTerminate {
                     transaction_id: TransactionId::from(offer.id),
                     friend_id: primary_id.uuid().into(),
                     calling_card_folder: InventoryFolderKey::from(Uuid::nil()),
+                    use_offline_cap: false,
                 })
                 .await?;
 

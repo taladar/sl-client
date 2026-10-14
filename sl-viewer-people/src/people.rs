@@ -290,7 +290,7 @@ const FRIENDS_TABLE: TableSpec = TableSpec {
             token: "you",
             kind: TableColumnKind::Custom,
             width: TableColumnWidth::Fixed {
-                default: RIGHT_COL_WIDTH * 3.0,
+                default: group_width(true),
             },
             align: TableAlign::Start,
             sortable: false,
@@ -582,17 +582,42 @@ impl RightKind {
     }
 }
 
-/// The six permission columns, in display order: the three rights this agent
-/// grants the friend ("They can …"), then the three the friend grants this agent
-/// ("You can …"). `received` selects which rights field a column reads.
-const RIGHT_COLUMNS: [(bool, RightKind); 6] = [
+/// The five permission columns, in display order: the three rights this agent
+/// grants the friend ("They can …"), then the two the friend grants this agent
+/// that it can observe ("You can …"). `received` selects which rights field a
+/// column reads.
+///
+/// There is no "you can see them online" column, as in the reference: Second
+/// Life never tells a grantee it may see the grantor online (a full grant
+/// reaches the grantee as 6, not 7 — `book/src/gridspec/friends.md`), and a
+/// friend who hides from you simply looks offline, which the presence dot
+/// already shows.
+const RIGHT_COLUMNS: [(bool, RightKind); 5] = [
     (false, RightKind::SeeOnline),
     (false, RightKind::Map),
     (false, RightKind::Edit),
-    (true, RightKind::SeeOnline),
     (true, RightKind::Map),
     (true, RightKind::Edit),
 ];
+
+/// The rights one permission group shows: all three that this agent grants,
+/// the two received ones it can observe.
+const fn group_kinds(received: bool) -> &'static [RightKind] {
+    if received {
+        &[RightKind::Map, RightKind::Edit]
+    } else {
+        &[RightKind::SeeOnline, RightKind::Map, RightKind::Edit]
+    }
+}
+
+/// How wide one permission group is: a column a right.
+const fn group_width(received: bool) -> f32 {
+    if received {
+        RIGHT_COL_WIDTH * 2.0
+    } else {
+        RIGHT_COL_WIDTH * 3.0
+    }
+}
 
 /// Whether a friend row's column `column` (a `(received, kind)` pair) is set.
 const fn column_is_set(row: &FriendRow, column: (bool, RightKind)) -> bool {
@@ -716,6 +741,7 @@ const fn column_token(column: SortColumn) -> &'static str {
         SortColumn::Right(false, RightKind::SeeOnline) => "g_o",
         SortColumn::Right(false, RightKind::Map) => "g_m",
         SortColumn::Right(false, RightKind::Edit) => "g_e",
+        // No column sorts by it any more; the token stays its own.
         SortColumn::Right(true, RightKind::SeeOnline) => "r_o",
         SortColumn::Right(true, RightKind::Map) => "r_m",
         SortColumn::Right(true, RightKind::Edit) => "r_e",
@@ -730,7 +756,6 @@ fn parse_column_token(token: &str) -> Option<SortColumn> {
         "g_o" => SortColumn::Right(false, RightKind::SeeOnline),
         "g_m" => SortColumn::Right(false, RightKind::Map),
         "g_e" => SortColumn::Right(false, RightKind::Edit),
-        "r_o" => SortColumn::Right(true, RightKind::SeeOnline),
         "r_m" => SortColumn::Right(true, RightKind::Map),
         "r_e" => SortColumn::Right(true, RightKind::Edit),
         _other => return None,
@@ -1094,9 +1119,9 @@ struct FriendRowParts {
     presence: Entity,
     /// The name label node.
     label: Entity,
-    /// The six permission-icon glyph nodes, in [`RIGHT_COLUMNS`] order (the three
-    /// "They can …" columns, then the three "You can …").
-    rights: [Entity; 6],
+    /// The five permission-icon glyph nodes, in [`RIGHT_COLUMNS`] order (the
+    /// three "They can …" columns, then the two "You can …").
+    rights: Vec<Entity>,
 }
 
 /// The friend a pooled row currently presents (so a press knows who to select),
@@ -1672,9 +1697,10 @@ fn sort_on_press(column: SortColumn) -> impl Fn(On<Pointer<Press>>, MessageWrite
 }
 
 /// Fill a widget custom header cell with one permission-group header — a group
-/// label above a row of three one-letter, clickable column headers (online / map /
-/// edit), sized to sit over the row's matching three rights cells. `received`
-/// selects the granted-vs-received sort column each letter maps to.
+/// label above a row of one-letter, clickable column headers (online / map /
+/// edit for the granted group, map / edit for the received one), sized to sit
+/// over the row's matching rights cells. `received` selects the
+/// granted-vs-received sort column each letter maps to.
 fn fill_rights_group_header(
     commands: &mut Commands,
     parent: Entity,
@@ -1685,7 +1711,7 @@ fn fill_rights_group_header(
     let group = commands
         .spawn((
             Node {
-                width: Val::Px(RIGHT_COL_WIDTH * 3.0),
+                width: Val::Px(group_width(received)),
                 flex_shrink: 0.0,
                 align_items: AlignItems::Center,
                 ..column(Val::Px(1.0))
@@ -1712,7 +1738,7 @@ fn fill_rights_group_header(
             ChildOf(group),
         ))
         .id();
-    for kind in [RightKind::SeeOnline, RightKind::Map, RightKind::Edit] {
+    for &kind in group_kinds(received) {
         let cell = commands
             .spawn((
                 Node {
@@ -2416,18 +2442,13 @@ fn populate_friend_rows(
         };
         // The two rights groups, in the same order as the header: "They can …"
         // (granted, editable checkboxes) then "You can …" (received, read-only).
-        let [they_online, they_map, they_edit] =
-            spawn_row_rights_group(&mut commands, they_cell, false, &ui.icons);
-        let [you_online, you_map, you_edit] =
-            spawn_row_rights_group(&mut commands, you_cell, true, &ui.icons);
-        let rights = [
-            they_online,
-            they_map,
-            they_edit,
-            you_online,
-            you_map,
-            you_edit,
-        ];
+        let mut rights = spawn_row_rights_group(&mut commands, they_cell, false, &ui.icons);
+        rights.extend(spawn_row_rights_group(
+            &mut commands,
+            you_cell,
+            true,
+            &ui.icons,
+        ));
         // The dot is always in one of its two presence states, so it spawns in
         // the resting one rather than classless; `bind_friend_rows` settles it
         // on the same frame it takes a friend.
@@ -2457,9 +2478,9 @@ fn populate_friend_rows(
     }
 }
 
-/// Fill a row's rights custom cell with one permission group (three checkbox
-/// cells) and return the three checkbox [`ImageNode`] entities, in online / map /
-/// edit order.
+/// Fill a row's rights custom cell with one permission group (a checkbox cell
+/// for each of [`group_kinds`]) and return the checkbox [`ImageNode`]
+/// entities, in that order.
 ///
 /// A granted (`received == false`) cell is an editable checkbox with a toggle
 /// observer; a received cell is a read-only indicator. The default image is the
@@ -2469,11 +2490,11 @@ fn spawn_row_rights_group(
     parent: Entity,
     received: bool,
     icons: &PeopleIcons,
-) -> [Entity; 3] {
+) -> Vec<Entity> {
     let group = commands
         .spawn((
             Node {
-                width: Val::Px(RIGHT_COL_WIDTH * 3.0),
+                width: Val::Px(group_width(received)),
                 flex_shrink: 0.0,
                 ..default()
             },
@@ -2481,59 +2502,61 @@ fn spawn_row_rights_group(
             ChildOf(parent),
         ))
         .id();
-    let kinds = [RightKind::SeeOnline, RightKind::Map, RightKind::Edit];
-    kinds.map(|kind| {
-        let cell = commands
-            .spawn((
-                Node {
-                    width: Val::Px(RIGHT_COL_WIDTH),
-                    flex_shrink: 0.0,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                ChildOf(group),
-            ))
-            .id();
-        let checkbox = commands
-            .spawn((
-                ImageNode::new(icons.checkbox(false)),
-                ClassList::new_with_classes([RIGHTS_CELL_CLASS]),
-                Node {
-                    width: Val::Px(ICON_DISPLAY),
-                    height: Val::Px(ICON_DISPLAY),
-                    ..default()
-                },
-                RightCell { kind },
-                CellFriend(None),
-                // An icon says nothing in words: the box is named by the right
-                // and its direction, as the column header's icon shows it.
-                Semantic::new(Role::Checkbox).name_key(kind.name_key(received)),
-                // Only granted rights are editable; a received cell is read-only.
-                if received {
-                    Pickable::IGNORE
-                } else {
-                    Pickable {
-                        should_block_lower: true,
-                        is_hoverable: true,
-                    }
-                },
-                ChildOf(cell),
-            ))
-            .id();
-        if received {
-            // Read-only in fact, not merely in styling: a received cell gets no
-            // toggle observer below. Saying so with the marker is what
-            // `:checked:disabled` selects on, and it tells the accessibility
-            // tree what the tint used to say only to the eye.
-            commands
-                .entity(checkbox)
-                .insert(bevy::ui::InteractionDisabled);
-        } else {
-            commands.entity(checkbox).observe(on_toggle_right);
-        }
-        checkbox
-    })
+    group_kinds(received)
+        .iter()
+        .map(|&kind| {
+            let cell = commands
+                .spawn((
+                    Node {
+                        width: Val::Px(RIGHT_COL_WIDTH),
+                        flex_shrink: 0.0,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    ChildOf(group),
+                ))
+                .id();
+            let checkbox = commands
+                .spawn((
+                    ImageNode::new(icons.checkbox(false)),
+                    ClassList::new_with_classes([RIGHTS_CELL_CLASS]),
+                    Node {
+                        width: Val::Px(ICON_DISPLAY),
+                        height: Val::Px(ICON_DISPLAY),
+                        ..default()
+                    },
+                    RightCell { kind },
+                    CellFriend(None),
+                    // An icon says nothing in words: the box is named by the right
+                    // and its direction, as the column header's icon shows it.
+                    Semantic::new(Role::Checkbox).name_key(kind.name_key(received)),
+                    // Only granted rights are editable; a received cell is read-only.
+                    if received {
+                        Pickable::IGNORE
+                    } else {
+                        Pickable {
+                            should_block_lower: true,
+                            is_hoverable: true,
+                        }
+                    },
+                    ChildOf(cell),
+                ))
+                .id();
+            if received {
+                // Read-only in fact, not merely in styling: a received cell gets no
+                // toggle observer below. Saying so with the marker is what
+                // `:checked:disabled` selects on, and it tells the accessibility
+                // tree what the tint used to say only to the eye.
+                commands
+                    .entity(checkbox)
+                    .insert(bevy::ui::InteractionDisabled);
+            } else {
+                commands.entity(checkbox).observe(on_toggle_right);
+            }
+            checkbox
+        })
+        .collect()
 }
 
 /// A granted-rights checkbox was clicked: flip that right and send the update
@@ -2924,8 +2947,8 @@ mod tests {
         );
     }
 
-    /// The six permission columns read the right rights field per direction:
-    /// granted → the "They can …" triad, received → the "You can …" triad.
+    /// The five permission columns read the right rights field per direction:
+    /// granted → the "They can …" three, received → the "You can …" two.
     #[test]
     fn rights_columns_map_both_directions() {
         let mut model = FriendsModel::default();
@@ -2942,8 +2965,8 @@ mod tests {
                 .map(|column| super::column_is_set(row, *column))
                 .collect::<Vec<bool>>()
         });
-        // [they_online, they_map, they_edit, you_online, you_map, you_edit]
-        assert_eq!(columns, Some(vec![true, true, false, false, false, true]));
+        // [they_online, they_map, they_edit, you_map, you_edit]
+        assert_eq!(columns, Some(vec![true, true, false, false, true]));
     }
 
     /// The default sort is online-first, then name ascending; clicking Name makes

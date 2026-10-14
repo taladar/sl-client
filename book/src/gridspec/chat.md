@@ -300,8 +300,8 @@ a record and found none. `sl-proto` now reads the nested array, and takes
 `asset_id` for the id of a typed message, an automatic reply and a script's
 message where `transaction-id` is nil, so that both roads hand a client the
 same message. An offer's or an invitation's id is left nil, which is what
-tells a viewer to answer it over the offline capabilities
-(`gridspec-friends-presence`).
+tells a viewer to answer it over the offline capabilities ([Friends and
+presence](friends.md)).
 
 ### What the viewer does with it
 
@@ -324,10 +324,9 @@ tells a viewer to answer it over the offline capabilities
 
 ### Not measured
 
-- An offer kept for an avatar that is away — friendship, inventory, a group
-  invitation — over either road (`gridspec-friends-presence`,
-  `gridspec-inventory-offers`, `gridspec-groups`), and what Second Life
-  sends an accepter.
+- An inventory offer or a group invitation kept for an avatar that is away,
+  over either road (`gridspec-inventory-offers`, `gridspec-groups`). A
+  friendship offer is measured in [Friends and presence](friends.md).
 - How long Second Life's suspension after a burst lasts, and the rate that
   triggers it.
 - How many messages a grid keeps for one avatar, and for how long.

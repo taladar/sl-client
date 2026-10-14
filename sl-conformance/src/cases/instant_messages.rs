@@ -904,7 +904,7 @@ async fn watch(session: &mut Session, window: Duration) -> Result<Got, TestFailu
 
 /// The two ids exclusive-ored: the id a viewer gives the session of two
 /// avatars.
-fn session_of(left: Uuid, right: Uuid) -> Uuid {
+pub(crate) fn session_of(left: Uuid, right: Uuid) -> Uuid {
     let mut bytes = [0_u8; 16];
     for (slot, (a, b)) in bytes
         .iter_mut()

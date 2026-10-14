@@ -471,6 +471,38 @@ impl Session {
         Ok(())
     }
 
+    /// Drop this avatar's connection without logging out — what a viewer that
+    /// crashed or lost its network leaves behind: the run loop is aborted, so
+    /// no `LogoutRequest` is sent and the grid has to notice on its own. Like
+    /// [`Session::disconnect`] it leaves a reusable handle for
+    /// [`Session::relogin`].
+    ///
+    /// # Errors
+    ///
+    /// Never returns an error today; fallible for symmetry with
+    /// [`Session::disconnect`].
+    pub async fn vanish(&mut self) -> Result<(), TestFailure> {
+        if !self.connected {
+            return Ok(());
+        }
+        let placeholder = tokio::spawn(async { Ok(()) });
+        let run = std::mem::replace(&mut self.run, placeholder);
+        run.abort();
+        match run.await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::warn!("run loop error on vanishing: {error}"),
+            Err(join) if join.is_cancelled() => {}
+            Err(join) => tracing::warn!("run task join error on vanishing: {join}"),
+        }
+        let (dead_tx, dead_rx) = mpsc::channel::<Command>(1);
+        drop(dead_rx);
+        self.commands = dead_tx;
+        let (_event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
+        self.events = event_rx;
+        self.connected = false;
+        Ok(())
+    }
+
     /// Log the same avatar back in after a [`Session::disconnect`], replacing the
     /// run loop, channels, and login-derived identity in place.
     ///

@@ -50,6 +50,45 @@ pub(crate) async fn post_llsd_oneway(
     }
 }
 
+/// Answers a friendship offer that was kept over the `AcceptFriendship`
+/// (`accept`: a POST with an empty LLSD body) or `DeclineFriendship` (a DELETE)
+/// capability, at `url` from [`sl_proto::friendship_answer_url`]. The grid
+/// answers `{ "success": bool }`; there is no event to carry it, so a failed
+/// request, a rejecting status or `success` false is logged — the reference
+/// viewer warns the same way. The URL is not logged: it carries the region's
+/// per-session cap token.
+pub(crate) async fn answer_friendship(url: String, accept: bool, http: ReqwestClient) {
+    let request = if accept {
+        http.post(&url)
+            .header("Content-Type", "application/llsd+xml")
+            .body(Llsd::Undef.to_llsd_xml())
+    } else {
+        http.delete(&url)
+    };
+    let what = if accept {
+        "the AcceptFriendship request"
+    } else {
+        "the DeclineFriendship request"
+    };
+    match request
+        .header("Accept", "application/llsd+xml")
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            let text = response.text().await.unwrap_or_default();
+            let success = parse_llsd_xml(&text)
+                .ok()
+                .and_then(|reply| reply.get("success").and_then(Llsd::as_bool));
+            if success != Some(true) {
+                tracing::warn!("{what} was not taken: {text}");
+            }
+        }
+        Ok(response) => tracing::warn!(status = %response.status(), "{what} was rejected"),
+        Err(error) => tracing::warn!("{what} could not be sent: {error}"),
+    }
+}
+
 /// POSTs `body` to the `cap` capability URL, ignoring the reply as the
 /// reference viewer does, but reporting a POST that could not be sent or was
 /// rejected as a failure of `cap` (over `caps_tx`), so an edit the grid

@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 139 |
 | ready | 353 |
-| blocked | 105 |
+| blocked | 103 |
 | in-progress | 20 |
-| bugs | 39 |
-| done | 1360 |
+| bugs | 38 |
+| done | 1363 |
 | deferred | 30 |
 | wont-do | 17 |
 | **total** | **2063** |
@@ -1096,6 +1096,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-edit-permission-enforcement`](ready/server-fake-grid-edit-permission-enforcement.md)
   — Fake grid — refuse edits the editor may not make, as each grid refuses them
   (blocked by `gridspec-object-edit` (done))
+- [`server-fake-grid-friends-presence`](ready/server-fake-grid-friends-presence.md)
+  — Fake grid — a mutable friendship store with rights, presence fan-out and
+  calling cards (blocked by `gridspec-friends-presence` (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
@@ -1146,8 +1149,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   and estate actions on each grid
 - [`gridspec-experiences`](ready/gridspec-experiences.md) — Experience records,
   permissions and admin on each grid
-- [`gridspec-friends-presence`](ready/gridspec-friends-presence.md) —
-  Friendship, rights, presence notifications and calling cards on each grid
 - [`gridspec-god-tools`](ready/gridspec-god-tools.md) — God tools as OpenSim
   answers them
 - [`gridspec-group-chat-and-conference`](ready/gridspec-group-chat-and-conference.md)
@@ -1191,7 +1192,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (105)
+## blocked (103)
 
 ### protocol
 
@@ -1211,9 +1212,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   lists over the GroupAPIv1 capability (blocked by `gridspec-groups`)
 - [`protocol-cap-home-location`](blocked/protocol-cap-home-location.md) — Set
   home over the HomeLocation capability (blocked by `gridspec-landmarks-home`)
-- [`protocol-cap-offline-friendship-answers`](blocked/protocol-cap-offline-friendship-answers.md)
-  — Answer offline friendship offers over AcceptFriendship / DeclineFriendship
-  (blocked by `gridspec-friends-presence`)
 - [`protocol-cap-offline-group-invite-answers`](blocked/protocol-cap-offline-group-invite-answers.md)
   — Answer offline group invitations over AcceptGroupInvite / DeclineGroupInvite
   (blocked by `gridspec-groups`)
@@ -1221,7 +1219,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   type names over ProductInfoRequest (blocked by `gridspec-search-directory`)
 - [`protocol-cap-read-offline-msgs`](blocked/protocol-cap-read-offline-msgs.md)
   — Drain kept messages over ReadOfflineMsgs where the answer capabilities exist
-  (blocked by `protocol-cap-offline-friendship-answers`,
+  (blocked by `protocol-cap-offline-friendship-answers` (done),
   `protocol-cap-offline-group-invite-answers`)
 - [`protocol-sim-group-messages`](blocked/protocol-sim-group-messages.md) —
   SimSession — decode group requests and send group replies (blocked by
@@ -1383,9 +1381,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-estate-actions`](blocked/server-fake-grid-estate-actions.md)
   — Fake grid — kick, eject, freeze, teleport home, estate messages and restarts
   (blocked by `gridspec-estate`)
-- [`server-fake-grid-friends-presence`](blocked/server-fake-grid-friends-presence.md)
-  — Fake grid — a mutable friendship store with rights, presence fan-out and
-  calling cards (blocked by `gridspec-friends-presence`)
 - [`server-fake-grid-god-tools`](blocked/server-fake-grid-god-tools.md) — Fake
   grid — god tools as OpenSim answers them (blocked by `gridspec-god-tools`)
 - [`server-fake-grid-groups`](blocked/server-fake-grid-groups.md) — Fake grid —
@@ -1584,7 +1579,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (39)
+## bugs (38)
 
 ### protocol
 
@@ -1631,8 +1626,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-floater-minimize-caps-follow-no-pattern`](bugs/viewer-floater-minimize-caps-follow-no-pattern.md)
   — Which floaters have a minimize button follows no pattern, and most that lack
   one should have it
-- [`viewer-friends-list-shows-a-sixth-rights-column`](bugs/viewer-friends-list-shows-a-sixth-rights-column.md)
-  — The Friends list shows six rights columns; the reference shows five
 - [`viewer-inventory-settings-subtree-shows-unloaded`](bugs/viewer-inventory-settings-subtree-shows-unloaded.md)
   — The Library root and its Environments subtree never read as loaded in the
   viewer model
@@ -1683,7 +1676,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1360)
+## done (1363)
 
 ### protocol
 
@@ -1878,6 +1871,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-cap-interest-list`](done/protocol-cap-interest-list.md) — Switch
   the interest list mode over the InterestList capability (blocked by
   `gridspec-object-update-stream` (done))
+- [`protocol-cap-offline-friendship-answers`](done/protocol-cap-offline-friendship-answers.md)
+  — Answer offline friendship offers over AcceptFriendship / DeclineFriendship
+  (blocked by `gridspec-friends-presence` (done))
 - [`protocol-cap-parcel-properties-update`](done/protocol-cap-parcel-properties-update.md)
   — Edit parcels over the ParcelPropertiesUpdate capability
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
@@ -2501,6 +2497,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
   status readout intermittently drops its "fps" label
+- [`viewer-friends-list-shows-a-sixth-rights-column`](done/viewer-friends-list-shows-a-sixth-rights-column.md)
+  — The Friends list shows six rights columns; the reference shows five
 - [`viewer-gallery-floaters-are-mostly-stubs`](done/viewer-gallery-floaters-are-mostly-stubs.md)
   — 43 of the gallery's 56 floaters show a line of prose instead of their
   content
@@ -4637,6 +4635,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   resends, pings, inactivity, packet quirks and throttles
 - [`gridspec-environment`](done/gridspec-environment.md) — Region and parcel
   environments (EEP) on each grid
+- [`gridspec-friends-presence`](done/gridspec-friends-presence.md) — Friendship,
+  rights, presence notifications and calling cards on each grid
 - [`gridspec-infra-fake-flavour-conformance`](done/gridspec-infra-fake-flavour-conformance.md)
   — Run every conformance case against both fake-grid flavours, beside the live
   grids

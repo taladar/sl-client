@@ -2751,7 +2751,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "accept_friendship",
-            usage: "<transaction_id> <friend_id> <calling_card_folder>",
+            usage: "<transaction_id> <friend_id> <calling_card_folder> [use_offline_cap=false]",
             build: |args, ctx| {
                 Ok(Command::AcceptFriendship {
                     transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 0)?),
@@ -2761,16 +2761,19 @@ fn all_specs() -> Vec<CommandSpec> {
                         "calling_card_folder",
                         2,
                     )?),
+                    use_offline_cap: args.bool_or(ctx, "use_offline_cap", 3, false)?,
                 })
             },
         },
         CommandSpec {
             name: "decline_friendship",
-            usage: "<transaction_id>",
+            usage: "<transaction_id> <friend_id> [use_offline_cap=false]",
             build: |args, ctx| {
-                Ok(Command::DeclineFriendship(TransactionId::from(
-                    args.req_uuid(ctx, "transaction_id", 0)?,
-                )))
+                Ok(Command::DeclineFriendship {
+                    transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 0)?),
+                    friend_id: FriendKey::from(args.req_uuid(ctx, "friend_id", 1)?),
+                    use_offline_cap: args.bool_or(ctx, "use_offline_cap", 2, false)?,
+                })
             },
         },
         CommandSpec {

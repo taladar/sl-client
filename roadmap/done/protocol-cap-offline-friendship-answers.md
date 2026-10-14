@@ -2,7 +2,7 @@
 id: protocol-cap-offline-friendship-answers
 title: Answer offline friendship offers over AcceptFriendship / DeclineFriendship
 topic: protocol
-status: blocked
+status: done
 origin: protocol-reference-capabilities triage (2026-10-04)
 refs: [protocol-reference-capabilities, viewer-offline-im-drain,
   protocol-cap-read-offline-msgs]
@@ -45,3 +45,15 @@ brings the same messages on Second Life with every id, and either road
 empties the store for both — so the viewer's drain was left on UDP there.
 The switch to the capability waits on these two answer commands and the
 group-invitation pair ([[protocol-cap-read-offline-msgs]]).
+
+## Done (2026-10-14, with gridspec-friends-presence)
+
+`CAP_ACCEPT_FRIENDSHIP` / `CAP_DECLINE_FRIENDSHIP` are requested;
+`Command::AcceptFriendship` / `DeclineFriendship` carry `use_offline_cap`
+and answer through them where granted (`friendship_answer_url`; both
+runtimes log a refusal), UDP otherwise; the viewer sets it for every kept
+offer. Measured on aditi (`book/src/gridspec/friends.md`): both capabilities
+take a kept offer read over either road, the decline answers
+`200 {success: true}`. The fake grid serves neither (no friendship store:
+[[server-fake-grid-friends-presence]]). The drain switch is left to
+[[protocol-cap-read-offline-msgs]].

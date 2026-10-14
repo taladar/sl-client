@@ -3112,6 +3112,8 @@ mod tests {
             ("ChatSessionRequest", CapStatus::Served),
             ("AcceptGroupInvite", CapStatus::Pending),
             ("DeclineGroupInvite", CapStatus::Pending),
+            ("AcceptFriendship", CapStatus::Pending),
+            ("DeclineFriendship", CapStatus::Pending),
             ("InventoryAPIv3", CapStatus::Served),
             ("LibraryAPIv3", CapStatus::Served),
             ("CreateInventoryCategory", CapStatus::Served),

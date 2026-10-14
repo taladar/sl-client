@@ -2,7 +2,7 @@
 id: viewer-friends-list-shows-a-sixth-rights-column
 title: The Friends list shows six rights columns; the reference shows five
 topic: viewer
-status: bugs
+status: done
 origin: the user comparing the Friends list against the reference (2026-09-24)
 refs: [viewer-skin-icon-set]
 ---
@@ -48,3 +48,11 @@ decides whether the column only duplicates information or is actively wrong.
 
 The Friends list shows the reference's five rights columns, and no column
 claims to show a right the agent cannot observe.
+
+## Done (2026-10-14, with gridspec-friends-presence)
+
+Measured: Second Life masks see-online out of every `ChangeUserRights` the
+grantee is sent (a full grant arrives as 6) and sends nothing for a grant of
+that bit alone, though the login buddy list carries it. The list now shows
+five columns (`RIGHT_COLUMNS`, `group_kinds`, `group_width`); the "You" group
+is two wide. The People layout has not been looked at live since.

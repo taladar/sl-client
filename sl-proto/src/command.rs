@@ -456,10 +456,27 @@ pub enum Command {
         friend_id: FriendKey,
         /// The inventory folder to place the new calling card in.
         calling_card_folder: InventoryFolderKey,
+        /// Whether to answer over the [`AcceptFriendship`](crate::CAP_ACCEPT_FRIENDSHIP)
+        /// capability, as the reference does for an offer that was kept while
+        /// the agent was offline ([`InstantMessage::offline`](crate::InstantMessage::offline)).
+        /// Where the region grants no such capability the answer goes over UDP
+        /// under `transaction_id`, which an offer read over `ReadOfflineMsgs`
+        /// does not have.
+        use_offline_cap: bool,
     },
-    /// Decline a friendship offer (`DeclineFriendship`). The `transaction_id` is
-    /// the [`InstantMessage::id`](crate::InstantMessage::id) of the incoming friendship-offer IM.
-    DeclineFriendship(TransactionId),
+    /// Decline a friendship offer (`DeclineFriendship`), with the same choice
+    /// of road as [`AcceptFriendship`](Self::AcceptFriendship): the UDP message
+    /// under `transaction_id`, or a DELETE through the
+    /// [`DeclineFriendship`](crate::CAP_DECLINE_FRIENDSHIP) capability naming
+    /// `friend_id`.
+    DeclineFriendship {
+        /// The offer's transaction id (the friendship-offer IM's `id`).
+        transaction_id: TransactionId,
+        /// The offering agent (the offer IM's `from_agent_id`).
+        friend_id: FriendKey,
+        /// Whether to answer over the capability (an offer that was kept).
+        use_offline_cap: bool,
+    },
     /// Offer this agent's calling card to an agent (`OfferCallingCard`) — a
     /// reference card to this avatar, *not* a friendship request. The recipient
     /// sees an [`Event::CallingCardOffered`](crate::Event::CallingCardOffered).
@@ -3054,7 +3071,7 @@ impl Command {
             Self::OfferFriendship { .. } => "OfferFriendship",
             Self::TerminateFriendship(..) => "TerminateFriendship",
             Self::AcceptFriendship { .. } => "AcceptFriendship",
-            Self::DeclineFriendship(..) => "DeclineFriendship",
+            Self::DeclineFriendship { .. } => "DeclineFriendship",
             Self::OfferCallingCard { .. } => "OfferCallingCard",
             Self::AcceptCallingCard { .. } => "AcceptCallingCard",
             Self::DeclineCallingCard(..) => "DeclineCallingCard",
