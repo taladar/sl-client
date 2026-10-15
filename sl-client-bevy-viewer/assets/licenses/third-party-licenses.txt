@@ -6108,7 +6108,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: hyper-rustls 0.27.9, rustls-native-certs 0.8.4, rustls 0.23.45
+used-by: hyper-rustls 0.27.9, rustls-native-certs 0.8.4, rustls 0.23.46
 
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
 
