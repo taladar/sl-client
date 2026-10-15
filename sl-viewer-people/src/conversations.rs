@@ -2193,6 +2193,7 @@ pub(crate) fn ingest_conversation_events(
                 from_agent_id,
                 from_name,
                 message,
+                ..
             } => {
                 // The grid broadcasts our own group message back to us; we already
                 // echo it locally as "You:" on send (`route_conversation_input`),
@@ -2215,6 +2216,7 @@ pub(crate) fn ingest_conversation_events(
                 from_agent_id,
                 from_name,
                 message,
+                ..
             } => {
                 // Same self-echo suppression as group sessions (a conference
                 // session likewise echoes the sender's own line back).
@@ -2231,14 +2233,23 @@ pub(crate) fn ingest_conversation_events(
                 }
             }
             // An invitation opens the tab (and records its name) as a *pending
-            // invite* — Accept / Decline in the pane — before any message arrives.
+            // invite* — Accept / Decline in the pane. The line it carries is
+            // the session's first (both grids invite with the message that
+            // opened the session, `group-chat` census), so it is shown, as the
+            // reference does (`LLViewerChatterBoxInvitation`): our own line,
+            // which OpenSim routes back through here, is not.
             SlSessionEvent::ConferenceInvited {
                 session_id,
                 from_agent_id,
+                from_name,
                 from_group,
                 session_name,
+                message,
                 ..
             } => {
+                let carried = (!message.is_empty()
+                    && facts.identity.agent_id != Some(*from_agent_id))
+                .then_some((*from_agent_id, from_name.as_str(), message.as_str()));
                 // The invitation carries no sender name, so a blocked inviter
                 // is matched on the id alone.
                 let invited_by_blocked = text_muted(mutes, from_agent_id.uuid(), "");
@@ -2252,6 +2263,10 @@ pub(crate) fn ingest_conversation_events(
                     }
                     let group = GroupKey::from(*session_id);
                     model.note_group_name(group, session_name);
+                    if let Some((from, name, line)) = carried {
+                        avatars.note_legacy_name(from, name);
+                        model.push_remote(ConversationKey::Group(group), from, name, line);
+                    }
                     model.mark_invite(ConversationKey::Group(group));
                 } else {
                     let id = ImSessionId::from(*session_id);
@@ -2280,6 +2295,10 @@ pub(crate) fn ingest_conversation_events(
                         continue;
                     }
                     model.note_conference_name(id, session_name);
+                    if let Some((from, name, line)) = carried {
+                        avatars.note_legacy_name(from, name);
+                        model.push_remote(ConversationKey::Conference(id), from, name, line);
+                    }
                     model.mark_invite(ConversationKey::Conference(id));
                 }
             }
@@ -4121,6 +4140,25 @@ mod tests {
         app.update();
     }
 
+    /// The message a session line arrived as, from `from` under `name`.
+    fn session_im(from: AgentKey, name: &str, text: &str) -> Box<InstantMessage> {
+        Box::new(InstantMessage {
+            from_agent_id: from,
+            from_agent_name: name.to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(1)),
+            dialog: ImDialog::SessionSend,
+            from_group: false,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: Uuid::nil(),
+            parent_estate_id: 0,
+            message: text.to_owned(),
+            binary_bucket: Vec::new(),
+        })
+    }
+
     /// The events a blocked resident's presence arrives as: a nearby say, a
     /// nearby typing notice, a direct IM, an IM typing notice, a group line and
     /// a conference line.
@@ -4169,12 +4207,14 @@ mod tests {
                 from_agent_id: troll,
                 from_name: "Troll Resident".to_owned(),
                 message: "and here too".to_owned(),
+                im: session_im(troll, "Troll Resident", "and here too"),
             },
             SlSessionEvent::ConferenceSessionMessage {
                 session_id: Uuid::from_u128(0xC0FE),
                 from_agent_id: troll,
                 from_name: "Troll Resident".to_owned(),
                 message: "and here".to_owned(),
+                im: session_im(troll, "Troll Resident", "and here"),
             },
         ]
     }
@@ -4396,6 +4436,39 @@ mod tests {
         assert_eq!(model.entries.len(), 1, "only the permanent Nearby tab");
     }
 
+    /// An invitation's line is the session's first: the tab shows it and still
+    /// waits for an answer.
+    #[test]
+    fn an_invitation_shows_the_line_it_carries() {
+        let friend = AgentKey::from(Uuid::from_u128(0xF11E));
+        let group = GroupKey::from(Uuid::from_u128(0x640A));
+        let mut app = ingest_app(&[]);
+        ingest(
+            &mut app,
+            SlSessionEvent::ConferenceInvited {
+                session_id: group.uuid(),
+                from_agent_id: friend,
+                from_name: "Avatar One".to_owned(),
+                dialog: ImDialog::SessionSend,
+                from_group: true,
+                session_name: "A Group".to_owned(),
+                message: "first line".to_owned(),
+                region_id: Uuid::nil(),
+                position: RegionCoordinates::new(0.0, 0.0, 0.0),
+                parent_estate_id: 1,
+                timestamp: None,
+                binary_bucket: Vec::new(),
+            },
+        );
+        let model = app.world().resource::<ConversationModel>();
+        let entry = get(model, ConversationKey::Group(group));
+        let lines: Vec<&str> = entry
+            .map(|entry| entry.lines.iter().map(|line| line.body.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(lines, vec!["first line"]);
+        assert_eq!(entry.map(|entry| entry.pending_invite), Some(true));
+    }
+
     /// A blocked resident's line in the **server backlog** is dropped too — the
     /// one path by which something they said before the block can still arrive
     /// — while everybody else's line in the same fetch is kept.
@@ -4414,6 +4487,7 @@ mod tests {
                 from_agent_id: friend,
                 from_name: "Avatar One".to_owned(),
                 message: "live line".to_owned(),
+                im: session_im(friend, "Avatar One", "live line"),
             },
         );
         ingest(

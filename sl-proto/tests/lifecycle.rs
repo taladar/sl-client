@@ -4236,6 +4236,78 @@ mod test {
         Ok(())
     }
 
+    /// Second Life sends group chat with `from_group` clear: a session line
+    /// under the id of a group the agent is in is the group's (the reference's
+    /// `gAgent.isInGroup`), one under any other id a conference's.
+    #[test]
+    fn a_group_line_without_from_group_is_read_by_membership() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x6718);
+        let other = uuid::Uuid::from_u128(0x671A);
+        let memberships = Event::GroupMemberships(vec![sl_proto::GroupMembership {
+            group_id: GroupKey::from(group),
+            group_powers: 0,
+            accept_notices: true,
+            group_insignia_id: sl_proto::TextureKey::from(uuid::Uuid::nil()),
+            contribution: sl_proto::LandArea(0),
+            group_name: "A Group".to_owned(),
+        }]);
+        session.handle_caps_event(
+            "AgentGroupDataUpdate",
+            &sl_proto::group_memberships_to_caps_llsd(&memberships)?,
+            now,
+        )?;
+        drain(&mut session)?;
+
+        let line = |id: uuid::Uuid| {
+            AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+                agent_data: ImprovedInstantMessageAgentDataBlock {
+                    agent_id: uuid::Uuid::from_u128(0x6719),
+                    session_id: uuid::Uuid::nil(),
+                },
+                message_block: ImprovedInstantMessageMessageBlockBlock {
+                    from_group: false,
+                    to_agent_id: uuid::Uuid::from_u128(1),
+                    parent_estate_id: 0,
+                    region_id: uuid::Uuid::nil(),
+                    position: Vector {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    offline: 0,
+                    dialog: 17,
+                    id,
+                    timestamp: 0,
+                    from_agent_name: b"Friend Tester\0".to_vec(),
+                    message: b"hello\0".to_vec(),
+                    binary_bucket: vec![0],
+                },
+                estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+                meta_data: Vec::new(),
+            })
+        };
+        session.handle_datagram(sim_addr(), &server_message(&line(group), 9, true)?, now)?;
+        session.handle_datagram(sim_addr(), &server_message(&line(other), 10, true)?, now)?;
+        let events = drain_events(&mut session);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::GroupSessionMessage { group_id, .. } if group_id.uuid() == group
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::ConferenceSessionMessage { session_id, .. } if *session_id == other
+        )));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            Event::ConferenceSessionMessage { session_id, .. } if *session_id == group
+        )));
+        Ok(())
+    }
+
     #[test]
     fn group_session_message_surfaces_event() -> Result<(), TestError> {
         let now = Instant::now();
@@ -4287,6 +4359,7 @@ mod test {
                 from_agent_id,
                 from_name,
                 message,
+                ..
             } => {
                 assert_eq!(group_id, GroupKey::from(group));
                 assert_eq!(from_agent_id, AgentKey::from(sender));
@@ -21965,6 +22038,40 @@ mod test {
                 }) if *temp_session_id == temp && session_id.get() == real
             ),
             "the driver is told which session id replaced which, got {started:?}"
+        );
+        Ok(())
+    }
+
+    /// A group session's start is answered under the group's own id (both
+    /// grids, `group-chat` census): the reply is the group session's and opens
+    /// no conference of the same id beside it.
+    #[test]
+    fn a_group_session_start_reply_opens_no_conference() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x67_11);
+        session.start_group_session(GroupKey::from(group), now)?;
+        drain(&mut session)?;
+        let xml = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{group}</uuid>\
+               <key>temp_session_id</key><uuid>{group}</uuid>\
+               <key>success</key><boolean>1</boolean>\
+               <key>session_info</key><map>\
+                 <key>session_name</key><string>A Group</string>\
+               </map></map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxSessionStartReply", &parse_llsd_xml(&xml)?, now)?;
+
+        let kinds: Vec<ChatSessionKind> =
+            session.chat_sessions_info().map(|info| info.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![ChatSessionKind::Group {
+                group_id: GroupKey::from(group)
+            }]
         );
         Ok(())
     }

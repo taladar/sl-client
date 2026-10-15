@@ -618,6 +618,42 @@ impl ChatLifecycleView {
     }
 }
 
+/// Whether a `ChatterBoxSessionAgentListUpdates` entry says the agent came into
+/// the session or left it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SessionTransition {
+    /// `"ENTER"`: the agent joined the session (or is being restated in it).
+    Enter,
+    /// `"LEAVE"`: the agent left it.
+    Leave,
+    /// A transition that is neither; the reference warns and ignores it.
+    Unrecognised,
+}
+
+/// What one `ChatterBoxSessionAgentListUpdates` push says about one agent of a
+/// group or conference session — the reference's speaker update
+/// (`LLIMSpeakerMgr::updateSpeakers`, `llspeakers.cpp:739`). Every member but
+/// the agent is optional because a grid states only what changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChatSessionAgentUpdate {
+    /// The agent the entry is about.
+    pub agent: AgentKey,
+    /// Whether it entered or left, when the entry says.
+    pub transition: Option<SessionTransition>,
+    /// The entry's `info.can_voice_chat`.
+    pub can_voice_chat: Option<bool>,
+    /// The entry's `info.is_moderator`.
+    pub is_moderator: Option<bool>,
+    /// The entry's `info.mutes.text`: a moderator took the agent's text away.
+    pub text_muted: Option<bool>,
+    /// The entry's `info.mutes.voice`.
+    pub voice_muted: Option<bool>,
+    /// Whether the entry came from the old `updates` map (agent → transition)
+    /// rather than `agent_updates`, which the reference reads only when
+    /// `agent_updates` is absent.
+    pub legacy: bool,
+}
+
 /// A light, owned snapshot of one chat session — the element of the
 /// [`Session::chat_sessions_info`](crate::Session::chat_sessions_info) list and
 /// the [`Event::ChatSessions`](crate::Event::ChatSessions) reply. Deliberately

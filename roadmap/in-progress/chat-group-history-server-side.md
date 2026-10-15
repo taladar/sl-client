@@ -182,3 +182,21 @@ Still to do (aditi, needs the interactive TOTP login):
    above).
 4. OpenSim: group traffic → no fetch issued, no warnings, recall+live
    only.
+
+## Measured live (2026-10-15, gridspec-group-chat-and-conference)
+
+Items 1, 3 and 4 of the list above are answered by the `group-chat` census
+(`book/src/gridspec/chat.md` § Server history):
+
+- Item 1: Second Life answers `fetch history` for a group session with the live
+  session's lines in order (`{ from, from_id, message, num, time }`, `time`
+  an integer); the client's own fetch surfaces them as
+  `SessionServerHistory`, and the auto-fetch on joining fires. Lines were
+  never delivered at all before the same task fixed the session bucket, which
+  is why this was never seen live. The history read empty after a short
+  burst and stayed empty — what empties it is not known.
+- Item 3: a conference has **no** history: `403` "You cannot join chat".
+- Item 4: OpenSim has no capability, nothing asked, nothing logged.
+
+Left: item 2, the viewer's three bands on a group tab, which needs a live
+viewer run with someone looking.

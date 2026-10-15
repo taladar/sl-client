@@ -114,7 +114,19 @@ keyed by the temporary id — a conversation tab, say. A reply with
 
 Much of the multi-party machinery (invitations especially) is delivered through
 the [event queue](../comms/caps.md#the-event-queue-eventqueueget) rather than
-over UDP.
+over UDP: the roster as `Event::ChatSessionAgentsUpdated` (folded into the
+session's participants), a refused line or start as
+`Event::ChatSessionEventReply`, a session the grid closes as
+`Event::ChatSessionForceClosed`.
+
+Second Life sends group chat — the lines and the invitations — with
+`from_group` **clear**, so `Session` reads a session line as a group's by its
+id: one of the groups the agent is in (it keeps the list from
+`AgentGroupDataUpdate`, joins, leaves and drops), or a group session that is
+open. And Second Life refuses a session line with an empty bucket; every
+session line goes out with the reference's one zero byte. What each grid does
+with a session is measured in [Grid Behaviour: Group and conference
+sessions](../gridspec/chat.md#group-and-conference-sessions).
 
 ## The server side
 

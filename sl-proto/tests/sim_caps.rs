@@ -5,6 +5,24 @@
 
 #[cfg(test)]
 mod test {
+
+    /// A roster entry entering `agent` with voice (`entering`), or leaving it.
+    fn roster_entry(agent: sl_proto::AgentKey, entering: bool) -> sl_proto::ChatSessionAgentUpdate {
+        sl_proto::ChatSessionAgentUpdate {
+            agent,
+            transition: Some(if entering {
+                sl_proto::SessionTransition::Enter
+            } else {
+                sl_proto::SessionTransition::Leave
+            }),
+            can_voice_chat: entering.then_some(true),
+            is_moderator: None,
+            text_muted: None,
+            voice_muted: None,
+            legacy: false,
+        }
+    }
+
     use std::error::Error;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::{Duration, Instant};
@@ -669,7 +687,7 @@ mod test {
             binary_bucket: Vec::new(),
         };
         sim.enqueue_chatterbox_invitation(&invitation);
-        sim.enqueue_chatterbox_agent_list_updates(conference, &[(inviter, true)]);
+        sim.enqueue_chatterbox_agent_list_updates(conference, &[roster_entry(inviter, true)]);
 
         let eq_path = granted_event_queue_path(&caps)?;
         let poll = build_event_queue_request(None, false);
@@ -681,11 +699,21 @@ mod test {
             client.handle_caps_event(&event.message, &event.body, now)?;
         }
 
+        let events = drain_client(&mut client);
         assert!(
-            drain_client(&mut client)
+            events
                 .iter()
                 .any(|event| matches!(event, Event::ConferenceInvited { .. })),
             "the invitation surfaced on the client"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ChatSessionAgentsUpdated { session_id, updates }
+                    if *session_id == conference
+                        && updates.iter().map(|update| update.agent).eq([inviter])
+            )),
+            "the roster update surfaced on the client"
         );
         let kind = ChatSessionKind::Conference {
             id: ImSessionId::from(conference),
@@ -696,6 +724,27 @@ mod test {
             .ok_or("expected the invited conference session on the client")?;
         assert!(info.has_voice);
         assert_eq!(info.voice_members, vec![inviter]);
+        assert!(
+            info.participants.contains(&inviter),
+            "ENTER adds to the roster"
+        );
+
+        // A LEAVE takes the agent off the roster again.
+        sim.enqueue_chatterbox_agent_list_updates(conference, &[roster_entry(inviter, false)]);
+        let (status, body) = respond(&mut caps, &mut sim, &post(&eq_path, &poll))?;
+        assert_eq!(status, 200);
+        for event in &parse_event_queue_response(&body)?.events {
+            client.handle_caps_event(&event.message, &event.body, now)?;
+        }
+        let info = client
+            .chat_sessions_info()
+            .find(|info| info.kind == kind)
+            .ok_or("expected the invited conference session on the client")?;
+        assert!(
+            !info.participants.contains(&inviter),
+            "LEAVE drops from the roster"
+        );
+        assert!(info.voice_members.is_empty());
         Ok(())
     }
 

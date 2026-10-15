@@ -21,6 +21,24 @@
 
 #[cfg(test)]
 mod test {
+
+    /// A roster entry entering `agent` with voice (`entering`), or leaving it.
+    fn roster_entry(agent: sl_proto::AgentKey, entering: bool) -> sl_proto::ChatSessionAgentUpdate {
+        sl_proto::ChatSessionAgentUpdate {
+            agent,
+            transition: Some(if entering {
+                sl_proto::SessionTransition::Enter
+            } else {
+                sl_proto::SessionTransition::Leave
+            }),
+            can_voice_chat: entering.then_some(true),
+            is_moderator: None,
+            text_muted: None,
+            voice_muted: None,
+            legacy: false,
+        }
+    }
+
     use std::collections::BTreeSet;
     use std::error::Error;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -1150,12 +1168,12 @@ mod test {
         drain_server(&mut sim);
         drain_client(&mut client);
 
-        sim.enqueue_chatterbox_agent_list_updates(group.uuid(), &[(peer, true)]);
+        sim.enqueue_chatterbox_agent_list_updates(group.uuid(), &[roster_entry(peer, true)]);
         deliver_caps(&mut client, &mut sim, now)?;
         let members: Vec<AgentKey> = client.session_voice_members(kind).collect();
         assert_eq!(members, vec![peer], "the ENTER update added the peer");
 
-        sim.enqueue_chatterbox_agent_list_updates(group.uuid(), &[(peer, false)]);
+        sim.enqueue_chatterbox_agent_list_updates(group.uuid(), &[roster_entry(peer, false)]);
         deliver_caps(&mut client, &mut sim, now)?;
         let members: Vec<AgentKey> = client.session_voice_members(kind).collect();
         assert!(members.is_empty(), "the LEAVE update removed the peer");

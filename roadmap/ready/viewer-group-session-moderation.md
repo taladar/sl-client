@@ -36,3 +36,14 @@ Reference (Firestorm, read-only):
 `menu_conversation.xml`, `indra/newview/llfloaterimsessiontab.cpp`,
 `indra/newview/llspeakers.cpp` (moderation), ChatSessionRequest in
 `indra/newview/llimview.cpp`.
+
+## Measured (gridspec-group-chat-and-conference, 2026-10-15)
+
+On Second Life the owner of a group is a moderator in its session
+(`is_moderator` in the roster push, `Event::ChatSessionAgentsUpdated`).
+`mute update` with `params { agent_id, mute_info { text } }` answers `200` and
+an empty map, and the grid pushes a roster entry for the muted agent with
+`mutes.text` and no transition — to the moderator and to the muted agent. A
+muted agent's line is refused (`Event::ChatSessionEventReply`, "generic") and
+reaches nobody. OpenSim has no `ChatSessionRequest`. `book/src/gridspec/chat.md`
+§ Moderation.

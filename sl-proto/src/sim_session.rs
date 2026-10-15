@@ -177,9 +177,9 @@ use crate::link::{
 use crate::object_update::TerseUpdate;
 use crate::session::{
     CrossedRegionInfo, SERVER_HISTORY_CAP, ServerHistoryMessage, TeleportFinishInfo,
-    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, agent_drop_group_to_llsd,
-    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_batch_reply,
-    build_map_block_reply, build_map_item_reply, build_map_layer_reply, build_task_inventory,
+    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, agent_drop_group_to_llsd, agent_list_updates_to_llsd,
+    agent_state_update_to_llsd, build_map_block_batch_reply, build_map_block_reply,
+    build_map_item_reply, build_map_layer_reply, build_task_inventory,
     chatterbox_invitation_to_llsd, chatterbox_session_start_reply_to_llsd,
     crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
     establish_agent_communication_to_llsd, full_update_block, instant_message,
@@ -10231,20 +10231,19 @@ impl SimSession {
         );
     }
 
-    /// Enqueues a CAPS `ChatterBoxSessionAgentListUpdates` push: per-agent
-    /// voice-membership changes in the chat session `session_id`. Each
-    /// `(agent, in_voice_now)` pair emits an `ENTER` (voice-capable) or
-    /// `LEAVE` transition — the shape
-    /// [`agent_list_voice_updates_to_llsd`](crate::agent_list_voice_updates_to_llsd)
-    /// serializes and the client's voice-participant handler folds.
+    /// Enqueues a CAPS `ChatterBoxSessionAgentListUpdates` push: what changed
+    /// of each agent of the chat session `session_id` — its transition, voice,
+    /// moderator and mute flags — in the shape
+    /// [`agent_list_updates_to_llsd`](crate::agent_list_updates_to_llsd)
+    /// serializes and the client's roster handler folds.
     pub fn enqueue_chatterbox_agent_list_updates(
         &mut self,
         session_id: Uuid,
-        updates: &[(AgentKey, bool)],
+        updates: &[crate::ChatSessionAgentUpdate],
     ) {
         self.enqueue_caps_event(
             "ChatterBoxSessionAgentListUpdates",
-            agent_list_voice_updates_to_llsd(session_id, updates),
+            agent_list_updates_to_llsd(session_id, updates),
         );
     }
 

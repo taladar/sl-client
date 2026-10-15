@@ -96,3 +96,21 @@ answers `RetrieveInstantMessages` from it, and `offline_messages_to_llsd`
 writes Second Life's record shape. Keeping an ordinary message is what is
 left: build its `KeptMessage` (the record states the same message) and keep
 it as the friendship offer and the group invitation are kept.
+
+## From gridspec-group-chat-and-conference (2026-10-15)
+
+Conferences ride the same relay (`book/src/gridspec/chat.md` § A conference;
+the `group-chat` census states both grids' answers). On Second Life's flavour:
+`start conference` over `ChatSessionRequest` answered with a start reply
+moving the client's id onto one the grid mints, named "*starter's name*
+Conference", with voice, and a roster push; the invitees told nothing until
+the first line, which reaches each one who has not accepted as a
+`ChatterBoxInvitation` (dialog 17, `from_group` clear, the conference's name
+as the bucket); after `accept invitation` (`200` `{}`) the lines go over UDP,
+back to the sender too. A decline or a leave ends the lines to that avatar;
+`invite` tells the invitee nothing until it accepts; the conference outlives
+its starter, and a lone speaker is told it is the only participant. A
+conference's `fetch history` answers `403` "You cannot join chat". On
+OpenSim's flavour there are no conferences: nobody is invited, the start gets
+no reply, and each line comes back to its sender alone, as a group line under
+the viewer's id.

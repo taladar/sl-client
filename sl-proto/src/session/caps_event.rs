@@ -173,6 +173,10 @@ pub(crate) enum CapsEvent {
     ChatSessionFetchHistory,
     /// The confirmation that a chat session has started.
     ChatterBoxSessionStartReply,
+    /// The grid's answer to something said or done in a chat session.
+    ChatterBoxSessionEventReply,
+    /// The grid closing a chat session on the agent.
+    ForceCloseChatterBoxSession,
     /// A chat session's participant roster, as a delta.
     ChatterBoxSessionAgentListUpdates,
     /// The agent's god level, flying-allowed and similar region-scoped state.
@@ -267,6 +271,8 @@ impl CapsEvent {
             CAP_CHAT_SESSION_REQUEST => Self::ChatSessionRequest,
             CHAT_SESSION_FETCH_HISTORY_TAG => Self::ChatSessionFetchHistory,
             "ChatterBoxSessionStartReply" => Self::ChatterBoxSessionStartReply,
+            "ChatterBoxSessionEventReply" => Self::ChatterBoxSessionEventReply,
+            "ForceCloseChatterBoxSession" => Self::ForceCloseChatterBoxSession,
             "ChatterBoxSessionAgentListUpdates" => Self::ChatterBoxSessionAgentListUpdates,
             "AgentStateUpdate" => Self::AgentStateUpdate,
             "NavMeshStatusUpdate" => Self::NavMeshStatusUpdate,

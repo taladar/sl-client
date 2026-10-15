@@ -333,11 +333,26 @@ pub(crate) fn run_chat_session_request(
         report_caps_failure(caps_tx, CAP_CHAT_SESSION_REQUEST);
         return;
     };
+    let status = response.status();
     let Ok(text) = response.text() else {
         report_caps_failure(caps_tx, CAP_CHAT_SESSION_REQUEST);
         return;
     };
+    if !status.is_success() {
+        tracing::warn!(
+            capability = CAP_CHAT_SESSION_REQUEST,
+            %status,
+            body = text.chars().take(200).collect::<String>(),
+            "ChatSessionRequest refused the request"
+        );
+    }
     let Ok(reply) = parse_llsd_xml(&text) else {
+        tracing::warn!(
+            capability = CAP_CHAT_SESSION_REQUEST,
+            %status,
+            body = text.chars().take(200).collect::<String>(),
+            "ChatSessionRequest answered with something that is not LLSD"
+        );
         report_caps_failure(caps_tx, CAP_CHAT_SESSION_REQUEST);
         return;
     };
@@ -387,11 +402,26 @@ pub(crate) fn run_chat_session_fetch_history(
         report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
         return;
     };
+    let status = response.status();
     let Ok(text) = response.text() else {
         report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
         return;
     };
+    if !status.is_success() {
+        tracing::warn!(
+            capability = CHAT_SESSION_FETCH_HISTORY_TAG,
+            %status,
+            body = text.chars().take(200).collect::<String>(),
+            "ChatSessionRequest refused the request"
+        );
+    }
     let Ok(reply) = parse_llsd_xml(&text) else {
+        tracing::warn!(
+            capability = CHAT_SESSION_FETCH_HISTORY_TAG,
+            %status,
+            body = text.chars().take(200).collect::<String>(),
+            "ChatSessionRequest answered with something that is not LLSD"
+        );
         report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
         return;
     };

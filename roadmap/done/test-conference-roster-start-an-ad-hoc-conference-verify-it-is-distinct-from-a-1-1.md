@@ -2,7 +2,7 @@
 id: test-conference-roster
 title: start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 topic: test
-status: ready
+status: done
 origin: TEST_ROADMAP.md — Phase 3 — Instant messaging & chat sessions `[both]`
 ---
 
@@ -42,3 +42,14 @@ to assert: the session id the roster and messages arrive under is the **grid's**
 temp-replacing one, not the one we minted. Offline stand-ins exist
 (`sl-proto/tests/lifecycle.rs`'s re-key / failed-start pair, and the sim-caps
 start + invite round trips), but none of them is a real grid.
+
+## Done (2026-10-15)
+
+Covered by the `group-chat` census ([[gridspec-group-chat-and-conference]]),
+which runs on both grids rather than aditi alone: A starts a conference with B
+and C, the start reply moves it onto an id the grid gives (`c_id`, distinct
+from every pair's one-to-one id), B and C are invited under that id, every
+roster push and line is recorded, and a decline, a re-invitation, an
+invitee's leave and the starter's leave are measured. OpenSim's column says
+"no ad-hoc conferences" in every row. `book/src/gridspec/chat.md` § A
+conference.

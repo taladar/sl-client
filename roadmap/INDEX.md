@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 351 |
-| blocked | 99 |
-| in-progress | 20 |
+| ready | 350 |
+| blocked | 98 |
+| in-progress | 19 |
 | bugs | 38 |
-| done | 1371 |
+| done | 1375 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2065** |
+| **total** | **2066** |
 
 ## ideas (139)
 
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (351)
+## ready (350)
 
 ### protocol
 
@@ -1075,8 +1075,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-audit-render-fixtures-crate` (done))
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
-- [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
-  — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-e2e-sweep-live-grid`](ready/test-e2e-sweep-live-grid.md) — End-to-end
   tests for what only a live grid has
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
@@ -1096,6 +1094,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-edit-permission-enforcement`](ready/server-fake-grid-edit-permission-enforcement.md)
   — Fake grid — refuse edits the editor may not make, as each grid refuses them
   (blocked by `gridspec-object-edit` (done))
+- [`server-fake-grid-group-chat`](ready/server-fake-grid-group-chat.md) — Fake
+  grid — group chat sessions (blocked by `gridspec-group-chat-and-conference`
+  (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
@@ -1148,8 +1149,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   permissions and admin on each grid
 - [`gridspec-god-tools`](ready/gridspec-god-tools.md) — God tools as OpenSim
   answers them
-- [`gridspec-group-chat-and-conference`](ready/gridspec-group-chat-and-conference.md)
-  — Group chat sessions and ad-hoc conferences on each grid
 - [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
   skeleton, fetch caps, AIS3, the library and cache versions on each grid
 - [`gridspec-inventory-mutations`](ready/gridspec-inventory-mutations.md) —
@@ -1187,7 +1186,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (99)
+## blocked (98)
 
 ### protocol
 
@@ -1366,8 +1365,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-estate`)
 - [`server-fake-grid-god-tools`](blocked/server-fake-grid-god-tools.md) — Fake
   grid — god tools as OpenSim answers them (blocked by `gridspec-god-tools`)
-- [`server-fake-grid-group-chat`](blocked/server-fake-grid-group-chat.md) — Fake
-  grid — group chat sessions (blocked by `gridspec-group-chat-and-conference`)
 - [`server-fake-grid-inventory-offers`](blocked/server-fake-grid-inventory-offers.md)
   — Fake grid — inventory offers, filing and object gives (blocked by
   `gridspec-inventory-offers`, `server-fake-grid-im-relay`)
@@ -1500,7 +1497,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (20)
+## in-progress (19)
 
 ### viewer
 
@@ -1512,8 +1509,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   position)
 - [`viewer-avatar-ground-from-collision-plane`](in-progress/viewer-avatar-ground-from-collision-plane.md)
   — Avatar ground probe from the simulator's collision plane (drop the raycast)
-- [`viewer-conference-start-ui`](in-progress/viewer-conference-start-ui.md) —
-  Start an ad-hoc conference from a multi-selection
 - [`viewer-environment-personal-lighting`](in-progress/viewer-environment-personal-lighting.md)
   — Personal lighting — local environment override (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -1564,8 +1559,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### protocol
 
-- [`protocol-agent-list-voice-transition-lossy`](bugs/protocol-agent-list-voice-transition-lossy.md)
-  — Agent-list voice updates collapse ENTER/LEAVE and can-voice into one bool
 - [`protocol-agent-preferences-read-unanswered-on-sl`](bugs/protocol-agent-preferences-read-unanswered-on-sl.md)
   — Reading the agent preferences gets no answer on Second Life
 - [`protocol-classified-query-wrong-flag-space`](bugs/protocol-classified-query-wrong-flag-space.md)
@@ -1637,6 +1630,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tile outlive its circuit
 - [`viewer-script-compile-error-positions-zero-based`](bugs/viewer-script-compile-error-positions-zero-based.md)
   — Grid compile-error positions are zero-based and shown as one-based
+- [`viewer-session-invitation-accepted-at-once`](bugs/viewer-session-invitation-accepted-at-once.md)
+  — A group or conference invitation waits for Accept / Decline; the reference
+  joins at once
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
@@ -1657,7 +1653,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1371)
+## done (1375)
 
 ### protocol
 
@@ -1784,6 +1780,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
 - [`protocol-account-benefits-package`](done/protocol-account-benefits-package.md)
   — What an account is entitled to arrives at login, and nothing decodes it
+- [`protocol-agent-list-voice-transition-lossy`](done/protocol-agent-list-voice-transition-lossy.md)
+  — Agent-list voice updates collapse ENTER/LEAVE and can-voice into one bool
 - [`protocol-ais3-library-cap`](done/protocol-ais3-library-cap.md) — Read both
   inventory trees over AIS3 on Second Life, the library over LibraryAPIv3
 - [`protocol-ais3-nested-embedded`](done/protocol-ais3-nested-embedded.md) — An
@@ -2346,6 +2344,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-command-despawned-entity-warnings`](done/viewer-command-despawned-entity-warnings.md)
   — "\"Entity despawned\" command warnings during a plain scene run"
+- [`viewer-conference-start-ui`](done/viewer-conference-start-ui.md) — Start an
+  ad-hoc conference from a multi-selection
 - [`viewer-contact-set-presence-extras`](done/viewer-contact-set-presence-extras.md)
   — Contact sets — per-set autoresponse and notify settings
 - [`viewer-contact-set-pseudonyms`](done/viewer-contact-set-pseudonyms.md) —
@@ -4148,6 +4148,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — verify whisper/shout reach vs normal
 - [`test-chat-whisper-shout-range-aditi`](done/test-chat-whisper-shout-range-aditi-add-the-aditi-variant.md)
   — Chat whisper/shout range — [aditi] variant
+- [`test-conference-roster`](done/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
+  — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-conformance-object-edit-click-action-opensim`](done/test-conformance-object-edit-click-action-opensim.md)
   — object-edit on OpenSim never sees the sit click action re-broadcast
 - [`test-crosscheck-day-position-is-inert`](done/test-crosscheck-day-position-is-inert.md)
@@ -4638,6 +4640,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   environments (EEP) on each grid
 - [`gridspec-friends-presence`](done/gridspec-friends-presence.md) — Friendship,
   rights, presence notifications and calling cards on each grid
+- [`gridspec-group-chat-and-conference`](done/gridspec-group-chat-and-conference.md)
+  — Group chat sessions and ad-hoc conferences on each grid
 - [`gridspec-groups`](done/gridspec-groups.md) — Groups: membership, roles,
   notices, invitations and accounting on each grid
 - [`gridspec-infra-fake-flavour-conformance`](done/gridspec-infra-fake-flavour-conformance.md)

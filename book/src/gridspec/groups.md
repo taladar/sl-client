@@ -180,7 +180,8 @@ seen there. A deed without the power is in [Building](building.md).
 
 ## Not measured
 
-- Group chat (`gridspec-group-chat-and-conference`).
+- Group chat: measured in [Group and conference
+  sessions](chat.md#group-and-conference-sessions).
 - A ban of a member.
 - A join fee, a closed group, an invitation to a role other than Everyone.
 - Accepting a notice's attachment (`viewer-group-notice-attachments`).

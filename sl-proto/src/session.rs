@@ -1880,6 +1880,13 @@ pub struct Session {
     /// by a relogin through the constructor. The simulator stays authoritative;
     /// this is an API-convenience read model. Read via [`Session::chat_sessions`].
     chat_sessions: BTreeMap<ChatSessionKind, ChatSession>,
+    /// The groups the agent is in, as the grid last listed them
+    /// (`AgentGroupDataUpdate`, either road) and as joins, leaves and drops
+    /// since then changed them. A session message names its group only by id
+    /// — Second Life sends group chat with `from_group` clear — so this is
+    /// what tells a group session from a conference, as the reference's
+    /// `gAgent.isInGroup` does.
+    member_groups: BTreeSet<sl_types::key::GroupKey>,
     /// The current region's capability-seed URL (from login or a teleport), for
     /// the driver to fetch the CAPS map and event queue.
     seed_capability: Option<url::Url>,
@@ -2010,9 +2017,10 @@ use self::inventory::Inventory;
 use self::transfers::Transfers;
 use self::world_cache::WorldCache;
 pub use chat_session::{
-    ChatLifecycleView, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FriendPresence,
-    InviteChannel, MessageCursor, NearbyHistoryLine, PendingInvite, ServerHistoryMessage,
-    SessionMessage, VoiceChannelInfo, VoiceChannelState,
+    ChatLifecycleView, ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind,
+    ChatSessionLifecycle, FriendPresence, InviteChannel, MessageCursor, NearbyHistoryLine,
+    PendingInvite, ServerHistoryMessage, SessionMessage, SessionTransition, VoiceChannelInfo,
+    VoiceChannelState,
 };
 pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;
@@ -2026,23 +2034,22 @@ pub(crate) use chat_session::SERVER_HISTORY_CAP;
 pub use conversions::{
     CrossedRegionInfo, STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID,
     TELEPORT_FINISH_LOCATION_ID_SECOND_LIFE, TeleportFinishInfo, agent_drop_group_to_llsd,
-    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
-    ais_category_children_reply_to_llsd, ais_category_links_reply_to_llsd,
-    ais_inventory_update_to_llsd, ais_item_reply_to_llsd, ais_mutation_reply_to_llsd,
-    build_environment_update_request, build_map_block_batch_reply, build_map_block_reply,
-    build_map_item_reply, build_map_layer_reply, bulk_update_inventory_to_llsd,
-    chat_session_agent_params_from_llsd, chat_session_agents_body, chat_session_request_body,
-    chat_session_request_from_llsd, chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
-    chatterbox_session_start_reply_to_llsd, cof_version_increment_to_llsd,
-    copy_inventory_from_notecard_body, created_category_to_llsd, crossed_region_to_caps_llsd,
-    day_cycle_from_asset, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
-    environment_asset_from_bytes, environment_asset_to_bytes, environment_cap_url,
-    environment_reply_needs_refetch, environment_to_llsd, establish_agent_communication_to_llsd,
-    fetch_inventory_items_to_llsd, friendship_answer_url, group_ban_request_body, group_bans_url,
-    group_invite_response_body, group_members_to_caps_llsd, group_memberships_to_caps_llsd,
-    inventory_descendents_to_llsd, land_stat_reply_to_caps_llsd, nav_mesh_status_to_llsd,
-    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
-    parcel_object_owners_to_caps_llsd, required_voice_version_to_llsd,
+    agent_list_updates_to_llsd, agent_state_update_to_llsd, ais_category_children_reply_to_llsd,
+    ais_category_links_reply_to_llsd, ais_inventory_update_to_llsd, ais_item_reply_to_llsd,
+    ais_mutation_reply_to_llsd, build_environment_update_request, build_map_block_batch_reply,
+    build_map_block_reply, build_map_item_reply, build_map_layer_reply,
+    bulk_update_inventory_to_llsd, chat_session_agent_params_from_llsd, chat_session_agents_body,
+    chat_session_request_body, chat_session_request_from_llsd, chat_session_roster_to_llsd,
+    chatterbox_invitation_to_llsd, chatterbox_session_start_reply_to_llsd,
+    cof_version_increment_to_llsd, copy_inventory_from_notecard_body, created_category_to_llsd,
+    crossed_region_to_caps_llsd, day_cycle_from_asset, display_name_update_to_llsd,
+    enable_simulator_to_caps_llsd, environment_asset_from_bytes, environment_asset_to_bytes,
+    environment_cap_url, environment_reply_needs_refetch, environment_to_llsd,
+    establish_agent_communication_to_llsd, fetch_inventory_items_to_llsd, friendship_answer_url,
+    group_ban_request_body, group_bans_url, group_invite_response_body, group_members_to_caps_llsd,
+    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, land_stat_reply_to_caps_llsd,
+    nav_mesh_status_to_llsd, offline_messages_to_llsd, open_region_info_to_llsd,
+    parcel_info_to_llsd, parcel_object_owners_to_caps_llsd, required_voice_version_to_llsd,
     server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
     sim_console_response_to_llsd, sky_settings_from_asset, sky_with_blended_values,
     sky_with_pushed_values, teleport_failed_to_caps_llsd, teleport_finish_to_llsd,

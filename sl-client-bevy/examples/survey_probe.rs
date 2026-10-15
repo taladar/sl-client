@@ -301,6 +301,9 @@ fn on_events(
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. }
             | SlSessionEvent::ChatSessionStarted { .. }
+            | SlSessionEvent::ChatSessionAgentsUpdated { .. }
+            | SlSessionEvent::ChatSessionEventReply { .. }
+            | SlSessionEvent::ChatSessionForceClosed { .. }
             | SlSessionEvent::AvatarNames(_)
             | SlSessionEvent::GroupNames(_)
             | SlSessionEvent::DisplayNames(_)

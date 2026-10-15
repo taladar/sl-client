@@ -51,6 +51,7 @@ pub mod give_inventory;
 pub mod grant_user_rights;
 pub mod group_accounting;
 pub mod group_admin;
+pub mod group_chat;
 pub mod group_create_activate;
 pub mod group_join_leave;
 pub mod group_notice;

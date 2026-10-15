@@ -350,6 +350,11 @@ const fn severity_of(message: &AnyMessage) -> ReliableSeverity {
 /// messages; one that is not fails to encode.
 const MAX_VARIABLE_BLOCKS: usize = 255;
 
+/// The bucket of a session message (`IM_SESSION_SEND`, a session start or
+/// leave): one zero byte, the reference's `EMPTY_BINARY_BUCKET` of size 1
+/// (`llinstantmessage.cpp:46`), which it packs where a message carries none.
+pub(crate) const EMPTY_BINARY_BUCKET: [u8; 1] = [0];
+
 /// The reference viewer's `LL_PATH_CACHE` (`ELLPath` in `lldir.h`), the remote
 /// path it names in every `RequestXfer` for a file the simulator generated.
 const XFER_PATH_CACHE: u8 = 4;
@@ -1954,7 +1959,7 @@ impl Circuit {
                 timestamp: 0,
                 from_agent_name: with_nul(from_name),
                 message: with_nul(message),
-                binary_bucket: Vec::new(),
+                binary_bucket: EMPTY_BINARY_BUCKET.to_vec(),
             },
             estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
             meta_data: Vec::new(),

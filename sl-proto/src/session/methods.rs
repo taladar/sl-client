@@ -1,18 +1,20 @@
 //! The driver-facing `Session` API: login, UDP/CAPS dispatch, and command methods.
 
 use super::caps_event::CapsEvent;
+use super::circuit::EMPTY_BINARY_BUCKET;
 use super::conversions::{
     EnvironmentReply, OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
-    agent_list_voice_updates_from_llsd, agent_state_update_from_llsd, ais_folder_listing_from_llsd,
+    agent_list_updates_from_llsd, agent_state_update_from_llsd, ais_folder_listing_from_llsd,
     ais_inventory_update_from_llsd, ais_updated_category_versions, avatar_animations,
     avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_picker_result,
     avatar_properties, benefits_of, bulk_update_folder, bulk_update_inventory_from_llsd,
     bulk_update_item, chat_message, chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
-    chatterbox_session_start_reply_from_llsd, classified_info, cof_version_increment_from_llsd,
-    created_category_from_llsd, crossed_region_from_caps_llsd, dir_land_reply_from_caps_llsd,
-    display_name_update_from_llsd, economy_data, enable_simulator_from_caps_llsd,
-    environment_reply_from_llsd, establish_agent_communication_from_llsd,
-    estate_access_from_params, estate_info_from_params, fetch_inventory_items_from_llsd, friend,
+    chatterbox_session_event_reply_from_llsd, chatterbox_session_start_reply_from_llsd,
+    classified_info, cof_version_increment_from_llsd, created_category_from_llsd,
+    crossed_region_from_caps_llsd, dir_land_reply_from_caps_llsd, display_name_update_from_llsd,
+    economy_data, enable_simulator_from_caps_llsd, environment_reply_from_llsd,
+    establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
+    fetch_inventory_items_from_llsd, force_close_chatterbox_session_from_llsd, friend,
     grid_coordinates_from_handle, group_account_details, group_account_summary,
     group_account_transactions, group_active_proposal_item, group_bans_from_caps_llsd,
     group_member, group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd,
@@ -41,7 +43,7 @@ use super::{
     PARENT_REQUEST_WARN_ATTEMPTS, PendingHandover, PendingInventorySave, PendingInvite,
     SIT_REFUSAL_ALERTS, SIT_REFUSAL_TEXTS, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
     ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
-    SessionState, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
+    SessionState, SessionTransition, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
     TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
     TransferDownload, TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT,
     XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose,
@@ -288,6 +290,7 @@ impl Session {
             online: BTreeSet::new(),
             mutes: MuteList::new(),
             chat_sessions: BTreeMap::new(),
+            member_groups: BTreeSet::new(),
             seed_capability: None,
             pending_complete_movement: false,
             agent_appearance_service: None,
@@ -894,6 +897,7 @@ impl Session {
             // UDP `AgentGroupDataUpdate` is deprecated on Second Life.
             CapsEvent::AgentGroupDataUpdate => {
                 if let Some(event) = group_memberships_from_caps_llsd(body) {
+                    self.note_memberships(&event);
                     self.events.push_back(event);
                 } else {
                     self.caps_decode_failed(message);
@@ -1314,7 +1318,18 @@ impl Session {
             // event queue (the modern path, #28). Join by sending into the session
             // with [`Session::send_conference_message`].
             CapsEvent::ChatterBoxInvitation => {
-                if let Some(event) = chatterbox_invitation_from_llsd(body) {
+                if let Some(mut event) = chatterbox_invitation_from_llsd(body) {
+                    // Second Life invites to a group session with `from_group`
+                    // clear: an invitation to a group the agent is in is the
+                    // group's, as the reference reads it.
+                    if let Event::ConferenceInvited {
+                        session_id,
+                        from_group,
+                        ..
+                    } = &mut event
+                    {
+                        *from_group = self.reads_as_group(*session_id, *from_group);
+                    }
                     // Record the invitation as a pending `Invited` chat-session
                     // entry (the registry is the pending-invitation read model)
                     // before surfacing the event unchanged for the driver to act
@@ -1461,14 +1476,26 @@ impl Session {
                     self.caps_decode_failed(message);
                 }
             }
-            // A `ChatterBoxSessionAgentListUpdates` push (#28): the modern voice
-            // participant list for a session we are in. Fold the per-agent voice
-            // flag into that session's `voice.members` (B8) — adding the
+            // The grid's answer to something said or done in a session, and a
+            // session it closed on us: surfaced as they are.
+            CapsEvent::ChatterBoxSessionEventReply => {
+                self.events
+                    .push_back(chatterbox_session_event_reply_from_llsd(body));
+            }
+            CapsEvent::ForceCloseChatterBoxSession => {
+                self.events
+                    .push_back(force_close_chatterbox_session_from_llsd(body));
+            }
+            // A `ChatterBoxSessionAgentListUpdates` push (#28): who came into a
+            // session we are in, who left, who moderates and whose text a
+            // moderator took away. As the reference does
+            // (`LLIMSpeakerMgr::updateSpeakers`), an `ENTER` adds the agent to
+            // the roster and a `LEAVE` drops it, and the voice flag is folded
+            // into the session's `voice.members` (B8) — adding the
             // voice-connected, dropping those who left or are text-only. The
-            // talk-activity / "is now speaking" flag is out of scope. The session
-            // is resolved from the wire id against the existing registry (the
-            // event carries no group/conference discriminator); an update for an
-            // unknown session is ignored.
+            // session is resolved from the wire id against the existing registry
+            // (the event carries no group/conference discriminator); the event
+            // is surfaced either way.
             //
             // This is an informational roster push, **not** a join: it folds via
             // the non-promoting [`Self::chat_session_get_mut`] so a still-pending
@@ -1478,14 +1505,36 @@ impl Session {
             // inbound session message — never on a bare roster update. Activity is
             // still stamped so the update orders the session list.
             CapsEvent::ChatterBoxSessionAgentListUpdates => {
-                if let Some((session_uuid, updates)) = agent_list_voice_updates_from_llsd(body)
-                    && let Some(kind) = self.chat_session_kind_for_session_id(session_uuid)
-                    && let Some(session) = self.chat_session_get_mut(kind)
-                {
-                    session.last_activity = now;
-                    for (agent, in_voice) in updates {
-                        session.note_voice_membership(agent, in_voice);
+                if let Some((session_uuid, updates)) = agent_list_updates_from_llsd(body) {
+                    if let Some(kind) = self.chat_session_kind_for_session_id(session_uuid)
+                        && let Some(session) = self.chat_session_get_mut(kind)
+                    {
+                        session.last_activity = now;
+                        for update in &updates {
+                            match update.transition {
+                                Some(SessionTransition::Enter) => {
+                                    session.note_participant(update.agent, true);
+                                }
+                                Some(SessionTransition::Leave) => {
+                                    session.note_participant(update.agent, false);
+                                }
+                                Some(SessionTransition::Unrecognised) | None => {}
+                            }
+                            if !update.legacy {
+                                let leaving = update.transition == Some(SessionTransition::Leave);
+                                session.note_voice_membership(
+                                    update.agent,
+                                    !leaving && update.can_voice_chat.unwrap_or(false),
+                                );
+                            }
+                        }
                     }
+                    self.events.push_back(Event::ChatSessionAgentsUpdated {
+                        session_id: session_uuid,
+                        updates,
+                    });
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // A pathfinding agent-state push: whether the agent may currently
@@ -1512,8 +1561,9 @@ impl Session {
             // dissolved, …); the client should forget its cached membership.
             CapsEvent::AgentDropGroup => {
                 if let Some(group) = agent_drop_group_from_llsd(body) {
-                    self.events
-                        .push_back(Event::AgentDroppedFromGroup { group });
+                    let event = Event::AgentDroppedFromGroup { group };
+                    self.note_memberships(&event);
+                    self.events.push_back(event);
                 } else {
                     self.caps_decode_failed(message);
                 }
@@ -4196,7 +4246,7 @@ impl Session {
                     // Group IM session traffic (the session id is the group id).
                     // Inbound traffic means we are effectively a participant, so
                     // open/track the session (the registry mirrors live sessions).
-                    ImDialog::SessionSend if block.from_group => {
+                    ImDialog::SessionSend if self.reads_as_group(block.id, block.from_group) => {
                         let group_id = GroupKey::from(block.id);
                         let from_agent_id = AgentKey::from(im.agent_data.agent_id);
                         let message = trimmed_string(&block.message);
@@ -4215,10 +4265,11 @@ impl Session {
                             from_agent_id,
                             from_name: trimmed_string(&block.from_agent_name),
                             message,
+                            im: Box::new(instant_message(&im.agent_data, block)),
                         });
                     }
                     dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave)
-                        if block.from_group =>
+                        if self.reads_as_group(block.id, block.from_group) =>
                     {
                         let group_id = GroupKey::from(block.id);
                         let agent_id = AgentKey::from(im.agent_data.agent_id);
@@ -4256,6 +4307,7 @@ impl Session {
                             from_agent_id,
                             from_name: trimmed_string(&block.from_agent_name),
                             message,
+                            im: Box::new(instant_message(&im.agent_data, block)),
                         });
                     }
                     dialog @ (ImDialog::SessionAdd | ImDialog::SessionLeave) => {
@@ -5690,13 +5742,15 @@ impl Session {
                     ))));
             }
             AnyMessage::AgentGroupDataUpdate(update) => {
-                self.events.push_back(Event::GroupMemberships(
+                let event = Event::GroupMemberships(
                     update
                         .group_data
                         .iter()
                         .map(group_membership)
                         .collect::<Result<_, _>>()?,
-                ));
+                );
+                self.note_memberships(&event);
+                self.events.push_back(event);
             }
             AnyMessage::GroupMembersReply(reply) => {
                 self.events.push_back(Event::GroupMembers {
@@ -5814,21 +5868,27 @@ impl Session {
                 });
             }
             AnyMessage::JoinGroupReply(reply) => {
-                self.events.push_back(Event::JoinGroupResult {
+                let event = Event::JoinGroupResult {
                     group_id: GroupKey::from(reply.group_data.group_id),
                     success: reply.group_data.success,
-                });
+                };
+                self.note_memberships(&event);
+                self.events.push_back(event);
             }
             AnyMessage::LeaveGroupReply(reply) => {
-                self.events.push_back(Event::LeaveGroupResult {
+                let event = Event::LeaveGroupResult {
                     group_id: GroupKey::from(reply.group_data.group_id),
                     success: reply.group_data.success,
-                });
+                };
+                self.note_memberships(&event);
+                self.events.push_back(event);
             }
             AnyMessage::AgentDropGroup(drop) => {
-                self.events.push_back(Event::DroppedFromGroup {
+                let event = Event::DroppedFromGroup {
                     group_id: GroupKey::from(drop.agent_data.group_id),
-                });
+                };
+                self.note_memberships(&event);
+                self.events.push_back(event);
             }
             AnyMessage::EjectGroupMemberReply(reply) => {
                 self.events.push_back(Event::EjectGroupMemberResult {
@@ -7465,6 +7525,44 @@ impl Session {
         self.chat_sessions.get(&kind)
     }
 
+    /// Folds a membership answer into [`Session::member_groups`]: a list
+    /// replaces it, a join adds the group, a leave or a drop takes it away.
+    fn note_memberships(&mut self, event: &Event) {
+        match event {
+            Event::GroupMemberships(groups) => {
+                self.member_groups = groups.iter().map(|group| group.group_id).collect();
+            }
+            Event::JoinGroupResult {
+                group_id,
+                success: true,
+            } => {
+                self.member_groups.insert(*group_id);
+            }
+            Event::LeaveGroupResult {
+                group_id,
+                success: true,
+            }
+            | Event::DroppedFromGroup { group_id }
+            | Event::AgentDroppedFromGroup { group: group_id } => {
+                self.member_groups.remove(group_id);
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether session traffic under `session` is a group session's: it says
+    /// so (`from_group`, as OpenSim sends it), or the id is a group the agent
+    /// is in or has a group session open with (Second Life sends group chat
+    /// with `from_group` clear; the reference asks `gAgent.isInGroup`).
+    fn reads_as_group(&self, session: Uuid, from_group: bool) -> bool {
+        let group_id = GroupKey::from(session);
+        from_group
+            || self.member_groups.contains(&group_id)
+            || self
+                .chat_sessions
+                .contains_key(&ChatSessionKind::Group { group_id })
+    }
+
     /// Moves the optimistic conference entry we opened under the id we minted
     /// onto the id the grid answered with (`ChatterBoxSessionStartReply`),
     /// merging into an entry that already exists under the real id — the grid
@@ -7479,6 +7577,18 @@ impl Session {
         success: bool,
         now: Instant,
     ) {
+        // A group session's start is answered too, under the group's id: that
+        // reply is the group session's, and must not open a conference of the
+        // same id beside it.
+        let group = ChatSessionKind::Group {
+            group_id: GroupKey::from(temp_session_id.get()),
+        };
+        if self.chat_sessions.contains_key(&group) {
+            if !success {
+                let _dropped = self.chat_sessions.remove(&group);
+            }
+            return;
+        }
         let from = ChatSessionKind::Conference {
             id: temp_session_id,
         };
@@ -9100,7 +9210,7 @@ impl Session {
                 id: session_id.get(),
                 message,
                 from_name: &from_name,
-                binary_bucket: Vec::new(),
+                binary_bucket: EMPTY_BINARY_BUCKET.to_vec(),
             },
             now,
         )?;
@@ -9139,7 +9249,7 @@ impl Session {
                 id: session_id.get(),
                 message: "",
                 from_name: &from_name,
-                binary_bucket: Vec::new(),
+                binary_bucket: EMPTY_BINARY_BUCKET.to_vec(),
             },
             now,
         )?;

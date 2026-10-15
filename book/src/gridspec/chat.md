@@ -1,4 +1,4 @@
-# Local chat and instant messages
+# Local chat, instant messages and sessions
 
 A viewer's `ChatFromViewer` and a script's `llSay` family come back as the
 same message, `ChatFromSimulator`: a type, a source and its kind, an owner, a
@@ -338,6 +338,150 @@ presence](friends.md)).
   triggers it.
 - How many messages a grid keeps for one avatar, and for how long.
 - Messages forwarded as mail: both test accounts have it off.
-- A message between avatars in different regions; a session or a
-  conference (`gridspec-group-chat-and-conference`).
+- A message between avatars in different regions. A session or a
+  conference is measured below, in [Group and conference
+  sessions](#group-and-conference-sessions).
 - A mute by name or of an object (`gridspec-mute-list`).
+
+## Group and conference sessions
+
+A group session's id is the group's: a viewer opens it with
+`IM_SESSION_GROUP_START` (dialog 15) and speaks into it with
+`IM_SESSION_SEND` (dialog 17), both to the group's id. An ad-hoc conference
+is started over the `ChatSessionRequest` capability's `start conference`, or
+with the deprecated `IM_SESSION_CONFERENCE_START` (dialog 16) where a region
+has no such capability. A line reaches a participant as an
+`ImprovedInstantMessage`, or as an event-queue `ChatterBoxInvitation` while
+the participant has not joined; the grid states who is in a session in
+`ChatterBoxSessionAgentListUpdates`, answers a start with
+`ChatterBoxSessionStartReply` and answers what it refuses with
+`ChatterBoxSessionEventReply`.
+
+Measured on 2026-10-15 by the conformance case `group-chat`: five runs on
+aditi and five on the local OpenSim, the last of each held to 132 answers
+(eight of them, roster pushes Second Life delivers in one run and not the
+next, held as anything there). Avatars **A** and **B** are members of a
+long-lived census group (the `groups` census's), avatar **C** is not. The
+fake grid has no group chat yet (`server-fake-grid-group-chat`), so the
+tables have no column for it.
+
+### A line in a group session
+
+A opens the session, says a line before B has joined, B accepts, and both
+speak.
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| A opens the session (**held**) | a start reply under the group's id, named for the group, with voice; a roster listing A (**moderator**, the owner) and B, who has not joined | a start reply under the group's id, without voice; a roster listing A alone |
+| B is told of the opening (**held**) | nothing | nothing |
+| A's first line, to B (**held**) | an **invitation** carrying the line, dialog 17, no region, place zero, estate 0, the time | the same invitation, estate 1, and a roster entering B |
+| the line's sender is sent it back (**held**) | yes | yes |
+| B accepts (`accept invitation`) (**held**) | `200` and an empty map; a roster of A and B | no capability |
+| a line once joined (**held**) | over UDP: dialog 17, **`from_group` clear**, the group's id, no region, place zero, estate 0, the time, the group's name as the bucket | over UDP: dialog 17, `from_group` **set**, the group's id, a region, place zero, estate 1, the time, the group's name as the bucket |
+| a line sent with an **empty bucket** (**held**) | **refused**: `ChatterBoxSessionEventReply` "message", error "generic", to the sender alone | passed on |
+| C, who is no member, opens the session (**held**) | refused: a start reply with error "unverified" | **taken**, and C enters the roster |
+| C speaks into it (**held**) | refused, "generic" | **passed on** to every member |
+
+Two things a client has to read from this. The **bucket**: the reference
+packs a one-zero-byte bucket (`EMPTY_BINARY_BUCKET`, size 1) into every
+session line, and Second Life refuses a line without one; ours sent an empty
+bucket and so never spoke in a session on Second Life until now. And
+**`from_group`**: Second Life sends group chat and invitations to it with
+the flag clear, so whether a session line is a group's is decided by its
+id, as the reference does (`gAgent.isInGroup`).
+
+### Moderation
+
+A takes B's text away over the capability (`mute update`, `mute_info.text`),
+and gives it back. OpenSim has no such capability.
+
+| behaviour | Second Life |
+| --- | --- |
+| the answer to A (**held**) | `200` and an empty map |
+| who is told (**held**) | A and B: a roster entry for B with `mutes.text` true and no transition |
+| B's line meanwhile (**held**) | refused, "generic"; nobody else sent it, and it is not kept in the history |
+| given back (**held**) | the same roster entry, `mutes.text` false; B's next line passes |
+
+### Leaving, declining, coming back
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| B leaves the session (dialog 18) (**held**) | A is sent a roster in which B leaves | nothing |
+| A speaks after B left (**held**) | B is sent nothing; A is told, from no id under the name "Second Life", "You are the only participant in this IM session. Your message is not being broadcast at this time." | **B is still sent the line** |
+| B declines (**held**) | nothing | nothing, and B is still sent A's next line |
+| B opens the session again (**held**) | a start reply, and A sees B enter | a start reply, and B enters |
+| B logs out and A speaks (**held**) | A is told it is the only participant; nothing is kept | nothing is kept |
+| B comes back (**held**) | sent nothing unasked; nothing over `RetrieveInstantMessages` or `ReadOfflineMsgs` | sent nothing; nothing kept |
+
+### Server history
+
+`ChatSessionRequest`'s `fetch history` answers Second Life's group session
+with an array of records `{ from, from_id, message, num, time }` (`time` an
+integer), oldest first. OpenSim has no capability.
+
+| behaviour | Second Life |
+| --- | --- |
+| read by B after ten lines (**held**) | `200`, the session's lines of this run in order — those said while A was the only participant too, not the line refused under moderation |
+| read again ten seconds later (**held**) | the same |
+| an earlier run's lines (**held**) | never there |
+| read after A says ten lines in 2.5 s, then after twenty and thirty more (**held**) | `200` and an **empty array**, every time — and still empty after B logs out, comes back and joins again |
+| a conference's history (**held**) | **`403`** "You cannot join chat", to a participant |
+
+So the history is the live session's, and something empties it: not its
+size (ten lines did), and not a second read. What does is not measured.
+
+### A conference
+
+A starts one with B and C and speaks; B accepts and speaks; C declines and
+A speaks; A invites C again; C accepts and speaks; C leaves and B speaks; A,
+who started it, leaves and B speaks. OpenSim has **no ad-hoc conferences**:
+nobody is ever invited, the start gets no reply, and each line comes back to
+its sender alone — as a *group* line (`from_group` set) under the id the
+viewer minted.
+
+| behaviour | Second Life |
+| --- | --- |
+| the start (**held**) | a start reply moving A's id onto **one the grid gives**, named "*A's name* Conference", with voice |
+| B and C are told of the start (**held**) | nothing |
+| A's first line (**held**) | to B and C as an invitation under the grid's id, dialog 17, `from_group` clear, the conference's name as the bucket |
+| B accepts (**held**) | `200` and an empty map; a roster of A, B and C |
+| a line once joined (**held**) | over UDP under the grid's id, the conference's name as the bucket, `from_group` clear; to a participant who has not accepted, as an invitation |
+| C declines, and A speaks (**held**) | C is sent nothing more |
+| A invites C again (`invite`) (**held**) | C is told nothing until it accepts |
+| C leaves (**held**) | nothing more for C |
+| A, who started it, leaves (**held**) | the conference goes on; B, the only participant, is told so when it speaks |
+
+### What the viewer does with it
+
+- **A session line is a group's by its id.** `sl-proto` keeps the groups
+  the agent is in (`AgentGroupDataUpdate`, joins, leaves, drops) and reads a
+  session line, a participant notice or an invitation as a group's when its
+  id is one of them, or a group session is open under it — whatever
+  `from_group` says. Before, Second Life's group chat arrived as a
+  conference under the group's id.
+- **Session lines carry the reference's bucket.** A line, a start and a
+  leave are sent with one zero byte (`EMPTY_BINARY_BUCKET`).
+- **The roster is read.** `ChatterBoxSessionAgentListUpdates` surfaces as
+  `Event::ChatSessionAgentsUpdated` (each agent's transition, voice,
+  moderator and text-mute flags), and an `ENTER` or `LEAVE` adds the agent to
+  the session's participants or takes it out, as the reference's speaker
+  list does. The refusal of a line or a start surfaces as
+  `Event::ChatSessionEventReply`, a session the grid closes as
+  `Event::ChatSessionForceClosed`, and a refused start (which names no
+  `session_id`) decodes.
+- **A group session's start reply opens no conference** of the same id.
+- **An invitation's line is shown.** The conversations panel puts the line
+  an invitation carries into the tab it opens. It still waits for Accept or
+  Decline, where the reference accepts a text invitation at once
+  (`viewer-session-invitation-accepted-at-once`).
+- **The history fetch degrades on OpenSim** without a request: the
+  capability is absent, so nothing is asked.
+
+### Not measured
+
+- What empties Second Life's group history, and how many lines it keeps.
+- Typing in a session; voice in a session.
+- A session in a group with a role that may not chat, and a group with
+  more members online than the three avatars.
+- A session that spans regions, and Second Life's `ForceCloseChatterBoxSession`
+  (no leg provoked one).

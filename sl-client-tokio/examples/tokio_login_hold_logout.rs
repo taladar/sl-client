@@ -290,6 +290,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => info!(
                 "chat session {temp_session_id:?} started as {session_id:?}                  (success={success}) named {session_name:?}"
             ),
+            Event::ChatSessionAgentsUpdated {
+                session_id,
+                updates,
+            } => info!(
+                "chat session {session_id} roster: {} update(s)",
+                updates.len()
+            ),
+            Event::ChatSessionEventReply {
+                session_id,
+                success,
+                event,
+                error,
+            } => info!("chat session {session_id} answered {event:?}: success={success} {error:?}"),
+            Event::ChatSessionForceClosed { session_id, reason } => {
+                info!("chat session {session_id} closed by the grid: {reason:?}");
+            }
             Event::ScriptDialog(dialog) => info!(
                 "script dialog from {:?}: {:?} [{}]",
                 dialog.object_name,

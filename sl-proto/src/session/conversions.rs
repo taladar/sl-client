@@ -1,7 +1,10 @@
 //! Wire/LLSD <-> value-type converters shared by the session impls, plus the
 //! server-side CAPS serializers and their round-trip tests.
 
-use super::chat_session::{InviteChannel, ServerHistoryMessage, VoiceChannelInfo};
+use super::chat_session::{
+    ChatSessionAgentUpdate, InviteChannel, ServerHistoryMessage, SessionTransition,
+    VoiceChannelInfo,
+};
 use crate::GroupRoleKey;
 use crate::appearance;
 use crate::bookkeeping_ids::ImSessionId;
@@ -4518,11 +4521,18 @@ pub(crate) fn avatar_picker_result(name: &DisplayName) -> AvatarPickerResult {
 /// The name / voice flag live under `session_info` on a success reply; a failure
 /// reply carries a top-level `error` instead.
 pub(crate) fn chatterbox_session_start_reply_from_llsd(body: &Llsd) -> Option<Event> {
-    let session_id = body.get("session_id")?.as_uuid()?;
+    let temp_session_id = body.get("temp_session_id").and_then(Llsd::as_uuid);
     let success = body.get("success").and_then(Llsd::as_bool).unwrap_or(false);
+    // A refusal names only the session that was asked for (the reference reads
+    // `session_id` on success alone): it stands for both ids then.
+    let session_id = match body.get("session_id").and_then(Llsd::as_uuid) {
+        Some(session_id) => session_id,
+        None if !success => temp_session_id?,
+        None => return None,
+    };
     let info = body.get("session_info");
     Some(Event::ChatSessionStarted {
-        temp_session_id: ImSessionId::from(uuid_member_lenient(body, "temp_session_id")),
+        temp_session_id: ImSessionId::from(temp_session_id.unwrap_or(session_id)),
         session_id: ImSessionId::from(session_id),
         success,
         session_name: info.map_or_else(String::new, |info| string_member(info, "session_name")),
@@ -4532,6 +4542,28 @@ pub(crate) fn chatterbox_session_start_reply_from_llsd(body: &Llsd) -> Option<Ev
             .unwrap_or(false),
         error: string_member(body, "error"),
     })
+}
+
+/// Decodes a `ChatterBoxSessionEventReply` CAPS event body — the grid's answer
+/// to something said or done in a session (`LLViewerChatterBoxSessionEventReply`,
+/// `llimview.cpp:4923`): `{ session_id, success, event, error }`.
+pub(crate) fn chatterbox_session_event_reply_from_llsd(body: &Llsd) -> Event {
+    Event::ChatSessionEventReply {
+        session_id: uuid_member_lenient(body, "session_id"),
+        success: body.get("success").and_then(Llsd::as_bool).unwrap_or(false),
+        event: string_member(body, "event"),
+        error: string_member(body, "error"),
+    }
+}
+
+/// Decodes a `ForceCloseChatterBoxSession` CAPS event body
+/// (`LLViewerForceCloseChatterBoxSession`, `llimview.cpp:4957`):
+/// `{ session_id, reason }`.
+pub(crate) fn force_close_chatterbox_session_from_llsd(body: &Llsd) -> Event {
+    Event::ChatSessionForceClosed {
+        session_id: uuid_member_lenient(body, "session_id"),
+        reason: string_member(body, "reason"),
+    }
 }
 
 /// Serializes an [`Event::ChatSessionStarted`] as a `ChatterBoxSessionStartReply`
@@ -4902,72 +4934,132 @@ pub(crate) fn voice_channel_info_from_llsd(map: &Llsd) -> VoiceChannelInfo {
 }
 
 /// Decodes a `ChatterBoxSessionAgentListUpdates` CAPS event body into the session
-/// id and the per-agent **voice-connected** flags — the modern equivalent of the
-/// voice participant list (Firestorm `LLIMSpeakerMgr::updateSpeakers`,
-/// `llspeakers.cpp:687`). Each `agent_updates` entry is keyed by the agent uuid
-/// and carries an `info` map (whose `can_voice_chat` flag is the voice-membership
-/// indicator B8 folds) and a `transition` (`"ENTER"` / `"LEAVE"`). The returned
-/// bool is "in voice now": `true` when the agent is entering / present *and*
-/// voice-capable, `false` when leaving or text-only — so the handler can both add
-/// and drop voice members from one update. The `is_now_speaking` / talk-activity
-/// flag is deliberately **not** read (out of scope — that is the external voice
-/// client's concern). Returns `None` if the body carries no `agent_updates` map.
-pub(crate) fn agent_list_voice_updates_from_llsd(
+/// id and what it says of each agent, as the reference reads it
+/// (`LLIMSpeakerMgr::updateSpeakers`, `llspeakers.cpp:739`). The modern
+/// `agent_updates` map is keyed by the agent uuid and carries a `transition`
+/// (`"ENTER"` / `"LEAVE"`) and an `info` map (`can_voice_chat`, `is_moderator`,
+/// `mutes { text, voice }`); only when it is absent is the old `updates` map
+/// (agent uuid → transition string) read. Entries are in key order. Returns
+/// `None` if the body carries neither map.
+pub(crate) fn agent_list_updates_from_llsd(
     body: &Llsd,
-) -> Option<(Uuid, Vec<(AgentKey, bool)>)> {
+) -> Option<(Uuid, Vec<ChatSessionAgentUpdate>)> {
     let session_id = uuid_member_lenient(body, "session_id");
-    let Some(Llsd::Map(updates)) = body.get("agent_updates") else {
+    let transition_of = |text: &str| match text {
+        "ENTER" => SessionTransition::Enter,
+        "LEAVE" => SessionTransition::Leave,
+        _other => SessionTransition::Unrecognised,
+    };
+    if let Some(Llsd::Map(updates)) = body.get("agent_updates") {
+        let mut entries: Vec<ChatSessionAgentUpdate> = updates
+            .iter()
+            .filter_map(|(key, value)| {
+                let agent = AgentKey::from(Uuid::parse_str(key).ok()?);
+                let info = value.get("info");
+                let flag =
+                    |name: &str| info.and_then(|info| info.get(name)).and_then(Llsd::as_bool);
+                let mute = |name: &str| {
+                    info.and_then(|info| info.get("mutes"))
+                        .and_then(|mutes| mutes.get(name))
+                        .and_then(Llsd::as_bool)
+                };
+                Some(ChatSessionAgentUpdate {
+                    agent,
+                    transition: value
+                        .get("transition")
+                        .and_then(Llsd::as_str)
+                        .map(transition_of),
+                    can_voice_chat: flag("can_voice_chat"),
+                    is_moderator: flag("is_moderator"),
+                    text_muted: mute("text"),
+                    voice_muted: mute("voice"),
+                    legacy: false,
+                })
+            })
+            .collect();
+        entries.sort_by_key(|entry| entry.agent);
+        return Some((session_id, entries));
+    }
+    let Some(Llsd::Map(updates)) = body.get("updates") else {
         return None;
     };
-    let members = updates
+    let mut entries: Vec<ChatSessionAgentUpdate> = updates
         .iter()
         .filter_map(|(key, value)| {
-            let agent = AgentKey::from(Uuid::parse_str(key).ok()?);
-            let leaving = value
-                .get("transition")
-                .and_then(Llsd::as_str)
-                .is_some_and(|transition| transition == "LEAVE");
-            let can_voice = value
-                .get("info")
-                .and_then(|info| info.get("can_voice_chat"))
-                .and_then(Llsd::as_bool)
-                .unwrap_or(false);
-            Some((agent, !leaving && can_voice))
+            Some(ChatSessionAgentUpdate {
+                agent: AgentKey::from(Uuid::parse_str(key).ok()?),
+                transition: value.as_str().map(transition_of),
+                can_voice_chat: None,
+                is_moderator: None,
+                text_muted: None,
+                voice_muted: None,
+                legacy: true,
+            })
         })
         .collect();
-    Some((session_id, members))
+    entries.sort_by_key(|entry| entry.agent);
+    Some((session_id, entries))
 }
 
-/// Serializes per-agent voice-membership updates as a
-/// `ChatterBoxSessionAgentListUpdates` CAPS event body — the inverse of
-/// `agent_list_voice_updates_from_llsd`, for the server side of the event
-/// queue. Each `(agent, in_voice_now)` pair becomes an `agent_updates` entry
-/// keyed by the agent uuid: `true` emits a `transition` of `"ENTER"` with
-/// `info.can_voice_chat` `true`, `false` emits `"LEAVE"` with `false` — exactly
-/// the two shapes the parser's `!leaving && can_voice` fold decodes back to the
-/// input flags.
+/// Serializes a roster update as a `ChatterBoxSessionAgentListUpdates` CAPS
+/// event body — the inverse of `agent_list_updates_from_llsd`, for the server
+/// side of the event queue. An entry from `agent_updates` is keyed by the agent
+/// uuid with its `transition` and an `info` map of the flags it states
+/// (`can_voice_chat`, `is_moderator`, `mutes { text, voice }`), as Second Life
+/// writes it (`group-chat` census); a `legacy` entry goes into the old
+/// `updates` map as its bare transition. A flag the update does not state is
+/// left out, so "present but text-only" and "left" stay apart.
 #[must_use]
-pub fn agent_list_voice_updates_to_llsd(session_id: Uuid, updates: &[(AgentKey, bool)]) -> Llsd {
-    let agent_updates = updates
-        .iter()
-        .map(|&(agent, in_voice)| {
-            let transition = if in_voice { "ENTER" } else { "LEAVE" };
-            (
-                agent.uuid().to_string(),
-                llsd_map(vec![
-                    ("transition", Llsd::String(transition.to_owned())),
-                    (
-                        "info",
-                        llsd_map(vec![("can_voice_chat", Llsd::Boolean(in_voice))]),
-                    ),
-                ]),
-            )
-        })
-        .collect();
-    llsd_map(vec![
-        ("session_id", Llsd::Uuid(session_id)),
-        ("agent_updates", Llsd::Map(agent_updates)),
-    ])
+pub fn agent_list_updates_to_llsd(session_id: Uuid, updates: &[ChatSessionAgentUpdate]) -> Llsd {
+    let transition_text = |transition: SessionTransition| match transition {
+        SessionTransition::Enter => "ENTER",
+        SessionTransition::Leave => "LEAVE",
+        SessionTransition::Unrecognised => "",
+    };
+    let mut agent_updates = HashMap::new();
+    let mut old_updates = HashMap::new();
+    for update in updates {
+        let key = update.agent.uuid().to_string();
+        if update.legacy {
+            if let Some(transition) = update.transition {
+                old_updates.insert(key, Llsd::String(transition_text(transition).to_owned()));
+            }
+            continue;
+        }
+        let mut info = Vec::new();
+        if let Some(can_voice) = update.can_voice_chat {
+            info.push(("can_voice_chat", Llsd::Boolean(can_voice)));
+        }
+        if let Some(moderator) = update.is_moderator {
+            info.push(("is_moderator", Llsd::Boolean(moderator)));
+        }
+        let mut mutes = Vec::new();
+        if let Some(text) = update.text_muted {
+            mutes.push(("text", Llsd::Boolean(text)));
+        }
+        if let Some(voice) = update.voice_muted {
+            mutes.push(("voice", Llsd::Boolean(voice)));
+        }
+        if !mutes.is_empty() {
+            info.push(("mutes", llsd_map(mutes)));
+        }
+        let mut entry = vec![("info", llsd_map(info))];
+        if let Some(transition) = update.transition {
+            entry.push((
+                "transition",
+                Llsd::String(transition_text(transition).to_owned()),
+            ));
+        }
+        agent_updates.insert(key, llsd_map(entry));
+    }
+    let mut body = vec![("session_id", Llsd::Uuid(session_id))];
+    if !agent_updates.is_empty() || old_updates.is_empty() {
+        body.push(("agent_updates", Llsd::Map(agent_updates)));
+    }
+    if !old_updates.is_empty() {
+        body.push(("updates", Llsd::Map(old_updates)));
+    }
+    llsd_map(body)
 }
 
 /// Reads a region-local position from an LLSD map's `position` member, encoded
@@ -8061,11 +8153,9 @@ mod caps_serializer_tests {
     use crate::types::LandArea;
     use sl_wire::Direction;
 
-    use super::ServerHistoryMessage;
     use super::{
-        CapsTeleportFinish, CrossedRegionInfo, ParcelLlsdDialect,
-        agent_list_voice_updates_from_llsd, agent_list_voice_updates_to_llsd,
-        ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
+        CapsTeleportFinish, CrossedRegionInfo, ParcelLlsdDialect, agent_list_updates_from_llsd,
+        agent_list_updates_to_llsd, ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
         ais_updated_category_versions, bulk_update_inventory_from_llsd,
         bulk_update_inventory_to_llsd, chat_session_request_body, chat_session_request_from_llsd,
         chat_session_roster_from_llsd, chat_session_roster_to_llsd,
@@ -8081,6 +8171,7 @@ mod caps_serializer_tests {
         session_history_from_llsd, session_history_to_llsd, teleport_finish_from_llsd,
         teleport_finish_to_llsd,
     };
+    use super::{ChatSessionAgentUpdate, ServerHistoryMessage, SessionTransition};
     use super::{
         STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo,
         inventory_item_from_llsd, ipv4_octets, llsd_map, llsd_port, llsd_u32,
@@ -9484,19 +9575,112 @@ mod caps_serializer_tests {
     }
 
     #[test]
-    fn agent_list_voice_updates_round_trip() -> Result<(), String> {
+    fn agent_list_updates_round_trip() -> Result<(), String> {
         let session_id = Uuid::from_u128(0xe6);
-        let updates = vec![
-            (AgentKey::from(Uuid::from_u128(0xe7)), true),
-            (AgentKey::from(Uuid::from_u128(0xe8)), false),
+        let entry = |agent: u128, transition, voice, legacy: bool| ChatSessionAgentUpdate {
+            agent: AgentKey::from(Uuid::from_u128(agent)),
+            transition,
+            can_voice_chat: voice,
+            is_moderator: (!legacy).then_some(false),
+            text_muted: None,
+            voice_muted: None,
+            legacy,
+        };
+        // A member who stays but has no voice is not one who left.
+        let modern = vec![
+            entry(0xe7, Some(SessionTransition::Enter), Some(true), false),
+            entry(0xe8, Some(SessionTransition::Enter), Some(false), false),
+            entry(0xe9, Some(SessionTransition::Leave), None, false),
         ];
-        let (parsed_session, mut parsed_updates) = agent_list_voice_updates_from_llsd(
-            &agent_list_voice_updates_to_llsd(session_id, &updates),
-        )
-        .ok_or_else(|| "an agent_updates map decodes".to_owned())?;
-        parsed_updates.sort();
+        let (parsed_session, parsed) =
+            agent_list_updates_from_llsd(&agent_list_updates_to_llsd(session_id, &modern))
+                .ok_or_else(|| "an agent_updates map decodes".to_owned())?;
         assert_eq!(parsed_session, session_id);
-        assert_eq!(parsed_updates, updates);
+        assert_eq!(parsed, modern);
+        let old = vec![entry(0xea, Some(SessionTransition::Leave), None, true)];
+        let (_session, parsed) =
+            agent_list_updates_from_llsd(&agent_list_updates_to_llsd(session_id, &old))
+                .ok_or_else(|| "an updates map decodes".to_owned())?;
+        assert_eq!(parsed, old);
+        Ok(())
+    }
+
+    #[test]
+    fn a_refused_session_start_and_an_event_reply_decode() -> Result<(), String> {
+        let asked = Uuid::from_u128(0xeb);
+        let refused = sl_wire::parse_llsd_xml(&format!(
+            "<llsd><map><key>temp_session_id</key><uuid>{asked}</uuid>\
+             <key>success</key><boolean>0</boolean>\
+             <key>error</key><string>not a member</string></map></llsd>"
+        ))
+        .map_err(|error| error.to_string())?;
+        assert_eq!(
+            super::chatterbox_session_start_reply_from_llsd(&refused),
+            Some(Event::ChatSessionStarted {
+                temp_session_id: crate::ImSessionId::from(asked),
+                session_id: crate::ImSessionId::from(asked),
+                success: false,
+                session_name: String::new(),
+                voice_enabled: false,
+                error: "not a member".to_owned(),
+            })
+        );
+        let reply = sl_wire::parse_llsd_xml(&format!(
+            "<llsd><map><key>session_id</key><uuid>{asked}</uuid>\
+             <key>success</key><boolean>0</boolean>\
+             <key>event</key><string>message</string>\
+             <key>error</key><string>generic</string></map></llsd>"
+        ))
+        .map_err(|error| error.to_string())?;
+        assert_eq!(
+            super::chatterbox_session_event_reply_from_llsd(&reply),
+            Event::ChatSessionEventReply {
+                session_id: asked,
+                success: false,
+                event: "message".to_owned(),
+                error: "generic".to_owned(),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn agent_list_updates_read_moderation_and_the_old_map() -> Result<(), String> {
+        let agent = Uuid::from_u128(0xe9);
+        let body = sl_wire::parse_llsd_xml(&format!(
+            "<llsd><map><key>session_id</key><uuid>{session}</uuid>\
+             <key>agent_updates</key><map><key>{agent}</key><map>\
+             <key>info</key><map><key>is_moderator</key><boolean>1</boolean>\
+             <key>mutes</key><map><key>text</key><boolean>1</boolean></map></map>\
+             </map></map></map></llsd>",
+            session = Uuid::from_u128(0xea),
+        ))
+        .map_err(|error| error.to_string())?;
+        let (_session, parsed) = agent_list_updates_from_llsd(&body)
+            .ok_or_else(|| "an agent_updates map decodes".to_owned())?;
+        assert_eq!(
+            parsed,
+            vec![ChatSessionAgentUpdate {
+                agent: AgentKey::from(agent),
+                transition: None,
+                can_voice_chat: None,
+                is_moderator: Some(true),
+                text_muted: Some(true),
+                voice_muted: None,
+                legacy: false,
+            }]
+        );
+        let old = sl_wire::parse_llsd_xml(&format!(
+            "<llsd><map><key>updates</key><map><key>{agent}</key><string>LEAVE</string>\
+             </map></map></llsd>"
+        ))
+        .map_err(|error| error.to_string())?;
+        let (_session, parsed) = agent_list_updates_from_llsd(&old)
+            .ok_or_else(|| "an updates map decodes".to_owned())?;
+        assert_eq!(
+            parsed.first().map(|entry| (entry.transition, entry.legacy)),
+            Some((Some(SessionTransition::Leave), true))
+        );
         Ok(())
     }
 

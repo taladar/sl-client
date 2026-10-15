@@ -396,6 +396,21 @@ mod tests {
         let nearby = |who: AgentKey, name: &str| {
             Event::ChatReceived(Box::new(said(name, ChatSource::Agent(who), None)))
         };
+        let wire = |who: AgentKey, name: &str| InstantMessage {
+            from_agent_id: who,
+            from_agent_name: name.to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(1)),
+            dialog: ImDialog::SessionSend,
+            from_group: false,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: Uuid::nil(),
+            parent_estate_id: 0,
+            message: "hello".to_owned(),
+            binary_bucket: Vec::new(),
+        };
         let im = |who: AgentKey, name: &str| {
             Event::InstantMessageReceived(Box::new(InstantMessage {
                 from_agent_id: who,
@@ -418,12 +433,14 @@ mod tests {
             from_agent_id: who,
             from_name: name.to_owned(),
             message: "hello".to_owned(),
+            im: Box::new(wire(who, name)),
         };
         let conference = |who: AgentKey, name: &str| Event::ConferenceSessionMessage {
             session_id: Uuid::from_u128(0x20),
             from_agent_id: who,
             from_name: name.to_owned(),
             message: "hello".to_owned(),
+            im: Box::new(wire(who, name)),
         };
 
         for said_by_troll in [

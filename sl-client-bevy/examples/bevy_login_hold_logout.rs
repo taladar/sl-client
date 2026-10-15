@@ -399,6 +399,9 @@ fn on_events(
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. }
             | SlSessionEvent::ChatSessionStarted { .. }
+            | SlSessionEvent::ChatSessionAgentsUpdated { .. }
+            | SlSessionEvent::ChatSessionEventReply { .. }
+            | SlSessionEvent::ChatSessionForceClosed { .. }
             | SlSessionEvent::EstateCovenant(_)
             | SlSessionEvent::TelehubInfo(_)
             | SlSessionEvent::AlertMessage { .. }

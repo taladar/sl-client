@@ -1213,6 +1213,15 @@ impl TestContext {
         self.tertiary.as_mut()
     }
 
+    /// All three sessions of a three-account test at once, for a case in
+    /// which each avatar is listened to after another one acts.
+    pub const fn all_three(&mut self) -> Option<(&mut Session, &mut Session, &mut Session)> {
+        match (self.secondary.as_mut(), self.tertiary.as_mut()) {
+            (Some(secondary), Some(tertiary)) => Some((&mut self.primary, secondary, tertiary)),
+            _ => None,
+        }
+    }
+
     /// The metrics collector to record measurements into.
     pub const fn metrics(&mut self) -> &mut Metrics {
         &mut self.metrics

@@ -7993,6 +7993,7 @@ mod test {
                     from_agent_id,
                     from_name,
                     message,
+                    ..
                 } if *group_id == group
                     && *from_agent_id == peer
                     && from_name == "Peer User"
@@ -8130,6 +8131,7 @@ mod test {
                     from_agent_id,
                     from_name,
                     message,
+                    ..
                 } if *sid == session_id.get()
                     && *from_agent_id == b_agent
                     && from_name == "Peer User"

@@ -553,6 +553,7 @@ impl ChatLog {
                 from_agent_id,
                 from_name,
                 message,
+                ..
             } => {
                 self.log_group(*group_id, *from_agent_id, from_name, message);
             }
@@ -561,6 +562,7 @@ impl ChatLog {
                 from_agent_id,
                 from_name,
                 message,
+                ..
             } => {
                 let id = ImSessionId::from(*session_id);
                 let roster: BTreeSet<AgentKey> = session

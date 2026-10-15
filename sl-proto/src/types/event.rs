@@ -65,8 +65,8 @@ use uuid::Uuid;
 use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, TransferId, XferId};
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::{
-    ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor, NearbyHistoryLine,
-    ServerHistoryMessage, SessionMessage,
+    ChatSessionAgentUpdate, ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor,
+    NearbyHistoryLine, ServerHistoryMessage, SessionMessage,
 };
 
 /// How the agent came to be in the region an [`Event::AgentArrived`] reports —
@@ -1204,6 +1204,9 @@ pub enum Event {
         from_name: String,
         /// The message text.
         message: String,
+        /// The whole message as it arrived — its region, place, time, estate
+        /// and bucket, which the fields above leave out.
+        im: Box<InstantMessage>,
     },
     /// A participant joined or left a group IM session (an
     /// `ImprovedInstantMessage` with the `IM_SESSION_INVITE`/`SessionAdd` or
@@ -1229,6 +1232,9 @@ pub enum Event {
         from_name: String,
         /// The message text.
         message: String,
+        /// The whole message as it arrived — its region, place, time, estate
+        /// and bucket, which the fields above leave out.
+        im: Box<InstantMessage>,
     },
     /// A participant joined or left an ad-hoc conference IM session (an
     /// `ImprovedInstantMessage` with the `IM_SESSION_INVITE`/`SessionAdd` or
@@ -1258,8 +1264,11 @@ pub enum Event {
         /// ([`ImDialog::SessionConferenceStart`]), or a plain session add — so a
         /// client can tell a group IM from an ad-hoc conference before joining.
         dialog: ImDialog,
-        /// Whether the invitation comes from a group (a group IM) rather than an
-        /// ad-hoc conference of individual agents. For a group IM the
+        /// Whether the invitation is to a group session (a group IM) rather than
+        /// an ad-hoc conference of individual agents: as it says, or as the
+        /// session reads it — Second Life invites to a group session with
+        /// `from_group` clear, so an invitation under the id of a group the
+        /// agent is in is the group's (the reference's `gAgent.isInGroup`). For a group IM the
         /// [`session_id`](Self::ConferenceInvited::session_id) is the group id.
         from_group: bool,
         /// The session's human-readable name (the group or conference name),
@@ -1315,6 +1324,40 @@ pub enum Event {
         voice_enabled: bool,
         /// The grid's failure reason (empty on success).
         error: String,
+    },
+    /// The grid's answer to something said or done in a group or conference
+    /// session — the CAPS event-queue `ChatterBoxSessionEventReply`. The
+    /// reference shows the error of a refusal and nothing else.
+    ChatSessionEventReply {
+        /// The session the answer is about.
+        session_id: Uuid,
+        /// Whether what was done was taken.
+        success: bool,
+        /// What was done, as the grid names it.
+        event: String,
+        /// Why it was refused (empty when taken).
+        error: String,
+    },
+    /// The grid closed a group or conference session on the agent — the CAPS
+    /// event-queue `ForceCloseChatterBoxSession`.
+    ChatSessionForceClosed {
+        /// The session.
+        session_id: Uuid,
+        /// Why, as the grid names it.
+        reason: String,
+    },
+    /// A group or conference session's roster changed — the CAPS event-queue
+    /// `ChatterBoxSessionAgentListUpdates` push, which is how Second Life tells
+    /// a participant who came in, who left, who moderates and whose text a
+    /// moderator took away. The session registry folds each entry's transition
+    /// into the session's participants (and the voice flag into its voice
+    /// members) before this is surfaced; an update for a session the registry
+    /// does not hold is surfaced all the same.
+    ChatSessionAgentsUpdated {
+        /// The session the update is about, as the grid names it.
+        session_id: Uuid,
+        /// What the update says of each agent, in agent-id order.
+        updates: Vec<ChatSessionAgentUpdate>,
     },
     /// The result of a [`Session::create_group`](crate::Session::create_group)
     /// (`CreateGroupReply`).

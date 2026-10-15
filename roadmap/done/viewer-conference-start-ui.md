@@ -2,7 +2,7 @@
 id: viewer-conference-start-ui
 title: Start an ad-hoc conference from a multi-selection
 topic: viewer
-status: in-progress
+status: done
 origin: Firestorm full-parity audit (2026-08-19)
 refs: [chat-b2, chat-b5, test-conference-roster,
   viewer-social-people-panel, viewer-radar-multi-select,
@@ -180,3 +180,14 @@ path — the peers receiving their `ChatterBoxInvitation` under the grid's id an
 a message crossing between them. A conformance `conference-roster` case
 ([[test-conference-roster]]) would assert exactly that without any UI, and is
 the better closer for this than another hand-driven session.
+
+## Done (2026-10-15)
+
+The `group-chat` census ([[gridspec-group-chat-and-conference]]) answered
+what was left: on Second Life a conference started through the client is
+re-keyed onto the grid's id by its start reply, the invitations and every
+later line and roster push name that id, and a line round-trips between all
+three avatars. It also found why no line had crossed before: Second Life
+refused every session line with an empty bucket, which the client now sends
+as the reference does (one zero byte). The UI doors were reached live on
+2026-08-21; nothing of the UI changed.
