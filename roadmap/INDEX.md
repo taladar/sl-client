@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 347 |
-| blocked | 94 |
+| blocked | 92 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1381 |
+| done | 1383 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2066** |
@@ -368,6 +368,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Set the maturity preference over UpdateAgentInformation
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
+- [`protocol-sim-profile-messages`](ready/protocol-sim-profile-messages.md) —
+  SimSession — decode profile requests and send profile replies
 - [`protocol-sim-script-messages`](ready/protocol-sim-script-messages.md) — The
   simulator-side script messages SimSession neither sends nor decodes
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
@@ -1155,8 +1157,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Notecards, embedded items and gestures on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
   Current Outfit Folder and wearables on each grid
-- [`gridspec-profiles`](ready/gridspec-profiles.md) — Profiles, picks,
-  classifieds, notes and display names on each grid
 - [`gridspec-region-info`](ready/gridspec-region-info.md) — RegionInfo, region
   flags and limits on each grid
 - [`gridspec-search-directory`](ready/gridspec-search-directory.md) — Directory
@@ -1170,16 +1170,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (94)
+## blocked (92)
 
 ### protocol
 
 - [`protocol-avatar-render-info`](blocked/protocol-avatar-render-info.md) —
   AvatarRenderInfo — client request, SimCaps service and fake-grid answers
   (blocked by `gridspec-avatar-render-info`)
-- [`protocol-cap-agent-profile`](blocked/protocol-cap-agent-profile.md) — Read
-  and write profiles over the AgentProfile capability (blocked by
-  `gridspec-profiles`)
 - [`protocol-cap-dispatch-region-info`](blocked/protocol-cap-dispatch-region-info.md)
   — Write region settings over the DispatchRegionInfo capability (blocked by
   `gridspec-region-info`)
@@ -1190,9 +1187,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   home over the HomeLocation capability (blocked by `gridspec-landmarks-home`)
 - [`protocol-cap-product-info`](blocked/protocol-cap-product-info.md) — Land
   type names over ProductInfoRequest (blocked by `gridspec-search-directory`)
-- [`protocol-sim-profile-messages`](blocked/protocol-sim-profile-messages.md) —
-  SimSession — decode profile requests and send profile replies (blocked by
-  `gridspec-profiles`)
 
 ### viewer
 
@@ -1355,7 +1349,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-fake-grid-parcel-on-movement`, `server-world-agent-movement`)
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
-  by `gridspec-profiles`, `protocol-sim-profile-messages`)
+  by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
 - [`server-fake-grid-script-compile-on-upload`](blocked/server-fake-grid-script-compile-on-upload.md)
   — A script upload is accepted and never compiled (blocked by
   `server-lsl-compiler-ir` (done), `gridspec-lsl-compile`)
@@ -1625,7 +1619,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1381)
+## done (1383)
 
 ### protocol
 
@@ -1817,6 +1811,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   failure
 - [`protocol-audit-wire-error-contract`](done/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-cap-agent-profile`](done/protocol-cap-agent-profile.md) — Read and
+  write profiles over the AgentProfile capability (blocked by
+  `gridspec-profiles` (done))
 - [`protocol-cap-get-metadata`](done/protocol-cap-get-metadata.md) — Read a
   script's experience over GetMetadata
 - [`protocol-cap-group-bans`](done/protocol-cap-group-bans.md) — Group ban lists
@@ -4667,6 +4664,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   edits, divide/join, object owners and return on each grid
 - [`gridspec-parcel-properties`](done/gridspec-parcel-properties.md) —
   ParcelProperties transport, fields and pushes on each grid
+- [`gridspec-profiles`](done/gridspec-profiles.md) — Profiles, picks,
+  classifieds, notes and display names on each grid
 - [`gridspec-region-arrival`](done/gridspec-region-arrival.md) — Region
   handshake identity, the arrival burst and region telemetry on each grid
 - [`gridspec-seed-capabilities`](done/gridspec-seed-capabilities.md) — Which

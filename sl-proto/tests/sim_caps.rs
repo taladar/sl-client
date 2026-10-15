@@ -181,8 +181,10 @@ mod test {
         // contents (RequestTaskInventory, GetMetadata), and the three smaller
         // upload capabilities (MeshUploadFlag, InventoryThumbnailUpload,
         // SendPostcard), and the six of friends and groups (the four answers to
-        // a kept offer or invitation, GroupMemberData, GroupAPIv1).
-        assert_eq!(granted.len(), 76);
+        // a kept offer or invitation, GroupMemberData, GroupAPIv1), and three
+        // of the profile capabilities (UploadAgentProfileImage, SetDisplayName,
+        // SearchStatRequest; AgentProfile waits for a profile store).
+        assert_eq!(granted.len(), 79);
         Ok(())
     }
 
@@ -5284,6 +5286,261 @@ mod test {
         }
         assert!(sim.voice().connections().is_empty());
         assert!(sim.poll_event().is_none());
+        Ok(())
+    }
+
+    /// A simulator session whose circuit agent 1 (session 2) opened, as a
+    /// `UseCircuitCode` would open it.
+    fn sim_with_agent(now: Instant) -> Result<SimSession, TestError> {
+        let mut sim = new_sim();
+        let open = sl_wire::AnyMessage::UseCircuitCode(sl_wire::messages::UseCircuitCode {
+            circuit_code: sl_wire::messages::UseCircuitCodeCircuitCodeBlock {
+                code: 0x0011_2233,
+                session_id: uuid::Uuid::from_u128(2),
+                id: uuid::Uuid::from_u128(1),
+            },
+        });
+        let mut writer = sl_wire::Writer::new();
+        open.id().encode(&mut writer)?;
+        open.encode_body(&mut writer)?;
+        let datagram = sl_wire::encode_datagram(
+            sl_wire::PacketFlags::RELIABLE,
+            sl_wire::SequenceNumber(1),
+            &writer.into_bytes(),
+        );
+        sim.handle_datagram(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 40000),
+            &datagram,
+            now,
+        )?;
+        while sim.poll_event().is_some() {}
+        Ok(sim)
+    }
+
+    /// The event-queue messages waiting for the client, by name and body.
+    fn event_queue_messages(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+    ) -> Result<Vec<(String, Llsd)>, TestError> {
+        let path = granted_event_queue_path(caps)?;
+        let (status, body) = respond(
+            caps,
+            sim,
+            &post(&path, &build_event_queue_request(None, false)),
+        )?;
+        assert_eq!(status, 200);
+        Ok(parse_event_queue_response(&body)?
+            .events
+            .into_iter()
+            .map(|event| (event.message, event.body))
+            .collect())
+    }
+
+    /// `UploadAgentProfileImage`: the field, then the image, which the
+    /// simulator hands the driver under the asset id it answers with; an
+    /// upload that named no field is a server error.
+    #[test]
+    fn upload_agent_profile_image_two_steps() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "UploadAgentProfileImage")?;
+        let image = sl_test_j2c(64, 64);
+        let first = sl_proto::profile_image_upload_body(sl_proto::ProfileImage::FirstLife);
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &first))?;
+        assert_eq!(status, 200);
+        let uploader: url::Url = parse_asset_upload_response(&reply)?
+            .uploader
+            .ok_or("expected an uploader URL")?
+            .parse()?;
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &request("POST", uploader.path(), &image),
+        )?;
+        assert_eq!(status, 200);
+        let done = parse_asset_upload_response(&reply)?;
+        assert_eq!(done.state, "complete");
+        let new_asset = done.new_asset.ok_or("expected a new asset")?;
+        match sim.poll_event() {
+            Some(ServerEvent::ProfileImageUploaded {
+                image: field,
+                new_asset: stored,
+                data,
+            }) => {
+                assert_eq!(field, sl_proto::ProfileImage::FirstLife);
+                assert_eq!(stored.uuid(), new_asset);
+                assert_eq!(data, image);
+            }
+            other => return Err(format!("expected a profile image, got {other:?}").into()),
+        }
+
+        let (_status, reply) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map/></llsd>"))?;
+        let uploader: url::Url = parse_asset_upload_response(&reply)?
+            .uploader
+            .ok_or("expected an uploader URL")?
+            .parse()?;
+        let (status, _reply) = respond(
+            &mut caps,
+            &mut sim,
+            &request("POST", uploader.path(), &image),
+        )?;
+        assert_eq!(status, 500);
+        Ok(())
+    }
+
+    /// `SetDisplayName` answers over the event queue: a stale old name is a
+    /// `409` and changes nothing; the current one changes the name, says so,
+    /// pushes the update, and hands the change to the driver.
+    #[test]
+    fn set_display_name_answers_over_the_event_queue() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut caps = new_caps()?;
+        let mut sim = sim_with_agent(now)?;
+        let agent = AgentKey::from(uuid::Uuid::from_u128(1));
+        sim.set_display_name(DisplayName {
+            id: agent,
+            username: "avatar.tester".to_owned(),
+            display_name: "Avatar Tester".to_owned(),
+            legacy_first_name: "Avatar".to_owned(),
+            legacy_last_name: "Tester".to_owned(),
+            is_display_name_default: true,
+            ..DisplayName::default()
+        });
+        let path = granted_cap_path(&caps, "SetDisplayName")?;
+
+        let stale = sl_proto::set_display_name_body("Somebody Else", "A New Name");
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &stale))?;
+        assert_eq!(status, 200);
+        let messages = event_queue_messages(&mut caps, &mut sim)?;
+        assert_eq!(
+            messages
+                .iter()
+                .map(|(name, body)| (name.as_str(), body.get("status").and_then(Llsd::as_i32)))
+                .collect::<Vec<_>>(),
+            vec![("SetDisplayNameReply", Some(409))]
+        );
+        assert_eq!(
+            sim.display_name(agent)
+                .map(|name| name.display_name.as_str()),
+            Some("Avatar Tester")
+        );
+
+        let taken = sl_proto::set_display_name_body("Avatar Tester", "A New Name");
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &taken))?;
+        assert_eq!(status, 200);
+        let messages = event_queue_messages(&mut caps, &mut sim)?;
+        assert_eq!(
+            messages
+                .iter()
+                .map(|(name, _body)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["SetDisplayNameReply", "DisplayNameUpdate"]
+        );
+        let stored = sim.display_name(agent).ok_or("the record went away")?;
+        assert_eq!(stored.display_name, "A New Name");
+        assert!(!stored.is_display_name_default);
+        match sim.poll_event() {
+            Some(ServerEvent::DisplayNameChanged(update)) => {
+                assert_eq!(update.old_display_name, "Avatar Tester");
+                assert_eq!(update.name.display_name, "A New Name");
+            }
+            other => return Err(format!("expected the change, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `SearchStatRequest` answers the six counters at nought, which the
+    /// client reads once it has stamped the classified.
+    #[test]
+    fn search_stat_request_answers_no_clicks() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "SearchStatRequest")?;
+        let classified = sl_proto::ClassifiedKey::from(uuid::Uuid::from_u128(0xc1a5));
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &post(&path, &sl_proto::search_stat_request_body(classified)),
+        )?;
+        assert_eq!(status, 200);
+        let answer = parse_llsd_xml(&reply)?;
+        for key in [
+            "teleport_clicks",
+            "map_clicks",
+            "profile_clicks",
+            "search_teleport_clicks",
+            "search_map_clicks",
+            "search_profile_clicks",
+        ] {
+            assert_eq!(answer.get(key).and_then(Llsd::as_i32), Some(0), "{key}");
+        }
+        Ok(())
+    }
+
+    /// Each grid's people service: Second Life names a Resident by its first
+    /// name, leaves the expiry out and lists an unknown id under `bad_ids`;
+    /// OpenSim's user name is the legacy name and an unknown id is left out.
+    #[test]
+    fn get_display_names_answers_as_each_grid() -> Result<(), TestError> {
+        let resident = AgentKey::from(uuid::Uuid::from_u128(0x7701));
+        let unknown = AgentKey::from(uuid::Uuid::from_u128(0x7702));
+        let record = DisplayName {
+            id: resident,
+            username: "example".to_owned(),
+            display_name: "Example Resident".to_owned(),
+            legacy_first_name: "Example".to_owned(),
+            legacy_last_name: "Resident".to_owned(),
+            is_display_name_default: true,
+            display_name_expires: "2099-01-01T00:00:00Z".to_owned(),
+            display_name_next_update: "2099-01-01T00:00:00Z".to_owned(),
+            missing: false,
+        };
+        let query = display_names_query(&[resident.uuid(), unknown.uuid()]);
+        let query = query.trim_start_matches('?').to_owned();
+        for (style, display, username, expires, bad_ids) in [
+            (
+                sl_proto::DisplayNameStyle::SecondLife,
+                "Example",
+                "example",
+                false,
+                true,
+            ),
+            (
+                sl_proto::DisplayNameStyle::OpenSim,
+                "Example Resident",
+                "Example Resident",
+                true,
+                false,
+            ),
+        ] {
+            let mut caps = new_caps()?.with_display_name_style(style);
+            let mut sim = new_sim();
+            sim.set_display_name(record.clone());
+            let path = granted_cap_path(&caps, "GetDisplayNames")?;
+            let (status, body) = respond(&mut caps, &mut sim, &get(&path, Some(&query)))?;
+            assert_eq!(status, 200);
+            let answer = parse_llsd_xml(&body)?;
+            let agent = answer
+                .get("agents")
+                .and_then(|agents| agents.index(0))
+                .ok_or("no agent")?;
+            assert_eq!(
+                agent.get("display_name").and_then(Llsd::as_str),
+                Some(display),
+                "{style:?}"
+            );
+            assert_eq!(
+                agent.get("username").and_then(Llsd::as_str),
+                Some(username),
+                "{style:?}"
+            );
+            assert_eq!(
+                agent.get("display_name_expires").is_some(),
+                expires,
+                "{style:?}"
+            );
+            assert_eq!(answer.get("bad_ids").is_some(), bad_ids, "{style:?}");
+        }
         Ok(())
     }
 }

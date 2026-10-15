@@ -81,15 +81,16 @@ use sl_proto::{
     ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry,
     ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
     ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType,
-    Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, ReflectionProbe,
-    ReflectionProbeFlags, RegionDebugUpdate, RegionHandle, RegionInfoUpdate, RegionLocalObjectId,
-    RegionLocalParcelId, RegionName, RegionTerrainUpdate, RenderMaterialRef, RestoreItem,
-    RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId,
-    ScopedParcelId, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
-    SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey,
-    TerraformArea, TextureEntry, TextureFace, Throttle, ThumbnailTarget, TimestampFormat,
-    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    Postcard, PrimShape, PrimShapeParams, ProfileImage, ProfileUpdate, ProposalVoteId,
+    ReflectionProbe, ReflectionProbeFlags, RegionDebugUpdate, RegionHandle, RegionInfoUpdate,
+    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionTerrainUpdate, RenderMaterialRef,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    ScopedObjectId, ScopedParcelId, ScriptLanguage, ScriptPermissions, ScriptTarget,
+    ScriptUploadLocation, SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot,
+    TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle, ThumbnailTarget,
+    TimestampFormat, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
+    WearableType,
 };
 
 use crate::args::{self, Args};
@@ -1324,6 +1325,10 @@ fn build_profile_update(args: &Args, ctx: &dyn ReplContext) -> Result<ProfileUpd
         allow_publish: args.bool_or(ctx, "allow_publish", 4, false)?,
         mature_publish: args.bool_or(ctx, "mature_publish", 5, false)?,
         profile_url: args.str_or(ctx, "profile_url", 6, "")?,
+        hide_age: args
+            .opt_str(ctx, "hide_age", 7)?
+            .map(|value| args::parse_bool("hide_age", &value))
+            .transpose()?,
     })
 }
 
@@ -2387,6 +2392,46 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::DeleteClassified(ClassifiedKey::from(
                     args.req_uuid(ctx, "classified_id", 0)?,
                 )))
+            },
+        },
+        CommandSpec {
+            name: "request_classified_click_stats",
+            usage: "<classified_id>",
+            build: |args, ctx| {
+                Ok(Command::RequestClassifiedClickStats(ClassifiedKey::from(
+                    args.req_uuid(ctx, "classified_id", 0)?,
+                )))
+            },
+        },
+        CommandSpec {
+            name: "upload_profile_image",
+            usage: "<image: sl|fl> <j2c>",
+            build: |args, ctx| {
+                let image = match args.req_str(ctx, "image", 0)?.as_str() {
+                    "sl" => ProfileImage::SecondLife,
+                    "fl" => ProfileImage::FirstLife,
+                    other => {
+                        return Err(ReplError::InvalidArg {
+                            field: "image".to_owned(),
+                            value: other.to_owned(),
+                            expected: "sl or fl".to_owned(),
+                        });
+                    }
+                };
+                Ok(Command::UploadProfileImage {
+                    image,
+                    j2c: args.bytes_or_empty(ctx, "j2c", 1)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_display_name",
+            usage: "<old> <new>",
+            build: |args, ctx| {
+                Ok(Command::SetDisplayName {
+                    old: args.req_str(ctx, "old", 0)?,
+                    new: args.req_str(ctx, "new", 1)?,
+                })
             },
         },
         CommandSpec {

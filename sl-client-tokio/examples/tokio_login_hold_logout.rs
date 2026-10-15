@@ -203,6 +203,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::ClassifiedInfo(classified) => {
                 info!("classified details: {}", classified.name);
             }
+            Event::ProfileImageUploaded { image, asset_id } => {
+                info!("profile image {image:?} uploaded: {asset_id:?}");
+            }
+            Event::ClassifiedClickStats(stats) => {
+                info!("classified click counts: {stats:?}");
+            }
             Event::Account(account) => {
                 info!(
                     "account: access {:?}/{:?}, max groups {:?}, home {:?}",

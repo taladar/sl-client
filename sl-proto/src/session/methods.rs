@@ -311,6 +311,7 @@ impl Session {
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
             circuit_probe: CircuitProbe::Off,
+            profile_reads: std::collections::BTreeSet::new(),
         }
     }
 
@@ -905,6 +906,34 @@ impl Session {
             }
             // The response to a `GroupMemberData` capability POST (the modern
             // group roster fetch).
+            CapsEvent::AgentProfile => match super::profile_caps::agent_profile_events(body) {
+                Some(events) => {
+                    for event in &events {
+                        if let Event::AvatarProperties(props) = event {
+                            let _was_out = self.profile_reads.remove(&props.avatar_id);
+                        }
+                    }
+                    self.events.extend(events);
+                }
+                None => {
+                    // An answer that names nobody does not say whose read it
+                    // ends.
+                    self.profile_reads.clear();
+                    self.caps_decode_failed(message);
+                }
+            },
+            CapsEvent::UploadAgentProfileImage => {
+                match super::profile_caps::profile_image_uploaded(body) {
+                    Some(event) => self.events.push_back(event),
+                    None => self.caps_decode_failed(message),
+                }
+            }
+            CapsEvent::SearchStatRequest => {
+                match super::profile_caps::classified_click_stats(body) {
+                    Some(event) => self.events.push_back(event),
+                    None => self.caps_decode_failed(message),
+                }
+            }
             CapsEvent::GroupApiV1 => {
                 if let Some(event) = group_bans_from_caps_llsd(body) {
                     self.events.push_back(event);
@@ -5520,6 +5549,23 @@ impl Session {
                     },
                 });
             }
+            // A classified's click counts, which Second Life sends with every
+            // `ClassifiedInfoReply`.
+            AnyMessage::GenericMessage(generic)
+                if trimmed_string(&generic.method_data.method) == "classifiedclickthrough" =>
+            {
+                let params: Vec<Vec<u8>> = generic
+                    .param_list
+                    .iter()
+                    .map(|block| block.parameter.clone())
+                    .collect();
+                match super::profile_caps::classified_click_through(&params) {
+                    Some(event) => self.events.push_back(event),
+                    None => tracing::warn!(
+                        "a classifiedclickthrough generic message did not read as click counts"
+                    ),
+                }
+            }
             AnyMessage::GenericMessage(generic)
                 // The sim NUL-terminates the method name on the wire.
                 if trimmed_string(&generic.method_data.method) == "emptymutelist" =>
@@ -7074,6 +7120,21 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_avatar_properties_request(target.uuid(), now)?;
         Ok(())
+    }
+
+    /// Whether a read of `avatar`'s profile over `AgentProfile` should go
+    /// out now: `false` while one is already out, as the reference suppresses
+    /// a duplicate request (`isPendingRequest`). A runtime calls this before
+    /// each GET; the answer ends the read.
+    pub fn begin_profile_read(&mut self, avatar: AgentKey) -> bool {
+        self.profile_reads.insert(avatar)
+    }
+
+    /// Ends every profile read that is out: a runtime calls this when an
+    /// `AgentProfile` GET failed, which does not say whose it was, so that the
+    /// next read of any profile goes out again.
+    pub fn profile_reads_failed(&mut self) {
+        self.profile_reads.clear();
     }
 
     /// Requests the picks of the avatar `target` (a `GenericMessage`

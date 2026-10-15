@@ -227,6 +227,7 @@ fn profile_update(props: &AvatarProperties, about_text: &str) -> ProfileUpdate {
         allow_publish: props.flags & FLAG_ALLOW_PUBLISH != 0,
         mature_publish: props.flags & FLAG_MATURE_PUBLISH != 0,
         profile_url: props.profile_url.clone(),
+        hide_age: None,
     }
 }
 

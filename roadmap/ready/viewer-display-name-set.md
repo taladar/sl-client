@@ -32,3 +32,13 @@ decodes. On 409 refetch the name. No capability → the feature is unavailable
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Protocol done (2026-10-15, gridspec-profiles)
+
+`Command::SetDisplayName { old, new }` POSTs to the capability (logged and
+dropped where there is none); the answer is the existing
+`Event::SetDisplayNameReply`, then `Event::DisplayNameUpdate`. The fake
+grid's Second Life flavour serves it (`409`, `400`, `200` as the reference
+expects; unmeasured on Second Life, where a change locks the name for a
+week). The dialog must stay hidden where the region grants no
+`SetDisplayName` (OpenSim, measured in `book/src/gridspec/profiles.md`).

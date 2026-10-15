@@ -252,6 +252,19 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid's people service answers `GetDisplayNames`
+    /// (`profiles`, 2026-10-15, `book/src/gridspec/profiles.md`): Second
+    /// Life names a Resident by its first name, leaves the expiry out and
+    /// lists an unknown id under `bad_ids`; OpenSim's user name is the legacy
+    /// name, space and all, and an unknown id is left out.
+    #[must_use]
+    pub const fn display_name_style(self) -> sl_proto::DisplayNameStyle {
+        match self {
+            Self::SecondLife => sl_proto::DisplayNameStyle::SecondLife,
+            Self::OpenSim => sl_proto::DisplayNameStyle::OpenSim,
+        }
+    }
+
     /// What a region of `product` holds on this grid: its land impact budget
     /// and how many agents it admits.
     ///
@@ -1489,13 +1502,16 @@ pub const SECOND_LIFE_REFUSED_CAPABILITIES: &[&str] = &["ObjectAnimation", "Uplo
 /// What the local OpenSim's seed refused of the client's requested
 /// capabilities: AIS3 and the library fetches, every experience capability,
 /// voice (no voice module), the group-invite and offline-message capabilities
-/// (OpenSim does both over UDP), the central-bake trigger, and the two reads
+/// (OpenSim does both over UDP), the central-bake trigger, the two reads
 /// of a prim's contents over HTTP (OpenSim lists them over UDP and `Xfer`, and
-/// has no experience to say a script is under).
+/// has no experience to say a script is under), and the four profile
+/// capabilities (OpenSim reads and writes profiles over UDP only, and has no
+/// display names to set; `profiles`, 2026-10-15).
 pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "AcceptFriendship",
     "AcceptGroupInvite",
     "AgentExperiences",
+    "AgentProfile",
     "ChatSessionRequest",
     "DeclineFriendship",
     "DeclineGroupInvite",
@@ -1515,8 +1531,8 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "IncrementCOFVersion",
     "InterestList",
     "InventoryAPIv3",
-    "IsExperienceAdmin",
     "InventoryThumbnailUpload",
+    "IsExperienceAdmin",
     "IsExperienceContributor",
     "LibraryAPIv3",
     "ModifyMaterialParams",
@@ -1526,13 +1542,16 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "ReadOfflineMsgs",
     "RegionExperiences",
     "RequestTaskInventory",
+    "SearchStatRequest",
     "SendPostcard",
     "SendUserReport",
     "SendUserReportWithScreenshot",
+    "SetDisplayName",
     "UpdateAvatarAppearance",
     "UpdateExperience",
     "UpdateMaterialAgentInventory",
     "UpdateMaterialTaskInventory",
+    "UploadAgentProfileImage",
     "UserInfo",
     "VoiceSignalingRequest",
 ];

@@ -104,17 +104,18 @@ use crate::{
     CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
     CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
     CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED, CAP_SEND_POSTCARD,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
-    CAP_UPDATE_GESTURE_TASK_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
-    CAP_UPDATE_MATERIAL_TASK_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
-    CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
-    CHAT_SESSION_START_CONFERENCE, Event, InventoryFolder, InventoryItem, InventoryListing,
-    ServerEvent, VoiceProvisionRefusal, offline_messages_to_llsd,
+    CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED, CAP_SEARCH_STAT_REQUEST,
+    CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_GESTURE_TASK_INVENTORY,
+    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_TASK_INVENTORY,
+    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
+    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event,
+    InventoryFolder, InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal,
+    offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -185,6 +186,8 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_GROUP_MEMBER_DATA,
     CAP_GROUP_API_V1,
     CAP_GET_DISPLAY_NAMES,
+    CAP_SET_DISPLAY_NAME,
+    CAP_SEARCH_STAT_REQUEST,
     CAP_AVATAR_PICKER_SEARCH,
     CAP_AGENT_PREFERENCES,
     CAP_INTEREST_LIST,
@@ -194,6 +197,7 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_MESH_UPLOAD_FLAG,
     CAP_INVENTORY_THUMBNAIL_UPLOAD,
     CAP_SEND_POSTCARD,
+    CAP_UPLOAD_AGENT_PROFILE_IMAGE,
     // The content upload/update, materials and MOAP cluster.
     CAP_NEW_FILE_AGENT_INVENTORY,
     CAP_UPLOAD_BAKED_TEXTURE,
@@ -321,6 +325,14 @@ pub enum CapHandler {
     ThumbnailUpload,
     /// The two-step `SendPostcard`: the card, then the snapshot.
     Postcard,
+    /// The two-step `UploadAgentProfileImage`: which profile field, then the
+    /// image.
+    ProfileImageUpload,
+    /// The `SetDisplayName` POST, answered over the event queue from and
+    /// into [`SimSession`]'s display-name store.
+    SetDisplayName,
+    /// The `SearchStatRequest` POST of a classified's click counts.
+    SearchStat,
     /// The shared two-stage asset-upload state machine serving every
     /// `UPLOAD_CAPABILITIES` entry (`NewFileAgentInventory`,
     /// `UploadBakedTexture`, and the `Update*{Agent,Task}Inventory` family):
@@ -713,6 +725,57 @@ pub struct SimCaps {
     event_queue_done: bool,
     /// Which grid's `NewFileAgentInventory` this surface serves.
     new_file_policy: NewFilePolicy,
+    /// Which grid's people service `GetDisplayNames` answers as.
+    display_name_style: DisplayNameStyle,
+}
+
+/// Which grid's people service a `GetDisplayNames` answer imitates, for a
+/// record that still has the default display name (`profiles`, 2026-10-15,
+/// `book/src/gridspec/profiles.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DisplayNameStyle {
+    /// The records as they were stored, every id unknown to the store listed
+    /// under `bad_ids`.
+    #[default]
+    Plain,
+    /// Second Life: a Resident's default display name is its first name
+    /// alone, the record has no `display_name_expires`, and an unknown id is
+    /// listed under `bad_ids`.
+    SecondLife,
+    /// OpenSim: the user name is the legacy name, space and capitals and all,
+    /// and an unknown id is left out of the answer altogether.
+    OpenSim,
+}
+
+impl DisplayNameStyle {
+    /// `record` as this grid answers it; `None` for an unknown id the grid
+    /// leaves out.
+    fn answer(self, record: DisplayName) -> Option<DisplayName> {
+        if record.missing {
+            return (self != Self::OpenSim).then_some(record);
+        }
+        if !record.is_display_name_default {
+            return Some(record);
+        }
+        let legacy = format!("{} {}", record.legacy_first_name, record.legacy_last_name);
+        Some(match self {
+            Self::Plain => record,
+            Self::SecondLife => DisplayName {
+                display_name: if record.legacy_last_name.eq_ignore_ascii_case("Resident") {
+                    record.legacy_first_name.clone()
+                } else {
+                    legacy
+                },
+                display_name_expires: String::new(),
+                ..record
+            },
+            Self::OpenSim => DisplayName {
+                username: legacy.clone(),
+                display_name: legacy,
+                ..record
+            },
+        })
+    }
 }
 
 impl SimCaps {
@@ -741,6 +804,7 @@ impl SimCaps {
             assets,
             event_queue_done: false,
             new_file_policy: NewFilePolicy::Plain,
+            display_name_style: DisplayNameStyle::Plain,
         }
     }
 
@@ -758,6 +822,14 @@ impl SimCaps {
     #[must_use]
     pub const fn with_new_file_policy(mut self, policy: NewFilePolicy) -> Self {
         self.new_file_policy = policy;
+        self
+    }
+
+    /// The same surface with its `GetDisplayNames` answering as `style`
+    /// says — which live grid's people service it is.
+    #[must_use]
+    pub const fn with_display_name_style(mut self, style: DisplayNameStyle) -> Self {
+        self.display_name_style = style;
         self
     }
 
@@ -796,6 +868,7 @@ impl SimCaps {
             assets,
             event_queue_done: false,
             new_file_policy: NewFilePolicy::Plain,
+            display_name_style: DisplayNameStyle::Plain,
         }
     }
 
@@ -837,6 +910,9 @@ impl SimCaps {
             CAP_MESH_UPLOAD_FLAG => Some(CapHandler::MeshUploadFlag),
             CAP_INVENTORY_THUMBNAIL_UPLOAD => Some(CapHandler::ThumbnailUpload),
             CAP_SEND_POSTCARD => Some(CapHandler::Postcard),
+            CAP_UPLOAD_AGENT_PROFILE_IMAGE => Some(CapHandler::ProfileImageUpload),
+            CAP_SET_DISPLAY_NAME => Some(CapHandler::SetDisplayName),
+            CAP_SEARCH_STAT_REQUEST => Some(CapHandler::SearchStat),
             CAP_UPDATE_AVATAR_APPEARANCE => Some(CapHandler::AvatarAppearance),
             CAP_INCREMENT_COF_VERSION => Some(CapHandler::IncrementCofVersion),
             CAP_COPY_INVENTORY_FROM_NOTECARD => Some(CapHandler::CopyInventoryFromNotecard),
@@ -978,7 +1054,7 @@ impl SimCaps {
                     Some(CapHandler::GroupMemberData) => Self::dispatch_group_member_data(request),
                     Some(CapHandler::GroupBans) => Self::dispatch_group_bans(request),
                     Some(CapHandler::DisplayNames) => {
-                        CapsDispatch::Response(Self::dispatch_display_names(sim, request))
+                        CapsDispatch::Response(self.dispatch_display_names(sim, request))
                     }
                     Some(CapHandler::AvatarPickerSearch) => {
                         CapsDispatch::Response(Self::dispatch_avatar_picker_search(sim, request))
@@ -1006,6 +1082,15 @@ impl SimCaps {
                     Some(CapHandler::Postcard) => CapsDispatch::Response(
                         self.dispatch_side_upload(sim, request, CAP_SEND_POSTCARD),
                     ),
+                    Some(CapHandler::ProfileImageUpload) => CapsDispatch::Response(
+                        self.dispatch_side_upload(sim, request, CAP_UPLOAD_AGENT_PROFILE_IMAGE),
+                    ),
+                    Some(CapHandler::SetDisplayName) => {
+                        CapsDispatch::Response(Self::dispatch_set_display_name(sim, request))
+                    }
+                    Some(CapHandler::SearchStat) => {
+                        CapsDispatch::Response(Self::dispatch_search_stat(request))
+                    }
                     Some(CapHandler::AssetUpload) => {
                         CapsDispatch::Response(self.dispatch_caps_upload(sim, request, name))
                     }
@@ -1404,7 +1489,7 @@ impl SimCaps {
     /// resolve" form). No ids — or no query at all — answers an empty
     /// `agents` array; an `ids` value that is not a UUID is a `400`, since
     /// "unreadable" and "nobody by that id" are different answers.
-    fn dispatch_display_names(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+    fn dispatch_display_names(&self, sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         if request.method != "GET" {
             return CapsResponse::method_not_allowed();
         }
@@ -1424,8 +1509,99 @@ impl SimCaps {
                         ..DisplayName::default()
                     })
             })
+            .filter_map(|record| self.display_name_style.answer(record))
             .collect::<Vec<DisplayName>>();
         CapsResponse::llsd_xml(build_display_names_response(&records))
+    }
+
+    /// Serves one `SetDisplayName` POST of `{ display_name: [<old>, <new>] }`,
+    /// as the reference expects it answered: the HTTP answer says nothing,
+    /// and the outcome arrives over the event queue as a `SetDisplayNameReply`
+    /// — `409` where the old name is not the agent's current one (the
+    /// reference then fetches the name again), `400` for a name that is empty
+    /// or longer than the reference's dialog takes, and `200` with the new
+    /// name, followed by a `DisplayNameUpdate`, where it is taken. The change
+    /// is handed to the driver to tell the rest of the region
+    /// ([`ServerEvent::DisplayNameChanged`]).
+    ///
+    /// Not measured: a change is refused on Second Life once a week, which
+    /// is why the census never makes one; this answers every valid change.
+    fn dispatch_set_display_name(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        /// The longest display name the reference's dialog takes, in
+        /// characters (`floater_display_name.xml`).
+        const LONGEST_DISPLAY_NAME: usize = 31;
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some((old, new)) = std::str::from_utf8(request.body)
+            .ok()
+            .and_then(crate::parse_set_display_name_body)
+        else {
+            return CapsResponse::bad_request();
+        };
+        let Some(current) = sim
+            .agent_id()
+            .and_then(|agent| sim.display_name(agent))
+            .cloned()
+        else {
+            return CapsResponse::not_found();
+        };
+        let refusal = |status: i32, reason: &str| crate::SetDisplayNameReply {
+            status,
+            reason: reason.to_owned(),
+            new_display_name: None,
+            error_tag: None,
+        };
+        if old != current.display_name {
+            sim.enqueue_set_display_name_reply(&refusal(409, "Conflict"));
+        } else if new.trim().is_empty() || new.chars().count() > LONGEST_DISPLAY_NAME {
+            sim.enqueue_set_display_name_reply(&refusal(400, "Bad Request"));
+        } else {
+            let name = DisplayName {
+                display_name: new.clone(),
+                is_display_name_default: false,
+                ..current.clone()
+            };
+            sim.set_display_name(name.clone());
+            sim.enqueue_set_display_name_reply(&crate::SetDisplayNameReply {
+                status: 200,
+                reason: "OK".to_owned(),
+                new_display_name: Some(new),
+                error_tag: None,
+            });
+            let update = crate::DisplayNameUpdate {
+                old_display_name: current.display_name,
+                name,
+            };
+            sim.enqueue_display_name_update(&update);
+            sim.push_side_upload(ServerEvent::DisplayNameChanged(Box::new(update)));
+        }
+        CapsResponse::llsd_xml(Llsd::Map(HashMap::new()).to_llsd_xml())
+    }
+
+    /// Serves one `SearchStatRequest` POST of `{ classified_id }` with the
+    /// six counters at nought, which is what Second Life answered for a
+    /// classified nobody had looked at (`profiles`, 2026-10-15). A fake grid
+    /// counts no clicks.
+    fn dispatch_search_stat(request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(classified_id) = std::str::from_utf8(request.body)
+            .ok()
+            .and_then(crate::parse_search_stat_request_body)
+        else {
+            return CapsResponse::bad_request();
+        };
+        CapsResponse::llsd_xml(crate::search_stat_answer_body(
+            &crate::ClassifiedClickStats {
+                classified_id,
+                teleport: 0,
+                map: 0,
+                profile: 0,
+                search: None,
+            },
+        ))
     }
 
     /// Serves one `AvatarPickerSearch` GET: the residents whose username,
@@ -1763,6 +1939,8 @@ impl SimCaps {
                 SideUpload::Postcard(Box::new(
                     crate::parse_postcard_request(body).unwrap_or_default(),
                 ))
+            } else if cap == CAP_UPLOAD_AGENT_PROFILE_IMAGE {
+                SideUpload::ProfileImage(crate::parse_profile_image_upload_body(body))
             } else {
                 SideUpload::Thumbnail(crate::parse_thumbnail_upload_request(body).ok().flatten())
             };
@@ -1789,6 +1967,23 @@ impl SimCaps {
                 });
                 CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
                     state: "complete".to_owned(),
+                    ..AssetUploadResponse::default()
+                }))
+            }
+            Some(SideUpload::ProfileImage(image)) => {
+                // An upload that named no profile field has nowhere to go.
+                let Some(image) = image else {
+                    return sim_new_file::server_error();
+                };
+                let new_asset = sim.mint_id();
+                sim.push_side_upload(ServerEvent::ProfileImageUploaded {
+                    image,
+                    new_asset: crate::AssetKey::from(new_asset),
+                    data: request.body.to_vec(),
+                });
+                CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
+                    state: "complete".to_owned(),
+                    new_asset: Some(new_asset),
                     ..AssetUploadResponse::default()
                 }))
             }
@@ -3307,6 +3502,10 @@ mod tests {
             ("AcceptFriendship", CapStatus::Served),
             ("DeclineFriendship", CapStatus::Served),
             ("GroupAPIv1", CapStatus::Served),
+            ("AgentProfile", CapStatus::Pending),
+            ("UploadAgentProfileImage", CapStatus::Served),
+            ("SetDisplayName", CapStatus::Served),
+            ("SearchStatRequest", CapStatus::Served),
             ("InventoryAPIv3", CapStatus::Served),
             ("LibraryAPIv3", CapStatus::Served),
             ("CreateInventoryCategory", CapStatus::Served),

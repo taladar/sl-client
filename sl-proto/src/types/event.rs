@@ -7,25 +7,25 @@ use std::time::Duration;
 use super::{
     ActiveGroup, AlertInfo, Asset, AssetType, AvatarAppearance, AvatarClassified,
     AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick, AvatarPickerResult,
-    AvatarProperties, ChatAudible, ChatMessage, ClassifiedInfo, CoarseLocation,
-    DirClassifiedResult, DirEventResult, DirGroupResult, DirLandResult, DirPeopleResult,
-    DirPlaceResult, DisconnectReason, DisplayNameUpdate, EconomyData, EnvironmentSettings,
-    EstateAccessKind, EstateCovenant, EstateInfo, EventInfo, FeatureDisabled, FolderInfo,
-    FollowCamPropertyValue, Friend, FriendRights, GenericMessage, GenericStreamingMessage,
-    GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem,
-    GroupBan, GroupMember, GroupMembership, GroupName, GroupNotice, GroupProfile, GroupRole,
-    GroupRoleMember, GroupTitle, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor,
-    InventoryFolder, InventoryItem, InventoryItemMove, ItemInfo, Kick, LandStatItem,
-    LandStatReportType, LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem, MapItemType,
-    MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeshUploadStatus,
-    MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, NeighborRetirement, Object,
-    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch,
+    AvatarProperties, ChatAudible, ChatMessage, ClassifiedClickStats, ClassifiedInfo,
+    CoarseLocation, DirClassifiedResult, DirEventResult, DirGroupResult, DirLandResult,
+    DirPeopleResult, DirPlaceResult, DisconnectReason, DisplayNameUpdate, EconomyData,
+    EnvironmentSettings, EstateAccessKind, EstateCovenant, EstateInfo, EventInfo, FeatureDisabled,
+    FolderInfo, FollowCamPropertyValue, Friend, FriendRights, GenericMessage,
+    GenericStreamingMessage, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
+    GroupActiveProposalItem, GroupBan, GroupMember, GroupMembership, GroupName, GroupNotice,
+    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, GroupVoteHistoryItem, ImDialog,
+    InstantMessage, InventoryCursor, InventoryFolder, InventoryItem, InventoryItemMove, ItemInfo,
+    Kick, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem,
+    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
+    MeshUploadStatus, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, NeighborRetirement,
+    Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch,
     OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
     ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
-    ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, RegionIdentity, RegionLimits,
-    RegionStats, RequiredVoiceVersion, ScriptCompileError, ScriptControl, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissionState, ScriptTeleportRequest, ServerError,
-    SetDisplayNameReply, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryItem,
+    ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, ProfileImage, RegionIdentity,
+    RegionLimits, RegionStats, RequiredVoiceVersion, ScriptCompileError, ScriptControl,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissionState, ScriptTeleportRequest,
+    ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryItem,
     TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerBatch, TerrainPatch, Texture,
     ThumbnailTarget, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
@@ -714,6 +714,23 @@ pub enum Event {
     /// response to
     /// [`Session::request_classified_info`](crate::Session::request_classified_info).
     ClassifiedInfo(Box<ClassifiedInfo>),
+    /// The answer to
+    /// [`Command::UploadProfileImage`](crate::Command::UploadProfileImage):
+    /// the asset the `UploadAgentProfileImage` capability made of the image
+    /// and put into the profile field, or `None` where the upload failed (or
+    /// the region has no such capability).
+    ProfileImageUploaded {
+        /// Which of the two profile images was uploaded.
+        image: ProfileImage,
+        /// The new image asset, which the profile now names.
+        asset_id: Option<TextureKey>,
+    },
+    /// A classified's click counts, in answer to
+    /// [`Command::RequestClassifiedClickStats`](crate::Command::RequestClassifiedClickStats)
+    /// over the `SearchStatRequest` capability, or pushed as the older
+    /// `classifiedclickthrough` generic message (which Second Life sends with
+    /// every `ClassifiedInfoReply`).
+    ClassifiedClickStats(ClassifiedClickStats),
     /// Account-level facts from the login response (home, start look-at,
     /// maturity ratings, group limit, and the shared Library roots). Emitted
     /// once, right after [`Event::CircuitEstablished`].

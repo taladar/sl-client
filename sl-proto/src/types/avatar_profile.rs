@@ -39,6 +39,17 @@ pub struct AvatarProperties {
     pub charter_member: String,
     /// The raw account/profile flags bitfield.
     pub flags: u32,
+    /// Whether the avatar hides its age from others (`hide_age`), or `None`
+    /// where the answer does not say: UDP never does, and Second Life's
+    /// `AgentProfile` leaves the key out today (`profiles`, 2026-10-15).
+    pub hide_age: Option<bool>,
+    /// The account's customer type (`customer_type`, e.g. `Base`), which
+    /// only the `AgentProfile` capability carries.
+    pub customer_type: Option<String>,
+    /// Whether the avatar is online, or `None` where the answer does not say:
+    /// `AgentProfile` leaves `online` out for an avatar that does not show
+    /// the agent its status, which the reference shows as "unknown".
+    pub online: Option<bool>,
 }
 
 /// An avatar's interests, parsed from `AvatarInterestsReply`.
@@ -188,6 +199,10 @@ pub struct ProfileUpdate {
     pub mature_publish: bool,
     /// The web profile URL.
     pub profile_url: String,
+    /// Whether to hide the agent's age from others, or `None` to leave it as
+    /// it is. Only the `AgentProfile` capability carries it; the UDP update
+    /// cannot.
+    pub hide_age: Option<bool>,
 }
 
 impl Default for ProfileUpdate {
@@ -200,8 +215,68 @@ impl Default for ProfileUpdate {
             allow_publish: false,
             mature_publish: false,
             profile_url: String::new(),
+            hide_age: None,
         }
     }
+}
+
+/// Which of an avatar's two profile images.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ProfileImage {
+    /// The "second life" picture (`sl_image_id`).
+    SecondLife,
+    /// The "first life" picture (`fl_image_id`).
+    FirstLife,
+}
+
+impl ProfileImage {
+    /// The profile field the image is kept in, which is also what the
+    /// `UploadAgentProfileImage` capability is told to set.
+    #[must_use]
+    pub const fn field(self) -> &'static str {
+        match self {
+            Self::SecondLife => "sl_image_id",
+            Self::FirstLife => "fl_image_id",
+        }
+    }
+
+    /// The image kept in the profile field `field`.
+    #[must_use]
+    pub fn from_field(field: &str) -> Option<Self> {
+        match field {
+            "sl_image_id" => Some(Self::SecondLife),
+            "fl_image_id" => Some(Self::FirstLife),
+            _ => None,
+        }
+    }
+}
+
+/// How often a classified was acted on, as its owner's classified panel shows
+/// it: from the `SearchStatRequest` capability, or the older
+/// `classifiedclickthrough` generic message, which has no search counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ClassifiedClickStats {
+    /// The classified the counts are for.
+    pub classified_id: ClassifiedKey,
+    /// Teleports to the classified's place from its panel.
+    pub teleport: i32,
+    /// Map views of its place from its panel.
+    pub map: i32,
+    /// Times its panel was opened.
+    pub profile: i32,
+    /// The same three counted from search, where the answer carries them.
+    pub search: Option<ClassifiedSearchClicks>,
+}
+
+/// The click counts of a classified acted on from search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ClassifiedSearchClicks {
+    /// Teleports from search.
+    pub teleport: i32,
+    /// Map views from search.
+    pub map: i32,
+    /// Panel views from search.
+    pub profile: i32,
 }
 
 /// An update to the agent's own interests, sent via

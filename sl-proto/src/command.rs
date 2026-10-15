@@ -23,13 +23,14 @@ use crate::{
     MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
     ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
     ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
-    Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
-    ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate, RegionHandle, RegionInfoUpdate,
-    RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-    Rotation, SaleType, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
-    SimWideDeleteFlags, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey,
-    Throttle, ThumbnailTarget, TransactionId, UpdatableAssetType, UpdateGroupInfoParams,
-    UpdateListing, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileImage,
+    ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate, RegionHandle,
+    RegionInfoUpdate, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptLanguage, ScriptPermissions,
+    ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags, StartLocationSlot, SurfaceInfo,
+    TaskInventoryKey, TextureEntry, TextureKey, Throttle, ThumbnailTarget, TransactionId,
+    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect,
+    VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -129,13 +130,31 @@ pub enum Command {
         /// The region-local height, in metres.
         z: f64,
     },
-    /// Request an avatar's profile. Replies arrive as [`Event::AvatarProperties`](crate::Event::AvatarProperties),
-    /// [`Event::AvatarInterests`](crate::Event::AvatarInterests), and [`Event::AvatarGroups`](crate::Event::AvatarGroups).
+    /// Request an avatar's profile.
+    ///
+    /// Where the region grants `AgentProfile` (Second Life) this is one GET
+    /// of the whole profile, as the reference makes it, answered by
+    /// [`Event::AvatarProperties`](crate::Event::AvatarProperties),
+    /// [`Event::AvatarGroups`](crate::Event::AvatarGroups),
+    /// [`Event::AvatarPicks`](crate::Event::AvatarPicks) and
+    /// [`Event::AvatarNotes`](crate::Event::AvatarNotes) — but no interests,
+    /// which the capability does not carry. A read of an avatar whose profile
+    /// is already being read is not sent again, as the reference suppresses
+    /// it, so the picks and notes requests that follow it cost nothing.
+    /// Elsewhere it is the UDP `AvatarPropertiesRequest`, answered by
+    /// [`Event::AvatarProperties`](crate::Event::AvatarProperties),
+    /// [`Event::AvatarInterests`](crate::Event::AvatarInterests) and
+    /// [`Event::AvatarGroups`](crate::Event::AvatarGroups).
     RequestAvatarProperties(AgentKey),
-    /// Request an avatar's picks. The reply arrives as [`Event::AvatarPicks`](crate::Event::AvatarPicks).
+    /// Request an avatar's picks. The reply arrives as
+    /// [`Event::AvatarPicks`](crate::Event::AvatarPicks): over `AgentProfile`
+    /// where the region grants it (with the rest of the profile), over the
+    /// `avatarpicksrequest` generic message elsewhere.
     RequestAvatarPicks(AgentKey),
     /// Request the agent's private notes about an avatar. The reply arrives as
-    /// [`Event::AvatarNotes`](crate::Event::AvatarNotes).
+    /// [`Event::AvatarNotes`](crate::Event::AvatarNotes): over `AgentProfile`
+    /// where the region grants it (with the rest of the profile), over the
+    /// `avatarnotesrequest` generic message elsewhere.
     RequestAvatarNotes(AgentKey),
     /// Request an avatar's classified ads. The reply arrives as
     /// [`Event::AvatarClassifieds`](crate::Event::AvatarClassifieds).
@@ -152,11 +171,15 @@ pub enum Command {
     /// Request the full details of one classified ad. The reply arrives as
     /// [`Event::ClassifiedInfo`](crate::Event::ClassifiedInfo).
     RequestClassifiedInfo(ClassifiedKey),
-    /// Replace the agent's own profile (`AvatarPropertiesUpdate`).
+    /// Replace the agent's own profile: one `PUT` of every field to
+    /// `AgentProfile` where the region grants it (which keeps texts longer
+    /// than the 500 bytes UDP holds), `AvatarPropertiesUpdate` elsewhere.
     UpdateProfile(ProfileUpdate),
     /// Replace the agent's own interests (`AvatarInterestsUpdate`).
     UpdateInterests(InterestsUpdate),
-    /// Set the agent's private notes about an avatar (`AvatarNotesUpdate`).
+    /// Set the agent's private notes about an avatar: a `PUT` of `notes` to
+    /// `AgentProfile` where the region grants it, `AvatarNotesUpdate`
+    /// elsewhere.
     UpdateAvatarNotes {
         /// The avatar the notes are about.
         target_id: AgentKey,
@@ -178,6 +201,38 @@ pub enum Command {
     UpdateClassified(ClassifiedUpdate),
     /// Delete one of the agent's classifieds (`ClassifiedDelete`).
     DeleteClassified(ClassifiedKey),
+    /// Read one of the agent's classifieds' click counts over the
+    /// `SearchStatRequest` capability. The answer arrives as
+    /// [`Event::ClassifiedClickStats`](crate::Event::ClassifiedClickStats); a
+    /// region without the capability (OpenSim) answers nothing, and the
+    /// runtime logs that.
+    RequestClassifiedClickStats(ClassifiedKey),
+    /// Upload a profile image over the `UploadAgentProfileImage` capability:
+    /// the grid makes an asset of the JPEG-2000 `j2c` and puts it in the
+    /// profile field `image` names. The answer arrives as
+    /// [`Event::ProfileImageUploaded`](crate::Event::ProfileImageUploaded),
+    /// with no asset where the upload failed or the region has no such
+    /// capability (OpenSim, where a profile image is picked from inventory
+    /// with [`Command::UpdateProfile`] instead).
+    UploadProfileImage {
+        /// Which of the two profile images to set.
+        image: ProfileImage,
+        /// The image, encoded as JPEG-2000.
+        j2c: Vec<u8>,
+    },
+    /// Change the agent's display name from `old` to `new` over the
+    /// `SetDisplayName` capability. The grid answers over the event queue as
+    /// [`Event::SetDisplayNameReply`](crate::Event::SetDisplayNameReply). A
+    /// region without the capability (OpenSim, which has no display names)
+    /// answers nothing, and the runtime logs that. Second Life lets an avatar
+    /// change its display name once a week.
+    SetDisplayName {
+        /// The display name the agent has now; the grid refuses a change
+        /// whose old name is not the current one.
+        old: String,
+        /// The display name to change to.
+        new: String,
+    },
     /// Delete any agent's classified (`ClassifiedGodDelete`, god-only).
     GodDeleteClassified {
         /// The classified id.
@@ -3066,6 +3121,9 @@ impl Command {
             Self::GodDeletePick { .. } => "GodDeletePick",
             Self::UpdateClassified(..) => "UpdateClassified",
             Self::DeleteClassified(..) => "DeleteClassified",
+            Self::RequestClassifiedClickStats(..) => "RequestClassifiedClickStats",
+            Self::UploadProfileImage { .. } => "UploadProfileImage",
+            Self::SetDisplayName { .. } => "SetDisplayName",
             Self::GodDeleteClassified { .. } => "GodDeleteClassified",
             Self::RequestFolderContents(..) => "RequestFolderContents",
             Self::FetchInventoryFolders(..) => "FetchInventoryFolders",

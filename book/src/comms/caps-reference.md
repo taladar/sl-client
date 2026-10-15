@@ -21,7 +21,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | --- | --- | --- | --- | --- |
 | `AbuseCategories` | yes | — | current | task `viewer-report-abuse` |
 | `AcceptFriendship` | yes | — | current | task `protocol-cap-offline-friendship-answers` (UDP today) |
-| `AgentProfile` | yes | — | current | task `protocol-cap-agent-profile` (UDP today) |
+| `AgentProfile` | yes | — | current | **used** since 2026-10-15 (`Command::RequestAvatarProperties`, `RequestAvatarPicks`, `RequestAvatarNotes`, `UpdateProfile`, `UpdateAvatarNotes`); measured in [Profiles](../gridspec/profiles.md) |
 | `AgentState` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `AvatarRenderInfo` | yes | — | current | task `protocol-avatar-render-info` |
 | `CharacterProperties` | yes | — | current | task `viewer-pathfinding-floaters` |
@@ -50,11 +50,11 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `RequestTaskInventory` | yes | — | current | **used** since 2026-10-12 (`Command::FetchTaskInventory`); UDP where not granted |
 | `RequestTextureDownload` | yes | — | never used | not adopted |
 | `RetrieveNavMeshSrc` | yes | — | current | task `viewer-pathfinding-navmesh-view` |
-| `SearchStatRequest` | yes | — | current | task `viewer-classified-click-stats` |
+| `SearchStatRequest` | yes | — | current | **used** since 2026-10-15 (`Command::RequestClassifiedClickStats`); the panel is task `viewer-classified-click-stats` |
 | `SearchStatTracking` | yes | — | telemetry | task `viewer-telemetry-opt-in` |
 | `SendPostcard` | yes | — | current | **used** since 2026-10-13 (`Command::SendPostcardViaCaps`); the viewer side is task `viewer-snapshot-postcard` |
 | `ServerReleaseNotes` | yes | yes | current | task `viewer-about-release-notes` |
-| `SetDisplayName` | yes | — | current | task `viewer-display-name-set` |
+| `SetDisplayName` | yes | — | current | **used** since 2026-10-15 (`Command::SetDisplayName`); the dialog is task `viewer-display-name-set` |
 | `SimConsoleAsync` | yes | yes | current (admin) | task `viewer-region-debug-console` |
 | `SpatialVoiceModerationRequest` | yes | — | current | task `viewer-nearby-voice-moderation` |
 | `StartGroupProposal` | yes | — | removed feature | not adopted |
@@ -65,7 +65,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `UpdateAgentLanguage` | yes | yes | current | task `viewer-i18n-agent-language` |
 | `UpdateGestureTaskInventory` | yes | yes | current | **requested** since 2026-10-12 (`Command::UpdateInventoryAsset`); the editor is task `viewer-gesture-management-ui` |
 | `UpdateMaterialTaskInventory` | yes | — | current | **requested** since 2026-10-12 (`Command::UpdateInventoryAsset`); the editor is task `viewer-material-save-to-object` |
-| `UploadAgentProfileImage` | yes | — | current | task `viewer-profile-image-editing` |
+| `UploadAgentProfileImage` | yes | — | current | **used** since 2026-10-15 (`Command::UploadProfileImage`); the picker is task `viewer-profile-image-editing` |
 | `ViewerBenefits` | yes | — | never used | not adopted |
 | `ViewerMetrics` | yes | — | telemetry | task `viewer-telemetry-opt-in` |
 | `ViewerStartAuction` | — | — | unused | not adopted (UDP) |
@@ -92,7 +92,10 @@ identified, transacted, charter_member | caption, groups:[{id, name,
 image_id}], picks:[{id, name}]}`. PUT `{cap}/{agent}` with a one-key partial
 map (`sl_about_text`, `fl_about_text`, `sl_image_id`, `fl_image_id`, `notes`,
 `allow_publish`, `hide_age`). With it, Firestorm sends no UDP profile request
-at all; the UDP notes path is the older, shorter one. Replaces
+at all; the UDP notes path is the older, shorter one. Measured on aditi
+(2026-10-15, [Profiles](../gridspec/profiles.md)): a PUT of several keys takes
+them all and answers `200` with no body; `hide_age` is neither answered nor
+kept; `groups` comes back empty where UDP lists the avatar's groups. Replaces
 `AvatarPropertiesRequest` / `Update`, `AvatarNotesUpdate` and the
 `avatarnotesrequest` / `avatarpicksrequest` generic messages.
 

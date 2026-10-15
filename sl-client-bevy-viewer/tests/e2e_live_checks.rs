@@ -652,11 +652,13 @@ mod test {
     /// The radar's floater id.
     const RADAR: &str = "radar";
 
-    /// The catalogue NPC standing nearer the login point.
-    const NEAR_NPC: &str = "Catalogue Resident";
+    /// The catalogue NPC standing nearer the login point, by the name the
+    /// viewer shows: "Catalogue Resident"'s display name, which a grid
+    /// imitating Second Life makes the first name alone.
+    const NEAR_NPC: &str = "Catalogue";
 
-    /// The catalogue NPC sitting farther away.
-    const FAR_NPC: &str = "Seated Resident";
+    /// The catalogue NPC sitting farther away ("Seated Resident"), likewise.
+    const FAR_NPC: &str = "Seated";
 
     /// The Range column's header cell.
     const RANGE_HEADER: &str = "radar:table-header-cell:7";

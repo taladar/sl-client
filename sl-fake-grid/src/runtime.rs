@@ -500,6 +500,8 @@ pub(crate) struct GridCore {
     /// How `NewFileAgentInventory` answers
     /// ([`ImitatedGrid::new_file_policy`]).
     pub(crate) new_file: sl_proto::NewFilePolicy,
+    /// How `GetDisplayNames` answers, as the imitated grid's people service.
+    pub(crate) display_name_style: sl_proto::DisplayNameStyle,
     /// What an agent has for uploads at login
     /// ([`ImitatedGrid::upload_funds`]).
     pub(crate) upload_funds: Option<i64>,
@@ -998,7 +1000,8 @@ impl GridCore {
             let mut caps =
                 sl_proto::SimCaps::new(base_url, self.minter.uuid(), move || minter.uuid())
                     .with_asset_http_policy(self.asset_http)
-                    .with_new_file_policy(self.new_file);
+                    .with_new_file_policy(self.new_file)
+                    .with_display_name_style(self.display_name_style);
             if let Some(surface) = &self.asset_host {
                 caps = caps.with_asset_surface(surface.clone());
             }
@@ -2207,6 +2210,7 @@ impl FakeGridBuilder {
             sit_policy: self.imitates.sit_policy(),
             asset_http: self.imitates.asset_http_policy(),
             new_file: self.imitates.new_file_policy(),
+            display_name_style: self.imitates.display_name_style(),
             upload_funds: self.imitates.upload_funds(),
             asset_host,
             map_policy: self.imitates.map_policy(),

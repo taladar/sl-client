@@ -1,52 +1,126 @@
-//! Resolve agent ids to their **display names** over the `GetDisplayNames`
-//! capability.
+//! A census of display names: what `GetDisplayNames` answers for two avatars
+//! and an id nobody has, what our client makes of the answer, and whether the
+//! grid offers `SetDisplayName`.
 //!
-//! A *display name* is the mutable, user-chosen name an avatar shows in world,
-//! layered over the immutable *legacy* `First Last` identity the UDP
-//! `UUIDNameRequest` path resolves. Display names live behind an HTTP capability
-//! rather than UDP: a viewer batches a set of agent ids into one
-//! `GetDisplayNames` GET and decodes the `{ agents, bad_ids }` LLSD reply. This
-//! case drives that lookup with [`Command::RequestDisplayNames`], batching the
-//! agent's own id together with a second known avatar into a single request, and
-//! asserts the reply ([`Event::DisplayNames`]) resolves the agent's own id to a
-//! real record — the observable protocol effect of the capability.
+//! A *display name* is the name an avatar chooses, layered over the legacy
+//! `First Last` it logged in with. Both live grids serve `GetDisplayNames`;
+//! only Second Life lets an avatar set one. **The census never sets a name**:
+//! Second Life lets an avatar change it once a week, and the test avatars are
+//! not ours to rename on a whim. It records:
 //!
-//! **This case only ever *reads*.** The client has no "set display name" command
-//! at all — the sole display-name commands are the `GetDisplayNames` lookup and
-//! observing the CAPS-pushed `DisplayNameUpdate` / `SetDisplayNameReply`. That
-//! matters because Second Life rate-limits *changing* a display name (a multi-day
-//! per-avatar cooldown); a lookup carries no such limit, so the case is safe to
-//! re-run freely and never touches the cooldown.
+//! - the raw answer for A, B and an unknown id: its status and keys, how many
+//!   agents it names, and what it does with the unknown id;
+//! - the shape of one record, and each avatar's record as Second Life's rules
+//!   describe it — the user name as the SLID (a Resident's first name, or
+//!   `first.last`, in lower case) or as the legacy name, the display name as
+//!   Second Life's default (a Resident's first name, anyone else's legacy
+//!   name) or as the legacy name — so the measurement is the grid's, not
+//!   whatever the test accounts happen to be called;
+//! - what [`Command::RequestDisplayNames`] brings the client;
+//! - whether `SetDisplayName` is granted.
 //!
-//! The agent's own id is guaranteed resolvable, so it anchors the assertions: the
-//! reply must contain a non-[`missing`](sl_client_tokio::DisplayName::missing)
-//! record for it, with a non-empty username, legacy name, and display name. A
-//! second avatar is added to the batch to exercise multi-id resolution — the
-//! `other_avatar` fixture on Second Life, or the local secondary test avatar
-//! (`Friend Tester`, a fixed-UUID account) on OpenSim — but its resolution is
-//! best-effort (recorded, not asserted), since a grid returns an unknown id in
-//! `bad_ids` (or, on stock OpenSim, silently omits it) rather than failing.
+//! What each live grid answered is stated as a [`Measured`] and written up in
+//! `book/src/gridspec/profiles.md`; every run is held to it.
 //!
-//! `1av`. The capability is Second-Life-centric — the legend lists Display Names
-//! under SL-only — but stock OpenSim *does* serve `GetDisplayNames` whenever its
-//! user-management component is present (`BunchOfCaps.cs`), returning the legacy
-//! name as a default (`is_display_name_default = true`) display name. So the read
-//! round-trip is assertable on both grids; where a grid omits the capability
-//! entirely the command is a silent no-op and the case records `partial` on the
-//! resulting timeout rather than failing.
+//! `2av`, `[both, fake]`. The fake grid answers as each flavour's people
+//! service (`ImitatedGrid::display_name_style`).
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use sl_client_tokio::{Command, Event};
+use sl_client_tokio::{AgentKey, Command, Event, Uuid};
+use sl_wire::{Llsd, display_names_query, parse_llsd_xml};
 
-use crate::context::{TestContext, TestFailure};
+use crate::cases::object_rez_derez::Answer;
+use crate::cases::task_inventory::{hold_to_measured, http_client, shape_of};
+use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
+use crate::measured::Measured;
+use crate::metrics::Metrics;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{
-    REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, count_metric, fixtures, is_opensim, secs_metric,
-};
+use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT};
 
-/// Resolves agent ids to display names over the `GetDisplayNames` capability.
+/// The capability that reads display names.
+const GET_DISPLAY_NAMES: &str = "GetDisplayNames";
+
+/// The capability that sets one's display name.
+const SET_DISPLAY_NAME: &str = "SetDisplayName";
+
+/// What a metric reads where the grid has no such capability.
+const NO_CAPABILITY: &str = "no capability";
+
+/// How long the capability map may take to arrive after a login.
+const CAP_WAIT: Duration = Duration::from_secs(15);
+
+/// Where the measurements below are written down.
+const SOURCE: &str = "book/src/gridspec/profiles.md (display-names, 2026-10-15)";
+
+/// An answer the grids differ in.
+const fn each(second_life: Answer, opensim: Answer) -> Measured<Answer> {
+    Measured {
+        second_life,
+        opensim,
+        source: SOURCE,
+    }
+}
+
+/// What each grid was measured to answer, by the metric the census records it
+/// under: every run is held to it.
+const MEASURED: &[(&str, Measured<Answer>)] = &[
+    (
+        "client_reads",
+        each(
+            Answer::Text("an unknown id missing, avatar A named, avatar B named"),
+            Answer::Text("avatar A named, avatar B named"),
+        ),
+    ),
+    (
+        "display_names_answer",
+        each(
+            Answer::Text("200, keys agents,bad_ids, 2 agent(s), bad ids [an unknown id]"),
+            Answer::Text("200, keys agents, 2 agent(s), bad ids absent"),
+        ),
+    ),
+    (
+        "display_names_other",
+        each(
+            Answer::Text(
+                "username the SLID, display name Second Life's default, legacy name as logged in, default true, expires absent, next update a date",
+            ),
+            Answer::Text(
+                "username the legacy name, display name Second Life's default, legacy name as logged in, default true, expires a date, next update a date",
+            ),
+        ),
+    ),
+    (
+        "display_names_own",
+        each(
+            Answer::Text(
+                "username the SLID, display name Second Life's default, legacy name as logged in, default true, expires absent, next update a date",
+            ),
+            Answer::Text(
+                "username the legacy name, display name Second Life's default, legacy name as logged in, default true, expires a date, next update a date",
+            ),
+        ),
+    ),
+    (
+        "display_names_shape",
+        each(
+            Answer::Text(
+                "{display_name:string,display_name_next_update:date,id:uuid,is_display_name_default:boolean,legacy_first_name:string,legacy_last_name:string,username:string}",
+            ),
+            Answer::Text(
+                "{display_name:string,display_name_expires:date,display_name_next_update:date,id:uuid,is_display_name_default:boolean,legacy_first_name:string,legacy_last_name:string,username:string}",
+            ),
+        ),
+    ),
+    (
+        "set_display_name",
+        each(Answer::Text("granted"), Answer::Text("no capability")),
+    ),
+];
+
+/// A census of display names: the raw `GetDisplayNames` answer, what the
+/// client makes of it, and whether `SetDisplayName` is granted.
 #[derive(Debug)]
 pub struct DisplayNames;
 
@@ -56,124 +130,313 @@ impl GridTest for DisplayNames {
     }
 
     fn description(&self) -> &'static str {
-        "Resolve agent ids to display names over the GetDisplayNames capability"
+        "What GetDisplayNames answers for two avatars and an unknown id, and whether SetDisplayName is granted"
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
+    }
+
+    fn accounts(&self) -> u8 {
+        2
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
-            // Resolve a *second* avatar to batch alongside the agent's own id, so
-            // the request exercises multi-id resolution. A configured fixture wins
-            // (the Second Life path); otherwise OpenSim falls back to the local
-            // secondary test avatar. With neither (an aditi run without the
-            // fixture) the batch is just the agent's own id — still a valid lookup.
+            let mut metrics = Metrics::new();
+            let outcome = census(ctx, &mut metrics).await;
             let grid = ctx.grid();
-            let other = match ctx.other_avatar() {
-                Some(other) => Some(other),
-                None if is_opensim(grid) => Some(fixtures::opensim_secondary_avatar()?),
-                None => None,
-            };
-
-            let session = ctx.primary();
-            session.wait_for_region(REGION_TIMEOUT).await?;
-            let own = session.agent_id().ok_or_else(|| {
-                TestFailure::Assertion("primary login reported no agent id".to_owned())
-            })?;
-
-            // Batch the agent's own id with the second avatar when it differs.
-            let other_id = other.filter(|id| *id != own);
-            let other_requested = other_id.is_some();
-            let mut ids = vec![own];
-            if let Some(id) = other_id {
-                ids.push(id);
-            }
-            let requested = ids.len();
-
-            let started = Instant::now();
-            session.send(Command::RequestDisplayNames(ids)).await?;
-            let names = match session
-                .wait_for(REPLY_TIMEOUT, |event| match event {
-                    Event::DisplayNames(names) => Some(names.clone()),
-                    _ => None,
-                })
-                .await
-            {
-                Ok(names) => names,
-                Err(TestFailure::Timeout(_)) => {
-                    // The grid does not serve GetDisplayNames (the command is a
-                    // silent no-op when the region seed omits the capability), so
-                    // there is no reply to assert against — record partial.
-                    ctx.mark_partial(
-                        "grid did not answer the GetDisplayNames lookup (capability \
-                         absent from the region seed)",
-                    );
-                    return Ok(());
-                }
-                Err(other) => return Err(other),
-            };
-            let rtt = started.elapsed();
-
-            // The agent's own id is always a known account, so the reply must
-            // resolve it to a real (non-missing) record — the observable effect of
-            // the capability.
-            let Some(own_record) = names.iter().find(|record| record.id == own) else {
-                return Err(TestFailure::Assertion(format!(
-                    "GetDisplayNames reply ({} record(s)) did not resolve the \
-                     agent's own id {own}",
-                    names.len(),
-                )));
-            };
-            check(
-                !own_record.missing,
-                "the agent's own id came back as a missing (bad_ids) placeholder",
-            )?;
-            check_eq("own record id", &own_record.id, &own)?;
-            check(
-                !own_record.username.is_empty(),
-                "the resolved own record has an empty username",
-            )?;
-            check(
-                !own_record.legacy_name().is_empty(),
-                "the resolved own record has an empty legacy name",
-            )?;
-            check(
-                !own_record.display_name.is_empty(),
-                "the resolved own record has an empty display name",
-            )?;
-
-            // The second avatar's resolution is best-effort: a grid returns an
-            // unknown id in bad_ids (or omits it), so record the outcome without
-            // asserting it.
-            let other_resolved = other_id.is_some_and(|id| {
-                names
-                    .iter()
-                    .any(|record| record.id == id && !record.missing)
-            });
-            let resolved = names.iter().filter(|record| !record.missing).count();
-
-            let metrics = ctx.metrics();
-            metrics.set_timing(&secs_metric("lookup_rtt"), rtt.as_secs_f64());
-            metrics.set(
-                &count_metric("requested"),
-                i64::try_from(requested).unwrap_or(-1),
-            );
-            metrics.set(
-                &count_metric("resolved"),
-                i64::try_from(resolved).unwrap_or(-1),
-            );
-            metrics.set("own_display_name", own_record.display_name.clone());
-            metrics.set("own_username", own_record.username.clone());
-            metrics.set("own_legacy_name", own_record.legacy_name());
-            metrics.set(
-                "own_is_display_name_default",
-                own_record.is_display_name_default,
-            );
-            metrics.set("other_requested", other_requested);
-            metrics.set("other_resolved", other_resolved);
-            Ok(())
+            ctx.metrics().merge(metrics.clone());
+            outcome.and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
         })
+    }
+}
+
+/// The ids a metric names by what they are.
+struct Scene {
+    /// Avatar A.
+    a: Uuid,
+    /// Avatar B.
+    b: Uuid,
+    /// The id nobody has.
+    stranger: Uuid,
+}
+
+impl Scene {
+    /// What `id` is the id of.
+    fn id_text(&self, id: Uuid) -> &'static str {
+        if id == self.a {
+            "avatar A"
+        } else if id == self.b {
+            "avatar B"
+        } else if id == self.stranger {
+            "an unknown id"
+        } else {
+            "another id"
+        }
+    }
+}
+
+/// The census.
+async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), TestFailure> {
+    let Some((a, b)) = ctx.primary_and_secondary() else {
+        return Err(TestFailure::State(
+            "display-names needs a secondary avatar".to_owned(),
+        ));
+    };
+    a.wait_for_region(REGION_TIMEOUT).await?;
+    b.wait_for_region(REGION_TIMEOUT).await?;
+    let a_id = a
+        .agent_id()
+        .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
+    let b_id = b
+        .agent_id()
+        .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
+    let scene = Scene {
+        a: a_id.uuid(),
+        b: b_id.uuid(),
+        stranger: Uuid::new_v4(),
+    };
+    let ids = [scene.a, scene.b, scene.stranger];
+    metrics.set(
+        "set_display_name",
+        if cap(a, SET_DISPLAY_NAME).await.is_some() {
+            "granted"
+        } else {
+            NO_CAPABILITY
+        },
+    );
+
+    match cap(a, GET_DISPLAY_NAMES).await {
+        Some(url) => {
+            let response = http_client()?
+                .get(format!("{url}{}", display_names_query(&ids)))
+                .header("Accept", "application/llsd+xml")
+                .send()
+                .await
+                .map_err(|error| {
+                    TestFailure::Assertion(format!("a capability request failed: {error}"))
+                })?;
+            let status = response.status().as_u16();
+            let llsd = parse_llsd_xml(&response.text().await.unwrap_or_default()).ok();
+            record_answer(metrics, &scene, status, llsd.as_ref(), (a, b));
+        }
+        None => {
+            for key in [
+                "display_names_answer",
+                "display_names_shape",
+                "display_names_own",
+                "display_names_other",
+            ] {
+                metrics.set(key, NO_CAPABILITY);
+            }
+        }
+    }
+
+    a.send(Command::RequestDisplayNames(
+        ids.iter().copied().map(AgentKey::from).collect(),
+    ))
+    .await?;
+    let read = a
+        .wait_for(REPLY_TIMEOUT, |event| match event {
+            Event::DisplayNames(names) => Some(names.clone()),
+            _ => None,
+        })
+        .await;
+    metrics.set(
+        "client_reads",
+        match read {
+            Ok(names) => {
+                let mut read: Vec<String> = names
+                    .iter()
+                    .map(|name| {
+                        format!(
+                            "{} {}",
+                            scene.id_text(name.id.uuid()),
+                            if name.missing { "missing" } else { "named" }
+                        )
+                    })
+                    .collect();
+                read.sort();
+                read.join(", ")
+            }
+            Err(TestFailure::Timeout(_)) => "nothing".to_owned(),
+            Err(other) => return Err(other),
+        },
+    );
+    Ok(())
+}
+
+/// Records the raw `GetDisplayNames` answer.
+fn record_answer(
+    metrics: &mut Metrics,
+    scene: &Scene,
+    status: u16,
+    llsd: Option<&Llsd>,
+    (a, b): (&Session, &Session),
+) {
+    let agents: Vec<Llsd> = match llsd.and_then(|llsd| llsd.get("agents")) {
+        Some(Llsd::Array(agents)) => agents.clone(),
+        _ => Vec::new(),
+    };
+    let bad_ids = llsd.and_then(|llsd| llsd.get("bad_ids")).map_or_else(
+        || "absent".to_owned(),
+        |ids| match ids {
+            Llsd::Array(ids) => {
+                let ids: Vec<&str> = ids
+                    .iter()
+                    .map(|id| match id {
+                        Llsd::Uuid(id) => scene.id_text(*id),
+                        _ => "something else",
+                    })
+                    .collect();
+                format!("[{}]", ids.join(", "))
+            }
+            other => shape_of(other),
+        },
+    );
+    metrics.set(
+        "display_names_answer",
+        format!(
+            "{status}, keys {}, {} agent(s), bad ids {bad_ids}",
+            llsd.map_or_else(|| "none".to_owned(), keys_text),
+            agents.len(),
+        ),
+    );
+    metrics.set(
+        "display_names_shape",
+        agents
+            .first()
+            .map_or_else(|| "no agent".to_owned(), shape_of),
+    );
+    for (key, who, session) in [
+        ("display_names_own", scene.a, a),
+        ("display_names_other", scene.b, b),
+    ] {
+        let entry = agents
+            .iter()
+            .find(|agent| matches!(agent.get("id"), Some(Llsd::Uuid(id)) if *id == who));
+        metrics.set(
+            key,
+            entry.map_or_else(
+                || "absent".to_owned(),
+                |entry| display_name_text(entry, &session.avatar_legacy_name()),
+            ),
+        );
+    }
+}
+
+/// A capability's URL on `session`'s region, waited for as long as the
+/// capability map may take; `None` where the region does not grant it.
+async fn cap(session: &Session, name: &str) -> Option<String> {
+    let started = Instant::now();
+    loop {
+        if let Some(url) = session.cap(name) {
+            return Some(url);
+        }
+        if session.capability_names().is_empty() && started.elapsed() < CAP_WAIT {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        } else {
+            return None;
+        }
+    }
+}
+
+/// The keys of an LLSD map, `,`-joined and in order.
+fn keys_text(value: &Llsd) -> String {
+    match value {
+        Llsd::Map(map) => {
+            let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            keys.join(",")
+        }
+        _ => "-".to_owned(),
+    }
+}
+
+/// The SLID Second Life derives from a legacy name: a Resident's first name,
+/// anyone else's `first.last`, in lower case.
+fn slid(legacy: &str) -> String {
+    match legacy.split_once(' ') {
+        Some((first, last)) if last.eq_ignore_ascii_case("Resident") => first.to_lowercase(),
+        Some((first, last)) => format!("{first}.{last}").to_lowercase(),
+        None => legacy.to_lowercase(),
+    }
+}
+
+/// The display name Second Life gives an avatar that never chose one: a
+/// Resident's first name, anyone else's legacy name.
+fn default_display_name(legacy: &str) -> String {
+    match legacy.split_once(' ') {
+        Some((first, last)) if last.eq_ignore_ascii_case("Resident") => first.to_owned(),
+        _ => legacy.to_owned(),
+    }
+}
+
+/// One `GetDisplayNames` record as a metric states it, against `legacy`, the
+/// name the avatar logged in with: each name by the rule it follows, never by
+/// what it is.
+fn display_name_text(entry: &Llsd, legacy: &str) -> String {
+    let text = |key: &str| match entry.get(key) {
+        Some(Llsd::String(text)) => text.clone(),
+        _ => String::new(),
+    };
+    let username = text("username");
+    let display = text("display_name");
+    let username_form = if username == slid(legacy) {
+        "the SLID"
+    } else if username == legacy {
+        "the legacy name"
+    } else if username.is_empty() {
+        "empty"
+    } else {
+        "another name"
+    };
+    let display_form = if display == default_display_name(legacy) {
+        "Second Life's default"
+    } else if display == legacy {
+        "the legacy name"
+    } else if display.is_empty() {
+        "empty"
+    } else {
+        "a name of its own"
+    };
+    let legacy_parts = format!("{} {}", text("legacy_first_name"), text("legacy_last_name"));
+    format!(
+        "username {username_form}, display name {display_form}, legacy name {}, default {}, \
+         expires {}, next update {}",
+        if legacy_parts == legacy {
+            "as logged in"
+        } else {
+            "otherwise"
+        },
+        entry.get("is_display_name_default").map_or_else(
+            || "absent".to_owned(),
+            |value| match value {
+                Llsd::Boolean(flag) => flag.to_string(),
+                other => shape_of(other),
+            }
+        ),
+        entry
+            .get("display_name_expires")
+            .map_or("absent", |_date| "a date"),
+        entry
+            .get("display_name_next_update")
+            .map_or("absent", |_date| "a date"),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{default_display_name, slid};
+    use pretty_assertions::assert_eq;
+
+    /// Second Life's rules for the names an avatar has before it chooses one.
+    #[test]
+    fn second_life_derives_the_names_from_the_legacy_name() {
+        assert_eq!(slid("Example Resident"), "example");
+        assert_eq!(slid("Avatar Tester"), "avatar.tester");
+        assert_eq!(default_display_name("Example Resident"), "Example");
+        assert_eq!(default_display_name("Avatar Tester"), "Avatar Tester");
     }
 }

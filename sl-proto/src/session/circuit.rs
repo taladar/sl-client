@@ -795,14 +795,17 @@ impl Circuit {
                 session_id: self.session_id,
                 transaction_id: Uuid::nil(),
             },
+            // Both are NUL-terminated, as the reference's `addString` packs
+            // them: Second Life reads them as C strings and answers nothing
+            // to a method name without its terminator.
             method_data: GenericMessageMethodDataBlock {
-                method: method.as_bytes().to_vec(),
+                method: with_nul(method),
                 invoice: Uuid::nil(),
             },
             param_list: params
                 .iter()
                 .map(|param| GenericMessageParamListBlock {
-                    parameter: param.as_bytes().to_vec(),
+                    parameter: with_nul(param),
                 })
                 .collect(),
         });

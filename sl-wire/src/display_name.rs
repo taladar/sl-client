@@ -148,12 +148,25 @@ impl DisplayName {
 
     /// Encodes this record as one `agents` map element — the inverse of
     /// [`from_llsd`](Self::from_llsd). The two timestamp fields are emitted as
-    /// LLSD `date` values; the server-side [`build_display_names_response`]
-    /// instead routes [`missing`](Self::missing) records to the reply's `bad_ids`
-    /// array (which decodes back to the same placeholder).
+    /// LLSD `date` values, and an empty
+    /// [`display_name_expires`](Self::display_name_expires) is left out, as
+    /// Second Life leaves it out (`profiles`, 2026-10-15); the server-side
+    /// [`build_display_names_response`] instead routes
+    /// [`missing`](Self::missing) records to the reply's `bad_ids` array (which
+    /// decodes back to the same placeholder).
     #[must_use]
     pub fn to_llsd(&self) -> Llsd {
-        Llsd::Map(HashMap::from([
+        let mut map = self.fields();
+        if self.display_name_expires.is_empty() {
+            let _expires = map.remove("display_name_expires");
+        }
+        Llsd::Map(map)
+    }
+
+    /// Every field of the record, as [`to_llsd`](Self::to_llsd) writes it
+    /// before leaving out an empty expiry.
+    fn fields(&self) -> HashMap<String, Llsd> {
+        HashMap::from([
             ("id".to_owned(), Llsd::Uuid(self.id.uuid())),
             ("username".to_owned(), Llsd::String(self.username.clone())),
             (
@@ -180,7 +193,7 @@ impl DisplayName {
                 "display_name_next_update".to_owned(),
                 Llsd::Date(self.display_name_next_update.clone()),
             ),
-        ]))
+        ])
     }
 }
 

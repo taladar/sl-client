@@ -138,6 +138,7 @@ mod test {
         avatar_presence => "avatar-presence" [fake_sl, fake_opensim],
         friends_presence => "friends-presence" [fake_sl, fake_opensim],
         groups => "groups" [fake_sl, fake_opensim],
+        display_names => "display-names" [fake_sl, fake_opensim],
     }
 
     /// The tests declared above are exactly the offline cases, each on exactly

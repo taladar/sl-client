@@ -1972,7 +1972,8 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GenericMessage")?;
-        assert_eq!(generic.method_data.method, b"autopilot");
+        // NUL-terminated, as the reference's `addString` packs both.
+        assert_eq!(generic.method_data.method, b"autopilot\0");
         let params: Vec<&[u8]> = generic
             .param_list
             .iter()
@@ -1980,7 +1981,7 @@ mod test {
             .collect();
         assert_eq!(
             params,
-            vec![&b"256010"[..], &b"256020"[..], &b"25"[..]],
+            vec![&b"256010\0"[..], &b"256020\0"[..], &b"25\0"[..]],
             "autopilot params are the global x, global y, and z as strings"
         );
         Ok(())
@@ -2673,6 +2674,41 @@ mod test {
         Ok(())
     }
 
+    /// A profile read over `AgentProfile` is not sent twice while one is out;
+    /// the answer, or a failure, ends it — and the answer reads as the UDP
+    /// replies would.
+    #[test]
+    fn a_profile_read_is_not_sent_twice() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let target = AgentKey::from(uuid::Uuid::from_u128(0xA1));
+        assert!(session.begin_profile_read(target));
+        assert!(!session.begin_profile_read(target), "a second read waits");
+        let answer = sl_wire::parse_llsd_xml(
+            "<llsd><map><key>id</key><uuid>00000000-0000-0000-0000-0000000000a1</uuid>\
+             <key>sl_about_text</key><string>About</string>\
+             <key>member_since</key><date>2020-05-29T00:00:00Z</date></map></llsd>",
+        )?;
+        session.handle_caps_event("AgentProfile", &answer, now)?;
+        let props = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarProperties(props) => Some(props),
+                _ => None,
+            })
+            .ok_or("expected an AvatarProperties event")?;
+        assert_eq!(props.about_text, "About");
+        assert_eq!(props.born_on, "5/29/2020");
+        assert!(
+            session.begin_profile_read(target),
+            "the answer ended the read"
+        );
+        session.profile_reads_failed();
+        assert!(session.begin_profile_read(target), "a failure ended it too");
+        Ok(())
+    }
+
     #[test]
     fn avatar_properties_reply_surfaces_event() -> Result<(), TestError> {
         let now = Instant::now();
@@ -2734,10 +2770,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GenericMessage")?;
-        assert_eq!(generic.method_data.method, b"avatarpicksrequest");
+        assert_eq!(generic.method_data.method, b"avatarpicksrequest\0");
         assert_eq!(
             generic.param_list.first().map(|p| p.parameter.as_slice()),
-            Some(target.to_string().as_bytes())
+            Some(format!("{target}\0").as_bytes())
         );
         Ok(())
     }
@@ -2822,10 +2858,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GenericMessage")?;
-        assert_eq!(generic.method_data.method, b"avatarclassifiedsrequest");
+        assert_eq!(generic.method_data.method, b"avatarclassifiedsrequest\0");
         assert_eq!(
             generic.param_list.first().map(|p| p.parameter.as_slice()),
-            Some(target.to_string().as_bytes())
+            Some(format!("{target}\0").as_bytes())
         );
         Ok(())
     }
@@ -2887,15 +2923,15 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a GenericMessage")?;
-        assert_eq!(generic.method_data.method, b"pickinforequest");
+        assert_eq!(generic.method_data.method, b"pickinforequest\0");
         // The viewer sends [creator_id, pick_id] in that order.
         assert_eq!(
             generic.param_list.first().map(|p| p.parameter.as_slice()),
-            Some(creator.to_string().as_bytes())
+            Some(format!("{creator}\0").as_bytes())
         );
         assert_eq!(
             generic.param_list.get(1).map(|p| p.parameter.as_slice()),
-            Some(pick.to_string().as_bytes())
+            Some(format!("{pick}\0").as_bytes())
         );
         Ok(())
     }

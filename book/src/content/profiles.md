@@ -13,7 +13,7 @@ account's *born-on* date, a profile web URL, and charter-member status. Separate
 
 | Read command | Result event |
 |--------------|--------------|
-| `RequestAvatarProperties` | `AvatarProperties` (+ `AvatarInterests`) |
+| `RequestAvatarProperties` | `AvatarProperties` (+ `AvatarInterests` over UDP; + `AvatarGroups`, `AvatarPicks`, `AvatarNotes` over `AgentProfile`) |
 | `RequestAvatarPicks` | `AvatarPicks` |
 | `RequestAvatarClassifieds` | `AvatarClassifieds` |
 | `RequestAvatarNotes` | `AvatarNotes` |
@@ -23,6 +23,22 @@ account's *born-on* date, a profile web URL, and charter-member status. Separate
 The groups shown on a profile arrive as `Event::AvatarGroups`. Per-avatar
 private **notes** are also part of the profile system (only you see your notes
 about someone).
+
+Where the region grants the **`AgentProfile`** capability (Second Life), the
+properties, picks and notes reads are one GET of the whole profile — the
+answer arrives as the same events the UDP replies bring, without interests —
+and `UpdateProfile` / `UpdateAvatarNotes` are PUTs, which keep an about text
+longer than the 500 bytes UDP holds. `UpdateProfile`'s `hide_age` travels only
+over the capability. Elsewhere (OpenSim) the UDP messages are used. The picks,
+notes and classifieds queries are generic messages whose method and parameter
+must be NUL-terminated, or neither grid answers. How each grid answers all of
+it is measured in [Profiles and display names](../gridspec/profiles.md).
+
+| Other command | Result event |
+|---------------|--------------|
+| `RequestClassifiedClickStats` | `ClassifiedClickStats` (over `SearchStatRequest`; Second Life also pushes the older `classifiedclickthrough` with every classified's details) |
+| `UploadProfileImage` | `ProfileImageUploaded` (over `UploadAgentProfileImage`; no asset where it failed or the region has no such capability) |
+| `SetDisplayName` | `SetDisplayNameReply`, then `DisplayNameUpdate`, over the event queue |
 
 ## Picks
 

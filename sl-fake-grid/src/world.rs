@@ -414,6 +414,11 @@ pub enum RegionChange {
     /// session's identity, so what travels here is the composition rather than
     /// a finished message.
     TerrainRetextured(Box<RegionTerrainComposition>),
+    /// An agent changed its display name over `SetDisplayName`. Every other
+    /// session stores the new record (so its `GetDisplayNames` answers it)
+    /// and pushes its viewer the `DisplayNameUpdate`, as the agent's own
+    /// session already did.
+    DisplayNameChanged(Box<sl_proto::DisplayNameUpdate>),
     /// A line was said in the region ([`crate::chat`]). The one change that
     /// reaches the session that made it too: a speaker hears its own line,
     /// which is how its viewer shows it.

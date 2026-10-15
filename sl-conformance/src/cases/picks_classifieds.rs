@@ -16,9 +16,9 @@
 //! draws a fresh list. The case creates a marker pick and asserts the volunteered
 //! detail, sweeps away any marker pick a prior interrupted run left behind (read
 //! from that same list), edits the description and confirms the new detail, then
-//! deletes it and confirms it left the list — leaving the profile as found. This
-//! deliberately avoids the `avatarpicksrequest` list *query* (a `GenericMessage`),
-//! which stock OpenSim does not answer for the agent's own empty profile.
+//! deletes it and confirms it left the list — leaving the profile as found. (The
+//! `avatarpicksrequest` list *query* is answered by both grids since the client
+//! NUL-terminates its `GenericMessage`; the `profiles` census measures it.)
 //!
 //! **Classifieds** get no volunteered reply after an edit, so they are read back
 //! with the typed `ClassifiedInfoRequest`. They use a *fixed* id (so re-runs edit

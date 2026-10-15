@@ -474,8 +474,9 @@ pub use asset::{
 };
 pub use avatar_profile::{
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
-    ClassifiedInfo, ClassifiedUpdate, DirectoryVisibility, Friend, FriendRights, InterestsUpdate,
-    LoginAccount, PickInfo, PickKey, PickUpdate, ProfileUpdate, UserInfo,
+    ClassifiedClickStats, ClassifiedInfo, ClassifiedSearchClicks, ClassifiedUpdate,
+    DirectoryVisibility, Friend, FriendRights, InterestsUpdate, LoginAccount, PickInfo, PickKey,
+    PickUpdate, ProfileImage, ProfileUpdate, UserInfo,
 };
 pub use benefits::{
     AccountBenefits, MIN_2K_TEXTURE_AREA, UploadClass, expected_upload_cost, packages_from_llsd,

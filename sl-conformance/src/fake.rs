@@ -212,6 +212,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "avatar-presence",
     "friends-presence",
     "groups",
+    "display-names",
 ];
 
 /// The offline cases meaningful on **one** fake flavour only, each with the

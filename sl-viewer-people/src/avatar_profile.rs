@@ -709,6 +709,9 @@ pub fn spawn_avatar_profile_specimen(
         profile_url: String::new(),
         charter_member: String::new(),
         flags: FLAG_ALLOW_PUBLISH | FLAG_IDENTIFIED | FLAG_ONLINE,
+        hide_age: None,
+        customer_type: None,
+        online: Some(true),
     });
     state.groups = Some(
         [
@@ -2780,6 +2783,8 @@ fn on_profile_action(
                 // be mature".
                 mature_publish: false,
                 profile_url: read(ui.url_field).unwrap_or_else(|| props.profile_url.clone()),
+                // The floater has no age switch yet: leave the flag as it is.
+                hide_age: None,
             };
             // Reflect the save locally so a repaint shows the new text; the
             // update message carries no ack.

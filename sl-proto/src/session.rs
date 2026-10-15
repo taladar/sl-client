@@ -422,6 +422,31 @@ pub const CAP_ACCEPT_FRIENDSHIP: &str = "AcceptFriendship";
 /// [`CAP_ACCEPT_FRIENDSHIP`]: a DELETE of `{cap}?from=<offerer>`.
 pub const CAP_DECLINE_FRIENDSHIP: &str = "DeclineFriendship";
 
+/// The capability that reads and writes **profiles**: a GET of
+/// `{cap}/{avatar}` answers the whole profile — properties, the groups and
+/// picks it lists, and the agent's notes about that avatar — and a PUT of a
+/// partial map to `{cap}/{avatar}` writes the agent's own profile (or, for
+/// `notes`, its notes about another avatar). With it the reference sends no
+/// UDP profile request at all. Second Life grants it; OpenSim does not.
+pub const CAP_AGENT_PROFILE: &str = "AgentProfile";
+
+/// The capability that uploads a **profile image**: a two-step upload whose
+/// first POST names the field (`{ profile-image-asset: "sl_image_id" |
+/// "fl_image_id" }`) and whose second POSTs the JPEG-2000 bytes; the grid sets
+/// the field to the new asset itself. Second Life grants it; OpenSim does not.
+pub const CAP_UPLOAD_AGENT_PROFILE_IMAGE: &str = "UploadAgentProfileImage";
+
+/// The capability that **sets the agent's display name**: a POST of `{
+/// display_name: [<old>, <new>] }`, answered over the event queue as a
+/// `SetDisplayNameReply`. Second Life grants it; OpenSim has no display names
+/// to set.
+pub const CAP_SET_DISPLAY_NAME: &str = "SetDisplayName";
+
+/// The capability that reads a classified's **click counts**: a POST of `{
+/// classified_id }` answers the six counters the owner's classified panel
+/// shows. Second Life grants it; OpenSim does not.
+pub const CAP_SEARCH_STAT_REQUEST: &str = "SearchStatRequest";
+
 /// The capabilities a region must grant for the kept messages to be read over
 /// [`CAP_READ_OFFLINE_MSGS`]: the capability itself and the two that answer
 /// what it hands over without a transaction id — a friendship offer and a
@@ -836,6 +861,10 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_ACCEPT_FRIENDSHIP,
     CAP_DECLINE_FRIENDSHIP,
     CAP_GROUP_API_V1,
+    CAP_AGENT_PROFILE,
+    CAP_UPLOAD_AGENT_PROFILE_IMAGE,
+    CAP_SET_DISPLAY_NAME,
+    CAP_SEARCH_STAT_REQUEST,
     CAP_INVENTORY_API_V3,
     CAP_LIBRARY_API_V3,
     CAP_CREATE_INVENTORY_CATEGORY,
@@ -1999,6 +2028,10 @@ pub struct Session {
     /// ([`Session::probe_circuits`]). [`CircuitProbe::Off`] on every normal
     /// session.
     circuit_probe: CircuitProbe,
+    /// The avatars whose profile is being read over `AgentProfile`, so that a
+    /// second read of one is not sent while the first is out
+    /// ([`Session::begin_profile_read`]).
+    profile_reads: std::collections::BTreeSet<AgentKey>,
 }
 
 mod caps_event;
@@ -2009,6 +2042,7 @@ mod inventory;
 mod inventory_cache;
 mod legacy_preset;
 mod methods;
+mod profile_caps;
 mod transfers;
 mod world_cache;
 
@@ -2061,4 +2095,10 @@ pub(crate) use conversions::{
     inheriting_environment_to_llsd, instant_message, object_transform_from_wire,
     parcel_properties_to_llsd, parcel_properties_to_wire, parse_copy_inventory_from_notecard,
     region_handshake_message, shape_from_object_shape_block, unpack_uuids,
+};
+pub use profile_caps::{
+    agent_profile_notes_body, agent_profile_put_body, agent_profile_url,
+    parse_profile_image_upload_body, parse_search_stat_request_body, parse_set_display_name_body,
+    profile_image_upload_body, profile_image_upload_outcome, search_stat_answer_body,
+    search_stat_request_body, set_display_name_body, stamp_search_stat_answer,
 };

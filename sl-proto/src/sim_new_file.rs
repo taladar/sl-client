@@ -93,6 +93,9 @@ pub(crate) enum SideUpload {
     Thumbnail(Option<crate::ThumbnailTarget>),
     /// A `SendPostcard`, and its card.
     Postcard(Box<crate::Postcard>),
+    /// An `UploadAgentProfileImage`, and the profile field it named — `None`
+    /// for a request that named none.
+    ProfileImage(Option<crate::ProfileImage>),
 }
 
 /// The widest and the tallest a thumbnail may be, in pixels.

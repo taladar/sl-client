@@ -155,6 +155,12 @@ fn on_events(
             SlSessionEvent::ClassifiedInfo(classified) => {
                 info!("classified details: {}", classified.name);
             }
+            SlSessionEvent::ProfileImageUploaded { image, asset_id } => {
+                info!("profile image {image:?} uploaded: {asset_id:?}");
+            }
+            SlSessionEvent::ClassifiedClickStats(stats) => {
+                info!("classified click counts: {stats:?}");
+            }
             SlSessionEvent::Account(account) => {
                 info!(
                     "account: access {:?}/{:?}, max groups {:?}, home {:?}",

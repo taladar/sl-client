@@ -680,11 +680,13 @@ mod test {
 
     // ---- Typing -----------------------------------------------------------
 
-    /// The catalogue NPC standing nearer the login point.
-    const NEAR_NPC: &str = "Catalogue Resident";
+    /// The catalogue NPC standing nearer the login point, by the name the
+    /// viewer shows: "Catalogue Resident"'s display name, which a grid
+    /// imitating Second Life makes the first name alone.
+    const NEAR_NPC: &str = "Catalogue";
 
-    /// The catalogue NPC sitting farther away.
-    const FAR_NPC: &str = "Seated Resident";
+    /// The catalogue NPC sitting farther away ("Seated Resident"), likewise.
+    const FAR_NPC: &str = "Seated";
 
     /// The built-in typing animation (`ANIM_AGENT_TYPE`).
     const TYPE_ANIMATION: Uuid = Uuid::from_u128(0xc541_c47f_e0c0_058b_ad1a_d6ae_3a45_84d9);

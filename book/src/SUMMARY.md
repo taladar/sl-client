@@ -56,6 +56,7 @@
 - [Local chat, instant messages and sessions](gridspec/chat.md)
 - [Friends and presence](gridspec/friends.md)
 - [Groups](gridspec/groups.md)
+- [Profiles and display names](gridspec/profiles.md)
 - [World map](gridspec/world-map.md)
 - [Terrain, wind and clouds](gridspec/terrain.md)
 - [Objects](gridspec/objects.md)

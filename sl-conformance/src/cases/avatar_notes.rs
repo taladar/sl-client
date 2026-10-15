@@ -17,15 +17,10 @@
 //! the edit, the case writes the original note back so it leaves the profile as
 //! it found it.
 //!
-//! **Live OpenSim finding (worked around, not fixed):** stock OpenSim leaves the
-//! `avatarnotesrequest` `GenericMessage` *unanswered* — the same class of
-//! unresponsive profile query the `picks-classifieds` case documented — and,
-//! unlike picks, `AvatarNotesUpdate` volunteers no reply either, so the note can
-//! never be read back on OpenSim. The case detects the silence (the initial read
-//! times out), still exercises the write on the wire best-effort, and records
-//! `partial` — the read-back round-trip is only assertable on a grid that
-//! answers the query (Second Life). On grids that *do* answer, the full
-//! toggle → write → re-read → assert → restore round-trip runs and is green.
+//! Both grids answer the read once its `GenericMessage` is NUL-terminated, as
+//! the reference packs it; without the terminator neither did, which this case
+//! used to record as OpenSim leaving the query unanswered (`profiles`,
+//! 2026-10-15, `book/src/gridspec/profiles.md`).
 //!
 //! `1av`, `[both]`. The "other avatar" the note is about is resolved per grid:
 //! OpenSim falls back to the local secondary test avatar (`Friend Tester`, a
@@ -46,11 +41,6 @@ use crate::registry::{GridTest, TestFuture};
 use crate::support::{
     REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, fixtures, is_opensim, secs_metric,
 };
-
-/// The note text written on grids that do not answer the read query (stock
-/// OpenSim), so the write is still exercised on the wire even though it can
-/// never be read back there.
-const NOTE_UNVERIFIABLE: &str = "sl-conformance avatar-notes (write-only, unverifiable read)";
 
 /// One of two fixed note markers; the round-trip flips to whichever the current
 /// value is *not*, so a fresh read can always detect the edit.
@@ -112,37 +102,11 @@ impl GridTest for AvatarNotes {
                 "target avatar must differ from the logged-in primary",
             )?;
 
-            // Read the current note. On a grid that answers the query the reply
-            // seeds the toggle; stock OpenSim never answers (see the module docs),
-            // so a timeout here is the "unanswered" signal, not a failure.
-            let note_before = match read_notes(session, target).await {
-                Ok(note) => note,
-                Err(TestFailure::Timeout(_)) => {
-                    // The grid does not answer notes reads. Still push a write so
-                    // the `AvatarNotesUpdate` encoding is exercised on the wire,
-                    // then record partial — the read-back cannot be verified here.
-                    session
-                        .send(Command::UpdateAvatarNotes {
-                            target_id: target,
-                            notes: NOTE_UNVERIFIABLE.to_owned(),
-                        })
-                        .await?;
-                    let metrics = ctx.metrics();
-                    metrics.set("target_avatar", target.to_string());
-                    metrics.set("notes_read_answered", false);
-                    metrics.set("note_written", NOTE_UNVERIFIABLE.to_owned());
-                    ctx.mark_partial(
-                        "grid left the avatarnotesrequest query unanswered (stock \
-                         OpenSim); the note write was exercised but the read-back \
-                         round-trip is unverifiable on this grid",
-                    );
-                    return Ok(());
-                }
-                Err(other) => return Err(other),
-            };
+            // Read the current note, which seeds the toggle.
+            let note_before = read_notes(session, target).await?;
 
-            // The grid answers notes reads — run the full round-trip. Flip to the
-            // other marker so every re-run is a real, detectable change.
+            // Flip to the other marker so every re-run is a real, detectable
+            // change.
             let new_note = if note_before == NOTE_MARKER_A {
                 NOTE_MARKER_B
             } else {
@@ -189,7 +153,6 @@ impl GridTest for AvatarNotes {
             let metrics = ctx.metrics();
             metrics.set_timing(&secs_metric("reread_rtt"), reread_rtt.as_secs_f64());
             metrics.set("target_avatar", target.to_string());
-            metrics.set("notes_read_answered", true);
             metrics.set("note_edited", new_note.to_owned());
             metrics.set("note_restored", restored);
             Ok(())

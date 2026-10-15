@@ -14,26 +14,27 @@ use std::collections::{BTreeSet, HashMap};
 use sl_proto::{
     AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_PAGE_SIZE,
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
-    CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
-    CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_FRIENDSHIP,
-    CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
-    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_METADATA,
-    CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INTEREST_LIST,
-    CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN,
-    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
-    CAP_MESH_UPLOAD_FLAG, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH,
+    CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+    CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES,
+    CAP_GROUP_MEMBER_DATA, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD,
+    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
+    CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE,
     CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
     CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_REQUEST_TASK_INVENTORY, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
-    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, NeighbourCaps,
-    NewFileAgentInventoryRequest, OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE,
-    REQUESTED_CAPABILITIES, Session, SessionMessage, UserInfoUpdate,
+    CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT,
+    CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY,
+    CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event as SessionEvent,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, NeighbourCaps, NewFileAgentInventoryRequest,
+    OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session, SessionMessage,
+    UserInfoUpdate, agent_profile_notes_body, agent_profile_put_body, agent_profile_url,
     ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
@@ -53,7 +54,7 @@ use sl_proto::{
     experience_id_query, experience_info_query, experience_query, find_experience_query,
     forget_experience_query, friendship_answer_url, group_ban_request_body, group_bans_url,
     group_experiences_query, group_invite_response_body, listing_request, listings_request,
-    merchant_status_request, parse_login_response, update_listing_request,
+    merchant_status_request, parse_login_response, set_display_name_body, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -67,42 +68,42 @@ pub use sl_proto::{
     AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_UI_SOUNDS, Camera, CameraError,
     ChatAudible, ChatChannel, ChatLogConfig, ChatMessage, ChatSessionAgentUpdate, ChatSessionKind,
     ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
-    CircuitProbe, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
-    ClientDirectories, ClockStyle, CloudPosDensity, CoarseLocation, Color, ColorAlpha, Command,
-    ControlFlags, ConversationKind, CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE,
-    DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE,
-    DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, DayCycle,
-    DayCycleFrame, DayNames, DayTrack, DeRezDestination, DensityLayer, DetachOrder, Diagnostic,
-    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility, DisconnectReason, DisplayName,
-    DisplayNameUpdate, Distance, DynamicMenus, EconomyData, EnvironmentAsset,
-    EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, Error as SessionError,
-    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate,
-    EventId, EventInfo, ExperienceEnvironmentPush, ExperienceEvent, ExperienceEventPermission,
-    ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
-    ExperienceSearchPage, ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData,
-    FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence, FriendRights,
-    GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupBan,
-    GroupBanAction, GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, InstantMessage, InterestListMode, InterestListReply, InterestsUpdate,
-    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryOwner, InventoryType, ItemInfo, KEYFRAME_SLOP, Key, Kilobits, LOGOUT_TIMEOUT,
-    LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact,
-    LandSearchType, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType,
-    LegacyMaterial, LegacyPresetError, LightData, LightImage, LindenAmount, LindenBalance, Listing,
-    ListingId, Llsd, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams,
-    LoginRejectKind, LoginRequest, LookAtType, LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MUTE_LIST_LIMIT,
-    MapBlockBatch, MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo,
-    MapRequestFlags, MarketplaceApiError, MarketplaceApiErrorKind,
-    MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, MarketplaceOperation, Material,
-    MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus, MeshKey, MeshUploadStatus,
-    MessageCursor, MessageId, MessageStatus, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteList, MuteType,
+    CircuitProbe, ClassifiedCategory, ClassifiedClickStats, ClassifiedInfo, ClassifiedKey,
+    ClassifiedSearchClicks, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle,
+    CloudPosDensity, CoarseLocation, Color, ColorAlpha, Command, ControlFlags, ConversationKind,
+    CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE, DEFAULT_CLOUD_TEXTURE,
+    DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE, DEFAULT_RAINBOW_TEXTURE,
+    DEFAULT_SUN_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, DayCycle, DayCycleFrame, DayNames, DayTrack,
+    DeRezDestination, DensityLayer, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult,
+    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction,
+    DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, DynamicMenus,
+    EconomyData, EnvironmentAsset, EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate,
+    Error as SessionError, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags,
+    EstateInfo, EstateInfoUpdate, EventId, EventInfo, ExperienceEnvironmentPush, ExperienceEvent,
+    ExperienceEventPermission, ExperienceInfo, ExperienceKey, ExperiencePermission,
+    ExperienceProperties, ExperienceSearchPage, ExperienceUpdate, ExtendedMesh, FaceMaterialPut,
+    FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence,
+    FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
+    GridCoordinates, GroupBan, GroupBanAction, GroupInvitationReceived, GroupKey, GroupMember,
+    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey,
+    GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
+    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
+    HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage, InterestListMode,
+    InterestListReply, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId, InventoryCursor,
+    InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey,
+    InventoryOffer, InventoryOwner, InventoryType, ItemInfo, KEYFRAME_SLOP, Key, Kilobits,
+    LOGOUT_TIMEOUT, LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit,
+    LandImpact, LandSearchType, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore,
+    LandingType, LegacyMaterial, LegacyPresetError, LightData, LightImage, LindenAmount,
+    LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest, LoggedChatType, LoginAccount,
+    LoginFailure, LoginParams, LoginRejectKind, LoginRequest, LookAtType, LureDestination, LureId,
+    MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
+    MEDIA_PERM_OWNER, MUTE_LIST_LIMIT, MapBlockBatch, MapBlockKind, MapBlockRecord, MapItem,
+    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MarketplaceApiError,
+    MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo,
+    MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus,
+    MeshKey, MeshUploadStatus, MessageCursor, MessageId, MessageStatus, MfaChallenge, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteList, MuteType,
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement, NewInventoryItem,
     NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
     ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation,
@@ -114,29 +115,30 @@ pub use sl_proto::{
     ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult,
     ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
     Permissions, Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate,
-    PingId, PlayingAnimation, PointAtType, PrimShape, PrimShapeParams, ProductType, ProfileUpdate,
-    ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags,
-    RegionChatSettings, RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags,
-    RegionHandle, RegionHandshakeReplyFlags, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionTerrainComposition,
-    RegionTerrainUpdate, Reliability, RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SKY_TRACK_COUNT,
-    SaleInfo, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
-    ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptMetadata, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
-    SculptOrMeshKey, SequenceNumber, ServerHistoryMessage, SessionTransition, SetDisplayNameReply,
-    SettingsKind, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, StartLocationSlot, SurfaceInfo, TRACK_MAX, TaskInventoryCapReply,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags,
-    TerraformArea, TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader,
-    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
-    ThrottleError, ThumbnailTarget, TimestampFormat, TransactionId, TransferId, Transmit,
-    TriggeredSound, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP,
-    UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT,
-    UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN,
-    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest,
-    WaterSettings, Wearable, WearableType, WireError, XferId, XferListing, avatar_texture,
+    PingId, PlayingAnimation, PointAtType, PrimShape, PrimShapeParams, ProductType, ProfileImage,
+    ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe,
+    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates,
+    RegionDebugUpdate, RegionFlags, RegionHandle, RegionHandshakeReplyFlags, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
+    RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
+    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, Rotation, SKY_TRACK_COUNT, SaleInfo, SaleType, Scale, ScopedObjectId,
+    ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog,
+    ScriptLanguage, ScriptMetadata, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
+    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
+    ServerHistoryMessage, SessionTransition, SetDisplayNameReply, SettingsKind, SimulatorFeatures,
+    SkySettings, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
+    StartLocationSlot, SurfaceInfo, TRACK_MAX, TaskInventoryCapReply, TaskInventoryItem,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerraformArea,
+    TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, TextureAnimation,
+    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
+    ThumbnailTarget, TimestampFormat, TransactionId, TransferId, Transmit, TriggeredSound,
+    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
+    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
+    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
+    Wearable, WearableType, WireError, XferId, XferListing, avatar_texture,
     azimuth_altitude_to_rotation, build_get_metadata_request, chat_text_muted,
     decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
     environment_asset_from_bytes, environment_asset_to_bytes, expected_upload_cost, grid_to_handle,
@@ -434,11 +436,12 @@ use crate::caps::{CAPS_FAILURE_PREFIX, fetch_neighbour_caps, start_caps};
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
-    answer_friendship, answer_group_invitation, group_bans, run_avatar_picker_search,
-    run_caps_oneway, run_chat_session_fetch_history, run_chat_session_request,
-    run_delete_caps_llsd, run_environment_change, run_experience_query, run_fetch_lsl_syntax,
-    run_get_caps_llsd, run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
-    run_remote_parcel_request, run_script_metadata, run_task_inventory,
+    answer_friendship, answer_group_invitation, group_bans, put_agent_profile,
+    run_avatar_picker_search, run_caps_oneway, run_chat_session_fetch_history,
+    run_chat_session_request, run_delete_caps_llsd, run_environment_change, run_experience_query,
+    run_fetch_lsl_syntax, run_get_caps_llsd, run_land_resources, run_patch_caps_llsd,
+    run_put_caps_llsd, run_remote_parcel_request, run_script_metadata, run_task_inventory,
+    search_stat, set_display_name, upload_profile_image,
 };
 use crate::inventory::{
     fetch_folder_contents, run_ais3_folder_fetches, run_group_members_fetch,
@@ -1419,6 +1422,31 @@ fn bans_over_the_capability(caps: Option<&Caps>, group: GroupKey, change: Option
     }
 }
 
+/// Reads `target`'s whole profile over the `AgentProfile` capability on a
+/// background thread, where the region grants it; the answer arrives as the
+/// profile, groups, picks and notes events. A read of a profile already being
+/// read is not sent again ([`Session::begin_profile_read`]). `false` where
+/// there is no capability, and the caller asks over UDP instead.
+fn profile_over_the_capability(
+    caps: Option<&Caps>,
+    session: &mut Session,
+    target: AgentKey,
+) -> bool {
+    let Some((url, events_tx)) = caps.and_then(|caps| {
+        caps.map
+            .get(CAP_AGENT_PROFILE)
+            .map(|url| (agent_profile_url(url, target), caps.events_tx.clone()))
+    }) else {
+        return false;
+    };
+    if session.begin_profile_read(target) {
+        crate::log_context::spawn_thread(move || {
+            run_get_caps_llsd(&url, CAP_AGENT_PROFILE, &events_tx);
+        });
+    }
+    true
+}
+
 /// Route an inventory mutation through AIS3 (Second Life): spawn its HTTP request
 /// on a background thread, feeding the reply back through the caps event channel
 /// (parsed as an inventory update). Returns `true` when it dispatched, `false` when
@@ -1578,6 +1606,10 @@ fn advance_running(
                     if let Err(error) = session.retrieve_instant_messages(now) {
                         tracing::warn!("the kept messages could not be asked for: {error}");
                     }
+                }
+                // A failed profile read does not say whose it was.
+                if cap == CAP_AGENT_PROFILE {
+                    session.profile_reads_failed();
                 }
             } else if let Err(error) = session.handle_caps_event(&message, &body, now) {
                 tracing::warn!(capability = %message, "CAPS payload rejected: {error}");
@@ -2006,14 +2038,22 @@ fn apply_command(
         } => {
             session.autopilot_to(*global_x, *global_y, *z, now)?;
         }
+        // The three reads are one `AgentProfile` GET where the region grants
+        // it, as the reference makes them.
         Command::RequestAvatarProperties(target) => {
-            session.request_avatar_properties(*target, now)?;
+            if !profile_over_the_capability(caps, session, *target) {
+                session.request_avatar_properties(*target, now)?;
+            }
         }
         Command::RequestAvatarPicks(target) => {
-            session.request_avatar_picks(*target, now)?;
+            if !profile_over_the_capability(caps, session, *target) {
+                session.request_avatar_picks(*target, now)?;
+            }
         }
         Command::RequestAvatarNotes(target) => {
-            session.request_avatar_notes(*target, now)?;
+            if !profile_over_the_capability(caps, session, *target) {
+                session.request_avatar_notes(*target, now)?;
+            }
         }
         Command::RequestAvatarClassifieds(target) => {
             session.request_avatar_classifieds(*target, now)?;
@@ -2028,13 +2068,30 @@ fn apply_command(
             session.request_classified_info(*classified_id, now)?;
         }
         Command::UpdateProfile(update) => {
-            session.update_profile(update, now)?;
+            match (
+                caps.and_then(|caps| caps.map.get(CAP_AGENT_PROFILE)),
+                session.agent_id(),
+            ) {
+                (Some(url), Some(agent)) => {
+                    let url = agent_profile_url(url, agent);
+                    let body = agent_profile_put_body(update);
+                    crate::log_context::spawn_thread(move || put_agent_profile(&url, body));
+                }
+                _ => session.update_profile(update, now)?,
+            }
         }
         Command::UpdateInterests(update) => {
             session.update_interests(update, now)?;
         }
         Command::UpdateAvatarNotes { target_id, notes } => {
-            session.update_avatar_notes(*target_id, notes, now)?;
+            match caps.and_then(|caps| caps.map.get(CAP_AGENT_PROFILE)) {
+                Some(url) => {
+                    let url = agent_profile_url(url, *target_id);
+                    let body = agent_profile_notes_body(notes);
+                    crate::log_context::spawn_thread(move || put_agent_profile(&url, body));
+                }
+                None => session.update_avatar_notes(*target_id, notes, now)?,
+            }
         }
         Command::UpdatePick(update) => {
             session.update_pick(update, now)?;
@@ -2050,6 +2107,46 @@ fn apply_command(
         }
         Command::DeleteClassified(classified_id) => {
             session.delete_classified(*classified_id, now)?;
+        }
+        Command::RequestClassifiedClickStats(classified_id) => {
+            match caps.and_then(|caps| {
+                caps.map
+                    .get(CAP_SEARCH_STAT_REQUEST)
+                    .map(|url| (url.clone(), caps.events_tx.clone()))
+            }) {
+                Some((url, events_tx)) => {
+                    let classified = *classified_id;
+                    crate::log_context::spawn_thread(move || {
+                        search_stat(&url, classified, &events_tx);
+                    });
+                }
+                None => tracing::warn!(
+                    "the region has no SearchStatRequest capability: no click counts"
+                ),
+            }
+        }
+        Command::UploadProfileImage { image, j2c } => match caps {
+            Some(caps) => {
+                let url = caps.map.get(CAP_UPLOAD_AGENT_PROFILE_IMAGE).cloned();
+                let events_tx = caps.events_tx.clone();
+                let (image, j2c) = (*image, j2c.clone());
+                crate::log_context::spawn_thread(move || {
+                    upload_profile_image(url.as_deref(), image, &j2c, &events_tx);
+                });
+            }
+            None => tracing::warn!("no capabilities yet: the profile image is not uploaded"),
+        },
+        Command::SetDisplayName { old, new } => {
+            match caps.and_then(|caps| caps.map.get(CAP_SET_DISPLAY_NAME)) {
+                Some(url) => {
+                    let url = url.clone();
+                    let body = set_display_name_body(old, new);
+                    crate::log_context::spawn_thread(move || set_display_name(&url, body));
+                }
+                None => tracing::warn!(
+                    "the region has no SetDisplayName capability: the display name is not changed"
+                ),
+            }
         }
         Command::GodDeleteClassified {
             classified_id,

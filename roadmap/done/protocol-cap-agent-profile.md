@@ -2,7 +2,7 @@
 id: protocol-cap-agent-profile
 title: Read and write profiles over the AgentProfile capability
 topic: protocol
-status: blocked
+status: done
 origin: protocol-reference-capabilities triage (2026-10-04)
 refs: [protocol-reference-capabilities, gridspec-profiles, viewer-profile-image-editing]
 blocked_by: [gridspec-profiles]
@@ -36,3 +36,19 @@ and Firestorm references: `book/src/comms/caps-reference.md`.
 This capability is adopted inside that gridspec task, which measures the
 feature on both grids over both paths, makes the fake grid serve the
 capability per flavour, and checks the viewer. Claim that task.
+
+## Done (2026-10-15, with gridspec-profiles)
+
+`CAP_AGENT_PROFILE` is requested. Where a region grants it,
+`Command::RequestAvatarProperties`, `RequestAvatarPicks` and
+`RequestAvatarNotes` are one GET of `{cap}/{avatar}` (a read already out is
+not sent again, as the reference's pending-request check does), answered as
+the UDP replies are: `AvatarProperties` (now with `hide_age`,
+`customer_type` and `online`), `AvatarGroups`, `AvatarPicks` and
+`AvatarNotes`; `UpdateProfile` is one PUT of every field (`hide_age` where
+set) and `UpdateAvatarNotes` a PUT of `notes` to the other avatar's URL.
+Both runtimes alike; UDP where the capability is absent. Measured on aditi
+(`book/src/gridspec/profiles.md`): a PUT of several keys takes them all,
+texts over 500 bytes survive only over the capability, `hide_age` is
+neither answered nor kept. The fake grid's serving of it is
+[[server-fake-grid-profiles]].

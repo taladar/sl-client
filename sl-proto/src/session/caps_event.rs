@@ -18,7 +18,7 @@
 
 use super::{
     AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_SEARCH_TAG,
-    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
+    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES,
     CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
     CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
     CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
@@ -29,7 +29,8 @@ use super::{
     CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
+    CAP_SEARCH_STAT_REQUEST, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_EXPERIENCE, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO,
     CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG,
 };
@@ -89,6 +90,13 @@ pub(crate) enum CapsEvent {
     GroupMemberData,
     /// The answer of the `GroupAPIv1` capability: a group's ban list.
     GroupApiV1,
+    /// An `AgentProfile` GET answer: one avatar's whole profile.
+    AgentProfile,
+    /// The outcome of an `UploadAgentProfileImage` upload, as the runtime
+    /// stamps it.
+    UploadAgentProfileImage,
+    /// A `SearchStatRequest` answer, stamped with its classified.
+    SearchStatRequest,
     /// The server's answer to an appearance (baked-texture) update.
     UpdateAvatarAppearance,
     /// The current-outfit folder's new version.
@@ -229,6 +237,9 @@ impl CapsEvent {
             "AgentGroupDataUpdate" => Self::AgentGroupDataUpdate,
             CAP_GROUP_MEMBER_DATA => Self::GroupMemberData,
             CAP_GROUP_API_V1 => Self::GroupApiV1,
+            CAP_AGENT_PROFILE => Self::AgentProfile,
+            CAP_UPLOAD_AGENT_PROFILE_IMAGE => Self::UploadAgentProfileImage,
+            CAP_SEARCH_STAT_REQUEST => Self::SearchStatRequest,
             CAP_UPDATE_AVATAR_APPEARANCE => Self::UpdateAvatarAppearance,
             CAP_INCREMENT_COF_VERSION => Self::IncrementCofVersion,
             CAP_OBJECT_MEDIA => Self::ObjectMedia,

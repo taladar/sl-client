@@ -9,13 +9,15 @@ use sl_client_common::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transi
 use sl_proto::{
     AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_GROUP_API_V1,
     CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
-    CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ObjectKey, ParcelKey, RemoteParcelRequest,
-    TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG, Uuid, build_get_metadata_request,
-    build_land_resources_request, build_remote_parcel_request, parse_land_resources_reply,
-    parse_llsd_xml, stamp_get_metadata_reply, stamp_remote_parcel_request,
-    stamp_task_inventory_cap_reply, task_inventory_cap_url, task_inventory_failed_body,
-    task_inventory_unchanged_body,
+    CAP_SEARCH_STAT_REQUEST, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CHAT_SESSION_FETCH_HISTORY_TAG,
+    ClassifiedKey, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ObjectKey, ParcelKey, ProfileImage,
+    RemoteParcelRequest, TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG, Uuid,
+    build_get_metadata_request, build_land_resources_request, build_remote_parcel_request,
+    parse_land_resources_reply, parse_llsd_xml, profile_image_upload_body,
+    profile_image_upload_outcome, search_stat_request_body, stamp_get_metadata_reply,
+    stamp_remote_parcel_request, stamp_search_stat_answer, stamp_task_inventory_cap_reply,
+    task_inventory_cap_url, task_inventory_failed_body, task_inventory_unchanged_body,
 };
 use std::collections::HashMap;
 
@@ -903,4 +905,168 @@ pub(crate) fn run_script_metadata(
         }
         None => report_caps_failure(caps_tx, CAP_GET_METADATA),
     }
+}
+
+/// How many times a profile image upload is tried, each time with a fresh
+/// uploader, as the reference does (`post_profile_image`).
+const PROFILE_IMAGE_ATTEMPTS: u32 = 3;
+
+/// PUTs `body` to an `AgentProfile` URL (blocking) — the agent's own
+/// profile, or its notes about another avatar — and logs an answer the grid
+/// did not take. Mirrors the tokio `put_agent_profile`.
+pub(crate) fn put_agent_profile(url: &str, body: String) {
+    let Some(http) = answer_client("a profile write") else {
+        return;
+    };
+    match http
+        .put(url)
+        .header("Content-Type", "application/llsd+xml")
+        .header("Accept", "application/llsd+xml")
+        .body(body)
+        .send()
+    {
+        Ok(response) if response.status().is_success() => {}
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "a profile write was rejected");
+        }
+        Err(error) => tracing::warn!("a profile write could not be sent: {error}"),
+    }
+}
+
+/// POSTs a display-name change to the `SetDisplayName` capability `url`
+/// (blocking). The grid answers over the event queue, so only a request it did
+/// not take is logged. Mirrors the tokio `set_display_name`.
+pub(crate) fn set_display_name(url: &str, body: String) {
+    let Some(http) = answer_client("a display-name change") else {
+        return;
+    };
+    match http
+        .post(url)
+        .header("Content-Type", "application/llsd+xml")
+        .header("Accept", "application/llsd+xml")
+        .header("Accept-Language", "en")
+        .body(body)
+        .send()
+    {
+        Ok(response) if response.status().is_success() => {}
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "a display-name change was rejected");
+        }
+        Err(error) => tracing::warn!("a display-name change could not be sent: {error}"),
+    }
+}
+
+/// Reads `classified`'s click counts over the `SearchStatRequest` capability
+/// `url` (blocking) and forwards the stamped answer over `caps_tx`. Mirrors
+/// the tokio `search_stat`.
+pub(crate) fn search_stat(url: &str, classified: ClassifiedKey, caps_tx: &Sender<(String, Llsd)>) {
+    let Some(http) = answer_client("a classified's click counts") else {
+        return;
+    };
+    match http
+        .post(url)
+        .header("Content-Type", "application/llsd+xml")
+        .header("Accept", "application/llsd+xml")
+        .body(search_stat_request_body(classified))
+        .send()
+    {
+        Ok(response) if response.status().is_success() => {
+            let text = response.text().unwrap_or_default();
+            match parse_llsd_xml(&text) {
+                Ok(answer) => deliver(
+                    caps_tx,
+                    (
+                        CAP_SEARCH_STAT_REQUEST.to_owned(),
+                        stamp_search_stat_answer(answer, classified),
+                    ),
+                ),
+                Err(error) => tracing::warn!("a classified's click counts did not parse: {error}"),
+            }
+        }
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "a classified's click counts were refused");
+        }
+        Err(error) => tracing::warn!("a classified's click counts could not be read: {error}"),
+    }
+}
+
+/// Uploads `j2c` as the profile image `image` over the
+/// `UploadAgentProfileImage` capability `url` (blocking) — `None` where the
+/// region has none — and hands the outcome over `caps_tx`. Mirrors the tokio
+/// `upload_profile_image`.
+pub(crate) fn upload_profile_image(
+    url: Option<&str>,
+    image: ProfileImage,
+    j2c: &[u8],
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let asset = match (url, answer_client("a profile image upload")) {
+        (Some(url), Some(http)) => (1..=PROFILE_IMAGE_ATTEMPTS).find_map(|attempt| {
+            profile_image_attempt(&http, url, image, j2c)
+                .inspect_err(|why| tracing::warn!(attempt, "a profile image upload failed: {why}"))
+                .ok()
+        }),
+        (None, _) => {
+            tracing::warn!("the region has no UploadAgentProfileImage capability");
+            None
+        }
+        (Some(_url), None) => None,
+    };
+    deliver(
+        caps_tx,
+        (
+            CAP_UPLOAD_AGENT_PROFILE_IMAGE.to_owned(),
+            profile_image_upload_outcome(image, asset),
+        ),
+    );
+}
+
+/// One attempt at a profile image upload (blocking): ask for an uploader,
+/// POST the image to it, and read the asset it made.
+fn profile_image_attempt(
+    http: &reqwest::blocking::Client,
+    url: &str,
+    image: ProfileImage,
+    j2c: &[u8],
+) -> Result<Uuid, String> {
+    let first = http
+        .post(url)
+        .header("Content-Type", "application/llsd+xml")
+        .header("Accept", "application/llsd+xml")
+        .body(profile_image_upload_body(image))
+        .send()
+        .map_err(|error| error.to_string())?;
+    if !first.status().is_success() {
+        return Err(format!("the uploader request answered {}", first.status()));
+    }
+    let answer = parse_llsd_xml(&first.text().map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    let uploader = answer
+        .get("uploader")
+        .and_then(Llsd::as_str)
+        .ok_or("the uploader request named no uploader")?
+        .to_owned();
+    let second = http
+        .post(&uploader)
+        .header("Content-Type", "application/jp2")
+        .header("Accept", "application/llsd+xml")
+        .body(j2c.to_vec())
+        .send()
+        .map_err(|error| error.to_string())?;
+    if !second.status().is_success() {
+        return Err(format!("the upload answered {}", second.status()));
+    }
+    let answer = parse_llsd_xml(&second.text().map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    if answer.get("state").and_then(Llsd::as_str) != Some("complete") {
+        return Err("the upload did not complete".to_owned());
+    }
+    answer
+        .get("new_asset")
+        .and_then(|asset| match asset {
+            Llsd::Uuid(id) => Some(*id),
+            Llsd::String(text) => Uuid::parse_str(text).ok(),
+            _ => None,
+        })
+        .ok_or_else(|| "the upload named no asset".to_owned())
 }

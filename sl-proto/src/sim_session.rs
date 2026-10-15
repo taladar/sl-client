@@ -1750,6 +1750,21 @@ pub enum ServerEvent {
         /// The image, a JPEG-2000 codestream.
         data: Vec<u8>,
     },
+    /// The client uploaded a profile image over `UploadAgentProfileImage`,
+    /// and the simulator minted the asset id it answered with. For the
+    /// driver to store, and to set in the profile field `image` names.
+    ProfileImageUploaded {
+        /// Which of the two profile images it is.
+        image: crate::ProfileImage,
+        /// The asset id the simulator minted and returned to the client.
+        new_asset: AssetKey,
+        /// The image, a JPEG-2000 codestream.
+        data: Vec<u8>,
+    },
+    /// The agent changed its display name over `SetDisplayName`. The
+    /// session has stored the new record and told its own agent; the driver
+    /// tells everybody else in the region.
+    DisplayNameChanged(Box<DisplayNameUpdate>),
     /// The client sent a snapshot postcard over the `SendPostcard`
     /// capability: the card from the first step, the snapshot from the
     /// second. For the driver to mail, or to keep for a test to read.

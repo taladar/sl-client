@@ -156,6 +156,8 @@ fn on_events(
             | SlSessionEvent::AvatarClassifieds { .. }
             | SlSessionEvent::PickInfo(_)
             | SlSessionEvent::ClassifiedInfo(_)
+            | SlSessionEvent::ProfileImageUploaded { .. }
+            | SlSessionEvent::ClassifiedClickStats(_)
             | SlSessionEvent::Account(_)
             | SlSessionEvent::InventorySkeleton(_)
             | SlSessionEvent::LibraryInventory(_)

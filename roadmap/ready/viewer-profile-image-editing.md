@@ -36,3 +36,11 @@ existing texture is the route on OpenSim. The profile write itself is
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Protocol done (2026-10-15, gridspec-profiles)
+
+`Command::UploadProfileImage { image, j2c }` does the two-step upload (three
+attempts, as the reference) and answers `Event::ProfileImageUploaded`; the
+grid sets the field itself (measured on aditi). The fake grid's Second Life
+flavour serves the upload. Without the capability (OpenSim) the event comes
+with no asset, and an image is set with `UpdateProfile` instead.

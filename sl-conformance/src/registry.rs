@@ -132,6 +132,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::profile_edit_roundtrip::ProfileEditRoundtrip),
         Box::new(crate::cases::picks_classifieds::PicksClassifieds),
         Box::new(crate::cases::display_names::DisplayNames),
+        Box::new(crate::cases::profiles::Profiles),
         Box::new(crate::cases::region_info::RegionInfo),
         Box::new(crate::cases::logout_clean::LogoutClean),
         Box::new(crate::cases::logout_seated::LogoutSeated),

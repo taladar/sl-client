@@ -4,11 +4,13 @@ use reqwest::Client as ReqwestClient;
 use sl_proto::{
     AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_GROUP_API_V1,
     CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
-    CHAT_SESSION_FETCH_HISTORY_TAG, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, Llsd, ObjectKey, ParcelKey, RemoteParcelRequest,
+    CAP_SEARCH_STAT_REQUEST, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CHAT_SESSION_FETCH_HISTORY_TAG,
+    ClassifiedKey, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, Llsd, ObjectKey, ParcelKey, ProfileImage, RemoteParcelRequest,
     TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG, build_get_metadata_request,
     build_land_resources_request, build_remote_parcel_request, parse_land_resources_reply,
-    parse_llsd_xml, stamp_get_metadata_reply, stamp_remote_parcel_request,
+    parse_llsd_xml, profile_image_upload_body, profile_image_upload_outcome,
+    stamp_get_metadata_reply, stamp_remote_parcel_request, stamp_search_stat_answer,
     stamp_task_inventory_cap_reply, task_inventory_cap_url, task_inventory_failed_body,
     task_inventory_unchanged_body,
 };
@@ -831,6 +833,180 @@ pub(crate) async fn post_script_metadata(
         }
         None => report_caps_failure(&caps_tx, CAP_GET_METADATA).await,
     }
+}
+
+/// How many times a profile image upload is tried, each time with a fresh
+/// uploader, as the reference does (`post_profile_image`).
+const PROFILE_IMAGE_ATTEMPTS: u32 = 3;
+
+/// PUTs `body` to an `AgentProfile` URL — the agent's own profile, or its
+/// notes about another avatar — and logs an answer the grid did not take.
+/// Second Life answers a PUT `200` with no body, so there is nothing to hand
+/// back.
+pub(crate) async fn put_agent_profile(url: String, body: String, http: ReqwestClient) {
+    match http
+        .put(&url)
+        .header("Content-Type", "application/llsd+xml")
+        .header("Accept", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {}
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "a profile write was rejected");
+        }
+        Err(error) => tracing::warn!("a profile write could not be sent: {error}"),
+    }
+}
+
+/// POSTs a display-name change to the `SetDisplayName` capability `url`,
+/// with the `Accept-Language` the People API words its refusals in. The
+/// grid answers over the event queue (`SetDisplayNameReply`), so only a
+/// request it did not take is logged here.
+pub(crate) async fn set_display_name(url: String, body: String, http: ReqwestClient) {
+    match http
+        .post(&url)
+        .header("Content-Type", "application/llsd+xml")
+        .header("Accept", "application/llsd+xml")
+        .header("Accept-Language", "en")
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {}
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "a display-name change was rejected");
+        }
+        Err(error) => tracing::warn!("a display-name change could not be sent: {error}"),
+    }
+}
+
+/// Reads `classified`'s click counts over the `SearchStatRequest` capability
+/// `url` and forwards the answer, stamped with the classified, over
+/// `caps_tx` tagged [`CAP_SEARCH_STAT_REQUEST`].
+pub(crate) async fn search_stat(
+    url: String,
+    classified: ClassifiedKey,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    match http
+        .post(&url)
+        .header("Content-Type", "application/llsd+xml")
+        .header("Accept", "application/llsd+xml")
+        .body(sl_proto::search_stat_request_body(classified))
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => {
+            let text = response.text().await.unwrap_or_default();
+            match parse_llsd_xml(&text) {
+                Ok(answer) => {
+                    let stamped = stamp_search_stat_answer(answer, classified);
+                    deliver(&caps_tx, (CAP_SEARCH_STAT_REQUEST.to_owned(), stamped)).await;
+                }
+                Err(error) => tracing::warn!("a classified's click counts did not parse: {error}"),
+            }
+        }
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "a classified's click counts were refused");
+        }
+        Err(error) => tracing::warn!("a classified's click counts could not be read: {error}"),
+    }
+}
+
+/// Uploads `j2c` as the profile image `image` over the
+/// `UploadAgentProfileImage` capability `url` — `None` where the region has
+/// none — and hands the outcome over `caps_tx`, tagged
+/// [`CAP_UPLOAD_AGENT_PROFILE_IMAGE`]: the new asset, or none (logged) where
+/// every attempt failed.
+pub(crate) async fn upload_profile_image(
+    url: Option<String>,
+    image: ProfileImage,
+    j2c: Vec<u8>,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let asset = match url {
+        Some(url) => {
+            let mut asset = None;
+            for attempt in 1..=PROFILE_IMAGE_ATTEMPTS {
+                match profile_image_attempt(&url, image, &j2c, &http).await {
+                    Ok(new_asset) => {
+                        asset = Some(new_asset);
+                        break;
+                    }
+                    Err(why) => tracing::warn!(attempt, "a profile image upload failed: {why}"),
+                }
+            }
+            asset
+        }
+        None => {
+            tracing::warn!("the region has no UploadAgentProfileImage capability");
+            None
+        }
+    };
+    deliver(
+        &caps_tx,
+        (
+            CAP_UPLOAD_AGENT_PROFILE_IMAGE.to_owned(),
+            profile_image_upload_outcome(image, asset),
+        ),
+    )
+    .await;
+}
+
+/// One attempt at a profile image upload: ask for an uploader, POST the
+/// image to it, and read the asset it made.
+async fn profile_image_attempt(
+    url: &str,
+    image: ProfileImage,
+    j2c: &[u8],
+    http: &ReqwestClient,
+) -> Result<Uuid, String> {
+    let first = http
+        .post(url)
+        .header("Content-Type", "application/llsd+xml")
+        .header("Accept", "application/llsd+xml")
+        .body(profile_image_upload_body(image))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !first.status().is_success() {
+        return Err(format!("the uploader request answered {}", first.status()));
+    }
+    let answer = parse_llsd_xml(&first.text().await.map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    let uploader = answer
+        .get("uploader")
+        .and_then(Llsd::as_str)
+        .ok_or("the uploader request named no uploader")?
+        .to_owned();
+    let second = http
+        .post(&uploader)
+        .header("Content-Type", "application/jp2")
+        .header("Accept", "application/llsd+xml")
+        .body(j2c.to_vec())
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !second.status().is_success() {
+        return Err(format!("the upload answered {}", second.status()));
+    }
+    let answer = parse_llsd_xml(&second.text().await.map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    if answer.get("state").and_then(Llsd::as_str) != Some("complete") {
+        return Err("the upload did not complete".to_owned());
+    }
+    answer
+        .get("new_asset")
+        .and_then(|asset| match asset {
+            Llsd::Uuid(id) => Some(*id),
+            Llsd::String(text) => Uuid::parse_str(text).ok(),
+            _ => None,
+        })
+        .ok_or_else(|| "the upload named no asset".to_owned())
 }
 
 #[cfg(test)]

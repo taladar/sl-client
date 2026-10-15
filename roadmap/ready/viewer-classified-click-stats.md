@@ -24,3 +24,11 @@ Every capability adopted here goes into `REQUESTED_CAPABILITIES`
 existing path where it does not, and is served by the fake grid per flavour as
 `seed-capabilities` measured it (`book/src/gridspec/capabilities.md`). Shapes
 and Firestorm references: `book/src/comms/caps-reference.md`.
+
+## Protocol done (2026-10-15, gridspec-profiles)
+
+`Command::RequestClassifiedClickStats` reads the counts over the capability
+and answers `Event::ClassifiedClickStats`; Second Life's
+`classifiedclickthrough` (sent with every `ClassifiedInfoReply`, measured)
+arrives as the same event without the search counts. What is left is the
+panel.

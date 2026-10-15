@@ -498,6 +498,11 @@ impl SharedSim {
                     )
                     .unwrap_or_default(),
                 );
+                // A display-name change is the agent's own session's to
+                // store and say; the rest of the region learns it here.
+                if let ServerEvent::DisplayNameChanged(update) = &event {
+                    changes.push(RegionChange::DisplayNameChanged(update.clone()));
+                }
                 // Published while the store is still held, so a watcher that
                 // wakes on the change and re-reads the region cannot see a
                 // world the change has not landed in yet.
@@ -969,6 +974,11 @@ pub(crate) async fn run_region_watcher(
                                         let mut identity = state.identity.clone();
                                         identity.terrain = **composition;
                                         state.sim.send_region_handshake(&identity, now)
+                                    }
+                                    RegionChange::DisplayNameChanged(update) => {
+                                        state.sim.set_display_name(update.name.clone());
+                                        state.sim.enqueue_display_name_update(update);
+                                        Ok(())
                                     }
                                 };
                                 if let Err(error) = result {

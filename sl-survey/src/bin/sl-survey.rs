@@ -623,6 +623,8 @@ impl Survey {
             | Event::AvatarClassifieds { .. }
             | Event::PickInfo(_)
             | Event::ClassifiedInfo(_)
+            | Event::ProfileImageUploaded { .. }
+            | Event::ClassifiedClickStats(_)
             | Event::Account(_)
             | Event::InventorySkeleton(_)
             | Event::LibraryInventory(_)

@@ -1830,7 +1830,7 @@ impl Scene {
 
 /// `text` with every date in it, `12/31/2026` or `2026-12-31`, written
 /// `<date>`.
-fn without_dates(text: &str) -> String {
+pub(crate) fn without_dates(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for (index, word) in text.split(' ').enumerate() {
         if index > 0 {
@@ -3350,7 +3350,7 @@ impl Census<'_> {
 /// Every way a grid writes the name of the avatar whose legacy name is
 /// `legacy`: the legacy name, a Resident's first name, and the user name
 /// (`first` for a Resident, `first.last` otherwise, in lower case).
-fn names_of(legacy: &str) -> Vec<String> {
+pub(crate) fn names_of(legacy: &str) -> Vec<String> {
     let mut names = vec![legacy.to_owned()];
     let (first, last) = legacy.split_once(' ').unwrap_or((legacy, ""));
     if last.is_empty() || last.eq_ignore_ascii_case("Resident") {

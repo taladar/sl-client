@@ -189,6 +189,14 @@ pub(crate) fn answer_upload(
             store(assets, *asset_id, data.clone());
             true
         }
+        ServerEvent::ProfileImageUploaded {
+            new_asset, data, ..
+        } => {
+            // The image only: this grid keeps no profiles to set it in yet
+            // (`server-fake-grid-profiles`).
+            store(assets, *new_asset, data.clone());
+            true
+        }
         ServerEvent::InventoryThumbnailUploaded {
             new_asset, data, ..
         } => {

@@ -2169,6 +2169,11 @@ pub(crate) fn avatar_properties(
         profile_url: trimmed_string(&data.profile_url),
         charter_member: trimmed_string(&data.charter_member),
         flags: data.flags,
+        // UDP says nothing of the age or the customer type, and says
+        // whether the avatar is online in a flag every reply carries.
+        hide_age: None,
+        customer_type: None,
+        online: Some(data.flags & 0x10 != 0),
     }
 }
 
