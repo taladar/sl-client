@@ -51,3 +51,13 @@ Acceptance: the nine cases run on every `cargo test` against the fake
 grid and pass without `partial`; their live-grid variants still run and
 still pass; and the OpenSim OAR fixture prim stops being a prerequisite
 for anything that runs in CI.
+
+Audit 2026-10-15: four of the nine are offline already. `chat-self-echo`,
+`chat-hear-other` and `chat-whisper-shout-range` joined
+`fake::OFFLINE_CASES` (`sl-conformance/src/fake.rs`) with
+[[server-world-chat-routing]], and `object-touch-grab` is listed too, but
+returns early on a fake grid before its scripted legs (`grid.is_fake()` in
+`sl-conformance/src/cases/object_touch_grab.rs`). What remains: the script
+legs of `object-touch-grab`, and `script-dialog`, `script-permissions`,
+`script-running`, `script-upload` and `money-transfer`, none of which is
+listed yet.

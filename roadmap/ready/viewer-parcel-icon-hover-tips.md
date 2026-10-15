@@ -19,3 +19,10 @@ translation targets too).
 Shape: a small shared hover-tip affordance would serve other top-bar
 elements as well (balance, time, FPS) — check whether the widget scaffold
 already has a tooltip primitive or whether this task introduces it.
+
+Audit 2026-10-15: still open. The icons are spawned by `spawn_parcel_icon`
+in `sl-client-bevy-viewer/src/status_bar.rs` with no tip. There is no
+UI-widget tooltip primitive yet: the only tooltip is the in-world hover
+tip (`sl-viewer-world-view/src/hover_tooltip.rs`), already skinned through
+the `.sk-tooltip` roles ([[viewer-skin-tooltip-roles]]) — reuse its look
+for the new widget-level tip.

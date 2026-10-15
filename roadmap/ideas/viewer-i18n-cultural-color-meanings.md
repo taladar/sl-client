@@ -49,5 +49,12 @@ Deliverables sketch:
 - Interacts with [[viewer-i18n-colorblind-accessibility]] — both argue against
   colour-as-sole-signal, and both resolve through the same semantic-token layer.
 
+Audit 2026-10-15: the first semantic tokens exist — `--gain` / `--loss` and
+the four `--notice-*` kinds in `sl-viewer-ui-core/src/skins/fallback.css`
+(restated by each shipped skin), with `.sk-gain` / `.sk-loss` classes in
+`common.css`. What is still missing is the per-culture override map (nothing
+flips `--gain` / `--loss` per locale today), the remaining tokens
+(`--danger`, `--celebrate`, `--mourning`) and the audit pass.
+
 Reference (Firestorm, read-only): `colors.xml` (its palette is literal, not
 semantic — the gap this task fills), and how nothing there varies by culture.

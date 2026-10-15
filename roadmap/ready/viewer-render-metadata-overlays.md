@@ -16,7 +16,8 @@ highest-value first):
 
 - [ ] Bounding boxes; avatar hitboxes
 - [ ] Normals / tangents
-- [ ] Physics shapes (avian3d colliders)
+- [ ] Physics shapes (the parry3d static raycast index's shapes — avian3d
+      is gone)
 - [ ] LOD info (current LOD per object); triangle count
 - [ ] Lights (local light radii); reflection probes + probe updates
 - [ ] Joints / collision skeleton (extends the existing avatar-geometry

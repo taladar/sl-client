@@ -2,13 +2,40 @@
 id: viewer-perf-gpu-avatar-crowd
 title: GPU avatar crowd — compute-pass animation + same-body instancing
 topic: viewer
-status: ideas
+status: done
 origin: design discussion off the 2026-08-12 critical-path capture
 refs: [viewer-perf-steady-state-46fps-ceiling, viewer-perf-avatar-pose-extract-skins, viewer-avatar-impostors-billboard, viewer-perf-skeleton-single-solve, viewer-avatar-mesh-accurate-pick, viewer-perf-hover-pick-raycast]
 ---
 
 Context: [context/viewer.md](../context/viewer.md). **Full design:**
 [context/gpu-avatars.md](../context/gpu-avatars.md).
+
+## Done (audit 2026-10-15)
+
+The epic is delivered through its phase tasks, all in `done/`:
+[[viewer-perf-gpu-avatar-phase0-mesh-dedup]] (rigged submesh `Mesh` /
+inverse-bind assets shared across wearers, so same-body copies batch),
+[[viewer-perf-gpu-avatar-keystone-skinuniforms-spike]],
+[[viewer-perf-gpu-avatar-phase1-gpu-fk-palettes]],
+[[viewer-perf-gpu-avatar-phase2-gpu-sample-blend]] (clip sampling deduped by
+`(clip, phase)`, far looping clips phase-bucketed),
+[[viewer-perf-gpu-avatar-phase3-gpu-picking]] (GPU ID-buffer picking) and
+[[viewer-perf-gpu-avatar-phase4-remove-scaffolding]] (joint entities and the
+CPU pose path deleted; avatars and animesh posed only on the GPU). The code
+is `sl-viewer-world-avatar/src/gpu_avatars/` (`stage.rs` the CPU feed,
+`render.rs` the compute passes A–D, `pose.wgsl`, `crowd.rs` the
+`SL_VIEWER_CROWD` harness); the CPU keeps only the socket / adjuster chain in
+`pose_avatar_skeletons`. Measured: `extract_skins` fell from the ~5–7 ms
+serial cost to 0.76 ms and flat in avatar count.
+
+What remains is follow-up, not this epic:
+[[viewer-perf-gpu-avatar-phase5-lod-polish]],
+[[viewer-perf-gpu-avatar-pose-lod]],
+[[viewer-perf-gpu-avatar-crowd-cpu-bound]] and
+[[viewer-perf-avatar-mesh-lod-screen-size]]. The no-GPU stopgaps
+([[viewer-perf-animation-lod-pose-cache]]) were retired as superseded.
+
+The design overview below is kept as written.
 
 > **Epic — decomposed into phase tasks (2026-08-12).** The detailed,
 > implementation-ready design lives in

@@ -85,3 +85,16 @@ No bespoke in-viewer profiler UI (the reference's Fast Timers): Tracy +
 the statistics floater cover it; revisit only if a user-facing need
 appears. The reference for comparison: `llfasttimerview`
 (`floater_fast_timers.xml`).
+
+## Audit 2026-10-15: what has landed
+
+Points 1 and 2 of the scope above are done: `sl-client-bevy-viewer` carries
+the `profile-tracy`, `profile-tracy-memory` and `profile-chrome` features
+(`Cargo.toml`), `tracy_plots::TracyProfilingPlugin` streams the diagnostics
+store as Tracy plots (`viewer_plugins.rs`), and `book/src/tools/profiling.md`
+documents the version pin, the `tracy-capture` recipe and the samply / perf
+fallback. Bevy's `RenderDiagnosticsPlugin` rows are already in the
+diagnostics store but only reach Tracy. What remains: those rows in the
+statistics floater ([[viewer-statistics-floater]]), dhat heap-regression
+tests in the pure crates, and an alloc-free guard on the audio thread (the
+audio backend has landed).

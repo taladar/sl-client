@@ -193,5 +193,14 @@ Testing matrix: NVDA (free) on Windows and Orca locally are the
 workhorses; VoiceOver needs Mac hardware; JAWS is commercial — expect its
 live-region quirks and rely on the visible-text fallback.
 
+Audit 2026-10-15: the viewer has since been split into crates, so the files
+named above now live at `sl-viewer-ui-core/src/ui.rs` and `i18n.rs`,
+`sl-viewer-world-view/src/input_context.rs`,
+`sl-viewer-people/src/conversations.rs` and `sl-viewer-chat/src/chat.rs`.
+The Linux adapter is enabled in `sl-client-bevy-viewer/Cargo.toml`
+(`accesskit_unix`). A notification subsystem exists now
+(`sl-viewer-notifications`), so the live-region announcer (item 4) should
+hook it rather than wait for one. Items 4–8 are what remains.
+
 Reference (Firestorm, read-only): none — the gap *is* the finding.
 AccessKit / `bevy_a11y` docs are the real reference.

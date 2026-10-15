@@ -2,12 +2,29 @@
 id: viewer-perf-probe-capture-shadows
 title: Reduce directional shadow-cascade cost for probe capture views
 topic: viewer
-status: ready
+status: done
 origin: reflection-probe performance planning round (2026-07-22), Firestorm LLReflectionMapManager survey
-refs: [viewer-perf-probe-instrumentation, viewer-perf-probe-capture-content]
+refs: [viewer-perf-probe-instrumentation, viewer-perf-probe-capture-content,
+  viewer-perf-pipeline-specialization-stalls]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+## Done (audit 2026-10-15)
+
+Resolved by the exclusion route this item preferred, landed with
+[[viewer-perf-pipeline-specialization-stalls]]: probe captures render **no sun
+shadow cascades at all**. `sl-viewer-kit/src/probe_layers.rs` puts the capture
+cameras only on the probe layers (`PROBE_ENV_LAYER`, `PROBE_GEOM_LAYER`,
+`PROBE_DYNAMIC_LAYER`) and the shadow-casting `SceneSun` on layer 0 plus
+`SUN_SHADOW_ONLY_LAYER`, so Bevy builds no cascade views for them (light ∩
+camera layers is empty); a shadow-free **mirror sun**
+(`mirror_sun_render_layers`, spawned in `sl-viewer-world-scene/src/sky.rs`)
+lights the captures on the probe layers. That removes both the per-face GPU
+shadow render and the per-probe-view `check_dir_light_mesh_visibility` cull
+multiplier measured below; reflections are shadowless, as in the reference
+(`generateSunShadow` is never called under `gCubeSnapshot`). No upstream
+per-view cascade knob was needed. The investigation notes are kept below.
 
 The dominant fixed per-face cost once
 [[viewer-perf-probe-capture-content]] has shrunk the geometry: Bevy forks

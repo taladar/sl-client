@@ -32,9 +32,13 @@ The reference viewer decides before the button exists
   accept button, and the viewer declines the lure and sends the offerer the
   `TeleportMaturityExceeded` line itself.
 
-All three templates are already in the notification catalogue
-(`sl-viewer-notifications`, `catalogue/teleport.rs`) and nothing raises the
-second or the third.
+Audit 2026-10-15: the catalogue (`sl-viewer-notifications`,
+`catalogue/teleport.rs`) carries only the `_SLUrl` forms of the three
+(`TeleportOffered_SLUrl`, `…_MaturityExceeded_SLUrl`,
+`…_MaturityBlocked_SLUrl`); the offer card itself is raised as
+`TeleportOffered` by `sl-viewer-people/src/offers_invites.rs`, and nothing
+raises either maturity variant. Port the two plain maturity templates (or
+reuse the `_SLUrl` ones) as part of this task.
 
 Wanted:
 

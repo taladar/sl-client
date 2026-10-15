@@ -2,10 +2,10 @@
 id: viewer-world-map-script-destination
 title: Script-requested map destination (llMapDestination)
 topic: viewer
-status: blocked
+status: ready
 origin: script-interface survey (2026-07-23)
-blocked_by: [viewer-world-map-tracking-teleport]
-refs: [viewer-world-map-floater, viewer-beacons-beam-render]
+blocked_by: [viewer-world-map-floater, viewer-beacons-beam-render]
+refs: [viewer-world-map-tracking-teleport]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -28,5 +28,14 @@ Scope:
 Reference (Firestorm, read-only): `process_script_teleport_request`
 (`llviewermessage.cpp`), `LLWorldMapMessage` tracking glue.
 
-Builds on: world-map tracking + teleport-from-track (the blocked map
-task provides the tracking state this reuses).
+Builds on: world-map tracking + teleport-from-track.
+
+Audit 2026-10-15: unblocked. The tracking state this reuses exists without
+[[viewer-world-map-tracking-teleport]] finishing — the shared `MapTracking`
+target, which the map's click sets and the in-world beacon
+(`sl-viewer-world-scene/src/beacons.rs`) draws. A region-name destination can go
+through the same path a `secondlife:///app/worldmap/...` SLURL takes:
+`sl-viewer-places/src/slurl_dispatch.rs` resolves the region name (a named
+map-block request) and opens the map there (`LocationAction::ShowOnMap`,
+`OpenWorldMap`). `Event::ScriptTeleport` (`ScriptTeleportRequest`) still has no
+consumer.

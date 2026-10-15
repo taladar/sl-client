@@ -52,3 +52,18 @@ time at 5 live probes drops by about the measured 5-chain cost. Probe
 lighting output itself unchanged — only the cadence changes: render
 goldens within tolerance, `SL_VIEWER_PROBE_TEST_SPHERE=1` mirror ball
 still matches the scene beside it.
+
+## Audit 2026-10-15 — the blit half is done
+
+`copy_probe_faces` (`sl-viewer-world-scene/src/probes.rs`) now blits only the
+one face `drive_probe_captures` rendered this frame
+(`ProbeCubeCopies::captured`, commit `89c646ce`); the hero / mirror path keeps
+its full-cube blit because a mirror re-renders all six faces. The filter half
+is open: no update-mode change to `GeneratedEnvironmentMapLight` is in the
+bevy fork, so measure first whether the 0.19 generator still re-filters every
+live probe every frame or only when its cube changed. Note the capture
+cadence itself must stay continuous (the probe-cadence lesson — slower
+cycling lets Bevy purge the idle pipelines and each late capture spikes), so
+under today's one-face-per-frame round-robin some cube changes every frame;
+"zero cost on an idle frame" only becomes reachable together with
+[[viewer-perf-probe-scheduling]].

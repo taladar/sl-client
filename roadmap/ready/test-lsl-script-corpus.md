@@ -42,7 +42,13 @@ evaluation order of call arguments. A transcript test states them as
 *behaviour* rather than as a unit test of an internal helper, which is
 what makes it survive a rewrite of the VM.
 
-Acceptance: `cargo test -p <runtime crate>` runs the corpus in under a
+Audit 2026-10-15: the runtime crate is `sl-lsl-runtime`; its only
+integration test is `tests/compile_corpus.rs` (compile errors against
+tailslide). The VM's unit tests (`src/vm/tests.rs`) already have a
+recording `Host` (`Recorder`) to grow the mock host from; the `.lsl` +
+transcript directory and its driver do not exist.
+
+Acceptance: `cargo test -p sl-lsl-runtime` runs the corpus in under a
 second with no grid; a deliberately changed expectation fails with a
 readable diff; and every semantic rule listed in
 [[server-lsl-value-model]] has at least one transcript case.

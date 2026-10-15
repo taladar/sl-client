@@ -30,11 +30,12 @@ draw).
 
 ## Established facts (from [[viewer-perf-pipeline-specialization-stalls]])
 
-- **Compilation is already async** on this build: avian pulls
-  `bevy/multi_threaded`, so Bevy compiles pipelines on the
-  `AsyncComputeTaskPool` (`synchronous_pipeline_compilation = false`) — a
-  first-use compile does **not** hard-stall the frame thread; the symptom is
-  the pipeline's output not being *ready* for a few frames.
+- **Compilation is already async** on this build: the viewer enables
+  `bevy/multi_threaded` explicitly (avian, which used to pull it, is gone), so
+  Bevy compiles pipelines on the `AsyncComputeTaskPool`
+  (`synchronous_pipeline_compilation = false`) — a first-use compile does
+  **not** hard-stall the frame thread; the symptom is the pipeline's output not
+  being *ready* for a few frames.
 - **No disk pipeline cache** in Bevy 0.19 / this wgpu (`create_pipeline_cache`
   absent) → no cross-run persistence. Pre-warm is **per-run** — it only
   front-loads the compile into the login window, it can't skip it across runs.

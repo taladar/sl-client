@@ -56,3 +56,16 @@ black) world in `render_gallery`; resolution 256 gives a sharper
 mirror-sphere golden; pool 0 leaves only the default probe live
 ([[viewer-perf-probe-instrumentation]] counters confirm); flipping each
 setting at runtime takes effect without relogin.
+
+Audit 2026-10-15: still open. `CAPTURE_SIZE` and `MAX_LOCAL_PROBES` are still
+constants in `sl-viewer-world-scene/src/probes.rs`; `CAPTURE_PERIOD_FRAMES`
+no longer exists (the cadence is now the continuous round-robin plus
+`DEFAULT_PROBE_PERIOD_SECS` — see [[viewer-perf-probe-scheduling]]). The one
+probe setting that exists is `render_reflection_probe_dynamic_content`
+(local probes capture avatars / particles or not, also a quick-preferences
+checkbox), the precedent for how the rest should be declared
+(`declare_probe_settings`). There is still no way to turn probes off. The
+mirror hero probe ([[viewer-realtime-mirrors]]) already has persistent
+settings beside it in `sl-viewer-settings` `keys::probes`
+(`HERO_RESOLUTION_SETTING`, `HERO_UPDATE_RATE_SETTING`,
+`RENDER_MIRRORS_SETTING`) — put the new ones there too.

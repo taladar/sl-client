@@ -10,7 +10,7 @@ refs: [viewer-prim-parameter-editing, viewer-realtime-mirrors]
 Context: [context/viewer.md](../context/viewer.md).
 
 The Features tab's remaining blocks, both absent from
-`sl-client-bevy-viewer/src/edit_params.rs`:
+`sl-viewer-edit/src/edit_params.rs`:
 
 The **Reflection Probe** checkbox with its sub-controls — Volume Type
 combo (Sphere / Box), Dynamic flag, Update Type combo (Static /
@@ -22,7 +22,7 @@ progress) — we just cannot author them.
 
 The **Animated Mesh** checkbox — the animesh extra-param flag that
 turns a rigged-mesh linkset into a control-avatar. We render animesh
-(`sl-client-bevy-viewer/src/animesh.rs`) but cannot set the flag on an
+(`sl-viewer-world-avatar/src/animesh.rs`) but cannot set the flag on an
 object.
 
 Reference (Firestorm, read-only):

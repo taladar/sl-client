@@ -56,3 +56,10 @@ toggle **Animation Textures** (texture-anim on/off), and **Render
 Animated Avatar System
 Cloth** — all Develop ▸ Rendering feature-mask toggles
 (menu_viewer.xml L4728–4947 and L3195–3239).
+
+Audit 2026-10-15: none of these toggles is user-facing yet. The per-app
+`RenderOverrides` resource (`sl-viewer-world-scene/src/render_overrides.rs`,
+[[viewer-render-overrides-resource]]) already carries a few env-only A/B knobs
+(glow, exposure, tone map, underwater fog, HUD particles as
+`RenderHUDParticles`), so it is the natural store for the masks; the selection
+wireframe in `sl-viewer-edit` is a highlight, not the global wireframe mode.

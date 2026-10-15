@@ -8,7 +8,7 @@ refs: [viewer-perf-gpu-avatar-phase5-lod-polish]
 ---
 
 Context: [context/gpu-avatars.md](../context/gpu-avatars.md); code
-`gpu_avatars/crowd.rs`.
+`sl-viewer-world-avatar/src/gpu_avatars/crowd.rs`.
 
 `SL_VIEWER_CROWD=N` copies can render **grey / untextured** while the local
 avatar is textured (a center-grid copy overlapping the avatar makes it "flicker"
@@ -19,6 +19,18 @@ the **visible-submesh set** to stabilize, but the mesh becomes visible
 material/texture, so the copies snapshot the template's material pre-bake →
 grey. (Cosmetic only — it does **not** affect the frustum-culling verification,
 which is bounds / `ViewVisibility`, independent of materials.)
+
+## Since filed (audit 2026-10-15)
+
+The settle detection described above is gone: commit 74d2f78f (2026-08-15)
+replaced it with a **manual trigger** — while a crowd is armed a "Spawn crowd"
+button on the bottom toolbar shows the live visible-part count, and nothing is
+captured until the user clicks it (`sl-viewer-world-avatar/src/gpu_avatars/
+crowd.rs`, module docs). That is the first fix option below done by hand: a
+user who waits until the avatar looks complete captures the baked material.
+What remains is the second option — copies still hold the handles captured at
+the click, so a bake that lands (or re-lands) **after** the capture leaves them
+grey — and the verification run below, which has not been done.
 
 ## Fix options
 

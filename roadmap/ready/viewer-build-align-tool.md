@@ -21,7 +21,7 @@ along the picked axis/direction; dragging further packs them together
 
 We have nothing like it: the edit-floater shell, gizmos, and selection
 core exist, and planar *texture* align exists
-(`sl-client-bevy-viewer/src/edit_texture_align.rs`), but there is no
+(`sl-viewer-edit/src/edit_texture_align.rs`), but there is no
 object-align tool. Implementation needs the selection set plus a
 MultipleObjectUpdate batch move. Note this is distinct from
 [[viewer-attachment-align]] (aligning worn attachments) and

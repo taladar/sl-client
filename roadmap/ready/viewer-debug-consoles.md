@@ -11,7 +11,8 @@ Context: [context/viewer.md](../context/viewer.md).
 
 The keyboard-summoned debug consoles (translucent full-width text overlays,
 as the reference's Ctrl+Shift+3/4 family), building on the existing
-pipeline-status overlay (`diagnostics.rs`):
+pipeline-status overlay
+(`sl-viewer-world-scene/src/diagnostics.rs`):
 
 - **Texture console**: live fetch/decode table — in-flight requests with
   priority / discard / state, cache hit rates, decode queue depth, memory
@@ -29,7 +30,8 @@ Reference (Firestorm, read-only): `llconsole`, `lltextureview`
 (texture console), `llfloaterstats` siblings, `menu_viewer.xml`
 (Develop → Consoles).
 
-Builds on: `diagnostics.rs` overlay + the pipeline-status API.
+Builds on: the `sl-viewer-world-scene/src/diagnostics.rs` overlay + the
+pipeline-status API.
 
 ## Parity-audit addendum (2026-08-19)
 

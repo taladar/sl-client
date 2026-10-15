@@ -24,9 +24,11 @@ yet:
   starts with deciding what the viewer's LLSD document API is, not with the
   window.
 - **Re-assigning the owning group** (the reference's `Group_btn` →
-  `LLFloaterGroupPicker`). Needs the group picker the viewer has not grown yet,
-  and `ExperienceUpdate` carries no `group_id` field — the cap takes one, so
-  this is a protocol edit as well as a UI one.
+  `LLFloaterGroupPicker`). The group picker now exists
+  (`sl-viewer-pickers/src/group_picker.rs`, from
+  [[viewer-region-estate-group-picker]]; audit 2026-10-15), so what remains
+  is the protocol half: `ExperienceUpdate` (`sl-wire/src/experience/types.rs`)
+  carries no `group_id` field though the cap takes one.
 
 Until then the window **preserves** what it cannot show: the blob goes back to
 `UpdateExperience` byte-for-byte, and the owner is not part of the update at

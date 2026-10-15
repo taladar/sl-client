@@ -5,7 +5,7 @@ topic: viewer
 status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-widget-scaffold]
-refs: [viewer-animation-overrider, viewer-mesh-gltf-import]
+refs: [viewer-animation-overrider, viewer-mesh-gltf-import, viewer-pose-stand]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -18,9 +18,10 @@ pose is "hold these joint rotations at high priority".
 Scope: the joint-tree floater with per-joint rotation (and the reference's
 position/scale nudges), symmetric mirroring, saving/loading poses (the
 reference's XML pose format for import compatibility, plus our own), posing
-selected animesh, and the simple **pose-stand** mode (lock the avatar into a
-T/A-pose for fitting attachments — the reference ships it as a separate tiny
-floater; here it is a preset in the same tool).
+selected animesh. The simple **pose-stand** mode (lock the avatar into a
+T/A-pose for fitting attachments) is not in this task: it has its own small
+floater in the reference and its own item, [[viewer-pose-stand]], which can
+land first; the poser may offer it as a preset once both exist.
 
 Out of scope: exporting poses as uploaded `.anim` assets (belongs with the
 upload wizard if ever wanted).

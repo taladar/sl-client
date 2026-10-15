@@ -17,7 +17,7 @@ tune shadow softness and fight acne / peter-panning per shot.
 
 Our sun/moon CSM ([[viewer-p24-1]]) uses Bevy's defaults (depth/normal
 bias, PCF) with only the detail / map-size / cascade-count settings in
-`sl-client-bevy-viewer/src/preferences_graphics.rs`; nothing lets a user
+`sl-viewer-preferences/src/preferences_graphics.rs`; nothing lets a user
 trade acne against peter-panning or soften shadow edges.
 
 Scope: surface the Bevy equivalents as live `[render]` settings — the

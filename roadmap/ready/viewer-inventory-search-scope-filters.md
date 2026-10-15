@@ -16,7 +16,7 @@ Copyable / Show Transferable / Only Coalesced**, and the
 search-visibility toggles from menu_inventory_search_visibility.xml:
 search outfit folders, search Trash, search Library, include links.
 
-Our filter floater (`sl-client-bevy-viewer/src/inventory_filters.rs`,
+Our filter floater (`sl-viewer-inventory/src/inventory_filters.rs`,
 [[viewer-inventory-advanced-filters]] done) covers type / date / worn
 only, and the search field ([[viewer-inventory-search-filter]] done)
 matches names only. All the facts needed are already on the held items —

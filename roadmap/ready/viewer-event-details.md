@@ -24,6 +24,12 @@ subscription; it also needs a notification host,
 [[viewer-ui-notification-host]]). Local-timezone date rendering (vs the
 dataserver SLT string) is the other gap.
 
+Audit 2026-10-15: the notification host is done and the catalogue already
+carries the reference's `EventNotification` template (Details / Cancel form,
+`sl-viewer-notifications/src/catalogue/landmarks_navigation.rs`), but nothing
+raises it; the Remind-me toggle lives in `sl-viewer-search/src/search.rs`.
+No standalone event floater exists yet.
+
 Context: [context/viewer.md](../context/viewer.md).
 
 The event-info floater the search results open ([[viewer-search-floater]]

@@ -18,6 +18,13 @@ context matrix — [[viewer-render-context-matrix]] and its axis tasks.
 What remains here is the coverage list below as the reference for what
 those must answer.
 
+Audit 2026-10-15: [[viewer-render-gpu-serialisation]] and
+[[viewer-render-pixel-oracle]] are done, and the log check below is folded in
+(`check_logs` over `capture_logs` in `src/render_readback.rs`). Every
+remaining coverage question is owned by the in-progress
+[[viewer-render-context-matrix]] (`src/render_matrix.rs`), so this file is a
+reference list only: close it as superseded when that task lands.
+
 [[viewer-render-test-harness]] built the geometry tier: real converters, real
 scenes, in `cargo test`, no GPU. It answers "is this geometry valid" and it does
 not — and cannot — answer **"did the right pixels light up"**.

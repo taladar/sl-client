@@ -2,12 +2,24 @@
 id: viewer-perf-avatar-pose-extract-skins
 title: Avatar pose path drives extract_skins — the serial critical-path cost
 topic: viewer
-status: ideas
+status: wont-do
 origin: Tracy critical-path reconstruction + code audit (2026-08-12)
 refs: [viewer-perf-steady-state-46fps-ceiling, viewer-perf-skeleton-single-solve, viewer-perf-gpu-avatar-crowd, viewer-perf-animation-lod-pose-cache]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+**Won't do (audit 2026-10-15): superseded by the GPU avatar path.**
+[[viewer-perf-gpu-avatar-phase4-remove-scaffolding]] deleted the per-avatar
+joint entities, `write_joint_globals` and the `PoseGate`, so there is nothing
+left to over-dirty: `extract_skins` measured 0.76 ms/frame and flat in avatar
+count afterwards, and [[viewer-perf-gpu-avatar-extract-skins-floor]] removed
+its residual joint gather. `deformed_world_matrices` is no longer called per
+frame (the adjusters read a chain mini-FK, `deformed_world_chain`). The two
+small leftovers — the per-avatar `AnimationPose` clone and the uncached env
+reads in `pose_avatar_skeletons` — were folded into
+[[viewer-perf-frame-churn-cleanups]]. The analysis below is kept as history;
+its file/line references predate both the rewrite and the crate split.
 
 > **Scope correction (2026-08-12): this item is the small, test-scene win.**
 > The idle-avatar framing below is biased by our (mostly-static) test scene.

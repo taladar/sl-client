@@ -32,9 +32,11 @@ backing behaviours plus their toggles):
   during camera drags.
 - Fly-after-teleport (`FSFlyAfterTeleport`): keep/resume flight on
   arrival.
-- Re-render temp-derendered objects after teleport
-  (`FSTempDerenderUntilTeleport`) — pairs with the derender machinery
-  from [[viewer-derender-blacklist]].
+- ~~Re-render temp-derendered objects after teleport
+  (`FSTempDerenderUntilTeleport`)~~ — done (audit 2026-10-15):
+  `sl-viewer-world-avatar/src/derender.rs` keeps it as the
+  `TempDerenderUntilTeleport` setting (`SETTING_UNTIL_TELEPORT`, default
+  on) and `clear_temporary_derenders` drops temporary entries on teleport.
 
 For completeness of record: `ClickOnAvatarKeepsCamera` needs no work —
 clicking an avatar never refocuses our camera in the first place, so the

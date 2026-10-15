@@ -11,7 +11,7 @@ refs: [viewer-prim-creation, viewer-create-shift-drag-duplicate,
 Context: [context/viewer.md](../context/viewer.md).
 
 The reference Create panel offers 13 prim shape presets; ours offers 7
-plus tree/grass (`sl-client-bevy-viewer/src/edit_create.rs` keys: box,
+plus tree/grass (`sl-viewer-edit/src/edit_create.rs` keys: box,
 cylinder, prism, sphere, torus, tube, ring, tree, grass). Add the
 derived presets — ToolPyramid, ToolTetrahedron, ToolCone, ToolHemiCone,
 ToolHemiCylinder, ToolHemiSphere — which are parameter presets (cut,

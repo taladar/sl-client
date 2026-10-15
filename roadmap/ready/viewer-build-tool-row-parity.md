@@ -12,8 +12,8 @@ refs: [viewer-transform-gizmos, viewer-prim-linking,
 Context: [context/viewer.md](../context/viewer.md).
 
 The reference build floater's top row offers five tools; ours models
-only the Edit sub-modes plus Create (`BUILD_TOOLS` in
-`sl-client-bevy-viewer/src/edit_tool.rs`). Missing tools: the **Focus**
+only the Edit sub-modes plus Create and Land (`BUILD_TOOLS` in
+`sl-viewer-world-api/src/edit_selection.rs`). Missing tools: the **Focus**
 tool (`button focus` with the Zoom / Orbit / Pan radio group and the
 zoom slider — it should drive the camera orbit/zoom code that already
 exists from [[viewer-camera-focus-on-object]], surfaced as a build
@@ -21,7 +21,7 @@ tool), and the **Move (grab)** tool (`button move` with the Move /
 Lift / Spin radio group: grab-drag an unlocked object without entering
 full edit mode, via ObjectGrab / ObjectGrabUpdate / ObjectDeGrab — we
 currently send only instantaneous grab/degrab for touch clicks in
-`sl-client-bevy-viewer/src/hud_pick.rs`). When the grab-drag exists, give
+`sl-viewer-world-view/src/hud_pick.rs`). When the grab-drag exists, give
 the automation world aim a grab intent (`WorldIntent` in
 `sl-viewer-automation/src/world_aim.rs`; [[viewer-automation-world-aim]]
 covers every other drag and left this one out for want of a consumer) and a
@@ -40,7 +40,7 @@ drag would grow from.
 
 Row-parity extras on the Edit panel: in-floater **Link / Unlink**
 buttons (`link_btn` / `unlink_btn` — the function exists via Ctrl+L /
-Ctrl+Shift+L and the Build menu, `sl-client-bevy-viewer/src/
+Ctrl+Shift+L and the Build menu, `sl-viewer-edit/src/
 edit_link.rs`, but the buttons are absent), the FS **Edit axis at
 root** pivot option (`FSBuildPrefs_ActualRoot` — rotate/stretch around
 the root prim instead of the selection centre; we have no

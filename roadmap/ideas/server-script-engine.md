@@ -22,3 +22,12 @@ itself. OpenSim's XEngine/YEngine are the reference implementations;
 compiling LSL to a WASM or bytecode VM for isolation is the design
 question to settle first. The client workspace's `sl-wire` LSL syntax
 support ties the compiler's surface to what the viewer's editor knows.
+
+Audit 2026-10-15: the execution-model question is settled for the fake
+grid: `sl-lsl-runtime` compiles LSL to a stack bytecode run by a VM in
+per-tick instruction slices ([[server-lsl-architecture]],
+[[server-lsl-compiler-ir]], [[server-lsl-vm-execution]]), and the rest of
+this note's list is broken down as the `server-lsl-*` / `server-world-*`
+tasks ([context/lsl.md](../context/lsl.md)). What stays here is the
+real-grid part: thousands of scripts per region, sandboxing across hosts,
+and state that travels with attachments between simulators.

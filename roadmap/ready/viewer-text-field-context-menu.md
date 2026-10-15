@@ -16,13 +16,13 @@ the same verbs also live on the viewer Edit menu, menu_edit.xml), with
 spellcheck entries prepended when the click lands on a misspelled word —
 that spellcheck half belongs to [[viewer-chat-spellcheck]].
 
-Our text widget (`sl-client-bevy-viewer/src/ui_text_input.rs`,
+Our text widget (`sl-viewer-ui-widgets/src/ui_text_input.rs`,
 [[viewer-ui-text-input-widget]] done) supports the keyboard shortcuts
 but has no context menu at all, so mouse-first users cannot paste into
 the chat bar or a search field. Scope: one shared MenuDef over the
 line-menu widget ([[viewer-ui-context-menu]] done), targeting the
 focused/clicked editable text, with enable states derived from the
-current selection and clipboard content (`clipboard.rs`).
+current selection and clipboard content (`sl-viewer-platform/src/clipboard.rs`).
 
 Reference (Firestorm, read-only):
 `indra/newview/skins/default/xui/en/menu_text_editor.xml`,

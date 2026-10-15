@@ -19,7 +19,7 @@ minimap/physical-prim/water toggles, plus windlight-per-parcel.
 
 We already decode the OpenRegionInfo limits bag ([[test-open-region-info]]
 done) but the About Region floater
-(`sl-client-bevy-viewer/src/about_region.rs`) has no such tab.
+(`sl-viewer-places/src/about_region.rs`) has no such tab.
 Implementing this means an OpenSim-gated tab rendering the decoded
 limits and, for estate owners, the write path back. OpenSim-only, so
 low priority (SL is the primary target); the broader OpenSim extras

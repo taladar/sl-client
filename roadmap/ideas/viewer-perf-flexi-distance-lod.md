@@ -59,6 +59,6 @@ minority — so it is bundled here rather than pursued on its own.
 The reference also scales flexi *update rate*, not just tessellation:
 `RenderFlexTimeFactor` is a sim-time / update-rate knob that lets distant
 or numerous flexi prims simulate at a reduced rate. Our flexi sim runs
-per-frame with settle detection (`sl-client-bevy-viewer/src/flexi.rs`)
+per-frame with settle detection (`sl-viewer-kit/src/flexi.rs`)
 and has no rate scaling; add the update-rate factor to this task's scope
 alongside the distance/pixel-area LOD.

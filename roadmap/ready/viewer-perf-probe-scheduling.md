@@ -55,3 +55,24 @@ mirror test sphere within ~0.5 s at FPS equal to today's 180-frame
 baseline; an artificial GPU load makes the controller back off (capture
 rate drops, frame budget held); staleness of every dirty rig stays
 bounded (no starvation).
+
+## Audit 2026-10-15 — the baseline moved; reconcile with the cadence lesson
+
+`CAPTURE_PERIOD_FRAMES` is gone. `sl-viewer-world-scene/src/probes.rs` now
+runs the reference's model: one face per frame scene-wide in six-frame
+bursts, the local pool on a **continuous** oldest-first, distance-weighted
+round-robin (`age − distance × PROBE_DISTANCE_WEIGHT`, 0.1), the
+environment-only default probe every `DEFAULT_PROBE_PERIOD_SECS` (2 s), and
+the `urgent` queue for a newly assigned rig. That is the continuous churn
+this item says is not the target.
+
+Before building the change-driven scheduler, resolve the conflict with what
+was measured since: slowing probe cycling made Bevy purge the idle capture
+views' pipelines / bind groups / specialization caches, so every late
+capture paid a recalculation spike (commit `89c646ce`;
+[[viewer-perf-probe-material-respecialize]] describes the per-view purge).
+A scheduler that captures nothing when idle hits exactly that purge on its
+next capture, so it needs the purge exemption (the upstream `bevy_pbr`
+change [[viewer-perf-probe-material-respecialize]] proposes) or some other
+way of keeping a parked view's caches warm — otherwise "zero idle cost"
+trades a steady cost for spikes.

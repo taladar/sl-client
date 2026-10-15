@@ -47,3 +47,17 @@ screenshot-harness scene with an avatar beside a non-DYNAMIC probe prim,
 the mirror test sphere shows no avatar — flag the prim DYNAMIC and it
 appears; sky present in every capture (gallery golden of a reflective
 water scene).
+
+## Audit 2026-10-15 — part (a) half done, (b) open
+
+The layer split exists (`sl-viewer-kit/src/probe_layers.rs`, landed with
+[[viewer-perf-pipeline-specialization-stalls]]): environment, static
+geometry and dynamic content (avatars, particles) each have a probe layer,
+the default probe captures the environment layer only, and the shadow half
+is done ([[viewer-perf-probe-capture-shadows]]). But the dynamic layer is
+switched by one **global** setting, `render_reflection_probe_dynamic_content`
+(`ProbeDynamicContent`, default on), not by each probe's own DYNAMIC flag —
+`probes.rs` (now `sl-viewer-world-scene/src/probes.rs`) still treats the flag
+as always on. What remains of (a): honour the per-probe flag (a non-DYNAMIC
+rig drops `PROBE_DYNAMIC_LAYER`), keeping the global setting as an override.
+(b) is untouched: the capture cameras still use `far: 4096.0`.

@@ -2,7 +2,7 @@
 id: viewer-ui-settings-binding-combo
 title: Combo↔settings two-way binding
 topic: viewer
-status: ready
+status: done
 origin: split from viewer-ui-settings-binding — deferred as an extension point
   until a combo widget exists (2026-07)
 blocked_by: [viewer-ui-combo-widget, viewer-ui-settings-binding]
@@ -31,3 +31,20 @@ setting) plus the option-key round-trip.
 
 Reference (Firestorm, read-only): `llui` `control_name` on `llcombobox`,
 `llviewercontrol` connections.
+
+## Done (found by the 2026-10-15 audit)
+
+Landed with the preferences General tab (commit `8a5039bd`, 2026-08-04,
+[[viewer-preferences-general-tab]]) in
+`sl-viewer-ui-widgets/src/settings_binding.rs`. A combo whose anchor
+carries a `ComboBindingValues` beside its `SettingBinding` binds through
+`write_bound_combo_changes` (a user pick, a `ComboChanged`, writes the
+option's value) and `sync_bound_combos` (the idempotent pass moves
+`ComboSelection` to the option matching the store). The mapping question
+was settled as an option-index → `SettingValue` table, so the stored value
+is the option's own value (a string key or a number as the setting
+declares), not its index; a stored value no option covers leaves the combo
+untouched. Tests in the same file: `combo_reads_setting_on_build`,
+`combo_user_pick_writes_setting`, `combo_follows_external_change`,
+`combo_ignores_unknown_stored_value`. `spawn_pref_combo` makes searchable
+preference rows of it.

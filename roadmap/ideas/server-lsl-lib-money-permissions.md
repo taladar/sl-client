@@ -46,9 +46,10 @@ has to cope with and a test should be able to produce.
 already has an economy: `economy_policy` with prices and an
 `EconomyEvent` stream, `RequestPayPrice` and
 `send_pay_price_reply`, `ObjectBuy`, `ParcelBought`, and a balance.
-Missing: the `MoneyTransferRequest` decode and the
-`send_money_balance_reply` sender, both in
-[[protocol-sim-script-messages]], and the routing of a payment made to
+`SimSession::send_money_balance_reply` exists now
+(`sl-proto/src/sim_session.rs`, audit 2026-10-15). Missing: the
+`MoneyTransferRequest` decode on the simulator side
+([[protocol-sim-script-messages]]), and the routing of a payment made to
 an object into its scripts' `money` event.
 
 A scripted vendor is the natural acceptance fixture and is exactly the

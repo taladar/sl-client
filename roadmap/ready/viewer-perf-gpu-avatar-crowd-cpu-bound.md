@@ -41,3 +41,14 @@ attribute Main at 100 avatars, then attack the top contributors. Candidates:
 
 `CROWD=100`: Main median falls below Render, frame period drops, and *then* the
 frustum culling's draw savings actually surface as FPS when looking away.
+
+## Audit 2026-10-15
+
+Two of the candidates above are gone: avian3d was removed from the viewer
+([[viewer-perf-custom-static-raycast-index]], a custom parry3d index), so
+crowd copies carry no physics work; and `collect_pick_warm_set` became
+change-driven ([[viewer-perf-pick-warm-set-scales-with-crowd]]). The
+`CROWD=100` Main decomposition itself has not been redone since, so the
+transform-propagation, `apply_gpu_avatar_bounds` and `stage_gpu_avatars`
+(`sl-viewer-world-avatar/src/gpu_avatars/stage.rs`) candidates are still
+unmeasured.

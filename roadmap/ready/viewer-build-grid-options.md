@@ -27,7 +27,7 @@ Reference (Firestorm, read-only): `menu_viewer.xml` Build ▸ Options
 (~L2342-2377), `llfloaterbuildoptions.cpp`, `LLSelectMgr` grid-mode
 state.
 
-Builds on: the transform gizmos (blocked task) — grid config and frames
+Builds on: the transform gizmos (done) — grid config and frames
 feed their snapping.
 
 ## Parity-audit addendum (2026-08-19)
@@ -43,3 +43,12 @@ increment for the rotate gizmo) and the Firestorm **decimal precision**
 setting (`FSBuildToolDecimalPrecision`, the number of decimals shown by
 the build floater's numeric fields). Both live at
 `floater_build_options.xml` L56-72; include them in the floater.
+
+Audit 2026-10-15: the grid-frame state already exists — `GridFrame { World,
+Local, Reference }` in `sl-viewer-world-api/src/edit_selection.rs`, with the
+gizmos aligning to it (`sl-viewer-edit/src/gizmos.rs`), the build floater's
+world/local toggle (`edit_tool.rs`), and grid-unit snapping
+(`DEFAULT_GRID_UNIT`, `snap_to_grid` in `gizmos/plan.rs`). `Reference` is
+modelled but not yet settable — that is this task's *Use Selection for
+Grid*. What remains: the Grid Options floater, Snap Object XY, Use Selection
+for Grid, RotationStep and the decimal-precision setting.

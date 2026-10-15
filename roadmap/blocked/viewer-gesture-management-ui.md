@@ -27,8 +27,10 @@ Builds on: [[viewer-gesture-runtime]].
 Saving a gesture held in an object uses `UpdateGestureTaskInventory` (both
 grids): the two-step upload with `{task_id, item_id}`, used only when
 `UpdateGestureAgentInventory` is granted too; otherwise the legacy asset store
-plus `UpdateTaskInventory`. Our client already dispatches it — only the name is
-missing from `REQUESTED_CAPABILITIES`.
+plus `UpdateTaskInventory`. Our client already dispatches it, and
+`CAP_UPDATE_GESTURE_TASK_INVENTORY` is now in `REQUESTED_CAPABILITIES`
+(`sl-proto/src/session.rs`; audit 2026-10-15) — only the editor's save path
+remains to use it.
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.

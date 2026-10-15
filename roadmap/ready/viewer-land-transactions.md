@@ -18,7 +18,7 @@ contribution with deed" checkbox, Abandon Land, Reclaim Land, Buy For
 Group, and Buy Pass, each behind a confirmation dialog.
 
 Our nine-tab About Land floater
-(`sl-client-bevy-viewer/src/about_land.rs`) has none of these:
+(`sl-viewer-places/src/about_land.rs`) has none of these:
 `AboutLandAction` covers only Apply/Refresh/pickers/landing/access-add,
 and the land pie's Buy This Land / Buy Pass slices are greyed
 `UNIMPLEMENTED` in `sl-viewer-ui-context-menus/src/land_menu.rs`. Every write

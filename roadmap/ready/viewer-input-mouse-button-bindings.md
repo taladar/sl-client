@@ -17,7 +17,7 @@ UI's key-capture floater (`floater_select_key.xml`) captures any mouse
 button — including button4/5 and double-click — with modifier masks, so
 users can put actions on spare mouse buttons.
 
-Our `BindingProfile` in `sl-client-bevy-viewer/src/input_action.rs`
+Our `BindingProfile` in `sl-viewer-world-view/src/input_action.rs`
 maps `KeyCode → BindingTarget` only; no mouse button can ever be bound
 to an action. That blocks the default MMB push-to-talk of
 [[viewer-voice-controls]] and the mouselook-LMB script trigger of

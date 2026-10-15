@@ -11,7 +11,7 @@ refs: [viewer-prim-texture-editing, viewer-edit-face-selection,
 Context: [context/viewer.md](../context/viewer.md).
 
 The fspanelface extras beyond the LL texture panel, all absent from
-`sl-client-bevy-viewer/src/edit_texture.rs` /
+`sl-viewer-edit/src/edit_texture.rs` /
 `edit_texture_align.rs`:
 
 - **Flip U / flip V** buttons on the diffuse scale fields

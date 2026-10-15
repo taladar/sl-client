@@ -135,3 +135,16 @@ via the GPU-zone track staying ~4 ms), so measure CPU submit/encode + per-entity
 prepare/queue, not GPU pass time. Separate task tracks the outlier spikes
 ([[viewer-perf-asset-streaming-frame-spikes]]); this one is the steady-state
 average frame.
+
+## Audit 2026-10-15 — the named lever was measured and rejected
+
+The entity-count lever above did not survive its own Step 0:
+[[viewer-perf-per-object-face-merge-entity-count]] measured the render leg
+(46.8 ms, GPU ~4 ms) on 2026-08-16 and found the merge-targetable per-entity
+work only a few ms of it — the rest is `submit_pending_command_buffers` (per
+view × pass) and the unbatchable transparent encode — so it is `wont-do`.
+Since then [[viewer-perf-wgpu-texture-init-fastpath]] (a wgpu fork skipping
+the per-bind texture init tracking) cut render-encode CPU. This item stays
+the umbrella for the render-app-bound average frame, but it has no committed
+lever left: the next step is a fresh capture to see what the render leg is
+made of now, not the face merge.

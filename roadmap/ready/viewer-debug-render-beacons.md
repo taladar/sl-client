@@ -28,6 +28,17 @@ feature first, so the toggles should be reachable without a mouse round-trip
 while live-testing (a keybind via [[viewer-input-action-map]] is the eventual
 home).
 
+Audit 2026-10-15: a marker renderer now exists —
+`sl-viewer-world-scene/src/debug_beacons.rs` (`DebugBeaconPlugin`) draws the
+reference's `addDebugBeacon` crosses (see-through + solid pass, thin boxes
+since `wgpu` has no line width, anchored to a live object) for whatever an
+open floater puts in the shared `DebugBeacons` resource
+(`sl-viewer-social/src/map_tracking.rs`); the telehub floater is its first
+caller. Per-class beacons should feed that resource (or share its material)
+rather than add a second marker path; the gizmo suggestion above predates it.
+What remains is the per-class sweep of the scene mirror, the toggles, and
+the highlight / hide-particles companions.
+
 Reference (Firestorm, read-only): `llfloaterbeacons`,
 `LLPipeline::renderDebugBeacons` and the `sBeacon*` flags.
 

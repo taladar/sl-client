@@ -26,3 +26,13 @@ The minimap context menu's location entries, waiting on their floaters:
 
 RLV can disable the location / world-map items
 ([[viewer-rlv-enforce-info-hiding]]).
+
+Audit 2026-10-15: both blockers are done and the floaters exist — the top
+menu bar's *About Land* / *Place Profile* open `about_land::OpenAboutLand`
+(`sl-client-bevy-viewer/src/menu_bar.rs`), and the minimap's double-click
+action 1 already hands the clicked point to `world_map::OpenWorldMap`
+(`sl-viewer-map/src/minimap.rs`), so it no longer falls back to beacon-only.
+What remains is the three context-menu entries themselves (the minimap menu,
+`MINIMAP_MENU`, has none of them yet), About Land / Place Profile aimed at the
+parcel under the right-click rather than the agent's own parcel, and the RLV
+gate.

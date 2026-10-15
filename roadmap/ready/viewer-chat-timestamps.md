@@ -18,7 +18,8 @@ for now), and in **SLT** (the grid's Pacific time,
 `America/Los_Angeles` with its DST), the clock the reference viewer
 shows everywhere. The on-disk chat-log files keep their existing
 Firestorm-compatible zone-less local stamps
-([`LogTimestamp`](../../sl-proto/src/chat_log.rs)) — display and file
+(`LogLineTime` / `TimestampFormat` in
+[`chat_log.rs`](../../sl-proto/src/chat_log.rs)) — display and file
 may therefore differ by the local↔SLT offset, exactly as in the
 reference. History reloaded from the log files should surface its
 stored stamps rather than the load time.
@@ -26,3 +27,7 @@ stored stamps rather than the load time.
 Reference (Firestorm, read-only): `llchathistory.cpp` /
 `llfloaterimnearbychat.cpp` (`ChatTimestampFormat`, the
 timestamp-prefix settings).
+
+Audit 2026-10-15: still open — `TranscriptLine` in
+`sl-viewer-people/src/conversations.rs` carries no time, and neither it
+nor the overlay in `sl-viewer-chat/src/chat.rs` renders one.

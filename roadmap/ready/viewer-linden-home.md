@@ -24,5 +24,7 @@ Scope:
 Reference (Firestorm, read-only): `World.LindenHome`
 (`menu_viewer.xml` World section, `grid_check="secondlife"`).
 
-Builds on: the embedded browser (in progress,
-[[viewer-media-prim-browser]] wired the engine) and web session auth.
+Builds on: the embedded browser ([[viewer-media-prim-browser]], done; the
+web floater is `sl-viewer-media/src/web_floater.rs`) and web session auth.
+Audit 2026-10-15: no Linden Home entry exists yet (the World menu in
+`sl-client-bevy-viewer/src/menu_bar.rs` has none).

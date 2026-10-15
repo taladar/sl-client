@@ -27,5 +27,5 @@ Reference (Firestorm, read-only): `menu_viewer.xml` Build ▸ Options
 (~L2097-2167), `LLSelectMgr` filter globals (`gAllowSelectAvatar`,
 select-owned/movable flags) in `llselectmgr.cpp`.
 
-Builds on: the selection-set core (blocked task) — these are predicates
+Builds on: the selection-set core (done) — these are predicates
 inside its pick/marquee path.

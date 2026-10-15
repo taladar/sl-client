@@ -29,5 +29,7 @@ Addition from the audit: honour the OpenSimExtras `GridStatusRSS` /
 `GridStatus` URL overrides from SimulatorFeatures
 (`lfsimfeaturehandler.cpp`) — the body is grid-info driven for hiding
 the feature but does not name the per-region SimulatorFeatures override
-of the feed/floater URLs. Wire decode already exists in
-`sl-wire/src/sim_features.rs`.
+of the feed/floater URLs. Audit 2026-10-15: the `OpenSimExtras` decode
+in `sl-wire/src/sim_features.rs` does not carry `GridStatus` /
+`GridStatusRSS` yet (it has the search, destination-guide and grid URLs),
+so the two keys must be added there first.

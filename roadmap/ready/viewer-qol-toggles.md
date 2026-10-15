@@ -58,6 +58,12 @@ as raw camera input. Finally, World ▸ Show More ▸ **Advanced Menu**
 this toggle, while our Advanced menu is unconditionally visible — add
 the gating toggle.
 
+Audit 2026-10-15: the *Reset View / Reset Camera Angles / Zoom* commands and
+*Look at Last Chatter* above are also the camera rows of
+[[viewer-menu-advanced-shortcuts]] (Advanced ▸ Shortcuts); whichever lands
+first owns the command and the other only adds its entry. None of this task's
+toggles exists yet (no viewer code sends `SetAlwaysRun`).
+
 Add the **Window Size** floater (`floater_window_size.xml`): a small
 floater with an exact-resolution presets combo (1024x768 etc.) plus
 free-form width/height to set the window to a precise size — used for

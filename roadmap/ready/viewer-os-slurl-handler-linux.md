@@ -41,6 +41,13 @@ Three parts, only the first is Linux-specific:
   the parser is shared, not duplicated per entry point. (`sl-types` likely
   already has SLURL types; reuse them.)
 
+Audit 2026-10-15: the third part is done — [[viewer-slurl-parse-dispatch]]
+shipped the shared parser and handler registry
+(`sl-viewer-places/src/slurl_dispatch.rs`, with the in-text link forms in
+`sl-viewer-platform/src/url_linkify.rs`, `hop://` included). What remains is
+the `.desktop` scheme registration, the URL-as-`argv` start location, and
+single-instance forwarding into that dispatcher — none of which exist yet.
+
 Security note: an inbound `/app/` command can be hostile (a malicious page
 firing a teleport or a purchase). Gate the dangerous commands behind the same
 confirmation the reference viewer's "trusted browser" / `secondlife:///app`

@@ -40,10 +40,13 @@ always-reachable panel, not only the preferences floater. The panel is a view
 over the same store and binds by setting key, so the entry needs nothing but the
 key, range and label.
 
-Related: the open bug `viewer-r23` (avatar stands too low, feet sinking into the
-ground) is *not* this — do not "fix" R23 by dialling in a hover offset; but
-whoever works either one should know the other exists, because a hover offset
-applied on top of an already-wrong ground height will mask the real defect.
+Related: the bug `viewer-r23` (avatar stands too low, feet sinking into the
+ground; now done) was *not* this — it was fixed without a hover offset, and a
+hover offset must not be used to paper over a ground-height defect, because one
+applied on top of a wrong ground height masks the real defect.
+
+Audit 2026-10-15: still unused — outside `sl-wire` / `sl-proto` nothing in the
+viewer reads `AvatarAppearance.hover_height` or sends `SetAgentPreferences`.
 
 Reference (Firestorm, read-only): `llfloaterhoverheight`, `llagent` hover-height
 plumbing, `LLVOAvatar::setHoverOffset`.

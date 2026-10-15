@@ -2,7 +2,7 @@
 id: server-fake-grid-im-relay
 title: Fake grid — relay IMs and offers between its sessions
 topic: server
-status: ideas
+status: ready
 origin: test-e2e-live-verify-sweep (2026-09-30)
 refs: [test-e2e-sweep-two-avatars, server-message-routing]
 blocked_by: [gridspec-teleport-lures, gridspec-instant-messages]
@@ -83,9 +83,9 @@ list when the relay exists):
 - **Reading back.** Nothing unasked. `RetrieveInstantMessages` on both, in
   the order sent, flagged kept, with the time sent. `ReadOfflineMsgs` on
   Second Life's only: an array holding one array of records, `transaction-id`
-  nil, the id under `asset_id`, `message_time`, `estate_id`, `offline` 1 —
-  `offline_messages_to_llsd` writes a bare array with the id as
-  `transaction-id` today. Either road empties the store for both.
+  nil, the id under `asset_id`, `message_time`, `estate_id`, `offline` 1
+  (`offline_messages_to_llsd` writes that shape now). Either road empties the
+  store for both.
 
 ## From server-fake-grid-friends-presence (2026-10-15)
 
@@ -114,3 +114,11 @@ conference's `fetch history` answers `403` "You cannot join chat". On
 OpenSim's flavour there are no conferences: nobody is invited, the start gets
 no reply, and each line comes back to its sender alone, as a group line under
 the viewer's id.
+
+## Audit 2026-10-15
+
+Moved from ideas to ready: both blockers are done and the item is fully
+specified. Still not built — `ServerEvent::InstantMessage` reaches
+`sl-fake-grid` only in `social.rs` (friendship offers) and `groups.rs`
+(group dialogs); an ordinary message, a lure, a teleport request and typing
+go nowhere. [[server-fake-grid-inventory-offers]] is blocked on this.

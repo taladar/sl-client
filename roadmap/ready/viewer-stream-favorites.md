@@ -30,8 +30,13 @@ Reference (Firestorm, read-only): `FSStreamList` setting,
 `fs_streamtitle` floater (`Floater.Toggle fs_streamtitle`,
 `menu_viewer.xml` World section).
 
-Builds on: the streaming-audio player (in progress) — both pieces sit
-directly on its stream-selection and metadata surface.
+Builds on: the streaming-audio player ([[viewer-streaming-audio]], done)
+— both pieces sit directly on its stream-selection and metadata surface.
+Audit 2026-10-15: the live ICY title already shows in the parcel-audio
+strip (`sl-viewer-audio/src/parcel_audio.rs`, fed by
+`AudioStreamStatus::title` from `sl-gst/src/stream.rs`); the separate
+title floater, its chat / toast / channel outputs and the favorites list
+are what remain.
 
 ## Parity-audit addendum (2026-08-19)
 

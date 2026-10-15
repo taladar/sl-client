@@ -12,13 +12,13 @@ refs: [viewer-chat-history-panel, viewer-social-im-conversations,
 
 Context: [context/viewer.md](../context/viewer.md).
 
-The reference keeps a large family of transcript-presentation options on
-the chat / IM header menus and the chat preferences pages; our
-conversations UI ([[viewer-chat-history-panel]] and
-[[viewer-social-im-conversations]], both done) renders one fixed
-presentation — sender plus text with the five ChatColor* classes — and
-exposes none of them. Chat font size already exists
-(`preferences_chat.rs` ChatFontSize); timestamp toggles belong to
+The reference keeps a large family of transcript-presentation options on the
+chat / IM header menus and the chat preferences pages; our conversations UI
+([[viewer-chat-history-panel]] and [[viewer-social-im-conversations]], both
+done) renders one fixed presentation — sender plus text with the five ChatColor*
+classes — and exposes none of them. Chat font size already exists
+(`sl-viewer-preferences/src/preferences_chat.rs` ChatFontSize); timestamp
+toggles belong to
 [[viewer-chat-timestamps]].
 
 View-mode options (menu_im_session_showmodes.xml, menu_nearby_chat.xml,
@@ -58,7 +58,8 @@ messages (`FSOpenIMContainerOnOfflineMessage`); restoring open
 conversations on relog (`FSRestoreOpenIMs`) is its own task,
 [[viewer-conversations-session-restore]]. Implementation is one
 settings section plus appliers in the existing transcript composer in
-`sl-client-bevy-viewer/src/conversations.rs` / `chat.rs` — each toggle a
+`sl-viewer-people/src/conversations.rs` / `sl-viewer-chat/src/chat.rs` —
+each toggle a
 setting and a branch in the transcript builder.
 
 Reference (Firestorm, read-only):

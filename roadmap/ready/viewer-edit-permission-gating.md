@@ -11,6 +11,29 @@ refs: [viewer-transform-gizmos, viewer-object-edit-floater-shell,
 
 Context: [context/viewer.md](../context/viewer.md).
 
+**Audit 2026-10-15 — mostly done.** Commit `b097af95` and later work gate
+editing on the agent-relative update flags (`ObjectState::agent_can_modify`
+/ `agent_can_move` in `sl-viewer-world-api/src/object_graph.rs`, wrapped as
+`EditPerm` in `sl-viewer-edit/src/gizmos.rs`):
+
+- the transform fields grey (`InteractionDisabled` + disabled label class)
+  per group — position / rotation on move, size on modify
+  (`sl-viewer-edit/src/edit_tool.rs`);
+- the Object / Features parameter tabs grey on no-modify
+  (`edit_params.rs`), as do the Texture, Material and media sections
+  (`edit_texture.rs`, `edit_material.rs`, `edit_media.rs`) and prim
+  contents (`edit_contents.rs`);
+- a gizmo press the selection lacks permission for starts no drag and
+  posts a local-chat notice; shift-drag copy is gated on copy
+  (`selection_lacking`, intersection over the whole selection).
+
+What remains: (1) the floater fields and tabs gate on the **primary** node
+only, not the intersection over a mixed multi-selection the gizmos already
+use; (2) the gizmo handles are refused on press rather than drawn
+disabled, unlike the reference which greys the manipulator up front.
+
+Original description follows.
+
 The edit surfaces currently let the agent *attempt* any transform edit and
 rely on the simulator to reject it; the selection set already tracks each
 node's `ObjectProperties` permission masks, and the build floater only shows

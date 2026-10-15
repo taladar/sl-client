@@ -14,9 +14,10 @@ The reference has a `FullScreen` setting — a checkbox on the graphics
 preferences tab — that starts the viewer fullscreen and switches the
 window into (borderless) fullscreen and back at runtime. Our window is
 created plain windowed with no mode control anywhere: the startup code in
-`sl-client-bevy-viewer/src/lib.rs` builds a default Bevy `Window` setting
-only title, name and cursor options, and nothing later touches
-`WindowMode`.
+`sl-client-bevy-viewer/src/assembly.rs` builds a default Bevy `Window`
+setting only title, name and cursor options, and nothing later touches
+Bevy's `bevy::window::WindowMode` (the crate's own `assembly::WindowMode` is
+the unrelated windowed / headless / windowless run mode).
 
 Scope: a persisted window-mode setting (windowed / borderless fullscreen;
 winit `WindowMode` via Bevy) applied at startup and toggleable at runtime

@@ -24,7 +24,7 @@ objects/clothes on double click".
 Individually each verb is tiny; collectively they are the FS power-user
 maintenance kit, and none is covered by another task. Our item and
 folder context menus live in
-`sl-client-bevy-viewer/src/inventory_actions.rs`
+`sl-viewer-inventory/src/inventory_actions.rs`
 ([[viewer-inventory-context-actions]] done); Restore to Last Position
 additionally needs the rez path from [[viewer-object-rezzing]] plus the
 stored last-position metadata.

@@ -2,7 +2,7 @@
 id: protocol-sim-lsl-syntax-document
 title: The fake grid serves an empty LSLSyntax document
 topic: protocol
-status: ready
+status: wont-do
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
 blocked_by: [server-lsl-library-surface-table]
@@ -49,3 +49,13 @@ Acceptance: a viewer logged into the fake grid fetches a non-empty
 `LSLSyntax` document; the editor highlights and completes from it; the
 version-gate and no-id cases are covered by fixtures; and the round trip
 is a unit test.
+
+## Closed as a duplicate (2026-10-15)
+
+[[server-fake-grid-lsl-syntax]] (from `gridspec-simulator-features`) covers the
+same gap — `sl-fake-grid` still never calls `SimSession::set_lsl_syntax`, and
+`sl-conformance`'s `simulator_features.rs` exempts the fake flavours from
+`LSLSyntaxId` / `LSLSyntaxVersion` (`FAKE_GRID_OMITS`) because of it — with the
+live grids' measured answers on top. This item's unique content (rendering
+from the descriptor table, a content-derived id, the no-id and
+unsupported-version fixtures, the round-trip test) was folded into that item.

@@ -36,8 +36,28 @@ their real measure inputs (`TextFont` / `LineHeight` / `TextLayout`)
 instead. The wasted per-field re-measure itself still happens whenever
 the layout system runs.
 
-Remaining work — fix it at the source, per the fork-upstream policy
-(`sl-client-fork-upstream-for-upstream-bugs`):
+## Fixed in the Bevy fork (2026-09-25)
+
+The source fix landed in the bevy fork (rev `de3251e1`, commit `4fe939a3`,
+documented in the workspace `Cargo.toml` `[patch.crates-io]` comment):
+`update_editable_text_layout` now bypasses change detection, skips an
+unfocused field whose text, node, hinting and target are unchanged, and writes
+the cursor only when it differs — the whole-UI per-frame re-layout went from
+~380 ms to ~25 ms a frame in the gallery. A testkit test keeps it fixed across
+Bevy bumps.
+
+What remains (audit 2026-10-15):
+
+- submit the fix upstream to bevy (check `main` first — the editable-text
+  widget is new in 0.19 and may have moved on), then drop it from the fork
+  once a release carries it;
+- once the source fix is the only one, decide whether the viewer-side
+  `EditableText` carve-out in `sl-viewer-platform/src/ui_perf.rs`
+  (`ui_layout_dirty` ignoring their `Changed<ContentSize>`) is still needed or
+  can go.
+
+The original plan, for reference: fix it at the source, per the fork-upstream
+policy (`sl-client-fork-upstream-for-upstream-bugs`):
 
 - check bevy `main` first (the editable-text widget is new in 0.19 and
   actively worked on — the churn may already be fixed);

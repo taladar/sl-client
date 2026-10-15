@@ -11,17 +11,19 @@ refs: [viewer-chat-input-bar, viewer-p31-9, viewer-chat-autoreplace,
 
 Context: [context/viewer.md](../context/viewer.md).
 
-The reference viewer's chat bar carries a family of send-time and
-layout conveniences, none of which exist in our `chat_input.rs` /
-`nearby_chat_bar.rs` / `local_chat_input.rs` — the chat input sends the
-typed text verbatim on Enter today. Send-time transforms: MU*-pose
-(a leading ":" is treated as `/me`, `AllowMUpose`), OOC auto-close
-(typing "((" auto-appends "))" — `AutoCloseOOC`, an un-prefixed but
-FS-authored setting), and the modifier-send chords — Ctrl+Enter shouts
-(`FSUseCtrlShout`), Shift+Enter whispers (`FSUseShiftWhisper`), and
-Alt+Enter wraps the message in configurable OOC markers (`FSUseAltOOC`
-with `FSOOCPrefix` / `FSOOCPostfix`). Firestorm implements the chord
-handling in `llchatentry.cpp` / `fsnearbychatbarlistener.cpp`.
+The reference viewer's chat bar carries a family of send-time and layout
+conveniences. Our chat input (`sl-viewer-chat/src/chat_input.rs`,
+`nearby_chat_bar.rs`, `local_chat_input.rs`) has only the Ctrl+Enter shout /
+Shift+Enter whisper chords (`resolve_volume` in `local_chat_input.rs`, always
+on, no setting); everything else below is missing and the typed text is
+otherwise sent verbatim. Send-time transforms: MU*-pose (a leading ":" is
+treated as `/me`, `AllowMUpose`), OOC auto-close (typing "((" auto-appends "))"
+— `AutoCloseOOC`, an un-prefixed but FS-authored setting), settings toggles for
+the existing Ctrl+Enter shout (`FSUseCtrlShout`) and Shift+Enter whisper
+(`FSUseShiftWhisper`) chords, and Alt+Enter, which wraps the message in
+configurable OOC markers (`FSUseAltOOC` with `FSOOCPrefix` / `FSOOCPostfix`).
+Firestorm implements the chord handling in `llchatentry.cpp` /
+`fsnearbychatbarlistener.cpp`.
 
 Chat-bar element toggles: autohide the main chat bar
 (`AutohideChatBar`), show/hide the channel selector (`FSShowChatChannel`),

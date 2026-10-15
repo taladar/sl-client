@@ -32,3 +32,13 @@ Reference (Firestorm, read-only): `llfloatermove` / `floater_moveview.xml`,
 Builds on: the movement input actions (`movement.rs`, `input_action.rs`)
 and the sit/stand command surface ([[viewer-sit-stand-actions]] wires the
 sit protocol; the buttons here reuse its commands).
+
+## Audit 2026-10-15
+
+The stand / stop-flying half is done, and the placement question is
+answered: `sl-client-bevy-viewer/src/stand_stop_button.rs` hosts **Stand
+Up**, **Stop Flying** (and this viewer's **Stop flycam**) in a reserved
+state slot at the leading edge of the bottom toolbar (commit e0e13a2d).
+What remains is the movement floater itself — walk / run / fly mode buttons
+and the click-and-hold directional arrows — and the walk/run default
+preference.

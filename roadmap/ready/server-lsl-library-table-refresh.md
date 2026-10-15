@@ -6,7 +6,7 @@ status: ready
 origin: server-lsl-compiler-ir scale oracle run (2026-09-27)
 points: 3
 refs: [server-lsl-library-surface-table, server-lsl-compiler-ir,
-  protocol-sim-lsl-syntax-document]
+  server-fake-grid-lsl-syntax]
 ---
 
 Context: [context/lsl.md](../context/lsl.md).

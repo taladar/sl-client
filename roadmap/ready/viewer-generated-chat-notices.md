@@ -17,10 +17,15 @@ refs:
 Context: [context/viewer.md](../context/viewer.md).
 
 The reference viewer writes many *viewer-originated* informational lines
-into nearby chat, each behind a setting. We currently emit only received
-chat plus a few structural `ChatSource::System` lines — there is no
-shared "report to nearby chat" helper. This task introduces that helper
-and the individual gated notices:
+into nearby chat, each behind a setting. A shared viewer-originated line
+now exists: the `LocalChatNotice` message
+(`sl-viewer-intents/src/requests.rs`), written by the build tools,
+inventory drag and panorama capture and rendered by `update_chat_overlay`
+(`sl-viewer-chat/src/chat.rs`). Audit 2026-10-15: it reaches only the
+chat overlay, not the nearby-chat transcript in
+`sl-viewer-people/src/conversations.rs`, so a reference-style "report to
+nearby chat" still needs that half. None of the gated notices below
+exist yet:
 
 - **Region restart to chat** (`FSReportRegionRestartToChat`, announce
   channel `FSRegionRestartAnnounceChannel`) plus the no-screen-shake

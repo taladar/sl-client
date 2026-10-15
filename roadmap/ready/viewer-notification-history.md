@@ -21,3 +21,9 @@ Reference (Firestorm, read-only): `llnotificationmanager`,
 `llui/llnotifications`, `lltoast*`.
 
 Builds on: [[viewer-ui-notification-host]].
+
+Audit 2026-10-15: the data half exists — the notification host records each
+raised notification as a `NotificationRecord` (template, kind, body, the
+chosen response) in a bounded ring, `NotificationManager::push_history` /
+`history` (`sl-viewer-notifications/src/lib.rs`). What remains is the panel
+that renders it and re-opens a still-actionable entry.

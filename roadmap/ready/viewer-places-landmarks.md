@@ -25,8 +25,11 @@ The Places floater — the landmark-centred navigation hub:
   ([[viewer-about-landmark-floater]]).
 
 Landmark asset decode (region handle + position from the asset blob) is
-required for detail display and map jumps — small, belongs in `sl-asset`
-alongside the other decoders.
+required for detail display and map jumps. Audit 2026-10-15: it exists
+(`sl_wire::landmark::parse_landmark`, used by the About Landmark floater in
+`sl-viewer-places/src/about_landmark.rs`), and `Session::set_start_location`
+and `teleport_via_landmark` exist in `sl-proto`; what is missing is the Places
+floater itself, Create Landmark, the teleport history and the menu entries.
 
 Reference (Firestorm, read-only): `llpanelplaces`, `llpanellandmarks`,
 `llpanelteleporthistory`, `llfloatercreatelandmark`,

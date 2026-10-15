@@ -26,7 +26,7 @@ ships the moderation powers only as greyed placeholders per
 
 Scope: track the moderator flag from session agent-updates (participant
 tracking exists from [[chat-b3]]), add the participant context entries
-in the conversations panel (`sl-client-bevy-viewer/src/conversations.rs`)
+in the conversations panel (`sl-viewer-people/src/conversations.rs`)
 gated on that flag, and send the ChatSessionRequest mute update for the
 per-participant and everyone variants; eject/ban route through the
 existing group-admin commands.

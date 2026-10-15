@@ -31,3 +31,10 @@ other harness surfaces — see [[viewer-audit-binary-module-extraction]], which
 covers the same problem for `gallery.rs` / `render_gallery.rs` /
 `ui_elements.rs` in the viewer crate, and [[viewer-audit-render-fixtures-crate]]
 for `render_scene.rs`.
+
+Audit 2026-10-15: all five panels are still registered unconditionally; the
+line numbers above have drifted (toggle keys now at `ui_text.rs:58`,
+`ui.rs:1200`, `i18n.rs:988`, `settings_binding.rs:739`,
+`ui_text_input.rs:1342`; the stale "`F6`" comment is at
+`ui_text_input.rs:1333`). Both referenced audits are done, so the natural
+home is now the `sl-viewer-gallery` crate the harness surfaces moved to.

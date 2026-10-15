@@ -20,5 +20,5 @@ does not embed (Second Life is WebRTC-only now; Vivox is gone and we will not
 implement it). With no live session to key on there is nothing to exchange, so
 this case waits on the viewer's WebRTC voice stack (planned late in the
 timeline). The client-side signalling (`Command::SendVoiceSignaling`) and its
-wire encoding already exist and are unit-tested in `sl-wire`; revisit this live
+wire encoding already exist and are unit-tested in `sl-proto`; revisit this live
 case once voice support lands. Depends on [[test-voice-account]].

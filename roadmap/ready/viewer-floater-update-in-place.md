@@ -23,6 +23,22 @@ and the picture/insignia/browser image inserts in `avatar_profile`,
 `group_profile`, `browser_widget`) — a correct safety net, but it papers over
 the churn rather than removing it.
 
+**Audit 2026-10-15 — partly done.** The profile half landed with the group
+profile itself (`450f9e36`): in `sl-viewer-people/src/avatar_profile.rs`
+`rebuild_profile_tabs` keeps the 2nd Life tab retained (structure once per
+subject, `update_second_life` in place, group rows reconciled), and the five
+other tabs rebuild only when their `tab_signature` changes, so the reply
+burst no longer respawns them; in `sl-viewer-people/src/group_profile.rs`
+the General tab (`build_general_structure` / `update_general_values`) and
+the roles list (`sync_roles_view`) update in place. `ui_texture_picker`'s
+`rebuild_tree` now skips a rebuild when the visible tree did not change.
+Still rebuilding wholesale: the group profile's `rebuild_details_area` /
+`rebuild_compose_area` / `rebuild_notice_body`, `inventory_properties`
+(tears its content down and respawns on every re-open of an open window),
+`edit_contents` (`rebuild_contents_views` / `rebuild_one_view`), and the
+avatar profile's signature-gated tabs (a changed pick / note still
+respawns the tab). The bullets below are the original survey.
+
 Convert these panels to **build the structure once and update values in place**,
 rebuilding only on a genuine structural change (own-vs-other, a selected
 pick/classified/role/member/notice changing, a folder changing):

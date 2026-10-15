@@ -2,7 +2,7 @@
 id: viewer-script-error-window
 title: Script warning / error window
 topic: viewer
-status: ready
+status: wont-do
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-widget-scaffold]
 refs: [viewer-chat-channel-and-commands]
@@ -30,3 +30,12 @@ Parity-audit extension: an option to route `llOwnerSay` output into the
 script debug window instead of (or in addition to) nearby chat
 (`FSllOwnerSayToScriptDebugWindow`, with its routing variant setting),
 plus clear-window-on-close (`FSScriptDebugWindowClearOnClose`).
+
+## Won't do (audit 2026-10-15)
+
+A duplicate of [[viewer-script-warning-window]]: both describe the
+reference's one Script Errors window (`llfloaterscriptdebug`) over
+`ChatType::DebugChannel` chat. That item is the fuller statement (routing
+preference, owner-only default, click-through to the editor, acceptance), and
+this one's unique scope — per-object tabs, the beacon action, the line cap
+and the `llOwnerSay` / clear-on-close addendum — was folded into it.

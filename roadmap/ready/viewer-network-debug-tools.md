@@ -19,7 +19,11 @@ session layer (most are thin toggles on machinery we own):
       (bypass dead-reckoning for diagnosis)
 - [ ] Drop-a-packet + sustained packet-loss simulation (exercises the
       reliable-retransmit path — pairs with `test-reliable-retransmit`)
-- [ ] Purge disk cache (assets + textures) with confirmation
+- [x] Purge disk cache (assets + textures) with confirmation — done as
+      Preferences ▸ Network & Cache **Clear Cache** (`ConfirmClearCache`,
+      purged on the next start: `ViewerPaths::mark_cache_for_purge` /
+      `purge_caches_if_marked`, `sl-viewer-platform/src/paths.rs`) plus
+      **Clear Inventory Cache**; a Develop-menu entry would only reuse it
 - [ ] Sim sun override / fixed weather (region-side debug, estate gated)
 - [ ] Interest-list 360° mode + reset (the caps toggle the reference sends
       for full-surround fetching — useful for the 360 snapshot task too)

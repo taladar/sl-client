@@ -29,7 +29,7 @@ post-process bypass) and the edit floater (advanced permissions).
 Reference (Firestorm, read-only): `menu_viewer.xml` Build ▸ Options
 (~L2084-2378), the corresponding debug settings and render-pass hooks.
 
-Builds on: the selection-set core (blocked task); overlay rendering
+Builds on: the selection-set core (done); overlay rendering
 shares machinery with [[viewer-render-type-toggles]] and
 [[viewer-highlight-transparent]].
 

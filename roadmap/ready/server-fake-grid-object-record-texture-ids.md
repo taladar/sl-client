@@ -40,3 +40,10 @@ the viewer's prim mesher works out and nothing below it does.
   grids and both flavours are held to it.
 
 No viewer code of ours reads the list today.
+
+Audit 2026-10-15: the viewer's prim mesher *is* a pure crate — `sl-prim`
+(Bevy-free, I/O-free) tessellates a `PrimShape` and its `PrimMesh` has a
+`face_count()`. `sl-fake-grid` does not depend on it and tessellating to
+count faces is heavier than needed, so the first bullet is either a cheap
+face-count function beside `sl-prim`'s profile/path face ranges or that
+dependency; sculpts and meshes still need their own answer.

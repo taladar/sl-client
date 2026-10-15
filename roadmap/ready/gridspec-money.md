@@ -13,7 +13,11 @@ Context: [context/gridspec.md](../context/gridspec.md).
 ## Known already
 
 OpenSim reports balance 0, refuses non-zero `ObjectBuy` with a BlueBox; SL
-transfers complete; the fake grid has no ledger.
+transfers complete; the fake grid has no ledger between avatars. It does keep
+one balance per session (`SimSession::money_balance` / `charge_money` in
+`sl-proto/src/sim_session.rs`): debited by an upload's fee and a group's
+founding fee, and stated in reply to `MoneyBalanceRequest`
+(`sl-fake-grid/src/groups.rs`, `answer_balance`).
 
 ## Discover
 

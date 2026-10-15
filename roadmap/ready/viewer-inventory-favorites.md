@@ -25,7 +25,7 @@ solid star, hollow star, and/or tinted text
 The flag persists as the AISv3 `favorite` item field, so it roams
 between viewers on the same account. We have none of it — no favorite
 handling anywhere in our inventory modules
-(`sl-client-bevy-viewer/src/inventory.rs`, `inventory_actions.rs`); our
+(`sl-viewer-inventory/src/inventory.rs`, `inventory_actions.rs`); our
 inventory only knows the classic Favorites *folder* (folder-icon
 special-case in `inventory.rs`). This task is distinct from the
 favorites-bar landmarks folder ([[viewer-navigation-favorites-bars]],

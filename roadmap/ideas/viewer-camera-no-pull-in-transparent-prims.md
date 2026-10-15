@@ -41,3 +41,10 @@ mechanism), or carry a per-collider "opaque" flag the ray filter consults.
 
 Deliberately parked in `ideas/` — may not be worth it; explore the above before
 promoting to `ready/`.
+
+Audit 2026-10-15: avian is gone; the "shared avian index" is now the custom
+parry3d index in `sl-viewer-kit/src/raycast_index.rs`
+(`StaticRaycastIndex`, built by `physics::build_static_colliders`), and the
+"`NonSolid` layer" is now a per-record `solid` flag that queries filter with
+`solid_only`. The third option above — a per-collider "opaque" flag the ray
+filter consults — would be one more such field. The open questions stand.

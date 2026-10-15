@@ -63,7 +63,7 @@ menu feels wrong and cannot say why.
   and let the universal tier cover the rest. A pie option's *angle* should not
   depend on the language anyway — and if it does, that is a finding.
 - **Reuse the registry.** `ELEMENTS` in
-  `sl-client-bevy-viewer/src/ui_element.rs` is already the one list; a baseline
+  `sl-client-bevy-viewer/src/ui_elements.rs` is already the one list; a baseline
   is keyed by element id and node `Name`.
 
 ## Prior art in this workspace
@@ -86,7 +86,8 @@ pie's measured compass angles — the angle from the pie's centre to each
 laid-out label, which is the muscle-memory fact, as distinct from the
 in-code address tables that pin *which* action sits at each point.
 
-What remains is the rest of this task's list: floater default sizes
-(waiting on [[viewer-ui-shell-plugin-groups]], the UI plugin group that
-would let a headless app stand the floaters up), toolbar button order,
-chiclet positions, and the real viewer pies' geometry.
+What remains is the rest of this task's list: floater default sizes,
+toolbar button order, chiclet positions, and the real viewer pies'
+geometry. (Audit 2026-10-15: [[viewer-ui-shell-plugin-groups]], which the
+floater sizes were waiting on, is done; the `ui_test.rs` sweeps already
+stand every `FLOATERS` window up headless.)

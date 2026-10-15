@@ -28,3 +28,15 @@ Scope:
   `hover` argument is already there — the shape param and the account hover
   sum in the reference).
 - Live-check on aditi against Firestorm with a non-zero hover setting.
+
+Audit 2026-10-15: both inputs are decoded now and neither reaches the plant.
+`sl-wire/src/agent_preferences.rs` reads and writes the capability's
+`hover_height` (the own avatar's value), and every `AvatarAppearance` carries
+the per-avatar `AppearanceHover` block as `hover_height: Option<Vector>`
+(`sl-proto/src/types/appearance.rs`, filled in
+`session/conversions.rs`) — that block is how other agents' hover arrives,
+not a separate preferences event. `sl-viewer-world-avatar/src/avatars.rs`
+still passes only the shape's `Hover` param to `root_drop_from_metrics`
+(its doc says the region-side hover "is not ingested yet"). What remains:
+add the appearance's `hover_height.z` (and, for the own avatar, the
+`AgentPreferences` value) to that `hover` term, then the aditi live check.

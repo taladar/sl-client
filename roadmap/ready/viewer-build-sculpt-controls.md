@@ -18,7 +18,7 @@ ordinary prim can be *switched* to a sculpt.
 
 Today our parameter tab classifies sculpt/mesh prims read-only and
 does not offer editing the sculpt texture — a deviation recorded in
-the `sl-client-bevy-viewer/src/edit_params.rs` module doc before the
+the `sl-viewer-edit/src/edit_params.rs` module doc before the
 texture-picker widget shipped; [[viewer-ui-texture-picker]] is done
 now, so the blocker is gone. Edits commit as the PARAMS_SCULPT
 ObjectExtraParams block the protocol already carries (sculpt type byte

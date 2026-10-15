@@ -36,3 +36,29 @@ flavours (`FAKE_GRID_OMITS`).
   so both flavours are held to the whole table.
 - Check the cost: the document is 683 KB and every fake-grid login in the
   test suite would fetch and parse it once.
+
+## Folded in from protocol-sim-lsl-syntax-document (2026-10-15)
+
+[[protocol-sim-lsl-syntax-document]] asked for the same thing from the LSL
+side and is closed as a duplicate of this item. What it adds:
+
+- **Which document, decided here.** It wanted the document *rendered from
+  the engine's own descriptor table* ([[server-lsl-library-surface-table]],
+  done) rather than from a copy of Linden's list, so the editor colours and
+  completes exactly the functions this grid can run — more honest about the
+  fake grid, and a test of the table → document → `sl-wire` decoder round
+  trip. The vendored-document route above imitates the live grids instead.
+  Pick one per flavour and say why (or offer both behind a knob);
+  [[server-lsl-lib-ossl]] makes the same point for the `os*` functions.
+- **The id follows the content**, so a changed table changes the
+  advertised `LSLSyntaxId` and invalidates a viewer's cached document.
+- **Fixture knobs for the two cases a viewer must survive**: a grid that
+  advertises no id (serve nothing; the viewer falls back to its shipped
+  default) and one serving a document at an unsupported version, which the
+  decoder refuses (`WireError::UnsupportedLslSyntaxVersion`).
+- **A round-trip unit test**: document → `sl-wire`'s decoder → `LslSyntax`
+  equals its source.
+
+Acceptance also includes: a viewer logged into the fake grid fetches a
+non-empty `LSLSyntax` document and its editor highlights and completes from
+it.

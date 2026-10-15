@@ -26,7 +26,7 @@ persisted per account; and the **per-region auto-switch**
 when entering a specific region (e.g. estate staff tags).
 
 Ours has the groups list with Activate
-(`sl-client-bevy-viewer/src/groups.rs`, [[viewer-social-groups]] done)
+(`sl-viewer-people/src/groups.rs`, [[viewer-social-groups]] done)
 and role data via the group-profile roster
 ([[viewer-social-group-profile]] done), but no title-centric
 quick-switch surface, no favourites, and no per-region auto-switch.

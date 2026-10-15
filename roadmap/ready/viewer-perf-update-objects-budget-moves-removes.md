@@ -9,14 +9,17 @@ refs: [viewer-perf-frame-churn-cleanups, viewer-perf-pbr-shadow-cluster-rez]
 
 Context: [context/viewer.md](../context/viewer.md).
 
-`update_objects` (`objects.rs`) is cheap on average (mean 0.17 ms) but **spiked
-to 124 ms** on a single steady-state frame on aditi — the largest single-frame
-hitch in the trace and the driver of `Update`'s 134 ms `max`.
+`update_objects` (`sl-viewer-world-objects/src/objects.rs`) is cheap on average
+(mean 0.17 ms) but **spiked to 124 ms** on a single steady-state frame on aditi
+— the largest single-frame hitch in the trace and the driver of `Update`'s 134
+ms `max`.
 
 ## Cause is NOT yet identified — measure first
 
-The obvious structural gap: the per-frame [`SpawnBudget`] (default 16) only
-counts **geometry builds** (`apply_object` returning `true`).
+The obvious structural gap: the per-frame budget — then `SpawnBudget`, since
+2026-08-14 the shared `MeshUploadBudget` lane (`asset_budget.rs`, default 24)
+— only counts **geometry builds** (`apply_object` returning `true`); still
+so at the 2026-10-15 audit (`drain_budgeted`).
 **Moves and removes are free** — the drain loop only decrements budget on a
 build, so a flood of moves/removes runs inline for the whole batch in one frame.
 

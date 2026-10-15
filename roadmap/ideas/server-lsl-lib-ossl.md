@@ -32,7 +32,7 @@ produce a short document and a filter in the surface table, answering:
   whole `osDB`/console surface.
 - **What does the grid tell the viewer?** Whatever we implement should
   be what the `LSLSyntax` document advertises
-  ([[protocol-sim-lsl-syntax-document]]), because serving OpenSim's full
+  ([[server-fake-grid-lsl-syntax]]), because serving OpenSim's full
   list for an engine that implements five of them makes the editor's
   autocomplete lie.
 - **The threat-level model.** OSSL's per-function permission tiers

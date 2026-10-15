@@ -48,3 +48,11 @@ Still open, and the reason this task is not done: `minimap_objects`,
 decides whether a re-tessellation happens), the four extra-param parsers, and
 the four state machines `DerenderList` / `SelectionSet` / `MuteModel` /
 `CameraRig`.
+
+Audit 2026-10-15: the crate has been split since, so the line numbers above
+point nowhere. Where the still-open targets live now: `minimap_objects`,
+`pick_summary` and `non_motion_blocks_changed` in `object_graph.rs` (its
+tests still do not touch them); the four extra-param parsers in
+`object_components.rs` (no tests); `DerenderList` and `CameraRig` in
+`world_state.rs` (no tests); `SelectionSet` in `edit_selection.rs` (one
+test); `MuteModel` moved out to `sl-viewer-social/src/mute.rs`.

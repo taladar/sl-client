@@ -5,6 +5,7 @@ topic: viewer
 status: ready
 origin: user request (2026-07); split from viewer-rlva-enforcement
 blocked_by: [viewer-rlv-restriction-state, viewer-camera-third-person-orbit]
+refs: [viewer-rlv-vision-render]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -21,8 +22,12 @@ Enforce the **camera and vision** restrictions against the camera-mode machine
 
 The camera limits clamp the parameters the camera module already exposes (fov,
 distance, avatar-lock), so they hook the mode machine rather than reimplementing
-it. The vision-sphere / blur overlay lands on the Phase 22–33 rendering work as
-a post/overlay effect driven by the current restriction set.
+it.
+
+Audit 2026-10-15: the vision-sphere / blur overlay (`@setsphere`, and the
+`@setoverlay` family) is fully specified in [[viewer-rlv-vision-render]] and
+is built there; this task keeps the `@setcam*` camera clamps and
+`@camtextures`.
 
 Reference (Firestorm, read-only): `rlveffects.cpp` (vision sphere / blur),
 `rlvhandler.cpp` (`@setcam_*`), `llagentcamera.cpp` (the camera parameters

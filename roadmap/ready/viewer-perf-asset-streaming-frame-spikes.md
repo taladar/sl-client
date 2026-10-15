@@ -71,3 +71,19 @@ Tracy capture flying into un-streamed areas: the 100–200 ms
 bounded per-frame slices; no single-digit-FPS frames from streaming; total
 rez time not materially worse. Log what got deferred so a silent under-budget
 is visible.
+
+## Audit 2026-10-15 — the budgeting landed; verification remains
+
+The direction above shipped the day after the first capture (commit
+`ab949f75`, 2026-08-14): every image-inserting apply system spends the
+shared image lane of `TextureApplyBudget`
+(`sl-viewer-world-objects/src/textures.rs`, `SL_VIEWER_IMAGE_UPLOAD_BUDGET`),
+and object spawn, mesh geometry, LOD re-tessellation and terrain share one
+`MeshUploadBudget` lane (`sl-viewer-world-objects/src/asset_budget.rs`,
+`SL_VIEWER_MESH_UPLOAD_BUDGET`), both reset in `PreUpdate`, with fetch /
+decode left at full speed. An aditi A/B moved the median frame 48.9 → 43.2 ms.
+The 2026-08-15 re-capture above postdates it and still shows rez-storm frames
+to 380 ms (`ExtractSchedule` 157 ms, `Update` 202 ms), so what remains is the
+Verify section: attribute those storm frames (which `Update` systems, and
+whether extract is still fed too much per frame), tune the default caps live,
+and add the "what got deferred" log so an under-budget is visible.

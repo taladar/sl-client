@@ -46,17 +46,23 @@ no typed event):
 - `send_load_url` — `llLoadURL`. Again, parsed client side
   (`LoadUrlRequest`), never built.
 - `send_script_teleport_request` — `llMapDestination`.
-- `send_money_balance_reply` — the balance push after a
-  `llGiveMoney` / object payment, and the `description` field the viewer
-  shows as the transaction line.
+
+`send_money_balance_reply` was on this list and exists now
+(`sl-proto/src/sim_session.rs`, with the transaction block and its item
+description; the fake grid's groups use it) — audit 2026-10-15.
 
 Each addition is the same small shape the ~130 existing senders share,
 and each gets the round-trip test the crate already applies to a
 server-direction message: build it, decode it with the client's own
 parser, assert the record.
 
+Note one consumer of the raw grabs now exists: `sl-fake-grid/src/grabs.rs` drags
+a prim from the `ObjectGrabUpdate`s it matches out of
+`ServerEvent::ClientMessage` (spins already arrive typed); it has to move to the
+typed events with this change.
+
 Acceptance: the three grab messages, `ScriptDialogReply` and
 `MoneyTransferRequest` arrive as typed `ServerEvent`s carrying their
-full payloads; the four senders exist and round-trip through the client
+full payloads; the three senders exist and round-trip through the client
 parser; and no existing `ClientMessage` consumer regresses (the
 catch-all stops seeing these, which is the point).

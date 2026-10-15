@@ -71,7 +71,7 @@ exercised on aditi — to be done after the rest of the teleport/crossing work i
 solid. (Qualified 2026-09-03: what needs a *scripted* vehicle is the permission
 churn. The **handover** — the vehicle killed in one region and rezzed in the
 next under new local ids, with its riders re-parented — is scriptable offline,
-and [[test-fake-grid-seated-crossing]] is the task for it.) (A separate
+and [[test-fake-grid-seated-crossing]] covered it — done.) (A separate
 walk-crossing movement lockup surfaced live —
 [[viewer-crossing-movement-locks-up]].)
 
@@ -80,7 +80,7 @@ walk-crossing movement lockup surfaced live —
 Addition from the audit of `fsregioncross.cpp`: the FS/Animats adaptive
 extrapolation-time limit for ridden vehicles. We implement the LL
 behaviour — a fixed 1 s crossing cap with zeroed acceleration
-(`sl-client-bevy-viewer/src/physics.rs:948-1005`,
+(`sl-viewer-world-view/src/physics.rs`,
 `REGION_CROSSING_CAP_SECS`). The reference low-pass filters the ridden
 object's object-frame velocity/angular velocity and sets the
 extrapolation limit to error-budget / current-deviation (settings

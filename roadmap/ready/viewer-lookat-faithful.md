@@ -11,8 +11,9 @@ Context: [context/viewer.md](../context/viewer.md).
 
 A faithful reimplementation of the reference's agent look-at
 (`LLHUDEffectLookAt` + `LLAgentCamera::setLookAt`), replacing the minimal
-camera-mode stand-in the camera-system pass left in `crate::look_at`
-([`update_own_look_at_target`]): mouselook looks along the camera forward;
+camera-mode stand-in the camera-system pass left in
+`sl-viewer-world-avatar/src/look_at.rs` (`update_own_look_at_target`):
+mouselook looks along the camera forward;
 third person / flycam send nothing. That stand-in exists only to kill the old
 debug behaviour (the avatar stared *at* the camera, which fed back into the
 head-focused camera and vibrated the view).

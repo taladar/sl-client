@@ -12,8 +12,8 @@ refs: [viewer-media-prim-browser, viewer-streaming-audio,
 Context: [context/viewer.md](../context/viewer.md).
 
 The security/UX policy layer around parcel media, parcel music streams
-and media-on-a-prim that the in-progress [[viewer-media-prim-browser]]
-and [[viewer-streaming-audio]] tasks do not carry. The centrepiece is
+and media-on-a-prim that the (now done) [[viewer-media-prim-browser]]
+and [[viewer-streaming-audio]] tasks did not carry. The centrepiece is
 the media filter (Singularity-lineage, `MediaEnableFilter`): before
 playing a parcel's media URL or audio stream, check the URL's domain
 against persisted per-account allow/deny lists; unknown domains prompt
@@ -23,8 +23,11 @@ against persisted per-account allow/deny lists; unknown domains prompt
 tables (add/remove; lists persist in `medialist.xml`). This is an
 IP-privacy/security feature — media and stream servers see the
 viewer's IP, and hostile parcels use media URLs as IP grabbers — so it
-matters on Second Life proper. Our players (`media_audio.rs`,
-`media_prim.rs`, `parcel_audio.rs`) auto-play with no URL gate at all;
+matters on Second Life proper. Our players
+(`sl-viewer-media/src/media_audio.rs`, `parcel_stream.rs`,
+`sl-viewer-world-view/src/media_prim.rs`,
+`sl-viewer-audio/src/parcel_audio.rs`) auto-play with no URL gate at all
+(audit 2026-10-15: still no filter, no media list, no rolloff setting);
 the browser task only covers the per-face MediaEntry whitelist, which
 is object-author-controlled, not viewer-user-controlled.
 

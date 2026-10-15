@@ -78,7 +78,9 @@ The census's script legs are live-only until this lands: enrol them on the
 fake flavours (drop the `is_fake` early return in
 `sl-conformance/src/cases/object_touch_grab.rs`) as the acceptance.
 
-Acceptance: the `object-touch-grab` conformance case runs against the
-fake grid (it is OpenSim-only today) and a unit test shows a held grab
+Acceptance: the `object-touch-grab` conformance case runs its script legs
+against the fake grid — it is already in `fake::OFFLINE_CASES`, but stops at
+the unscripted legs there and holds the fake flavours to `MEASURED` only, not
+`MEASURED_LIVE` (audit 2026-10-15) — and a unit test shows a held grab
 producing exactly one `touch_start`, N `touch` and one `touch_end` over
 N+2 ticks.

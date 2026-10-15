@@ -2,7 +2,7 @@
 id: viewer-chat-clickable-sender-names
 title: Clickable sender names in the chat / conversations transcript
 topic: viewer
-status: ready
+status: done
 origin: split from [[viewer-clickable-name-widgets]] (2026-07-28) — the reusable
   name-link widget landed and the owner floaters migrated, but the chat
   transcript needs a per-line restructure before a name can be made clickable
@@ -46,3 +46,18 @@ Scope:
 
 Reference (Firestorm, read-only): `LLChatHistory` / the name-link segments in
 the chat log, and the click-name → profile behaviour.
+
+## Done (audit 2026-10-15)
+
+Landed as [[viewer-chat-sender-name-links]] (commit `1494983d`), by a
+different route than the `NameLink` row sketched above: the
+Conversations transcript in `sl-viewer-people/src/conversations.rs` is
+now a column of per-line linkified rows (`spawn_linkified_text` from
+`linkified_text`, one per line via `line_text`), and each
+`TranscriptLine` carries a `SpeakerLink` (`Own` / `Agent` / `Object` /
+`None`). An agent speaker renders as a `secondlife:///app/agent/<id>/about`
+link, an object as an `objectim` link, our own line as the
+non-clickable "You", and a speaker whose id we do not hold as plain
+text; `push_nearby` takes the `ChatSource` so nearby lines link too.
+The transient overlay (`sl-viewer-chat/src/chat.rs`) stays plain on
+purpose, as decided above.

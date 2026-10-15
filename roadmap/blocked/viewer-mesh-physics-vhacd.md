@@ -10,7 +10,9 @@ blocked_by: [viewer-mesh-gltf-import]
 Context: [context/viewer.md](../context/viewer.md).
 
 Compute the model's **physics shape** — the "Analyze" step — with **`parry3d`'s
-pure-Rust V-HACD, which we already ship** (via avian3d in the physics stack). So
+pure-Rust V-HACD, which we already ship** (a direct dependency since avian3d
+was removed: the viewer's custom raycast index in `sl-viewer-kit` /
+`sl-viewer-world-view` uses `parry3d` 0.27 itself). So
 the heaviest-sounding piece of the importer needs no new dependency and no C++.
 
 `VHACD::decompose` + `compute_convex_hulls` returns one hull per part — exactly
@@ -28,5 +30,5 @@ tier if wanted — still no C++.
 Reference (Firestorm, read-only): `llconvexdecompositionvhacd.cpp` (the open
 V-HACD Firestorm uses in place of Havok).
 
-Builds on: [[viewer-mesh-gltf-import]] and `parry3d` (already in the physics
-stack).
+Builds on: [[viewer-mesh-gltf-import]] and `parry3d` (already a dependency of
+the raycast index).

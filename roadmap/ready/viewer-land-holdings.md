@@ -12,14 +12,16 @@ Context: [context/viewer.md](../context/viewer.md).
 
 The land-holdings floater: every parcel the agent owns (and their group-land
 contributions), with name, region, area, and the tier summary (m² used vs
-allowed). Driven by the classic `AgentData`-family wire pair
-(`RequestLandHoldings`? — verify: the reference uses the money-server-backed
-`LandHoldings` reply via `AgentDataUpdate`/dir queries; confirm which of our
-implemented surfaces carries it, and add the small missing decode if the
-protocol batches did not cover it). Rows: show-on-map and teleport.
+allowed). Rows: show-on-map and teleport.
+
+Wire coverage (audit 2026-10-15): the protocol half exists —
+`Command::PlacesQuery` (`PlacesQuery`, an agent's or group's land holdings,
+`sl-proto/src/command.rs`) answered by `Event::PlacesReply` with its
+`PlacesResult` rows (`sl-proto/src/types/event.rs`). Nothing in the viewer
+issues it yet; the tier allowance comes with the money/economy data.
 
 Reference (Firestorm, read-only): `llfloaterlandholdings`,
 `floater_land_holdings.xml`.
 
-Builds on: parcel/money protocol (`protocol-11`, `protocol-13`); first step
-is the wire-coverage check above.
+Builds on: parcel/money protocol (`protocol-11`, `protocol-13`) and the
+`PlacesQuery` / `PlacesReply` pair above.

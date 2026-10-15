@@ -14,7 +14,7 @@ Context: [context/viewer.md](../context/viewer.md).
 `SpacenavInput` is a plain resource consumers only read — the ideal
 injection seam; no device, evdev, or feature flag needed in tests. Inject
 axis vectors and assert `drive_flycam` applies the reference semantics
-from `spacenav.rs`/`camera.rs`:
+from `sl-viewer-spacenav/src/lib.rs` / `sl-viewer-world-view/src/camera.rs`:
 
 - per-axis dead-zone (sub-threshold input moves nothing);
 - per-axis scale in flycam-function order (`FlycamAxisSettings`);
@@ -25,3 +25,15 @@ from `spacenav.rs`/`camera.rs`:
 
 Doubles as the executable spec the deferred cross-platform reader
 ([[viewer-input-spacenav-crossplatform]]) must satisfy.
+
+## Audit 2026-10-15
+
+Some of this exists. `sl-viewer-spacenav/src/lib.rs` tests the avatar-walk
+mapping (a centred device is inert, forward / up by sign, the yaw ramp, the
+run threshold). `sl-viewer-world-view/src/camera.rs` tests the toggle
+(`a_toggle_flycam_request_enters_and_leaves_the_flycam`, through
+`ToggleFlycam` rather than the device button) and that an idle, levelled
+flycam stops writing its transform. What remains is `drive_flycam` itself
+under injected axes: the per-axis dead zone, the per-axis scale order, the
+feathering ramp, auto-levelling easing the roll back, and the per-axis pose
+deltas.

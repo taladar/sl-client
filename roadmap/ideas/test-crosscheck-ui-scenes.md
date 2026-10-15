@@ -91,6 +91,14 @@ photographed.
 registries. Most of a locator-and-action layer exists; what it lacks is a
 vocabulary meant to be spoken by something outside the process.
 
+Audit 2026-10-15: that vocabulary exists now. `sl-automation-proto` is the
+protocol every driver speaks ([[viewer-automation-protocol]]), resolved by
+[[viewer-automation-locator-engine]] and reachable over a socket
+([[viewer-automation-remote-transport]]), with `sl-viewer-driver` and
+`sl-viewer-ctl` as clients. Our side of locate-and-act is built; the open
+parts are the scoping question below and the reference side
+([[test-firestorm-automation-endpoint]]).
+
 **Theirs**: XUI `name=` attributes and `LLView::getChildView(name, recurse)`
 are a named tree, which is a selector path already. No event recorder in this
 tree to build on.

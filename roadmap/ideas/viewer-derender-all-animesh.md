@@ -16,7 +16,7 @@ object (animesh / control avatar) currently in the scene in one click
 from avatar complexity limiting ([[viewer-avatar-complexity-limit]]
 jellydolls avatars but leaves animesh meshes rendering).
 
-Our derender core is per-object (`sl-client-bevy-viewer/src/
+Our derender core is per-object (`sl-viewer-world-avatar/src/
 derender.rs` + `asset_blacklist.rs`, [[viewer-derender-blacklist]]
 done); the new piece is a "sweep all current animesh into the session
 derender list" action — plus deciding whether it also blacklists

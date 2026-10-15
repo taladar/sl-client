@@ -54,7 +54,8 @@ today, while the *rich* affordances still wait on the widget. This task stays
 
 Done:
 
-- **`sl-client-bevy-viewer/src/edit_script.rs`** — a dedicated floater
+- **`sl-viewer-asset-editors/src/edit_script.rs`** (it has since moved there,
+  and become a keyed floater, one window per script) — a dedicated floater
   (`EditScriptPlugin`, id `script-editor`) opened by the inventory **Open**
   action (routed from `inventory_properties`, the `InventoryType::Script` arm,
   now `previewable`) and by **double-clicking a script in the Object Contents
@@ -89,8 +90,12 @@ Still to do (each needs [[viewer-lsl-editor-widget]] or its own task):
   font** — the editable field is the plain Sans widget with one whole-buffer
   style; colour is [[viewer-lsl-editor-highlight]] and the rest is the widget
   itself. (The read-only block is already monospace.)
-- **No experience is set on a task upload** (`experience: None`), and the
-  Firestorm preprocessor stays out of v1 as planned.
+- The Firestorm preprocessor stays out of v1 as planned
+  ([[viewer-lsl-preprocessor]]).
+
+(The task upload now carries the script's experience: `edit_script.rs` asks
+for it on open with `Command::RequestScriptExperience` over `GetMetadata`,
+shows it under the body and names it again on Save.)
 
 ## Capability (triage 2026-10-04)
 

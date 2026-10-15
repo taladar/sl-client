@@ -22,3 +22,11 @@ Reference (Firestorm, read-only): `llfloaterobjectweights`,
 `floater_object_weights.xml`.
 
 Deps: [[viewer-object-selection-core]] (a selection to report on).
+
+Audit 2026-10-15: the selection exists ([[viewer-object-selection-core]]
+done), and the selected linkset's land impact is already fetched over
+`GetObjectCost` through the shared `ObjectCostModel`
+(`sl-viewer-world-objects/src/object_cost.rs`) and shown in the build
+floater's info line (`sl-viewer-edit/src/edit_params.rs`) and the hover
+tooltip. What remains is the weights floater itself: the download / physics
+/ server / display breakdown and the region / parcel totals.

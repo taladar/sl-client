@@ -9,25 +9,28 @@ refs: [viewer-profiling]
 
 Context: [context/viewer.md](../context/viewer.md).
 
-A conversation's transcript is rendered as **one single `Text` node**:
-`refresh_conversations` (`conversations.rs:1707-1717`) rebuilds the
-whole string with `format_transcript` (`conversations.rs:656`) over all
-lines — up to `HISTORY_CAP = 200` live lines (`conversations.rs:84`)
-plus recalled history — and `set_text`s the one node whenever a new line
-lands (`rendered_revision != entry.revision`).
+**Updated at the 2026-10-15 audit** (the original text described a single
+`Text` node; the transcript has since become clickable rows). A
+conversation's transcript is now a column of **one linkified row per line**
+(`sl-viewer-people/src/conversations.rs`, `ConversationView::transcript_column`)
+— so speaker names and URLs / SLURLs are links — in the reference's three
+bands (persisted recall, server-fetched history, live lines up to
+`HISTORY_CAP`). But `refresh_conversations` still **rebuilds the whole
+column** whenever a line lands (`rendered_revision != entry.revision`):
+`despawn_related::<Children>()` on the column, then a fresh row spawned and
+shaped for every recall, history and live line.
 
-Because it is a single multi-line `Text`, appending one line makes
-`bevy_text`/parley re-shape **every line** of the transcript: ~200 lines
-× ~50 chars ≈ 10 000 glyphs re-shaped, plus a ~10 KB string
-reallocation, per incoming message. Shaping is the expensive stage —
-ms-scale at that glyph count. It is correctly revision-gated (not a
-60 Hz storm), but busy local chat or an active group easily produces
-several-to-dozens of messages per second, and cost grows with history
-length.
+So appending one line still costs O(history): every row entity is despawned
+and respawned and every line is re-shaped by `bevy_text` / parley (~200+
+lines × ~50 chars ≈ 10 000 glyphs), plus the entity churn the old single
+`Text` did not have. It is correctly revision-gated (not a 60 Hz storm),
+but busy local chat or an active group easily produces several-to-dozens of
+messages per second, and cost grows with history length.
 
 ## Proposed fix
 
-Render the transcript through the existing `virtual_list.rs` — a
+Render the transcript through the existing virtual list
+(`sl-viewer-ui-core/src/virtual_list.rs`) — a
 correct windowed-recycling list, already O(visible) with bounded row
 pools and guarded writes, whose own module comment names "chat history
 at scale" as an intended client. One `Text` entity per line: a line is
@@ -50,5 +53,5 @@ memory-in-layout at the visible window. Measure text-shaping span time
 per incoming message ([[viewer-profiling]]) with a scripted chat-flood
 on the test grid.
 
-Confidence: high that the whole transcript currently re-shapes (single
-Text node verified); medium on the exact ms until profiled.
+Confidence: high that the whole transcript currently re-shapes (full
+column rebuild verified 2026-10-15); medium on the exact ms until profiled.

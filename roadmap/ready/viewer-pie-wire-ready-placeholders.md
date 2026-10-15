@@ -34,6 +34,14 @@ done); avatar-other / attachment-other **Zoom In** (`zoom-in`) → the
 third-person focus-on-target camera (`camera.rs` `FocusTarget::Point`,
 [[viewer-camera-focus-on-object]] done).
 
+**Audit 2026-10-15.** The menus now live in `sl-viewer-ui-context-menus/src/`
+(`object_menu.rs`, `land_menu.rs`, `avatar_menu.rs`, `attachment_menu.rs`).
+The object and land pie **Create** (`build`) slices are wired (`when: None`,
+dispatched to the Build Tools in Create mode) and are no longer part of this
+task. Still on `UNIMPLEMENTED`: `groups`, `edit-shape` (avatar-self and
+attachment-self), the seven `takeoff-*` slices, `detach-all`,
+`show-in-inventory` and `zoom-in` (avatar-other and attachment-other).
+
 All addresses stay put per the pinned per-menu address tables; the
 committed `*_keeps_every_address` tests' enable assertions must be
 updated in the same commits ([[viewer-world-pie-menu-reactions]] pins

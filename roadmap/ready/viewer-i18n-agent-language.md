@@ -2,9 +2,9 @@
 id: viewer-i18n-agent-language
 title: Send agent-language preference to the grid
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-i18n-localization
-blocked_by: [viewer-i18n-locale-selection]
+refs: [viewer-i18n-locale-selection]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -25,3 +25,13 @@ ignored.
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Unblocked (audit 2026-10-15)
+
+The language this reports already exists: the persisted `UiLanguage` setting
+and the live `UiLocale` resource (`sl-viewer-ui-core/src/i18n.rs`), switched at
+runtime from the preferences General tab. What
+[[viewer-i18n-locale-selection]] still owes (OS-locale detection) only changes
+*which* locale is active, so it no longer blocks this. Nothing sends
+`UpdateAgentLanguage` yet, and there is no "share my language with objects"
+setting.

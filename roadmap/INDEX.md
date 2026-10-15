@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 139 |
-| ready | 350 |
-| blocked | 98 |
+| ideas | 134 |
+| ready | 347 |
+| blocked | 94 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1375 |
-| deferred | 30 |
-| wont-do | 17 |
+| done | 1381 |
+| deferred | 29 |
+| wont-do | 24 |
 | **total** | **2066** |
 
-## ideas (139)
+## ideas (134)
 
 ### protocol
 
@@ -119,10 +119,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Region-wide parcel ban-line / access display
 - [`viewer-people-groups-list-options`](ideas/viewer-people-groups-list-options.md)
   — Contacts & groups list display options
-- [`viewer-perf-animation-lod-pose-cache`](ideas/viewer-perf-animation-lod-pose-cache.md)
-  — Animation pose cache + temporal/budget pose LOD (no-GPU crowd stopgaps)
-- [`viewer-perf-avatar-pose-extract-skins`](ideas/viewer-perf-avatar-pose-extract-skins.md)
-  — Avatar pose path drives extract_skins — the serial critical-path cost
 - [`viewer-perf-chat-transcript-virtual-list`](ideas/viewer-perf-chat-transcript-virtual-list.md)
   — Chat transcript via virtual list — stop re-shaping the whole history
 - [`viewer-perf-flexi-distance-lod`](ideas/viewer-perf-flexi-distance-lod.md) —
@@ -131,8 +127,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Small per-frame churn cleanups (throttles + scratch reuse)
 - [`viewer-perf-frame-work-budget-priorities`](ideas/viewer-perf-frame-work-budget-priorities.md)
   — Frame-work budget arbiter with priorities (skip low-priority work)
-- [`viewer-perf-gpu-avatar-crowd`](ideas/viewer-perf-gpu-avatar-crowd.md) — GPU
-  avatar crowd — compute-pass animation + same-body instancing
 - [`viewer-perf-gpu-jpeg2000-decode`](ideas/viewer-perf-gpu-jpeg2000-decode.md)
   — GPU (wgpu compute) JPEG2000 texture decoding
 - [`viewer-perf-login-state-gate`](ideas/viewer-perf-login-state-gate.md) —
@@ -148,8 +142,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)
   — Skip capture for occluded reflection probes (blocked by
   `viewer-perf-probe-scheduling`)
-- [`viewer-perf-skeleton-single-solve`](ideas/viewer-perf-skeleton-single-solve.md)
-  — Solve each avatar skeleton once per frame unless an adjuster needs two
 - [`viewer-perf-texture-anim-pause`](ideas/viewer-perf-texture-anim-pause.md) —
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
@@ -266,9 +258,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-agent-avatars-shared`](ideas/server-fake-grid-agent-avatars-shared.md)
   — Fake grid — logged-in agents see each other's avatars (blocked by
   `gridspec-avatar-presence` (done), `gridspec-animations`)
-- [`server-fake-grid-im-relay`](ideas/server-fake-grid-im-relay.md) — Fake grid
-  — relay IMs and offers between its sessions (blocked by
-  `gridspec-teleport-lures` (done), `gridspec-instant-messages` (done))
 - [`server-fake-grid-teleport-edges`](ideas/server-fake-grid-teleport-edges.md)
   — Fake grid — the teleport edges each grid was measured handling and the fake
   grid does not model
@@ -361,7 +350,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (350)
+## ready (347)
 
 ### protocol
 
@@ -379,9 +368,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Set the maturity preference over UpdateAgentInformation
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
-- [`protocol-sim-lsl-syntax-document`](ready/protocol-sim-lsl-syntax-document.md)
-  — The fake grid serves an empty LSLSyntax document (blocked by
-  `server-lsl-library-surface-table` (done))
 - [`protocol-sim-script-messages`](ready/protocol-sim-script-messages.md) — The
   simulator-side script messages SimSession neither sends nor decodes
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
@@ -419,8 +405,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
   alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
   (done))
-- [`viewer-audit-checkbox-box-widget`](ready/viewer-audit-checkbox-box-widget.md)
-  — The settings checkbox box is spawned and repainted by hand in seven places
 - [`viewer-audit-demo-panels-in-release`](ready/viewer-audit-demo-panels-in-release.md)
   — Five developer demo panels ship in the release binary from inside library
   crates
@@ -509,8 +493,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-bar-commands`](ready/viewer-chat-bar-commands.md) — Chat-bar
   action commands (`cmd …`)
 - [`viewer-chat-bubbles`](ready/viewer-chat-bubbles.md) — Chat bubbles
-- [`viewer-chat-clickable-sender-names`](ready/viewer-chat-clickable-sender-names.md)
-  — Clickable sender names in the chat / conversations transcript
 - [`viewer-chat-input-behavior-options`](ready/viewer-chat-input-behavior-options.md)
   — Chat-input behaviour options — send modifiers, OOC, bar toggles
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
@@ -623,6 +605,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
   setting
+- [`viewer-i18n-agent-language`](ready/viewer-i18n-agent-language.md) — Send
+  agent-language preference to the grid
 - [`viewer-i18n-chat-translation`](ready/viewer-i18n-chat-translation.md) —
   Machine translation of chat / IM (blocked by `viewer-i18n-fluent-scaffold`
   (done), `viewer-chat-history-panel` (done))
@@ -817,8 +801,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Budget asset upload/prep to kill single-digit-FPS streaming spikes
 - [`viewer-perf-avatar-mesh-lod-screen-size`](ready/viewer-perf-avatar-mesh-lod-screen-size.md)
   — Screen-size mesh LOD for rigged avatar meshes (on-screen crowd draw)
-- [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
-  — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
 - [`viewer-perf-gpu-avatar-crowd-cpu-bound`](ready/viewer-perf-gpu-avatar-crowd-cpu-bound.md)
@@ -835,8 +817,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Pipeline debug overlay rewrites its Text unconditionally every frame
 - [`viewer-perf-probe-capture-content`](ready/viewer-perf-probe-capture-content.md)
   — Cheaper probe captures — layer exclusions (honour DYNAMIC), draw distance
-- [`viewer-perf-probe-capture-shadows`](ready/viewer-perf-probe-capture-shadows.md)
-  — Reduce directional shadow-cascade cost for probe capture views
 - [`viewer-perf-probe-filter-on-capture`](ready/viewer-perf-probe-filter-on-capture.md)
   — Filter probe cubemaps only on capture completion; blit only dirty faces
 - [`viewer-perf-probe-instrumentation`](ready/viewer-perf-probe-instrumentation.md)
@@ -945,8 +925,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
   — Screen-space reflections (SSR)
-- [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
-  warning / error window (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-script-limits`](ready/viewer-script-limits.md) — Script limits —
   parcel / attachment script resources (blocked by `viewer-ui-widget-scaffold`
   (done))
@@ -975,6 +953,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   High-resolution snapshot capture + quiet-snapshot mode
 - [`viewer-snapshot-postcard`](ready/viewer-snapshot-postcard.md) — Snapshot
   destination — postcard / e-mail (blocked by `viewer-snapshot-floater` (done))
+- [`viewer-snapshot-profile-feed`](ready/viewer-snapshot-profile-feed.md) —
+  Snapshot destination — profile feed (blocked by `viewer-snapshot-floater`
+  (done))
 - [`viewer-social-group-extras`](ready/viewer-social-group-extras.md) — Group
   profile extras — land/money, experiences, bans, create/invite (blocked by
   `viewer-social-group-profile` (done))
@@ -996,6 +977,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-about-floater` (done))
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
+- [`viewer-task-inventory-open-and-save-back`](ready/viewer-task-inventory-open-and-save-back.md)
+  — Open a task-inventory item into its editor + Save Back to Object (blocked by
+  `viewer-notecard-editor` (done))
 - [`viewer-telemetry-opt-in`](ready/viewer-telemetry-opt-in.md) — Opt-in viewer
   telemetry, saying exactly what is sent
 - [`viewer-teleport-offer-maturity-prompt`](ready/viewer-teleport-offer-maturity-prompt.md)
@@ -1019,12 +1003,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`
   (done))
-- [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
-  — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
-  `viewer-ui-settings-binding` (done))
-- [`viewer-ui-settings-binding-text`](ready/viewer-ui-settings-binding-text.md)
-  — Text-field↔settings two-way binding (blocked by
-  `viewer-ui-text-input-widget` (done), `viewer-ui-settings-binding` (done))
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
@@ -1048,6 +1026,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-virtualized-list` (done))
 - [`viewer-window-title-unread-count`](ready/viewer-window-title-unread-count.md)
   — Unread IM/chat count in the window title
+- [`viewer-world-map-script-destination`](ready/viewer-world-map-script-destination.md)
+  — Script-requested map destination (llMapDestination) (blocked by
+  `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done))
 - [`viewer-world-map-tracking-teleport`](ready/viewer-world-map-tracking-teleport.md)
   — World-map floater — tracking & teleport hand-off (blocked by
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done),
@@ -1097,6 +1078,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-group-chat`](ready/server-fake-grid-group-chat.md) — Fake
   grid — group chat sessions (blocked by `gridspec-group-chat-and-conference`
   (done))
+- [`server-fake-grid-im-relay`](ready/server-fake-grid-im-relay.md) — Fake grid
+  — relay IMs and offers between its sessions (blocked by
+  `gridspec-teleport-lures` (done), `gridspec-instant-messages` (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
@@ -1186,7 +1170,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (98)
+## blocked (94)
 
 ### protocol
 
@@ -1221,9 +1205,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-gesture-management-ui`](blocked/viewer-gesture-management-ui.md) —
   Gesture management & editor UI (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-gesture-runtime`)
-- [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
-  agent-language preference to the grid (blocked by
-  `viewer-i18n-locale-selection`)
 - [`viewer-input-conflict-detection`](blocked/viewer-input-conflict-detection.md)
   — Key-binding conflict detection (blocked by
   `viewer-input-rebinding-persistence`)
@@ -1296,15 +1277,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-script-mirror-download`)
 - [`viewer-script-recovery`](blocked/viewer-script-recovery.md) — Unsaved-script
   recovery (blocked by `viewer-lsl-editor-widget`)
-- [`viewer-snapshot-profile-feed`](blocked/viewer-snapshot-profile-feed.md) —
-  Snapshot destination — profile feed (blocked by `viewer-snapshot-floater`
-  (done), `viewer-image-upload`)
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater` (done), `viewer-image-upload`)
-- [`viewer-task-inventory-open-and-save-back`](blocked/viewer-task-inventory-open-and-save-back.md)
-  — Open a task-inventory item into its editor + Save Back to Object (blocked by
-  `viewer-notecard-editor` (done), `viewer-lsl-editor-save-compile`)
 - [`viewer-usb-route-comments`](blocked/viewer-usb-route-comments.md) — USB
   waypoint comments in the viewer (blocked by `viewer-usb-route-map-display`)
 - [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
@@ -1322,9 +1297,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-controls`](blocked/viewer-voice-controls.md) — Voice controls —
   talk button, PTT, participants, per-speaker volume (blocked by
   `viewer-voice-audio`)
-- [`viewer-world-map-script-destination`](blocked/viewer-world-map-script-destination.md)
-  — Script-requested map destination (llMapDestination) (blocked by
-  `viewer-world-map-tracking-teleport`)
 
 ### test
 
@@ -1653,7 +1625,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1375)
+## done (1381)
 
 ### protocol
 
@@ -2008,6 +1980,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Escape out of flycam interpolates between two unrelated poses
 - [`viewer-audit-cef-browser-settings-hardening`](done/viewer-audit-cef-browser-settings-hardening.md)
   — An in-world media page runs on CEF's default browser settings
+- [`viewer-audit-checkbox-box-widget`](done/viewer-audit-checkbox-box-widget.md)
+  — The settings checkbox box is spawned and repainted by hand in seven places
 - [`viewer-audit-collider-settle-treadmill`](done/viewer-audit-collider-settle-treadmill.md)
   — A mesh with no physics block rebuilds its collider and the BVH every frame
   forever
@@ -2313,6 +2287,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-channel-and-commands`](done/viewer-chat-channel-and-commands.md)
   — Chat channels, whisper/shout & /me (blocked by `viewer-ui-text-input-emoji`
   (done))
+- [`viewer-chat-clickable-sender-names`](done/viewer-chat-clickable-sender-names.md)
+  — Clickable sender names in the chat / conversations transcript
 - [`viewer-chat-history-panel`](done/viewer-chat-history-panel.md) — Chat
   history panel (scrollable / resizable) (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-floater-basic` (done))
@@ -3116,6 +3092,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Budget decode-result geometry application (mesh / sculpt / rigged)
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
+- [`viewer-perf-gpu-avatar-crowd`](done/viewer-perf-gpu-avatar-crowd.md) — GPU
+  avatar crowd — compute-pass animation + same-body instancing
 - [`viewer-perf-gpu-avatar-extract-skins-floor`](done/viewer-perf-gpu-avatar-extract-skins-floor.md)
   — Eliminate CPU extract_skins for GPU-posed avatars (iterate-all floor)
 - [`viewer-perf-gpu-avatar-keystone-skinuniforms-spike`](done/viewer-perf-gpu-avatar-keystone-skinuniforms-spike.md)
@@ -3165,6 +3143,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Cross-instance prim tessellation cache + shared mesh handles
 - [`viewer-perf-prim-texture-apply-burst`](done/viewer-perf-prim-texture-apply-burst.md)
   — Throttle prim-texture application + GPU asset uploads during rez bursts
+- [`viewer-perf-probe-capture-shadows`](done/viewer-perf-probe-capture-shadows.md)
+  — Reduce directional shadow-cascade cost for probe capture views
 - [`viewer-perf-run-condition-gating`](done/viewer-perf-run-condition-gating.md)
   — Gate idle systems with run conditions (pause off-screen/inactive work)
 - [`viewer-perf-session-network-thread`](done/viewer-perf-session-network-thread.md)
@@ -3685,6 +3665,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-settings-binding`](done/viewer-ui-settings-binding.md) — Two-way
   widget↔settings binding layer (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-settings-store` (done))
+- [`viewer-ui-settings-binding-combo`](done/viewer-ui-settings-binding-combo.md)
+  — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
+  `viewer-ui-settings-binding` (done))
+- [`viewer-ui-settings-binding-text`](done/viewer-ui-settings-binding-text.md) —
+  Text-field↔settings two-way binding (blocked by `viewer-ui-text-input-widget`
+  (done), `viewer-ui-settings-binding` (done))
 - [`viewer-ui-settings-store`](done/viewer-ui-settings-store.md) — Typed
   persistent settings store
 - [`viewer-ui-shell-plugin-groups`](done/viewer-ui-shell-plugin-groups.md) — The
@@ -4706,7 +4692,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-world-map`](done/gridspec-world-map.md) — World map blocks, items,
   layers and tiles on each grid
 
-## deferred (30)
+## deferred (29)
 
 ### protocol
 
@@ -4751,8 +4737,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Zero-copy media frames (DMA-BUF / shared-texture import)
 - [`viewer-navigation-favorites-bars`](deferred/viewer-navigation-favorites-bars.md)
   — Navigation / location bar + favorites bar
-- [`viewer-non-goals-deferred-candi`](deferred/viewer-non-goals-deferred-candi-non-goals-deferred-candidate-follow-up-roadmaps.md)
-  — Non-goals (deferred; candidate follow-up roadmaps)
 - [`viewer-object-menu-reorder-when-implemented`](deferred/viewer-object-menu-reorder-when-implemented.md)
   — Re-lay the object pie by meaning once most actions are implemented (blocked
   by `viewer-object-context-menu` (done))
@@ -4793,12 +4777,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Library tranche — email and XML-RPC, parked (blocked by
   `server-lsl-vm-execution` (done))
 
-## wont-do (17)
+## wont-do (24)
 
 ### protocol
 
 - [`protocol-34`](wont-do/protocol-34-experience-key-value-store.md) —
   Experience key-value store
+- [`protocol-sim-lsl-syntax-document`](wont-do/protocol-sim-lsl-syntax-document.md)
+  — The fake grid serves an empty LSLSyntax document (blocked by
+  `server-lsl-library-surface-table` (done))
 
 ### viewer
 
@@ -4808,18 +4795,30 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Animesh surrounded by an almost-transparent box shell
 - [`viewer-discord-rich-presence`](wont-do/viewer-discord-rich-presence.md) —
   Discord rich-presence integration
+- [`viewer-non-goals-deferred-candi`](wont-do/viewer-non-goals-deferred-candi-non-goals-deferred-candidate-follow-up-roadmaps.md)
+  — Non-goals (deferred; candidate follow-up roadmaps)
+- [`viewer-perf-animation-lod-pose-cache`](wont-do/viewer-perf-animation-lod-pose-cache.md)
+  — Animation pose cache + temporal/budget pose LOD (no-GPU crowd stopgaps)
 - [`viewer-perf-avatar-ground-probe`](wont-do/viewer-perf-avatar-ground-probe.md)
   — Avatar ground probe — stop per-frame full-scene raycasts
+- [`viewer-perf-avatar-pose-extract-skins`](wont-do/viewer-perf-avatar-pose-extract-skins.md)
+  — Avatar pose path drives extract_skins — the serial critical-path cost
+- [`viewer-perf-avian-collider-tree-rez`](wont-do/viewer-perf-avian-collider-tree-rez.md)
+  — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-cached-static-shadow-map`](wont-do/viewer-perf-cached-static-shadow-map.md)
   — Cache the static sun-shadow map; re-render only dynamic casters
 - [`viewer-perf-per-object-face-merge-entity-count`](wont-do/viewer-perf-per-object-face-merge-entity-count.md)
   — Cut per-frame CPU by reducing world-object entity count (face merge /
   per-object cull unit)
+- [`viewer-perf-skeleton-single-solve`](wont-do/viewer-perf-skeleton-single-solve.md)
+  — Solve each avatar skeleton once per frame unless an adjuster needs two
 - [`viewer-perf-world-frustum-culling-octree`](wont-do/viewer-perf-world-frustum-culling-octree.md)
   — Spatial (octree/BVH) frustum culling for world meshes
 - [`viewer-r27`](wont-do/viewer-r27-midnight-is-almost-as-bright-as-midday.md) —
   Midnight is almost as bright as midday — NOT a viewer bug; the scenes had no
   night in them
+- [`viewer-script-error-window`](wont-do/viewer-script-error-window.md) — Script
+  warning / error window (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-stand-foot-ik-knee-asymmetry`](wont-do/viewer-stand-foot-ik-knee-asymmetry.md)
   — Standing foot-IK bends the two knees by different amounts on flat ground
 - [`viewer-teleport-reset-defeated-by-a-v1-grid`](wont-do/viewer-teleport-reset-defeated-by-a-v1-grid.md)

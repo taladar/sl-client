@@ -15,7 +15,7 @@ LLPanelRegionDebugInfo::onClickReturn) with three scope checkboxes:
 include objects with scripts, only objects on someone else's land, and
 apply to every region of the estate.
 
-Our Debug tab (`sl-client-bevy-viewer/src/about_region.rs`,
+Our Debug tab (`sl-viewer-places/src/about_region.rs`,
 [[viewer-region-options-debug]] done) has the
 scripts/collisions/physics toggles plus restart/cancel-restart only —
 no return UI in `AboutRegionAction`. The wire path exists unused:

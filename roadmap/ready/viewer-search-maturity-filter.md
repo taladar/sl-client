@@ -12,33 +12,35 @@ Context: [context/viewer.md](../context/viewer.md).
 
 `DirFindQuery` carries three include-flags — `DFQ_INC_PG`, `DFQ_INC_MATURE`,
 `DFQ_INC_ADULT` — and `sl-proto` types all three
-(`DirFindFlags::{IncPg, IncMature, IncAdult}` in `types/directory.rs`).
-`sl-viewer-search` imports `DirFindFlags` for the *category* bits and never sets
-any of the three rating bits.
+(`DirFindFlags::{INC_PG, INC_MATURE, INC_ADULT}` in `types/directory.rs`).
 
-So every search this viewer sends asks for whatever the grid's default is,
-rather than for what the account is entitled to and has asked for. An account
-whose `PreferredMaturity` is `PG` can be shown Moderate and Adult results, and
-the preference the General panel spent a whole retry conversation keeping in
-sync with the server does not reach the one query family it most obviously
-governs.
+**Audit 2026-10-15: half of the original finding was wrong or is outdated.**
+`sl-viewer-search/src/search.rs` does set the rating bits: `maturity_flags`
+reads the reference's per-category checkboxes (`SearchPlacesPG` / `…Mature` /
+`…Adult` and their Groups, Land, Events and Classifieds twins; General and
+Moderate on, Adult off by default) and `dispatch_query` unions them into every
+`DirFindQuery`, `DirPlacesQuery`, `DirLandQuery` and `DirClassifiedQuery` it
+sends, recomposed per
+query. People carries none, as in the reference.
 
-The reference viewer composes the flags from the preference each time it builds
-a query, not once at login, because the preference can change mid-session — and
-this viewer already has the change event to hang that off.
+What remains is the **account** half. Nothing clamps those checkboxes by what
+the account may see and has asked for: an account whose `PreferredMaturity`
+is `PG` (or whose ceiling is below Adult) can still tick Moderate and Adult
+and is sent those results. The reference disables the checkboxes the account
+may not use and composes the flags from the preference too, recomputed when
+the preference changes mid-session — and the General panel's maturity
+conversation already raises that change.
 
 Wanted:
 
-- The rating bits set from `PreferredMaturity` on every `DirFindQuery` the
-  search panel builds, recomposed when the preference changes rather than
-  captured at startup.
-- The same for the other directory queries that take rating flags, not just
-  people/groups: places, land, classifieds and events all filter by rating on a
-  live grid.
+- The checkboxes above the preference / entitlement disabled, and their bits
+  left out of every query, following a mid-session preference change.
 - A test. This is offline-testable end to end: the fake grid answers
-  `DirFindQuery`, so a case can set a preference, search, and assert the flags
-  on the query the grid received — better than asserting the results, which
-  would only prove the fixture.
+  `DirFindQuery` and now has a maturity ceiling per account
+  (`AccountConfig::maturity_ceiling` in `sl-fake-grid/src/accounts.rs`), so a
+  case can set a preference, search, and assert the flags on the query the
+  grid received — better than asserting the results, which would only prove
+  the fixture.
 
 The world map is the weaker sibling of the same gap and belongs here rather
 than in an item of its own: `world_map.rs` renders a rating badge per region
@@ -47,5 +49,6 @@ region the account may not enter. Fix the badge's silence at the same time or
 write down why not.
 
 Acceptance: a search issued while the preference is `PG` sends a query whose
-rating flags say `PG` only, the flags follow a mid-session preference change,
-and a conformance case pins the flags as the grid received them.
+rating flags say `PG` only whatever the checkboxes say, the flags follow a
+mid-session preference change, and a test pins the flags as the grid received
+them.

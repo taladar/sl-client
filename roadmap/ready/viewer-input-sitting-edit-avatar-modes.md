@@ -11,7 +11,7 @@ refs: [viewer-camera-keyboard-controls, viewer-sit-stand-actions,
 Context: [context/viewer.md](../context/viewer.md).
 
 The reference's `key_bindings.xml` has four binding modes; our
-`InputMode` (`sl-client-bevy-viewer/src/input_context.rs`) has only
+`InputMode` (`sl-viewer-world-view/src/input_action.rs`) has only
 ThirdPerson, Mouselook and Flycam equivalents. Missing are `sitting`
 and `edit_avatar`, each with its own default profile and 12 dedicated
 actions: `spin_around_ccw/cw_sitting`, `spin_over/under_sitting`,
@@ -25,8 +25,9 @@ control, the sit camera is scripted, or the agent is running
 (`llviewerinput.cpp`, `camera_spin_around_ccw_sitting` and friends),
 and the Shift variants always pass controls to the vehicle. Ours
 hardwires the seated branch to vehicle steering:
-`sl-client-bevy-viewer/src/movement.rs` (around lines 436-448) always
-emits YAW control bits when `agent.seated_on.is_some()`, so sitting on
+`sl-viewer-world-view/src/movement.rs` (the `if seated` branch of the
+movement driver) always emits YAW control bits when
+`agent.seated_on.is_some()`, so sitting on
 an ordinary chair turns the movement keys into dead keys instead of
 orbiting the camera. EditAvatar: while the appearance editor
 ([[viewer-appearance-editor-shell]], done) is open, the reference

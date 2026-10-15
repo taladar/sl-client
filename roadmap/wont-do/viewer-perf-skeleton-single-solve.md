@@ -2,12 +2,22 @@
 id: viewer-perf-skeleton-single-solve
 title: Solve each avatar skeleton once per frame unless an adjuster needs two
 topic: viewer
-status: ideas
+status: wont-do
 origin: performance survey of the implemented viewer (2026-07-22)
 refs: [viewer-profiling, viewer-avatar-impostors-billboard]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+**Won't do (audit 2026-10-15): superseded by the GPU avatar path.** The full
+skeletal recurrence this item wanted to run once instead of twice is gone
+from the CPU: [[viewer-perf-gpu-avatar-phase4-remove-scaffolding]] moved FK
+and skinning to the GPU compute passes. `pose_avatar_skeletons`
+(`sl-viewer-world-avatar/src/animations.rs`) still builds a `world0` for the
+adjusters, but as a chain mini-FK over the few `ADJUSTER_JOINT_NAMES` and
+their ancestors (`deformed_world_chain`), not a ~130-joint solve — gating it
+would save next to nothing. The text below is kept as history; its line
+references predate the rewrite.
 
 `pose_avatar_skeletons` (`animations.rs:961-1259`) runs the full SL
 skeletal recurrence — per-joint world-matrix chain over ~30+ joints plus

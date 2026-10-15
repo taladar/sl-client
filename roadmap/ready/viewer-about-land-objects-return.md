@@ -14,11 +14,14 @@ The reference About Land Objects tab acts on parcel objects: Return per
 class (owner/group/other, with live counts), Return per selected owner
 from the object-owners list, Show (select/beacon) per class, and an
 editable autoreturn ("clean other time") minutes field. Our Objects tab
-(`sl-client-bevy-viewer/src/about_land.rs`) renders the counts and the
+(`sl-viewer-places/src/about_land.rs`) renders the counts and the
 owners table but the only action is `RefreshOwners`, and autoreturn is a
-read-only value node. The write paths exist unused in
-`sl-proto/src/command.rs`: `ReturnParcelObjects`, the parcel
-select/disable-objects command, and `SetParcelOtherCleanTime`.
+read-only value node. The write paths exist in `sl-proto/src/command.rs`:
+`ReturnParcelObjects`, `SelectParcelObjects` / `DisableParcelObjects`, and
+`SetParcelOtherCleanTime`. `ReturnParcelObjects` and `DisableParcelObjects`
+are already sent by the Top Objects floater
+(`sl-viewer-places/src/top_objects.rs`), the pattern to follow; About Land
+sends none of them.
 
 Also fold in two small reference gaps whose write paths already exist:
 the Access tab's "Sell passes to" Anyone/Group combo (a flag combination

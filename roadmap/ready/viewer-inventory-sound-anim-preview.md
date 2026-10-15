@@ -21,6 +21,15 @@ The item-preview players the per-type Open path
   and the asset's priority/duration/loop metadata displayed from the
   `sl-anim` decode.
 
+Audit 2026-10-15: part of the animation half exists. The keyed
+`"preview-animation"` window in
+`sl-viewer-inventory/src/inventory_properties.rs`
+([[viewer-key-animation-preview]]) has **Play in world** / **Stop**
+(`PlayAnimation` / stop for that window's asset). Still missing there:
+local-only playback and the priority / duration / loop metadata from the
+`sl-anim` decode. The sound preview does not exist at all (a sound item has no
+Open).
+
 Small, but the everyday way inventories get sorted ("which of these five
 identically-named sounds is the doorbell").
 

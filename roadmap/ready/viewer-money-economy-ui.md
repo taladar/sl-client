@@ -49,3 +49,15 @@ replaces the "L$" label and `currency-base-uri` overrides the economy
 helper URI per region, with a change notification when the region
 switches either. Wire decode already exists in
 `sl-wire/src/sim_features.rs`.
+
+## Audit 2026-10-15
+
+Already in place: the **L$ balance** read-out in the status bar
+(`sl-client-bevy-viewer/src/status_bar.rs`, `AgentBalance`, requested with
+`Command::RequestMoneyBalance`), and a plain pay-an-avatar amount row in the
+avatar profile (`sl-viewer-people/src/avatar_profile.rs`, sending
+`Command::SendMoneyTransfer`). Nothing else listed here exists yet: no pay
+dialog (and no viewer consumer of `PayPriceReply`), no buy-object /
+buy-contents / buy-land / buy-currency floaters, no transaction history or
+money tracker, and the OpenSim `currency` symbol is decoded but no viewer
+label reads it.

@@ -2,11 +2,19 @@
 id: viewer-perf-avian-collider-tree-rez
 title: Reduce avian3d collider-tree churn during bulk rez
 topic: viewer
-status: ready
+status: wont-do
 origin: Tracy profiling of Aditi rezzing (2026-07-30)
+refs: [viewer-perf-custom-static-raycast-index]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+**Won't do (audit 2026-10-15): obsolete.** avian3d is no longer a dependency
+of the viewer — [[viewer-perf-custom-static-raycast-index]] replaced it with a
+custom parry3d static raycast index (`sl-viewer-kit/src/raycast_index.rs`),
+so `block_on_optimize_trees` and the avian broadphase this item measured no
+longer run. Any rez-time cost of the new index is that task's territory.
+The original measurement is kept below.
 
 Tracy self-time over the first ~10 s of rezzing on Aditi shows the avian3d
 physics broadphase re-optimizing constantly as colliders stream in:

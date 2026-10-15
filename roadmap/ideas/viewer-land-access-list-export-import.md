@@ -16,9 +16,9 @@ ban lists between parcels and estates or share them.
 
 Ours has none of these: the About Land access tab
 ([[viewer-parcel-options-access-media]], done;
-`sl-client-bevy-viewer/src/about_land.rs`) and the About Region access
+`sl-viewer-places/src/about_land.rs`) and the About Region access
 tab ([[viewer-region-options-estate]], in progress;
-`sl-client-bevy-viewer/src/about_region.rs`) only add/remove single
+`sl-viewer-places/src/about_region.rs`) only add/remove single
 entries. Implementing this means a file-format-compatible export/import
 (Firestorm uses a simple name-per-line list format) plus a
 copy-to-clipboard action on our table widgets, feeding the existing

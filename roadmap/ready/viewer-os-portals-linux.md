@@ -72,8 +72,9 @@ single-flight, and remembers a last-used directory **per purpose**.
 
 What is still this task's:
 
-- **Save** dialogs, folder pickers, and multi-select — only `pick_file` is
-  wired.
+- **Save** dialogs and multi-select. (Folder pickers are done since: the
+  open dialog takes a `FileDialogSelection` of `File` or `Folder`, mapping to
+  `rfd`'s `pick_file` / `pick_folder` — audit 2026-10-15.)
 - **No parent window.** `rfd::set_parent` wants a `HasWindowHandle`, and Bevy
   only offers one through `RawHandleWrapper::get_handle`, an `unsafe fn` this
   workspace's `unsafe_code = "forbid"` rules out. Fixing it properly means a

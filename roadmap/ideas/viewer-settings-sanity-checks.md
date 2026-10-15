@@ -22,10 +22,16 @@ type errors are impossible, and the curated preferences UI already
 clamps ranges — which is why this sits in ideas: the value would
 mainly be guarding the raw debug-settings editor
 ([[viewer-preferences-debug-settings-editor]] done,
-`sl-client-bevy-viewer/src/debug_settings.rs`) against
+`sl-viewer-preferences/src/debug_settings.rs`) against
 legal-but-harmful values, a much smaller surface than in the
 reference. If picked up, the natural shape is optional per-setting
 validation metadata in the typed store plus a one-shot warning toast.
 
 Reference (Firestorm, read-only): `indra/newview/sanitycheck.cpp`,
 `indra/newview/app_settings/settings.xml` (SanityCheck… entries).
+
+Audit 2026-10-15: the reference's `SanityCheck` notification (Fix it / Keep
+it form) is already in the catalogue
+(`sl-viewer-notifications/src/catalogue/preferences.rs`, strings in
+`main.ftl`), but nothing raises it; the per-setting rule metadata and the
+check that would raise it are what remain.

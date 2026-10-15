@@ -45,5 +45,11 @@ Deliverables sketch:
   culture-colour task uses, so the two compose rather than fight.
 - WCAG-style contrast minimums for text on its background.
 
+Audit 2026-10-15: the token half of the toggle exists — meaning-bearing
+colours are addressable as `--gain` / `--loss` / `--notice-*`
+(`sl-viewer-ui-core/src/skins/fallback.css`), and several skin comments name a
+colour-blind overlay as their consumer. No overlay, CVD simulation helper or
+user toggle exists yet.
+
 Reference (Firestorm, read-only): its UI is colour-heavy with little
 non-colour redundancy — a feature-gap to fill, not a design to copy.

@@ -28,3 +28,12 @@ Reference (Firestorm, read-only): `llfloaterconversationlog`,
 `llfloaterconversationpreview`, `llconversationlog`.
 
 Builds on: the chat-log files ([[chat-b9]]) and the per-avatar account dirs.
+
+Audit 2026-10-15: the on-disk side has grown since — the chat log now lives
+in `sl-client-common/src/chat_log.rs` and keeps the reference's
+`conversation.log` **index** (one line per conversation with its last-activity
+stamp, purged after `ConversationLogRetentionDays`; the line codec is
+`sl_proto::conversation_log_line` / `conversation_log_file`), toggled by the
+`KeepConversationLog` preference (`sl-viewer-preferences/src/
+preferences_chat.rs`). The floater should list that index rather than walk
+the directory. No browse UI exists yet; that is what remains.

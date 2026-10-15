@@ -5,17 +5,18 @@ topic: viewer
 status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
-refs: [server-lsl-runtime-errors, viewer-lsl-editor-save-compile]
+refs: [server-lsl-runtime-errors, viewer-lsl-editor-save-compile,
+  viewer-script-error-window, viewer-chat-channel-and-commands]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
 
-`ChatType::DebugChannel` is decoded (`sl-proto`'s `ChatType`, code 6)
-and **no viewer crate mentions it**: the only reference to
-`DebugChannel` outside `sl-proto` in the whole workspace is `sl-repl`'s
-chat-type argument parser. So a script that errors at run time on any
-grid — the local OpenSim today, the fake grid once it runs scripts —
-says so into a channel this viewer drops on the floor.
+`ChatType::DebugChannel` is decoded (`sl-proto`'s `ChatType`, code 6).
+Audit 2026-10-15: since this was written such lines do reach the Nearby
+transcript, as automation kind `debug` (`sl-viewer-people/src/conversations.rs`
+`chat_kind`, pinned by `e2e_pilot.rs`'s debug-channel test), but nothing
+gives them a surface of their own, a preference or a distinct look. So a
+script that errors at run time on any grid drowns in nearby chat.
 
 The reference has a dedicated window for it
 (`llfloaterscriptdebug.cpp`, Advanced ▸ Show Script Errors), with a
@@ -39,6 +40,14 @@ What it needs here:
   the script is modifiable, to the editor at the reported line —
   [[viewer-lsl-editor-save-compile]] already lists compile errors with
   line and column, so the two error surfaces should read alike.
+
+Folded in from [[viewer-script-error-window]] (the same window, filed twice):
+a **combined tab plus one tab per source object**, as the reference does;
+each line timestamped with the object name; a jump-to-object **beacon**
+action; a cap on retained lines. Parity-audit extensions: an option to route
+`llOwnerSay` output into this window instead of (or as well as) nearby chat
+(`FSllOwnerSayToScriptDebugWindow` and its routing-variant setting), and
+clear-window-on-close (`FSScriptDebugWindowClearOnClose`).
 
 This is independently useful: a run-time error today is invisible
 against the *live* grids too, which makes any scripted content

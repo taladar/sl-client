@@ -38,12 +38,15 @@ remaining *capability* gap, and should not be justified by that symptom.
 Scope:
 
 - `Command::FetchInventoryItems(Vec<InventoryKey>)`, routed to
-  `CAP_FETCH_INVENTORY` (agent) / `CAP_FETCH_LIBRARY` (library) by the owner of
-  each item, mirroring `fetch_folder_contents`' routing;
-- the request body — the same shape the descendents request uses for folders,
-  each entry an `{ item_id, owner_id }` map
-  (`build_fetch_inventory_request` is the model to follow, and the reply parser
-  already exists);
+  `CAP_FETCH_INVENTORY_ITEM` (`FetchInventory2`, agent) /
+  `CAP_FETCH_LIBRARY_ITEM` (`FetchLib2`, library) by the owner of each item,
+  mirroring `fetch_folder_contents`' routing;
+- the request body — each entry an `{ item_id, owner_id }` map. The builder
+  exists already (audit 2026-10-15):
+  `sl_wire::build_fetch_inventory_items_request` with `FetchItemRef`,
+  round-tripped in `sl-wire/tests/llsd.rs` and parsed by the server side's
+  `CapHandler::FetchItems` (`sl-proto/src/sim_caps.rs`); only the client command
+  is missing, and the reply parser already exists;
 - **both runtimes**, at parity: `sl-client-tokio` and `sl-client-bevy`;
 - a `sl-conformance` case (`test-inventory-item-fetch`): fetch an item by id on
   a live grid and check the reply against what a folder fetch says about the

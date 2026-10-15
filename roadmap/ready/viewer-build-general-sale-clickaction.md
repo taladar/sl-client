@@ -12,7 +12,7 @@ refs: [viewer-prim-parameter-editing, viewer-object-menu-custom-verbs,
 Context: [context/viewer.md](../context/viewer.md).
 
 The build floater General tab's commerce/behaviour block, all absent
-from `sl-client-bevy-viewer/src/edit_params.rs`: the **For Sale**
+from `sl-viewer-edit/src/edit_params.rs`: the **For Sale**
 checkbox with the sale-type combo (Copy / Contents / Original) and the
 L$ price field; the **click-action** combo (Touch / Sit / Buy / Pay /
 Open / Zoom / Ignore / None); the **Show in search** checkbox; and the
@@ -21,8 +21,8 @@ handling exists in edit_params / edit_tool / gizmos today).
 
 The wire paths already exist unused in sl-proto:
 `Command::SetObjectForSale` (`sl-proto/src/command.rs:1462`),
-`Command::SetObjectClickAction` (`command.rs:1391`),
-`Command::SetObjectIncludeInSearch` (`command.rs:1481`), and the
+`Command::SetObjectClickAction` (`command.rs:1547`),
+`Command::SetObjectIncludeInSearch` (`command.rs:1637`), and the
 permission-mask update covers Locked. So this task is UI plus wiring.
 Greying under insufficient permissions belongs to
 [[viewer-edit-permission-gating]]; the pie-menu side of custom click

@@ -22,10 +22,10 @@ Ctrl+0 / Ctrl+9 / Ctrl+8 (zoom in / default / out), Shift+Esc (reset
 camera angles) and Ctrl+\ (look at last chatter).
 
 Our third-person camera is mouse-only today
-(`sl-client-bevy-viewer/src/camera.rs`, `orbit_third_person` around
-lines 773-870: Alt+LMB drag plus wheel zoom); none of these camera
+(`sl-viewer-world-view/src/camera.rs`, `orbit_third_person` at
+line 807: Alt+LMB drag plus wheel zoom); none of these camera
 operations exist as `Action`s in
-`sl-client-bevy-viewer/src/input_action.rs`, so they can never be bound
+`sl-viewer-world-view/src/input_action.rs`, so they can never be bound
 or rebound. Add them as a camera-family `Action` set resolved through
 the per-mode binding profiles (the masked defaults need
 [[viewer-input-modifier-chords]]) and drive the existing orbit/zoom rig

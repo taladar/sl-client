@@ -17,13 +17,15 @@ from its **`/`-command chat trigger** — which needs the chat channel / command
 dispatch ([[viewer-chat-channel-and-commands]]) so a typed `/trigger` is routed
 to the gesture instead of being sent as chat.
 
-Own-avatar animation playback already exists (`animations.rs`,
-`locomotion.rs`); this task adds the step sequencer and the trigger firing.
+Own-avatar animation playback already exists
+(`sl-viewer-world-avatar/src/animations.rs`, `locomotion.rs`); this task adds
+the step sequencer and the trigger firing.
 
-**Sound steps are deferred**: they need the audio backend / UI sound bus
-([[viewer-ui-sound-effects]]), which is out of scope until that research lands.
-Sequence a sound step as a no-op (or a logged placeholder) for now and wire it
-to the sound bus as a follow-up.
+**Sound steps** (audit 2026-10-15): the audio backend landed
+([[viewer-ui-sound-effects]] is done; in-world sounds play in
+`sl-viewer-audio/src/world_sounds.rs`), so sound steps are no longer deferred.
+Per the measurement below a sound step only sends `Command::TriggerSound` and
+lets the grid's echo play it through the existing world-sound path.
 
 Reference (Firestorm, read-only): `llgesturemgr`, `llmultigesture`.
 

@@ -15,6 +15,14 @@ Context: [context/gridspec.md](../context/gridspec.md).
 `RegionInfo5` is newer-SL-only; `OpenRegionInfo` OpenSim-only; the fake grid
 answers `RequestRegionInfo` from defaults, not its store (stale-read bug).
 
+Audit 2026-10-15: the stale read is not visible in the code. The fake grid's
+`RequestRegionInfo` arm (`sl-fake-grid/src/parcel_edits.rs`) answers from
+`SceneFixtures::limits` (`sl-fake-grid/src/world.rs`), which returns the
+edited limits once an estate manager has changed them (since 2026-09-05), and
+an edit is pushed as `RegionChange::RegionConfigured`. Pin it with a test
+(edit, then request) before fixing anything; if it holds, only the flavour
+defaults remain for the fake grid here.
+
 ## Discover
 
 Extend `region-info` to record every block and field on both grids (no rights

@@ -42,3 +42,11 @@ With the crowd harness (`SL_VIEWER_CROWD=N`): far/occluded copies update pose at
 the bucketed cadence (no visible stutter), `stage_gpu_avatars` per-frame cost
 falls with distance/occlusion, near copies stay exact-phase. Bone-count LOD:
 distant copies use the reduced joint list with no perceptible skinning change.
+
+Audit 2026-10-15: not to be confused with what exists. `stage_gpu_avatars`
+(`sl-viewer-world-avatar/src/gpu_avatars/stage.rs`) already quantises a far
+avatar's looping-clip **sample phase** to `PHASE_BUCKET_HZ` (30 Hz) beyond
+`PHASE_SYNC_DISTANCE_METRES` (20 m) and dedups sample jobs by
+`(clip, phase)` — that shares sampling work but still re-poses every avatar
+every frame. The recompute-cadence skip (holding a far avatar's palette
+between updates) and the bone-count LOD are both still open.

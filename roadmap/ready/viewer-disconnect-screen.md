@@ -9,12 +9,13 @@ refs: [viewer-ui-notification-host, viewer-teleport-flow-progress]
 
 Context: [context/viewer.md](../context/viewer.md).
 
-When the viewer loses its simulator connection it currently just **exits the
-process / closes the window** (`session.rs`: "exit on any `LoggedOut` /
+When the viewer loses its simulator connection it currently just
+**exits the process / closes the window**
+(`sl-viewer-world-view/src/session.rs`: "exit on any `LoggedOut` /
 `Disconnected`"). The reference viewer instead **stays open**, drains the world
-to a **greyscale (black-and-white) render** and shows a **"You have been
-disconnected" error dialog** with the reason, letting the user read it and
-choose to quit or (where possible) reconnect/relog.
+to a **greyscale (black-and-white) render** and shows a
+**"You have been disconnected" error dialog** with the reason, letting the user
+read it and choose to quit or (where possible) reconnect/relog.
 
 Scope:
 
@@ -31,8 +32,8 @@ Scope:
   `KickUser`/`LogoutReply`) vs. a timeout/socket loss.
 
 The greyscale pass can reuse the existing post-process stack (tonemap/exposure
-lives in `exposure.rs`/`tonemap.rs`); a global desaturation uniform toggled on
-disconnect is the smallest hook.
+lives in `sl-viewer-world-scene/src/exposure.rs` / `tonemap.rs`); a global
+desaturation uniform toggled on disconnect is the smallest hook.
 
 Reference (Firestorm, read-only): `LLAppViewer::forceDisconnect` /
 `LLViewerWindow` disconnect grey-out, the "you have been logged out" /

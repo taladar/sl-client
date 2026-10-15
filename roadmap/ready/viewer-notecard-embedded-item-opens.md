@@ -23,13 +23,21 @@ type, and the types it does something *other* than copy for are:
 
 | type | what it does |
 | --- | --- |
-| landmark | open it — the place profile, from which you teleport |
+| landmark | open it — the place profile, from which you teleport (**done**) |
 | texture / snapshot | open the texture preview (**done**) |
 | calling card | open the avatar's profile (**done**) |
-| sound | play it locally, no copy |
+| sound | play it locally, no copy (**done**, then offers the copy) |
 | animation | open the animation preview (play / stop) |
 | notecard | open that notecard in its own window |
 | everything else | copy into inventory, behind the confirmation (**done**) |
+
+Audit 2026-10-15: landmark (About Landmark with its Teleport button), sound
+(local play on the UI bus) and — beyond the reference's table — material (the
+material editor without Save) now open in place, along with a right-click
+*Open* / *Copy to Inventory* menu: `EmbeddedAction` / `resolve_action` in
+`sl-viewer-asset-editors/src/notecard_render.rs`. What remains is the
+**animation** preview and opening an embedded **notecard** in its own window,
+both still falling to the copy path.
 
 Note how this overlaps [[viewer-inventory-double-click-actions]]: the same
 "what does this type open into" table, reached from a different surface. They

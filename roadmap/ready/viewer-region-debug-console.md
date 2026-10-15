@@ -35,3 +35,8 @@ line as an LLSD string; the output arrives as the event-queue
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+Audit 2026-10-15: the receive half is in `sl-proto`
+(`Event::SimConsoleResponse`, decoded in `session/methods.rs`; the server side
+has `SimSession::enqueue_sim_console_response`), but there is no `Command`
+that POSTs to `SimConsoleAsync` yet — that small send path comes first.

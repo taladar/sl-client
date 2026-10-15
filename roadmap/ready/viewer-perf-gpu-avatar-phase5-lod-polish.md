@@ -74,3 +74,15 @@ iterate-all floor), [[viewer-perf-pick-warm-set-scales-with-crowd]], and the
 pose-LOD [[viewer-perf-gpu-avatar-pose-lod]] (trims `stage_gpu_avatars` in Main
 — now more relevant than first thought). Harness cosmetic:
 [[viewer-crowd-harness-copies-render-grey]].
+
+## What remains (audit 2026-10-15)
+
+Steps 1–2 are in (`gpu_avatars/crowd.rs`; posed-bounds readback in
+`gpu_avatars/render.rs` + `apply_gpu_avatar_bounds` in `stage.rs`, and the
+avatar path no longer carries `NoFrustumCulling`). The pose-LOD knobs moved
+to [[viewer-perf-gpu-avatar-pose-lod]], the draw-side mesh LOD to
+[[viewer-perf-avatar-mesh-lod-screen-size]], and the extract floor and pick
+warm-set follow-ups are done. Left here: the **active-avatar clamp /
+priority floor** for background avatars (no such limit exists; the only
+`MAX_ACTIVE` is the per-avatar `MAX_ACTIVE_CLIPS = 16` motion block), and the
+optional box-select / HUD pick view.

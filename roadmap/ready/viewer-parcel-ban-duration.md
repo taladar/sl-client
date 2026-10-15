@@ -17,13 +17,16 @@ expiry time field in the `ParcelAccessListUpdate` message so the sim
 lifts the ban automatically.
 
 Our About Land Access tab ([[viewer-parcel-options-access-media]], done;
-`sl-client-bevy-viewer/src/about_land.rs`) adds ban entries with no
-duration choice — every ban is permanent; the only hours field we have is
-pass-hours. Implementing this means a small duration dialog (or inline
-choice) on the Add-to-ban flow that sets the access-list entry's time
-field, plus rendering the remaining duration on timed-ban rows the way
-the reference list does. The wire side is already exercised by
-[[test-parcel-access-list]].
+now `sl-viewer-places/src/about_land.rs`) adds ban entries with no
+duration choice — the add path pushes a `ParcelAccessEntry` with
+`time: 0`, so every ban is permanent; the only hours field we have is
+pass-hours. The allow / ban tables already have an expiry column
+(`expiry_text`: "Always" for `0`, else the date), so a timed ban made
+elsewhere already shows when it ends. What remains is a small duration
+dialog (or inline choice) on the Add-to-ban flow that sets the
+access-list entry's time field (and, if wanted, the reference's
+remaining-hours wording instead of a date). The wire side is already
+exercised by [[test-parcel-access-list]].
 
 Reference (Firestorm, read-only):
 `indra/newview/llfloaterbanduration.cpp`,

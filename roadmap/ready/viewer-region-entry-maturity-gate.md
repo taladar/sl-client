@@ -49,9 +49,14 @@ Wanted:
   below it. Both flavours can do this — the ratings are region policy, not a
   grid divergence — so it needs no live-grid run to verify.
 
-Depends on [[protocol-account-benefits-package]] for the account's real ceiling:
-today the fake grid hard-codes `agent_access_max = "A"`, so every account is
-maximally entitled and a refusal cannot be provoked at all.
+Built on [[protocol-account-benefits-package]] (done) for the account's real
+ceiling. Audit 2026-10-15: the fake grid now has the knob —
+`AccountConfig::maturity_ceiling` / `preferred_maturity`
+(`sl-fake-grid/src/accounts.rs`), sent as `agent_access_max` /
+`agent_region_access` by the Second Life flavour (`runtime.rs`; the OpenSim
+flavour still always sends `"A"`). What it still lacks is the refusal itself:
+nothing in `sl-fake-grid` sends `RegionEntryAccessBlocked`, and no viewer code
+raises any member of the family.
 
 Acceptance: an account whose ceiling forbids a region is refused with the
 family member the reference viewer would raise, accepting the offered change

@@ -2,12 +2,27 @@
 id: viewer-perf-animation-lod-pose-cache
 title: Animation pose cache + temporal/budget pose LOD (no-GPU crowd stopgaps)
 topic: viewer
-status: ideas
+status: wont-do
 origin: design discussion off the 2026-08-12 critical-path capture
 refs: [viewer-perf-avatar-pose-extract-skins, viewer-perf-gpu-avatar-crowd, viewer-avatar-impostors-billboard, viewer-perf-skeleton-single-solve]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+**Won't do (audit 2026-10-15): superseded.** These were CPU stopgaps to
+buy time before [[viewer-perf-gpu-avatar-crowd]]; that rewrite landed first
+(phases 0–4 done) and the CPU sample/FK/extract path they would have trimmed
+no longer exists. What survives of the ideas lives on the GPU path:
+
+- **#1 pose-sample cache** — done in GPU form: `stage_gpu_avatars`
+  (`sl-viewer-world-avatar/src/gpu_avatars/stage.rs`) dedups sample jobs by
+  `(clip, phase)` and quantises a far avatar's looping clips to
+  `PHASE_BUCKET_HZ` (30 Hz) beyond `PHASE_SYNC_DISTANCE_METRES`, so synced
+  far dancers share one sample job.
+- **#2 temporal / budget pose LOD** and **#3 bone-count LOD** — tracked as
+  [[viewer-perf-gpu-avatar-pose-lod]] (no weight remap needed there).
+
+The text below is kept as history.
 
 The near-term, **no-GPU-rewrite** levers for the animated crowd, chosen
 because the dance-club case defeats the usual ones: everyone dancing (so

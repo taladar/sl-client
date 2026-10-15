@@ -58,3 +58,9 @@ GPU-animation workaround, hence deferred.
 
 Profiling to confirm the win needs render-world timing, which is currently
 blocked — see [[viewer-profiling-logplugin-tracing]].
+
+Audit 2026-10-15: still open — the TODO is unchanged in the pinned bevy fork
+(`taladar/bevy` rev `d9cc76e`, `bevy_pbr/src/material.rs:1583`), so a fix
+would be one more entry on that fork's diff list. The profiling blocker is
+cleared ([[viewer-profiling-logplugin-tracing]] is done), so render-world
+timing to measure the win is available now.

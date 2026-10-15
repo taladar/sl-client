@@ -11,15 +11,15 @@ refs: [viewer-input-modifier-chords, viewer-movement-controls-floater,
 
 Context: [context/viewer.md](../context/viewer.md).
 
-Our `Action` set in `sl-client-bevy-viewer/src/input_action.rs` covers
+Our `Action` set in `sl-viewer-world-view/src/input_action.rs` covers
 10 of the reference's roughly 20 avatar-scope actions. Missing:
 
 `stop_moving` (default Space — zero all motion and stop the autopilot);
 `toggle_run` (menu Ctrl+R "Always Run" — the protocol side,
-sl-proto's `Command::SetAlwaysRun` at `sl-proto/src/command.rs:1878`,
+sl-proto's `Command::SetAlwaysRun` in `sl-proto/src/command.rs`,
 exists and is never issued by the viewer; today Run is only a held
 Shift modifier / double-tap latch in
-`sl-client-bevy-viewer/src/movement.rs` around lines 403-424) together
+`sl-viewer-world-view/src/movement.rs`, `double_tap_run`) together
 with the `run_forward/backward/left/right` directionals; the
 third-person strafe pair `slide_left/right` (default Shift+A/D and
 Shift+arrows — we strafe only in mouselook, third person has no strafe

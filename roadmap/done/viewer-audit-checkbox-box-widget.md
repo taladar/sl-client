@@ -2,10 +2,11 @@
 id: viewer-audit-checkbox-box-widget
 title: The settings checkbox box is spawned and repainted by hand in seven places
 topic: viewer
-status: ready
+status: done
 origin: viewer-audit-preferences-hub-decoupling (2026-09-20)
 points: 3
-refs: [viewer-audit-preferences-hub-decoupling, viewer-audit-skin-token-coverage]
+refs: [viewer-audit-preferences-hub-decoupling, viewer-audit-skin-token-coverage,
+  viewer-skin-checkbox-radio-shape]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -74,3 +75,17 @@ Sequencing note: the colours are hard-coded `Color`s today and
 `CheckboxPaint` per widget is the cheaper thing to re-point at a token later
 than seven scattered constant sets, so this is worth doing first — but it does
 mean the two tasks touch the same lines, and they should not run in parallel.
+
+## Done (audit 2026-10-15)
+
+Solved by [[viewer-skin-checkbox-radio-shape]] in a different shape than the
+`CheckboxPaint` proposed above: every site now spawns the shared
+`sl_viewer_ui_widgets::ui_checkbox::spawn_checkbox` widget and inserts
+`bound_checkbox` on it (commit e7ba43b3b681951eff93847d8d495c66f6e419d1 for
+`sl-viewer-preferences`, then `radar.rs`, `search.rs`, `experiences_floater.rs`,
+`my_environments.rs`, `land_environment.rs`, `edit_land.rs`). The box's look
+comes from the skin (`:checked` / `:disabled` in `common.css`), so the per-panel
+`CHECK_ON` / `CHECK_OFF` palettes, the six marker components and the
+`drive_*_checkbox_visual` systems are gone. The only hand-painted box left is
+`DemoCheckboxBox` in the F7 demo panel of `settings_binding.rs`, which
+[[viewer-audit-demo-panels-in-release]] covers.

@@ -52,3 +52,16 @@ within one shared budget.
 
 Do the concrete per-subsystem budgets first; this arbiter coordinates them once
 there is more than one and they demonstrably collide.
+
+## Audit 2026-10-15 — a first step exists
+
+Within one asset kind, the "budgets stack across subsystems" problem is
+already solved: commit `ab949f75` replaced the independent spawn / geometry /
+LOD / terrain counters with one shared `MeshUploadBudget` lane
+(`sl-viewer-world-objects/src/asset_budget.rs`) and all image inserts with
+the shared image lane of `TextureApplyBudget`, each drained in **schedule
+order** as a deliberate priority (an earlier system may starve a later one
+within a frame; reserved per-stream floors are named there as the follow-up).
+What this idea adds on top is unchanged: one budget **across** kinds and
+subsystems (images vs meshes vs pose / probe / env-map work) with explicit
+priorities and an aging floor.

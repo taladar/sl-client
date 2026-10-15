@@ -19,6 +19,16 @@ and render the light as a spotlight that modulates by the projected texture
 sampled in the light's frustum. Cap the number of active projectors like point
 lights, reusing the P25 nearest-N selection.
 
+**Audit 2026-10-15: the untextured half has landed.** The light-image
+extra-param is decoded into `LightProjection` (texture, fov, focus, ambiance;
+`sl-viewer-world-api/src/object_components.rs`), and
+`sl-viewer-world-scene/src/lights.rs` (`drive_local_lights` / `spot_light`)
+already renders a projector as a Bevy `SpotLight` with its cone, inside the
+shared nearest-N budget. What remains is the projected **texture** (Bevy 0.19
+has `SpotLightTexture` in `bevy_light`; check whether it fits before building
+a custom path),
+plus `focus` and `ambiance`.
+
 Per-projector **shadows** — the third shadow tier — are a separate follow-up in
 [[viewer-projector-lights-spot-shadows]]; this task delivers the textured
 spotlight without shadow casting.

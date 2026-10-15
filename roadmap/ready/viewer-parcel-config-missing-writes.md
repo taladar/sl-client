@@ -40,7 +40,7 @@ Reference (Firestorm, read-only): `llpanellandmedia`, `llpanellandaudio`,
 
 Parity-audit addition: the Options tab's **SeeAvatarsCheck** ("Avatars
 on other parcels can see and chat with avatars on this parcel"). We
-have no such control at all in `sl-client-bevy-viewer/src/about_land.rs`;
+have no such control at all in `sl-viewer-places/src/about_land.rs`;
 the read exists (`ParcelInfo.see_avs`, `sl-proto/src/types/parcel.rs`)
 but `ParcelUpdate` lacks the field — the same caps-side
 ParcelPropertiesUpdate class as the avatar-sound toggles this task
@@ -58,3 +58,20 @@ leave it `None` for a field the floater did not show. OpenSim has no link
 sharing or `obscure_moap` (`book/src/gridspec/land.md`), so those controls
 change nothing there. The experiences and environment tabs still have no write
 path.
+
+## Audit 2026-10-15
+
+- **Environment tab — done.** `build_environment_tab`
+  (`sl-viewer-places/src/about_land.rs`) now hosts the shared
+  land-environment panel (`sl-viewer-places/src/land_environment.rs`,
+  `spawn_land_environment_panel`) scoped to the parcel, publishing through
+  `Command::SetEnvironment` (`sl-proto/src/command.rs`); its day cycle can be
+  customised in place (commit `426f5a39`). Drop it from this task.
+- **Media / sound / see-avatars / obscure-MOAP** — still read-only in the
+  floater although the write path exists (§ Write path above): the avatar
+  sound rows are still documented "Read-only" and `ParcelUpdate`'s new
+  fields are never set from the floater.
+- **Experiences tab** — still the "unavailable" note
+  (`build_experiences_tab`). The region-level lists do have a write path now
+  (`RegionExperiences`, `Command::SetRegionExperiences`, used by
+  `about_region.rs`); the per-parcel allow / block sub-lists still have none.

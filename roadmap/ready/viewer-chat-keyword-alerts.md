@@ -25,7 +25,8 @@ visual alert stands alone), and settings persistence.
 The alert **colour** already exists: the skin token (`--keyword-alert`), the
 `KeywordAlertColor` setting and its preferences swatch row shipped with
 [[viewer-preferences-colors-skins-tab]] — this task wires the highlight that
-consumes it (`crate::skin_colors::SETTING_KEYWORD_ALERT`).
+consumes it (`SETTING_KEYWORD_ALERT` in
+`sl-viewer-ui-core/src/skin_colors.rs`).
 
 Reference (Firestorm, read-only): the FS chat preferences keyword section
 (`panel_preferences_chat`, `FSKeyword*` settings), `fskeywords`.

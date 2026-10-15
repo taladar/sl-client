@@ -84,3 +84,23 @@ each item is a before/after measurement exercise in miniature.
 
 Confidence: high — all call sites and existing throttles/gates verified,
 and the top three now measured.
+
+## Audit 2026-10-15
+
+The modules moved in the crate split: `drive_local_lights` is in
+`sl-viewer-world-scene/src/lights.rs` (still a fresh ranked `Vec` + sort
+each frame), `drive_render_priority` in
+`sl-viewer-world-objects/src/render_priority.rs` (still fresh maps per run),
+the particle sim in `sl-viewer-world-scene/src/particles.rs`.
+`update_status_readouts` (`sl-client-bevy-viewer/src/status_bar.rs`) now runs
+on a 100 ms `on_timer` and shows Bevy's smoothed FPS — the 60 Hz re-shape is
+gone, the reference's 1 s / 200-frame median is not done.
+
+Two leftovers folded in from the retired
+[[viewer-perf-avatar-pose-extract-skins]] (its headline cost went away with
+the GPU avatar path): `pose_avatar_skeletons`
+(`sl-viewer-world-avatar/src/animations.rs`) still clones each avatar's
+`AnimationPose` per frame (`poses.get(&agent).cloned()`; a reused `Local` +
+`clone_from` would keep the map allocations), and still reads four debug env
+vars per run through `std::env::var` (`LookAtDebug::from_env` and the
+`reach` / `body_physics` / `locomotion_ik` `log_enabled`) — cache them.

@@ -34,3 +34,11 @@ avian dynamic bodies; flexi (Phase 32) went with a bespoke solver instead
 
 Parked in `ideas/` — no consumer today; revisit when Phase 34 (avatar
 cloth/body physics) is scoped.
+
+Audit 2026-10-15: avian is gone from the workspace; client-side collision is
+now the custom parry3d raycast index (`sl_viewer_kit::raycast_index`:
+`StaticRaycastIndex` / `DynamicColliders`), so "avian collider" and "avian
+dynamic bodies" above read as "a shape in that index". A capsule, if ever
+needed, would be a `SharedShape::capsule` entry kept out of camera collision
+by the existing ignore-set rather than a collision layer. Flexi lives in
+`sl-prim/src/flexi.rs` / `sl-viewer-kit/src/flexi.rs`. Still no consumer.

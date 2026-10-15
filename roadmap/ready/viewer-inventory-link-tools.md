@@ -19,7 +19,7 @@ Links**), and Firestorm's **Cleanup broken Links** (delete links whose
 target item is gone).
 
 Our inventory gear menu ships all of these greyed as UNIMPLEMENTED
-(`sl-client-bevy-viewer/src/inventory.rs` INVENTORY_GEAR_MENU, noted as
+(`sl-viewer-inventory/src/inventory.rs` INVENTORY_GEAR_MENU, noted as
 such in [[viewer-inventory-floater-menus]]), and the item context menu
 in `inventory_actions.rs` has no Find Original / Find All Links entries
 at all. The held inventory model already indexes links — the COF

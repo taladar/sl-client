@@ -15,7 +15,7 @@ The build tool row's "Stretch Textures" checkbox
 texture repeats along with the face, so the texture stretches with the
 surface instead of tiling more. With the toggle off, repeats stay
 fixed — which is our current and only behaviour (no stretch-textures
-hit anywhere in `sl-client-bevy-viewer/src/gizmos.rs`).
+hit anywhere in `sl-viewer-edit/src/gizmos.rs`).
 
 Applies in the stretch gizmo's commit path (and equally when the Size
 numeric fields change scale), sending the updated TextureEntry

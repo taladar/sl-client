@@ -18,12 +18,15 @@ now), but the whole profile — WASD, vertical motion, speed modifier, what
 through as a set, together with the rebinding UI / persistence tasks that
 will expose it.
 
-Builds on: `input_action.rs` (the per-mode `BindingProfile`s).
+Builds on: `sl-viewer-world-view/src/input_action.rs` (the per-mode
+`BindingProfile`s).
 
 ## Parity-audit addendum (2026-08-19)
 
-Audit finding: `Action::ToggleFlycam` has no keyboard binding at all in
-any default profile — only the SpaceNavigator button toggles flycam
-(`sl-client-bevy-viewer/src/camera.rs:661`). The reference exposes
-Alt+Shift+F ("Joystick Flycam") in the menu. Fold a default keyboard
-toggle into the rethink.
+The 2026-08-19 finding — no keyboard way into the flycam — is resolved
+(audit 2026-10-15): Advanced ▸ Shortcuts ▸ Joystick Flycam carries the
+reference's `Alt+Shift+F` accelerator (`SHORTCUTS_MENU` in
+`sl-client-bevy-viewer/src/menu_bar.rs`, dispatching `ToggleFlycam`).
+`Action::ToggleFlycam` itself still has no binding in the default
+profiles; whether it should (vs. only the menu accelerator) is part of the
+rethink.

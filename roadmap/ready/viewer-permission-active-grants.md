@@ -20,3 +20,9 @@ the auto-grants).
 
 Reference (Firestorm, read-only): the script-info / granted-permissions surface,
 `llagent` control-flag release.
+
+Audit 2026-10-15: the protocol half exists — `Session::granted_permissions`
+mirrors each in-world grant and `Command::RevokeScriptPermissions` sends the
+`RevokePermissions` release (exercised by `sl-repl` and the conformance case
+`script_permissions`). No viewer surface reads or revokes them yet;
+`sl-viewer-notices/src/script_permission.rs` points here.

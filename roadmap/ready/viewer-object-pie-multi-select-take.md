@@ -13,12 +13,12 @@ Context: [context/viewer.md](../context/viewer.md).
 The reference's take sub-pie switches its slices on single vs multi selection:
 single shows `Take Copy` / `Take` (wired by [[viewer-object-context-menu]]),
 multi shows `Copies: Separately`, `Take: Combined`, `Copy: Combined` and
-`Take: Separately`. There is no multi-object selection yet, so the four
-multi-selection slices sit greyed (`UNIMPLEMENTED`) at their reference
-positions.
+`Take: Separately`. The four multi-selection slices still sit greyed
+(`UNIMPLEMENTED`) at their reference positions in
+`sl-viewer-ui-context-menus/src/object_menu.rs` (audit 2026-10-15).
 
-Once [[viewer-object-selection-core]] provides the maintained selection set,
-wire them:
+[[viewer-object-selection-core]] is done and provides the maintained
+selection set (click and drag-rectangle), so wire them:
 
 - **Combined** take / copy: one `DeRezObject` batch over every selected root
   (they land as a single coalesced inventory object, the server's combining

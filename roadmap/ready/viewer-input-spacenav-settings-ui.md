@@ -20,8 +20,10 @@ Reference (Firestorm, read-only): `llfloaterjoystick.cpp/h`.
 ## Parity-audit addendum (2026-08-19)
 
 Three reference joystick behaviours belong in this panel beyond the
-already-committed per-axis settings (`spacenav.rs` has axes 0-5 with
-dead-zone / scale / feathering): the zoom axis itself (`JoystickAxis6` —
+already-committed per-axis settings (`sl-viewer-spacenav/src/lib.rs`
+`register_settings` has flycam and avatar axes 0-5 with dead-zone / scale /
+feathering, plus `AutoLeveling` and `JoystickRunThreshold`, none of them
+on any panel yet): the zoom axis itself (`JoystickAxis6` —
 a seventh mappable axis driving camera zoom) with its behaviour pair
 `ZoomDirect` / `ZoomTime` (direct zoom versus time-smoothed), and
 `JoystickBuildEnabled` — enabling 6-DOF device input for object

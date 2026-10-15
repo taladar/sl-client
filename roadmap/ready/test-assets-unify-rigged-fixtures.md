@@ -22,7 +22,7 @@ has to be one".
 They are not gratuitously different, which is why this is a task and not
 a deletion:
 
-| | `render_scene::rigged_strip` | `rigged::cylinder` |
+| | `sl_viewer_render_fixtures::rigged_strip` | `rigged::cylinder` |
 | --- | --- | --- |
 | shape | flat strip, 18 verts, 16 tris | closed cylinder, 45 verts, 64 tris |
 | joints | `mPelvis` / `mTorso` | `mTorso` / `mChest` |
@@ -56,6 +56,13 @@ Making it a non-dev dependency of `sl-viewer-world-scene` — a library
 five crates and the viewer binary depend on — would put the JPEG2000
 *encoder* in all of them, to serve a fixture. Once the fixtures live in
 their own crate, that crate can depend on `sl-test-assets` for free.
+
+Audit 2026-10-15: that blocker is done — the fixtures are
+`sl-viewer-render-fixtures` (`rigged_strip` in its `src/lib.rs`), a
+dev-dependency of the viewer. One caveat for "for free":
+`sl-viewer-gallery` takes it as an ordinary dependency, so adding
+`sl-test-assets` there brings the encoder into the gallery's tree; measure
+with `cargo tree` before choosing the first option.
 
 Costs to budget: reblessing
 `baselines/sl-client-bevy-viewer/render/rigged-mesh.toml`, whose recorded

@@ -34,3 +34,10 @@ never reaches the `listener.await` path (`:90`) and never checks that the
 highest-priority waiter wins; and `WaiterCleanup` (`:162-177`) — the "a
 cancelled waiter never starves another" promise from the module doc — has no
 test that drops an unresolved `acquire` future.
+
+Audit 2026-10-15: still accurate — no shared store/disk skeleton exists.
+The figures have drifted: `sl-texture`'s progress type now lives in
+`schedule.rs` (it has no `progress.rs`), the stores have grown (`sl-asset`
+store 458, `sl-texture` 1,095, `sl-mesh` 978 lines), `sl-asset` has two
+tests in `store.rs` and two in `disk.rs`, and `gate.rs` still has only its
+two tests, with `set_priority` at `:94` and `remove` at `:105`.

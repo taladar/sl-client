@@ -12,7 +12,10 @@ Context: [context/gridspec.md](../context/gridspec.md).
 ## Known already
 
 Stock OpenSim ships no experience module; none of the experience cases ran on
-aditi; the fake grid serves experiences on both flavours.
+aditi. The fake grid serves experiences on its Second Life flavour only: the
+OpenSim flavour's seed withholds every experience capability
+(`OPENSIM_REFUSED_CAPABILITIES` in `sl-fake-grid/src/imitates.rs`, from
+[[gridspec-seed-capabilities]]).
 
 ## Discover
 
@@ -25,7 +28,8 @@ Firestorm or the web UI).
 
 ## Fake grid
 
-Small — a flavour row gating experience caps off for OpenSim.
+The OpenSim flavour's gating is done (above). What remains is holding the
+Second Life flavour's answers to what the aditi cases record.
 
 ## Viewer
 

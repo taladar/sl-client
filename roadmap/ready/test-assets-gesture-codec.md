@@ -41,3 +41,10 @@ gesture's steps without reading one.
 Acceptance: every vendored `.gesture` parses; a written gesture round
 trips; the vendored-content test asserts parsing rather than a version
 line.
+
+Audit 2026-10-15: still no decoder or encoder anywhere. One more consumer
+to switch over: `sl-test-assets/src/inventory.rs` hand-writes the seeded
+inventory's gesture (`gesture_body`) and exempts it from the
+"every body decodes as its declared class" test for want of a decoder. The
+vendored-content test is now
+`sl-viewer-world-avatar/tests/vendored_static_assets.rs`.

@@ -20,3 +20,8 @@ parts apply to our input pipeline.
 Reference (Firestorm, read-only): the `FSMouselook*` /
 `FSScrollWheelExitsMouselook` settings and their consumers in
 `llagentcamera.cpp` / FS patches.
+
+Audit 2026-10-15: `FSDisableMouseWheelCameraZoom` is done (a camera &
+movement preference, `sl-viewer-preferences/src/preferences_camera_move.rs`,
+honoured in `sl-viewer-world-view/src/camera.rs`). `FSMouselookCombatFeatures`
+and `FSScrollWheelExitsMouselook` remain.

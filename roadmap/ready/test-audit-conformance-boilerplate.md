@@ -60,3 +60,11 @@ Third: **17 cases depend on grid state the case does not provision** — every
 file with a `start_location` override needs the `SLClientScriptTester` prim from
 a hand-loaded OAR, which lives nowhere in git. A fresh checkout cannot run them
 and there is no precondition check with a useful message.
+
+Audit 2026-10-15: none of the helpers exists yet, and the duplication has
+grown with the case count (146 case files): 77 copies of the "ran without a
+secondary" form across 26 files, 30 of the agent-id form, and about a
+hundred `sleep(` call sites in `src/cases`. `parcel_divide_join.rs` no
+longer sleeps; `effects_sounds.rs`' `PARCEL_EDIT_SETTLE` (2 s, twice) is
+new. `parcel_ban_enforcement.rs` has a private `secondary()` helper that
+the shared one would replace.

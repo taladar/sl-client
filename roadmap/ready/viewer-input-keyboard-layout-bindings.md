@@ -23,8 +23,9 @@ bindings want different answers:
   binding stored by *logical key* would scatter the movement cluster. These
   should bind by **physical scancode** (Bevy's `KeyCode`, which is already
   position-based and layout-independent) so `W` stays under the same finger
-  everywhere. Confirm the current map genuinely stores `KeyCode` (position),
-  not a logical key, and that the settings UI presents them as positions.
+  everywhere. (Confirmed 2026-10-15: `BindingProfile` in
+  `sl-viewer-world-view/src/input_action.rs` is a `HashMap<KeyCode, _>`, so
+  every binding is positional today; there is no rebinding UI yet.)
 - **Mnemonic bindings** — shortcuts chosen for the *letter* (`M` for map, `I`
   for inventory, `B` for build). A user on QWERTZ expects the key **labelled**
   `M`, wherever it physically sits. These want the **logical key** (Bevy's

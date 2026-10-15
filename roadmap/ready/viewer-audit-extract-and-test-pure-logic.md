@@ -84,3 +84,26 @@ reachable through the pure `specialize(&self, key, layout)` (`:86`): assert
 if the flip ever regresses), `grid_login_uri` (`:701`), `resolve_login_uri`
 (`:717` — a four-level precedence ladder, duplicated verbatim in both REPL
 binaries), `replay_camera_start` (`:2586`).
+
+## Audit 2026-10-15
+
+Line numbers above have drifted throughout. Already covered since the audit:
+
+- the `collider_needs_build` / `collider_job_settled` bullet is moot —
+  [[viewer-audit-collider-settle-treadmill]] is done and those helpers no
+  longer exist under those names;
+- `collide_camera` (now `camera.rs:1819`, with a clearance argument) has
+  `collision_leaves_the_framed_sphere_clear`;
+- `tile_level` / `tile_corner` moved to the pure
+  `sl-viewer-map/src/world_map_math.rs` and are tested there;
+- `apply_persisted_widths` / `encode_widths` have
+  `widths_round_trip_and_clamp` and `malformed_widths_are_dropped_part_by_part`
+  in `ui_table.rs`;
+- the gizmo drag planning partly moved to `sl-viewer-edit/src/gizmos/plan.rs`
+  (which calls `clamp_corner_factor` / `primary_face_fold`), still untested.
+
+Everything else listed is still untested (e.g. `scroll_notches`,
+`ScreenshotSchedule`'s cadence — its tests cover only the sky report —,
+`gpu_pick/render.rs` with zero tests, `InventoryFilter::passes` at 4 tests,
+`parse_sl_vec3` / `resolve_login_uri` now at `lib.rs:816` / `:850`, and the
+local-light ranking still inline in `lights.rs`).

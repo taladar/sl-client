@@ -18,7 +18,7 @@ in-progress GLTF-objects project.
 Grid-side support is still experimental/beta, so this is a tracking
 item: revisit when LL ships the GLTF-object pipeline for real. Our PBR
 material editor ([[viewer-pbr-material-editor]], done;
-`sl-client-bevy-viewer/src/edit_material_asset.rs`,
+`sl-viewer-edit/src/edit_material_asset.rs`,
 `edit_material.rs`) already covers the materials half, and
 [[viewer-mesh-gltf-import]] covers GLTF as an import format.
 

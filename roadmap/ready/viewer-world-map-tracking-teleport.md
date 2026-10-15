@@ -25,14 +25,20 @@ render, and the teleport progress flow.
 Deps: [[viewer-world-map-floater]], [[viewer-beacons-beam-render]],
 [[viewer-teleport-flow-progress]].
 
-## Partial (2026-08-07)
+## Partial (2026-08-07, updated by the 2026-10-15 audit)
 
 The **teleport + map-marker** half landed as
-[[viewer-world-map-double-click-teleport]] (done): double-click a region → drop
-the `MapTracking` beacon + teleport through the shared backend. What remains
-here (still blocked on [[viewer-beacons-beam-render]]): the **in-world tracking
-beam** pointed at the tracked point. This task stays blocked until the beam
-render exists.
+[[viewer-world-map-double-click-teleport]] (done): a single click on the
+map sets the shared `MapTracking` target and feeds the X/Y/Z fields and the
+Teleport button; a double-click teleports through the shared backend
+(`sl-viewer-map/src/world_map.rs`). The **in-world tracking beam** this
+item used to wait for exists too: [[viewer-beacons-beam-render]] draws the
+`MapTracking` target (`sl-viewer-world-scene/src/beacons.rs`).
+
+What remains is the map floater's own track selectors — track a **friend**
+(the reference's online-friends combo, a `TrackTarget::Avatar`), a
+**landmark** (the landmarks combo) and an **event** from its marker — and
+the option below.
 
 ## Parity-audit addendum (2026-08-19)
 

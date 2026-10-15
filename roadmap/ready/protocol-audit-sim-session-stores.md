@@ -40,3 +40,8 @@ types, not from moving methods between files.
 
 `SESSION_FLOW_COVERAGE` and its pinned-table test must keep passing unchanged —
 it is the parity contract, not an implementation detail.
+
+Audit 2026-10-15: still open and grown — `SimSession` now has 67 fields
+(the newer ones include `money_balance`, `script_grants`, `offline_messages`,
+`attachment_resources`, `land_resource_*` and `voice`), and no serving-store
+type has been extracted yet.

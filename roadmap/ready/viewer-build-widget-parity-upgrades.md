@@ -12,7 +12,7 @@ Context: [context/viewer.md](../context/viewer.md).
 
 The build parameter tabs still carry deviations recorded when the
 widget library was younger (module doc of
-`sl-client-bevy-viewer/src/edit_params.rs`), and every original
+`sl-viewer-edit/src/edit_params.rs`), and every original
 blocker is done now:
 
 - Replace the prim-type, hollow-shape, and material **cycle buttons**
@@ -39,3 +39,9 @@ Reference (Firestorm, read-only):
 hole / material combos, colorswatch + projector texture_picker
 L2964-2977, button set group L1143), `indra/newview/llpanelobject.cpp`,
 `indra/newview/llpanelvolume.cpp`.
+
+Audit 2026-10-15: the fourth bullet is done — the General tab's **Set
+group** now opens the group picker (`ParamAction::SetGroup` writes
+`OpenGroupPicker` in `sl-viewer-edit/src/edit_params.rs`, commit 81d68d4f).
+The cycle buttons (`ParamCycle`), the three light-colour fields
+(`build-light-red` …) and the missing projector picker remain.

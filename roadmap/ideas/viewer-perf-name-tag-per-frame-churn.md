@@ -75,3 +75,13 @@ the unconditional projection + all-tags scan. Minor; batch with #2.
 `report_agent_viewport` (rate-limited + change-gated), `pose_attachment_nodes`
 (per-joint `is_changed()`), the `skin.rs` systems
 (`resource_changed`/`Added<T>`).
+
+## Audit 2026-10-15
+
+Still open: `compose_name_tags` (now
+`sl-viewer-world-avatar/src/name_tag_content.rs`, registered in that crate's
+`plugin.rs` `name_tag_pipeline`) has ordering only, and `follow_tag_anchors` /
+`solve_tag_overlap` (now `sl-viewer-world-objects/src/name_tag_billboard.rs`)
+still run every `PostUpdate` with a fresh `HashMap` per solve. The line numbers
+above predate the crate split. The `update_minimap_hover` bullet is the same fix
+as [[viewer-perf-map-hover-tooltip-node-writes]] — do it there.

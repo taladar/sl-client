@@ -42,10 +42,12 @@ and flag are answered with nothing at all; on Second Life a stranger's
 delete to the Trash and its `ObjectDelete` are refused in silence while a
 take and a return are refused with `NoPermsNoRemoval`.
 
-The deed leg needs groups: the fake grid has none, so today every group
-set is a no-op and every deed is refused, which is the measured answer for
-a group the agent is not in. A member's group set and a deed by a member
-with the power wait on the fake grid's groups ([[gridspec-groups]]).
+The deed leg needs groups. When this was written the fake grid had none, so
+every group set is a no-op and every deed is refused, which is the measured
+answer for a group the agent is not in. The fake grid holds groups now
+([[server-fake-grid-groups]], done 2026-10-15; `sl-fake-grid/src/groups.rs`),
+but its object edits do not consult them yet (audit 2026-10-15): a member's
+group set and a deed by a member with the power are part of this task.
 
 ## Linking (2026-10-11)
 

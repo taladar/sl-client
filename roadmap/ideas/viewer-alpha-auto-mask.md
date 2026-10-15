@@ -32,3 +32,16 @@ verify no haloing on gradient-alpha content before enabling by default.
 Reference (Firestorm, read-only): `indra/newview/lldrawpoolalpha.cpp`,
 `indra/llrender/llgltexture` automask path,
 `indra/newview/app_settings/settings.xml` (RenderAutoMaskAlphaDeferred).
+
+Audit 2026-10-15: the code named above has moved and changed shape. Face
+alpha is resolved in `sl-viewer-world-objects/src/textures.rs`
+(`resolve_texture_alpha_mode`, `TextureAlpha`): an ordinary (non-rigged)
+face with an alpha-bearing texture is *already always* alpha-masked at
+`FACE_ALPHA_MASK_CUTOFF` (R22d), while a rigged face blends only when the
+decode task's `DecodedTexture::min_alpha` shows real transparency. So the
+gap is no longer "no promotion" but the classification itself: nothing
+distinguishes binary from gradient alpha, so gradient-alpha prim faces mask
+where the reference (auto-mask on) would likely keep blending them, and
+binary-alpha rigged faces blend where it may mask (verify against the
+reference before relying on either). Re-scope around a
+binary/gradient classification in the decode task before promoting.
