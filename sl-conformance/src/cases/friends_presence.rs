@@ -37,9 +37,9 @@
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/friends.md`; every run is held to it.
 //!
-//! `2av`, `[both]`. The fake grid keeps no friendships yet
-//! (`server-fake-grid-friends-presence`). The friendship is ended and every
-//! calling card the census made is removed, also when a leg fails.
+//! `2av`, `[both]`, and both fake flavours, which keep friendships as the grid
+//! each imitates does. The friendship is ended and every calling card the
+//! census made is removed, also when a leg fails.
 
 use std::time::{Duration, Instant};
 
@@ -1701,7 +1701,7 @@ impl GridTest for FriendsPresence {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 139 |
-| ready | 353 |
+| ready | 351 |
 | blocked | 99 |
 | in-progress | 20 |
 | bugs | 38 |
-| done | 1368 |
+| done | 1371 |
 | deferred | 30 |
 | wont-do | 17 |
-| **total** | **2064** |
+| **total** | **2065** |
 
 ## ideas (139)
 
@@ -361,7 +361,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (353)
+## ready (351)
 
 ### protocol
 
@@ -379,9 +379,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Set the maturity preference over UpdateAgentInformation
 - [`protocol-fetch-inventory-items-request`](ready/protocol-fetch-inventory-items-request.md)
   — Fetching inventory items by id (FetchInventory2's request half)
-- [`protocol-sim-group-messages`](ready/protocol-sim-group-messages.md) —
-  SimSession — decode group requests and send group replies (blocked by
-  `gridspec-groups` (done))
 - [`protocol-sim-lsl-syntax-document`](ready/protocol-sim-lsl-syntax-document.md)
   — The fake grid serves an empty LSLSyntax document (blocked by
   `server-lsl-library-surface-table` (done))
@@ -1099,9 +1096,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-edit-permission-enforcement`](ready/server-fake-grid-edit-permission-enforcement.md)
   — Fake grid — refuse edits the editor may not make, as each grid refuses them
   (blocked by `gridspec-object-edit` (done))
-- [`server-fake-grid-friends-presence`](ready/server-fake-grid-friends-presence.md)
-  — Fake grid — a mutable friendship store with rights, presence fan-out and
-  calling cards (blocked by `gridspec-friends-presence` (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
@@ -1372,10 +1366,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-estate`)
 - [`server-fake-grid-god-tools`](blocked/server-fake-grid-god-tools.md) — Fake
   grid — god tools as OpenSim answers them (blocked by `gridspec-god-tools`)
-- [`server-fake-grid-groups`](blocked/server-fake-grid-groups.md) — Fake grid —
-  a group store: membership, roles, notices, invitations and group sessions
-  (blocked by `gridspec-groups` (done), `gridspec-group-chat-and-conference`,
-  `protocol-sim-group-messages`)
+- [`server-fake-grid-group-chat`](blocked/server-fake-grid-group-chat.md) — Fake
+  grid — group chat sessions (blocked by `gridspec-group-chat-and-conference`)
 - [`server-fake-grid-inventory-offers`](blocked/server-fake-grid-inventory-offers.md)
   — Fake grid — inventory offers, filing and object gives (blocked by
   `gridspec-inventory-offers`, `server-fake-grid-im-relay`)
@@ -1665,7 +1657,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1368)
+## done (1371)
 
 ### protocol
 
@@ -1915,6 +1907,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-sim-caps-region-info`](done/protocol-sim-caps-region-info.md) —
   Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`
   (done))
+- [`protocol-sim-group-messages`](done/protocol-sim-group-messages.md) —
+  SimSession — decode group requests and send group replies (blocked by
+  `gridspec-groups` (done))
 - [`protocol-sim-http-misc`](done/protocol-sim-http-misc.md) — Niche non-CAPS
   server channels — grid info, map tiles, helper URIs
 - [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
@@ -4592,6 +4587,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`server-fake-grid-agent-experiences`](done/server-fake-grid-agent-experiences.md)
   — Fake grid — the agent's own five experience lists
+- [`server-fake-grid-friends-presence`](done/server-fake-grid-friends-presence.md)
+  — Fake grid — a mutable friendship store with rights, presence fan-out and
+  calling cards (blocked by `gridspec-friends-presence` (done))
+- [`server-fake-grid-groups`](done/server-fake-grid-groups.md) — Fake grid — a
+  group store: membership, roles, notices, invitations and group sessions
+  (blocked by `gridspec-groups` (done))
 - [`server-fake-grid-login-response-sections`](done/server-fake-grid-login-response-sections.md)
   — The fake grid's login response lacks the sections and scalars the live grids
   send

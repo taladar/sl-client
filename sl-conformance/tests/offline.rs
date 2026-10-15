@@ -136,6 +136,8 @@ mod test {
         logout_clean => "logout-clean" [fake_sl, fake_opensim],
         sit_stand => "sit-stand" [fake_sl, fake_opensim],
         avatar_presence => "avatar-presence" [fake_sl, fake_opensim],
+        friends_presence => "friends-presence" [fake_sl, fake_opensim],
+        groups => "groups" [fake_sl, fake_opensim],
     }
 
     /// The tests declared above are exactly the offline cases, each on exactly

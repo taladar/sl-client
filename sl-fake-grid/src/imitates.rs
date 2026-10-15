@@ -970,6 +970,7 @@ impl ImitatedGrid {
                 object_delete: ObjectDelete::Deletes,
                 derez_kill: DerezKill::EveryPrimOnce,
                 trash_folder: TrashFolder::Named,
+                group_object_trash: GroupObjectTrash::AsAnyOther,
                 taken_item_masks: TakenItemMasks::Objects,
                 announcement_states_a_transaction: true,
                 rezzed_record_names_folder: true,
@@ -986,6 +987,7 @@ impl ImitatedGrid {
                 object_delete: ObjectDelete::Ignored,
                 derez_kill: DerezKill::RootTwice,
                 trash_folder: TrashFolder::AgentsOwn,
+                group_object_trash: GroupObjectTrash::LostAndFound,
                 taken_item_masks: TakenItemMasks::Folded,
                 announcement_states_a_transaction: false,
                 rezzed_record_names_folder: false,
@@ -1115,6 +1117,108 @@ impl ImitatedGrid {
                 gaze_camera_range_m: Some(crate::relays::OPENSIM_GAZE_RANGE_M),
                 sound_range_m: Some(crate::relays::OPENSIM_SOUND_RANGE_M),
                 sound_names_a_parent: true,
+            },
+        }
+    }
+
+    /// How this grid runs friendship — measured by the `friends-presence`
+    /// conformance case on aditi and the local OpenSim (2026-10-14,
+    /// `book/src/gridspec/friends.md`), and tabulated in [`crate::social`].
+    ///
+    /// Second Life passes an offer on under an id of its own and keeps one for
+    /// an avatar that is away until it asks; tells the offerer nothing of a
+    /// decline and of an accept only bare, with the accepter online; never
+    /// tells a grantee of the see-online right; and points the coarse feed at
+    /// a friend tracked with the map right. OpenSim passes an offer on under
+    /// the offerer's id and hands a kept one over at login; refuses an offer
+    /// to a friend; tells the offerer of either answer from the session of the
+    /// two; and makes a calling card for each side of a friendship, and one
+    /// for a card offer at once.
+    #[must_use]
+    pub const fn friends_policy(self) -> crate::social::FriendsPolicy {
+        use crate::social::{Acceptance, CardOffers, FriendsPolicy, KeptOffers, OfferForm};
+        match self {
+            Self::SecondLife => FriendsPolicy {
+                offers: OfferForm::Minted,
+                decline_told: false,
+                offer_to_a_friend_passed_on: true,
+                acceptance: Acceptance::Bare,
+                masks_see_online: true,
+                tracks: true,
+                cards: CardOffers::AsSent,
+                kept_offers: KeptOffers::Kept,
+            },
+            Self::OpenSim => FriendsPolicy {
+                offers: OfferForm::OfferersId,
+                decline_told: true,
+                offer_to_a_friend_passed_on: false,
+                acceptance: Acceptance::Stated,
+                masks_see_online: false,
+                tracks: false,
+                cards: CardOffers::MadeAtOnce,
+                kept_offers: KeptOffers::HandedOverAtLogin,
+            },
+        }
+    }
+
+    /// How this grid runs groups — measured by the `groups` conformance case
+    /// on aditi and the local OpenSim (2026-10-14,
+    /// `book/src/gridspec/groups.md`), and tabulated in [`crate::groups`].
+    ///
+    /// Second Life charges for a founding and cuts its name, reads a profile
+    /// like a cache, lists no roster over UDP, tells by alerts and failed
+    /// balance updates, sends a notice from its sender under an id per
+    /// recipient, answers the accounts, invites a member, and deeds only an
+    /// object shared with the group. OpenSim founds for free and makes the
+    /// group active, answers as the group stands, tells by the active group
+    /// and the memberships, sends a notice from the group, and deeds any.
+    #[must_use]
+    pub const fn groups_policy(self) -> crate::groups::GroupsPolicy {
+        use crate::groups::{GroupsPolicy, InvitationForm, StockRoles};
+        match self {
+            Self::SecondLife => GroupsPolicy {
+                founding_fee: crate::groups::SECOND_LIFE_FOUNDING_FEE,
+                name_limit: Some(35),
+                founding_text: "",
+                stock_roles: StockRoles::SecondLife,
+                activates_on_join: false,
+                stale_profile: true,
+                roster_over_udp: false,
+                everyone_pairs: false,
+                titles_by_role_name: false,
+                powers_of_worn_role: false,
+                assignment_wears: false,
+                roles_to_outsiders: false,
+                role_edits_told: false,
+                told_by_alerts: true,
+                notices_from_group: false,
+                accounts_answered: true,
+                invites_members: true,
+                invitation: InvitationForm::SecondLife,
+                deeds_unshared: false,
+                refused_move: Some("Can't reposition -- permission denied"),
+            },
+            Self::OpenSim => GroupsPolicy {
+                founding_fee: 0,
+                name_limit: None,
+                founding_text: "Group created successfully",
+                stock_roles: StockRoles::OpenSim,
+                activates_on_join: true,
+                stale_profile: false,
+                roster_over_udp: true,
+                everyone_pairs: true,
+                titles_by_role_name: true,
+                powers_of_worn_role: true,
+                assignment_wears: true,
+                roles_to_outsiders: true,
+                role_edits_told: true,
+                told_by_alerts: false,
+                notices_from_group: true,
+                accounts_answered: false,
+                invites_members: false,
+                invitation: InvitationForm::OpenSim,
+                deeds_unshared: true,
+                refused_move: None,
             },
         }
     }
@@ -1389,9 +1493,11 @@ pub const SECOND_LIFE_REFUSED_CAPABILITIES: &[&str] = &["ObjectAnimation", "Uplo
 /// of a prim's contents over HTTP (OpenSim lists them over UDP and `Xfer`, and
 /// has no experience to say a script is under).
 pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
+    "AcceptFriendship",
     "AcceptGroupInvite",
     "AgentExperiences",
     "ChatSessionRequest",
+    "DeclineFriendship",
     "DeclineGroupInvite",
     "DirectDelivery",
     "ExperiencePreferences",
@@ -1404,6 +1510,7 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "GetExperienceInfo",
     "GetExperiences",
     "GetMetadata",
+    "GroupAPIv1",
     "GroupExperiences",
     "IncrementCOFVersion",
     "InterestList",
@@ -2479,6 +2586,8 @@ pub struct RezPolicy {
     pub derez_kill: DerezKill,
     /// Which folder a delete to the Trash files the item in.
     pub trash_folder: TrashFolder,
+    /// Where a delete to the Trash of a group's object files the item.
+    pub group_object_trash: GroupObjectTrash,
     /// The base and owner masks of the item a derez files.
     pub taken_item_masks: TakenItemMasks,
     /// Whether the announcement of that item states a transaction. Second
@@ -2628,6 +2737,17 @@ pub enum TrashFolder {
     Named,
     /// The agent's own Trash, whatever folder the derez named: OpenSim.
     AgentsOwn,
+}
+
+/// Where a delete to the Trash of a group's object files the item
+/// ([`RezPolicy::group_object_trash`]) — measured by `groups` (2026-10-14,
+/// `book/src/gridspec/groups.md` § A deed by the owner).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupObjectTrash {
+    /// Where [`RezPolicy::trash_folder`] files any other: Second Life.
+    AsAnyOther,
+    /// In the agent's Lost And Found: OpenSim.
+    LostAndFound,
 }
 
 /// The base and owner masks of the item a derez files

@@ -13,8 +13,9 @@ Measured on 2026-10-14 by the conformance case `friends-presence`: avatar
 **A** offers, grants and ends; avatar **B** answers and goes away four times.
 Two runs on aditi (Mauve) and two on the local OpenSim; no answer changed
 between two runs of a grid, and every run is held to them (**held**). The
-fake grid keeps no friendships yet, so it is not measured here
-(`server-fake-grid-friends-presence`).
+fake grid imitates each (`sl-fake-grid`'s `social` module, a row of
+`FriendsPolicy` per divergence), and the same case holds both of its flavours
+to these answers offline.
 
 ## An offer and its answer
 

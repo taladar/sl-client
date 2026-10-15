@@ -216,6 +216,14 @@ impl Fixtures {
         self
     }
 
+    /// These fixtures with the census group set — what the fake grid supplies
+    /// for itself, as it supplies [`with_other_avatar`](Self::with_other_avatar).
+    #[must_use]
+    pub const fn with_census_group(mut self, group: GroupKey) -> Self {
+        self.census_group = Some(group);
+        self
+    }
+
     /// The default fixtures-file path for a grid (alongside the credentials
     /// file): `fixtures.toml` for OpenSim, `fixtures.<grid>.toml` otherwise,
     /// and `None` for a grid whose environment is not something an operator

@@ -196,13 +196,14 @@ use crate::types::directory::category_from_wire;
 use crate::types::{
     AddPrimParams, AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarAppearance,
     AvatarName, AvatarPickerResult, Camera, ChatSource, ChatType, ClassifiedCategory, ClickAction,
-    CoarseLocation, DeRezDestination, DetachOrder, DirClassifiedResult, DirEventResult,
-    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
+    CoarseLocation, CreateGroupParams, DeRezDestination, DetachOrder, DirClassifiedResult,
+    DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
     DirectoryVisibility, DisplayNameUpdate, EconomyData, EjectAction, EnvironmentSettings,
     EnvironmentUpdate, EstateAccessKind, EstateCovenant, EstateInfo, EventInfo, FeatureDisabled,
     FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage, GenericStreamingMessage,
     GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, ImDialog,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupNoticeKey, GroupRoleChange,
+    GroupRoleEdit, GroupRoleMemberChange, GroupRoleUpdateType, GroupVoteHistoryItem, ImDialog,
     InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
     LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
     LandStatReportType, LayerEncoding, LayerPacking, MapBlockBatch, MapItem, MapItemType, MapLayer,
@@ -678,6 +679,37 @@ struct ArmedTelemetry {
     coarse_due: Option<Instant>,
 }
 
+/// A message kept for an agent while it was offline, in the two forms a grid
+/// hands it over in: as the UDP `ImprovedInstantMessage` a
+/// `RetrieveInstantMessages` brings ([`message`](Self::message)), and as the
+/// record the `ReadOfflineMsgs` capability serves ([`record`](Self::record)).
+///
+/// The two are one message, but Second Life states them differently (measured
+/// on aditi, 2026-10-14 — `book/src/gridspec/friends.md`,
+/// `book/src/gridspec/groups.md`): a friendship offer's record names the
+/// session of the two avatars and the offerer's region where the message has
+/// its transaction and no region, and an invitation's record is from the
+/// inviter with the group as its id where the message is from the group. The
+/// record is serialized by [`offline_messages_to_llsd`](crate::offline_messages_to_llsd),
+/// its [`id`](InstantMessage::id) as the record's `asset_id`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct KeptMessage {
+    /// The message as `RetrieveInstantMessages` hands it over.
+    pub message: InstantMessage,
+    /// The message as the `ReadOfflineMsgs` record states it.
+    pub record: InstantMessage,
+}
+
+impl From<InstantMessage> for KeptMessage {
+    /// A message whose record states it as it is.
+    fn from(message: InstantMessage) -> Self {
+        Self {
+            record: message.clone(),
+            message,
+        }
+    }
+}
+
 /// Where an agent lands when its movement into the region completes: the
 /// `Position` / `LookAt` of the `AgentMovementComplete` reply.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1082,6 +1114,30 @@ pub enum ServerEvent {
     FriendshipDeclined {
         /// The offer transaction being declined (the offer IM's id).
         transaction: TransactionId,
+    },
+    /// The client answered a friendship offer that was kept for it through
+    /// the `AcceptFriendship` or `DeclineFriendship` capability, which names
+    /// the offerer rather than a transaction: a kept offer read over
+    /// `ReadOfflineMsgs` carries none. The capability has already answered
+    /// `{success: true}`; forming the friendship, or forgetting the offer, is
+    /// the driver's.
+    KeptFriendshipAnswered {
+        /// The avatar whose offer is answered (the request's `from`).
+        from: AgentKey,
+        /// Whether it was accepted (`AcceptFriendship`) rather than declined.
+        accept: bool,
+    },
+    /// The client answered a group invitation that was kept for it through
+    /// the `AcceptGroupInvite` or `DeclineGroupInvite` capability, which names
+    /// the group rather than a transaction: a kept invitation read over
+    /// `ReadOfflineMsgs` carries none. The capability has already answered
+    /// `{success: true}`; the membership, or forgetting the invitation, is the
+    /// driver's.
+    KeptGroupInvitationAnswered {
+        /// The group whose invitation is answered.
+        group_id: GroupKey,
+        /// Whether it was accepted (`AcceptGroupInvite`) rather than declined.
+        accept: bool,
     },
     /// The client asked to end a friendship (`TerminateFriendship`) — the
     /// inverse of the client's
@@ -2831,6 +2887,126 @@ pub enum ServerEvent {
         /// The group role carrying the desired title.
         title_role_id: GroupRoleKey,
     },
+    /// The client asked to found a group (`CreateGroupRequest`) — the inverse
+    /// of the client's [`Session::create_group`](crate::Session::create_group).
+    /// The driver answers with [`SimSession::send_create_group_reply`].
+    CreateGroup {
+        /// The group to found.
+        params: CreateGroupParams,
+    },
+    /// The client asked to join a group (`JoinGroupRequest`). The driver
+    /// answers with [`SimSession::send_join_group_reply`].
+    JoinGroup {
+        /// The group to join.
+        group_id: GroupKey,
+    },
+    /// The client asked to leave a group (`LeaveGroupRequest`). The driver
+    /// answers with [`SimSession::send_leave_group_reply`].
+    LeaveGroup {
+        /// The group to leave.
+        group_id: GroupKey,
+    },
+    /// The client asked to eject members from a group
+    /// (`EjectGroupMemberRequest`). The driver answers with
+    /// [`SimSession::send_eject_group_member_reply`].
+    EjectGroupMembers {
+        /// The group to eject them from.
+        group_id: GroupKey,
+        /// The members to eject.
+        member_ids: Vec<AgentKey>,
+    },
+    /// The client invited avatars into a group (`InviteGroupRequest`), each
+    /// into a role (`None` for the Everyone role).
+    InviteToGroup {
+        /// The group invited into.
+        group_id: GroupKey,
+        /// Each invitee and the role offered.
+        invitees: Vec<(AgentKey, Option<GroupRoleKey>)>,
+    },
+    /// The client made a group its active one, or none (`ActivateGroup`).
+    ActivateGroup {
+        /// The group, or `None` for no active group.
+        group_id: Option<GroupKey>,
+    },
+    /// The client said whether it takes a group's notices and lists the group
+    /// in its profile (`SetGroupAcceptNotices`).
+    SetGroupAcceptNotices {
+        /// The group.
+        group_id: GroupKey,
+        /// Whether the agent takes the group's notices.
+        accept_notices: bool,
+        /// Whether the group is listed in the agent's profile.
+        list_in_profile: bool,
+    },
+    /// The client asked for a group's profile (`GroupProfileRequest`). The
+    /// driver answers with [`SimSession::send_group_profile_reply`].
+    RequestGroupProfile {
+        /// The group.
+        group_id: GroupKey,
+    },
+    /// The client asked for a group's members (`GroupMembersRequest`). The
+    /// driver answers with [`SimSession::send_group_members_reply`].
+    RequestGroupMembers {
+        /// The group.
+        group_id: GroupKey,
+        /// The client's request id, echoed in the reply.
+        request_id: Uuid,
+    },
+    /// The client asked for a group's roles (`GroupRoleDataRequest`). The
+    /// driver answers with [`SimSession::send_group_role_data_reply`].
+    RequestGroupRoles {
+        /// The group.
+        group_id: GroupKey,
+        /// The client's request id, echoed in the reply.
+        request_id: Uuid,
+    },
+    /// The client asked who holds which of a group's roles
+    /// (`GroupRoleMembersRequest`). The driver answers with
+    /// [`SimSession::send_group_role_members_reply`].
+    RequestGroupRoleMembers {
+        /// The group.
+        group_id: GroupKey,
+        /// The client's request id, echoed in the reply.
+        request_id: Uuid,
+    },
+    /// The client asked for the titles it may wear in a group
+    /// (`GroupTitlesRequest`). The driver answers with
+    /// [`SimSession::send_group_titles_reply`].
+    RequestGroupTitles {
+        /// The group.
+        group_id: GroupKey,
+        /// The client's request id, echoed in the reply.
+        request_id: Uuid,
+    },
+    /// The client asked for a group's notice list (`GroupNoticesListRequest`).
+    /// The driver answers with [`SimSession::send_group_notices_list_reply`].
+    RequestGroupNotices {
+        /// The group.
+        group_id: GroupKey,
+    },
+    /// The client asked for one notice again (`GroupNoticeRequest`); the
+    /// driver sends it as an instant message.
+    RequestGroupNotice {
+        /// The notice.
+        notice_id: GroupNoticeKey,
+    },
+    /// The client created, changed or deleted roles of a group
+    /// (`GroupRoleUpdate`); a block of an update type no viewer sends is
+    /// dropped.
+    UpdateGroupRoles {
+        /// The group.
+        group_id: GroupKey,
+        /// The edits, in the order sent.
+        roles: Vec<GroupRoleEdit>,
+    },
+    /// The client put members into roles of a group or took them out
+    /// (`GroupRoleChanges`); a change no viewer sends is dropped.
+    ChangeGroupRoleMembers {
+        /// The group.
+        group_id: GroupKey,
+        /// The changes, in the order sent.
+        changes: Vec<GroupRoleMemberChange>,
+    },
     /// The client requested a teleport to a landmark (`TeleportLandmarkRequest`).
     /// The inverse of the client's
     /// [`Session::teleport_via_landmark`](crate::Session::teleport_via_landmark);
@@ -3127,6 +3303,10 @@ pub struct SimSession {
     /// The other avatars the periodic `CoarseLocationUpdate` lists
     /// ([`SimSession::set_coarse_others`]).
     coarse_others: Vec<CoarseLocation>,
+    /// The avatar the agent tracks and where it stands, which the periodic
+    /// `CoarseLocationUpdate` lists and points its `Prey` at
+    /// ([`SimSession::set_coarse_prey`]).
+    coarse_prey: Option<(AgentKey, RegionCoordinates)>,
     /// How an `ObjectUpdate` body is put on the wire; see
     /// [`SimSession::set_short_zero_tails`].
     object_update_coding: BodyCoding,
@@ -3213,7 +3393,7 @@ pub struct SimSession {
     chat_sessions: BTreeMap<ImSessionId, SimChatSession>,
     /// Instant messages stored while the agent was offline, awaiting the
     /// deliver-once `ReadOfflineMsgs` fetch ([`SimSession::take_offline_messages`]).
-    offline_messages: Vec<InstantMessage>,
+    offline_messages: Vec<KeptMessage>,
     /// The people-service display-name store the `GetDisplayNames` capability
     /// serves from, keyed by agent ([`SimSession::set_display_name`]).
     display_names: BTreeMap<AgentKey, DisplayName>,
@@ -3535,6 +3715,7 @@ impl SimSession {
             telemetry: None,
             wind: None,
             coarse_others: Vec::new(),
+            coarse_prey: None,
             object_update_coding: BodyCoding::Plain,
             region_handle,
             channel_version: b"sl-proto SimSession".to_vec(),
@@ -3655,17 +3836,17 @@ impl SimSession {
         self.chat_sessions.get(&session_id)
     }
 
-    /// Stores an instant message that arrived while the agent was offline, to
-    /// be served (once) by the `ReadOfflineMsgs` capability — the driver API
-    /// feeding [`SimSession::take_offline_messages`].
-    pub fn store_offline_message(&mut self, message: InstantMessage) {
+    /// Stores a message kept while the agent was offline, to be read (once)
+    /// over the `ReadOfflineMsgs` capability or handed over by the driver —
+    /// the driver API feeding [`SimSession::take_offline_messages`].
+    pub fn store_offline_message(&mut self, message: KeptMessage) {
         self.offline_messages.push(message);
     }
 
-    /// Drains the stored offline messages, oldest-first — OpenSim's
-    /// delete-on-fetch deliver-once semantics: the `ReadOfflineMsgs` handler
-    /// serves the batch and a repeated fetch yields an empty list.
-    pub fn take_offline_messages(&mut self) -> Vec<InstantMessage> {
+    /// Drains the stored offline messages, oldest-first — deliver-once: the
+    /// `ReadOfflineMsgs` handler serves the batch, and a repeated fetch, by
+    /// either road, yields an empty list.
+    pub fn take_offline_messages(&mut self) -> Vec<KeptMessage> {
         std::mem::take(&mut self.offline_messages)
     }
 
@@ -3896,6 +4077,20 @@ impl SimSession {
         });
     }
 
+    /// Routes the answer to a kept friendship offer received over the
+    /// `AcceptFriendship` / `DeclineFriendship` capability to the driver as
+    /// [`ServerEvent::KeptFriendshipAnswered`].
+    pub(crate) fn push_kept_friendship_answer(&mut self, from: AgentKey, accept: bool) {
+        self.events
+            .push_back(ServerEvent::KeptFriendshipAnswered { from, accept });
+    }
+
+    /// Queues `event` for the driver: what a capability handled outside this
+    /// module hands on, as the UDP path would have.
+    pub(crate) fn push_server_event(&mut self, event: ServerEvent) {
+        self.events.push_back(event);
+    }
+
     /// Routes an abuse report received over the modern `SendUserReport`
     /// capability to the driver as [`ServerEvent::AbuseReportReceived`] — the
     /// same event the legacy UDP `UserReport` path pushes.
@@ -4013,6 +4208,77 @@ impl SimSession {
     /// nobody. Nothing else reads it: this is not a money ledger.
     pub const fn set_money_balance(&mut self, balance: Option<i64>) {
         self.money_balance = balance;
+    }
+
+    /// Takes `amount` L$ from the balance, where one is kept, outside an
+    /// upload — a founding fee, say.
+    pub fn charge_money(&mut self, amount: i32) {
+        self.charge(amount);
+    }
+
+    /// Sends a `MoneyBalanceReply` — the agent's balance, and what changed it
+    /// (the client's [`Event::MoneyBalance`](crate::Event::MoneyBalance)).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if an amount is out of the wire's range or the message fails to encode.
+    pub fn send_money_balance_reply(
+        &mut self,
+        balance: &crate::MoneyBalance,
+        now: Instant,
+    ) -> Result<(), Error> {
+        use sl_wire::messages::{
+            MoneyBalanceReply, MoneyBalanceReplyMoneyDataBlock,
+            MoneyBalanceReplyTransactionInfoBlock,
+        };
+        let party = |owner: &OwnerKey| match owner {
+            OwnerKey::Agent(agent) => (agent.uuid(), false),
+            OwnerKey::Group(group) => (group.uuid(), true),
+        };
+        let transaction_info = match &balance.transaction {
+            Some(transaction) => {
+                let (source_id, is_source_group) = party(&transaction.source);
+                let (dest_id, is_dest_group) = party(&transaction.dest);
+                MoneyBalanceReplyTransactionInfoBlock {
+                    transaction_type: transaction.transaction_type,
+                    source_id,
+                    is_source_group,
+                    dest_id,
+                    is_dest_group,
+                    amount: crate::types::linden_to_wire("Amount", &transaction.amount)?,
+                    item_description: with_nul(&transaction.item_description),
+                }
+            }
+            None => MoneyBalanceReplyTransactionInfoBlock {
+                transaction_type: 0,
+                source_id: Uuid::nil(),
+                is_source_group: false,
+                dest_id: Uuid::nil(),
+                is_dest_group: false,
+                amount: 0,
+                item_description: Vec::new(),
+            },
+        };
+        let message = AnyMessage::MoneyBalanceReply(MoneyBalanceReply {
+            money_data: MoneyBalanceReplyMoneyDataBlock {
+                agent_id: balance.agent_id.uuid(),
+                transaction_id: balance.transaction_id,
+                transaction_success: balance.success,
+                money_balance: crate::types::linden_to_wire("MoneyBalance", &balance.balance)?,
+                square_meters_credit: crate::types::land_area_to_wire(
+                    "SquareMetersCredit",
+                    &balance.square_meters_credit,
+                )?,
+                square_meters_committed: crate::types::land_area_to_wire(
+                    "SquareMetersCommitted",
+                    &balance.square_meters_committed,
+                )?,
+                description: with_nul(&balance.description),
+            },
+            transaction_info,
+        });
+        self.push(&message, Reliability::Reliable, now)
     }
 
     /// Takes `amount` L$ from the balance, where one is kept.
@@ -4301,6 +4567,15 @@ impl SimSession {
     /// last arrived.
     pub fn set_coarse_others(&mut self, others: Vec<CoarseLocation>) {
         self.coarse_others = others;
+    }
+
+    /// Sets the avatar the agent tracks (`TrackAgent`) and where it stands, or
+    /// `None` to stop: the periodic `CoarseLocationUpdate` then lists it, if
+    /// [`set_coarse_others`](Self::set_coarse_others) did not already, and
+    /// points its `Prey` at it. Whether the agent may track it at all is the
+    /// driver's to decide.
+    pub const fn set_coarse_prey(&mut self, prey: Option<(AgentKey, RegionCoordinates)>) {
+        self.coarse_prey = prey;
     }
 
     /// How this simulator cuts a position down to a coarse entry: its
@@ -12343,6 +12618,145 @@ impl SimSession {
                     title_role_id: GroupRoleKey::from(update.agent_data.title_role_id),
                 });
             }
+            AnyMessage::CreateGroupRequest(request) => {
+                let group = &request.group_data;
+                self.events.push_back(ServerEvent::CreateGroup {
+                    params: CreateGroupParams {
+                        name: trimmed_string(&group.name),
+                        charter: trimmed_string(&group.charter),
+                        show_in_list: group.show_in_list,
+                        insignia_id: crate::types::optional_key_from_wire(group.insignia_id),
+                        membership_fee: crate::types::linden_from_wire(
+                            "MembershipFee",
+                            group.membership_fee,
+                        )?,
+                        open_enrollment: group.open_enrollment,
+                        allow_publish: group.allow_publish,
+                        mature_publish: group.mature_publish,
+                    },
+                });
+            }
+            AnyMessage::JoinGroupRequest(request) => {
+                self.events.push_back(ServerEvent::JoinGroup {
+                    group_id: GroupKey::from(request.group_data.group_id),
+                });
+            }
+            AnyMessage::LeaveGroupRequest(request) => {
+                self.events.push_back(ServerEvent::LeaveGroup {
+                    group_id: GroupKey::from(request.group_data.group_id),
+                });
+            }
+            AnyMessage::EjectGroupMemberRequest(request) => {
+                self.events.push_back(ServerEvent::EjectGroupMembers {
+                    group_id: GroupKey::from(request.group_data.group_id),
+                    member_ids: request
+                        .eject_data
+                        .iter()
+                        .map(|block| AgentKey::from(block.ejectee_id))
+                        .collect(),
+                });
+            }
+            AnyMessage::InviteGroupRequest(request) => {
+                self.events.push_back(ServerEvent::InviteToGroup {
+                    group_id: GroupKey::from(request.group_data.group_id),
+                    invitees: request
+                        .invite_data
+                        .iter()
+                        .map(|block| {
+                            (
+                                AgentKey::from(block.invitee_id),
+                                crate::types::optional_key_from_wire(block.role_id),
+                            )
+                        })
+                        .collect(),
+                });
+            }
+            AnyMessage::ActivateGroup(request) => {
+                self.events.push_back(ServerEvent::ActivateGroup {
+                    group_id: crate::types::optional_key_from_wire(request.agent_data.group_id),
+                });
+            }
+            AnyMessage::SetGroupAcceptNotices(request) => {
+                self.events.push_back(ServerEvent::SetGroupAcceptNotices {
+                    group_id: GroupKey::from(request.data.group_id),
+                    accept_notices: request.data.accept_notices,
+                    list_in_profile: request.new_data.list_in_profile,
+                });
+            }
+            AnyMessage::GroupProfileRequest(request) => {
+                self.events.push_back(ServerEvent::RequestGroupProfile {
+                    group_id: GroupKey::from(request.group_data.group_id),
+                });
+            }
+            AnyMessage::GroupMembersRequest(request) => {
+                self.events.push_back(ServerEvent::RequestGroupMembers {
+                    group_id: GroupKey::from(request.group_data.group_id),
+                    request_id: request.group_data.request_id,
+                });
+            }
+            AnyMessage::GroupRoleDataRequest(request) => {
+                self.events.push_back(ServerEvent::RequestGroupRoles {
+                    group_id: GroupKey::from(request.group_data.group_id),
+                    request_id: request.group_data.request_id,
+                });
+            }
+            AnyMessage::GroupRoleMembersRequest(request) => {
+                self.events.push_back(ServerEvent::RequestGroupRoleMembers {
+                    group_id: GroupKey::from(request.group_data.group_id),
+                    request_id: request.group_data.request_id,
+                });
+            }
+            AnyMessage::GroupTitlesRequest(request) => {
+                self.events.push_back(ServerEvent::RequestGroupTitles {
+                    group_id: GroupKey::from(request.agent_data.group_id),
+                    request_id: request.agent_data.request_id,
+                });
+            }
+            AnyMessage::GroupNoticesListRequest(request) => {
+                self.events.push_back(ServerEvent::RequestGroupNotices {
+                    group_id: GroupKey::from(request.data.group_id),
+                });
+            }
+            AnyMessage::GroupNoticeRequest(request) => {
+                self.events.push_back(ServerEvent::RequestGroupNotice {
+                    notice_id: GroupNoticeKey::from(request.data.group_notice_id),
+                });
+            }
+            AnyMessage::GroupRoleUpdate(update) => {
+                self.events.push_back(ServerEvent::UpdateGroupRoles {
+                    group_id: GroupKey::from(update.agent_data.group_id),
+                    roles: update
+                        .role_data
+                        .iter()
+                        .filter_map(|block| {
+                            Some(GroupRoleEdit {
+                                role_id: crate::types::optional_key_from_wire(block.role_id),
+                                name: trimmed_string(&block.name),
+                                description: trimmed_string(&block.description),
+                                title: trimmed_string(&block.title),
+                                powers: block.powers,
+                                update_type: GroupRoleUpdateType::from_u8(block.update_type)?,
+                            })
+                        })
+                        .collect(),
+                });
+            }
+            AnyMessage::GroupRoleChanges(changes) => {
+                self.events.push_back(ServerEvent::ChangeGroupRoleMembers {
+                    group_id: GroupKey::from(changes.agent_data.group_id),
+                    changes: changes
+                        .role_change
+                        .iter()
+                        .filter_map(|block| {
+                            Some(GroupRoleMemberChange {
+                                role_id: crate::types::optional_key_from_wire(block.role_id),
+                                member_id: AgentKey::from(block.member_id),
+                                change: GroupRoleChange::from_u32(block.change)?,
+                            })
+                        })
+                        .collect(),
+                });
+            }
             AnyMessage::TeleportLandmarkRequest(request) => {
                 self.teleport_cancel = TeleportCancelState::None;
                 // A nil LandmarkID is the wire encoding of "teleport home".
@@ -12697,6 +13111,19 @@ impl SimSession {
         {
             armed.coarse_due = Some(deadline(now, interval));
             let mut locations = self.coarse_others.clone();
+            let prey = self.coarse_prey.as_ref().map(|(prey, position)| {
+                locations
+                    .iter()
+                    .position(|location| location.agent_id == *prey)
+                    .unwrap_or_else(|| {
+                        locations.push(coarse_location(
+                            *prey,
+                            position,
+                            armed.telemetry.coarse_rounding,
+                        ));
+                        locations.len().saturating_sub(1)
+                    })
+            });
             if let Some(agent_id) = self.agent_id() {
                 locations.push(coarse_location(
                     agent_id,
@@ -12705,7 +13132,7 @@ impl SimSession {
                 ));
             }
             let you = locations.len().checked_sub(1);
-            if let Err(error) = self.send_coarse_location_update(&locations, you, None, now) {
+            if let Err(error) = self.send_coarse_location_update(&locations, you, prey, now) {
                 tracing::warn!(%error, "failed to send the region's coarse locations");
             }
         }

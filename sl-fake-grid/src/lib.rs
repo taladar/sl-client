@@ -16,6 +16,7 @@ pub mod estate;
 pub mod experiences;
 pub mod fixtures;
 mod grabs;
+pub mod groups;
 mod http_answer;
 mod http_service;
 pub mod imitates;
@@ -31,6 +32,7 @@ mod parcel_edits;
 pub mod relays;
 pub mod runtime;
 pub mod scenario;
+pub mod social;
 mod task_contents;
 mod teleport;
 pub mod terrain;
@@ -55,16 +57,17 @@ pub use fixtures::{
     CatalogueEntry, FaceStyle, Landmark, NamedScenario, NpcAppearance, NpcBake, NpcFixture,
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
+pub use groups::{GroupConfig, GroupsPolicy, InvitationForm, StockRoles};
 pub use imitates::{
     AbsentTile, ChildSale, ContentsAudience, ContentsPolicy, CopiedSerial, DerezKill, DotName,
-    EditEcho, EditPolicy, EmptyCells, EnvironmentChangeReply, ImitatedGrid, LandOrigin, LastOwner,
-    LinkPolicy, LoginFields, LoginRefusals, LogoutReply, MapLayerAnswer, MapPolicy, MaskRules,
-    NameMatch, Newcomers, NoBuildAlert, OPENSIM_ALL_PERMISSIONS, OPENSIM_FOLDED_BITS,
-    OPENSIM_MAX_AGENT_GROUPS, ObjectDelete, OutOfWorld, ParcelPolicy, Placement, PrimResent,
-    Promoted, PropertiesPolicy, RayAtNothing, RegionCapacity, RemovedItem, RestoreToWorld,
-    ReturnNotice, RezPolicy, RootRecord, SELECTED_PARCEL_SEQUENCE_ID, SIT_TARGET_RAISE_M, SaveTold,
-    ScriptStart, SecondLogin, SentOrder, SitPolicy, SitRefusal, StockDay, StoppedScript,
-    StoredText, TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
+    EditEcho, EditPolicy, EmptyCells, EnvironmentChangeReply, GroupObjectTrash, ImitatedGrid,
+    LandOrigin, LastOwner, LinkPolicy, LoginFields, LoginRefusals, LogoutReply, MapLayerAnswer,
+    MapPolicy, MaskRules, NameMatch, Newcomers, NoBuildAlert, OPENSIM_ALL_PERMISSIONS,
+    OPENSIM_FOLDED_BITS, OPENSIM_MAX_AGENT_GROUPS, ObjectDelete, OutOfWorld, ParcelPolicy,
+    Placement, PrimResent, Promoted, PropertiesPolicy, RayAtNothing, RegionCapacity, RemovedItem,
+    RestoreToWorld, ReturnNotice, RezPolicy, RootRecord, SELECTED_PARCEL_SEQUENCE_ID,
+    SIT_TARGET_RAISE_M, SaveTold, ScriptStart, SecondLogin, SentOrder, SitPolicy, SitRefusal,
+    StockDay, StoppedScript, StoredText, TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
 };
 pub use inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,

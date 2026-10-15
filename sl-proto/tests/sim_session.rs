@@ -2032,6 +2032,274 @@ mod test {
         Ok(())
     }
 
+    /// Every group request a viewer makes surfaces as its server event, and
+    /// every reply a simulator sends decodes back into the client event it
+    /// answers with.
+    #[test]
+    fn group_requests_and_replies_round_trip() -> Result<(), TestError> {
+        use sl_proto::{
+            CreateGroupParams, GroupMember, GroupMembership, GroupNotice, GroupNoticeKey,
+            GroupProfile, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
+            GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, LandArea,
+        };
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let group = GroupKey::from(uuid::Uuid::from_u128(0x6A0D));
+        let role = GroupRoleKey::from(uuid::Uuid::from_u128(0x7012));
+        let member = AgentKey::from(uuid::Uuid::from_u128(0xB0B));
+        let params = CreateGroupParams {
+            name: "A Group".to_owned(),
+            charter: "a charter".to_owned(),
+            show_in_list: true,
+            insignia_id: None,
+            membership_fee: LindenAmount(10),
+            open_enrollment: true,
+            allow_publish: false,
+            mature_publish: false,
+        };
+        let edit = GroupRoleEdit {
+            role_id: Some(role),
+            name: "Role".to_owned(),
+            description: "a role".to_owned(),
+            title: "Title".to_owned(),
+            powers: 6,
+            update_type: GroupRoleUpdateType::Create,
+        };
+        let change = GroupRoleMemberChange {
+            role_id: Some(role),
+            member_id: member,
+            change: GroupRoleChange::Remove,
+        };
+        client.create_group(&params, now)?;
+        client.join_group(group, now)?;
+        client.leave_group(group, now)?;
+        client.eject_group_members(group, &[member], now)?;
+        client.invite_to_group(group, &[(member, role)], now)?;
+        client.activate_group(Some(group), now)?;
+        client.set_group_accept_notices(group, false, true, now)?;
+        client.request_group_profile(group, now)?;
+        client.request_group_members(group, now)?;
+        client.request_group_roles(group, now)?;
+        client.request_group_role_members(group, now)?;
+        client.request_group_titles(group, now)?;
+        client.request_group_notices(group, now)?;
+        client.request_group_notice(GroupNoticeKey::from(uuid::Uuid::from_u128(0x2071)), now)?;
+        client.update_group_roles(group, std::slice::from_ref(&edit), now)?;
+        client.change_group_role_members(group, &[change], now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        let has = |wanted: &dyn Fn(&ServerEvent) -> bool| server_events.iter().any(wanted);
+        assert!(has(
+            &|e| matches!(e, ServerEvent::CreateGroup { params: p } if *p == params)
+        ));
+        assert!(has(
+            &|e| matches!(e, ServerEvent::JoinGroup { group_id } if *group_id == group)
+        ));
+        assert!(has(
+            &|e| matches!(e, ServerEvent::LeaveGroup { group_id } if *group_id == group)
+        ));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::EjectGroupMembers { member_ids, .. } if *member_ids == [member]
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::InviteToGroup { invitees, .. } if *invitees == [(member, Some(role))]
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::ActivateGroup { group_id } if *group_id == Some(group)
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::SetGroupAcceptNotices {
+                accept_notices: false,
+                list_in_profile: true,
+                ..
+            }
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::RequestGroupProfile { .. }
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::RequestGroupMembers { .. }
+        )));
+        assert!(has(&|e| matches!(e, ServerEvent::RequestGroupRoles { .. })));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::RequestGroupRoleMembers { .. }
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::RequestGroupTitles { .. }
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::RequestGroupNotices { .. }
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::RequestGroupNotice { .. }
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::UpdateGroupRoles { roles, .. } if *roles == [edit.clone()]
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            ServerEvent::ChangeGroupRoleMembers { changes, .. } if *changes == [change]
+        )));
+
+        let request_id = uuid::Uuid::from_u128(0xF00D);
+        let profile = GroupProfile {
+            group_id: group,
+            name: "A Group".to_owned(),
+            charter: "a charter".to_owned(),
+            show_in_list: true,
+            member_title: "Member".to_owned(),
+            powers: 0x8000_1801_0000,
+            insignia_id: None,
+            founder_id: member,
+            membership_fee: LindenAmount(10),
+            open_enrollment: true,
+            money: 0,
+            member_count: 2,
+            role_count: 3,
+            allow_publish: false,
+            mature_publish: false,
+            owner_role: role,
+        };
+        let members = vec![GroupMember {
+            agent_id: member,
+            contribution: LandArea(0),
+            online_status: "Online".to_owned(),
+            agent_powers: 2,
+            title: "Title".to_owned(),
+            is_owner: true,
+        }];
+        let roles = vec![GroupRole {
+            role_id: Some(role),
+            name: "Role".to_owned(),
+            title: "Title".to_owned(),
+            description: "a role".to_owned(),
+            powers: 6,
+            members: 1,
+        }];
+        let pairs = vec![GroupRoleMember {
+            role_id: Some(role),
+            member_id: member,
+        }];
+        let titles = vec![GroupTitle {
+            title: "Title".to_owned(),
+            role_id: Some(role),
+            selected: true,
+        }];
+        let notices = vec![GroupNotice {
+            notice_id: GroupNoticeKey::from(uuid::Uuid::from_u128(0x2071)),
+            timestamp: 1_700_000_000,
+            from_name: "Some Body".to_owned(),
+            subject: "a notice".to_owned(),
+            has_attachment: false,
+            asset_type: 0,
+        }];
+        let memberships = vec![GroupMembership {
+            group_id: group,
+            group_powers: 2,
+            accept_notices: true,
+            group_insignia_id: sl_proto::TextureKey::from(uuid::Uuid::nil()),
+            contribution: LandArea(0),
+            group_name: "A Group".to_owned(),
+        }];
+        sim.send_create_group_reply(group, true, "Group created successfully", now)?;
+        sim.send_join_group_reply(group, true, now)?;
+        sim.send_leave_group_reply(group, false, now)?;
+        sim.send_eject_group_member_reply(group, true, now)?;
+        sim.send_agent_drop_group(group, now)?;
+        sim.send_agent_group_data_update(&memberships, now)?;
+        sim.send_group_profile_reply(&profile, now)?;
+        sim.send_group_members_reply(group, request_id, 2, &members, now)?;
+        sim.send_group_role_data_reply(group, request_id, 3, &roles, now)?;
+        sim.send_group_role_members_reply(group, request_id, &pairs, now)?;
+        sim.send_group_titles_reply(group, request_id, &titles, now)?;
+        sim.send_group_notices_list_reply(group, &notices, now)?;
+        let balance = sl_proto::MoneyBalance {
+            agent_id: member,
+            transaction_id: uuid::Uuid::from_u128(0x7AC7),
+            success: true,
+            balance: LindenAmount(900),
+            square_meters_credit: LandArea(0),
+            square_meters_committed: LandArea(0),
+            description: "You paid Governor Linden L$100.".to_owned(),
+            transaction: Some(sl_proto::MoneyTransaction {
+                transaction_type: 1002,
+                source: sl_proto::OwnerKey::Agent(member),
+                dest: sl_proto::OwnerKey::Group(group),
+                amount: LindenAmount(100),
+                item_description: String::new(),
+            }),
+        };
+        sim.send_money_balance_reply(&balance, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        let got = |wanted: &dyn Fn(&Event) -> bool| client_events.iter().any(wanted);
+        assert!(got(&|e| matches!(
+            e,
+            Event::CreateGroupResult { group_id, success: true, message }
+                if *group_id == group && message == "Group created successfully"
+        )));
+        assert!(got(&|e| matches!(
+            e,
+            Event::JoinGroupResult { success: true, .. }
+        )));
+        assert!(got(&|e| matches!(
+            e,
+            Event::LeaveGroupResult { success: false, .. }
+        )));
+        assert!(got(&|e| matches!(
+            e,
+            Event::EjectGroupMemberResult { success: true, .. }
+        )));
+        assert!(got(
+            &|e| matches!(e, Event::DroppedFromGroup { group_id } if *group_id == group)
+        ));
+        assert!(got(
+            &|e| matches!(e, Event::GroupMemberships(m) if *m == memberships)
+        ));
+        assert!(got(
+            &|e| matches!(e, Event::GroupProfileReceived(p) if **p == profile)
+        ));
+        assert!(got(&|e| matches!(
+            e,
+            Event::GroupMembers { member_count: 2, members: m, request_id: r, .. }
+                if *m == members && *r == request_id
+        )));
+        assert!(got(&|e| matches!(
+            e,
+            Event::GroupRoleData { role_count: 3, roles: r, .. } if *r == roles
+        )));
+        assert!(got(&|e| matches!(
+            e,
+            Event::GroupRoleMembers { total_pairs: 1, pairs: p, .. } if *p == pairs
+        )));
+        assert!(got(
+            &|e| matches!(e, Event::GroupTitles { titles: t, .. } if *t == titles)
+        ));
+        assert!(got(
+            &|e| matches!(e, Event::GroupNotices { notices: n, .. } if *n == notices)
+        ));
+        assert!(got(
+            &|e| matches!(e, Event::MoneyBalance(b) if *b == balance)
+        ));
+        Ok(())
+    }
+
     /// The two "what does the grid hold about me" asks that had a decode and a
     /// carrier type but no simulator half: the grid's price list and the
     /// agent's own outfit. Each goes out as a request, arrives as a

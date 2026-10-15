@@ -42,7 +42,7 @@
 
 use std::sync::Arc;
 
-use sl_client_tokio::{AgentKey, Uuid};
+use sl_client_tokio::{AgentKey, GroupKey, Uuid};
 use sl_repl::{Avatar, Credentials};
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -86,6 +86,19 @@ fn other_avatar_id() -> AgentKey {
     let (_label, _first_name, id) = ACCOUNTS[1];
     AgentKey::from(Uuid::from_u128(id))
 }
+
+/// The group a fake grid holds from its start, owned by the primary with the
+/// secondary a member: the census group of the `groups` case
+/// ([`Fixtures::with_census_group`]), as a live grid's is a group an
+/// operator founded once.
+const CENSUS_GROUP: u128 = 0xC0_4F_A6_00_6E;
+
+/// The name of [`CENSUS_GROUP`].
+const CENSUS_GROUP_NAME: &str = "Conformance Census";
+
+/// The charter of [`CENSUS_GROUP`]: the one the `groups` case's charter leg
+/// writes, which is what a live census group reads after any earlier run.
+const CENSUS_GROUP_CHARTER: &str = "gr-2-charter";
 
 /// The credentials-file label of the account the fake grid registers as an
 /// **estate manager**.
@@ -197,6 +210,8 @@ pub const OFFLINE_CASES: &[&str] = &[
     "logout-clean",
     "sit-stand",
     "avatar-presence",
+    "friends-presence",
+    "groups",
 ];
 
 /// The offline cases meaningful on **one** fake flavour only, each with the
@@ -334,7 +349,16 @@ impl FakeGridHarness {
             maturity: sl_client_tokio::Maturity::Mature,
             ..sl_fake_grid::RegionConfig::default()
         };
+        let (_primary, founder, _founder_id) = ACCOUNTS[0];
+        let (_secondary, member, _member_id) = ACCOUNTS[1];
         let grid = builder
+            .group(sl_fake_grid::GroupConfig {
+                group_id: GroupKey::from(Uuid::from_u128(CENSUS_GROUP)),
+                name: CENSUS_GROUP_NAME.to_owned(),
+                charter: CENSUS_GROUP_CHARTER.to_owned(),
+                founder: (founder.to_owned(), LAST_NAME.to_owned()),
+                members: vec![(member.to_owned(), LAST_NAME.to_owned())],
+            })
             .region(sl_fake_grid::catalogue().into_region(start))
             .region(sl_fake_grid::fixtures::border::border().into_region(east))
             .region(far)
@@ -349,6 +373,16 @@ impl FakeGridHarness {
             credentials,
             logins: tokio::sync::Mutex::new(logins),
         })
+    }
+
+    /// The fixtures a fake grid supplies for itself: the other avatar and the
+    /// census group are accounts and a group it registered, so nobody has to
+    /// write them down.
+    #[must_use]
+    pub fn fixtures() -> Fixtures {
+        Fixtures::default()
+            .with_other_avatar(other_avatar_id())
+            .with_census_group(GroupKey::from(Uuid::from_u128(CENSUS_GROUP)))
     }
 
     /// The synthesised credentials: three avatars, each naming this grid's
@@ -480,7 +514,7 @@ impl FakeGridHarness {
             primary,
             sessions.next(),
             sessions.next(),
-            Fixtures::default().with_other_avatar(other_avatar_id()),
+            Self::fixtures(),
         );
         Ok(match control {
             Some(control) => context.with_fake(control),
@@ -587,9 +621,7 @@ pub async fn run_case(test: &dyn GridTest, flavour: Grid) -> Result<FakeRun, Tes
     }
     let harness = FakeGridHarness::start(flavour).await?;
     let mut context = harness.context(test).await?;
-    let outcome =
-        crate::isolate::run_isolated(test.run(&mut context), crate::isolate::DEFAULT_CASE_TIMEOUT)
-            .await;
+    let outcome = crate::isolate::run_isolated(test.run(&mut context), test.timeout()).await;
     let (metrics, completeness, note, primary, secondary, tertiary) = context.into_parts();
     for session in [Some(primary), secondary, tertiary].into_iter().flatten() {
         if let Err(error) = session.logout().await {

@@ -88,6 +88,7 @@ pub(crate) fn answer_object_edit(
     mint: &dyn Fn() -> uuid::Uuid,
     selection: &mut Selection,
     sim: &mut SimSession,
+    rights: &GroupRights<'_>,
     event: &ServerEvent,
     now: Instant,
 ) -> Option<Vec<RegionChange>> {
@@ -149,19 +150,30 @@ pub(crate) fn answer_object_edit(
             }
             return Some(changes);
         }
-        // Two edits that change nothing. A category is a field no viewer has
-        // set in years, and neither grid takes it: a record reads zero
-        // afterwards on both. And a group an object is set to, like a deed to
-        // it, is for an agent that is in the group — the fake grid has no
-        // groups, so its agents are in none: the object keeps the group it
-        // had and stays its owner's, as on both live grids, and Second Life
-        // says of the deed why.
-        ServerEvent::ObjectCategorySet { .. } | ServerEvent::ObjectGroupSet { .. } => {}
-        ServerEvent::ObjectOwnerSet { .. } => {
-            if let Some(alert) = world.edit.deed_refusal {
-                send_alert(sim, alert, &[], now);
+        // An edit that changes nothing: a category is a field no viewer has
+        // set in years, and neither grid takes it — a record reads zero
+        // afterwards on both.
+        ServerEvent::ObjectCategorySet { .. } => {}
+        // An object is set to a group its owner is in, without a word on
+        // either grid; a group the agent is not in leaves it as it was.
+        ServerEvent::ObjectGroupSet {
+            local_ids,
+            group_id,
+        } => {
+            if group_id.is_some_and(|group| !rights.groups.powers.contains_key(&group)) {
+                return Some(Vec::new());
+            }
+            for local_id in local_ids {
+                if owned_by(world, *local_id, rights.agent) {
+                    edit_properties(world, *local_id, Some((&mut *sim, now)), |properties| {
+                        properties.group = *group_id;
+                    });
+                }
             }
         }
+        ServerEvent::ObjectOwnerSet {
+            local_ids, owner, ..
+        } => return Some(deed(world, sim, rights, local_ids, *owner, now)),
         // ----- edits to the object update itself ---------------------------
         ServerEvent::ObjectClickActionSet {
             local_id,
@@ -261,6 +273,23 @@ pub(crate) fn answer_object_edit(
             } else {
                 *local_id
             };
+            // A group's object moves for a member with the power to move it,
+            // and for nobody else.
+            if let Some(OwnerKey::Group(owner)) = world
+                .properties_of(target)
+                .map(|properties| properties.owner)
+                && !rights
+                    .groups
+                    .may(owner, crate::groups::POWER_OBJECT_MANIPULATE)
+            {
+                if let Some(text) = rights.policy.refused_move {
+                    send_alert(sim, NoBuildAlert { text, key: None }, &[], now);
+                }
+                if let Some(object) = world.object_by_local_id(target) {
+                    push_terse(sim, &object, now);
+                }
+                return Some(Vec::new());
+            }
             let policy = world.edit;
             let whole = transform.position.is_some()
                 && transform.rotation.is_some()
@@ -697,6 +726,103 @@ fn edit_properties(
     if let Some(record) = world.record_of(local_id) {
         push_properties(sim, &record, now);
     }
+}
+
+/// What an agent may do with the objects of its groups: its powers in each,
+/// and how the grid it is on decides.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GroupRights<'a> {
+    /// The agent whose session this is.
+    pub(crate) agent: sl_types::key::AgentKey,
+    /// Its groups and its powers in each.
+    pub(crate) groups: &'a crate::groups::AgentGroups,
+    /// How the grid runs groups.
+    pub(crate) policy: &'a crate::groups::GroupsPolicy,
+}
+
+/// Whether the object `local_id` is the agent `agent`'s.
+fn owned_by(
+    world: &SceneFixtures,
+    local_id: RegionLocalObjectId,
+    agent: sl_types::key::AgentKey,
+) -> bool {
+    world
+        .properties_of(local_id)
+        .is_some_and(|properties| properties.owner == OwnerKey::Agent(agent))
+}
+
+/// The bit OpenSim keeps in a deeded object's base mask besides the
+/// next-owner mask (measured: `0x00092000` from a next-owner mask of
+/// `0x00082000`).
+const OPENSIM_DEED_KEPT_BASE: u32 = 0x0001_0000;
+
+/// A deed of `local_ids` to `owner`. A deed to an agent is a god's, which
+/// this grid has none of; a deed to a group the agent may not deed for is
+/// refused as the grid refuses it. Otherwise each object of the agent's set
+/// to that group is the group's — on Second Life only one shared with the
+/// group — with the next-owner mask its base and owner masks and nothing for
+/// the group and everyone, and the agent its last owner. Either way the
+/// object is sent again, in full and with its record.
+fn deed(
+    world: &mut SceneFixtures,
+    sim: &mut SimSession,
+    rights: &GroupRights<'_>,
+    local_ids: &[RegionLocalObjectId],
+    owner: OwnerKey,
+    now: Instant,
+) -> Vec<RegionChange> {
+    let OwnerKey::Group(group) = owner else {
+        return Vec::new();
+    };
+    if !rights.groups.may(group, crate::groups::POWER_OBJECT_DEED) {
+        if let Some(alert) = world.edit.deed_refusal {
+            send_alert(sim, alert, &[], now);
+        }
+        return Vec::new();
+    }
+    let mut changes = Vec::new();
+    for local_id in local_ids {
+        let Some(properties) = world.properties_of(*local_id) else {
+            continue;
+        };
+        if properties.owner != OwnerKey::Agent(rights.agent) || properties.group != Some(group) {
+            continue;
+        }
+        let shared = !properties.permissions.group.is_empty();
+        let agent = rights.agent;
+        // Second Life names the agent the last owner even of an object whose
+        // deed it ignores.
+        edit_properties(world, *local_id, None, |properties| {
+            properties.last_owner_id = agent.uuid();
+        });
+        if shared || rights.policy.deeds_unshared {
+            let keeps_export = rights.policy.deeds_unshared;
+            edit_properties(world, *local_id, None, |properties| {
+                let masks = &mut properties.permissions;
+                let next = masks.next_owner;
+                masks.base = if keeps_export {
+                    sl_wire::Permissions::from_bits(
+                        next.bits() | (masks.base.bits() & OPENSIM_DEED_KEPT_BASE),
+                    )
+                } else {
+                    next
+                };
+                masks.owner = next;
+                masks.group = sl_wire::Permissions::NONE;
+                masks.everyone = sl_wire::Permissions::NONE;
+                properties.owner = owner;
+                properties.last_owner_id = agent.uuid();
+            });
+        }
+        if let Some(object) = world.object_by_local_id(*local_id) {
+            push_object(sim, &object, now);
+            changes.push(RegionChange::Updated(Box::new(object)));
+        }
+        if let Some(record) = world.record_of(*local_id) {
+            push_properties(sim, &record, now);
+        }
+    }
+    changes
 }
 
 /// Applies `edit` to the object itself and returns the changed object.

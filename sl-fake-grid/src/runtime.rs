@@ -426,8 +426,15 @@ pub struct LoginNotice {
 pub(crate) struct GridCore {
     /// The registered accounts.
     pub(crate) accounts: Vec<Account>,
-    /// The friendships between accounts, as agent pairs.
-    friendships: Vec<(AgentKey, AgentKey)>,
+    /// The friendships between accounts and what is pending between them
+    /// ([`crate::social`]).
+    pub(crate) social: parking_lot::Mutex<crate::social::Social>,
+    /// How friendship runs ([`ImitatedGrid::friends_policy`]).
+    pub(crate) friends_policy: crate::social::FriendsPolicy,
+    /// The groups and what is pending in them ([`crate::groups`]).
+    pub(crate) groups: parking_lot::Mutex<crate::groups::GroupStore>,
+    /// How groups run ([`ImitatedGrid::groups_policy`]).
+    pub(crate) groups_policy: crate::groups::GroupsPolicy,
     /// The agent every region reports as its owner: the first account
     /// registered with estate powers, or the nil key when no account has any.
     ///
@@ -610,28 +617,9 @@ pub(crate) struct PreparedSession {
 
 impl GridCore {
     /// The buddy list of `agent`'s login response: every account it is
-    /// friends with, each seeing the other online and on the map.
+    /// friends with, and the rights each grants the other.
     pub(crate) fn buddies_of(&self, agent: AgentKey) -> Vec<sl_wire::BuddyListEntry> {
-        /// What each side of a stage friendship grants the other.
-        const RIGHTS: i32 =
-            sl_proto::FriendRights::CAN_SEE_ONLINE | sl_proto::FriendRights::CAN_SEE_ON_MAP;
-        self.friendships
-            .iter()
-            .filter_map(|&(one, other)| {
-                if agent == one {
-                    Some(other)
-                } else if agent == other {
-                    Some(one)
-                } else {
-                    None
-                }
-            })
-            .map(|buddy| sl_wire::BuddyListEntry {
-                buddy_id: buddy.uuid(),
-                rights_granted: RIGHTS,
-                rights_has: RIGHTS,
-            })
-            .collect()
+        self.social.lock().buddies_of(agent)
     }
 
     /// The index of the region an account starts in.
@@ -951,6 +939,7 @@ impl GridCore {
         if let Some(setup_for_agent) = region.scenario.setup_for_agent.as_ref() {
             setup_for_agent(&mut sim, &avatar, now);
         }
+        crate::scenario::own_stock_folders(&mut sim, account.agent_id);
         // The parcel covers the `RemoteParcelRequest` capability resolves a
         // location against, one per parcel the scene's fixtures carry a
         // grid-wide listing for. Registered here rather than stated by the
@@ -1066,6 +1055,11 @@ impl GridCore {
             },
             arrival: self.arrival_policy,
             own_appearance_owed: false,
+            groups: self
+                .groups
+                .lock()
+                .agent_groups_at_login(account.agent_id, &self.groups_policy),
+            groups_policy: self.groups_policy,
             terrain_policy: self.imitated.terrain_policy(),
             on_agent_arrived: region.scenario.on_agent_arrived.clone(),
             on_event: region.scenario.on_event.clone(),
@@ -1122,6 +1116,14 @@ impl GridCore {
         tokio::spawn(run_udp_pump(prepared.shared.clone()));
         tokio::spawn(run_timer(prepared.shared.clone()));
         tokio::spawn(crate::teleport::run_teleport_responder(
+            Arc::clone(self),
+            prepared.shared.clone(),
+        ));
+        tokio::spawn(crate::social::run_social_responder(
+            Arc::clone(self),
+            prepared.shared.clone(),
+        ));
+        tokio::spawn(crate::groups::run_groups_responder(
             Arc::clone(self),
             prepared.shared.clone(),
         ));
@@ -1584,6 +1586,8 @@ pub struct FakeGridBuilder {
     map_tiles: MapTileStore,
     /// The friendships between accounts, each pair of `First Last` names.
     friendships: Vec<[(String, String); 2]>,
+    /// The groups the grid holds from its start.
+    groups: Vec<crate::groups::GroupConfig>,
     /// The identifier source (random unless seeded).
     minter: IdMinter,
     /// The clock every session machine is stamped from (the system clock
@@ -1685,6 +1689,7 @@ impl FakeGridBuilder {
             bakes: None,
             map_tiles: MapTileStore::default(),
             friendships: Vec::new(),
+            groups: Vec::new(),
         }
     }
 
@@ -1717,10 +1722,9 @@ impl FakeGridBuilder {
     /// each letting the other see it online and on the map: each one's login
     /// response lists the other in its `buddy-list`.
     ///
-    /// The friendship is a fixed fact of the grid, not a service: nothing
-    /// tells a friend when the other comes online (the roadmap's
-    /// `server-friends-service` is that), so a test announces it with the
-    /// session's `send_online_notification`.
+    /// The friendship is where the grid's friendship service starts from:
+    /// each is told when the other comes and goes, and may end it
+    /// ([`crate::social`]).
     #[must_use]
     pub fn friends(
         mut self,
@@ -1731,6 +1735,14 @@ impl FakeGridBuilder {
             (first.to_owned(), last.to_owned()),
             (other_first.to_owned(), other_last.to_owned()),
         ]);
+        self
+    }
+
+    /// Adds a group the grid holds from its start: founded by its founder,
+    /// who owns it, with its other members in its Everyone role.
+    #[must_use]
+    pub fn group(mut self, group: crate::groups::GroupConfig) -> Self {
+        self.groups.push(group);
         self
     }
 
@@ -2127,6 +2139,37 @@ impl FakeGridBuilder {
                 Ok((one?, other?))
             })
             .collect::<Result<Vec<_>, Error>>()?;
+        let agent_named = |(first, last): &(String, String)| {
+            accounts
+                .iter()
+                .find(|account| {
+                    account.config.first_name == *first && account.config.last_name == *last
+                })
+                .map(|account| account.agent_id)
+                .ok_or(Error::UnknownGroupMember {
+                    account: format!("{first} {last}"),
+                })
+        };
+        let stock_groups = self
+            .groups
+            .into_iter()
+            .map(|group| {
+                let founder = agent_named(&group.founder)?;
+                let members = group
+                    .members
+                    .iter()
+                    .map(agent_named)
+                    .collect::<Result<Vec<_>, Error>>()?;
+                Ok((group, founder, members))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let groups_policy = self.imitates.groups_policy();
+        let groups = {
+            let minter = minter.clone();
+            crate::groups::GroupStore::with_groups(stock_groups, &groups_policy, &move || {
+                minter.uuid()
+            })
+        };
         let estate_owner = accounts
             .iter()
             .find(|account| account.config.estate_manager)
@@ -2134,7 +2177,10 @@ impl FakeGridBuilder {
         let bakes = self.bakes.unwrap_or_else(|| self.imitates.bakes());
         let core = Arc::new(GridCore {
             accounts,
-            friendships,
+            social: parking_lot::Mutex::new(crate::social::Social::with_friendships(&friendships)),
+            friends_policy: self.imitates.friends_policy(),
+            groups: parking_lot::Mutex::new(groups),
+            groups_policy,
             estate_owner,
             regions,
             gates: self.gates,

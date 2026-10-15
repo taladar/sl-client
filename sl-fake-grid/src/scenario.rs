@@ -284,6 +284,35 @@ const AGENT_SYSTEM_FOLDERS: &[(i8, &str)] = &[
 /// its folder type. Chosen clear of the other `0xFAxx` fixture ids.
 const AGENT_SYSTEM_FOLDER_BASE: u128 = 0xFA80;
 
+/// Whether `folder` is one of the stock folders [`default_setup`] seeds with
+/// the same id for every agent.
+fn is_stock_folder(folder: InventoryFolderKey) -> bool {
+    let id = folder.uuid().as_u128();
+    id == AGENT_ROOT
+        || id == AGENT_CLOTHING
+        || AGENT_SYSTEM_FOLDERS.iter().any(|&(folder_type, _name)| {
+            u128::try_from(folder_type)
+                .is_ok_and(|offset| id == AGENT_SYSTEM_FOLDER_BASE.saturating_add(offset))
+        })
+}
+
+/// Makes the stock folders `agent`'s own: each gets an id of its own,
+/// derived from the agent's, as every account's folders have on a live grid.
+/// Run once every fixture has been seeded, so whatever a fixture filed in a
+/// stock folder ([`class_folder`]) follows it. Without it two avatars logged
+/// in together have one Calling Cards folder between them, and nothing that
+/// names a folder can say whose it is.
+pub(crate) fn own_stock_folders(sim: &mut SimSession, agent: sl_types::key::AgentKey) {
+    let salt = agent.uuid().as_u128();
+    sim.agent_inventory_mut().rename_folders(|folder| {
+        if is_stock_folder(folder) {
+            InventoryFolderKey::from(uuid::Uuid::from_u128(folder.uuid().as_u128() ^ salt))
+        } else {
+            folder
+        }
+    });
+}
+
 /// The id base for the seeded per-class fixture items; each item's id is this
 /// plus its `LLAssetType` code, so an item id names its class the way its asset
 /// id does ([`sl_test_assets::inventory::fixture_id`]).

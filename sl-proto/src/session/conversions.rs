@@ -6720,17 +6720,25 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
     Ok(llsd_map(blocks))
 }
 
-/// Serializes offline IMs as a `ReadOfflineMsgs` capability reply body — an
-/// array of per-message records (inverse of `offline_messages_from_llsd`).
+/// Serializes offline IMs as a `ReadOfflineMsgs` capability reply body, as
+/// Second Life answers it: an array holding one array of records (inverse of
+/// `offline_messages_from_llsd`).
 #[must_use]
 pub fn offline_messages_to_llsd(messages: &[InstantMessage]) -> Llsd {
-    Llsd::Array(messages.iter().map(offline_message_to_record).collect())
+    Llsd::Array(vec![Llsd::Array(
+        messages.iter().map(offline_message_to_record).collect(),
+    )])
 }
 
-/// Serializes one [`InstantMessage`] as an offline-IM record (inverse of
-/// [`offline_message_from_record`]). The `offline` flag is implicit (the parser
-/// always marks these messages offline), so it is not emitted.
+/// Serializes one [`InstantMessage`] as a `ReadOfflineMsgs` record, in Second
+/// Life's shape (measured on aditi, 2026-10-13 and 2026-10-14 —
+/// `book/src/gridspec/chat.md`): a nil `transaction-id`, the message's id
+/// under `asset_id`, `offline` 1, the time sent again as a date, and the
+/// sender's estate as both `parent_estate_id` and `estate_id`. The inverse of
+/// [`offline_message_from_record`] up to what that reads back: a friendship
+/// offer's or an invitation's id is not read, as the reference does not.
 pub(crate) fn offline_message_to_record(im: &InstantMessage) -> Llsd {
+    let timestamp = crate::types::optional_u32_to_wire(im.timestamp);
     llsd_map(vec![
         ("from_agent_id", Llsd::Uuid(im.from_agent_id.uuid())),
         ("from_agent_name", Llsd::String(im.from_agent_name.clone())),
@@ -6742,12 +6750,16 @@ pub(crate) fn offline_message_to_record(im: &InstantMessage) -> Llsd {
             Llsd::Uuid(crate::types::optional_uuid_to_wire(im.region_id)),
         ),
         ("position", region_coords_to_llsd(im.position)),
+        ("timestamp", u32_to_llsd(timestamp)),
         (
-            "timestamp",
-            u32_to_llsd(crate::types::optional_u32_to_wire(im.timestamp)),
+            "message_time",
+            Llsd::String(unix_to_iso8601(i64::from(timestamp)).unwrap_or_default()),
         ),
-        ("transaction-id", Llsd::Uuid(im.id)),
+        ("transaction-id", Llsd::Uuid(Uuid::nil())),
+        ("asset_id", Llsd::Uuid(im.id)),
+        ("offline", Llsd::Integer(1)),
         ("parent_estate_id", u32_to_llsd(im.parent_estate_id)),
+        ("estate_id", u32_to_llsd(im.parent_estate_id)),
         ("message", Llsd::String(im.message.clone())),
         ("binary_bucket", Llsd::Binary(im.binary_bucket.clone())),
     ])

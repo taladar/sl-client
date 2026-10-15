@@ -314,6 +314,20 @@ impl GroupRoleUpdateType {
             Self::Delete => 5,
         }
     }
+
+    /// The update type a wire byte names; `None` for a byte no viewer sends.
+    #[must_use]
+    pub const fn from_u8(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::NoUpdate),
+            1 => Some(Self::UpdateData),
+            2 => Some(Self::UpdatePowers),
+            3 => Some(Self::UpdateAll),
+            4 => Some(Self::Create),
+            5 => Some(Self::Delete),
+            _ => None,
+        }
+    }
 }
 
 /// One role create/update/delete in a `GroupRoleUpdate`, passed to
@@ -355,6 +369,17 @@ impl GroupRoleChange {
         match self {
             Self::Add => 0,
             Self::Remove => 1,
+        }
+    }
+
+    /// The change a wire `Change` value names; `None` for a value no viewer
+    /// sends.
+    #[must_use]
+    pub const fn from_u32(change: u32) -> Option<Self> {
+        match change {
+            0 => Some(Self::Add),
+            1 => Some(Self::Remove),
+            _ => None,
         }
     }
 }

@@ -26,7 +26,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use sl_types::key::{AgentKey, ExperienceKey, InventoryKey, ObjectKey};
+use sl_types::key::{AgentKey, ExperienceKey, GroupKey, InventoryKey, ObjectKey};
 use sl_wire::{
     AisUpdate, AssetUploadResponse, DisplayName, ExperiencePermission, InterestListReply,
     LandResourcesUrls, Llsd, ObjectMediaRequest, ObjectMediaResponse, Permissions,
@@ -87,32 +87,34 @@ use crate::task_caps::{
     parse_get_metadata_request, parse_task_inventory_cap_query,
 };
 use crate::types::TaskInventoryItem;
+use crate::types::{GroupBan, GroupBanAction, GroupMember};
 use crate::{
-    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
-    CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY,
+    CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
+    CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
+    CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_FRIENDSHIP,
+    CAP_DECLINE_GROUP_INVITE, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY,
     CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
     CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
-    CAP_GROUP_EXPERIENCES, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
-    CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_REQUEST_TASK_INVENTORY,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
-    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_GESTURE_TASK_INVENTORY,
-    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_TASK_INVENTORY,
-    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
-    CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event,
-    InventoryFolder, InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal,
-    offline_messages_to_llsd,
+    CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION,
+    CAP_INTEREST_LIST, CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD,
+    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
+    CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED, CAP_SEND_POSTCARD,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_UPDATE_GESTURE_TASK_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
+    CAP_UPDATE_MATERIAL_TASK_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
+    CHAT_SESSION_START_CONFERENCE, Event, InventoryFolder, InventoryItem, InventoryListing,
+    ServerEvent, VoiceProvisionRefusal, offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -176,6 +178,12 @@ const SERVED_CAPABILITIES: &[&str] = &[
     EVENT_QUEUE_GET,
     CAP_CHAT_SESSION_REQUEST,
     CAP_READ_OFFLINE_MSGS,
+    CAP_ACCEPT_FRIENDSHIP,
+    CAP_DECLINE_FRIENDSHIP,
+    CAP_ACCEPT_GROUP_INVITE,
+    CAP_DECLINE_GROUP_INVITE,
+    CAP_GROUP_MEMBER_DATA,
+    CAP_GROUP_API_V1,
     CAP_GET_DISPLAY_NAMES,
     CAP_AVATAR_PICKER_SEARCH,
     CAP_AGENT_PREFERENCES,
@@ -268,6 +276,20 @@ pub enum CapHandler {
     /// The deliver-once `ReadOfflineMsgs` fetch of messages stored while the
     /// agent was offline ([`SimSession::take_offline_messages`]).
     OfflineMessages,
+    /// The `AcceptFriendship` POST / `DeclineFriendship` DELETE answering a
+    /// kept friendship offer by its offerer (`?from=`), handed to the driver
+    /// as [`ServerEvent::KeptFriendshipAnswered`].
+    KeptFriendshipAnswer,
+    /// The `AcceptGroupInvite` / `DeclineGroupInvite` POST of `{group}`
+    /// answering a kept group invitation, handed to the driver as
+    /// [`ServerEvent::KeptGroupInvitationAnswered`].
+    KeptGroupInvitationAnswer,
+    /// The `GroupMemberData` POST of `{group_id}`: a group's roster, which is
+    /// the driver's to know ([`CapsDispatch::GroupMembers`]).
+    GroupMemberData,
+    /// The `GroupAPIv1` GET / POST of a group's bans (`?group_id=`), which are
+    /// the driver's ([`CapsDispatch::GroupBans`]).
+    GroupBans,
     /// The `AvatarPickerSearch` name search over [`SimSession`]'s display-name
     /// store — the modern replacement for the UDP `AvatarPickerRequest`.
     AvatarPickerSearch,
@@ -633,6 +655,21 @@ pub enum CapsDispatch {
         /// The script.
         item: InventoryKey,
     },
+    /// A `GroupMemberData` POST: who is in a group is the driver's to know.
+    /// It answers with [`SimCaps::group_member_data_response`].
+    GroupMembers {
+        /// The group asked about.
+        group_id: GroupKey,
+    },
+    /// A `GroupAPIv1` request: a read of a group's bans, or a change of them.
+    /// The driver answers a read with [`SimCaps::group_bans_response`] and a
+    /// change it made with [`SimCaps::group_bans_changed_response`].
+    GroupBans {
+        /// The group.
+        group_id: GroupKey,
+        /// What the POST does and to whom; `None` for a GET.
+        change: Option<(GroupBanAction, Vec<AgentKey>)>,
+    },
 }
 
 /// What a request path resolved to.
@@ -781,6 +818,14 @@ impl SimCaps {
             EVENT_QUEUE_GET => Some(CapHandler::EventQueue),
             CAP_CHAT_SESSION_REQUEST => Some(CapHandler::ChatSession),
             CAP_READ_OFFLINE_MSGS => Some(CapHandler::OfflineMessages),
+            CAP_ACCEPT_FRIENDSHIP | CAP_DECLINE_FRIENDSHIP => {
+                Some(CapHandler::KeptFriendshipAnswer)
+            }
+            CAP_ACCEPT_GROUP_INVITE | CAP_DECLINE_GROUP_INVITE => {
+                Some(CapHandler::KeptGroupInvitationAnswer)
+            }
+            CAP_GROUP_MEMBER_DATA => Some(CapHandler::GroupMemberData),
+            CAP_GROUP_API_V1 => Some(CapHandler::GroupBans),
             CAP_GET_DISPLAY_NAMES => Some(CapHandler::DisplayNames),
             CAP_AVATAR_PICKER_SEARCH => Some(CapHandler::AvatarPickerSearch),
             CAP_AGENT_PREFERENCES => Some(CapHandler::AgentPreferences),
@@ -924,6 +969,14 @@ impl SimCaps {
                     Some(CapHandler::OfflineMessages) => {
                         CapsDispatch::Response(Self::dispatch_offline_messages(sim, request))
                     }
+                    Some(CapHandler::KeptFriendshipAnswer) => CapsDispatch::Response(
+                        Self::dispatch_kept_friendship_answer(sim, request, name),
+                    ),
+                    Some(CapHandler::KeptGroupInvitationAnswer) => CapsDispatch::Response(
+                        Self::dispatch_kept_group_invitation_answer(sim, request, name),
+                    ),
+                    Some(CapHandler::GroupMemberData) => Self::dispatch_group_member_data(request),
+                    Some(CapHandler::GroupBans) => Self::dispatch_group_bans(request),
                     Some(CapHandler::DisplayNames) => {
                         CapsDispatch::Response(Self::dispatch_display_names(sim, request))
                     }
@@ -1202,8 +1255,147 @@ impl SimCaps {
         if request.method != "GET" {
             return CapsResponse::method_not_allowed();
         }
-        let messages = sim.take_offline_messages();
-        CapsResponse::llsd_xml(offline_messages_to_llsd(&messages).to_llsd_xml())
+        let records: Vec<_> = sim
+            .take_offline_messages()
+            .into_iter()
+            .map(|kept| kept.record)
+            .collect();
+        CapsResponse::llsd_xml(offline_messages_to_llsd(&records).to_llsd_xml())
+    }
+
+    /// Serves one answer to a kept friendship offer: an `AcceptFriendship`
+    /// POST or a `DeclineFriendship` DELETE of `?from=<offerer>` (the accept
+    /// also names the accepter, `&agent_name=`, which nothing here needs). The
+    /// answer goes to the driver ([`ServerEvent::KeptFriendshipAnswered`]) and
+    /// the request is answered `{success: true}`, as Second Life answers a
+    /// decline of a kept offer (measured on aditi, 2026-10-14 —
+    /// `book/src/gridspec/friends.md`). The wrong method → `405`; no `from`,
+    /// or one that is not an id → `400`.
+    fn dispatch_kept_friendship_answer(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+        name: &str,
+    ) -> CapsResponse {
+        let accept = name == CAP_ACCEPT_FRIENDSHIP;
+        let method = if accept { "POST" } else { "DELETE" };
+        if request.method != method {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(from) = query_param(request.query, "from")
+            .and_then(|from| Uuid::parse_str(from.trim_matches('"')).ok())
+        else {
+            return CapsResponse::bad_request();
+        };
+        sim.push_kept_friendship_answer(AgentKey::from(from), accept);
+        CapsResponse::llsd_xml(
+            Llsd::Map(HashMap::from([("success".to_owned(), Llsd::Boolean(true))])).to_llsd_xml(),
+        )
+    }
+
+    /// Serves one answer to a kept group invitation: an `AcceptGroupInvite` or
+    /// `DeclineGroupInvite` POST of `{group}`. The answer goes to the driver
+    /// ([`ServerEvent::KeptGroupInvitationAnswered`]) and the request is
+    /// answered `{success: true}`, as Second Life answers a decline of a kept
+    /// invitation (measured on aditi, 2026-10-14 — `book/src/gridspec/groups.md`).
+    /// The wrong method → `405`; a body that names no group → `400`.
+    fn dispatch_kept_group_invitation_answer(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+        name: &str,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(group_id) = parse_llsd_body(request.body)
+            .as_ref()
+            .and_then(crate::group_invite_answer_from_llsd)
+        else {
+            return CapsResponse::bad_request();
+        };
+        sim.push_kept_group_invitation_answer(group_id, name == CAP_ACCEPT_GROUP_INVITE);
+        CapsResponse::llsd_xml(
+            Llsd::Map(HashMap::from([("success".to_owned(), Llsd::Boolean(true))])).to_llsd_xml(),
+        )
+    }
+
+    /// Reads one `GroupMemberData` POST and hands it to the driver: the wrong
+    /// method → `405`, a body that names no group → `400`.
+    fn dispatch_group_member_data(request: &CapsRequest<'_>) -> CapsDispatch {
+        if request.method != "POST" {
+            return CapsDispatch::Response(CapsResponse::method_not_allowed());
+        }
+        match parse_llsd_body(request.body)
+            .as_ref()
+            .and_then(crate::group_member_data_request_from_llsd)
+        {
+            Some(group_id) => CapsDispatch::GroupMembers { group_id },
+            None => CapsDispatch::Response(CapsResponse::bad_request()),
+        }
+    }
+
+    /// Answers a `GroupMemberData` request ([`CapsDispatch::GroupMembers`])
+    /// with `members`, the roster the driver holds for `group_id`.
+    #[must_use]
+    pub fn group_member_data_response(group_id: GroupKey, members: &[GroupMember]) -> CapsResponse {
+        let event = Event::GroupMembers {
+            group_id,
+            request_id: Uuid::nil(),
+            member_count: i32::try_from(members.len()).unwrap_or(i32::MAX),
+            members: members.to_vec(),
+        };
+        match crate::group_members_to_caps_llsd(&event) {
+            Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+            Err(_out_of_range) => CapsResponse::internal_error(),
+        }
+    }
+
+    /// Reads one `GroupAPIv1` request and hands it to the driver: a GET of
+    /// `?group_id=` reads the bans, a POST of a ban request changes them. The
+    /// wrong method → `405`; no group, or a POST that is no ban request →
+    /// `400`.
+    fn dispatch_group_bans(request: &CapsRequest<'_>) -> CapsDispatch {
+        let Some(group_id) = query_param(request.query, "group_id")
+            .and_then(|group| Uuid::parse_str(group).ok())
+            .map(GroupKey::from)
+        else {
+            return CapsDispatch::Response(CapsResponse::bad_request());
+        };
+        match request.method {
+            "GET" => CapsDispatch::GroupBans {
+                group_id,
+                change: None,
+            },
+            "POST" => match parse_llsd_body(request.body)
+                .as_ref()
+                .and_then(crate::group_ban_request_from_llsd)
+            {
+                Some(change) => CapsDispatch::GroupBans {
+                    group_id,
+                    change: Some(change),
+                },
+                None => CapsDispatch::Response(CapsResponse::bad_request()),
+            },
+            _ => CapsDispatch::Response(CapsResponse::method_not_allowed()),
+        }
+    }
+
+    /// Answers a `GroupAPIv1` read ([`CapsDispatch::GroupBans`] with no
+    /// change) with `bans`, the list the driver holds for `group_id`.
+    #[must_use]
+    pub fn group_bans_response(group_id: GroupKey, bans: &[GroupBan]) -> CapsResponse {
+        CapsResponse::llsd_xml(crate::group_bans_to_llsd(group_id, bans).to_llsd_xml())
+    }
+
+    /// Answers a `GroupAPIv1` change the driver made, as Second Life does: a
+    /// ban `201` with the text "Created", a lifted ban `200` with the text
+    /// "OK", neither LLSD (measured on aditi, 2026-10-14 —
+    /// `book/src/gridspec/groups.md`).
+    #[must_use]
+    pub fn group_bans_changed_response(action: GroupBanAction) -> CapsResponse {
+        match action {
+            GroupBanAction::Ban => CapsResponse::words(201, "Created"),
+            GroupBanAction::Unban => CapsResponse::words(200, "OK"),
+        }
     }
 
     /// Serves one `GetDisplayNames` GET: looks each `ids` query parameter up
@@ -3066,7 +3258,7 @@ mod tests {
             ("FetchLibDescendents2", CapStatus::Served),
             ("FetchInventory2", CapStatus::Served),
             ("FetchLib2", CapStatus::Served),
-            ("GroupMemberData", CapStatus::Pending),
+            ("GroupMemberData", CapStatus::Served),
             ("GetTexture", CapStatus::Served),
             ("GetMesh", CapStatus::Served),
             ("GetMesh2", CapStatus::Served),
@@ -3110,11 +3302,11 @@ mod tests {
             ("ExperienceQuery", CapStatus::Served),
             ("ReadOfflineMsgs", CapStatus::Served),
             ("ChatSessionRequest", CapStatus::Served),
-            ("AcceptGroupInvite", CapStatus::Pending),
-            ("DeclineGroupInvite", CapStatus::Pending),
-            ("AcceptFriendship", CapStatus::Pending),
-            ("DeclineFriendship", CapStatus::Pending),
-            ("GroupAPIv1", CapStatus::Pending),
+            ("AcceptGroupInvite", CapStatus::Served),
+            ("DeclineGroupInvite", CapStatus::Served),
+            ("AcceptFriendship", CapStatus::Served),
+            ("DeclineFriendship", CapStatus::Served),
+            ("GroupAPIv1", CapStatus::Served),
             ("InventoryAPIv3", CapStatus::Served),
             ("LibraryAPIv3", CapStatus::Served),
             ("CreateInventoryCategory", CapStatus::Served),

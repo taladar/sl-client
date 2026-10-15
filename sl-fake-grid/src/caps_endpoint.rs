@@ -3,11 +3,11 @@
 //! hold the sans-I/O core deliberately leaves to its runtime.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use sl_proto::{CapsDispatch, CapsRequest, CapsResponse, SimCaps};
 
 use crate::driver::{SharedSim, SimState, sleep_until_opt};
+use crate::runtime::GridCore;
 
 /// The request headers a capability reads: only the asset-delivery ones do.
 #[derive(Debug, Clone, Copy, Default)]
@@ -29,8 +29,8 @@ pub(crate) struct AssetHeaders<'a> {
 /// everything else goes through [`sl_proto::SimCaps::dispatch`] followed by
 /// the driver's flush rule (a caps POST can queue transmits and events).
 pub(crate) async fn dispatch_caps(
+    core: &GridCore,
     shared: &SharedSim,
-    eq_hold: Duration,
     method: &str,
     path: &str,
     query: Option<&str>,
@@ -38,7 +38,7 @@ pub(crate) async fn dispatch_caps(
     body: &[u8],
 ) -> CapsResponse {
     // The hold deadline covers the whole poll, not each re-dispatch.
-    let deadline = shared.now().checked_add(eq_hold);
+    let deadline = shared.now().checked_add(core.eq_hold);
     let mut shutdown_rx = shared.shutdown_rx.clone();
     loop {
         let request = CapsRequest {
@@ -87,6 +87,27 @@ pub(crate) async fn dispatch_caps(
                 let world = Arc::clone(&shared.state.lock().await.world);
                 let script = world.lock().script_experience(task, item);
                 return SimCaps::script_metadata_response(script);
+            }
+            // The groups are the grid's.
+            CapsDispatch::GroupMembers { group_id } => {
+                let members = crate::groups::roster_for_capability(core, group_id).await;
+                return SimCaps::group_member_data_response(group_id, &members);
+            }
+            CapsDispatch::GroupBans {
+                group_id,
+                change: None,
+            } => {
+                return SimCaps::group_bans_response(
+                    group_id,
+                    &crate::groups::bans_of(core, group_id),
+                );
+            }
+            CapsDispatch::GroupBans {
+                group_id,
+                change: Some((action, agents)),
+            } => {
+                crate::groups::change_bans(core, group_id, action, &agents);
+                return SimCaps::group_bans_changed_response(action);
             }
             CapsDispatch::EventQueueWouldBlock => {
                 if *shutdown_rx.borrow_and_update() {

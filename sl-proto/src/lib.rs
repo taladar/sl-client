@@ -23,6 +23,7 @@ mod scoped_id;
 mod session;
 mod sim_caps;
 mod sim_experiences;
+mod sim_groups;
 mod sim_inventory;
 mod sim_new_file;
 mod sim_session;
@@ -148,11 +149,15 @@ pub use sim_caps::{
     CapHandler, CapsDispatch, CapsRequest, CapsResponse, LLSD_XML_CONTENT_TYPE, SimCaps,
 };
 pub use sim_experiences::SimExperiences;
+pub use sim_groups::{
+    group_ban_request_from_llsd, group_bans_to_llsd, group_invite_answer_from_llsd,
+    group_member_data_request_from_llsd,
+};
 pub use sim_inventory::SimInventoryTree;
 pub use sim_new_file::{NewFilePolicy, UploadPrices};
 pub use sim_session::{
     AgentPresence, AgentUpdateInfo, ArrivalPlacement, CapsUploadMetadata, CoarseRounding,
-    FlowMirrorStatus, ObjectMediaState, PARCEL_OVERLAY_CHUNK_BYTES, RegionTelemetry,
+    FlowMirrorStatus, KeptMessage, ObjectMediaState, PARCEL_OVERLAY_CHUNK_BYTES, RegionTelemetry,
     RejectionReason, SESSION_FLOW_COVERAGE, ServerEvent, SimChatSession, SimChatSessionKind,
     SimParcel, SimSession, SitTransform, TerrainStream, TransferRequestSource,
     UpdatedInventoryItem, UserRightsEntry, WindFeed, coarse_location, teleport_strings,

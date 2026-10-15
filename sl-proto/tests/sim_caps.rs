@@ -162,8 +162,9 @@ mod test {
         // uploads of a gesture and a material, and the two reads of a prim's
         // contents (RequestTaskInventory, GetMetadata), and the three smaller
         // upload capabilities (MeshUploadFlag, InventoryThumbnailUpload,
-        // SendPostcard).
-        assert_eq!(granted.len(), 70);
+        // SendPostcard), and the six of friends and groups (the four answers to
+        // a kept offer or invitation, GroupMemberData, GroupAPIv1).
+        assert_eq!(granted.len(), 76);
         Ok(())
     }
 
@@ -185,17 +186,17 @@ mod test {
     fn unsupported_caps_are_omitted_from_the_grant() -> Result<(), TestError> {
         let mut caps = new_caps()?;
         let mut sim = new_sim();
-        // `GroupMemberData` is still a Pending capability (no handler), so it
+        // `ObjectAnimation` is still a Pending capability (no handler), so it
         // stands in here for "requested but unsupported"; `GetTexture` is now
         // served by the composed asset surface and would be granted.
         let request_body =
-            build_seed_request(&["EventQueueGet", "GroupMemberData", "NoSuchCapability"]);
+            build_seed_request(&["EventQueueGet", "ObjectAnimation", "NoSuchCapability"]);
         let seed_path = caps.seed_url().path().to_owned();
         let (status, body) = respond(&mut caps, &mut sim, &post(&seed_path, &request_body))?;
         assert_eq!(status, 200);
         let granted = parse_seed_response(&body)?;
         assert!(granted.contains_key("EventQueueGet"));
-        assert!(!granted.contains_key("GroupMemberData"));
+        assert!(!granted.contains_key("ObjectAnimation"));
         assert!(!granted.contains_key("NoSuchCapability"));
         Ok(())
     }
@@ -723,7 +724,7 @@ mod test {
             message: "stored while offline".to_owned(),
             binary_bucket: Vec::new(),
         };
-        sim.store_offline_message(stored.clone());
+        sim.store_offline_message(stored.clone().into());
 
         let path = granted_cap_path(&caps, "ReadOfflineMsgs")?;
         let (status, body) = respond(&mut caps, &mut sim, &get(&path, None))?;
@@ -738,10 +739,14 @@ mod test {
             .ok_or("expected the offline IM on the client")?;
         assert_eq!(received, stored);
 
-        // Deliver-once: the fetch drained the store.
+        // Deliver-once: the fetch drained the store, and the answer is still
+        // Second Life's array holding one (now empty) array of records.
         let (status, body) = respond(&mut caps, &mut sim, &get(&path, None))?;
         assert_eq!(status, 200);
-        assert_eq!(parse_llsd_xml(&body)?, Llsd::Array(Vec::new()));
+        assert_eq!(
+            parse_llsd_xml(&body)?,
+            Llsd::Array(vec![Llsd::Array(Vec::new())])
+        );
         Ok(())
     }
 

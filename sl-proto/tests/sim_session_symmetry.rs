@@ -29,16 +29,15 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AgentKey, AnimationKey, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
-        ChatSessionKind, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags,
-        CreateGroupParams, Event, FolderType, FriendKey, GridCoordinates, GroupKey, GroupNoticeKey,
-        GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, GroupRoleUpdateType,
-        InterestsUpdate, InventoryFolderKey, InventoryKey, LandStatExtended, LandStatItem,
-        LandStatReportType, LandStatScore, LindenAmount, LoginParams, LureId, Maturity,
-        MoneyTransactionType, MuteFlags, MuteType, ObjectExtraParams, ObjectKey, OwnerKey,
-        ParcelObjectOwner, ParcelObjectOwnersPart, PickKey, PickUpdate, PrimShapeParams,
-        ProductType, ProfileUpdate, QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId,
-        RegionTerrainComposition, RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession,
-        TextureKey, Wearable, WearableType, group_powers, parse_event_queue_response,
+        ChatSessionKind, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags, Event,
+        FolderType, FriendKey, GridCoordinates, GroupKey, InterestsUpdate, InventoryFolderKey,
+        InventoryKey, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore,
+        LindenAmount, LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        ObjectExtraParams, ObjectKey, OwnerKey, ParcelObjectOwner, ParcelObjectOwnersPart, PickKey,
+        PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId, RegionHandle,
+        RegionIdentity, RegionLocalObjectId, RegionTerrainComposition, RezAttachment,
+        ScopedObjectId, ServerEvent, Session, SimSession, TextureKey, Wearable, WearableType,
+        parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_types::map::RegionCoordinates;
@@ -438,23 +437,7 @@ mod test {
         "RemoveInventoryObjects",
         "PurgeInventoryDescendents",
         // groups
-        "CreateGroupRequest",
-        "JoinGroupRequest",
-        "LeaveGroupRequest",
-        "InviteGroupRequest",
-        "EjectGroupMemberRequest",
-        "ActivateGroup",
-        "SetGroupAcceptNotices",
         "SetGroupContribution",
-        "GroupRoleUpdate",
-        "GroupRoleChanges",
-        "GroupProfileRequest",
-        "GroupMembersRequest",
-        "GroupRoleDataRequest",
-        "GroupRoleMembersRequest",
-        "GroupTitlesRequest",
-        "GroupNoticesListRequest",
-        "GroupNoticeRequest",
         // object handling (the edits themselves are typed since
         // `test-fake-grid-edit-surfaces`; what is left is the grab, which moves
         // an object without changing what the region holds of it)
@@ -508,25 +491,7 @@ mod test {
         "PurgeInventoryDescendents",
     ];
     /// The raw-forwarded messages the matching family test sends, in order.
-    const GROUP_FAMILY: &[&str] = &[
-        "CreateGroupRequest",
-        "JoinGroupRequest",
-        "LeaveGroupRequest",
-        "InviteGroupRequest",
-        "EjectGroupMemberRequest",
-        "ActivateGroup",
-        "SetGroupAcceptNotices",
-        "SetGroupContribution",
-        "GroupRoleUpdate",
-        "GroupRoleChanges",
-        "GroupProfileRequest",
-        "GroupMembersRequest",
-        "GroupRoleDataRequest",
-        "GroupRoleMembersRequest",
-        "GroupTitlesRequest",
-        "GroupNoticesListRequest",
-        "GroupNoticeRequest",
-    ];
+    const GROUP_FAMILY: &[&str] = &["SetGroupContribution"];
     /// The raw-forwarded messages the matching family test sends, in order.
     const OBJECT_FAMILY: &[&str] = &["ObjectGrab", "ObjectDeGrab", "ObjectGrabUpdate"];
     /// The raw-forwarded messages the matching family test sends, in order.
@@ -635,58 +600,10 @@ mod test {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
 
+        // The rest of the group requests decode to typed events
+        // (`group_requests_and_replies_round_trip` in `sim_session.rs`).
         let group = GroupKey::from(uuid::Uuid::from_u128(0x670C));
-        let role = GroupRoleKey::from(uuid::Uuid::from_u128(0x670D));
-        let member = AgentKey::from(uuid::Uuid::from_u128(0x670E));
-
-        client.create_group(
-            &CreateGroupParams {
-                name: "My Group".to_owned(),
-                charter: "hi".to_owned(),
-                show_in_list: true,
-                insignia_id: None,
-                membership_fee: LindenAmount(0),
-                open_enrollment: true,
-                allow_publish: false,
-                mature_publish: false,
-            },
-            now,
-        )?;
-        client.join_group(group, now)?;
-        client.leave_group(group, now)?;
-        client.invite_to_group(group, &[(member, role)], now)?;
-        client.eject_group_members(group, &[member], now)?;
-        client.activate_group(Some(group), now)?;
-        client.set_group_accept_notices(group, true, false, now)?;
         client.set_group_contribution(group, 512, now)?;
-        client.update_group_roles(
-            group,
-            &[GroupRoleEdit {
-                role_id: Some(role),
-                name: "Officers".to_owned(),
-                description: "the officers".to_owned(),
-                title: "Officer".to_owned(),
-                powers: group_powers::MEMBER_INVITE | group_powers::NOTICES_SEND,
-                update_type: GroupRoleUpdateType::Create,
-            }],
-            now,
-        )?;
-        client.change_group_role_members(
-            group,
-            &[GroupRoleMemberChange {
-                role_id: Some(role),
-                member_id: member,
-                change: GroupRoleChange::Add,
-            }],
-            now,
-        )?;
-        client.request_group_profile(group, now)?;
-        client.request_group_members(group, now)?;
-        client.request_group_roles(group, now)?;
-        client.request_group_role_members(group, now)?;
-        client.request_group_titles(group, now)?;
-        client.request_group_notices(group, now)?;
-        client.request_group_notice(GroupNoticeKey::from(uuid::Uuid::from_u128(0x670F)), now)?;
 
         let relayed = assert_family(&mut client, &mut sim, now, GROUP_FAMILY)?;
         let AnyMessage::SetGroupContribution(contribution) =

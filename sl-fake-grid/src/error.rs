@@ -73,4 +73,10 @@ pub enum Error {
         /// The `First Last` name.
         account: String,
     },
+    /// A group named an account the builder never added.
+    #[error("a group names {account:?}, which is no account of the grid")]
+    UnknownGroupMember {
+        /// The `First Last` name.
+        account: String,
+    },
 }

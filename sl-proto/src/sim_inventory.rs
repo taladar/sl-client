@@ -79,6 +79,24 @@ impl SimInventoryTree {
         self.folders.values()
     }
 
+    /// Gives every folder the id `rename` maps its id to, and every item and
+    /// folder that names one the new id — e.g. a fixture tree, seeded with
+    /// the same ids for every agent, made the agent's own, as a grid's
+    /// folders are.
+    pub fn rename_folders(&mut self, rename: impl Fn(InventoryFolderKey) -> InventoryFolderKey) {
+        self.folders = core::mem::take(&mut self.folders)
+            .into_values()
+            .map(|mut folder| {
+                folder.folder_id = rename(folder.folder_id);
+                folder.parent_id = folder.parent_id.map(&rename);
+                (folder.folder_id, folder)
+            })
+            .collect();
+        for item in self.items.values_mut() {
+            item.folder_id = rename(item.folder_id);
+        }
+    }
+
     /// The direct child folders of `folder_id`, sorted by name with an id
     /// tie-break (the deterministic listing order).
     fn child_folders(&self, folder_id: InventoryFolderKey) -> Vec<InventoryFolder> {

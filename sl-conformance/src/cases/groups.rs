@@ -41,7 +41,8 @@
 //! founds one where none is named (the run then measures in that one, and
 //! keeps it). B is left a member of the census group, also when a leg fails:
 //! Second Life disbands a young group of fewer than two members. The fake
-//! grid has no groups yet (`server-fake-grid-groups`).
+//! grid holds a census group of its own from its start, owned by A with B a
+//! member, and imitates each grid's groups.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -3388,7 +3389,7 @@ impl GridTest for Groups {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {

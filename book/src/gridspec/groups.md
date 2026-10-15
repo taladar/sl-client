@@ -15,8 +15,10 @@ Measured on 2026-10-14 by the conformance case `groups`: avatar **A** owns
 the census group and does what an owner does; avatar **B** is the member it
 acts on and goes away three times. Two runs on aditi (Mauve) and two on the
 local OpenSim (Groups V2); no answer changed between two runs of a grid, and
-every run is held to them (**held**). The fake grid has no groups yet, so
-it is not measured here (`server-fake-grid-groups`).
+every run is held to them (**held**). The fake grid imitates each
+(`sl-fake-grid`'s `groups` module, a field of `GroupsPolicy` per divergence)
+but group chat, holding a census group of its own from its start, and the
+same case holds both of its flavours to these answers offline.
 
 A role's powers are written as the hex of the `GP_*` bitfield; a group's
 name and the avatars' names are left out.

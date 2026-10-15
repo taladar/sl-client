@@ -230,7 +230,10 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     // Optional environment-specific fixtures (e.g. a pre-made group the
     // membership cases reuse instead of creating one per run). Absent by default,
     // especially on OpenSim where creating per run is free.
-    let fixtures = Fixtures::load(args.grid, args.fixtures.as_deref())?;
+    let fixtures = match &fake {
+        Some(_harness) => FakeGridHarness::fixtures(),
+        None => Fixtures::load(args.grid, args.fixtures.as_deref())?,
+    };
 
     // Avatar-availability precondition: refuse only when more avatars are needed
     // than the file provides, before any login happens.

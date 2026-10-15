@@ -75,6 +75,12 @@ pub(crate) struct SimState {
     /// that whether it is sent its own appearance is still to be decided
     /// ([`crate::BakePolicy::sends_own_appearance`]).
     pub(crate) own_appearance_owed: bool,
+    /// What the session knows of its agent's groups: the active one an
+    /// `AgentDataUpdate` names, and the powers a deed and a move of a
+    /// group's object are checked against ([`crate::groups`]).
+    pub(crate) groups: crate::groups::AgentGroups,
+    /// How the grid runs groups ([`ImitatedGrid::groups_policy`](crate::ImitatedGrid::groups_policy)).
+    pub(crate) groups_policy: crate::groups::GroupsPolicy,
     /// How the region's ground and wind are sent
     /// ([`crate::ImitatedGrid::terrain_policy`]).
     pub(crate) terrain_policy: crate::imitates::TerrainPolicy,
@@ -326,15 +332,7 @@ impl SharedSim {
             if (opened && matches!(state.role, SessionRole::Root))
                 || matches!(event, ServerEvent::RequestAgentDataUpdate)
             {
-                let agent = sl_proto::ActiveGroup {
-                    agent_id: state.avatar.agent_id,
-                    first_name: state.avatar.first_name.clone(),
-                    last_name: state.avatar.last_name.clone(),
-                    group_title: String::new(),
-                    active_group_id: None,
-                    group_powers: 0,
-                    group_name: String::new(),
-                };
+                let agent = state.groups.active_group(&state.avatar);
                 if let Err(error) = state.sim.send_agent_data_update(&agent, now) {
                     tracing::warn!("agent data update failed: {error}");
                 }
@@ -477,6 +475,11 @@ impl SharedSim {
                         parcels: state.parcel_policy,
                         sits: state.sit_policy,
                         mint: &move || minter.uuid(),
+                        groups: crate::object_edits::GroupRights {
+                            agent: state.avatar.agent_id,
+                            groups: &state.groups,
+                            policy: &state.groups_policy,
+                        },
                     },
                     &event,
                     now,

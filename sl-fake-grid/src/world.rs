@@ -2068,6 +2068,8 @@ pub(crate) struct WorldPolicies<'a> {
     pub(crate) sits: crate::imitates::SitPolicy,
     /// Where the simulator's own ids come from.
     pub(crate) mint: &'a dyn Fn() -> uuid::Uuid,
+    /// What the agent may do with its groups' objects.
+    pub(crate) groups: crate::object_edits::GroupRights<'a>,
 }
 
 /// Answers one drained [`ServerEvent`] against the region's world, under the
@@ -2122,12 +2124,13 @@ pub(crate) fn answer_world_request(
         parcels,
         sits,
         mint,
+        groups,
     } = policies;
     // The object and parcel edit families are bodies of work of their own; each
     // answers first and says so, so nothing here has to enumerate what they
     // cover.
     if let Some(changes) =
-        crate::object_edits::answer_object_edit(world, mint, selection, sim, event, now)
+        crate::object_edits::answer_object_edit(world, mint, selection, sim, &groups, event, now)
     {
         return changes;
     }
@@ -3313,7 +3316,17 @@ fn derez(
         let own = linkset
             .first()
             .is_some_and(|root| root.owner_id == identity.agent_id.uuid());
+        let group_owned = world
+            .properties_of(*local_id)
+            .is_some_and(|properties| matches!(properties.owner, OwnerKey::Group(_)));
         let folder = match destination {
+            DeRezDestination::Trash(_named)
+                if group_owned
+                    && policy.group_object_trash
+                        == crate::imitates::GroupObjectTrash::LostAndFound =>
+            {
+                folder_of_type(sim, FolderType::LostAndFound)
+            }
             DeRezDestination::Trash(named) => Some(match policy.trash_folder {
                 crate::imitates::TrashFolder::Named => *named,
                 crate::imitates::TrashFolder::AgentsOwn => {

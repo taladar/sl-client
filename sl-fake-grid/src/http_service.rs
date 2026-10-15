@@ -266,8 +266,8 @@ async fn handle_request(
             });
         }
         let caps_response = dispatch_caps(
+            &core,
             &shared,
-            core.eq_hold,
             &method,
             &path,
             query.as_deref(),

@@ -86,3 +86,13 @@ list when the relay exists):
   nil, the id under `asset_id`, `message_time`, `estate_id`, `offline` 1 —
   `offline_messages_to_llsd` writes a bare array with the id as
   `transaction-id` today. Either road empties the store for both.
+
+## From server-fake-grid-friends-presence (2026-10-15)
+
+The kept store exists now: `Social::keep` holds a `KeptMessage` for an
+avatar that is away, its arrival moves them into the session's store (or
+hands a friendship offer over, on OpenSim's flavour), the social responder
+answers `RetrieveInstantMessages` from it, and `offline_messages_to_llsd`
+writes Second Life's record shape. Keeping an ordinary message is what is
+left: build its `KeptMessage` (the record states the same message) and keep
+it as the friendship offer and the group invitation are kept.
