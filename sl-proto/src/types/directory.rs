@@ -19,10 +19,13 @@ use sl_types::search::EventId;
 use sl_wire::GlobalCoordinates;
 use uuid::Uuid;
 
-/// The directory-query flags (`DFQ_*`), shared by every `Dir*Query` and
-/// `PlacesQuery`: a bitfield selecting what a `DirFindQuery` searches
-/// (people / events / groups), which results to include, and how they are
-/// sorted. Combine the constants with [`union`](Self::union).
+/// The directory-query flags (`DFQ_*`) of a `DirFindQuery`, `DirPlacesQuery`,
+/// `DirLandQuery` and `PlacesQuery`: a bitfield selecting what a `DirFindQuery`
+/// searches (people / events / groups), which results to include, and how they
+/// are sorted. Combine the constants with [`union`](Self::union).
+///
+/// A `DirClassifiedQuery` packs the same `QueryFlags` field with bits of its
+/// own, [`ClassifiedQueryFlags`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct DirFindFlags(pub u32);
 
@@ -114,6 +117,81 @@ impl DirFindFlags {
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
+    }
+}
+
+/// The query flags of a `DirClassifiedQuery`: the classifieds' own bit space
+/// (`llclassifiedflags.h`), not the [`DirFindFlags`] every other directory
+/// query uses — a classified search sent the `DFQ_INC_*` bits asks for no
+/// rating at all.
+///
+/// Build one from the rating checkboxes with
+/// [`for_ratings`](Self::for_ratings), which packs them as the reference's
+/// `pack_classified_flags_request` does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ClassifiedQueryFlags(pub u32);
+
+impl ClassifiedQueryFlags {
+    /// No flags set.
+    pub const NONE: Self = Self(0);
+    /// Leave mature classifieds out (`CLASSIFIED_QUERY_FILTER_MATURE`,
+    /// `1 << 1`): what a search for General without Moderate also sets.
+    pub const FILTER_MATURE: Self = Self(1 << 1);
+    /// Include General-rated classifieds (`CLASSIFIED_QUERY_INC_PG`, `1 << 2`).
+    pub const INC_PG: Self = Self(1 << 2);
+    /// Include Moderate-rated classifieds (`CLASSIFIED_QUERY_INC_MATURE`,
+    /// `1 << 3`).
+    pub const INC_MATURE: Self = Self(1 << 3);
+    /// The auto-renew bit (`CLASSIFIED_FLAG_AUTO_RENEW`, `1 << 5`), which the
+    /// reference's search never sets.
+    pub const AUTO_RENEW: Self = Self(1 << 5);
+    /// Include Adult-rated classifieds (`CLASSIFIED_QUERY_INC_ADULT`, `1 << 6`).
+    pub const INC_ADULT: Self = Self(1 << 6);
+
+    /// The flags a search for the ratings `general`, `moderate` and `adult`
+    /// sends, packed as the reference's `pack_classified_flags_request` packs
+    /// them: an include bit per rating, and the mature filter when General is
+    /// asked for without Moderate.
+    #[must_use]
+    pub const fn for_ratings(general: bool, moderate: bool, adult: bool) -> Self {
+        let mut bits = 0;
+        if general {
+            bits |= Self::INC_PG.0;
+        }
+        if moderate {
+            bits |= Self::INC_MATURE.0;
+        }
+        if general && !moderate {
+            bits |= Self::FILTER_MATURE.0;
+        }
+        if adult {
+            bits |= Self::INC_ADULT.0;
+        }
+        Self(bits)
+    }
+
+    /// Wraps a raw flags value.
+    #[must_use]
+    pub const fn from_bits(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    /// The raw flags value.
+    #[must_use]
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// Combines two sets of flags.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Whether every bit of `other` is set in `self`.
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
     }
 }
 
@@ -270,6 +348,11 @@ pub struct DirLandResult {
     pub sale_price: Option<LindenAmount>,
     /// The parcel's area, in square metres.
     pub actual_area: LandArea,
+    /// The land product the parcel is (`ProductSKU`, e.g. `023`), named by
+    /// the `ProductInfoRequest` capability's [`LandProduct`] list. Only the
+    /// event-queue form of the reply carries it — the UDP template leaves it
+    /// out — so a reply over UDP has `None`, as has a row whose SKU is empty.
+    pub product_sku: Option<String>,
 }
 
 /// One name matched by an [`AvatarPickerRequest`](crate::Command::AvatarPickerRequest),
@@ -325,6 +408,22 @@ pub struct PlacesResult {
     pub dwell: f32,
     /// The parcel's price, in L$.
     pub price: LindenAmount,
+    /// The land product the parcel is (`ProductSKU`), as on
+    /// [`DirLandResult::product_sku`]: only the event-queue form carries it.
+    pub product_sku: Option<String>,
+}
+
+/// One land product of the `ProductInfoRequest` capability's list: what a
+/// `ProductSKU` on a land row is called.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LandProduct {
+    /// The product code a land row carries (`023`).
+    pub sku: String,
+    /// The product's short name.
+    pub name: String,
+    /// What the reference shows as the land's type (`Mainland / Full
+    /// Region`).
+    pub description: String,
 }
 
 /// The full detail of a single in-world event, carried in an
@@ -384,7 +483,10 @@ pub(crate) const fn category_from_wire(value: i8) -> ParcelCategory {
 
 #[cfg(test)]
 mod tests {
-    use super::{DirFindFlags, EventId, LandSearchType, category_from_wire, category_to_wire};
+    use super::{
+        ClassifiedQueryFlags, DirFindFlags, EventId, LandSearchType, category_from_wire,
+        category_to_wire,
+    };
     use crate::types::ParcelCategory;
     use pretty_assertions::assert_eq;
 
@@ -409,6 +511,43 @@ mod tests {
         assert!(DirFindFlags::NONE.is_empty());
     }
 
+    /// The classified flags pack the ratings as the reference's
+    /// `pack_classified_flags_request` does, in their own bit space.
+    #[test]
+    fn classified_flags_pack_the_ratings_as_the_reference() {
+        assert_eq!(
+            ClassifiedQueryFlags::for_ratings(true, true, true).bits(),
+            0x4C
+        );
+        // General without Moderate also filters mature out.
+        assert_eq!(
+            ClassifiedQueryFlags::for_ratings(true, false, false).bits(),
+            0x06
+        );
+        assert_eq!(
+            ClassifiedQueryFlags::for_ratings(false, true, false).bits(),
+            0x08
+        );
+        assert_eq!(
+            ClassifiedQueryFlags::for_ratings(false, false, true).bits(),
+            0x40
+        );
+        assert_eq!(
+            ClassifiedQueryFlags::for_ratings(false, false, false),
+            ClassifiedQueryFlags::NONE
+        );
+        // None of them is a `DFQ_INC_*` bit.
+        let every = ClassifiedQueryFlags::for_ratings(true, true, true).bits();
+        assert_eq!(
+            every
+                & DirFindFlags::INC_PG
+                    .union(DirFindFlags::INC_MATURE)
+                    .union(DirFindFlags::INC_ADULT)
+                    .bits(),
+            0
+        );
+    }
+
     /// The default land filter includes everything.
     #[test]
     fn land_search_type_default_is_all() {
@@ -424,6 +563,7 @@ mod tests {
             ParcelCategory::None,
             ParcelCategory::Linden,
             ParcelCategory::Adult,
+            ParcelCategory::Any,
             ParcelCategory::Unknown(200),
         ] {
             assert_eq!(category_from_wire(category_to_wire(category)), category);

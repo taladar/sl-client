@@ -15,16 +15,16 @@ use crate::types::EventId;
 use crate::types::directory::category_to_wire;
 use crate::types::{
     AssetType, AttachmentMode, AttachmentPoint, Camera, ChatType, ClassifiedCategory,
-    ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags,
-    GestureActivation, GodRegionUpdate, GroupRoleEdit, GroupRoleMemberChange, ImDialog,
-    InterestsUpdate, InventoryItem, InventoryType, LandEdit, LandSearchType, MapRequestFlags,
-    Material, MovementMode, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectTransform, ParcelAccessEntry, ParcelCategory,
-    ParcelRect, ParcelUpdate, PermissionField, PickKey, PickUpdate, Postcard, PrimShape,
-    PrimShapeParams, ProfileUpdate, RegionHandshakeReplyFlags, Reliability, RestoreItem,
-    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptPermissions,
-    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TeleportFlags, TextureEntry, Throttle,
-    UpdateGroupInfoParams, ViewerEffect, Wearable,
+    ClassifiedQueryFlags, ClassifiedUpdate, ClickAction, CreateGroupParams, DeRezDestination,
+    DetachOrder, DirFindFlags, GestureActivation, GodRegionUpdate, GroupRoleEdit,
+    GroupRoleMemberChange, ImDialog, InterestsUpdate, InventoryItem, InventoryType, LandEdit,
+    LandSearchType, MapRequestFlags, Material, MovementMode, NewInventoryItem, NewInventoryLink,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectTransform,
+    ParcelAccessEntry, ParcelCategory, ParcelRect, ParcelUpdate, PermissionField, PickKey,
+    PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate, RegionHandshakeReplyFlags,
+    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
+    ScriptPermissions, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TeleportFlags,
+    TextureEntry, Throttle, UpdateGroupInfoParams, ViewerEffect, Wearable,
 };
 use crate::types::{GroupNoticeKey, ProposalVoteId};
 use sl_types::chat::ChatChannel;
@@ -2593,7 +2593,7 @@ impl Circuit {
         &mut self,
         query_id: Uuid,
         query_text: &str,
-        flags: DirFindFlags,
+        flags: ClassifiedQueryFlags,
         category: ClassifiedCategory,
         query_start: i32,
         now: Instant,

@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 347 |
-| blocked | 92 |
+| blocked | 90 |
 | in-progress | 19 |
-| bugs | 38 |
-| done | 1383 |
+| bugs | 37 |
+| done | 1386 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2066** |
@@ -1074,6 +1074,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-fake-grid-directory-search`](ready/server-fake-grid-directory-search.md)
+  — Fake grid — answer directory searches from an index of accounts, parcels and
+  fixtures (blocked by `gridspec-search-directory` (done))
 - [`server-fake-grid-edit-permission-enforcement`](ready/server-fake-grid-edit-permission-enforcement.md)
   — Fake grid — refuse edits the editor may not make, as each grid refuses them
   (blocked by `gridspec-object-edit` (done))
@@ -1159,8 +1162,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Current Outfit Folder and wearables on each grid
 - [`gridspec-region-info`](ready/gridspec-region-info.md) — RegionInfo, region
   flags and limits on each grid
-- [`gridspec-search-directory`](ready/gridspec-search-directory.md) — Directory
-  search and the avatar picker on each grid
 - [`gridspec-seated-crossing`](ready/gridspec-seated-crossing.md) — A seated
   crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
@@ -1170,7 +1171,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (92)
+## blocked (90)
 
 ### protocol
 
@@ -1185,8 +1186,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-estate`)
 - [`protocol-cap-home-location`](blocked/protocol-cap-home-location.md) — Set
   home over the HomeLocation capability (blocked by `gridspec-landmarks-home`)
-- [`protocol-cap-product-info`](blocked/protocol-cap-product-info.md) — Land
-  type names over ProductInfoRequest (blocked by `gridspec-search-directory`)
 
 ### viewer
 
@@ -1323,9 +1322,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-directory-search`](blocked/server-fake-grid-directory-search.md)
-  — Fake grid — answer directory searches from an index of accounts, parcels and
-  fixtures (blocked by `gridspec-search-directory`)
 - [`server-fake-grid-estate-actions`](blocked/server-fake-grid-estate-actions.md)
   — Fake grid — kick, eject, freeze, teleport home, estate messages and restarts
   (blocked by `gridspec-estate`)
@@ -1521,15 +1517,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (38)
+## bugs (37)
 
 ### protocol
 
 - [`protocol-agent-preferences-read-unanswered-on-sl`](bugs/protocol-agent-preferences-read-unanswered-on-sl.md)
   — Reading the agent preferences gets no answer on Second Life
-- [`protocol-classified-query-wrong-flag-space`](bugs/protocol-classified-query-wrong-flag-space.md)
-  — DirClassifiedQuery sends DirFind maturity bits instead of classified-query
-  bits
 - [`protocol-im-states-no-position`](bugs/protocol-im-states-no-position.md) —
   Every instant message the session sends states position zero
 - [`protocol-region-flag-deny-ageunverified-value`](bugs/protocol-region-flag-deny-ageunverified-value.md)
@@ -1619,7 +1612,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1383)
+## done (1386)
 
 ### protocol
 
@@ -1829,10 +1822,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-groups` (done))
 - [`protocol-cap-parcel-properties-update`](done/protocol-cap-parcel-properties-update.md)
   — Edit parcels over the ParcelPropertiesUpdate capability
+- [`protocol-cap-product-info`](done/protocol-cap-product-info.md) — Land type
+  names over ProductInfoRequest (blocked by `gridspec-search-directory` (done))
 - [`protocol-cap-read-offline-msgs`](done/protocol-cap-read-offline-msgs.md) —
   Drain kept messages over ReadOfflineMsgs where the answer capabilities exist
   (blocked by `protocol-cap-offline-friendship-answers` (done),
   `protocol-cap-offline-group-invite-answers` (done))
+- [`protocol-classified-query-wrong-flag-space`](done/protocol-classified-query-wrong-flag-space.md)
+  — DirClassifiedQuery sends DirFind maturity bits instead of classified-query
+  bits
 - [`protocol-experience-environment-push`](done/protocol-experience-environment-push.md)
   — An experience can set the sky, and nothing in this stack can say so
 - [`protocol-experience-parcel-recheck`](done/protocol-experience-parcel-recheck.md)
@@ -4668,6 +4666,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   classifieds, notes and display names on each grid
 - [`gridspec-region-arrival`](done/gridspec-region-arrival.md) — Region
   handshake identity, the arrival burst and region telemetry on each grid
+- [`gridspec-search-directory`](done/gridspec-search-directory.md) — Directory
+  search and the avatar picker on each grid
 - [`gridspec-seed-capabilities`](done/gridspec-seed-capabilities.md) — Which
   capabilities each grid grants from the seed, and to whom
 - [`gridspec-simulator-features`](done/gridspec-simulator-features.md) — The

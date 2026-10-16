@@ -16,18 +16,19 @@ use super::{
     GroupActiveProposalItem, GroupBan, GroupMember, GroupMembership, GroupName, GroupNotice,
     GroupProfile, GroupRole, GroupRoleMember, GroupTitle, GroupVoteHistoryItem, ImDialog,
     InstantMessage, InventoryCursor, InventoryFolder, InventoryItem, InventoryItemMove, ItemInfo,
-    Kick, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem,
-    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
-    MeshUploadStatus, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, NeighborRetirement,
-    Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch,
-    OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
-    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
-    ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, ProfileImage, RegionIdentity,
-    RegionLimits, RegionStats, RequiredVoiceVersion, ScriptCompileError, ScriptControl,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissionState, ScriptTeleportRequest,
-    ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryItem,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerBatch, TerrainPatch, Texture,
-    ThumbnailTarget, TransferStatus, UserInfo, ViewerEffect, Wearable,
+    Kick, LandProduct, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
+    MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
+    MeanCollision, MeshUploadStatus, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo,
+    NeighborRetirement, Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily,
+    ObjectStreamBatch, OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
+    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
+    ParcelObjectOwnersPart, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation,
+    ProfileImage, RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion,
+    ScriptCompileError, ScriptControl, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissionState, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime,
+    SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
+    TerrainLayerBatch, TerrainPatch, Texture, ThumbnailTarget, TransferStatus, UserInfo,
+    ViewerEffect, Wearable,
 };
 use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
@@ -2185,6 +2186,11 @@ pub enum Event {
         /// The matched land parcels.
         results: Vec<DirLandResult>,
     },
+    /// The land products a land row's
+    /// [`product_sku`](crate::DirLandResult::product_sku) names, in answer to
+    /// a [`Command::RequestLandProducts`](crate::Command::RequestLandProducts)
+    /// over the `ProductInfoRequest` capability.
+    LandProducts(Vec<LandProduct>),
     /// The results of an [`Command::AvatarPickerRequest`](crate::Command::AvatarPickerRequest)
     /// name autocomplete (`AvatarPickerReply`).
     AvatarPickerReply {

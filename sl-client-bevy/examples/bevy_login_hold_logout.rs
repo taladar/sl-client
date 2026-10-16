@@ -161,6 +161,9 @@ fn on_events(
             SlSessionEvent::ClassifiedClickStats(stats) => {
                 info!("classified click counts: {stats:?}");
             }
+            SlSessionEvent::LandProducts(products) => {
+                info!("{} land product(s)", products.len());
+            }
             SlSessionEvent::Account(account) => {
                 info!(
                     "account: access {:?}/{:?}, max groups {:?}, home {:?}",

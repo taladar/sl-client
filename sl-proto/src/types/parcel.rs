@@ -1073,6 +1073,10 @@ pub enum ParcelCategory {
     Other,
     /// Adult-oriented land.
     Adult,
+    /// Any category (`C_ANY`, `-1` on the wire): only a query asks for it, a
+    /// places search of every category. [`None`](Self::None) asks for the
+    /// parcels that have no category.
+    Any,
     /// An unrecognised category value, preserved verbatim.
     Unknown(u8),
 }
@@ -1090,6 +1094,7 @@ impl ParcelCategory {
             5 => Self::ParkAndRecreation,
             6 => Self::Other,
             7 => Self::Adult,
+            u8::MAX => Self::Any,
             other => Self::Unknown(other),
         }
     }
@@ -1106,6 +1111,7 @@ impl ParcelCategory {
             Self::ParkAndRecreation => 5,
             Self::Other => 6,
             Self::Adult => 7,
+            Self::Any => u8::MAX,
             Self::Unknown(value) => value,
         }
     }

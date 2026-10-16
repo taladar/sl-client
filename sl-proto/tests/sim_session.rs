@@ -12,24 +12,25 @@ mod test {
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AlertInfo, AnimationKey, Arrival, AssetKey,
         AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, ChatChannel,
-        ChatSource, ChatType, ClassifiedCategory, ClassifiedKey, CoarseLocation, ControlFlags,
-        DeRezDestination, DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags,
-        DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility,
-        DisplayName, DisplayNameUpdate, EjectAction, EnvironmentPushAction, EstateCovenant, Event,
-        EventId, EventInfo, ExperienceEnvironmentPush, ExperienceKey, FeatureDisabled,
-        FollowCamProperty, FollowCamPropertyValue, FreezeAction, FriendKey, FriendRights,
-        GenericMessage, GenericStreamingMessage, GestureActivation, GlobalCoordinates,
-        GodRegionUpdate, GridCoordinates, GridRectangle, GroupAccountDetails,
-        GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
-        GroupAccountTransactions, GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId,
-        GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder,
-        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
-        InventoryKey, InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushRadius,
-        LandEdit, LandSearchType, LandStatItem, LandStatReportType, LandStatScore, LandingType,
-        LightData, LindenAmount, LindenBalance, Llsd, LoginParams, MAX_FACES, MapItem, MapItemType,
-        MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeanCollisionType,
-        MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
-        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
+        ChatSource, ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedQueryFlags,
+        CoarseLocation, ControlFlags, DeRezDestination, DetachOrder, DirClassifiedResult,
+        DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult,
+        DirPlaceResult, DirectoryVisibility, DisplayName, DisplayNameUpdate, EjectAction,
+        EnvironmentPushAction, EstateCovenant, Event, EventId, EventInfo,
+        ExperienceEnvironmentPush, ExperienceKey, FeatureDisabled, FollowCamProperty,
+        FollowCamPropertyValue, FreezeAction, FriendKey, FriendRights, GenericMessage,
+        GenericStreamingMessage, GestureActivation, GlobalCoordinates, GodRegionUpdate,
+        GridCoordinates, GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry,
+        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+        GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId, GroupRoleKey, GroupVote,
+        GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryFolderKey,
+        InventoryItem, InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InventoryType,
+        InvoiceId, Kick, LandArea, LandBrushAction, LandBrushRadius, LandEdit, LandSearchType,
+        LandStatItem, LandStatReportType, LandStatScore, LandingType, LightData, LindenAmount,
+        LindenBalance, Llsd, LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer, MapRegionInfo,
+        MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
+        NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink, NotecardRez,
+        ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
         ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails,
         ParcelInfo, ParcelKey, ParcelListingFlags, ParcelObjectOwner, ParcelRect,
         ParcelRequestResult, ParcelReturnType, ParcelStatus, Permissions, Permissions5, PingId,
@@ -837,7 +838,7 @@ mod test {
         client.dir_classified_query(
             QueryId::from(qid),
             "shoes",
-            DirFindFlags::INC_MATURE,
+            ClassifiedQueryFlags::for_ratings(false, true, false),
             ClassifiedCategory::PropertyRental,
             0,
             now,
@@ -899,15 +900,21 @@ mod test {
             .find_map(|e| match e {
                 ServerEvent::DirClassifiedQuery {
                     query_text,
+                    flags,
                     category,
                     ..
-                } => Some((query_text.clone(), *category)),
+                } => Some((query_text.clone(), *flags, *category)),
                 _ => None,
             })
             .ok_or("expected a DirClassifiedQuery server event")?;
+        // The ratings travel in the classifieds' own bit space.
         assert_eq!(
             classified,
-            ("shoes".to_owned(), ClassifiedCategory::PropertyRental)
+            (
+                "shoes".to_owned(),
+                ClassifiedQueryFlags::INC_MATURE,
+                ClassifiedCategory::PropertyRental
+            )
         );
 
         let picker = events
@@ -1007,6 +1014,7 @@ mod test {
                 for_sale: true,
                 sale_price: Some(LindenAmount(1000)),
                 actual_area: LandArea(1024),
+                product_sku: None,
             }],
             now,
         )?;
@@ -1036,6 +1044,7 @@ mod test {
                 snapshot_id: None,
                 dwell: 3.0,
                 price: LindenAmount(0),
+                product_sku: None,
             }],
             now,
         )?;

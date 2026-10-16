@@ -31,12 +31,16 @@ filtering them is the caller's job, as it is the reference viewer's:
 
 This chapter covers the directory searches (`Dir*Query`), the avatar-name
 autocomplete (`AvatarPickerRequest`), and the land-holdings lookup
-(`PlacesQuery`).
+(`PlacesQuery`). What each grid answers to every one of them, over which
+road, is measured in
+[Grid Behaviour → Search and the directory](../gridspec/search.md).
 
 ## Query flags
 
-`DirFindFlags` is the `DFQ_*` bitfield shared by every directory query (and
-`PlacesQuery`). It does three jobs:
+`DirFindFlags` is the `DFQ_*` bitfield of `DirFindQuery`, `DirPlacesQuery`,
+`DirLandQuery` and `PlacesQuery` — not of `DirClassifiedQuery`, whose
+`ClassifiedQueryFlags` are the classifieds' own bits (below). It does three
+jobs:
 
 - **selects what a `DirFindQuery` searches** — `DirFindFlags::PEOPLE`,
   `DirFindFlags::GROUPS` or `DirFindFlags::EVENTS`;
@@ -85,16 +89,28 @@ string, Unix time, event flags). The events reply also carries a `status` word
 Three dedicated queries cover the remaining directory tabs:
 
 - **`DirPlacesQuery`** → `Event::DirPlacesReply` — named parcels, optionally
-  filtered by `ParcelCategory` and region name. Results (`DirPlaceResult`) give
-  the parcel id, name, for-sale/auction flags and dwell.
+  filtered by `ParcelCategory` and region name. A search of every category
+  sends `ParcelCategory::Any` (`C_ANY`, −1); `ParcelCategory::None` asks for
+  the parcels with no category, and Second Life answers it with other rows.
+  Results (`DirPlaceResult`) give the parcel id, name, for-sale/auction flags
+  and dwell.
 - **`DirLandQuery`** → `Event::DirLandReply` — land for sale or auction,
   filtered by `LandSearchType`, price and area. Results (`DirLandResult`) give
-  the parcel id, name, auction/for-sale flags, sale price and area.
-  Second Life sends the reply over the event queue rather than UDP; both
-  arrive as the same event
+  the parcel id, name, auction/for-sale flags, sale price and area, and the
+  land product (`product_sku`) where the reply carries one. Second Life sends
+  the reply over the event queue rather than UDP; both arrive as the same
+  event
   ([Grid Behaviour → Land](../gridspec/land.md#land-search-on-second-life)).
+  `Command::RequestLandProducts` reads what each SKU is called from the
+  `ProductInfoRequest` capability (`Event::LandProducts`, a `LandProduct` per
+  product: `sku`, `name`, `description`), as the reference does once to name
+  the land type.
 - **`DirClassifiedQuery`** → `Event::DirClassifiedReply` — classified ads,
-  filtered by a `ClassifiedCategory` (`AnyCategory` for any). Results
+  filtered by a `ClassifiedCategory` (`AnyCategory` for any) and by rating in
+  the classifieds' own bit space: `ClassifiedQueryFlags::for_ratings(general,
+  moderate, adult)` packs the checkboxes as the reference's
+  `pack_classified_flags_request` does (`CLASSIFIED_QUERY_INC_PG` is `1 << 2`,
+  not `DFQ_INC_PG`). Results
   (`DirClassifiedResult`) give the
   classified id, name, flags, creation/expiration dates and weekly listing
   price. Fetch the full ad with `ClassifiedInfoRequest` (see
@@ -167,8 +183,11 @@ session.avatar_picker_request(query_id, "bob", now)?;
 land *holdings* (the land and group-land panels), not the public search index.
 It echoes both a `query_id` and a `transaction_id`, and answers with
 `Event::PlacesReply` carrying `PlacesResult` entries (owner, name, description,
-actual/billable area, flags, global position, region name, snapshot, dwell and
-price).
+actual/billable area, flags, global position, region name, snapshot, dwell,
+price and land product). Second Life answers it over the event queue
+(`PlacesReply` is `UDPDeprecated`), which is the only form that carries the
+`ProductSKU`; the reference's land holdings floater asks with the nil query
+id.
 
 ## Server side
 
@@ -187,8 +206,10 @@ through the real wire path.
 The REPL exposes one command per query: `dir_find_query`, `dir_places_query`,
 `dir_land_query`, `dir_classified_query`, `avatar_picker_request`,
 `places_query`, `event_info_request`, `event_notification_add_request` and
-`event_notification_remove_request`. Flags are passed as raw `u32` bit values
-(the `DFQ_*` / `ST_*` numbers), so for a people search you might run:
+`event_notification_remove_request`, and `request_land_products` for the land
+products. Flags are passed as raw `u32` bit values
+(the `DFQ_*` / `ST_*` numbers, and the `CLASSIFIED_QUERY_*` ones for
+`dir_classified_query`), so for a people search you might run:
 
 ```text
 dir_find_query <query_id> alice 3 0

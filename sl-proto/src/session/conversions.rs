@@ -19,17 +19,18 @@ use crate::types::{
     GroupAccountTransactions, GroupActiveProposalItem, GroupBan, GroupBanAction, GroupMember,
     GroupMembership, GroupName, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle,
     GroupVote, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    InventoryListing, InventoryType, LandStatExtended, LandStatItem, LandStatReportType,
-    LandStatScore, LandingType, MapBlockBatch, MapBlockRecord, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance, MoneyTransaction, MuteEntry, MuteFlags,
-    MuteType, NavMeshBuildStatus, NavMeshStatus, NeighborInfo, Object, ObjectProperties,
-    ObjectTransform, OpenRegionInfo, ParcelCategory, ParcelInfo, ParcelLlsdDialect,
-    ParcelMediaData, ParcelMediaSharing, ParcelObjectOwner, ParcelRequestResult, ParcelStatus,
-    PickInfo, PickKey, PlayingAnimation, PrimShapeParams, ProductType, ProposalCandidateId,
-    ProposalVoteId, RegionChatSettings, RegionCombatSettings, RegionIdentity, RegionLimits,
-    RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, SetDisplayNameReply, SkySettings, TRACK_MAX,
-    TaskInventoryItem, WaterSettings, avatar_texture,
+    InventoryListing, InventoryType, LandProduct, LandStatExtended, LandStatItem,
+    LandStatReportType, LandStatScore, LandingType, MapBlockBatch, MapBlockRecord, MapItem,
+    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MoneyBalance,
+    MoneyTransaction, MuteEntry, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus,
+    NeighborInfo, Object, ObjectProperties, ObjectTransform, OpenRegionInfo, ParcelCategory,
+    ParcelInfo, ParcelLlsdDialect, ParcelMediaData, ParcelMediaSharing, ParcelObjectOwner,
+    ParcelRequestResult, ParcelStatus, PickInfo, PickKey, PlacesResult, PlayingAnimation,
+    PrimShapeParams, ProductType, ProposalCandidateId, ProposalVoteId, RegionChatSettings,
+    RegionCombatSettings, RegionIdentity, RegionLimits, RegionTerrainComposition,
+    RequiredVoiceVersion, RestoreItem, SaleType, Scale, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, SetDisplayNameReply, SkySettings, TRACK_MAX, TaskInventoryItem,
+    WaterSettings, avatar_texture,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::AgentKey;
@@ -5830,12 +5831,144 @@ pub(crate) fn dir_land_reply_from_caps_llsd(
                             "ActualArea",
                             i32_member(row, "ActualArea"),
                         )?,
+                        product_sku: product_sku_member(row),
                     })
                 })
                 .collect::<Result<Vec<_>, sl_wire::WireError>>()
         },
     )?;
     Ok(Some((query_id, results)))
+}
+
+/// The `ProductSKU` of an event-queue land row: the land product's code, or
+/// `None` where the row has none or an empty one. Read by the reference's
+/// name, as its event-queue dispatch reads it — OpenSim's `ProductSku` (always
+/// `0`) is not that field.
+fn product_sku_member(row: &Llsd) -> Option<String> {
+    row.get("ProductSKU")
+        .and_then(Llsd::as_str)
+        .map(str::trim)
+        .filter(|sku| !sku.is_empty())
+        .map(str::to_owned)
+}
+
+/// Decodes a `ProductInfoRequest` answer: an array of `{ sku, name,
+/// description }` maps, one per land product. `None` refuses a body that is
+/// not an array, as the reference does ("Land SKU description response is
+/// malformed"); an entry without a SKU names nothing and is dropped.
+pub(crate) fn land_products_from_llsd(body: &Llsd) -> Option<Vec<LandProduct>> {
+    Some(
+        body.as_array()?
+            .iter()
+            .filter_map(|entry| {
+                let sku = string_member(entry, "sku");
+                (!sku.is_empty()).then(|| LandProduct {
+                    sku,
+                    name: string_member(entry, "name"),
+                    description: string_member(entry, "description"),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The LLSD-XML a simulator answers a `ProductInfoRequest` GET with: the
+/// array of `{ sku, name, description }` maps a client reads into
+/// [`Event::LandProducts`].
+#[must_use]
+pub fn land_products_body(products: &[LandProduct]) -> String {
+    Llsd::Array(
+        products
+            .iter()
+            .map(|product| {
+                Llsd::Map(
+                    [
+                        ("sku", &product.sku),
+                        ("name", &product.name),
+                        ("description", &product.description),
+                    ]
+                    .into_iter()
+                    .map(|(key, value)| (key.to_owned(), Llsd::String(value.clone())))
+                    .collect(),
+                )
+            })
+            .collect(),
+    )
+    .to_llsd_xml()
+}
+
+/// Decodes a CAPS `PlacesReply` event body: the event-queue form of a land
+/// holdings lookup, which the template marks `UDPDeprecated`.
+///
+/// The body mirrors the UDP message block for block —
+/// `{ AgentData: [ { AgentID, QueryID } ], TransactionData: [ { TransactionID
+/// } ], QueryData: [ { OwnerID, Name, Desc, ActualArea, BillableArea, Flags,
+/// GlobalX, GlobalY, GlobalZ, SimName, SnapshotID, Dwell, Price, ProductSKU }
+/// ] }` — with the land type's `ProductSKU` the UDP template leaves out.
+///
+/// `AgentData` is required: it carries the query id, without which nothing can
+/// tell which lookup the rows answer, so `Ok(None)` refuses the body.
+///
+/// # Errors
+///
+/// A row whose area or price is negative, or whose region name is not one, as
+/// on the UDP path.
+pub(crate) fn places_reply_from_caps_llsd(
+    body: &Llsd,
+) -> Result<Option<(Uuid, Uuid, Vec<PlacesResult>)>, sl_wire::WireError> {
+    let Some(query_id) = body
+        .get("AgentData")
+        .and_then(|data| data.index(0))
+        .and_then(|agent| agent.get("QueryID"))
+        .and_then(Llsd::as_uuid)
+    else {
+        return Ok(None);
+    };
+    let transaction_id = body
+        .get("TransactionData")
+        .and_then(|data| data.index(0))
+        .map_or_else(Uuid::nil, |data| uuid_member(data, "TransactionID"));
+    let rows = body.get("QueryData").and_then(Llsd::as_array);
+    let results = rows.map_or_else(
+        || Ok(Vec::new()),
+        |rows| {
+            rows.iter()
+                .map(|row| {
+                    Ok(PlacesResult {
+                        owner_id: uuid_member(row, "OwnerID"),
+                        name: string_member(row, "Name"),
+                        description: string_member(row, "Desc"),
+                        actual_area: crate::types::land_area_from_wire(
+                            "ActualArea",
+                            i32_member(row, "ActualArea"),
+                        )?,
+                        billable_area: crate::types::land_area_from_wire(
+                            "BillableArea",
+                            i32_member(row, "BillableArea"),
+                        )?,
+                        flags: u8::try_from(u32_member(row, "Flags")).unwrap_or(u8::MAX),
+                        global_position: GlobalCoordinates::new(
+                            f64::from(f32_member(row, "GlobalX")),
+                            f64::from(f32_member(row, "GlobalY")),
+                            f64::from(f32_member(row, "GlobalZ")),
+                        ),
+                        sim_name: sl_wire::region_name_from_wire(
+                            "SimName",
+                            string_member(row, "SimName").trim(),
+                        )?,
+                        snapshot_id: crate::types::optional_key_from_wire(uuid_member(
+                            row,
+                            "SnapshotID",
+                        )),
+                        dwell: f32_member(row, "Dwell"),
+                        price: crate::types::linden_from_wire("Price", i32_member(row, "Price"))?,
+                        product_sku: product_sku_member(row),
+                    })
+                })
+                .collect::<Result<Vec<_>, sl_wire::WireError>>()
+        },
+    )?;
+    Ok(Some((query_id, transaction_id, results)))
 }
 
 /// Decodes one `DataExtended` entry of a CAPS `LandStatReply`.

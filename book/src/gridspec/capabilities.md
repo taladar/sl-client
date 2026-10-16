@@ -39,6 +39,7 @@ What OpenSim refuses, grouped by what a viewer loses:
 | messages | `ReadOfflineMsgs` | the UDP `RetrieveInstantMessages` (the client falls back itself since 2026-10-04) |
 | account | `UserInfo` | the UDP `UserInfoRequest` / `UpdateUserInfo` |
 | profiles | `AgentProfile`, `UploadAgentProfileImage`, `SetDisplayName`, `SearchStatRequest` | the UDP profile, interests and notes messages and the generic picks, notes and classifieds requests; a profile image is picked from inventory; there are no display names to set and no click counts (since 2026-10-15, [Profiles](profiles.md)) |
+| search | `ProductInfoRequest` | nothing: OpenSim answers no land search, so there is no land type to name (since 2026-10-16, [Search](search.md#land-products)) |
 | appearance | `UpdateAvatarAppearance`, `IncrementCOFVersion` | the viewer bakes and uploads (`UploadBakedTexture`, which OpenSim grants) |
 | materials | `ModifyMaterialParams`, `UpdateMaterialAgentInventory`, `UpdateMaterialTaskInventory` | no PBR overrides or material saving; the client logs an edit it cannot send (since 2026-10-04) and the viewer greys its PBR tab (since 2026-10-12, [Materials](materials.md)) |
 | objects | `InterestList` | nothing: OpenSim sends a region's objects whichever way the camera looks (since 2026-10-09) |

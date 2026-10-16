@@ -9,28 +9,28 @@ use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
     AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
-    ChatSessionKind, ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction,
-    ControlFlags, CreateGroupParams, CreateListing, DeRezDestination, DetachOrder, DirFindFlags,
-    DirectoryVisibility, Distance, EjectAction, EnvironmentUpdate, EstateAccessDelta,
-    EstateInfoUpdate, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
-    FaceMaterialPut, FolderType, FreezeAction, FriendKey, FriendRights, GestureActivation,
-    GodRegionUpdate, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId,
-    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId,
-    InterestListMode, InterestsUpdate, InventoryCursor, InventoryFolderKey, InventoryItem,
-    InventoryKey, InventoryOffer, InventoryType, LandEdit, LandSearchType, LandStatReportType,
-    LindenAmount, ListingId, LureId, MapItemType, MapRequestFlags, Material,
-    MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
-    Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileImage,
-    ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate, RegionHandle,
-    RegionInfoUpdate, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptLanguage, ScriptPermissions,
-    ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags, StartLocationSlot, SurfaceInfo,
-    TaskInventoryKey, TextureEntry, TextureKey, Throttle, ThumbnailTarget, TransactionId,
-    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect,
-    VoiceProvisionRequest, Wearable,
+    ChatSessionKind, ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedQueryFlags,
+    ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, CreateListing,
+    DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance, EjectAction,
+    EnvironmentUpdate, EstateAccessDelta, EstateInfoUpdate, EventId, ExperienceKey,
+    ExperiencePermission, ExperienceUpdate, FaceMaterialPut, FolderType, FreezeAction, FriendKey,
+    FriendRights, GestureActivation, GodRegionUpdate, GroupKey, GroupNoticeAttachment,
+    GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
+    IceCandidate, ImSessionId, InterestListMode, InterestsUpdate, InventoryCursor,
+    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
+    LandSearchType, LandStatReportType, LindenAmount, ListingId, LureId, MapItemType,
+    MapRequestFlags, Material, MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor,
+    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform,
+    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
+    ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard, PrimShape,
+    PrimShapeParams, ProfileImage, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates,
+    RegionDebugUpdate, RegionHandle, RegionInfoUpdate, RegionTerrainUpdate, Reliability,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags,
+    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey, Throttle,
+    ThumbnailTarget, TransactionId, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid,
+    Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -211,6 +211,13 @@ pub enum Command {
     /// region without the capability (OpenSim) answers nothing, and the
     /// runtime logs that.
     RequestClassifiedClickStats(ClassifiedKey),
+    /// Read the land products — what a land row's
+    /// [`product_sku`](crate::DirLandResult::product_sku) is called — over the
+    /// `ProductInfoRequest` capability, as the reference does once to name the
+    /// land type in land search and land holdings. The answer arrives as
+    /// [`Event::LandProducts`](crate::Event::LandProducts); a region without
+    /// the capability (OpenSim) answers nothing, and the runtime logs that.
+    RequestLandProducts,
     /// Upload a profile image over the `UploadAgentProfileImage` capability:
     /// the grid makes an asset of the JPEG-2000 `j2c` and puts it in the
     /// profile field `image` names. The answer arrives as
@@ -2293,8 +2300,8 @@ pub enum Command {
         query_id: QueryId,
         /// The search text.
         query_text: String,
-        /// Result inclusion/sort flags (the maturity-inclusion and sort bits).
-        flags: DirFindFlags,
+        /// The ratings to include, in the classifieds' own bit space.
+        flags: ClassifiedQueryFlags,
         /// The classified category to filter by
         /// ([`ClassifiedCategory::AnyCategory`] for any).
         category: ClassifiedCategory,
@@ -3126,6 +3133,7 @@ impl Command {
             Self::UpdateClassified(..) => "UpdateClassified",
             Self::DeleteClassified(..) => "DeleteClassified",
             Self::RequestClassifiedClickStats(..) => "RequestClassifiedClickStats",
+            Self::RequestLandProducts => "RequestLandProducts",
             Self::UploadProfileImage { .. } => "UploadProfileImage",
             Self::SetDisplayName { .. } => "SetDisplayName",
             Self::GodDeleteClassified { .. } => "GodDeleteClassified",

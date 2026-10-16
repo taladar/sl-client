@@ -625,6 +625,7 @@ impl Survey {
             | Event::ClassifiedInfo(_)
             | Event::ProfileImageUploaded { .. }
             | Event::ClassifiedClickStats(_)
+            | Event::LandProducts(_)
             | Event::Account(_)
             | Event::InventorySkeleton(_)
             | Event::LibraryInventory(_)

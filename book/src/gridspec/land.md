@@ -155,8 +155,9 @@ Aditi answers a `DirLandQuery` over the **event queue**, never over UDP: a
 row that the UDP template has no field for (`023` and `024` seen). The client
 decodes it into the same `Event::DirLandReply` since 2026-10-05; before that
 the event was dropped and a land search on Second Life showed nothing. The SKU
-is not carried yet (`protocol-cap-product-info`). OpenSim's standalone answers
-a land search with nothing at all, and so does the fake grid
+is carried as `DirLandResult::product_sku` since 2026-10-16, and named by the
+`ProductInfoRequest` list ([Search](search.md#land)). OpenSim's standalone
+answers a land search with nothing at all, and so does the fake grid
 (`server-fake-grid-directory-search`).
 
 ## Managing a parcel

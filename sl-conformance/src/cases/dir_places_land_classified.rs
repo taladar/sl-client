@@ -5,7 +5,8 @@
 use std::time::Instant;
 
 use sl_client_tokio::{
-    ClassifiedCategory, Command, DirFindFlags, Event, LandSearchType, ParcelCategory, QueryId, Uuid,
+    ClassifiedCategory, ClassifiedQueryFlags, Command, DirFindFlags, Event, LandSearchType,
+    ParcelCategory, QueryId, Uuid,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -13,12 +14,10 @@ use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{REGION_TIMEOUT, REPLY_TIMEOUT, check, is_opensim};
 
-/// The classifieds query reuses the shared `query_flags` field with its *own*
-/// bit namespace (`CLASSIFIED_QUERY_INC_*`), distinct from the `DFQ_*` bits the
-/// other directory queries use. These are the viewer's "include every maturity"
-/// bits (`CLASSIFIED_QUERY_INC_PG | INC_MATURE | INC_ADULT` = `1<<2 | 1<<3 |
-/// 1<<6`); the [`DirFindFlags`] newtype is only carrying the raw `u32` here.
-const CLASSIFIED_INC_ALL: DirFindFlags = DirFindFlags::from_bits((1 << 2) | (1 << 3) | (1 << 6));
+/// The classifieds query's "include every rating" flags, in the classifieds'
+/// own bit space (`CLASSIFIED_QUERY_INC_PG | INC_MATURE | INC_ADULT`).
+const CLASSIFIED_INC_ALL: ClassifiedQueryFlags =
+    ClassifiedQueryFlags::for_ratings(true, true, true);
 
 /// Sends one directory-query `command` and awaits the first reply the `extract`
 /// closure accepts, mapping a reply-timeout to "this grid does not answer this

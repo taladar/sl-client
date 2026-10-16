@@ -15004,9 +15004,83 @@ mod test {
         assert!(!first.auction);
         assert_eq!(first.sale_price, Some(LindenAmount(3920)));
         assert_eq!(first.actual_area, LandArea(768));
+        assert_eq!(first.product_sku.as_deref(), Some("024"));
         let second = results.get(1).ok_or("second row")?;
         assert!(second.auction);
         assert_eq!(second.sale_price, None);
+        assert_eq!(second.product_sku.as_deref(), Some("023"));
+        Ok(())
+    }
+
+    /// Second Life answers a land holdings lookup over the event queue (the
+    /// message is `UDPDeprecated`): an agent with no land gets one nil row,
+    /// and a row's `ProductSKU` rides along, which the UDP form cannot carry.
+    #[test]
+    fn places_reply_caps_surfaces_the_holdings() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let body = parse_llsd_xml(concat!(
+            "<llsd><map>",
+            "<key>AgentData</key><array><map>",
+            "<key>AgentID</key><uuid>00000000-0000-0000-0000-000000000001</uuid>",
+            "<key>QueryID</key><uuid>00000000-0000-0000-0000-000000000000</uuid>",
+            "</map></array>",
+            "<key>TransactionData</key><array><map>",
+            "<key>TransactionID</key><uuid>00000000-0000-0000-0000-0000000007a0</uuid>",
+            "</map></array>",
+            "<key>QueryData</key><array>",
+            "<map>",
+            "<key>OwnerID</key><uuid>00000000-0000-0000-0000-000000000001</uuid>",
+            "<key>Name</key><string>Home</string>",
+            "<key>Desc</key><string>mine</string>",
+            "<key>ActualArea</key><integer>512</integer>",
+            "<key>BillableArea</key><integer>512</integer>",
+            "<key>Flags</key><integer>0</integer>",
+            "<key>GlobalX</key><real>256000.0</real>",
+            "<key>GlobalY</key><real>256128.0</real>",
+            "<key>GlobalZ</key><real>22.0</real>",
+            "<key>SimName</key><string>Region</string>",
+            "<key>SnapshotID</key><uuid>00000000-0000-0000-0000-000000000000</uuid>",
+            "<key>Dwell</key><real>3.0</real>",
+            "<key>Price</key><integer>0</integer>",
+            "<key>ProductSKU</key><string>131</string>",
+            "</map>",
+            "<map>",
+            "<key>OwnerID</key><uuid>00000000-0000-0000-0000-000000000000</uuid>",
+            "<key>Name</key><string></string>",
+            "<key>SimName</key><string></string>",
+            "<key>ProductSKU</key><string></string>",
+            "</map>",
+            "</array>",
+            "</map></llsd>",
+        ))?;
+        session.handle_caps_event("PlacesReply", &body, now)?;
+
+        let (query_id, transaction_id, results) = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::PlacesReply {
+                    query_id,
+                    transaction_id,
+                    results,
+                } => Some((query_id, transaction_id, results)),
+                _ => None,
+            })
+            .ok_or("expected a PlacesReply event")?;
+        assert_eq!(query_id, uuid::Uuid::nil());
+        assert_eq!(transaction_id, uuid::Uuid::from_u128(0x7a0));
+        assert_eq!(results.len(), 2);
+        let home = results.first().ok_or("first row")?;
+        assert_eq!(home.name, "Home");
+        assert_eq!(home.actual_area, LandArea(512));
+        assert_eq!(home.product_sku.as_deref(), Some("131"));
+        let nil = results.get(1).ok_or("second row")?;
+        assert!(nil.owner_id.is_nil());
+        assert_eq!(nil.product_sku, None, "an empty SKU is none");
+        assert_eq!(nil.sim_name, None);
         Ok(())
     }
 

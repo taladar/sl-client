@@ -16,7 +16,10 @@
 //!   the parcel's snapshot, copies its SLURL and commits a title and notes
 //!   edit to the grid;
 //! - the About window's simulator line names each region's own simulator
-//!   across a teleport.
+//!   across a teleport;
+//! - the search window says why it shows nothing: a too-short text refused,
+//!   a search the grid never answers; and on a live grid it names a land
+//!   row's type and pages an "Any" places search.
 
 #[cfg(test)]
 mod test {
@@ -26,7 +29,7 @@ mod test {
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use sl_automation_proto::{Bounds, InventoryRoot, Locator, Probe, Role};
-    use sl_e2e::{BodyError, Need, Stage, StageBuilder};
+    use sl_e2e::{BodyError, Grid, Need, Stage, StageBuilder};
     use sl_fake_grid::scenario::{Scenario, class_folder};
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
     use sl_proto::{
@@ -1096,6 +1099,110 @@ mod test {
                     .expect(&block)
                     .timeout(WAIT)
                     .to_contain_text(&format!("Simulator version: {NEIGHBOUR_SIMULATOR}"))
+                    .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    // ---- Search ----------------------------------------------------------
+
+    /// **The search window says why it shows nothing**: a people search for
+    /// two letters is refused as the reference refuses it — Second Life
+    /// would answer it with nothing at all — and a places search the grid
+    /// never answers (OpenSim's, and the fake grid's) is said to be one
+    /// rather than left reading "No results" (`book/src/gridspec/search.md`).
+    #[test]
+    fn the_search_window_says_why_it_shows_nothing() -> Result<(), TestError> {
+        stage("search_status_line").run(async |stage: &Stage| {
+            let alpha = &stage.viewer("Alpha")?;
+            let search = alpha.open_floater("search").await?;
+            let tab = |key: &str| search.get(Locator::role(Role::Tab).name_key(key));
+            let query = search.test_id("search-query:field");
+
+            let _people = tab("search-tab-people").click().await?;
+            let _typed = query.fill("ab").await?;
+            query.press("Enter").await?;
+            let _short = alpha
+                .expect(&search.test_id("search-status-people"))
+                .timeout(WAIT)
+                .to_contain_text("The search text is too short")
+                .await?;
+
+            let _places = tab("search-tab-places").click().await?;
+            let _typed = query.fill("castle").await?;
+            query.press("Enter").await?;
+            let places = search.test_id("search-status-places");
+            let _searching = alpha
+                .expect(&places)
+                .timeout(WAIT)
+                .to_contain_text("Searching\u{2026}")
+                .await?;
+            let _unanswered = alpha
+                .expect(&places)
+                .timeout(WAIT)
+                .to_contain_text("The grid did not answer this search")
+                .await?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    /// **The search window on a live grid**: on Second Life the Land tab
+    /// names each row's type from the grid's land products (the event-queue
+    /// rows' `ProductSKU`, looked up in `ProductInfoRequest`), and "Any"
+    /// places, sent as `C_ANY`, fill a page; on OpenSim, which answers
+    /// neither search, both tabs say the grid did not answer
+    /// (`book/src/gridspec/search.md`).
+    #[test]
+    fn the_search_window_on_a_live_grid_names_land_types() -> Result<(), TestError> {
+        stage("search_live")
+            .needs(Need::LiveGrid(
+                "a grid's own search index and land products",
+            ))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let second_life = stage.on_grid() == Grid::Aditi;
+                let search = alpha.open_floater("search").await?;
+                let tab = |key: &str| search.get(Locator::role(Role::Tab).name_key(key));
+                let query = search.test_id("search-query:field");
+                let unanswered = "The grid did not answer this search";
+
+                let _land = tab("search-tab-land").click().await?;
+                query.press("Enter").await?;
+                if second_life {
+                    // Every land product's description but one is "kind /
+                    // size": a row naming one has its type from the list.
+                    let _named = alpha
+                        .expect(
+                            &search
+                                .test_id("search-land:table")
+                                .get(Locator::role(Role::ListItem).name_containing(" / ")),
+                        )
+                        .timeout(WAIT)
+                        .to_be_visible()
+                        .await?;
+                } else {
+                    let _silent = alpha
+                        .expect(&search.test_id("search-status-land"))
+                        .timeout(WAIT)
+                        .to_have_text(unanswered)
+                        .await?;
+                }
+
+                let _places = tab("search-tab-places").click().await?;
+                let _typed = query.fill("linden").await?;
+                query.press("Enter").await?;
+                let places = search.test_id("search-status-places");
+                let wanted = if second_life {
+                    "Showing 1\u{2013}100"
+                } else {
+                    unanswered
+                };
+                let _paged = alpha
+                    .expect(&places)
+                    .timeout(WAIT)
+                    .to_have_text(wanted)
                     .await?;
                 Ok(())
             })?;

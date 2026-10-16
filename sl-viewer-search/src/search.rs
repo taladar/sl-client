@@ -31,17 +31,21 @@
 //! `floater_fs_search.xml` + `panel_fs_search_legacy_*.xml`.
 
 use crate::skin_palette::SkinPalette;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Checked;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    AgentKey, AvatarProperties, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, Command,
-    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, EventId, EventInfo, GlobalCoordinates, GroupKey, GroupProfile,
-    ParcelCategory, ParcelDetails, ParcelKey, QueryId, RegionCoordinates, RegionHandle, SlCommand,
-    SlEvent, SlIdentity, SlSessionEvent, TextureKey, Uuid, Vector,
+    AgentKey, AvatarProperties, ClassifiedCategory, ClassifiedInfo, ClassifiedKey,
+    ClassifiedQueryFlags, Command, DirClassifiedResult, DirEventResult, DirFindFlags,
+    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EventId, EventInfo,
+    GlobalCoordinates, GroupKey, GroupProfile, ParcelCategory, ParcelDetails, ParcelKey, QueryId,
+    RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureKey,
+    Uuid, Vector,
 };
 use sl_settings::SettingValue;
 
@@ -214,14 +218,6 @@ impl SearchTab {
     }
 }
 
-impl SearchCategory {
-    /// Whether the category's query is driven by the shared text field (every
-    /// category except **Land**, a pure filter query).
-    const fn needs_query_text(self) -> bool {
-        !matches!(self, Self::Land)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Land / events filter enums.
 // ---------------------------------------------------------------------------
@@ -313,7 +309,9 @@ enum EventsMode {
 
 /// The Places category options, in combo order.
 const PLACES_CATEGORIES: [ParcelCategory; 8] = [
-    ParcelCategory::None,
+    // "Any" is the reference's `C_ANY`; `None` would ask for the parcels
+    // without a category.
+    ParcelCategory::Any,
     ParcelCategory::Linden,
     ParcelCategory::Residential,
     ParcelCategory::Commercial,
@@ -681,6 +679,12 @@ struct Page<T> {
     received: Option<usize>,
     /// The results currently shown.
     results: Vec<T>,
+    /// When the pending query was sent, so a grid that never answers it can
+    /// be told from one still answering.
+    sent_at: Option<Instant>,
+    /// The search status the pending query's replies carried
+    /// (`STATUS_SEARCH_*`), unioned over the replies.
+    status: u32,
     /// Whether the replies so far reached past a whole page (so a Next is
     /// meaningful).
     filled: bool,
@@ -696,6 +700,8 @@ impl<T> Default for Page<T> {
             pending: None,
             received: None,
             results: Vec::new(),
+            sent_at: None,
+            status: 0,
             filled: false,
             revision: 0,
         }
@@ -705,9 +711,37 @@ impl<T> Default for Page<T> {
 impl<T: DirRow> Page<T> {
     /// Arm the page for a freshly sent query: replies echoing `query_id`
     /// accumulate into it, and the first of them replaces what is shown.
-    const fn begin_query(&mut self, query_id: QueryId) {
+    fn begin_query(&mut self, query_id: QueryId) {
         self.pending = Some(query_id);
         self.received = None;
+        self.sent_at = Some(Instant::now());
+        self.status = 0;
+    }
+
+    /// Show a search the viewer refused to send because its text was too
+    /// short, as the grid's short-text status shows.
+    fn refuse_short(&mut self) {
+        self.pending = None;
+        self.received = None;
+        self.results.clear();
+        self.sent_at = Some(Instant::now());
+        self.status = STATUS_SHORT_STRING;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// Note the search status one reply of the pending query carried.
+    const fn note_status(&mut self, status: u32) {
+        self.status |= status;
+    }
+
+    /// Where the pending query stands, for the status line.
+    const fn progress(&self) -> Progress {
+        Progress {
+            sent_at: self.sent_at,
+            answered: self.received.is_some(),
+            status: self.status,
+            shown: self.results.len(),
+        }
     }
 
     /// Fold one reply of the pending query in, dropping the "there is more"
@@ -800,9 +834,68 @@ struct SearchState {
     events: Page<DirEventResult>,
     /// The Classifieds page.
     classifieds: Page<DirClassifiedResult>,
+    /// What each land product (`ProductSKU`) is called, from the grid's
+    /// `ProductInfoRequest` list; empty until it arrives, and on a grid
+    /// without one.
+    land_types: HashMap<String, String>,
+    /// Whether the land products were asked for: once, before the first land
+    /// search, as the reference does.
+    land_types_requested: bool,
 }
 
+/// Where a category's pending search stands, as its status line tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Progress {
+    /// When the search was sent; `None` before the first.
+    sent_at: Option<Instant>,
+    /// Whether any reply to it arrived.
+    answered: bool,
+    /// The search status its replies carried (`STATUS_SEARCH_*`).
+    status: u32,
+    /// How many results are shown.
+    shown: usize,
+}
+
+/// How long a search waits for its first reply before the status line says
+/// the grid did not answer. OpenSim answers no places, land, events or
+/// classifieds search at all (`book/src/gridspec/search.md`), and the
+/// reference would say "Searching..." for ever.
+const SEARCH_ANSWER_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// `STATUS_SEARCH_*_BANNEDWORD`: the text holds a word the grid refuses.
+const STATUS_BANNED_WORD: u32 = 1 << 0;
+
+/// `STATUS_SEARCH_*_SHORTSTRING`: the text is too short to search for.
+const STATUS_SHORT_STRING: u32 = 1 << 1;
+
+/// `STATUS_SEARCH_*_SEARCHDISABLED`: the grid's search is switched off.
+const STATUS_SEARCH_DISABLED: u32 = 1 << 3;
+
 impl SearchState {
+    /// Show the category's search as refused for a too-short text.
+    fn refuse_short(&mut self, category: SearchCategory) {
+        match category {
+            SearchCategory::People => self.people.refuse_short(),
+            SearchCategory::Groups => self.groups.refuse_short(),
+            SearchCategory::Places => self.places.refuse_short(),
+            SearchCategory::Land => self.land.refuse_short(),
+            SearchCategory::Events => self.events.refuse_short(),
+            SearchCategory::Classifieds => self.classifieds.refuse_short(),
+        }
+    }
+
+    /// Where the category's pending search stands.
+    const fn progress(&self, category: SearchCategory) -> Progress {
+        match category {
+            SearchCategory::People => self.people.progress(),
+            SearchCategory::Groups => self.groups.progress(),
+            SearchCategory::Places => self.places.progress(),
+            SearchCategory::Land => self.land.progress(),
+            SearchCategory::Events => self.events.progress(),
+            SearchCategory::Classifieds => self.classifieds.progress(),
+        }
+    }
+
     /// The category's result count.
     const fn result_count(&self, category: SearchCategory) -> usize {
         match category {
@@ -939,6 +1032,18 @@ impl SearchDetail {
 // ---------------------------------------------------------------------------
 // Entity handles.
 // ---------------------------------------------------------------------------
+
+/// The name of a category's status line, which automation finds it by.
+const fn status_name(category: SearchCategory) -> &'static str {
+    match category {
+        SearchCategory::People => "search-status-people",
+        SearchCategory::Groups => "search-status-groups",
+        SearchCategory::Places => "search-status-places",
+        SearchCategory::Land => "search-status-land",
+        SearchCategory::Events => "search-status-events",
+        SearchCategory::Classifieds => "search-status-classifieds",
+    }
+}
 
 /// Marks a category's paging + count row, so its label / buttons are found.
 #[derive(Component, Clone, Copy)]
@@ -1147,23 +1252,44 @@ fn setting_bool(settings: Option<&ViewerSettings>, name: &str, default: bool) ->
     })
 }
 
-/// The maturity-inclusion flags the checkboxes currently select.
+/// The ratings `[General, Moderate, Adult]` the checkboxes currently select,
+/// or `None` for a category with no rating filter.
+fn maturity_choice(
+    category: SearchCategory,
+    settings: Option<&ViewerSettings>,
+) -> Option<[bool; 3]> {
+    let [general, moderate, adult] = maturity_settings(category)?;
+    let [general_on, moderate_on, adult_on] = MATURITY_DEFAULTS;
+    Some([
+        setting_bool(settings, general, general_on),
+        setting_bool(settings, moderate, moderate_on),
+        setting_bool(settings, adult, adult_on),
+    ])
+}
+
+/// The maturity-inclusion flags the checkboxes currently select, in the
+/// `DFQ_*` bit space every query but the classifieds' uses.
 fn maturity_flags(category: SearchCategory, settings: Option<&ViewerSettings>) -> DirFindFlags {
-    let Some([general, moderate, adult]) = maturity_settings(category) else {
+    let Some([general, moderate, adult]) = maturity_choice(category, settings) else {
         return DirFindFlags::NONE;
     };
-    let [general_on, moderate_on, adult_on] = MATURITY_DEFAULTS;
-    let mut flags = DirFindFlags::NONE;
-    if setting_bool(settings, general, general_on) {
-        flags = flags.union(DirFindFlags::INC_PG);
-    }
-    if setting_bool(settings, moderate, moderate_on) {
-        flags = flags.union(DirFindFlags::INC_MATURE);
-    }
-    if setting_bool(settings, adult, adult_on) {
-        flags = flags.union(DirFindFlags::INC_ADULT);
-    }
-    flags
+    [
+        (general, DirFindFlags::INC_PG),
+        (moderate, DirFindFlags::INC_MATURE),
+        (adult, DirFindFlags::INC_ADULT),
+    ]
+    .into_iter()
+    .filter(|(on, _flag)| *on)
+    .fold(DirFindFlags::NONE, |flags, (_on, flag)| flags.union(flag))
+}
+
+/// The ratings the classifieds' checkboxes select, in the classifieds' own bit
+/// space, packed as the reference packs them.
+fn classified_flags(settings: Option<&ViewerSettings>) -> ClassifiedQueryFlags {
+    maturity_choice(SearchCategory::Classifieds, settings)
+        .map_or(ClassifiedQueryFlags::NONE, |[general, moderate, adult]| {
+            ClassifiedQueryFlags::for_ratings(general, moderate, adult)
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -1497,7 +1623,7 @@ pub fn spawn_search_specimen(
     }
     commands
         .entity(table.count)
-        .insert(Text::new(count_label(&state, category)));
+        .insert(Text::new(count_label(&state, category, Instant::now())));
 
     let subject = subject_request(category, 0, &state)
         .map_or(DetailSubject::None, |(subject, _request)| subject);
@@ -2057,6 +2183,7 @@ fn spawn_paging_row(
     spawn_paging_button(commands, paging, category, false, font_size);
     let count = commands
         .spawn((
+            Name::new(status_name(category)),
             Text::new(String::new()),
             UiFont::Sans.at(font_size),
             text_role(SECONDARY_COLOR),
@@ -2447,6 +2574,42 @@ fn build_sl_search_url(session_id: Uuid, query: &str, language: &str) -> String 
     )
 }
 
+/// The reference's shortest word worth searching for is one longer than this
+/// (`MIN_SEARCH_STRING_SIZE`).
+const MIN_SEARCH_TEXT: usize = 2;
+
+/// The text `category` sends for the typed `query`, as the reference's search
+/// panels make it — or `None` where the reference refuses to search ("search
+/// text too short"). Second Life answers a people search for two letters or
+/// an empty text with nothing at all (`book/src/gridspec/search.md`).
+///
+/// - **People**: the whole text, a `.` read as a space (`first.last`), and
+///   refused at [`MIN_SEARCH_TEXT`] characters or fewer.
+/// - **Groups, Places, Classifieds, Events**: the words longer than
+///   [`MIN_SEARCH_TEXT`] (`filterShortWords`); refused when none is left,
+///   except for Events, which search by date.
+/// - **Land** has no text.
+fn search_text(category: SearchCategory, query: &str) -> Option<String> {
+    match category {
+        SearchCategory::Land => Some(String::new()),
+        SearchCategory::People => {
+            let text = query.trim();
+            (text.chars().count() > MIN_SEARCH_TEXT).then(|| text.replace('.', " "))
+        }
+        SearchCategory::Groups
+        | SearchCategory::Places
+        | SearchCategory::Classifieds
+        | SearchCategory::Events => {
+            let words: Vec<&str> = query
+                .split(' ')
+                .filter(|word| word.chars().count() > MIN_SEARCH_TEXT)
+                .collect();
+            let text = words.join(" ");
+            (!text.is_empty() || category == SearchCategory::Events).then_some(text)
+        }
+    }
+}
+
 /// Send the wire query for `category` at its current paging offset.
 fn dispatch_query(
     category: SearchCategory,
@@ -2454,11 +2617,11 @@ fn dispatch_query(
     settings: Option<&ViewerSettings>,
     commands: &mut MessageWriter<SlCommand>,
 ) {
-    if category.needs_query_text() && state.query.is_empty() && category != SearchCategory::Events {
+    let Some(query_text) = search_text(category, &state.query) else {
+        state.refuse_short(category);
         return;
-    }
+    };
     let maturity = maturity_flags(category, settings);
-    let query_text = state.query.clone();
     let query_id = QueryId::from(Uuid::new_v4());
     let query_start = state.query_start(category);
     match category {
@@ -2530,6 +2693,10 @@ fn dispatch_query(
                 flags = flags.union(DirFindFlags::LIMIT_BY_AREA);
             }
             let search_type = state.land_sale.to_search_type();
+            if !state.land_types_requested {
+                state.land_types_requested = true;
+                commands.write(SlCommand(Command::RequestLandProducts));
+            }
             state.land.begin_query(query_id);
             commands.write(SlCommand(Command::DirLandQuery {
                 query_id,
@@ -2546,7 +2713,7 @@ fn dispatch_query(
             commands.write(SlCommand(Command::DirClassifiedQuery {
                 query_id,
                 query_text,
-                flags: maturity,
+                flags: classified_flags(settings),
                 category: classified_category,
                 query_start,
             }));
@@ -2737,13 +2904,19 @@ fn ingest_search_replies(mut events: MessageReader<SlEvent>, mut state: ResMut<S
                 state.groups.append_reply(results.clone());
             }
             SlSessionEvent::DirEventsReply {
-                query_id, results, ..
+                query_id,
+                results,
+                status,
             } if pending_matches(state.events.pending, *query_id) => {
+                state.events.note_status(*status);
                 state.events.append_reply(results.clone());
             }
             SlSessionEvent::DirPlacesReply {
-                query_id, results, ..
+                query_id,
+                results,
+                status,
             } if pending_matches(state.places.pending, *query_id) => {
+                state.places.note_status(*status);
                 state
                     .places
                     .append_reply_sorted_by(results.clone(), |a, b| b.dwell.total_cmp(&a.dwell));
@@ -2754,9 +2927,20 @@ fn ingest_search_replies(mut events: MessageReader<SlEvent>, mut state: ResMut<S
                 state.land.append_reply(results.clone());
             }
             SlSessionEvent::DirClassifiedReply {
-                query_id, results, ..
+                query_id,
+                results,
+                status,
             } if pending_matches(state.classifieds.pending, *query_id) => {
+                state.classifieds.note_status(*status);
                 state.classifieds.append_reply(results.clone());
+            }
+            SlSessionEvent::LandProducts(products) => {
+                state.land_types = products
+                    .iter()
+                    .map(|product| (product.sku.clone(), product.description.clone()))
+                    .collect();
+                // The land rows name their type from the list: rebind them.
+                state.land.revision = state.land.revision.wrapping_add(1);
             }
             _other => {}
         }
@@ -2929,13 +3113,12 @@ fn result_cells(
             .results
             .get(index)
             .map_or_else(Vec::new, |result| {
-                let land_type = if result.auction { "Auction" } else { "Sale" };
                 vec![
                     (result.name.clone(), LABEL_COLOR),
                     (land_price(result), SECONDARY_COLOR),
                     (format!("{}", result.actual_area), SECONDARY_COLOR),
                     (land_ppm(result), SECONDARY_COLOR),
-                    (land_type.to_owned(), SECONDARY_COLOR),
+                    (land_type(result, &state.land_types), SECONDARY_COLOR),
                 ]
             }),
         SearchCategory::Events => state
@@ -2961,6 +3144,19 @@ fn result_cells(
                 })
         }
     }
+}
+
+/// A land result's type cell: what the grid's land products call its
+/// `ProductSKU`, or "Unknown" — the reference's `land_type_unknown` — for a
+/// row without one (a UDP reply carries none) or one the list does not name.
+fn land_type(result: &DirLandResult, land_types: &HashMap<String, String>) -> String {
+    result
+        .product_sku
+        .as_ref()
+        .and_then(|sku| land_types.get(sku))
+        .filter(|description| !description.is_empty())
+        .cloned()
+        .unwrap_or_else(|| "Unknown".to_owned())
 }
 
 /// A land result's price cell: its asking price, or a dash when not for sale.
@@ -3493,18 +3689,18 @@ fn teleport_destination(
     Some((RegionHandle::from_grid(grid.x(), grid.y()), local))
 }
 
-/// Keep each category's count read-out current, and the Events day label.
+/// Keep each category's status line current — also while nothing changes, so
+/// a search the grid never answers is said to be one — and the Events day
+/// label.
 fn update_search_counts(
     state: Res<SearchState>,
     ui: Option<Res<SearchUi>>,
     mut counts: Query<(&SearchCount, &mut Text), Without<DetailField>>,
     mut labels: Query<&mut Text, (Without<SearchCount>, Without<DetailField>)>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
+    let now = Instant::now();
     for (count, mut text) in &mut counts {
-        let wanted = count_label(&state, count.0);
+        let wanted = count_label(&state, count.0, now);
         if text.0 != wanted {
             text.0 = wanted;
         }
@@ -3519,16 +3715,32 @@ fn update_search_counts(
     }
 }
 
-/// A category's count read-out: "No results", or the range of the page shown.
-fn count_label(state: &SearchState, category: SearchCategory) -> String {
-    let len = state.result_count(category);
-    if len == 0 {
-        "No results".to_owned()
-    } else {
+/// A category's status line at `now`: the range of the page shown, or why
+/// there is nothing to show — not searched yet, still searching, refused by the
+/// grid's status, nothing found, or no answer at all.
+fn count_label(state: &SearchState, category: SearchCategory, now: Instant) -> String {
+    let progress = state.progress(category);
+    if progress.shown > 0 {
         let start = usize::try_from(state.query_start(category)).unwrap_or(0);
         let first = start.saturating_add(1);
-        let last = start.saturating_add(len);
-        format!("Showing {first}\u{2013}{last}")
+        let last = start.saturating_add(progress.shown);
+        return format!("Showing {first}\u{2013}{last}");
+    }
+    let Some(sent_at) = progress.sent_at else {
+        return "No results".to_owned();
+    };
+    if progress.status & STATUS_SEARCH_DISABLED != 0 {
+        "Search is disabled on this grid".to_owned()
+    } else if progress.status & STATUS_BANNED_WORD != 0 {
+        "The search text holds a word the grid refuses".to_owned()
+    } else if progress.status & STATUS_SHORT_STRING != 0 {
+        "The search text is too short".to_owned()
+    } else if progress.answered {
+        "Nothing found".to_owned()
+    } else if now.saturating_duration_since(sent_at) >= SEARCH_ANSWER_TIMEOUT {
+        "The grid did not answer this search".to_owned()
+    } else {
+        "Searching\u{2026}".to_owned()
     }
 }
 
@@ -3581,10 +3793,13 @@ mod tests {
         AgentKey, CATEGORY_ORDER, ClassifiedKey, DirClassifiedResult, DirEventResult,
         DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirRow, EventId,
         EventsMode, GroupKey, LandSaleFilter, LandSort, PAGE_SIZE_USIZE, Page, ParcelKey, QueryId,
-        SearchCategory, SearchTab, Uuid, build_sl_search_url, events_query_text,
+        SEARCH_ANSWER_TIMEOUT, STATUS_SHORT_STRING, SearchCategory, SearchState, SearchTab, Uuid,
+        build_sl_search_url, count_label, events_query_text, land_type,
     };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{LandArea, LindenAmount};
+    use sl_client_bevy::{ClassifiedQueryFlags, LandArea, LindenAmount, ParcelCategory};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
 
     /// A people result for `id` (`0` is the nil key, i.e. a padding block).
     fn person(id: u32) -> DirPeopleResult {
@@ -3632,15 +3847,6 @@ mod tests {
         assert_eq!(CATEGORY_ORDER.len(), 6);
         assert_eq!(SearchTab::Web.category(), None);
         assert_eq!(SearchTab::People.category(), Some(SearchCategory::People));
-    }
-
-    /// Only Land runs without query text.
-    #[test]
-    fn only_land_skips_query_text() {
-        for category in CATEGORY_ORDER {
-            let expected = category != SearchCategory::Land;
-            assert_eq!(category.needs_query_text(), expected);
-        }
     }
 
     /// A page is "there is more" only when the reply reaches *past* the page:
@@ -3768,6 +3974,7 @@ mod tests {
             for_sale: true,
             sale_price: Some(LindenAmount(0)),
             actual_area: LandArea(512),
+            product_sku: None,
         };
         assert!(land(0).is_placeholder());
         assert!(!land(1).is_placeholder());
@@ -3913,5 +4120,121 @@ mod tests {
 &collection_chosen=events&collection_chosen=groups&collection_chosen=destinations\
 &maturity=gma&lang=en&sid=22222222-2222-2222-2222-222222222222"
         );
+    }
+
+    /// The status line tells every state of a search apart: never sent,
+    /// searching, a grid that never answered, nothing found, the grid's
+    /// refusal, and a page of results.
+    #[test]
+    fn the_status_line_tells_a_silent_grid_from_an_empty_answer() {
+        let now = Instant::now();
+        let mut state = SearchState::default();
+        let category = SearchCategory::Places;
+        assert_eq!(count_label(&state, category, now), "No results");
+
+        state.places.begin_query(query(1));
+        let sent = state.places.sent_at.unwrap_or(now);
+        assert_eq!(count_label(&state, category, sent), "Searching\u{2026}");
+        // OpenSim answers no places search: past the timeout, say so.
+        let later = sent + SEARCH_ANSWER_TIMEOUT + Duration::from_secs(1);
+        assert_eq!(
+            count_label(&state, category, later),
+            "The grid did not answer this search"
+        );
+
+        // An answer with nothing in it is "nothing found", however late.
+        state.places.append_reply(Vec::new());
+        assert_eq!(count_label(&state, category, later), "Nothing found");
+
+        // The grid's own refusal outranks that.
+        state.places.note_status(STATUS_SHORT_STRING);
+        assert_eq!(
+            count_label(&state, category, later),
+            "The search text is too short"
+        );
+
+        state.people.begin_query(query(2));
+        state.people.append_reply(people(3));
+        assert_eq!(
+            count_label(&state, SearchCategory::People, now),
+            "Showing 1\u{2013}3"
+        );
+    }
+
+    /// A land row's type is what the land products call its SKU, and the
+    /// reference's "Unknown" for a row without one or one the list lacks.
+    #[test]
+    fn a_land_rows_type_is_named_by_its_product() {
+        let row = |sku: Option<&str>| DirLandResult {
+            parcel_id: ParcelKey::from(Uuid::from_u128(1)),
+            name: "Parcel".to_owned(),
+            auction: false,
+            for_sale: true,
+            sale_price: Some(LindenAmount(10)),
+            actual_area: LandArea(512),
+            product_sku: sku.map(str::to_owned),
+        };
+        let types: HashMap<String, String> =
+            [("023".to_owned(), "Mainland / Full Region".to_owned())].into();
+        assert_eq!(
+            land_type(&row(Some("023")), &types),
+            "Mainland / Full Region"
+        );
+        assert_eq!(land_type(&row(Some("999")), &types), "Unknown");
+        assert_eq!(land_type(&row(None), &types), "Unknown");
+    }
+
+    /// The classifieds' ratings travel in their own bit space, packed as the
+    /// reference packs them, never as the `DFQ_INC_*` bits.
+    #[test]
+    fn classified_ratings_are_packed_in_their_own_bits() {
+        // No settings: the defaults, General and Moderate.
+        assert_eq!(
+            super::classified_flags(None),
+            ClassifiedQueryFlags::for_ratings(true, true, false)
+        );
+        assert_eq!(super::classified_flags(None).bits(), 0x0C);
+    }
+
+    /// The text each tab sends is the reference's, and a too-short one is
+    /// refused rather than sent to a grid that would not answer it.
+    #[test]
+    fn short_search_text_is_refused_as_the_reference_does() {
+        use super::search_text;
+        assert_eq!(search_text(SearchCategory::People, "ab"), None);
+        assert_eq!(search_text(SearchCategory::People, ""), None);
+        assert_eq!(
+            search_text(SearchCategory::People, "first.last").as_deref(),
+            Some("first last")
+        );
+        assert_eq!(
+            search_text(SearchCategory::Places, "a big castle").as_deref(),
+            Some("big castle")
+        );
+        assert_eq!(search_text(SearchCategory::Places, "ab cd"), None);
+        assert_eq!(search_text(SearchCategory::Groups, ""), None);
+        assert_eq!(
+            search_text(SearchCategory::Events, "ab").as_deref(),
+            Some("")
+        );
+        assert_eq!(
+            search_text(SearchCategory::Land, "anything").as_deref(),
+            Some("")
+        );
+
+        // A refused search says so on its status line.
+        let mut state = SearchState::default();
+        state.refuse_short(SearchCategory::People);
+        assert_eq!(
+            count_label(&state, SearchCategory::People, Instant::now()),
+            "The search text is too short"
+        );
+    }
+
+    /// "Any" in the Places category combo is the reference's `C_ANY`.
+    #[test]
+    fn any_places_category_is_c_any() {
+        assert_eq!(super::PLACES_CATEGORIES.first(), Some(&ParcelCategory::Any));
+        assert_eq!(ParcelCategory::Any.to_u8().cast_signed(), -1);
     }
 }

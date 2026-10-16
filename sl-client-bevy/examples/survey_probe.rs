@@ -158,6 +158,7 @@ fn on_events(
             | SlSessionEvent::ClassifiedInfo(_)
             | SlSessionEvent::ProfileImageUploaded { .. }
             | SlSessionEvent::ClassifiedClickStats(_)
+            | SlSessionEvent::LandProducts(_)
             | SlSessionEvent::Account(_)
             | SlSessionEvent::InventorySkeleton(_)
             | SlSessionEvent::LibraryInventory(_)

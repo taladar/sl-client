@@ -447,6 +447,13 @@ pub const CAP_SET_DISPLAY_NAME: &str = "SetDisplayName";
 /// shows. Second Life grants it; OpenSim does not.
 pub const CAP_SEARCH_STAT_REQUEST: &str = "SearchStatRequest";
 
+/// The capability that names the **land types**: a GET answers
+/// `[ { sku, name, description } ]`, one entry per land product, and the
+/// `ProductSKU` the event-queue forms of a land search's and a land holdings
+/// lookup's rows carry is looked up in it. The reference fetches it once.
+/// Second Life grants it; OpenSim does not.
+pub const CAP_PRODUCT_INFO_REQUEST: &str = "ProductInfoRequest";
+
 /// The capabilities a region must grant for the kept messages to be read over
 /// [`CAP_READ_OFFLINE_MSGS`]: the capability itself and the two that answer
 /// what it hands over without a transaction id — a friendship offer and a
@@ -865,6 +872,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_UPLOAD_AGENT_PROFILE_IMAGE,
     CAP_SET_DISPLAY_NAME,
     CAP_SEARCH_STAT_REQUEST,
+    CAP_PRODUCT_INFO_REQUEST,
     CAP_INVENTORY_API_V3,
     CAP_LIBRARY_API_V3,
     CAP_CREATE_INVENTORY_CATEGORY,
@@ -2085,14 +2093,14 @@ pub use conversions::{
     environment_cap_url, environment_reply_needs_refetch, environment_to_llsd,
     establish_agent_communication_to_llsd, fetch_inventory_items_to_llsd, friendship_answer_url,
     group_ban_request_body, group_bans_url, group_invite_response_body, group_members_to_caps_llsd,
-    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, land_stat_reply_to_caps_llsd,
-    nav_mesh_status_to_llsd, offline_messages_to_llsd, open_region_info_to_llsd,
-    parcel_info_to_llsd, parcel_object_owners_to_caps_llsd, required_voice_version_to_llsd,
-    server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
-    sim_console_response_to_llsd, sky_settings_from_asset, sky_with_blended_values,
-    sky_with_pushed_values, teleport_failed_to_caps_llsd, teleport_finish_to_llsd,
-    water_settings_from_asset, water_with_blended_values, water_with_pushed_values,
-    windlight_refresh_to_llsd,
+    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, land_products_body,
+    land_stat_reply_to_caps_llsd, nav_mesh_status_to_llsd, offline_messages_to_llsd,
+    open_region_info_to_llsd, parcel_info_to_llsd, parcel_object_owners_to_caps_llsd,
+    required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
+    set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
+    sky_with_blended_values, sky_with_pushed_values, teleport_failed_to_caps_llsd,
+    teleport_finish_to_llsd, water_settings_from_asset, water_with_blended_values,
+    water_with_pushed_values, windlight_refresh_to_llsd,
 };
 pub(crate) use conversions::{
     ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,

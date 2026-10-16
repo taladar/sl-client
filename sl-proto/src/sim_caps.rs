@@ -102,8 +102,8 @@ use crate::{
     CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
     CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
     CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED, CAP_SEARCH_STAT_REQUEST,
     CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
@@ -188,6 +188,7 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_GET_DISPLAY_NAMES,
     CAP_SET_DISPLAY_NAME,
     CAP_SEARCH_STAT_REQUEST,
+    CAP_PRODUCT_INFO_REQUEST,
     CAP_AVATAR_PICKER_SEARCH,
     CAP_AGENT_PREFERENCES,
     CAP_INTEREST_LIST,
@@ -333,6 +334,8 @@ pub enum CapHandler {
     SetDisplayName,
     /// The `SearchStatRequest` POST of a classified's click counts.
     SearchStat,
+    /// The `ProductInfoRequest` GET of the land products.
+    ProductInfo,
     /// The shared two-stage asset-upload state machine serving every
     /// `UPLOAD_CAPABILITIES` entry (`NewFileAgentInventory`,
     /// `UploadBakedTexture`, and the `Update*{Agent,Task}Inventory` family):
@@ -727,6 +730,8 @@ pub struct SimCaps {
     new_file_policy: NewFilePolicy,
     /// Which grid's people service `GetDisplayNames` answers as.
     display_name_style: DisplayNameStyle,
+    /// The land products `ProductInfoRequest` lists.
+    land_products: Vec<crate::LandProduct>,
 }
 
 /// Which grid's people service a `GetDisplayNames` answer imitates, for a
@@ -805,6 +810,7 @@ impl SimCaps {
             event_queue_done: false,
             new_file_policy: NewFilePolicy::Plain,
             display_name_style: DisplayNameStyle::Plain,
+            land_products: Vec::new(),
         }
     }
 
@@ -830,6 +836,14 @@ impl SimCaps {
     #[must_use]
     pub const fn with_display_name_style(mut self, style: DisplayNameStyle) -> Self {
         self.display_name_style = style;
+        self
+    }
+
+    /// The same surface with its `ProductInfoRequest` listing `products` —
+    /// the land types a land row's `ProductSKU` is named by. Empty unless set.
+    #[must_use]
+    pub fn with_land_products(mut self, products: Vec<crate::LandProduct>) -> Self {
+        self.land_products = products;
         self
     }
 
@@ -869,6 +883,7 @@ impl SimCaps {
             event_queue_done: false,
             new_file_policy: NewFilePolicy::Plain,
             display_name_style: DisplayNameStyle::Plain,
+            land_products: Vec::new(),
         }
     }
 
@@ -913,6 +928,7 @@ impl SimCaps {
             CAP_UPLOAD_AGENT_PROFILE_IMAGE => Some(CapHandler::ProfileImageUpload),
             CAP_SET_DISPLAY_NAME => Some(CapHandler::SetDisplayName),
             CAP_SEARCH_STAT_REQUEST => Some(CapHandler::SearchStat),
+            CAP_PRODUCT_INFO_REQUEST => Some(CapHandler::ProductInfo),
             CAP_UPDATE_AVATAR_APPEARANCE => Some(CapHandler::AvatarAppearance),
             CAP_INCREMENT_COF_VERSION => Some(CapHandler::IncrementCofVersion),
             CAP_COPY_INVENTORY_FROM_NOTECARD => Some(CapHandler::CopyInventoryFromNotecard),
@@ -1090,6 +1106,9 @@ impl SimCaps {
                     }
                     Some(CapHandler::SearchStat) => {
                         CapsDispatch::Response(Self::dispatch_search_stat(request))
+                    }
+                    Some(CapHandler::ProductInfo) => {
+                        CapsDispatch::Response(self.dispatch_product_info(request))
                     }
                     Some(CapHandler::AssetUpload) => {
                         CapsDispatch::Response(self.dispatch_caps_upload(sim, request, name))
@@ -1602,6 +1621,15 @@ impl SimCaps {
                 search: None,
             },
         ))
+    }
+
+    /// Serves one `ProductInfoRequest` GET: the land products, as the array of
+    /// `{ sku, name, description }` maps Second Life answers.
+    fn dispatch_product_info(&self, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        CapsResponse::llsd_xml(crate::land_products_body(&self.land_products))
     }
 
     /// Serves one `AvatarPickerSearch` GET: the residents whose username,
@@ -3506,6 +3534,7 @@ mod tests {
             ("UploadAgentProfileImage", CapStatus::Served),
             ("SetDisplayName", CapStatus::Served),
             ("SearchStatRequest", CapStatus::Served),
+            ("ProductInfoRequest", CapStatus::Served),
             ("InventoryAPIv3", CapStatus::Served),
             ("LibraryAPIv3", CapStatus::Served),
             ("CreateInventoryCategory", CapStatus::Served),

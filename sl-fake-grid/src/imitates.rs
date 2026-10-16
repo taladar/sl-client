@@ -31,7 +31,7 @@
 //! | whether an update capability's completion names the item it rewrote ([`UpdateCompletionItem`]) | omitted: `new_asset` alone, and the client uses the id it sent | echoed: `new_inventory_item` carries the rewritten item |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
-//! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 37 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger, the interest-list switch, a prim's contents and a script's experience over HTTP, a material saved into a prim |
+//! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 47 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger, the interest-list switch, a prim's contents and a script's experience over HTTP, a material saved into a prim, the profile capabilities, the land products |
 //! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
 //! | how a login is refused, and a second login of an avatar in world ([`login_refusals`](ImitatedGrid::login_refusals)) | `key` with a localisation key, its (empty) arguments and an incident id; the second login is admitted and the first session kicked | `key` with a text and nothing else; the second login is refused as `presence` and the first session kicked all the same |
 //! | whether a logout is answered ([`logout_reply`](ImitatedGrid::logout_reply)) | a `LogoutReply`, always | none: the session closes with the request unanswered and unacknowledged, which is what the live grid does six times in seven |
@@ -74,6 +74,7 @@
 //! | whether an agent has a balance for uploads ([`upload_funds`](ImitatedGrid::upload_funds)) | L$ 10 000 a session | none kept |
 //! | a thumbnail and a postcard over HTTP (`InventoryThumbnailUpload`, `SendPostcard`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted |
 //! | a prim's contents and a script's experience over HTTP (`RequestTaskInventory`, `GetMetadata`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted: the listing is UDP and `Xfer` alone |
+//! | the land products a land row's `ProductSKU` is named by ([`land_products`](ImitatedGrid::land_products)) | `ProductInfoRequest` granted, listing the 26 products aditi lists | not granted |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
 //! | the kill a derez sends ([`RezPolicy::derez_kill`]) | one `KillObject` naming every prim of the linkset | two, each naming the root alone |
@@ -262,6 +263,25 @@ impl ImitatedGrid {
         match self {
             Self::SecondLife => sl_proto::DisplayNameStyle::SecondLife,
             Self::OpenSim => sl_proto::DisplayNameStyle::OpenSim,
+        }
+    }
+
+    /// The land products this grid's `ProductInfoRequest` lists — what the
+    /// `ProductSKU` of a land search's or a land holdings lookup's row is
+    /// called (`search-directory`, 2026-10-16, `book/src/gridspec/search.md`).
+    /// Second Life lists 26; OpenSim grants no such capability.
+    #[must_use]
+    pub fn land_products(self) -> Vec<sl_proto::LandProduct> {
+        match self {
+            Self::SecondLife => SECOND_LIFE_LAND_PRODUCTS
+                .iter()
+                .map(|(sku, name, description)| sl_proto::LandProduct {
+                    sku: (*sku).to_owned(),
+                    name: (*name).to_owned(),
+                    description: (*description).to_owned(),
+                })
+                .collect(),
+            Self::OpenSim => Vec::new(),
         }
     }
 
@@ -1496,6 +1516,93 @@ impl ImitatedGrid {
     }
 }
 
+/// The land products aditi's `ProductInfoRequest` lists, `(sku, name,
+/// description)` in SKU order (`search-directory`, 2026-10-16).
+const SECOND_LIFE_LAND_PRODUCTS: &[(&str, &str, &str)] = &[
+    ("023", "mainland_full", "Mainland / Full Region"),
+    ("024", "estate_full", "Estate / Full Region"),
+    ("027", "estate_openspace", "Estate / Openspace"),
+    (
+        "029",
+        "estate_homestead_pre20090701",
+        "Grandfathered / Homestead",
+    ),
+    (
+        "121",
+        "developed_estate_full",
+        "Estate / Full Region - Developed",
+    ),
+    (
+        "123",
+        "developed_estate_homestead",
+        "Estate / Homestead - Developed",
+    ),
+    (
+        "125",
+        "developed_estate_openspace",
+        "Estate / Openspace - Developed",
+    ),
+    ("127", "mainland_openspace", "Mainland / Openspace"),
+    ("129", "mainland_homestead", "Mainland / Homestead"),
+    ("131", "linden_homes", "Linden Homes / Full Region"),
+    ("132", "linden_homes_30k", "Linden Homes Full Region 30k"),
+    (
+        "133",
+        "linden_homes_commercial",
+        "Linden Homes Commercial Full Region",
+    ),
+    (
+        "141",
+        "gaming_estate_full",
+        "Estate / Full Region - Skill Gaming",
+    ),
+    (
+        "221",
+        "developed_estate_full_30k",
+        "Estate / Full Region - Developed 30k",
+    ),
+    (
+        "224",
+        "estate_full_grandfathered",
+        "Grandfathered / Full Region",
+    ),
+    ("229", "estate_homestead", "Estate / Homestead"),
+    (
+        "241",
+        "gaming_estate_full_30k",
+        "Estate / Full Region - Skill Gaming 30k",
+    ),
+    (
+        "324",
+        "estate_full_buydown",
+        "Estate / Full Region - Buy Down",
+    ),
+    (
+        "329",
+        "estate_homestead_buydown",
+        "Estate / Homestead - Buy Down",
+    ),
+    (
+        "424",
+        "estate_full_grandfathered_30k",
+        "Grandfathered / Full Region 30k",
+    ),
+    (
+        "524",
+        "estate_full_buydown_30k",
+        "Estate / Full Region - Buy Down 30k",
+    ),
+    ("624", "estate_full_30k", "Estate / Full Region 30k"),
+    ("733", "events_pro", "Estate / Events Pro"),
+    ("833", "events_pro_30k", "Estate / Events Pro 30k"),
+    (
+        "841",
+        "gaming_events_elite",
+        "Estate / Events Elite - Skill Gaming",
+    ),
+    ("844", "events_elite", "Estate / Events Elite"),
+];
+
 /// What aditi's seed refused of the client's requested capabilities.
 pub const SECOND_LIFE_REFUSED_CAPABILITIES: &[&str] = &["ObjectAnimation", "UploadBakedTexture"];
 
@@ -1506,7 +1613,9 @@ pub const SECOND_LIFE_REFUSED_CAPABILITIES: &[&str] = &["ObjectAnimation", "Uplo
 /// of a prim's contents over HTTP (OpenSim lists them over UDP and `Xfer`, and
 /// has no experience to say a script is under), and the four profile
 /// capabilities (OpenSim reads and writes profiles over UDP only, and has no
-/// display names to set; `profiles`, 2026-10-15).
+/// display names to set; `profiles`, 2026-10-15), and the land products
+/// (`ProductInfoRequest`: OpenSim answers no land search to name a type in;
+/// `search-directory`, 2026-10-16).
 pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "AcceptFriendship",
     "AcceptGroupInvite",
@@ -1538,6 +1647,7 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "ModifyMaterialParams",
     "ObjectAnimation",
     "ParcelVoiceInfoRequest",
+    "ProductInfoRequest",
     "ProvisionVoiceAccountRequest",
     "ReadOfflineMsgs",
     "RegionExperiences",

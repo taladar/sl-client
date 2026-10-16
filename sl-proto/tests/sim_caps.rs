@@ -183,8 +183,9 @@ mod test {
         // SendPostcard), and the six of friends and groups (the four answers to
         // a kept offer or invitation, GroupMemberData, GroupAPIv1), and three
         // of the profile capabilities (UploadAgentProfileImage, SetDisplayName,
-        // SearchStatRequest; AgentProfile waits for a profile store).
-        assert_eq!(granted.len(), 79);
+        // SearchStatRequest; AgentProfile waits for a profile store), and the
+        // land products (ProductInfoRequest).
+        assert_eq!(granted.len(), 80);
         Ok(())
     }
 
@@ -5474,6 +5475,48 @@ mod test {
         ] {
             assert_eq!(answer.get(key).and_then(Llsd::as_i32), Some(0), "{key}");
         }
+        Ok(())
+    }
+
+    /// `ProductInfoRequest` lists the land products it was given, as the
+    /// array Second Life answers, and the client reads them back as
+    /// `Event::LandProducts`.
+    #[test]
+    fn product_info_request_lists_the_land_products() -> Result<(), TestError> {
+        let products = vec![
+            sl_proto::LandProduct {
+                sku: "023".to_owned(),
+                name: "mainland_full".to_owned(),
+                description: "Mainland / Full Region".to_owned(),
+            },
+            sl_proto::LandProduct {
+                sku: "131".to_owned(),
+                name: "linden_homes".to_owned(),
+                description: "Linden Homes / Full Region".to_owned(),
+            },
+        ];
+        let mut caps = new_caps()?.with_land_products(products.clone());
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "ProductInfoRequest")?;
+        let (status, body) = respond(&mut caps, &mut sim, &get(&path, None))?;
+        assert_eq!(status, 200);
+        let mut client = new_client()?;
+        client.handle_caps_event(
+            sl_proto::CAP_PRODUCT_INFO_REQUEST,
+            &parse_llsd_xml(&body)?,
+            Instant::now(),
+        )?;
+        let read = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::LandProducts(read) => Some(read),
+                _other => None,
+            })
+            .ok_or("expected the land products on the client")?;
+        assert_eq!(read, products);
+        // A POST is not how the list is read.
+        let (status, _body) = respond(&mut caps, &mut sim, &post(&path, ""))?;
+        assert_eq!(status, 405);
         Ok(())
     }
 

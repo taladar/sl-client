@@ -488,8 +488,9 @@ pub use chat::{
 };
 pub use diagnostic::{CircuitProbe, Diagnostic, hexdump};
 pub use directory::{
-    AvatarPickerResult, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
-    DirLandResult, DirPeopleResult, DirPlaceResult, EventInfo, LandSearchType, PlacesResult,
+    AvatarPickerResult, ClassifiedQueryFlags, DirClassifiedResult, DirEventResult, DirFindFlags,
+    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, EventInfo, LandProduct,
+    LandSearchType, PlacesResult,
 };
 pub use display_name::{DisplayNameUpdate, SetDisplayNameReply};
 pub use economy::{EconomyData, LandImpact, MoneyBalance, MoneyTransaction, MoneyTransactionType};

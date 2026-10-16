@@ -2,7 +2,7 @@
 id: protocol-classified-query-wrong-flag-space
 title: DirClassifiedQuery sends DirFind maturity bits instead of classified-query bits
 topic: protocol
-status: bugs
+status: done
 origin: idiomatic-audit-primitive-typed-patterns (2026-10-03)
 refs: [idiomatic-audit-primitive-typed-patterns, viewer-search-floater]
 ---
@@ -32,3 +32,15 @@ wrongly or returns nothing, silently.
 A separate `ClassifiedQueryFlags` type for this command (and its server-side
 decode in `SimSession`), mapped from the same maturity checkboxes. Live-check a
 classified search on aditi.
+
+## Done (2026-10-16, in [[gridspec-search-directory]])
+
+`ClassifiedQueryFlags` (`sl-proto/src/types/directory.rs`) is the
+classifieds' own bit space, and `Command::DirClassifiedQuery` and
+`ServerEvent::DirClassifiedQuery` carry it; `for_ratings` packs the rating
+checkboxes as `pack_classified_flags_request` does (General without Moderate
+also sets `CLASSIFIED_QUERY_FILTER_MATURE`). The search floater sends it from
+its classifieds checkboxes. The live check ran on aditi, but aditi lists no
+classifieds: both bit spaces were answered by the same empty reply (status
+`FOUNDNONE`), so the fix rests on the reference
+(`book/src/gridspec/search.md`, *Classifieds*).

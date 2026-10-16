@@ -21,11 +21,12 @@ use super::conversions::{
     group_names, group_notice, group_profile, group_role, group_title, group_vote_history_item,
     index_into, instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
     inventory_item_from_create, inventory_offer_bucket, invite_channel_from_llsd,
-    land_stat_reply_from_caps_llsd, map_block_batch, map_item, map_layer, map_region_info,
-    money_balance, nav_mesh_status_from_llsd, neighbor_info, object_from_full_update,
-    object_properties, offline_messages_from_llsd, open_region_info_from_llsd, pack_uuids,
-    packages_of, parcel_info, parcel_info_from_llsd, parcel_object_owners_from_caps_llsd,
-    parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
+    land_products_from_llsd, land_stat_reply_from_caps_llsd, map_block_batch, map_item, map_layer,
+    map_region_info, money_balance, nav_mesh_status_from_llsd, neighbor_info,
+    object_from_full_update, object_properties, offline_messages_from_llsd,
+    open_region_info_from_llsd, pack_uuids, packages_of, parcel_info, parcel_info_from_llsd,
+    parcel_object_owners_from_caps_llsd, parse_lure_region_handle, parse_mute_list,
+    parse_task_inventory, parse_uuid_string, pick_info, places_reply_from_caps_llsd,
     region_identity, region_limits, required_voice_version_from_llsd, script_dialog,
     script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
     session_history_from_llsd, set_display_name_reply_from_llsd, sim_console_response_from_llsd,
@@ -65,11 +66,11 @@ use crate::types::EventId;
 use crate::types::{
     AlertInfo, Arrival, AssetType, AttachmentMode, AttachmentPoint, AvatarClassified, AvatarPick,
     AvatarPickerResult, Camera, ChatAudible, ChatType, Child, CircuitProbe, ClassifiedCategory,
-    ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams, DeRezDestination,
-    DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
-    DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisconnectReason,
-    EjectAction, EstateAccessDelta, EstateCovenant, EstateInfoUpdate, Event, EventInfo,
-    FeatureDisabled, FolderInfo, FolderType, FollowCamProperty, FollowCamPropertyValue,
+    ClassifiedQueryFlags, ClassifiedUpdate, ClickAction, CoarseLocation, CreateGroupParams,
+    DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
+    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, DirectoryVisibility,
+    DisconnectReason, EjectAction, EstateAccessDelta, EstateCovenant, EstateInfoUpdate, Event,
+    EventInfo, FeatureDisabled, FolderInfo, FolderType, FollowCamProperty, FollowCamPropertyValue,
     FreezeAction, Friend, FriendRights, GenericMessage, GenericStreamingMessage, GestureActivation,
     GodRegionUpdate, GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember,
     GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryCursor, InventoryFolder,
@@ -640,6 +641,26 @@ impl Session {
                 }
                 Ok(None) => self.caps_decode_failed(message),
                 Err(error) => self.caps_decode_error(message, &error),
+            },
+            // The event-queue form of a land holdings lookup: the message is
+            // `UDPDeprecated`, and only this form carries each row's land
+            // product.
+            CapsEvent::PlacesReply => match places_reply_from_caps_llsd(body) {
+                Ok(Some((query_id, transaction_id, results))) => {
+                    self.events.push_back(Event::PlacesReply {
+                        query_id,
+                        transaction_id,
+                        results,
+                    });
+                }
+                Ok(None) => self.caps_decode_failed(message),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            // The land products a land row's `ProductSKU` names, in answer to
+            // a `ProductInfoRequest` GET.
+            CapsEvent::ProductInfoRequest => match land_products_from_llsd(body) {
+                Some(products) => self.events.push_back(Event::LandProducts(products)),
+                None => self.caps_decode_failed(message),
             },
             // A parcel's object-owner tally. The message is `UDPDeprecated`: a
             // simulator with an event queue answers a `ParcelObjectOwnersRequest`
@@ -5470,6 +5491,8 @@ impl Session {
                                     "ActualArea",
                                     block.actual_area,
                                 )?,
+                                // The UDP template leaves the SKU out.
+                                product_sku: None,
                             })
                         })
                         .collect::<Result<_, sl_wire::WireError>>()?,
@@ -5528,6 +5551,8 @@ impl Session {
                                 snapshot_id: crate::types::optional_key_from_wire(block.snapshot_id),
                                 dwell: block.dwell,
                                 price: crate::types::linden_from_wire("Price", block.price)?,
+                                // The UDP template leaves the SKU out.
+                                product_sku: None,
                             })
                         })
                         .collect::<Result<_, sl_wire::WireError>>()?,
@@ -10214,7 +10239,7 @@ impl Session {
         &mut self,
         query_id: QueryId,
         query_text: &str,
-        flags: DirFindFlags,
+        flags: ClassifiedQueryFlags,
         category: ClassifiedCategory,
         query_start: i32,
         now: Instant,

@@ -44,7 +44,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `NavMeshGenerationStatus` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `ObjectNavMeshProperties` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `ParcelPropertiesUpdate` | yes | yes | current | **used** since 2026-10-05; UDP where not granted |
-| `ProductInfoRequest` | yes | — | current | task `protocol-cap-product-info` |
+| `ProductInfoRequest` | yes | — | current | **used** since 2026-10-16 (`Command::RequestLandProducts`); the search floater names a land row's type by it |
 | `RegionObjects` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `RegionSchedule` | yes | — | current | task `viewer-region-restart-schedule` |
 | `RequestTaskInventory` | yes | — | current | **used** since 2026-10-12 (`Command::FetchTaskInventory`); UDP where not granted |

@@ -26,7 +26,7 @@ use super::{
     CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
     CAP_GROUP_API_V1, CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST,
     CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED,
     CAP_SEARCH_STAT_REQUEST, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
@@ -53,6 +53,10 @@ pub(crate) enum CapsEvent {
     ParcelObjectOwnersReply,
     /// The results of a land search.
     DirLandReply,
+    /// The event-queue form of a land holdings lookup's answer.
+    PlacesReply,
+    /// The answer to a `ProductInfoRequest` GET: the land products.
+    ProductInfoRequest,
     /// The destination region of a teleport that is going through.
     TeleportFinish,
     /// A teleport the simulator refused or gave up on, in place of the UDP
@@ -219,6 +223,8 @@ impl CapsEvent {
             "LandStatReply" => Self::LandStatReply,
             "ParcelObjectOwnersReply" => Self::ParcelObjectOwnersReply,
             "DirLandReply" => Self::DirLandReply,
+            "PlacesReply" => Self::PlacesReply,
+            CAP_PRODUCT_INFO_REQUEST => Self::ProductInfoRequest,
             "TeleportFinish" => Self::TeleportFinish,
             "TeleportFailed" => Self::TeleportFailed,
             "EnableSimulator" => Self::EnableSimulator,

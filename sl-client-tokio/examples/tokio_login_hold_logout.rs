@@ -209,6 +209,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::ClassifiedClickStats(stats) => {
                 info!("classified click counts: {stats:?}");
             }
+            Event::LandProducts(products) => {
+                info!("{} land product(s)", products.len());
+            }
             Event::Account(account) => {
                 info!(
                     "account: access {:?}/{:?}, max groups {:?}, home {:?}",
