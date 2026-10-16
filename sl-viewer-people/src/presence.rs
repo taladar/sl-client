@@ -498,7 +498,7 @@ fn auto_respond_to_ims(
         let is_blocked = facts
             .mutes
             .as_deref()
-            .is_some_and(|mutes| mutes.is_muted(im.from_agent_id.uuid()));
+            .is_some_and(|mutes| mutes.text_muted(im.from_agent_id.uuid(), &im.from_agent_name));
         let Some(mode) = reply_for(modes, is_friend, is_blocked) else {
             continue;
         };

@@ -114,9 +114,137 @@ viewer can answer every kept offer that way, as the reference does
 - **No calling card is waited for.** Neither the friendship nor the card
   offer waits on the other side's confirmation, which OpenSim never sends.
 
+## Mute list
+
+The mute (block) list is kept by the grid and read whole: the viewer sends
+`MuteListRequest` with the CRC of the copy it has cached (0 for none), and the
+grid answers with `UseCachedMuteList`, with a `MuteListUpdate` naming a file
+the viewer then fetches over [Xfer](../comms/xfer.md), or — for an empty list —
+with the `emptymutelist` [generic message](../comms/generic-messages.md). An
+entry is added or changed with `UpdateMuteListEntry` (id, name, type, the
+per-aspect *exception* flags) and removed with `RemoveMuteListEntry` (id,
+name); neither is answered.
+
+Measured on 2026-10-16 by the conformance case `mute-list`: avatar **A** keeps
+the list, avatar **B** is the resident it mutes. Runs on aditi (Mauve) and on
+the local OpenSim with its mute store in MariaDB (see the note below); every
+run is held to these answers (**held**). The fake grid keeps no mute list yet
+(`server-fake-grid-mute-list`).
+
+### Reading the list
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| an empty list, asked with CRC 0 (**held**) | `emptymutelist` | `emptymutelist` |
+| an empty list, asked with any CRC (**held**) | `emptymutelist` | `emptymutelist` |
+| a list, asked with CRC 0 (**held**) | `MuteListUpdate`, then the file over Xfer | the same |
+| a list, asked with the CRC of the file as the viewer caches it (**held**) | `UseCachedMuteList` | `UseCachedMuteList` |
+| a list, asked with another CRC (**held**) | the file again | the file again |
+| the list emptied by the removals (**held**) | `emptymutelist`, not an empty file | the same |
+
+The CRC is the IEEE CRC-32 of the file as the reference writes its cache —
+one `<type> <id> <name>|<flags>` line an entry — so both grids write the file
+byte for byte as a viewer would, apart from the line below.
+
+### What is kept
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| a resident, by id under the user name (**held**) | kept as sent: agent, the id, the name, flags 0 | the same |
+| a by-name entry (nil id) (**held**) | kept, **written `0 <nil> <name>|` — the flags field empty** | kept, written `…|0` |
+| an agent id that is nobody, an object, a group, an external entry (**held**) | each kept as sent | the same |
+| the order of the file (**held**) | the order the entries were added | the same |
+| a second mute of the same resident with other flags (**held**) | the entry's flags change; one entry | the same |
+| the same resident muted under another name (**held**) | **the entry is renamed**: one entry, the new name, flags 0 | **a second entry**: both names, each with its own flags |
+| a removal under a name the resident was never muted under (**held**) | **removes the entry** | removes nothing |
+| a removal under the first name, after the rename (**held**) | — (already gone) | removes that name's entry only |
+| a mute of oneself (**held**) | not kept | not kept |
+| the reply to an edit | none | none |
+
+So Second Life keys an entry by its id and OpenSim by its id *and* name: a
+viewer that names the same resident two ways files two entries on OpenSim,
+and must remove an entry under exactly the name it was filed under. The
+reference names a resident by the **user name** (`getUserName()`: `First
+Last`, or `First` for a Resident — not lower case).
+
+**OpenSim's store.** The local grid first ran the stock standalone SQLite
+store, whose migration declares `PRIMARY KEY(AgentID)` beside the
+`UNIQUE(AgentID, MuteID, MuteName)` the MySQL migration has: its `replace
+into` keeps **one entry per avatar**, each mute replacing the last (a census of
+five kinds kept only the last). A read taken in the same instant as an edit
+could also list the old row and the new one together. The grids people run use
+the MySQL store, so the local grid's `[MuteListStore]` now points at the
+MariaDB the groups module already uses, and the table above is that store's
+answer.
+
+### What a muted resident can still send
+
+A mutes B outright, with text chat excepted (flags 1), and with every aspect
+but text chat excepted (flags 14); in each round, and once before the mute, B
+sends A an instant message, a typing notice, a friendship offer, a teleport
+offer and a shout.
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| what reaches A, in every round (**held**) | **all of it** | all of it |
+| what B is told (**held**) | nothing | nothing |
+
+**Neither grid enforces a mute.** Everything a muted resident sends is
+delivered, and the sender is told nothing; filtering is the viewer's alone.
+
+### What the viewer does with it
+
+- **The mute list is asked for once the region has taken the agent in**
+  (`AgentMovementComplete`), as the reference asks in `STATE_INVENTORY_SEND`.
+  The viewer asked as soon as the login named the agent; Second Life does not
+  answer a `MuteListRequest` that early, so on Second Life the list never
+  loaded and no block was enforced after a login (found by the live e2e stage
+  below; OpenSim answers at once).
+- **A fresh login's mute list is served on OpenSim.** OpenSim keeps its
+  pending `Xfer`s by id across every client of a region, and our session
+  numbered every login's transfers from 1, so after a relog the list request
+  met an earlier session's unfinished transfer and was never answered (found by
+  the live e2e stage below). A login now numbers its transfers from its session
+  id; the reference draws a random id per transfer.
+- **A mute list with a by-name entry is read.** The parser refused Second
+  Life's `name|` line as a malformed flags field and with it the *whole* list,
+  so one by-name block on Second Life left every block unenforced. An empty
+  field now reads as no flags, as the reference's `" %d %254s %254[^|]| %u"`
+  does.
+- **A resident is muted under the user name**, whatever name the asking surface
+  showed (a display name, an instant message's `First Resident`): the name the
+  grid resolved for the id, else the given one with a `Resident` surname
+  dropped. A request for someone already on the list updates that entry under
+  its own name, so OpenSim does not file a second.
+- **An unblock names the entry as the list keeps it** (`RequestUnblock`): the
+  radar's and a `secondlife:///…/unmute` link's removals used the name the
+  surface knew, which OpenSim ignores when it is not the entry's.
+- **Everything is filtered locally**, as neither grid filters: the instant
+  message, its typing notice, local chat, offers (friendship declined,
+  teleport ignored, inventory declined), group and conference lines. Now also a
+  group invitation from a resident blocked by id (matched by the inviter's
+  name in any form, as `LLMuteList::isMuted(username)` does), a conference
+  invitation from a by-name entry, and a group notice a blocked resident posted
+  even when asked for. The session's own conversation record no longer opens a
+  conversation or counts unread for a blocked sender. The muted auto-reply uses
+  the same test as the message filter.
+
+Held by the e2e stage
+`a_live_block_is_kept_by_the_grid_and_the_radar_unblocks_it` (two viewers,
+either live grid): Alpha blocks Beta from the radar and a name
+from the Blocked tab, a relog reads both back from the grid, the radar's
+Unblock removes Beta, and a second relog shows the grid kept the name and let go
+of Beta. The fake-grid radar stage holds the name both messages go out under.
+
 ## Not measured
 
 - The edit right in use: editing a friend's object
   ([Building](building.md)).
+- The mute list's limit (the reference's `MuteListLimit`, 1000): filling it
+  costs a thousand edits on aditi.
+- Muting a Linden or a god: OpenSim refuses an administrator by re-sending the
+  list (`MuteListModule`); not tried on aditi.
+- Offline messages from a muted resident: what is kept for an avatar that is
+  away was not tried with a mute in place.
 - A friendship between avatars in different regions, or on different grids.
 - The calling card's description and permissions.

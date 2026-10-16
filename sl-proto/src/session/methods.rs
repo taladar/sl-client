@@ -1364,6 +1364,7 @@ impl Session {
                                 text: im.message.clone(),
                                 timestamp: im.timestamp,
                             },
+                            &im.from_agent_name,
                             now,
                         );
                     }
@@ -2265,6 +2266,14 @@ impl Session {
                 // predict its stored asset id (`combine(transaction,
                 // secure_session)`) before the upload completes.
                 self.secure_session_id = success.secure_session_id;
+                // Number this login's `Xfer`s from its session id rather than
+                // from 1: OpenSim keeps its pending transfers by id alone,
+                // across every client of the region, so a fresh login's id 1
+                // collides with a transfer an earlier one left unfinished and
+                // is never answered. The reference draws a random id per
+                // transfer (`LLXferManager::getNextID`); the session id is the
+                // grid's random number for this login.
+                self.transfers.seed_xfer_ids(success.session_id);
                 // Defer `CompleteAgentMovement` until the region's capabilities have
                 // been fetched (the seed-caps request advertises our animesh support
                 // via the `ObjectAnimation` capability). The simulator gates object
@@ -4306,6 +4315,7 @@ impl Session {
                     ImDialog::SessionSend if self.reads_as_group(block.id, block.from_group) => {
                         let group_id = GroupKey::from(block.id);
                         let from_agent_id = AgentKey::from(im.agent_data.agent_id);
+                        let from_name = trimmed_string(&block.from_agent_name);
                         let message = trimmed_string(&block.message);
                         self.log_inbound_message(
                             ChatSessionKind::Group { group_id },
@@ -4315,12 +4325,13 @@ impl Session {
                                 text: message.clone(),
                                 timestamp: crate::types::optional_u32_from_wire(block.timestamp),
                             },
+                            &from_name,
                             now,
                         );
                         self.events.push_back(Event::GroupSessionMessage {
                             group_id,
                             from_agent_id,
-                            from_name: trimmed_string(&block.from_agent_name),
+                            from_name,
                             message,
                             im: Box::new(instant_message(&im.agent_data, block)),
                         });
@@ -4348,6 +4359,7 @@ impl Session {
                     ImDialog::SessionSend => {
                         let id = ImSessionId::from(block.id);
                         let from_agent_id = AgentKey::from(im.agent_data.agent_id);
+                        let from_name = trimmed_string(&block.from_agent_name);
                         let message = trimmed_string(&block.message);
                         self.log_inbound_message(
                             ChatSessionKind::Conference { id },
@@ -4357,12 +4369,13 @@ impl Session {
                                 text: message.clone(),
                                 timestamp: crate::types::optional_u32_from_wire(block.timestamp),
                             },
+                            &from_name,
                             now,
                         );
                         self.events.push_back(Event::ConferenceSessionMessage {
                             session_id: block.id,
                             from_agent_id,
-                            from_name: trimmed_string(&block.from_agent_name),
+                            from_name,
                             message,
                             im: Box::new(instant_message(&im.agent_data, block)),
                         });
@@ -4413,6 +4426,7 @@ impl Session {
                                 text: received.message.clone(),
                                 timestamp: received.timestamp,
                             },
+                            &received.from_agent_name,
                             now,
                         );
                         self.events
@@ -7581,12 +7595,22 @@ impl Session {
     /// session if needed, and bumps its unread count unless the message is our
     /// own echo. Shared by the 1:1, group, and conference inbound arms and the
     /// offline-IM drain.
+    ///
+    /// A line from a sender whose text chat [`Session::mutes`] blocks is not
+    /// logged and opens no session: neither grid holds such a line back
+    /// (`book/src/gridspec/friends.md`, § Mute list), and the reference
+    /// neither creates nor feeds a session for it (`LLIMMgr::addMessage`). The
+    /// event still goes out, for a consumer to judge by its own list.
     fn log_inbound_message(
         &mut self,
         kind: ChatSessionKind,
         message: SessionMessage,
+        sender_name: &str,
         now: Instant,
     ) {
+        if self.mutes.text_muted(message.sender.uuid(), sender_name) {
+            return;
+        }
         let own_agent = self.agent_id();
         self.chat_session_mut(kind, now)
             .log_inbound(message, own_agent);

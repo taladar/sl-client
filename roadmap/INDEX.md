@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 347 |
-| blocked | 90 |
+| blocked | 89 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1386 |
+| done | 1388 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2066** |
+| **total** | **2067** |
 
 ## ideas (134)
 
@@ -1093,6 +1093,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-mesh-upload-cost`](ready/server-fake-grid-mesh-upload-cost.md)
   — Fake grid — mesh upload costing and refusals (blocked by
   `gridspec-asset-upload` (done))
+- [`server-fake-grid-mute-list`](ready/server-fake-grid-mute-list.md) — Fake
+  grid — mute list storage, the Xfer file and each grid's empty-list reply
+  (blocked by `gridspec-mute-list` (done))
 - [`server-fake-grid-object-media-region`](ready/server-fake-grid-object-media-region.md)
   — Fake grid — region-wide object media with version bumps and propagation
 - [`server-fake-grid-object-record-texture-ids`](ready/server-fake-grid-object-record-texture-ids.md)
@@ -1154,8 +1157,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   delivery on each grid
 - [`gridspec-money`](ready/gridspec-money.md) — Balance, L$ transfers, pay
   dialogs and buying objects on each grid
-- [`gridspec-mute-list`](ready/gridspec-mute-list.md) — Mute (block) list
-  storage and enforcement on each grid
 - [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
   Notecards, embedded items and gestures on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
@@ -1171,7 +1172,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (90)
+## blocked (89)
 
 ### protocol
 
@@ -1336,9 +1337,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-money-ledger`](blocked/server-fake-grid-money-ledger.md) —
   Fake grid — a money ledger: balances, transfers, buying and paying (blocked by
   `gridspec-money`, `gridspec-land-transactions`)
-- [`server-fake-grid-mute-list`](blocked/server-fake-grid-mute-list.md) — Fake
-  grid — mute list storage, the Xfer file and each grid's empty-list reply
-  (blocked by `gridspec-mute-list`)
 - [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
   — Fake grid — enforce parcel access and push ban lines (blocked by
   `gridspec-parcel-access-and-ban-lines` (done),
@@ -1549,6 +1547,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Bespoke notification cards resolve every click as "no choice"
 - [`viewer-build-phantom-flag-wrong-bit`](bugs/viewer-build-phantom-flag-wrong-bit.md)
   — Build floater's Phantom checkbox reads and writes the any-owner bit
+- [`viewer-calling-card-offer-unanswered`](bugs/viewer-calling-card-offer-unanswered.md)
+  — A calling card offered to us is never shown or answered
 - [`viewer-camera-framing-ends-inside-the-framed-object`](bugs/viewer-camera-framing-ends-inside-the-framed-object.md)
   — A framing glide can carry the camera inside the object it frames
 - [`viewer-day-cycle-strip-click-mirrored-rtl`](bugs/viewer-day-cycle-strip-click-mirrored-rtl.md)
@@ -1568,8 +1568,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The world renders all white at times on the live OpenSim grid
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
-- [`viewer-mute-entry-name-is-not-the-username`](bugs/viewer-mute-entry-name-is-not-the-username.md)
-  — A blocked avatar's mute entry is named by its first name, not its username
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-new-material-refused-on-second-life`](bugs/viewer-new-material-refused-on-second-life.md)
@@ -1612,7 +1610,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1386)
+## done (1388)
 
 ### protocol
 
@@ -2693,6 +2691,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A multi-line field that grows with the window around it
 - [`viewer-music-controls-push-chat-bar`](done/viewer-music-controls-push-chat-bar.md)
   — Parcel music controls push the nearby chat bar up when they appear
+- [`viewer-mute-entry-name-is-not-the-username`](done/viewer-mute-entry-name-is-not-the-username.md)
+  — A blocked avatar's mute entry is named by its first name, not its username
 - [`viewer-muted-residents-text-still-shown`](done/viewer-muted-residents-text-still-shown.md)
   — A blocked resident's chat and IMs are still shown
 - [`viewer-name-tags-billboard-render`](done/viewer-name-tags-billboard-render.md)
@@ -4640,6 +4640,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   logout does to seats and child circuits
 - [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material
   edits and overrides on each grid
+- [`gridspec-mute-list`](done/gridspec-mute-list.md) — Mute (block) list storage
+  and enforcement on each grid
 - [`gridspec-neighbours-crossing`](done/gridspec-neighbours-crossing.md) — Child
   agents, EnableSimulator and region crossing on each grid
 - [`gridspec-object-edit`](done/gridspec-object-edit.md) — Object edits on each

@@ -15,7 +15,7 @@
 //! a legacy by-name fallback (`isMuted(id, name, flags)`), the per-aspect
 //! *exception* bits, and the `MuteListLimit` cap.
 
-use crate::types::{ChatMessage, ChatSource, Event, ImDialog, MuteEntry, MuteFlags};
+use crate::types::{ChatMessage, ChatSource, Event, ImDialog, MuteEntry, MuteFlags, MuteType};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
@@ -196,6 +196,26 @@ impl MuteList {
         self.reindex();
     }
 
+    /// Whether a resident entry is filed under `name` in any of the forms a
+    /// resident's name is written in — the reference's
+    /// `LLMuteList::isMuted(username)`, which compares every agent entry's name
+    /// as a username (`LLCacheName::buildUsername`) and ignores the exception
+    /// bits.
+    ///
+    /// It is the test for what names a resident without saying who it is: a
+    /// group invitation, whose sender is the group and whose inviter comes as
+    /// a name only (Second Life writes it `first.last`, OpenSim `First Last`),
+    /// and a notice OpenSim sends from the group. An empty `name` matches
+    /// nothing.
+    #[must_use]
+    pub fn agent_named(&self, name: &str) -> bool {
+        let wanted = account_name(name);
+        !wanted.is_empty()
+            && self.entries.iter().any(|entry| {
+                matches!(entry.mute_type, MuteType::Agent) && account_name(&entry.name) == wanted
+            })
+    }
+
     /// Replace the whole list (a received
     /// [`Event::MuteList`](crate::Event::MuteList)).
     pub fn replace(&mut self, entries: Vec<MuteEntry>) {
@@ -212,6 +232,19 @@ impl MuteList {
             .filter(|id| !id.is_nil())
             .collect();
         self.revision = self.revision.wrapping_add(1);
+    }
+}
+
+/// A resident's name in account form, whichever form it came in — `First
+/// Last`, a legacy `Name Resident`, the user name `Name` or the account name
+/// `first.last` — as `LLCacheName::buildUsername` writes it: lower case, the
+/// surname joined by a dot, a `Resident` surname dropped.
+fn account_name(name: &str) -> String {
+    let lower = name.trim().to_lowercase();
+    match lower.split_once(' ') {
+        Some((first, "resident")) => first.to_owned(),
+        Some((first, last)) => format!("{first}.{last}"),
+        None => lower,
     }
 }
 
@@ -503,5 +536,32 @@ mod tests {
         list.note_unmute(troll, "Troll Resident");
         assert!(list.entries().is_empty());
         assert!(!list.is_muted(troll));
+    }
+
+    /// A resident entry is found by any form of the resident's name — the
+    /// account name a Second Life invitation carries, the legacy name OpenSim
+    /// writes — and only a resident entry, whatever its exceptions.
+    #[test]
+    fn a_resident_is_found_by_any_form_of_the_name() {
+        let mut list = MuteList::new();
+        list.replace(vec![
+            mute(
+                Uuid::from_u128(1),
+                "Troll",
+                MuteType::Agent,
+                MuteFlags::ALLOW_TEXT_CHAT,
+            ),
+            mute(Uuid::from_u128(2), "Grumpy Linden", MuteType::Agent, 0),
+            mute(Uuid::from_u128(3), "Sign Object", MuteType::Object, 0),
+        ]);
+        for name in ["troll", "Troll", "Troll Resident", "troll resident"] {
+            assert!(list.agent_named(name), "{name}");
+        }
+        for name in ["grumpy.linden", "Grumpy Linden"] {
+            assert!(list.agent_named(name), "{name}");
+        }
+        for name in ["", "sign.object", "Sign Object", "trolls"] {
+            assert!(!list.agent_named(name), "{name}");
+        }
     }
 }

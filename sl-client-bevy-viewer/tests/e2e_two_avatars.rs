@@ -883,8 +883,9 @@ mod test {
     /// **Radar row menu**: Track starts a beacon (the menu then offers to
     /// stop it); Teleport To asks the grid for the resident's spot; Add
     /// Friend asks for a message and offers it with the friendship; Block
-    /// mutes them (the menu then offers Unblock); Derender takes them out of
-    /// the scene together with what they wear.
+    /// mutes them under their user name (the menu then offers Unblock, which
+    /// removes the entry under the same name); Derender takes them out of the
+    /// scene together with what they wear.
     #[test]
     fn the_radar_row_menu_tracks_teleports_befriends_blocks_and_derenders() -> Result<(), TestError>
     {
@@ -942,16 +943,28 @@ mod test {
                 })
                 .await?;
                 radar_menu(alpha, NEAR_NPC, "menu-radar-block").await?;
+                // Under the user name, as the reference mutes a resident: a
+                // Resident's first name alone.
                 let _muted = grid_hears(&mut heard, "mute", |event| {
                     matches!(event, ServerEvent::ClientMessage(message)
                         if matches!(&**message, AnyMessage::UpdateMuteListEntry(entry)
-                            if entry.mute_data.mute_id == npc.full_id))
+                            if entry.mute_data.mute_id == npc.full_id
+                                && entry.mute_data.mute_name == b"Catalogue\0"))
                 })
                 .await?;
                 assert!(
                     radar_menu_offers(alpha, NEAR_NPC, "menu-radar-unblock").await?,
                     "Unblock once the resident is blocked"
                 );
+                // The removal names the entry as it was filed.
+                radar_menu(alpha, NEAR_NPC, "menu-radar-unblock").await?;
+                let _unmuted = grid_hears(&mut heard, "unmute", |event| {
+                    matches!(event, ServerEvent::ClientMessage(message)
+                        if matches!(&**message, AnyMessage::RemoveMuteListEntry(entry)
+                            if entry.mute_data.mute_id == npc.full_id
+                                && entry.mute_data.mute_name == b"Catalogue\0"))
+                })
+                .await?;
 
                 let worn: Vec<u32> = npc.children.clone();
                 assert!(!worn.is_empty(), "the catalogue NPC wears an attachment");
@@ -1640,6 +1653,161 @@ mod test {
             .timeout(LIVE_WAIT)
             .to_equal(json!("idle"))
             .await?;
+        Ok(())
+    }
+
+    /// The by-name entry the live block stage keeps across its relogs: its
+    /// row says the grid's list was read back, and on Second Life it is the
+    /// line written with an empty flags field (`book/src/gridspec/friends.md`,
+    /// § Mute list).
+    const BLOCK_SENTINEL: &str = "SL-E2E Block Sentinel";
+
+    /// The row of `name` in the Blocked tab of `window`.
+    fn blocked_row(window: &UiLocator, name: &str) -> UiLocator {
+        window.get(Locator::role(Role::ListItem).name_containing(name))
+    }
+
+    /// Close `viewer`'s radar, which would cover the People floater.
+    async fn close_radar(viewer: &Viewer) -> Result<(), BodyError> {
+        let _closed = viewer
+            .ui()
+            .window(RADAR)
+            .test_id("floater-button:close")
+            .click()
+            .await?;
+        Ok(())
+    }
+
+    /// The Blocked tab of `viewer`'s People floater.
+    async fn blocked_tab(viewer: &Viewer) -> Result<UiLocator, BodyError> {
+        people_tab(viewer, "people-blocked-tab").await
+    }
+
+    /// Unblock `name` from the Blocked tab if it is listed: a leftover of a
+    /// run that failed before it cleaned up.
+    async fn unblock_listed(viewer: &Viewer, name: &str) -> Result<(), BodyError> {
+        let window = blocked_tab(viewer).await?;
+        let row = blocked_row(&window, name);
+        if row.count().await? == 0 {
+            return Ok(());
+        }
+        let _selected = row.click().await?;
+        let _unblocked = window.button_key("blocked-action-unblock").click().await?;
+        let _gone = viewer
+            .expect(&row)
+            .timeout(LIVE_WAIT)
+            .to_be_detached()
+            .await?;
+        Ok(())
+    }
+
+    /// The reference's user name for the account `First Last`: the first name
+    /// alone for a Resident.
+    fn user_name(account: &str) -> &str {
+        match account.split_once(' ') {
+            Some((first, "Resident")) => first,
+            _ => account,
+        }
+    }
+
+    /// **Blocking on a live grid**: Alpha blocks Beta from the radar and a
+    /// name from the Blocked tab; a relog reads both back from the grid (the
+    /// resident under the user name), the radar's Unblock removes Beta, and a
+    /// second relog shows the grid let go of Beta and kept the name. OpenSim
+    /// removes an entry only under the exact name it was filed under, and
+    /// Second Life writes a by-name entry with an empty flags field.
+    #[test]
+    fn a_live_block_is_kept_by_the_grid_and_the_radar_unblocks_it() -> Result<(), TestError> {
+        stage("live_block", &["Alpha", "Beta"])
+            .needs(RELAYED)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let beta = &stage.viewer("Beta")?;
+                gather(stage, alpha, beta).await?;
+                let beta_name = shown_name(stage, alpha, "Beta").await?;
+                let beta_user = user_name(stage.account_name("Beta")?).to_owned();
+                unblock_listed(alpha, &beta_user).await?;
+                unblock_listed(alpha, BLOCK_SENTINEL).await?;
+
+                let window = blocked_tab(alpha).await?;
+                let _asked = window
+                    .button_key("blocked-action-block-object")
+                    .click()
+                    .await?;
+                let _named = alpha
+                    .ui()
+                    .test_id("block-by-name-field:field")
+                    .fill(BLOCK_SENTINEL)
+                    .await?;
+                let _ok = alpha
+                    .ui()
+                    .test_id("block-by-name-button:ok")
+                    .click()
+                    .await?;
+                let _listed = alpha
+                    .expect(&blocked_row(&window, BLOCK_SENTINEL))
+                    .timeout(LIVE_WAIT)
+                    .to_be_visible()
+                    .await?;
+
+                open_radar(alpha).await?;
+                let _seen = alpha
+                    .expect(&radar_row(alpha, &beta_name))
+                    .timeout(LIVE_WAIT)
+                    .to_be_visible()
+                    .await?;
+                radar_menu(alpha, &beta_name, "menu-radar-block").await?;
+                close_radar(alpha).await?;
+                let window = blocked_tab(alpha).await?;
+                let _blocked = alpha
+                    .expect(&blocked_row(&window, &beta_user))
+                    .timeout(LIVE_WAIT)
+                    .to_be_visible()
+                    .await?;
+
+                // The grid's list, read back at login.
+                let alpha = stage.relog("Alpha").await?;
+                let window = blocked_tab(&alpha).await?;
+                for name in [beta_user.as_str(), BLOCK_SENTINEL] {
+                    let _kept = alpha
+                        .expect(&blocked_row(&window, name))
+                        .timeout(LIVE_WAIT)
+                        .to_be_visible()
+                        .await?;
+                }
+
+                open_radar(&alpha).await?;
+                let _seen = alpha
+                    .expect(&radar_row(&alpha, &beta_name))
+                    .timeout(LIVE_WAIT)
+                    .to_be_visible()
+                    .await?;
+                radar_menu(&alpha, &beta_name, "menu-radar-unblock").await?;
+                close_radar(&alpha).await?;
+                let window = blocked_tab(&alpha).await?;
+                let _unblocked = alpha
+                    .expect(&blocked_row(&window, &beta_user))
+                    .timeout(LIVE_WAIT)
+                    .to_be_detached()
+                    .await?;
+
+                // The grid let go of Beta: once the sentinel says the list
+                // was read, Beta is not on it.
+                let alpha = stage.relog("Alpha").await?;
+                let window = blocked_tab(&alpha).await?;
+                let _read = alpha
+                    .expect(&blocked_row(&window, BLOCK_SENTINEL))
+                    .timeout(LIVE_WAIT)
+                    .to_be_visible()
+                    .await?;
+                assert_eq!(
+                    blocked_row(&window, &beta_user).count().await?,
+                    0,
+                    "the grid still lists Beta after the radar's Unblock"
+                );
+                unblock_listed(&alpha, BLOCK_SENTINEL).await?;
+                Ok(())
+            })?;
         Ok(())
     }
 

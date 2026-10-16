@@ -112,7 +112,8 @@ pub(crate) struct Transfers {
     /// — the two source types that remain UDP-only on both grids (no
     /// `ViewerAsset` coverage).
     pub(super) transfer_downloads: BTreeMap<TransferId, TransferDownload>,
-    /// A monotonic counter for generating `Xfer` ids (never zero).
+    /// A counter for generating `Xfer` ids (never zero), started per login
+    /// from its session id ([`Self::seed_xfer_ids`]).
     next_xfer_id: XferId,
     /// A monotonic counter for minting [`TransferId`]s (never nil). The
     /// reference viewer mints random transfer ids; a sans-I/O session has no
@@ -138,6 +139,15 @@ impl Transfers {
             next_xfer_id: XferId(1),
             next_transfer_id: 1,
         }
+    }
+
+    /// Start this login's `Xfer` ids from the low 64 bits of its
+    /// `session_id`, which the grid draws at random for every login, so two
+    /// logins do not reuse each other's ids (see the login handling in
+    /// `Session::handle_login_response`). A nil-derived zero starts at 1.
+    pub(crate) const fn seed_xfer_ids(&mut self, session_id: Uuid) {
+        let low = session_id.as_u64_pair().1;
+        self.next_xfer_id = XferId(if low == 0 { 1 } else { low });
     }
 
     /// The next client-chosen `Xfer` id, never zero.

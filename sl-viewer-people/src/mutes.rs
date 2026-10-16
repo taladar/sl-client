@@ -40,13 +40,14 @@
 use bevy::prelude::*;
 
 use sl_client_bevy::{
-    Command, MUTE_LIST_LIMIT, MuteEntry, MuteFlags, MuteType, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent, Uuid, XferListing,
+    AgentKey, Command, MUTE_LIST_LIMIT, MuteEntry, MuteFlags, MuteType, SlCommand, SlEvent,
+    SlIdentity, SlSessionEvent, Uuid, XferListing,
 };
 
-use crate::intents::RequestBlock;
+use crate::intents::{RequestBlock, RequestUnblock};
 use crate::notifications::ShowNotification;
 use crate::social::MuteModel;
+use crate::world_api::AvatarState;
 
 /// The mute list: the model, the one guarded way into it, and the four systems
 /// that keep it current.
@@ -66,6 +67,7 @@ impl Plugin for MutesPlugin {
             // is answered; the affordances that write it are scattered over
             // half the viewer and none of them owns the channel.
             .add_message::<RequestBlock>()
+            .add_message::<RequestUnblock>()
             .add_systems(
                 Update,
                 (
@@ -74,6 +76,7 @@ impl Plugin for MutesPlugin {
                     // Before `note_local_mutes`, so a just-guarded block is
                     // mirrored in the same frame it is sent.
                     apply_block_requests,
+                    apply_unblock_requests,
                     note_local_mutes,
                 )
                     .chain(),
@@ -81,15 +84,23 @@ impl Plugin for MutesPlugin {
     }
 }
 
-/// Request the mute list once the session is up (the login handshake has
-/// produced an agent id).
+/// Request the mute list once the region has taken the agent in
+/// (`AgentMovementComplete`, surfaced as [`SlSessionEvent::AgentArrived`]), as
+/// the reference does (`STATE_INVENTORY_SEND`, after the agent-movement
+/// handshake). Second Life does not answer a `MuteListRequest` sent before
+/// then — the list never arrived, and every block went unenforced for the
+/// session — where OpenSim answers it at once.
 pub fn request_mute_list(
+    mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     time: Res<Time>,
     mut model: ResMut<MuteModel>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    if identity.agent_id.is_none() || !model.claim_request(time.elapsed()) {
+    let arrived = events
+        .read()
+        .any(|event| matches!(event.0, SlSessionEvent::AgentArrived { .. }));
+    if !arrived || identity.agent_id.is_none() || !model.claim_request(time.elapsed()) {
         return;
     }
     commands.write(SlCommand(Command::RequestMuteList));
@@ -221,17 +232,63 @@ pub(crate) fn check_block(
     Ok(())
 }
 
+/// A resident's legacy `name` in the reference's **user name** form
+/// (`LLAvatarName::getUserName`): the first name alone for a `Resident`,
+/// otherwise the name as given.
+fn user_name_form(name: &str) -> &str {
+    match name.rsplit_once(' ') {
+        Some((first, last)) if last.eq_ignore_ascii_case("Resident") => first,
+        _ => name,
+    }
+}
+
+/// The name `request` goes on the wire under.
+///
+/// The reference mutes a resident under their user name
+/// (`LLAvatarActions::toggleMute`: `LLMute(id, av_name.getUserName(), AGENT)`),
+/// whatever name the asking surface happened to show — a display name, an
+/// instant message's `First Resident`. And a request for a target already on
+/// the list is an **update** of that entry, so it keeps the entry's own name:
+/// OpenSim keys an entry by its id *and* name and would file a second one
+/// rather than change the first (`book/src/gridspec/friends.md`, § Mute list).
+/// Every other kind of entry keeps the name it was asked under.
+pub(crate) fn wire_name(
+    model: &MuteModel,
+    avatars: Option<&AvatarState>,
+    request: &RequestBlock,
+) -> String {
+    if !matches!(request.mute_type, MuteType::Agent) {
+        return request.name.clone();
+    }
+    if let Some(entry) = model.entry(request.id, &request.name) {
+        return entry.name.clone();
+    }
+    avatars
+        .and_then(|avatars| avatars.name_of(AgentKey::from(request.id)))
+        .filter(|name| !name.is_empty())
+        .map_or_else(
+            || user_name_form(&request.name).to_owned(),
+            |name| user_name_form(name).to_owned(),
+        )
+}
+
 /// Turn each [`RequestBlock`] into an `UpdateMuteListEntry` — or, when a guard
 /// refuses it, into the matching notification.
 pub fn apply_block_requests(
     mut requests: MessageReader<RequestBlock>,
     model: Res<MuteModel>,
     identity: Res<SlIdentity>,
+    avatars: Option<Res<AvatarState>>,
     mut commands: MessageWriter<SlCommand>,
     mut notifications: MessageWriter<ShowNotification>,
 ) {
     let own = identity.agent_id.map(|agent| agent.uuid());
-    for request in requests.read() {
+    for asked in requests.read() {
+        let request = RequestBlock {
+            name: wire_name(&model, avatars.as_deref(), asked),
+            ..asked.clone()
+        };
+        let request = &request;
         match check_block(&model, own, request) {
             Ok(()) => {
                 commands.write(SlCommand(Command::Mute {
@@ -256,6 +313,26 @@ pub fn apply_block_requests(
     }
 }
 
+/// Turn each [`RequestUnblock`] into a `RemoveMuteListEntry` naming the entry
+/// as the list keeps it; a target that is not on the list sends nothing.
+pub fn apply_unblock_requests(
+    mut requests: MessageReader<RequestUnblock>,
+    model: Res<MuteModel>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for request in requests.read() {
+        match model.entry(request.id, &request.name) {
+            Some(entry) => {
+                commands.write(SlCommand(Command::Unmute {
+                    id: entry.id,
+                    name: entry.name.clone(),
+                }));
+            }
+            None => debug!("unblock of {:?}: not on the mute list", request.name),
+        }
+    }
+}
+
 /// Whether `mute_type` names an entry whose per-aspect flags are meaningful.
 /// The reference offers the text / voice / particles / object-sound toggles
 /// only for a resident (`AGENT`) mute; every other kind is all-or-nothing.
@@ -265,9 +342,13 @@ pub(crate) const fn flags_apply(mute_type: MuteType) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockRefusal, MUTE_LIST_LIMIT, MuteModel, RequestBlock, check_block, is_linden};
+    use super::{
+        AvatarState, BlockRefusal, MUTE_LIST_LIMIT, MuteModel, RequestBlock, RequestUnblock,
+        apply_unblock_requests, check_block, is_linden, wire_name,
+    };
+    use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
-    use sl_client_bevy::{MuteEntry, MuteFlags, MuteType, Uuid};
+    use sl_client_bevy::{AgentKey, Command, MuteEntry, MuteFlags, MuteType, SlCommand, Uuid};
 
     /// A resident mute of `id` with `flags`.
     fn agent_entry(id: Uuid, name: &str, flags: u32) -> MuteEntry {
@@ -473,5 +554,96 @@ mod tests {
             model.note_mute(agent_entry(id, "Filler", 0));
         }
         assert!(model.is_full());
+    }
+
+    /// A resident is muted under the user name, as the reference mutes one:
+    /// the name the grid resolved when there is one, else the asking
+    /// surface's name with a `Resident` surname dropped.
+    #[test]
+    fn a_resident_is_muted_under_the_user_name() {
+        let model = MuteModel::default();
+        let troll = Uuid::from_u128(0xBAD);
+        let asked = |name: &str| RequestBlock::new(troll, name, MuteType::Agent);
+        assert_eq!(wire_name(&model, None, &asked("Troll Resident")), "Troll");
+        assert_eq!(
+            wire_name(&model, None, &asked("Troll Someone")),
+            "Troll Someone"
+        );
+
+        let mut avatars = AvatarState::default();
+        avatars.note_legacy_name(AgentKey::from(troll), "Troll Resident");
+        // A display name the surface showed gives way to the grid's name.
+        assert_eq!(
+            wire_name(&model, Some(&avatars), &asked("Fancy Display")),
+            "Troll"
+        );
+
+        // An object keeps the name it was asked under.
+        let object = RequestBlock::new(troll, "Some Sign Resident", MuteType::Object);
+        assert_eq!(
+            wire_name(&model, Some(&avatars), &object),
+            "Some Sign Resident"
+        );
+    }
+
+    /// A request for a resident already on the list updates that entry, so it
+    /// names it as the list does — OpenSim would file a second entry under a
+    /// second name.
+    #[test]
+    fn an_update_keeps_the_entry_name() {
+        let mut model = MuteModel::default();
+        let troll = Uuid::from_u128(0xBAD);
+        model.note_mute(agent_entry(troll, "Troll Resident", 0));
+        let update = RequestBlock::new(troll, "Troll", MuteType::Agent)
+            .with_flags(MuteFlags(MuteFlags::ALLOW_TEXT_CHAT));
+        assert_eq!(wire_name(&model, None, &update), "Troll Resident");
+    }
+
+    /// The unblocks the app sent, by id and name.
+    fn unblocked(model: MuteModel, request: RequestUnblock) -> Vec<(Uuid, String)> {
+        let mut app = App::new();
+        app.add_message::<RequestUnblock>()
+            .add_message::<SlCommand>()
+            .insert_resource(model)
+            .add_systems(Update, apply_unblock_requests);
+        app.world_mut().write_message(request);
+        app.update();
+        app.world()
+            .resource::<Messages<SlCommand>>()
+            .iter_current_update_messages()
+            .filter_map(|command| match &command.0 {
+                Command::Unmute { id, name } => Some((*id, name.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An unblock names the entry as the list keeps it, whatever name the
+    /// asking surface knew; a target that is not on the list sends nothing.
+    #[test]
+    fn an_unblock_names_the_entry_as_the_list_keeps_it() {
+        let troll = Uuid::from_u128(0xBAD);
+        let mut model = MuteModel::default();
+        model.note_mute(agent_entry(troll, "Troll Resident", 0));
+        assert_eq!(
+            unblocked(model, RequestUnblock::new(troll, "Troll")),
+            vec![(troll, "Troll Resident".to_owned())]
+        );
+        assert_eq!(
+            unblocked(MuteModel::default(), RequestUnblock::new(troll, "Troll")),
+            Vec::new()
+        );
+
+        let mut by_name = MuteModel::default();
+        by_name.note_mute(MuteEntry {
+            id: Uuid::nil(),
+            name: "Spam Vendor".to_owned(),
+            mute_type: MuteType::ByName,
+            flags: MuteFlags(0),
+        });
+        assert_eq!(
+            unblocked(by_name, RequestUnblock::new(Uuid::nil(), "spam vendor")),
+            vec![(Uuid::nil(), "Spam Vendor".to_owned())]
+        );
     }
 }

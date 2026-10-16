@@ -46,7 +46,7 @@ use std::collections::BTreeMap;
 
 use sl_client_bevy::{
     AssetType, Command, GroupKey, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, ImDialog,
-    InstantMessage, MuteList, MuteType, SlCommand, SlEvent, SlSessionEvent, TextureKey, Uuid,
+    InstantMessage, MuteList, SlCommand, SlEvent, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 
@@ -221,24 +221,15 @@ struct NoticeGates<'w> {
 /// Life), else by the poster's name (OpenSim sends the group as the sender;
 /// the reference looks the name up in its name cache, and an entry for a
 /// muted resident carries the name), in whichever form either is written.
-fn notice_sender_muted(im: &InstantMessage, group: GroupKey, mutes: &MuteList) -> bool {
+pub(crate) fn notice_sender_muted(im: &InstantMessage, group: GroupKey, mutes: &MuteList) -> bool {
     let from = im.from_agent_id.uuid();
     if from != group.uuid() {
         return mutes.is_muted(from);
     }
     // A name in any of the forms it is written in — "First Last", a legacy
     // "Name Resident", or the username ("first.last", "name") a mute entry
-    // may carry (`viewer-mute-entry-name-is-not-the-username`).
-    let bare = |name: &str| {
-        let lower = name.trim().to_lowercase().replace('.', " ");
-        lower.strip_suffix(" resident").unwrap_or(&lower).to_owned()
-    };
-    let poster = bare(&im.from_agent_name);
-    !poster.is_empty()
-        && mutes
-            .entries()
-            .iter()
-            .any(|entry| entry.mute_type == MuteType::Agent && bare(&entry.name) == poster)
+    // may carry.
+    mutes.agent_named(&im.from_agent_name)
 }
 
 /// What one ingested notice raises, bundled as one

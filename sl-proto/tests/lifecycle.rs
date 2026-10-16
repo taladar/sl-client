@@ -6528,6 +6528,60 @@ mod test {
         Ok(())
     }
 
+    /// A login numbers its `Xfer`s from its own session id, not from 1:
+    /// OpenSim keeps pending transfers by id across every client of a region,
+    /// and a second login's id 1 met the first login's unfinished transfer
+    /// and was never answered.
+    #[test]
+    fn a_login_numbers_its_xfers_from_its_session_id() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let session_id = session.session_id().ok_or("no session id")?;
+        let (xfer_id, _events) = deliver_mute_list_file(&mut session, "", 9, now)?;
+        assert_eq!(xfer_id, session_id.as_u64_pair().1);
+        Ok(())
+    }
+
+    /// A blocked resident's instant message still goes out as an event (the
+    /// grid passed it on, and a consumer judges it by its own list), but opens
+    /// no conversation and counts as nothing unread — while the same message
+    /// from anyone else does both.
+    #[test]
+    fn a_blocked_senders_message_opens_no_conversation() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let sender = AgentKey::from(uuid::Uuid::from_u128(0x55));
+        let direct = ChatSessionKind::Direct { peer: sender };
+
+        session.mute(
+            sender.uuid(),
+            "Friendly Bot",
+            MuteType::Agent,
+            MuteFlags::default(),
+            now,
+        )?;
+        drain(&mut session)?;
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi there\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 9, false)?, now)?;
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::InstantMessageReceived(_)))
+        );
+        assert!(!session.chat_sessions().any(|kind| kind == direct));
+        assert_eq!(session.unread(direct), 0);
+
+        session.unmute(sender.uuid(), "Friendly Bot", now)?;
+        drain(&mut session)?;
+        session.handle_datagram(sim_addr(), &server_message(&im, 10, false)?, now)?;
+        drain_events(&mut session);
+        assert!(session.chat_sessions().any(|kind| kind == direct));
+        assert_eq!(session.unread(direct), 1);
+        Ok(())
+    }
+
     #[test]
     fn mute_list_update_downloads_and_parses_via_xfer() -> Result<(), TestError> {
         let now = Instant::now();

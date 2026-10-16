@@ -60,6 +60,34 @@ impl RequestBlock {
     }
 }
 
+/// A request to unblock a target: the way out of the mute list for a surface
+/// that knows the target but not the entry it is filed under.
+///
+/// A removal must name the entry exactly as the grid keeps it — OpenSim
+/// removes only on the same id **and** name — and the name a surface knows
+/// (the radar's, a `secondlife:///…/unmute` link's) need not be the one the
+/// entry was made under. `apply_unblock_requests` looks the entry up in the
+/// mute list and removes it under its own name, and sends nothing for a target
+/// that is not on the list, as `LLMuteList::remove` does.
+#[derive(Message, Debug, Clone)]
+pub struct RequestUnblock {
+    /// The blocked entity's id (nil for a [`MuteType::ByName`] entry).
+    pub id: Uuid,
+    /// The blocked entity's name, as the asking surface knows it — only
+    /// consulted to find a by-name entry, whose id is nil.
+    pub name: String,
+}
+
+impl RequestUnblock {
+    /// Unblock `id`, known to the asking surface as `name`.
+    pub fn new(id: Uuid, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+        }
+    }
+}
+
 /// A request to offer friendship to one or more residents: the single
 /// **prompted** entry point every Add Friend surface writes instead of putting
 /// a `Command::OfferFriendship` on the wire itself.

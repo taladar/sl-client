@@ -65,8 +65,8 @@ use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use sl_client_bevy::{
     AgentKey, Command, GroupKey, GroupMember, GroupNotice, GroupNoticeKey, GroupProfile, GroupRole,
     GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange,
-    GroupRoleUpdateType, GroupTitle, ImDialog, LandArea, LindenAmount, SlCommand, SlEvent,
-    SlSessionEvent, TextureKey, UpdateGroupInfoParams, Uuid, group_powers,
+    GroupRoleUpdateType, GroupTitle, ImDialog, LandArea, LindenAmount, MuteList, SlCommand,
+    SlEvent, SlSessionEvent, TextureKey, UpdateGroupInfoParams, Uuid, group_powers,
 };
 
 use crate::floater::{
@@ -1605,17 +1605,26 @@ fn fetch_group(group: GroupKey, sl_commands: &mut MessageWriter<SlCommand>) {
 fn ingest_group_profile_events(
     mut events: MessageReader<SlEvent>,
     mut windows: Query<(&mut GroupProfileState, &mut GroupProfileDirty)>,
+    mutes: Option<Res<crate::social::MuteModel>>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
     let frame: Vec<&SlEvent> = events.read().collect();
     if frame.is_empty() {
         return;
     }
+    let mutes = mutes.as_deref().map(crate::social::MuteModel::list);
     for (mut state, mut dirty) in &mut windows {
         let Some(target) = state.target else {
             continue;
         };
-        ingest_for_window(&frame, target, &mut state, &mut dirty, &mut sl_commands);
+        ingest_for_window(
+            &frame,
+            target,
+            mutes,
+            &mut state,
+            &mut dirty,
+            &mut sl_commands,
+        );
     }
 }
 
@@ -1624,6 +1633,7 @@ fn ingest_group_profile_events(
 fn ingest_for_window(
     frame: &[&SlEvent],
     target: GroupKey,
+    mutes: Option<&MuteList>,
     state: &mut GroupProfileState,
     dirty: &mut GroupProfileDirty,
     sl_commands: &mut MessageWriter<SlCommand>,
@@ -1692,6 +1702,15 @@ fn ingest_for_window(
                 ) && state.pending_notice.is_some() =>
             {
                 if let Some(notice_id) = state.pending_notice.take() {
+                    // A notice a blocked resident posted is not shown, even
+                    // asked for: the reference drops the requested notice as
+                    // it drops the pushed one (`processNewMessage`).
+                    if mutes.is_some_and(|mutes| {
+                        crate::group_notice::notice_sender_muted(im, target, mutes)
+                    }) {
+                        info!("group notice from muted {} not shown", im.from_agent_name);
+                        continue;
+                    }
                     let body = split_notice(&im.message).1.to_owned();
                     state.notice_bodies.insert(notice_id, body);
                     dirty.notice_body = true;

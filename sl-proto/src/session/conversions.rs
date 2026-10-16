@@ -251,8 +251,12 @@ pub(crate) fn parse_mute_line(line: &str) -> Result<Option<MuteEntry>, sl_wire::
         return Ok(None);
     }
     // The flags follow the last '|'; everything before is "<type> <uuid> <name>".
-    // A line with no flags suffix carries no flags (the viewer omits it).
+    // A line with no flags suffix carries no flags (the viewer omits it), and
+    // neither does one whose suffix is empty: Second Life writes a by-name
+    // entry as `0 <nil> <name>|` (measured on aditi, gridspec-mute-list), and
+    // the reference's `" %d %254s %254[^|]| %u"` leaves its flags at 0.
     let (head, flags) = match line.rsplit_once('|') {
+        Some((head, tail)) if tail.trim().is_empty() => (head, 0),
         Some((head, tail)) => (head, parse_u32_field("mute_flags", tail)?),
         None => (line, 0),
     };
@@ -8457,7 +8461,8 @@ mod caps_serializer_tests {
     /// is kept in file order, blank lines (including the trailing newline every
     /// such file ends with) are skipped rather than becoming nil mutes, and a
     /// line with no `|flags` suffix — the shape the viewer writes for a
-    /// flagless mute — carries no flags. One malformed line fails the **whole**
+    /// flagless mute — or an empty one — the shape Second Life writes for a
+    /// by-name mute — carries no flags. One malformed line fails the **whole**
     /// file: a partially-applied mute list silently un-mutes somebody.
     #[test]
     fn a_mute_list_file_parses_line_by_line() -> Result<(), TestError> {
@@ -8466,6 +8471,8 @@ mod caps_serializer_tests {
             "\n",
             "2 22222222-2222-2222-2222-222222222222 Noisy Object|0\n",
             "0 00000000-0000-0000-0000-000000000000 Someone Else\n",
+            // Second Life's by-name entry: an empty flags field.
+            "0 00000000-0000-0000-0000-000000000000 Spam Vendor|\n",
         );
         let entries = super::parse_mute_list(file.as_bytes())?;
         assert_eq!(
@@ -8477,6 +8484,7 @@ mod caps_serializer_tests {
                 ("Bob Resident", MuteType::Agent, 5),
                 ("Noisy Object", MuteType::Object, 0),
                 ("Someone Else", MuteType::ByName, 0),
+                ("Spam Vendor", MuteType::ByName, 0),
             ]
         );
         assert_eq!(

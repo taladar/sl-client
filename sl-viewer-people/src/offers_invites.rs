@@ -494,8 +494,15 @@ fn muted_offer(im: &InstantMessage, mutes: &MuteList) -> Option<MutedOffer> {
             || (!name.is_empty() && mutes.has_by_name(name)))
         .then_some(MutedOffer::Decline),
         ImDialog::FriendshipOffered => mutes.text_muted(from, name).then_some(MutedOffer::Decline),
-        ImDialog::LureUser | ImDialog::TeleportRequest | ImDialog::GroupInvitation => {
+        ImDialog::LureUser | ImDialog::TeleportRequest => {
             mutes.text_muted(from, name).then_some(MutedOffer::Ignore)
+        }
+        // The group is the sender and the inviter comes as a name only, so a
+        // resident blocked by id is found by that name in any of its forms
+        // (`LLMuteList::isMuted(username)` — Second Life writes the inviter
+        // `first.last`).
+        ImDialog::GroupInvitation => {
+            (mutes.text_muted(from, name) || mutes.agent_named(name)).then_some(MutedOffer::Ignore)
         }
         _ => None,
     }
@@ -1643,6 +1650,15 @@ mod tests {
         assert_eq!(
             muted_offer(&from(ImDialog::FriendshipOffered, chatty), &mutes),
             None
+        );
+        // A resident blocked by id invites to a group: the group is the
+        // sender, the inviter a name (Second Life's `first.last` form), and
+        // the reference's username test ignores the exception bits.
+        let mut invited_by_chatty = from(ImDialog::GroupInvitation, Uuid::from_u128(0x76));
+        invited_by_chatty.from_agent_name = "chatty".to_owned();
+        assert_eq!(
+            muted_offer(&invited_by_chatty, &mutes),
+            Some(MutedOffer::Ignore)
         );
     }
 

@@ -27,7 +27,8 @@ against the Firestorm viewer and the OpenSim server sources):
 - **Mute list — add / remove** (mutation): **not** Xfer at all — each change is
   a per-entry UDP message (`UpdateMuteListEntry` / `RemoveMuteListEntry`), also
   with no CAPS equivalent. The simulator regenerates the list file, which the
-  viewer re-fetches over Xfer.
+  viewer re-fetches over Xfer. What each grid keeps and answers is measured in
+  [Grid Behaviour: Mute list](../gridspec/friends.md#mute-list).
 - **Prim (task) inventory listing** (download): Xfer on OpenSim. Second Life
   also offers a `RequestTaskInventory` **capability** (HTTP `?task_id=`),
   which `Command::FetchTaskInventory` takes where it is granted, but

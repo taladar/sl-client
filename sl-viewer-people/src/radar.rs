@@ -71,10 +71,10 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::LocalChatNotice;
 use crate::intents::OpenAddToContactSet;
 use crate::intents::OpenAvatarProfile;
-use crate::intents::RequestBlock;
 use crate::intents::RequestFriendship;
 use crate::intents::StartConference;
 use crate::intents::{ConversationKey, OpenConversation};
+use crate::intents::{RequestBlock, RequestUnblock};
 use crate::menu::{
     MenuCommand, MenuDef, MenuDynamicPick, MenuItemDef, OpenContextMenu, SetMenuDynamicLabels,
 };
@@ -830,10 +830,12 @@ struct RadarActionModel<'w> {
 /// profile, and the add-to-set floater.
 #[derive(bevy::ecs::system::SystemParam)]
 struct RadarActionOut<'w> {
-    /// The wire (teleport, offer teleport, unmute, terminate friendship).
+    /// The wire (teleport, offer teleport, terminate friendship).
     sl_commands: MessageWriter<'w, SlCommand>,
     /// A Block.
     blocks: MessageWriter<'w, RequestBlock>,
+    /// An Unblock: removed under the name the entry is filed under.
+    unblocks: MessageWriter<'w, RequestUnblock>,
     /// An Add Friend.
     friendships: MessageWriter<'w, RequestFriendship>,
     /// A Derender.
@@ -2366,10 +2368,8 @@ fn handle_radar_actions(
                     .iter()
                     .filter(|agent| model.mutes.is_muted(agent.uuid()))
                 {
-                    out.sl_commands.write(SlCommand(Command::Unmute {
-                        id: agent.uuid(),
-                        name: name_of(*agent),
-                    }));
+                    out.unblocks
+                        .write(RequestUnblock::new(agent.uuid(), name_of(*agent)));
                 }
             }
             action @ ("derender" | "derender-blacklist") => {
@@ -2416,8 +2416,8 @@ mod tests {
         MenuItemDef, MinimapMarks, MuteModel, OpenAddToContactSet, OpenAvatarProfile,
         OpenConversation, PaymentInfo, RADAR_ELEMENT, RADAR_MENU, RADAR_MULTI_MENU,
         RadarMenuTarget, RadarRow, RadarSelection, RadarState, RadarView, RequestBlock,
-        RequestDerender, RequestFriendship, RequestRenderException, SLOT_PROFILES, StartConference,
-        UiAction, handle_radar_actions, handle_radar_profile_picks,
+        RequestDerender, RequestFriendship, RequestRenderException, RequestUnblock, SLOT_PROFILES,
+        StartConference, UiAction, handle_radar_actions, handle_radar_profile_picks,
     };
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
@@ -2582,6 +2582,7 @@ mod tests {
         app.add_message::<UiAction>()
             .add_message::<SlCommand>()
             .add_message::<RequestBlock>()
+            .add_message::<RequestUnblock>()
             .add_message::<RequestFriendship>()
             .add_message::<RequestDerender>()
             .add_message::<OpenConversation>()

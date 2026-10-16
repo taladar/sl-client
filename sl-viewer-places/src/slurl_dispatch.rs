@@ -71,10 +71,10 @@ use crate::intents::DispatchSlurl;
 use crate::intents::OpenAvatarProfile;
 use crate::intents::OpenGroupProfile;
 use crate::intents::OpenWebBrowser;
-use crate::intents::RequestBlock;
 use crate::intents::RequestFriendship;
 use crate::intents::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::intents::{ConversationKey, OpenConversation};
+use crate::intents::{RequestBlock, RequestUnblock};
 use crate::linkified_text::LinkActivated;
 use crate::notifications::{NotificationResponse, OkCancel, ShowNotification, TemplateRef};
 use crate::world_api::AvatarState;
@@ -221,10 +221,12 @@ struct DispatchOut<'w> {
     conversations: MessageWriter<'w, OpenConversation>,
     /// Raise a confirmation (the teleport-SLURL guard).
     notifications: MessageWriter<'w, ShowNotification>,
-    /// Send a protocol command (unmute, name / map / parcel requests).
+    /// Send a protocol command (name / map / parcel requests).
     commands: MessageWriter<'w, SlCommand>,
     /// Ask for a block — the guarded channel every Block affordance uses.
     blocks: MessageWriter<'w, RequestBlock>,
+    /// Ask for an unblock, removed under the name the entry is filed under.
+    unblocks: MessageWriter<'w, RequestUnblock>,
     /// Ask to offer friendship — the prompted channel every Add Friend
     /// affordance uses.
     friendships: MessageWriter<'w, RequestFriendship>,
@@ -334,10 +336,7 @@ fn route_agent(agent: AgentKey, action: &str, out: &mut DispatchOut, avatars: &A
                 .name_of(agent)
                 .map(ToOwned::to_owned)
                 .unwrap_or_default();
-            out.commands.write(SlCommand(Command::Unmute {
-                id: agent.uuid(),
-                name,
-            }));
+            out.unblocks.write(RequestUnblock::new(agent.uuid(), name));
         }
         "pay" => {
             // Avatar pay is not wired yet (the pie-menu Pay slice is a

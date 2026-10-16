@@ -2250,9 +2250,10 @@ pub(crate) fn ingest_conversation_events(
                 let carried = (!message.is_empty()
                     && facts.identity.agent_id != Some(*from_agent_id))
                 .then_some((*from_agent_id, from_name.as_str(), message.as_str()));
-                // The invitation carries no sender name, so a blocked inviter
-                // is matched on the id alone.
-                let invited_by_blocked = text_muted(mutes, from_agent_id.uuid(), "");
+                // The inviter's name counts too, as in the reference
+                // (`isMuted(id, name, flagTextChat)`): a by-name entry blocks
+                // an inviter whose id it does not know.
+                let invited_by_blocked = text_muted(mutes, from_agent_id.uuid(), from_name);
                 if *from_group {
                     // A group session a blocked resident started opens no tab
                     // — but the invitation is *not* declined, because the group
