@@ -415,6 +415,10 @@ struct SecondLifeHandles {
     facts: Option<Entity>,
     /// Whether the facts have been filled.
     facts_built: bool,
+    /// The online-status caption node and the key it shows: Second Life's
+    /// `AgentProfile` does not say whether another avatar is online, so the
+    /// caption reads "Unknown" until the UDP read after it does.
+    online: Option<(Entity, &'static str)>,
     /// The partner value node (updated when the partner name resolves).
     partner: Option<Entity>,
     /// The groups list container (reconciled in place).
@@ -1418,12 +1422,11 @@ fn fill_second_life_from_properties(
     if !ui.sl_handles.facts_built
         && let Some(facts) = ui.sl_handles.facts
     {
-        spawn_key_label(
-            commands,
-            facts,
-            online_caption_key(props.flags),
-            LABEL_COLOR,
-        );
+        let online_key = online_caption_key(props.online);
+        ui.sl_handles.online = Some((
+            spawn_key_label_node(commands, facts, online_key, LABEL_COLOR),
+            online_key,
+        ));
         if !props.born_on.is_empty() {
             let born_row = spawn_labeled_row(commands, facts, "profile-birthdate");
             spawn_value_label(commands, born_row, props.born_on.clone(), LABEL_COLOR);
@@ -1502,6 +1505,15 @@ fn update_second_life(
         &build.avatars.label_text(build.target),
     );
     fill_second_life_from_properties(commands, build, state, ui);
+    if let Some(props) = state.properties.as_ref()
+        && let Some((node, shown)) = ui.sl_handles.online
+    {
+        let online_key = online_caption_key(props.online);
+        if online_key != shown {
+            commands.entity(node).insert(Translated::new(online_key));
+            ui.sl_handles.online = Some((node, online_key));
+        }
+    }
     if let Some(partner) = state.properties.as_ref().and_then(|props| props.partner_id) {
         ui_text::set_node_text(
             texts,
@@ -3180,12 +3192,13 @@ const fn payment_caption_key(flags: u32) -> &'static str {
     }
 }
 
-/// The online-status caption key for a profile's flags.
-const fn online_caption_key(flags: u32) -> &'static str {
-    if flags & FLAG_ONLINE != 0 {
-        "profile-online"
-    } else {
-        "profile-offline"
+/// The online-status caption key for whether a profile says its avatar is
+/// online (`None`: it does not say).
+const fn online_caption_key(online: Option<bool>) -> &'static str {
+    match online {
+        Some(true) => "profile-online",
+        Some(false) => "profile-offline",
+        None => "profile-online-unknown",
     }
 }
 
@@ -3308,9 +3321,9 @@ mod tests {
     use sl_client_bevy::{ClassifiedCategory, GlobalCoordinates};
 
     use super::{
-        AccountCaption, FLAG_IDENTIFIED, FLAG_ONLINE, FLAG_TRANSACTED, account_caption,
-        classified_auto_renew, classified_mature, next_category, online_caption_key,
-        pack_classified_flags, payment_caption_key, teleport_destination,
+        AccountCaption, FLAG_IDENTIFIED, FLAG_TRANSACTED, account_caption, classified_auto_renew,
+        classified_mature, next_category, online_caption_key, pack_classified_flags,
+        payment_caption_key, teleport_destination,
     };
     use pretty_assertions::assert_eq;
 
@@ -3353,8 +3366,9 @@ mod tests {
             payment_caption_key(FLAG_IDENTIFIED | FLAG_TRANSACTED),
             "profile-payment-used"
         );
-        assert_eq!(online_caption_key(FLAG_ONLINE), "profile-online");
-        assert_eq!(online_caption_key(0), "profile-offline");
+        assert_eq!(online_caption_key(Some(true)), "profile-online");
+        assert_eq!(online_caption_key(Some(false)), "profile-offline");
+        assert_eq!(online_caption_key(None), "profile-online-unknown");
     }
 
     /// Classified flags pack / unpack the reference's mature (bit 1) and

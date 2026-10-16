@@ -1191,6 +1191,7 @@ profile-name = Name:
 profile-key = Key:
 profile-online = Online
 profile-offline = Offline
+profile-online-unknown = Unknown
 profile-birthdate = Birthdate:
 profile-account = Account:
 profile-account-resident = Resident

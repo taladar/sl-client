@@ -113,7 +113,12 @@ and over UDP elsewhere; `UpdateProfile` and `UpdateAvatarNotes` PUT. The
 capability's answer reads as the UDP replies do: `member_since` as
 `M/D/YYYY`, the caption index as the one-byte `CharterMember`, the flags
 from the booleans, and `hide_age`, `customer_type` and `online` (left out
-where the answer leaves them out). The classified's click counts arrive as
+where the answer leaves them out). An answer without `online` — Second
+Life's for anybody else — is followed by the UDP `AvatarPropertiesRequest`,
+as the reference follows it: the reply's online flag joins the capability's
+profile (whose texts stay whole), and its `AvatarGroupsReply` stands in for
+the capability's empty `groups`; the profile window says "Unknown" until
+then. The classified's click counts arrive as
 `Event::ClassifiedClickStats`, over `SearchStatRequest` or from Second
 Life's `classifiedclickthrough`; a profile image uploads with
 `Command::UploadProfileImage`; `Command::SetDisplayName` POSTs a change.

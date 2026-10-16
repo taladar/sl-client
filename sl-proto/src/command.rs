@@ -140,8 +140,12 @@ pub enum Command {
     /// [`Event::AvatarNotes`](crate::Event::AvatarNotes) — but no interests,
     /// which the capability does not carry. A read of an avatar whose profile
     /// is already being read is not sent again, as the reference suppresses
-    /// it, so the picks and notes requests that follow it cost nothing.
-    /// Elsewhere it is the UDP `AvatarPropertiesRequest`, answered by
+    /// it, so the picks and notes requests that follow it cost nothing. An
+    /// answer that does not say whether the avatar is online (Second Life's
+    /// for anybody else) is followed by the UDP request, as the reference
+    /// follows it: a second `AvatarProperties` then carries the online state,
+    /// and the UDP groups and interests arrive in place of the capability's
+    /// (empty) groups. Elsewhere it is the UDP `AvatarPropertiesRequest`, answered by
     /// [`Event::AvatarProperties`](crate::Event::AvatarProperties),
     /// [`Event::AvatarInterests`](crate::Event::AvatarInterests) and
     /// [`Event::AvatarGroups`](crate::Event::AvatarGroups).

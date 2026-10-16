@@ -2032,6 +2032,10 @@ pub struct Session {
     /// second read of one is not sent while the first is out
     /// ([`Session::begin_profile_read`]).
     profile_reads: std::collections::BTreeSet<AgentKey>,
+    /// The profiles `AgentProfile` answered without `online`, kept until the
+    /// UDP `AvatarPropertiesReply` sent for it says whether the avatar is
+    /// online.
+    profiles_awaiting_presence: std::collections::BTreeMap<AgentKey, crate::AvatarProperties>,
 }
 
 mod caps_event;

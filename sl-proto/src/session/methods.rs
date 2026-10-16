@@ -312,6 +312,7 @@ impl Session {
             diagnostics: VecDeque::new(),
             circuit_probe: CircuitProbe::Off,
             profile_reads: std::collections::BTreeSet::new(),
+            profiles_awaiting_presence: std::collections::BTreeMap::new(),
         }
     }
 
@@ -911,6 +912,12 @@ impl Session {
                     for event in &events {
                         if let Event::AvatarProperties(props) = event {
                             let _was_out = self.profile_reads.remove(&props.avatar_id);
+                            if props.online.is_none() {
+                                let _earlier = self
+                                    .profiles_awaiting_presence
+                                    .insert(props.avatar_id, (**props).clone());
+                                self.request_avatar_properties(props.avatar_id, now)?;
+                            }
                         }
                     }
                     self.events.extend(events);
@@ -4421,11 +4428,13 @@ impl Session {
                 }
             }
             AnyMessage::AvatarPropertiesReply(reply) => {
+                let udp = avatar_properties(reply.agent_data.avatar_id, &reply.properties_data);
+                let profile = match self.profiles_awaiting_presence.remove(&udp.avatar_id) {
+                    Some(profile) => super::profile_caps::with_presence(profile, &udp),
+                    None => udp,
+                };
                 self.events
-                    .push_back(Event::AvatarProperties(Box::new(avatar_properties(
-                        reply.agent_data.avatar_id,
-                        &reply.properties_data,
-                    ))));
+                    .push_back(Event::AvatarProperties(Box::new(profile)));
             }
             AnyMessage::AvatarInterestsReply(reply) => {
                 self.events

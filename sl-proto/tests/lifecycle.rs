@@ -2709,6 +2709,80 @@ mod test {
         Ok(())
     }
 
+    /// An `AgentProfile` answer that does not say whether the avatar is online
+    /// (Second Life's for anybody else) is followed by the UDP request, as the
+    /// reference follows it; the reply's online state joins the capability's
+    /// profile, whose texts stay whole.
+    #[test]
+    fn an_agent_profile_without_online_asks_over_udp() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let target = uuid::Uuid::from_u128(0xA1);
+        let answer = sl_wire::parse_llsd_xml(
+            "<llsd><map><key>id</key><uuid>00000000-0000-0000-0000-0000000000a1</uuid>\
+             <key>sl_about_text</key><string>The whole text</string>\
+             <key>allow_publish</key><boolean>1</boolean></map></llsd>",
+        )?;
+        session.handle_caps_event("AgentProfile", &answer, now)?;
+        let first = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarProperties(props) => Some(props),
+                _ => None,
+            })
+            .ok_or("expected an AvatarProperties event")?;
+        assert_eq!(first.online, None);
+        let request = drain(&mut session)?
+            .into_iter()
+            .find_map(|message| match message {
+                AnyMessage::AvatarPropertiesRequest(request) => Some(request),
+                _ => None,
+            })
+            .ok_or("expected an AvatarPropertiesRequest")?;
+        assert_eq!(request.agent_data.avatar_id, target);
+
+        let reply = AnyMessage::AvatarPropertiesReply(AvatarPropertiesReply {
+            agent_data: AvatarPropertiesReplyAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                avatar_id: target,
+            },
+            properties_data: AvatarPropertiesReplyPropertiesDataBlock {
+                image_id: uuid::Uuid::nil(),
+                fl_image_id: uuid::Uuid::nil(),
+                partner_id: uuid::Uuid::nil(),
+                about_text: b"The whole\0".to_vec(),
+                fl_about_text: b"\0".to_vec(),
+                born_on: b"5/29/2020\0".to_vec(),
+                profile_url: b"\0".to_vec(),
+                charter_member: b"\0".to_vec(),
+                flags: 0x11,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 9, false)?, now)?;
+        let merged = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarProperties(props) => Some(props),
+                _ => None,
+            })
+            .ok_or("expected the merged AvatarProperties event")?;
+        assert_eq!(merged.online, Some(true));
+        assert_eq!(merged.flags, 0x11);
+        assert_eq!(merged.about_text, "The whole text");
+
+        session.handle_datagram(sim_addr(), &server_message(&reply, 10, false)?, now)?;
+        let later = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarProperties(props) => Some(props),
+                _ => None,
+            })
+            .ok_or("expected a plain AvatarProperties event")?;
+        assert_eq!(later.about_text, "The whole", "only the one reply merges");
+        Ok(())
+    }
+
     #[test]
     fn avatar_properties_reply_surfaces_event() -> Result<(), TestError> {
         let now = Instant::now();

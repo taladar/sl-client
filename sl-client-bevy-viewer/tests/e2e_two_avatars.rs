@@ -1823,6 +1823,48 @@ mod test {
         Ok(())
     }
 
+    /// **A profile, live**: Alpha opens Beta's profile from the radar. It
+    /// shows Beta online and, on Second Life, lists Beta's groups (the test
+    /// avatars belong to some there) — on Second Life the profile is read over `AgentProfile`, which says
+    /// neither, so the viewer reads both over UDP after it, as the reference
+    /// does (`book/src/gridspec/profiles.md`).
+    #[test]
+    fn a_live_profile_shows_its_avatar_online_with_its_groups() -> Result<(), TestError> {
+        stage("live_profile", &["Alpha", "Beta"])
+            .needs(RELAYED)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let beta = &stage.viewer("Beta")?;
+                gather(stage, alpha, beta).await?;
+                let beta_name = shown_name(stage, alpha, "Beta").await?;
+                open_radar(alpha).await?;
+                radar_menu(alpha, &beta_name, "menu-radar-view-profile").await?;
+                let profile = alpha.ui().window(&format!(
+                    "avatar-profile#{}",
+                    stage.agent_id("Beta")?.uuid()
+                ));
+                let _born = alpha
+                    .expect(&profile.key("profile-birthdate"))
+                    .timeout(LIVE_WAIT)
+                    .to_be_visible()
+                    .await?;
+                let _online = alpha
+                    .expect(&profile.key("profile-online"))
+                    .timeout(LIVE_WAIT)
+                    .to_be_visible()
+                    .await?;
+                if std::env::var("SL_E2E_GRID").as_deref() == Ok("aditi") {
+                    let _groups = alpha
+                        .expect(&profile.test_id("profile-group-row").nth(0))
+                        .timeout(LIVE_WAIT)
+                        .to_be_visible()
+                        .await?;
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     /// The prim the two editors fight over.
     const CONTESTED: &str = "E2E Contested Prim";
 

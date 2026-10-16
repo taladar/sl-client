@@ -300,13 +300,18 @@ pub(crate) fn agent_profile_events(body: &Llsd) -> Option<Vec<Event>> {
             })
         })
         .collect();
-    Some(vec![
-        Event::AvatarProperties(Box::new(properties)),
-        Event::AvatarGroups {
+    let mut events = vec![Event::AvatarProperties(Box::new(properties))];
+    // Second Life's answer lists no groups where `AvatarGroupsReply` lists
+    // some; an answer without `online` is followed by the UDP read
+    // ([`with_presence`]), which brings them, so it does not say "none" first.
+    if online.is_some() {
+        events.push(Event::AvatarGroups {
             avatar_id: AgentKey::from(avatar),
             groups,
             list_in_profile: true,
-        },
+        });
+    }
+    events.extend([
         Event::AvatarPicks {
             target_id: avatar,
             picks,
@@ -315,7 +320,22 @@ pub(crate) fn agent_profile_events(body: &Llsd) -> Option<Vec<Event>> {
             target_id: avatar,
             notes: text_of(body.get("notes")),
         },
-    ])
+    ]);
+    Some(events)
+}
+
+/// The profile `AgentProfile` answered without `online`, given the online
+/// state the UDP `AvatarPropertiesReply` read after it carries: the
+/// reference marks such a status unknown and sends the UDP request for it
+/// (Firestorm's `AVATAR_ONLINE_UNDEFINED`). Everything else stays the
+/// capability's — the UDP texts are cut to 500 bytes.
+pub(crate) const fn with_presence(
+    mut profile: AvatarProperties,
+    udp: &AvatarProperties,
+) -> AvatarProperties {
+    profile.flags = (profile.flags & !ONLINE) | (udp.flags & ONLINE);
+    profile.online = Some(udp.flags & ONLINE != 0);
+    profile
 }
 
 /// The event an `UploadAgentProfileImage` outcome
@@ -374,9 +394,9 @@ mod tests {
     use super::{
         agent_profile_events, agent_profile_put_body, classified_click_stats,
         classified_click_through, profile_image_upload_outcome, profile_image_uploaded,
-        set_display_name_body, stamp_search_stat_answer,
+        set_display_name_body, stamp_search_stat_answer, with_presence,
     };
-    use crate::types::{ProfileImage, ProfileUpdate};
+    use crate::types::{AvatarProperties, ProfileImage, ProfileUpdate};
     use crate::{Event, PickKey};
     use pretty_assertions::assert_eq;
     use sl_types::key::{AgentKey, ClassifiedKey, TextureKey};
@@ -396,7 +416,9 @@ mod tests {
 
     /// Another avatar's profile as Second Life answers it (the shape the
     /// `profiles` census recorded on aditi): texts never written are `undef`,
-    /// the partner is a string, `online` and `hide_age` are left out.
+    /// the partner is a string, `online` and `hide_age` are left out. Its
+    /// groups are left to the UDP read that follows for the online state, and
+    /// that read's state is merged into the capability's profile.
     #[test]
     fn another_avatars_profile_reads_as_the_udp_replies_would() -> Result<(), String> {
         let avatar = Uuid::from_u128(0xb0b);
@@ -443,7 +465,6 @@ mod tests {
         let events = agent_profile_events(&body).ok_or("no events")?;
         let [
             Event::AvatarProperties(props),
-            Event::AvatarGroups { groups, .. },
             Event::AvatarPicks { target_id, picks },
             Event::AvatarNotes { notes, .. },
         ] = events.as_slice()
@@ -460,13 +481,23 @@ mod tests {
         assert_eq!(props.online, None);
         assert_eq!(props.hide_age, None);
         assert_eq!(props.customer_type.as_deref(), Some("Base"));
-        assert_eq!(groups.len(), 1);
         assert_eq!(*target_id, avatar);
         assert_eq!(
             picks.first().map(|pick| pick.pick_id),
             Some(PickKey::from(pick))
         );
         assert_eq!(notes, "");
+
+        let udp = AvatarProperties {
+            about_text: "About".to_owned(),
+            flags: 0x11,
+            online: Some(true),
+            ..(**props).clone()
+        };
+        let merged = with_presence((**props).clone(), &udp);
+        assert_eq!(merged.flags, 0x11);
+        assert_eq!(merged.online, Some(true));
+        assert_eq!(merged.about_text, "About me", "the capability's text stays");
         Ok(())
     }
 
@@ -480,8 +511,13 @@ mod tests {
             ("hide_age", Llsd::Boolean(true)),
         ]);
         let events = agent_profile_events(&body).ok_or("no events")?;
-        let Some(Event::AvatarProperties(props)) = events.first() else {
-            return Err("no profile".to_owned());
+        let [
+            Event::AvatarProperties(props),
+            Event::AvatarGroups { .. },
+            ..,
+        ] = events.as_slice()
+        else {
+            return Err(format!("unexpected events: {events:?}"));
         };
         assert_eq!(props.flags, 0x10);
         assert_eq!(props.online, Some(true));
