@@ -208,6 +208,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::parcel_divide_join::ParcelDivideJoin),
         Box::new(crate::cases::parcel_object_owners::ParcelObjectOwners),
         Box::new(crate::cases::land_transactions::LandTransactions),
+        Box::new(crate::cases::estate::Estate),
         Box::new(crate::cases::simulator_features::SimulatorFeaturesCase),
         Box::new(crate::cases::seed_capabilities::SeedCapabilities),
         Box::new(crate::cases::environment::Environment),

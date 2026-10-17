@@ -225,9 +225,52 @@ pub struct AlertInfo {
     /// Empty if the simulator sent no key.
     pub message: String,
     /// The substitution parameters for the keyed template (`ExtraParams`), as the
-    /// raw string the simulator sent (a `key=value`/`|`-separated blob the viewer
-    /// parses per-alert). Empty when the alert takes no parameters.
+    /// raw string the simulator sent: a serialized LLSD map (Second Life sends
+    /// `<? LLSD/XML ?>` XML), read by [`AlertInfo::parameters`]. Empty when the
+    /// alert takes no parameters.
     pub extra_params: String,
+}
+
+impl AlertInfo {
+    /// The template's substitution parameters, by name, in name order: the
+    /// [`extra_params`](Self::extra_params) map read in whichever LLSD encoding
+    /// it came in, as the reference's `LLSDSerialize::deserialize` reads it,
+    /// each value as the text the reference substitutes (`asString`).
+    ///
+    /// Empty when there are none, or when the blob is not a serialized map —
+    /// the reference shows such an alert without its parameters too.
+    #[must_use]
+    pub fn parameters(&self) -> Vec<(String, String)> {
+        if self.extra_params.trim().is_empty() {
+            return Vec::new();
+        }
+        let Ok(sl_wire::Llsd::Map(map)) =
+            sl_wire::parse_llsd_serialized(self.extra_params.as_bytes())
+        else {
+            return Vec::new();
+        };
+        let mut parameters: Vec<(String, String)> = map
+            .into_iter()
+            .map(|(key, value)| (key, llsd_as_string(&value)))
+            .collect();
+        parameters.sort();
+        parameters
+    }
+}
+
+/// An LLSD value as the reference's `LLSD::asString` writes it.
+fn llsd_as_string(value: &sl_wire::Llsd) -> String {
+    match value {
+        sl_wire::Llsd::Undef | sl_wire::Llsd::Map(_) | sl_wire::Llsd::Array(_) => String::new(),
+        sl_wire::Llsd::Boolean(flag) => flag.to_string(),
+        sl_wire::Llsd::Integer(number) => number.to_string(),
+        sl_wire::Llsd::Real(number) => number.to_string(),
+        sl_wire::Llsd::String(text) | sl_wire::Llsd::Date(text) | sl_wire::Llsd::Uri(text) => {
+            text.clone()
+        }
+        sl_wire::Llsd::Uuid(id) => id.to_string(),
+        sl_wire::Llsd::Binary(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+    }
 }
 
 /// Whether a scripted object is *taking* the named movement controls or
@@ -793,10 +836,42 @@ pub const DEFAULT_LUAU_SCRIPT: &str = "-- SLua script\n";
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatChannel, PermissionRole, ScriptCompileError, ScriptControlAction, ScriptLanguage,
-        ScriptPermissions, ScriptTarget,
+        AlertInfo, ChatChannel, PermissionRole, ScriptCompileError, ScriptControlAction,
+        ScriptLanguage, ScriptPermissions, ScriptTarget,
     };
     use pretty_assertions::assert_eq;
+
+    /// Second Life's `ExtraParams` is a serialized LLSD map, `<? LLSD/XML ?>`
+    /// XML as its `LinkFailed` sends it (measured on aditi): read by name, in
+    /// name order, each value as text.
+    #[test]
+    fn alert_parameters_read_a_serialized_map() {
+        let info = AlertInfo {
+            message: "RegionRestartMinutes".to_owned(),
+            extra_params: "<? LLSD/XML ?>\n<llsd><map><key>NAME</key><string>Mauve</string>\
+                           <key>MINUTES</key><integer>5</integer></map></llsd>\n"
+                .to_owned(),
+        };
+        assert_eq!(
+            info.parameters(),
+            vec![
+                ("MINUTES".to_owned(), "5".to_owned()),
+                ("NAME".to_owned(), "Mauve".to_owned()),
+            ]
+        );
+    }
+
+    /// No parameters, or a blob that is not a map, reads as none.
+    #[test]
+    fn alert_parameters_of_nothing_are_none() {
+        for blob in ["", "  ", "not llsd at all", "<llsd><array/></llsd>"] {
+            let info = AlertInfo {
+                message: "Key".to_owned(),
+                extra_params: blob.to_owned(),
+            };
+            assert_eq!(info.parameters(), Vec::new(), "{blob:?}");
+        }
+    }
 
     #[test]
     fn permission_role_classifies_representative_flags() {

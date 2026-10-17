@@ -34,6 +34,7 @@ use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
     Listing, ListingId, MarketplaceApiError, MarketplaceOperation, MerchantStatus,
 };
+use crate::region_restart::RegionRestartNotice;
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
     ParcelKey, TextureKey,
@@ -43,6 +44,7 @@ use sl_types::lsl::Vector;
 use sl_types::map::RegionCoordinates;
 use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
+use sl_wire::EstateAccessLists;
 use sl_wire::ExperienceEnvironmentPush;
 use sl_wire::ExperienceEvent;
 use sl_wire::LandResourcesUrls;
@@ -443,6 +445,18 @@ pub enum Event {
         /// The agent/group ids in this chunk of the list.
         members: Vec<Uuid>,
     },
+    /// The estate's four access lists, from the `EstateAccess` capability's
+    /// answer to a `RequestEstateAccessLists`: what the `setaccess` replies
+    /// carry, plus who banned whom and when. Second Life answers a resident
+    /// without estate rights with four empty lists; OpenSim refuses it (a
+    /// capability failure), as it refuses its `getinfo` silently.
+    EstateAccessLists(Box<EstateAccessLists>),
+    /// A region restart notice — Second Life's keyed `RegionRestartMinutes` /
+    /// `RegionRestartSeconds` alert or OpenSim's spelled-out agent alert, read
+    /// into one countdown ([`RegionRestartNotice`]). Follows the
+    /// [`AlertMessage`](Self::AlertMessage) or
+    /// [`AgentAlertMessage`](Self::AgentAlertMessage) it was read from.
+    RegionRestart(RegionRestartNotice),
     /// The estate covenant summary, from an `EstateCovenantReply` in response to
     /// [`Session::request_estate_covenant`](crate::Session::request_estate_covenant).
     EstateCovenant(EstateCovenant),

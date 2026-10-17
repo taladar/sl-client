@@ -231,6 +231,7 @@ pub(crate) use sl_viewer_media::media_engine;
 pub(crate) use sl_viewer_notices::inspector_popup;
 pub(crate) use sl_viewer_notices::linkified_text;
 pub(crate) use sl_viewer_notices::load_url;
+pub(crate) use sl_viewer_notices::region_restart;
 pub(crate) use sl_viewer_ui_context_menus::land_menu;
 pub(crate) use sl_viewer_ui_core::i18n;
 #[cfg(test)]

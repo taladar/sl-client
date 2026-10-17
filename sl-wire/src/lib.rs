@@ -9,6 +9,7 @@ mod economy_helper;
 mod endian;
 mod environment_push;
 mod error;
+mod estate_access;
 mod experience;
 mod experience_event;
 mod fake_parcel_id;
@@ -82,6 +83,10 @@ pub use environment_push::{
     build_environment_push_params, parse_environment_push,
 };
 pub use error::WireError;
+pub use estate_access::{
+    EstateAccessLists, EstateAccessStyle, EstateBan, build_estate_access_response,
+    parse_estate_access,
+};
 pub use experience::{
     ExperienceInfo, ExperienceLocation, ExperiencePermission, ExperienceProperties,
     ExperienceSearchPage, ExperienceUpdate, PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID,

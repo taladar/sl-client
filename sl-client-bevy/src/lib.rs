@@ -16,7 +16,7 @@ use sl_proto::{
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH,
     CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY,
+    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY, CAP_ESTATE_ACCESS,
     CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
     CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
@@ -80,25 +80,26 @@ pub use sl_proto::{
     DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility, DisconnectReason, DisplayName,
     DisplayNameUpdate, Distance, DynamicMenus, EconomyData, EnvironmentAsset,
     EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, Error as SessionError,
-    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate,
-    EventId, EventInfo, ExperienceEnvironmentPush, ExperienceEvent, ExperienceEventPermission,
-    ExperienceInfo, ExperienceKey, ExperienceLocation, ExperiencePermission, ExperienceProperties,
-    ExperienceSearchPage, ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData,
-    FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence, FriendRights,
-    GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupBan,
-    GroupBanAction, GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, InstantMessage, InterestListMode, InterestListReply, InterestsUpdate,
-    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryOwner, InventoryType, ItemInfo, KEYFRAME_SLOP, Key, Kilobits, LOGOUT_TIMEOUT,
-    LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandProduct,
-    LandSearchType, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType,
-    LegacyMaterial, LegacyPresetError, LightData, LightImage, LindenAmount, LindenBalance, Listing,
-    ListingId, Llsd, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams,
-    LoginRejectKind, LoginRequest, LookAtType, LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateFlags,
+    EstateInfo, EstateInfoUpdate, EventId, EventInfo, ExperienceEnvironmentPush, ExperienceEvent,
+    ExperienceEventPermission, ExperienceInfo, ExperienceKey, ExperienceLocation,
+    ExperiencePermission, ExperienceProperties, ExperienceSearchPage, ExperienceUpdate,
+    ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend,
+    FriendKey, FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow,
+    GltfMaterialOverride, GridCoordinates, GroupBan, GroupBanAction, GroupInvitationReceived,
+    GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeItem,
+    GroupNoticeKey, GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
+    GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage,
+    InterestListMode, InterestListReply, InterestsUpdate, InventoryCacheConfig,
+    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
+    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
+    ItemInfo, KEYFRAME_SLOP, Key, Kilobits, LOGOUT_TIMEOUT, LandArea, LandBrushAction,
+    LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandProduct, LandSearchType,
+    LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType, LegacyMaterial,
+    LegacyPresetError, LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId,
+    Llsd, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
+    LoginRequest, LookAtType, LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MUTE_LIST_LIMIT,
     MapBlockBatch, MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo,
     MapRequestFlags, MarketplaceApiError, MarketplaceApiErrorKind,
@@ -122,25 +123,25 @@ pub use sl_proto::{
     ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates,
     RegionDebugUpdate, RegionFlags, RegionHandle, RegionHandshakeReplyFlags, RegionIdentity,
     RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
-    RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
-    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, Rotation, SKY_TRACK_COUNT, SaleInfo, SaleType, Scale, ScopedObjectId,
-    ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog,
-    ScriptLanguage, ScriptMetadata, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
-    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
-    ServerHistoryMessage, SessionTransition, SetDisplayNameReply, SettingsKind, SimulatorFeatures,
-    SkySettings, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
-    StartLocationSlot, SurfaceInfo, TRACK_MAX, TaskInventoryCapReply, TaskInventoryItem,
-    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerraformArea,
-    TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, TextureAnimation,
-    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
-    ThumbnailTarget, TimestampFormat, TransactionId, TransferId, Transmit, TriggeredSound,
-    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
-    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
-    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
-    Wearable, WearableType, WireError, XferId, XferListing, avatar_texture,
+    RegionRestartNotice, RegionTerrainComposition, RegionTerrainUpdate, Reliability,
+    RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SKY_TRACK_COUNT, SaleInfo, SaleType, Scale,
+    ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction,
+    ScriptDialog, ScriptLanguage, ScriptMetadata, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
+    SequenceNumber, ServerHistoryMessage, SessionTransition, SetDisplayNameReply, SettingsKind,
+    SimulatorFeatures, SkySettings, SoundFlags, SoundPreload, StartLocation,
+    StartLocationParseError, StartLocationSlot, SurfaceInfo, TRACK_MAX, TaskInventoryCapReply,
+    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags,
+    TerraformArea, TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader,
+    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
+    ThrottleError, ThumbnailTarget, TimestampFormat, TransactionId, TransferId, Transmit,
+    TriggeredSound, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP,
+    UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT,
+    UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN,
+    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest,
+    WaterSettings, Wearable, WearableType, WireError, XferId, XferListing, avatar_texture,
     azimuth_altitude_to_rotation, build_get_metadata_request, chat_text_muted,
     decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
     environment_asset_from_bytes, environment_asset_to_bytes, expected_upload_cost, grid_to_handle,
@@ -3460,8 +3461,14 @@ fn apply_command(
         Command::RestartRegion { seconds } => {
             session.restart_region(*seconds, now)?;
         }
+        Command::SendRegionMessage { message } => {
+            session.send_region_message(message, now)?;
+        }
         Command::SendEstateMessage { message } => {
             session.send_estate_message(message, now)?;
+        }
+        Command::SetEstateCovenant { covenant } => {
+            session.set_estate_covenant(*covenant, now)?;
         }
         Command::SetRegionInfo(update) => {
             session.set_region_info(update, now)?;
@@ -4500,6 +4507,16 @@ fn apply_command(
                 let events_tx = caps.events_tx.clone();
                 crate::log_context::spawn_thread(move || {
                     run_voice_cap(&url, body, CAP_UPDATE_EXPERIENCE, &events_tx);
+                });
+            }
+        }
+        Command::RequestEstateAccessLists => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_ESTATE_ACCESS).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                crate::log_context::spawn_thread(move || {
+                    run_get_caps_llsd(&url, CAP_ESTATE_ACCESS, &events_tx);
                 });
             }
         }

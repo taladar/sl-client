@@ -118,6 +118,17 @@ The access lists are **ids, not names** — including the estate *managers* list
 To turn those UUIDs (or the region owner, or any other id the protocol hands
 you) into something readable, use name resolution.
 
+The same four lists come in one read over the `EstateAccess` capability:
+`Command::RequestEstateAccessLists` answers `Event::EstateAccessLists`, which
+adds, for each ban, who set it and when — the reference viewer's Access tab is
+read from there. Edits stay on `Command::UpdateEstateAccess`
+(`estateaccessdelta`). The estate's other commands — kick, send home, freeze,
+eject, the region and estate messages (`Command::SendRegionMessage`,
+`Command::SendEstateMessage`), the covenant (`Command::SetEstateCovenant`) and
+a restart — and what each grid answers to them, including the restart notices
+read into `Event::RegionRestart`, are in
+[Grid Behaviour → Estate](../gridspec/estate.md).
+
 ### Estate covenant
 
 Every estate may publish a **covenant** — a notecard of terms that a buyer

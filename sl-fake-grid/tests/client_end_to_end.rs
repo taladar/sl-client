@@ -5801,6 +5801,140 @@ mod test {
             .await?)
     }
 
+    /// [`two_avatar_grid`], imitating `imitates`.
+    async fn two_avatar_grid_imitating(imitates: ImitatedGrid) -> Result<FakeGrid, TestError> {
+        Ok(FakeGridBuilder::new()
+            .account(AccountConfig::new("First", "User", "password").estate_manager())
+            .account(AccountConfig::new("Second", "User", "password"))
+            .imitates(imitates)
+            .event_queue_hold(Duration::from_secs(2))
+            .region(RegionConfig::default())
+            .start()
+            .await?)
+    }
+
+    /// An estate manager's region message and restart reach both avatars in
+    /// each grid's form: OpenSim's agent alerts with a leading `/`, a restart
+    /// keyed on Second Life — and the client reads either restart into the one
+    /// [`RegionRestartNotice`](sl_client_tokio::RegionRestartNotice).
+    #[tokio::test]
+    async fn estate_notices_reach_the_region_in_each_grids_form() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let grid = two_avatar_grid_imitating(imitates).await?;
+            let mut first = join(&grid, "First").await?;
+            let mut second = join(&grid, "Second").await?;
+            first
+                .commands
+                .send(Command::SendRegionMessage {
+                    message: "hello region".to_owned(),
+                })
+                .await?;
+            for (who, avatar) in [("the sender", &mut first), ("the other", &mut second)] {
+                let text = wait_on(&mut avatar.events, |event| match event {
+                    Event::AgentAlertMessage {
+                        message,
+                        modal: false,
+                        ..
+                    } => Some(message.clone()),
+                    _ => None,
+                })
+                .await?;
+                assert_eq!(text, "/hello region", "{imitates:?}: {who}");
+            }
+            first
+                .commands
+                .send(Command::RestartRegion { seconds: 30 })
+                .await?;
+            for (who, avatar) in [("the sender", &mut first), ("the other", &mut second)] {
+                let notice = wait_on(&mut avatar.events, |event| match event {
+                    Event::RegionRestart(notice) => Some(notice.clone()),
+                    _ => None,
+                })
+                .await?;
+                let sl_client_tokio::RegionRestartNotice::Scheduled {
+                    seconds,
+                    region_name,
+                } = notice
+                else {
+                    return Err(format!("{imitates:?}: {who} read a cancellation").into());
+                };
+                assert_eq!(seconds, 30, "{imitates:?}: {who}");
+                assert_eq!(
+                    region_name.is_some(),
+                    imitates == ImitatedGrid::SecondLife,
+                    "{imitates:?}: {who}: only Second Life's notice names the region"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// A change to the allowed agents is answered with the allowed **and** the
+    /// banned agents, as OpenSim answers it; the `EstateAccess` capability then
+    /// reads the change back to the manager, and Second Life's four empty
+    /// lists to a resident.
+    #[tokio::test]
+    async fn estate_access_answers_as_the_grids_do() -> Result<(), TestError> {
+        let grid = two_avatar_grid_imitating(ImitatedGrid::SecondLife).await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+        let second_id = second.agent.agent_id();
+        first
+            .commands
+            .send(Command::UpdateEstateAccess {
+                delta: sl_client_tokio::EstateAccessDelta::BannedAgentAdd,
+                target: sl_client_tokio::OwnerKey::Agent(second_id),
+            })
+            .await?;
+        let mut kinds = Vec::new();
+        while kinds.len() < 2 {
+            let (kind, members) = wait_on(&mut first.events, |event| match event {
+                Event::EstateAccessList { kind, members, .. } => Some((*kind, members.clone())),
+                _ => None,
+            })
+            .await?;
+            if kind == sl_client_tokio::EstateAccessKind::BannedAgents {
+                assert_eq!(members, vec![second_id.uuid()]);
+            }
+            kinds.push(kind);
+        }
+        assert_eq!(
+            kinds,
+            vec![
+                sl_client_tokio::EstateAccessKind::AllowedAgents,
+                sl_client_tokio::EstateAccessKind::BannedAgents,
+            ]
+        );
+        first
+            .commands
+            .send(Command::RequestEstateAccessLists)
+            .await?;
+        let lists = wait_on(&mut first.events, |event| match event {
+            Event::EstateAccessLists(lists) => Some(lists.clone()),
+            _ => None,
+        })
+        .await?;
+        assert_eq!(
+            lists
+                .banned_agents
+                .iter()
+                .map(|ban| ban.agent)
+                .collect::<Vec<_>>(),
+            vec![second_id]
+        );
+        second
+            .commands
+            .send(Command::RequestEstateAccessLists)
+            .await?;
+        let lists = wait_on(&mut second.events, |event| match event {
+            Event::EstateAccessLists(lists) => Some(lists.clone()),
+            _ => None,
+        })
+        .await?;
+        assert_eq!(*lists, sl_client_tokio::EstateAccessLists::default());
+        Ok(())
+    }
+
     /// Takes a freshly rezzed cube into `avatar`'s Objects folder and returns
     /// the inventory item the simulator minted — a donor a task-inventory
     /// write can drop into something else.

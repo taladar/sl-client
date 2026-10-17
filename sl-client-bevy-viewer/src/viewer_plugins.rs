@@ -96,6 +96,7 @@ use crate::people::PeoplePlugin;
 use crate::physics::PhysicsPlugin;
 use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
+use crate::region_restart::RegionRestartPlugin;
 use crate::resolution_divisor::ResolutionDivisorPlugin;
 use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
@@ -872,6 +873,11 @@ impl Plugin for ViewerUiPlugins {
             // After NotificationHostPlugin (whose shared channel it adopts its card into)
             // and WebFloaterPlugin (whose OpenWebBrowser message Load writes).
             .add_plugins(LoadUrlPlugin)
+            // The region restart countdown (gridspec-estate): one card counting
+            // down to a restart, from either grid's notice. After
+            // NotificationHostPlugin, whose shared channel it adopts its card into
+            // and whose alert ingest leaves the notice to it.
+            .add_plugins(RegionRestartPlugin)
             // The script permission-request toast host (viewer-permission-request-dialog):
             // pops a card — object / owner, the requested permission bits, Yes / No /
             // Block (or the money-access caution card with Allow access / Deny) — when a

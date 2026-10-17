@@ -1238,6 +1238,12 @@ pub enum Command {
         /// The 256 m region handle (used when `region_id` is nil).
         region_handle: RegionHandle,
     },
+    /// Read the estate's four access lists over the `EstateAccess`
+    /// capability, where the region grants it; the answer arrives as
+    /// [`Event::EstateAccessLists`](crate::Event::EstateAccessLists). Where it
+    /// does not, the lists are the `setaccess` replies that trail
+    /// [`Command::RequestEstateInfo`].
+    RequestEstateAccessLists,
     /// Request the region's estate config + access lists (`getinfo`); replies
     /// arrive as [`Event::EstateInfo`](crate::Event::EstateInfo) and [`Event::EstateAccessList`](crate::Event::EstateAccessList).
     RequestEstateInfo,
@@ -1288,16 +1294,29 @@ pub enum Command {
     },
     /// Teleport every agent in the region home (`teleporthomeallusers`).
     TeleportHomeAllUsers,
-    /// Schedule a region restart in `seconds` (`restart`); `-1` delays a pending
-    /// restart by an hour.
+    /// Schedule a region restart in `seconds` (`restart`); `-1` is the
+    /// reference's "cancel restart", which OpenSim takes as "delay by an hour".
     RestartRegion {
-        /// Seconds until restart (`-1` to delay).
+        /// Seconds until restart (`-1` to cancel or delay).
         seconds: i32,
     },
-    /// Send an estate-wide blue-box notice (`simulatormessage`).
+    /// Send a notice to everyone in the region (`simulatormessage`, the
+    /// reference's "Send message to region").
+    SendRegionMessage {
+        /// The message body.
+        message: String,
+    },
+    /// Send a notice to everyone in every region of the estate
+    /// (`instantmessage`, the reference's "Send message to estate").
     SendEstateMessage {
         /// The message body.
         message: String,
+    },
+    /// Point the estate at a new covenant notecard
+    /// (`estatechangecovenantid`); `None` clears it.
+    SetEstateCovenant {
+        /// The covenant notecard's asset, or `None` for no covenant.
+        covenant: Option<AssetKey>,
     },
     /// Update the region's settings (`setregioninfo`).
     SetRegionInfo(RegionInfoUpdate),
@@ -3258,6 +3277,7 @@ impl Command {
             Self::DisableParcelObjects { .. } => "DisableParcelObjects",
             Self::RequestParcelInfo { .. } => "RequestParcelInfo",
             Self::RequestRemoteParcelId { .. } => "RequestRemoteParcelId",
+            Self::RequestEstateAccessLists => "RequestEstateAccessLists",
             Self::RequestEstateInfo => "RequestEstateInfo",
             Self::RequestRegionTerrainDownload { .. } => "RequestRegionTerrainDownload",
             Self::RequestRegionTerrainUpload { .. } => "RequestRegionTerrainUpload",
@@ -3266,7 +3286,9 @@ impl Command {
             Self::TeleportHomeUser { .. } => "TeleportHomeUser",
             Self::TeleportHomeAllUsers => "TeleportHomeAllUsers",
             Self::RestartRegion { .. } => "RestartRegion",
+            Self::SendRegionMessage { .. } => "SendRegionMessage",
             Self::SendEstateMessage { .. } => "SendEstateMessage",
+            Self::SetEstateCovenant { .. } => "SetEstateCovenant",
             Self::SetRegionInfo(..) => "SetRegionInfo",
             Self::SetRegionDebug(..) => "SetRegionDebug",
             Self::SetRegionTerrain(..) => "SetRegionTerrain",

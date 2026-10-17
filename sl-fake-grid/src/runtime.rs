@@ -494,6 +494,9 @@ pub(crate) struct GridCore {
     /// How the region answers a sit request
     /// ([`ImitatedGrid::sit_policy`]).
     pub(crate) sit_policy: crate::imitates::SitPolicy,
+    /// How the region answers the estate
+    /// ([`ImitatedGrid::estate_policy`]).
+    pub(crate) estate_policy: crate::imitates::EstatePolicy,
     /// How the asset-delivery capabilities answer as HTTP
     /// ([`ImitatedGrid::asset_http_policy`]).
     pub(crate) asset_http: sl_proto::AssetHttpPolicy,
@@ -1046,6 +1049,7 @@ impl GridCore {
             object_assets: self.object_assets,
             parcel_policy: self.parcel_policy,
             sit_policy: self.sit_policy,
+            estate_policy: self.estate_policy,
             map_policy: self.map_policy,
             inventory_announcement: self.inventory_announcement,
             upload_announcements: self.upload_announcements,
@@ -2211,6 +2215,7 @@ impl FakeGridBuilder {
             withheld_capabilities: self.imitates.withheld_capabilities(),
             parcel_policy: self.imitates.parcel_policy(),
             sit_policy: self.imitates.sit_policy(),
+            estate_policy: self.imitates.estate_policy(),
             asset_http: self.imitates.asset_http_policy(),
             new_file: self.imitates.new_file_policy(),
             display_name_style: self.imitates.display_name_style(),

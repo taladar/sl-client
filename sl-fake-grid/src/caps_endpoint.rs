@@ -109,6 +109,23 @@ pub(crate) async fn dispatch_caps(
                 crate::groups::change_bans(core, group_id, action, &agents);
                 return SimCaps::group_bans_changed_response(action);
             }
+            // The estate is the region's, and who may read it the session's:
+            // a manager reads OpenSim's arrays on either flavour (Second
+            // Life's manager answer is unmeasured), a resident Second Life's
+            // four `undef` lists or OpenSim's `401`.
+            CapsDispatch::EstateAccess => {
+                let guard = shared.state.lock().await;
+                let lists = guard.world.lock().estate.access_lists();
+                let style = if guard.policy.estate_manager {
+                    Some(sl_proto::EstateAccessStyle::Arrays)
+                } else if guard.estate_policy.access_capability_refuses_residents {
+                    None
+                } else {
+                    Some(sl_proto::EstateAccessStyle::Undefined)
+                };
+                drop(guard);
+                return SimCaps::estate_access_response(style.map(|style| (&lists, style)));
+            }
             CapsDispatch::EventQueueWouldBlock => {
                 if *shutdown_rx.borrow_and_update() {
                     let guard = shared.state.lock().await;

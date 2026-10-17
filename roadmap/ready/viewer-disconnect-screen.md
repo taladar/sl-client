@@ -52,3 +52,10 @@ grids, as a `KickUser` (`Disconnected(Kicked { reason })`):
 `a_second_life_flavoured_second_login_kicks_the_viewer` and its OpenSim twin
 pin today's clean exit; this task changes them to expect the dialog with the
 text.
+
+## Kick reasons measured by gridspec-estate (2026-10-17)
+
+OpenSim kicks with "You have been kicked out" (`kickestate`), "Your access to
+the region was revoked and TP home failed - you have been logged out." (an
+estate ban on a resident with no home) and "The simulator is going down." (a
+region restart); each arrives as `DisconnectReason::Kicked`.

@@ -92,7 +92,7 @@ use crate::{
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
     CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_FRIENDSHIP,
-    CAP_DECLINE_GROUP_INVITE, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY,
+    CAP_DECLINE_GROUP_INVITE, CAP_ESTATE_ACCESS, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY,
     CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
     CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
@@ -117,6 +117,7 @@ use crate::{
     InventoryFolder, InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal,
     offline_messages_to_llsd,
 };
+use sl_wire::{EstateAccessLists, EstateAccessStyle, build_estate_access_response};
 
 /// The LLSD-XML media type CAPS bodies use.
 pub const LLSD_XML_CONTENT_TYPE: &str = "application/llsd+xml";
@@ -255,6 +256,8 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_UPDATE_EXPERIENCE,
     CAP_REGION_EXPERIENCES,
     CAP_EXPERIENCE_QUERY,
+    // The estate's access lists.
+    CAP_ESTATE_ACCESS,
     // The voice signalling cluster.
     CAP_PROVISION_VOICE_ACCOUNT,
     CAP_PARCEL_VOICE_INFO,
@@ -336,6 +339,9 @@ pub enum CapHandler {
     SearchStat,
     /// The `ProductInfoRequest` GET of the land products.
     ProductInfo,
+    /// The `EstateAccess` GET of the estate's four lists. The estate is the
+    /// driver's, so the request is handed to it ([`CapsDispatch::EstateAccess`]).
+    EstateAccess,
     /// The shared two-stage asset-upload state machine serving every
     /// `UPLOAD_CAPABILITIES` entry (`NewFileAgentInventory`,
     /// `UploadBakedTexture`, and the `Update*{Agent,Task}Inventory` family):
@@ -685,6 +691,9 @@ pub enum CapsDispatch {
         /// What the POST does and to whom; `None` for a GET.
         change: Option<(GroupBanAction, Vec<AgentKey>)>,
     },
+    /// An `EstateAccess` GET: the estate and who may read it are the driver's
+    /// to know. It answers with [`SimCaps::estate_access_response`].
+    EstateAccess,
 }
 
 /// What a request path resolved to.
@@ -963,6 +972,7 @@ impl SimCaps {
             }
             CAP_UPDATE_EXPERIENCE => Some(CapHandler::UpdateExperience),
             CAP_REGION_EXPERIENCES => Some(CapHandler::RegionExperiences),
+            CAP_ESTATE_ACCESS => Some(CapHandler::EstateAccess),
             CAP_EXPERIENCE_QUERY => Some(CapHandler::ExperienceQuery),
             CAP_PROVISION_VOICE_ACCOUNT => Some(CapHandler::ProvisionVoiceAccount),
             CAP_PARCEL_VOICE_INFO => Some(CapHandler::ParcelVoiceInfo),
@@ -1069,6 +1079,13 @@ impl SimCaps {
                     ),
                     Some(CapHandler::GroupMemberData) => Self::dispatch_group_member_data(request),
                     Some(CapHandler::GroupBans) => Self::dispatch_group_bans(request),
+                    Some(CapHandler::EstateAccess) => {
+                        if request.method == "GET" {
+                            CapsDispatch::EstateAccess
+                        } else {
+                            CapsDispatch::Response(CapsResponse::method_not_allowed())
+                        }
+                    }
                     Some(CapHandler::DisplayNames) => {
                         CapsDispatch::Response(self.dispatch_display_names(sim, request))
                     }
@@ -1480,6 +1497,21 @@ impl SimCaps {
                 None => CapsDispatch::Response(CapsResponse::bad_request()),
             },
             _ => CapsDispatch::Response(CapsResponse::method_not_allowed()),
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::EstateAccess`]: the estate's `lists`
+    /// written in `style`, or `None` for a reader the grid refuses — `401`,
+    /// OpenSim's answer to a resident without estate rights.
+    #[must_use]
+    pub fn estate_access_response(
+        lists: Option<(&EstateAccessLists, EstateAccessStyle)>,
+    ) -> CapsResponse {
+        match lists {
+            Some((lists, style)) => {
+                CapsResponse::llsd_xml(build_estate_access_response(lists, style))
+            }
+            None => CapsResponse::unauthorized(),
         }
     }
 
@@ -3582,6 +3614,7 @@ mod tests {
             ("MeshUploadFlag", CapStatus::Served),
             ("InventoryThumbnailUpload", CapStatus::Served),
             ("SendPostcard", CapStatus::Served),
+            ("EstateAccess", CapStatus::Served),
         ];
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES
             .iter()

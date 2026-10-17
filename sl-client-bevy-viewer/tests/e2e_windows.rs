@@ -21,7 +21,12 @@
 //!   across a teleport;
 //! - the search window says why it shows nothing: a too-short text refused,
 //!   a search the grid never answers; and on a live grid it names a land
-//!   row's type and pages an "Any" places search.
+//!   row's type and pages an "Any" places search;
+//! - a region restart notice, in either grid's form, opens one countdown card
+//!   in place of its alert, which counts down and closes when the restart is
+//!   cancelled;
+//! - About Region's Access tab shows a ban's banner, which only the
+//!   `EstateAccess` capability tells.
 
 #[cfg(test)]
 mod test {
@@ -1299,6 +1304,178 @@ mod test {
                     .timeout(WAIT)
                     .to_have_text(wanted)
                     .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    // ---- Region restart ----------------------------------------------------
+
+    /// The template the restart countdown card reports as.
+    const RESTART_CARD: &str = "RegionRestarting";
+
+    /// **A region restart notice opens one countdown card**, from Second
+    /// Life's keyed alert and from OpenSim's spelled-out agent alert alike, and
+    /// not the alert's own toast; the card counts down, and a "Region restart
+    /// cancelled." notice closes it (`book/src/gridspec/estate.md`).
+    #[test]
+    fn a_restart_notice_counts_down_and_a_cancellation_closes_it() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "restart_countdown_second_life"),
+            (ImitatedGrid::OpenSim, "restart_countdown_open_sim"),
+        ] {
+            stage(name)
+                .needs(Need::GridControl)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    let agent = stage.agent("Alpha").await?;
+                    let agent_id = stage.agent_id("Alpha")?;
+                    let notice = sl_fake_grid::estate::restart_notice(
+                        flavour.estate_policy().restart_notice,
+                        30,
+                        &RegionConfig::default().name,
+                    );
+                    let now = agent.now();
+                    agent
+                        .with_sim(|sim| match &notice {
+                            sl_fake_grid::estate::Notice::AgentAlert(text) => {
+                                sim.send_agent_alert_message(agent_id, false, text, now)
+                            }
+                            sl_fake_grid::estate::Notice::Alert { message, info } => {
+                                sim.send_alert_message(message, info, &[], now)
+                            }
+                        })
+                        .await
+                        .map_err(|error| format!("sending the notice: {error}"))?;
+                    let _shown = alpha
+                        .expect_notification()
+                        .timeout(WAIT)
+                        .to_show(RESTART_CARD)
+                        .await?;
+                    // It counts down from 30, so it soon reads 2x (Fluent sets
+                    // the number in isolation marks).
+                    let countdown = alpha
+                        .ui()
+                        .test_id(sl_viewer_notices::region_restart::COUNTDOWN_NAME);
+                    let _ticking = alpha
+                        .expect(&countdown)
+                        .timeout(WAIT)
+                        .to_contain_text(": \u{2068}2")
+                        .await?;
+                    let raised: Vec<(String, String)> = alpha
+                        .notifications()
+                        .await?
+                        .into_iter()
+                        .map(|readout| (readout.template, readout.text))
+                        .collect();
+                    assert_eq!(
+                        raised
+                            .iter()
+                            .filter(|(template, _text)| template == RESTART_CARD)
+                            .count(),
+                        1,
+                        "one card: {raised:?}"
+                    );
+                    // The notice's own toast: a catalogue restart template, or
+                    // the spelled-out text as a system message.
+                    let is_the_alert = |template: &str, text: &str| {
+                        let keyed = template.starts_with("RegionRestart");
+                        let spelled = text.contains("will restart");
+                        template != RESTART_CARD && (keyed || spelled)
+                    };
+                    assert!(
+                        !raised
+                            .iter()
+                            .any(|(template, text)| is_the_alert(template, text)),
+                        "the notice raised its alert as well: {raised:?}"
+                    );
+
+                    let now = agent.now();
+                    agent
+                        .with_sim(|sim| {
+                            sim.send_agent_alert_message(
+                                agent_id,
+                                false,
+                                "/Region restart cancelled.",
+                                now,
+                            )
+                        })
+                        .await
+                        .map_err(|error| format!("sending the cancellation: {error}"))?;
+                    let deadline = tokio::time::Instant::now() + WAIT;
+                    loop {
+                        let live = alpha
+                            .notifications()
+                            .await?
+                            .into_iter()
+                            .any(|readout| readout.template == RESTART_CARD && readout.live);
+                        if !live {
+                            break;
+                        }
+                        if tokio::time::Instant::now() >= deadline {
+                            return Err("the cancellation left the countdown up".into());
+                        }
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                    Ok(())
+                })?;
+        }
+        Ok(())
+    }
+
+    // ---- About Region's access lists --------------------------------------
+
+    /// A resident the home region's estate bans, who never logs in.
+    const BANNED: u128 = 0x57A6_EBA0_0001;
+
+    /// **A ban's details come over the capability**: About Region's banned
+    /// list names who set a ban, which the `setaccess` reply does not carry,
+    /// and reads "n/a" for the dates the fake grid does not keep.
+    #[test]
+    fn the_banned_list_names_who_set_each_ban() -> Result<(), TestError> {
+        stage("estate_ban_details")
+            .region(home())
+            .estate_manager("Alpha")
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let alpha_id = stage.agent_id("Alpha")?;
+                stage
+                    .agent("Alpha")
+                    .await?
+                    .with_world(|world, _sim| {
+                        world.estate.banned_agents.push(Uuid::from_u128(BANNED));
+                        let _previous = world
+                            .estate
+                            .banned_by
+                            .insert(Uuid::from_u128(BANNED), alpha_id.uuid());
+                    })
+                    .await;
+                let _opened = alpha.menu_path(&REGION_ESTATE).await?;
+                let window = about_region(alpha, HOME_ID);
+                let _shown = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+                let _tab = window
+                    .get(Locator::role(Role::Tab).name_key("about-region-tab-access"))
+                    .click()
+                    .await?;
+                // The row reads its cells in order: the resident (whose name
+                // never resolves), the two dates and the banner.
+                let row = window
+                    .test_id("about-region-banned:table")
+                    .get(Locator::role(Role::ListItem).name_containing("n/a n/a Stage Alpha"));
+                let _listed = alpha.expect(&row).timeout(WAIT).to_be_visible().await?;
+                // And each cell has the room to show its text, not an ellipsis.
+                for column in 0..4 {
+                    let shown = bounds_of(
+                        alpha,
+                        &row.test_id(&format!("about-region-banned:table-cell:{column}")),
+                    )
+                    .await?;
+                    assert!(
+                        shown.width >= 100.0,
+                        "the banned list's column {column} has {shown:?} to show in"
+                    );
+                }
                 Ok(())
             })?;
         Ok(())

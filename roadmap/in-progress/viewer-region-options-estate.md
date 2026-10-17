@@ -41,3 +41,12 @@ notecard onto the covenant panel to set it) and the **Reset** button
 sl-proto has no `estatechangecovenantid` EstateOwnerMessage command yet
 — the write path needs adding to sl-proto first (grep ChangeCovenant:
 none in `sl-proto/src/command.rs`).
+
+## From gridspec-estate (2026-10-17)
+
+The Access tab reads the lists over `EstateAccess` and shows a ban's last
+login, date and banner. The estate tab's message button now sends the
+estate-wide `instantmessage` (`Command::SendEstateMessage`), as the reference's
+does; the region-wide "Send message to region" (`simulatormessage`,
+`Command::SendRegionMessage`) has no button yet. `Command::SetEstateCovenant`
+now exists in sl-proto for the Covenant tab's drop-a-notecard and Reset.

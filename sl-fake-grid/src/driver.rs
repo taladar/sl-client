@@ -47,6 +47,9 @@ pub(crate) struct SimState {
     /// How the region answers a sit request where the live grids disagree
     /// ([`crate::ImitatedGrid::sit_policy`]).
     pub(crate) sit_policy: crate::imitates::SitPolicy,
+    /// How the region answers the estate where the live grids disagree
+    /// ([`crate::ImitatedGrid::estate_policy`]).
+    pub(crate) estate_policy: crate::imitates::EstatePolicy,
     /// How the grid answers the world map where the live grids disagree
     /// ([`crate::ImitatedGrid::map_policy`]).
     pub(crate) map_policy: crate::imitates::MapPolicy,
@@ -490,8 +493,12 @@ impl SharedSim {
                 changes.extend(
                     crate::estate::answer_estate_request(
                         &mut world,
-                        &state.identity,
-                        state.policy,
+                        crate::estate::EstateAsker {
+                            identity: &state.identity,
+                            agent: &state.avatar,
+                            policy: state.policy,
+                            estate: state.estate_policy,
+                        },
                         &mut state.sim,
                         &event,
                         now,
@@ -984,6 +991,19 @@ pub(crate) async fn run_region_watcher(
                                             return;
                                         }
                                         state.sim.send_triggered_sound(sound, now)
+                                    }
+                                    // An estate notice reaches every avatar
+                                    // in the region.
+                                    RegionChange::Notice(notice) => {
+                                        if !state.sim.is_root_agent() {
+                                            return;
+                                        }
+                                        crate::estate::send_notice(
+                                            &mut state.sim,
+                                            state.avatar.agent_id,
+                                            notice,
+                                            now,
+                                        )
                                     }
                                     RegionChange::TerrainRetextured(composition) => {
                                         let mut identity = state.identity.clone();

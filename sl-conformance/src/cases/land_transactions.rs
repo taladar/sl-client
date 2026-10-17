@@ -1235,7 +1235,7 @@ impl Census<'_> {
 }
 
 /// Reads the parcel under the 4 m square containing `point`.
-async fn read_parcel(
+pub(crate) async fn read_parcel(
     session: &mut Session,
     point: &Vector,
     sequence_id: i32,
@@ -1320,7 +1320,7 @@ async fn parcel_id_at(session: &mut Session, point: &Vector) -> Result<ParcelKey
 /// Teleports `session` to the region-local `point` of the region
 /// `region_handle`, failing with the grid's reason; the arrival's handshake
 /// is read, so the session knows the region's billable factor after.
-async fn teleport(
+pub(crate) async fn teleport(
     session: &mut Session,
     region_handle: RegionHandle,
     point: &Vector,
@@ -1701,7 +1701,10 @@ async fn second_life_plot(
 }
 
 /// The handle of the region called `name`, from the world map.
-async fn region_named(session: &mut Session, name: &str) -> Result<RegionHandle, TestFailure> {
+pub(crate) async fn region_named(
+    session: &mut Session,
+    name: &str,
+) -> Result<RegionHandle, TestFailure> {
     session
         .send(Command::RequestMapByName {
             name: name.to_owned(),

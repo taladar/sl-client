@@ -594,6 +594,30 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid answers the estate where the two disagree — measured by
+    /// the `estate` census on aditi and the local OpenSim (2026-10-17,
+    /// `book/src/gridspec/estate.md`).
+    ///
+    /// On aditi the test avatars hold no estate rights, so Second Life's side
+    /// is what a resident is told: nothing but four empty lists, and a keyed
+    /// alert for a freeze or an eject. The rest of its column — the notices
+    /// an estate manager's actions send — keeps OpenSim's measured answer,
+    /// except the restart notice, which keeps the reference viewer's reading
+    /// of the keyed form Second Life sends.
+    #[must_use]
+    pub const fn estate_policy(self) -> EstatePolicy {
+        match self {
+            Self::SecondLife => EstatePolicy {
+                access_capability_refuses_residents: false,
+                restart_notice: RestartNoticeForm::Keyed,
+            },
+            Self::OpenSim => EstatePolicy {
+                access_capability_refuses_residents: true,
+                restart_notice: RestartNoticeForm::Spelled,
+            },
+        }
+    }
+
     /// How this grid answers a sit request where the two disagree — measured
     /// by the `sit-stand` conformance case on aditi and the local OpenSim
     /// (2026-10-08, `book/src/gridspec/movement.md` § Sitting).
@@ -3281,6 +3305,29 @@ pub enum Placement {
     },
     /// The object leaves the world for its owner's Lost And Found.
     Returned,
+}
+
+/// How a grid answers the estate ([`ImitatedGrid::estate_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EstatePolicy {
+    /// Whether the `EstateAccess` capability refuses a resident without
+    /// estate rights — `401`, OpenSim's answer — rather than answer it four
+    /// `undef` lists, Second Life's.
+    pub access_capability_refuses_residents: bool,
+    /// How a restart is announced to the region.
+    pub restart_notice: RestartNoticeForm,
+}
+
+/// How a grid announces a region restart ([`EstatePolicy::restart_notice`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestartNoticeForm {
+    /// Second Life's: an `AlertMessage` keyed `RegionRestartMinutes` (a
+    /// minute or more ahead) or `RegionRestartSeconds`, its parameters the
+    /// count and the region's `NAME`.
+    Keyed,
+    /// OpenSim's: a non-modal agent alert, `/Region will restart in 30
+    /// seconds`, the duration spelled out in minutes and seconds.
+    Spelled,
 }
 
 /// How a grid answers a sit request ([`ImitatedGrid::sit_policy`]).

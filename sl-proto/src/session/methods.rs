@@ -1311,6 +1311,13 @@ impl Session {
                 )),
                 Err(error) => self.caps_decode_error(message, &error),
             },
+            // The reply to an `EstateAccess` GET: the estate's four lists.
+            CapsEvent::EstateAccess => match sl_wire::parse_estate_access(body) {
+                Ok(lists) => self
+                    .events
+                    .push_back(Event::EstateAccessLists(Box::new(lists))),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `RegionExperiences` GET or POST: the region's
             // allow/block/trust lists.
             CapsEvent::RegionExperiences => match parse_region_experiences(body) {
@@ -5762,11 +5769,16 @@ impl Session {
                 });
             }
             AnyMessage::AgentAlertMessage(alert) => {
+                let message = trimmed_string(&alert.alert_data.message);
+                let notice = crate::RegionRestartNotice::from_text(&message);
                 self.events.push_back(Event::AgentAlertMessage {
                     agent_id: AgentKey::from(alert.agent_data.agent_id),
                     modal: alert.alert_data.modal,
-                    message: trimmed_string(&alert.alert_data.message),
+                    message,
                 });
+                if let Some(notice) = notice {
+                    self.events.push_back(Event::RegionRestart(notice));
+                }
             }
             AnyMessage::MeanCollisionAlert(alert) => {
                 let collisions = alert
@@ -7126,6 +7138,20 @@ impl Session {
                 .map(|block| block.agent_id)
                 .collect(),
         });
+        let alert_info: Vec<AlertInfo> = alert
+            .alert_info
+            .iter()
+            .map(|block| AlertInfo {
+                message: trimmed_string(&block.message),
+                extra_params: trimmed_string(&block.extra_params),
+            })
+            .collect();
+        if let Some(notice) = crate::RegionRestartNotice::from_alert(
+            &trimmed_string(&alert.alert_data.message),
+            &alert_info,
+        ) {
+            self.events.push_back(Event::RegionRestart(notice));
+        }
     }
 
     /// Walks the agent to the global coordinates `(global_x, global_y, z)` using
@@ -13011,25 +13037,61 @@ impl Session {
         Ok(())
     }
 
-    /// Sends an estate-wide notice (blue-box message) to everyone in the estate
-    /// via `EstateOwnerMessage`/`simulatormessage`.
+    /// Sends a notice to everyone in the region via `EstateOwnerMessage`/
+    /// `simulatormessage`, the reference's "Send message to region".
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn send_region_message(&mut self, message: &str, now: Instant) -> Result<(), Error> {
+        let name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        // ParamList: grid_x, grid_y (unused, "-1"), sender id, sender name, body.
+        let params = [
+            "-1".to_owned(),
+            "-1".to_owned(),
+            circuit.agent_id.to_string(),
+            name,
+            message.to_owned(),
+        ];
+        circuit.send_estate_owner_message("simulatormessage", &params, now)?;
+        Ok(())
+    }
+
+    /// Sends a notice to everyone in every region of the estate via
+    /// `EstateOwnerMessage`/`instantmessage`, the reference's "Send message to
+    /// estate".
     ///
     /// # Errors
     ///
     /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
     /// [`Error::Wire`] if the request fails to encode.
     pub fn send_estate_message(&mut self, message: &str, now: Instant) -> Result<(), Error> {
+        let name = self.agent_name();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        let sender = circuit.agent_id.to_string();
-        // ParamList: grid_x, grid_y (unused, "-1"), sender id, sender name, body.
-        let params = [
-            "-1".to_owned(),
-            "-1".to_owned(),
-            sender.clone(),
-            sender,
-            message.to_owned(),
-        ];
-        circuit.send_estate_owner_message("simulatormessage", &params, now)?;
+        // ParamList: sender name, body (the reference's `onMessageCommit`).
+        let params = [name, message.to_owned()];
+        circuit.send_estate_owner_message("instantmessage", &params, now)?;
+        Ok(())
+    }
+
+    /// Points the estate at a new covenant notecard via `EstateOwnerMessage`/
+    /// `estatechangecovenantid`; `None` clears the covenant (the reference's
+    /// Reset, which sends the nil id).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn set_estate_covenant(
+        &mut self,
+        covenant: Option<AssetKey>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        let id = covenant.map_or_else(Uuid::nil, |asset| asset.uuid());
+        circuit.send_estate_owner_message("estatechangecovenantid", &[id.to_string()], now)?;
         Ok(())
     }
 

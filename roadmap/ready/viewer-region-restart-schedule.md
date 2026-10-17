@@ -36,3 +36,12 @@ the button only with the capability.
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## The countdown, from gridspec-estate (2026-10-17)
+
+Both grids' restart notices now read into `Event::RegionRestart`, and the
+viewer shows one countdown card for either (`sl-viewer-notices/src/
+region_restart.rs`), in place of the notice's toast. What remains of the
+reference's `region_restarting` floater: its landmark combo and Teleport
+button, the `UISndRestart` sound (and OpenSim's `UISndRestartOpenSim`), the
+screen shake, and the nearby-chat line Firestorm adds.

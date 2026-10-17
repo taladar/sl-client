@@ -414,6 +414,9 @@ pub enum RegionChange {
     /// The region's own configuration changed (the estate floater's Region and
     /// Terrain tabs); every session in the region needs the new `RegionInfo`.
     RegionConfigured(Box<sl_proto::RegionLimits>),
+    /// An estate manager's notice to the region — a region or estate
+    /// message, a restart notice — which every avatar in it is sent.
+    Notice(Box<crate::estate::Notice>),
     /// The region's ground textures changed (the estate floater's Terrain tab,
     /// on "Apply"). The only message a terrain composition travels in is a
     /// `RegionHandshake`, and a handshake is stamped with the *receiving*

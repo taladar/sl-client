@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 345 |
-| blocked | 89 |
+| blocked | 87 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1390 |
+| done | 1392 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2067** |
@@ -1080,6 +1080,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-edit-permission-enforcement`](ready/server-fake-grid-edit-permission-enforcement.md)
   — Fake grid — refuse edits the editor may not make, as each grid refuses them
   (blocked by `gridspec-object-edit` (done))
+- [`server-fake-grid-estate-actions`](ready/server-fake-grid-estate-actions.md)
+  — Fake grid — kick, eject, freeze, teleport home, estate messages and restarts
 - [`server-fake-grid-group-chat`](ready/server-fake-grid-group-chat.md) — Fake
   grid — group chat sessions (blocked by `gridspec-group-chat-and-conference`
   (done))
@@ -1135,8 +1137,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid: attach, detach, limits, HUDs, temporary
 - [`gridspec-avatar-render-info`](ready/gridspec-avatar-render-info.md) —
   AvatarRenderInfo and AttachmentResources on each grid
-- [`gridspec-estate`](ready/gridspec-estate.md) — Estate info, access, covenant
-  and estate actions on each grid
 - [`gridspec-god-tools`](ready/gridspec-god-tools.md) — God tools as OpenSim
   answers them
 - [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
@@ -1168,7 +1168,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (89)
+## blocked (87)
 
 ### protocol
 
@@ -1178,9 +1178,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-cap-dispatch-region-info`](blocked/protocol-cap-dispatch-region-info.md)
   — Write region settings over the DispatchRegionInfo capability (blocked by
   `gridspec-region-info`)
-- [`protocol-cap-estate-access`](blocked/protocol-cap-estate-access.md) — Read
-  the estate access lists over the EstateAccess capability (blocked by
-  `gridspec-estate`)
 - [`protocol-cap-home-location`](blocked/protocol-cap-home-location.md) — Set
   home over the HomeLocation capability (blocked by `gridspec-landmarks-home`)
 
@@ -1319,9 +1316,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-estate-actions`](blocked/server-fake-grid-estate-actions.md)
-  — Fake grid — kick, eject, freeze, teleport home, estate messages and restarts
-  (blocked by `gridspec-estate`)
 - [`server-fake-grid-god-tools`](blocked/server-fake-grid-god-tools.md) — Fake
   grid — god tools as OpenSim answers them (blocked by `gridspec-god-tools`)
 - [`server-fake-grid-inventory-offers`](blocked/server-fake-grid-inventory-offers.md)
@@ -1606,7 +1600,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1390)
+## done (1392)
 
 ### protocol
 
@@ -1801,6 +1795,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-cap-agent-profile`](done/protocol-cap-agent-profile.md) — Read and
   write profiles over the AgentProfile capability (blocked by
   `gridspec-profiles` (done))
+- [`protocol-cap-estate-access`](done/protocol-cap-estate-access.md) — Read the
+  estate access lists over the EstateAccess capability
 - [`protocol-cap-get-metadata`](done/protocol-cap-get-metadata.md) — Read a
   script's experience over GetMetadata
 - [`protocol-cap-group-bans`](done/protocol-cap-group-bans.md) — Group ban lists
@@ -4615,6 +4611,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   resends, pings, inactivity, packet quirks and throttles
 - [`gridspec-environment`](done/gridspec-environment.md) — Region and parcel
   environments (EEP) on each grid
+- [`gridspec-estate`](done/gridspec-estate.md) — Estate info, access, covenant
+  and estate actions on each grid
 - [`gridspec-experiences`](done/gridspec-experiences.md) — Experience records,
   permissions and admin on each grid
 - [`gridspec-friends-presence`](done/gridspec-friends-presence.md) — Friendship,

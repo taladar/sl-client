@@ -15339,7 +15339,9 @@ mod test {
         )?;
         session.kick_estate_user(AgentKey::from(uuid::Uuid::from_u128(9)), now)?;
         session.restart_region(-1, now)?;
+        session.send_region_message("hello region", now)?;
         session.send_estate_message("hello estate", now)?;
+        session.set_estate_covenant(Some(AssetKey::from(uuid::Uuid::from_u128(7))), now)?;
         session.set_region_info(
             &RegionInfoUpdate {
                 maturity: Maturity::Adult,
@@ -15387,9 +15389,30 @@ mod test {
         assert_eq!(param_at(&restart.param_list, 0), "-1");
 
         let message = method("simulatormessage").ok_or("expected simulatormessage")?;
-        // Last param is the body.
-        let body = message.param_list.last().ok_or("expected a message body")?;
-        assert_eq!(trimmed(&body.parameter), "hello estate");
+        // ParamList: -1, -1, sender id, sender name, body — the name is the
+        // legacy name the reference's `buildFullname` writes, not the id.
+        assert_eq!(
+            param_at(&message.param_list, 2),
+            uuid::Uuid::from_u128(1).to_string()
+        );
+        let name = param_at(&message.param_list, 3);
+        assert!(
+            name.contains(' ') && name != uuid::Uuid::from_u128(1).to_string(),
+            "the region message's sender name was {name:?}"
+        );
+        assert_eq!(param_at(&message.param_list, 4), "hello region");
+
+        let estate_wide = method("instantmessage").ok_or("expected instantmessage")?;
+        // ParamList: sender name, body.
+        assert_eq!(estate_wide.param_list.len(), 2);
+        assert_eq!(param_at(&estate_wide.param_list, 0), name);
+        assert_eq!(param_at(&estate_wide.param_list, 1), "hello estate");
+
+        let covenant = method("estatechangecovenantid").ok_or("expected estatechangecovenantid")?;
+        assert_eq!(
+            param_at(&covenant.param_list, 0),
+            uuid::Uuid::from_u128(7).to_string()
+        );
 
         let region = method("setregioninfo").ok_or("expected setregioninfo")?;
         // [1] block_fly = Y; [6] maturity = 42 (Adult).

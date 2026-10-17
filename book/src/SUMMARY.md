@@ -68,6 +68,7 @@
 - [Assets](gridspec/assets.md)
 - [Capabilities](gridspec/capabilities.md)
 - [Land](gridspec/land.md)
+- [Estate](gridspec/estate.md)
 - [Environment](gridspec/environment.md)
 
 ## Simulator

@@ -4044,6 +4044,11 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "request_estate_access_lists",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestEstateAccessLists),
+        },
+        CommandSpec {
             name: "request_estate_info",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestEstateInfo),
@@ -4091,11 +4096,32 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "send_region_message",
+            usage: "<message>",
+            build: |args, ctx| {
+                Ok(Command::SendRegionMessage {
+                    message: args.req_str(ctx, "message", 0)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "send_estate_message",
             usage: "<message>",
             build: |args, ctx| {
                 Ok(Command::SendEstateMessage {
                     message: args.req_str(ctx, "message", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_estate_covenant",
+            usage: "[covenant]",
+            build: |args, ctx| {
+                Ok(Command::SetEstateCovenant {
+                    covenant: args
+                        .opt_uuid(ctx, "covenant", 0)?
+                        .filter(|id| !id.is_nil())
+                        .map(AssetKey::from),
                 })
             },
         },

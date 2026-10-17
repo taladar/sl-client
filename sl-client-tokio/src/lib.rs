@@ -17,7 +17,7 @@ use sl_proto::{
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH,
     CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY,
+    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY, CAP_ESTATE_ACCESS,
     CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
     CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
@@ -77,53 +77,54 @@ pub use sl_proto::{
     DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
     DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility,
     DiscardLevel, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, DynamicMenus,
-    EconomyData, EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, EstateAccessDelta,
-    EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, Event,
-    ExperienceEnvironmentPush, ExperienceEvent, ExperienceEventPermission, ExperienceInfo,
-    ExperienceKey, ExperienceLocation, ExperiencePermission, ExperienceProperties,
-    ExperienceSearchPage, ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData,
-    FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence, FriendRights,
-    GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupBan,
-    GroupBanAction, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
-    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
-    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
-    HomeLocation, IceCandidate, ImDialog, ImSessionId, ImageCodec, InstantMessage,
-    InterestListMode, InterestListReply, InterestsUpdate, InventoryCacheConfig,
-    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
-    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
-    InviteChannel, ItemInfo, Key, Kilobits, LOGOUT_TIMEOUT, LandArea, LandBrushAction,
-    LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandProduct, LandSearchType,
-    LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType, LegacyMaterial,
-    LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd, LoadUrlRequest,
-    LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind, LoginRequest,
-    LoginResponse, LoginSuccess, LookAtType, LureDestination, LureId, MAX_FACES, MEDIA_PERM_ALL,
-    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapBlockBatch,
-    MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-    MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
-    MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
-    MediaEntry, MerchantStatus, MeshKey, MeshUploadStatus, MessageCursor, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
-    MuteType, NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement,
-    NewInventoryItem, NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectProperties,
-    ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry, ObjectTransform,
-    ObjectUpdateForm, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelCollision, ParcelDetails,
-    ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell,
-    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    Permissions, Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate,
-    PingId, PlacesResult, PlayingAnimation, PointAtType, PrimShape, PrimShapeParams, ProductType,
-    ProfileImage, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
-    REQUESTED_CAPABILITIES, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
-    RegionHandshakeReplyFlags, RegionIdentity, RegionInfoUpdate, RegionLimits, RegionLocalObjectId,
-    RegionLocalParcelId, RegionName, RegionStats, RegionTerrainComposition, RegionTerrainUpdate,
-    Reliability, RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestoreItem,
-    RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId,
-    ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog,
-    ScriptLanguage, ScriptMetadata, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
+    EconomyData, EjectAction, EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate,
+    EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateFlags,
+    EstateInfo, EstateInfoUpdate, Event, ExperienceEnvironmentPush, ExperienceEvent,
+    ExperienceEventPermission, ExperienceInfo, ExperienceKey, ExperienceLocation,
+    ExperiencePermission, ExperienceProperties, ExperienceSearchPage, ExperienceUpdate,
+    ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, FreezeAction,
+    Friend, FriendKey, FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow,
+    GltfMaterialOverride, GridCoordinates, GroupBan, GroupBanAction, GroupKey, GroupMember,
+    GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
+    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    ImSessionId, ImageCodec, InstantMessage, InterestListMode, InterestListReply, InterestsUpdate,
+    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
+    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
+    InventoryOwner, InventoryType, InviteChannel, ItemInfo, Key, Kilobits, LOGOUT_TIMEOUT,
+    LandArea, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandImpact, LandProduct,
+    LandSearchType, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LandingType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, Listing, ListingId, Llsd,
+    LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
+    LoginRequest, LoginResponse, LoginSuccess, LookAtType, LureDestination, LureId, MAX_FACES,
+    MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
+    MapBlockBatch, MapBlockKind, MapBlockRecord, MapItem, MapItemType, MapLayer, MapRegionInfo,
+    MapRequestFlags, MarketplaceApiError, MarketplaceApiErrorKind,
+    MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, MarketplaceOperation, Material,
+    MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus, MeshKey, MeshUploadStatus,
+    MessageCursor, MfaChallenge, MoneyBalance, MoneyTransaction, MoneyTransactionType,
+    MovementMode, MuteEntry, MuteFlags, MuteType, NearbyHistoryLine, NegativeBalanceError,
+    NeighborInfo, NeighborRetirement, NewInventoryItem, NewInventoryLink, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
+    ObjectPermMasks, ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily,
+    ObjectStreamBatch, ObjectStreamEntry, ObjectTransform, ObjectUpdateForm, OpenRegionInfo,
+    OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelCollision, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey,
+    ParcelListingFlags, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
+    ParcelObjectOwnersPart, ParcelOverlayCell, ParcelOverlayGrid, ParcelOverlayInfo,
+    ParcelOwnership, ParcelRect, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+    ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions, Permissions5, PhysicsShapeType,
+    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlacesResult, PlayingAnimation,
+    PointAtType, PrimShape, PrimShapeParams, ProductType, ProfileImage, ProfileUpdate,
+    ProposalCandidateId, ProposalVoteId, QueryId, REQUESTED_CAPABILITIES, ReflectionProbe,
+    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates,
+    RegionDebugUpdate, RegionFlags, RegionHandle, RegionHandshakeReplyFlags, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
+    RegionRestartNotice, RegionStats, RegionTerrainComposition, RegionTerrainUpdate, Reliability,
+    RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
+    ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage,
+    ScriptMetadata, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
     ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
     ServerHistoryMessage, SessionMessage, SessionTransition, SetDisplayNameReply, SimStatId,
     SimulatorFeatures, SimulatorTime, SkySettings, SoundFlags, SoundPreload, StartLocation,
@@ -2155,8 +2156,14 @@ impl Client {
                         Some(Command::RestartRegion { seconds }) => {
                             self.session.restart_region(seconds, Instant::now())?;
                         }
+                        Some(Command::SendRegionMessage { message }) => {
+                            self.session.send_region_message(&message, Instant::now())?;
+                        }
                         Some(Command::SendEstateMessage { message }) => {
                             self.session.send_estate_message(&message, Instant::now())?;
+                        }
+                        Some(Command::SetEstateCovenant { covenant }) => {
+                            self.session.set_estate_covenant(covenant, Instant::now())?;
                         }
                         Some(Command::SetRegionInfo(update)) => {
                             self.session.set_region_info(&update, Instant::now())?;
@@ -2745,6 +2752,11 @@ impl Client {
                             if let Some(url) = caps.get(CAP_UPDATE_EXPERIENCE).cloned() {
                                 let body = build_update_experience_request(&update);
                                 tokio::spawn(post_voice_cap(url, body, CAP_UPDATE_EXPERIENCE, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestEstateAccessLists) => {
+                            if let Some(url) = caps.get(CAP_ESTATE_ACCESS).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_ESTATE_ACCESS, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::RequestRegionExperiences) => {

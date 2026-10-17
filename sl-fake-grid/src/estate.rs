@@ -33,12 +33,14 @@
 use std::time::Instant;
 
 use sl_proto::{
-    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, RegionIdentity, ServerEvent,
-    SimSession,
+    AgentKey, AlertInfo, EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateCovenant,
+    EstateInfo, GroupKey, REGION_RESTART_MINUTES, REGION_RESTART_SECONDS, RegionIdentity,
+    ServerEvent, SimSession,
 };
 
 use crate::agent_requests::AgentPolicy;
-use crate::world::{RegionChange, SceneFixtures};
+use crate::imitates::{EstatePolicy, RestartNoticeForm};
+use crate::world::{AvatarIdentity, RegionChange, SceneFixtures};
 
 /// The estate command a viewer's "regenerate the map tile" nudge issues.
 const REFRESH_MAP_VISIBILITY: &str = "refreshmapvisibility";
@@ -73,6 +75,112 @@ const ACCESS_DELTA: &str = "estateaccessdelta";
 
 /// The estate command that points the estate at a new covenant notecard.
 const CHANGE_COVENANT: &str = "estatechangecovenantid";
+
+/// The estate command that schedules (or, with `-1`, cancels) a restart.
+const RESTART: &str = "restart";
+
+/// The estate command that messages everyone in the region.
+const REGION_MESSAGE: &str = "simulatormessage";
+
+/// The estate command that messages everyone in the estate.
+const ESTATE_MESSAGE: &str = "instantmessage";
+
+/// An estate manager's notice to everyone in the region, as each avatar is
+/// sent it ([`RegionChange::Notice`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Notice {
+    /// A non-modal agent alert with this text: OpenSim's region and estate
+    /// messages and its restart notice (measured by the `estate` census,
+    /// 2026-10-17), slash and all.
+    AgentAlert(String),
+    /// An `AlertMessage`: Second Life's keyed restart notice.
+    Alert {
+        /// The alert's text.
+        message: String,
+        /// Its keys and their parameters.
+        info: Vec<AlertInfo>,
+    },
+}
+
+/// Sends `notice` to the session `sim` of the avatar `agent`.
+///
+/// # Errors
+///
+/// As the [`SimSession`] send it makes.
+pub(crate) fn send_notice(
+    sim: &mut SimSession,
+    agent: AgentKey,
+    notice: &Notice,
+    now: Instant,
+) -> Result<(), sl_proto::Error> {
+    match notice {
+        Notice::AgentAlert(text) => sim.send_agent_alert_message(agent, false, text, now),
+        Notice::Alert { message, info } => sim.send_alert_message(message, info, &[], now),
+    }
+}
+
+/// The notice a restart in `seconds` is announced with, in `form`, for the
+/// region `region_name`.
+#[must_use]
+pub fn restart_notice(form: RestartNoticeForm, seconds: u32, region_name: &str) -> Notice {
+    match form {
+        RestartNoticeForm::Spelled => {
+            Notice::AgentAlert(format!("/Region will restart in {}", spelled(seconds)))
+        }
+        RestartNoticeForm::Keyed => {
+            let (key, unit, count) = if seconds >= 60 {
+                (REGION_RESTART_MINUTES, "MINUTES", seconds / 60)
+            } else {
+                (REGION_RESTART_SECONDS, "SECONDS", seconds)
+            };
+            let name = region_name
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
+            Notice::Alert {
+                message: String::new(),
+                info: vec![AlertInfo {
+                    message: key.to_owned(),
+                    extra_params: format!(
+                        "<? LLSD/XML ?>\n<llsd><map><key>{unit}</key><integer>{count}</integer>\
+                         <key>NAME</key><string>{name}</string></map></llsd>\n"
+                    ),
+                }],
+            }
+        }
+    }
+}
+
+/// A duration as OpenSim's `RestartModule` spells it: `1 minute`, `2 minutes
+/// and 30 seconds`, `15 seconds`.
+fn spelled(seconds: u32) -> String {
+    let (minutes, rest) = (seconds / 60, seconds % 60);
+    let mut parts = Vec::new();
+    match minutes {
+        0 => {}
+        1 => parts.push("1 minute".to_owned()),
+        many => parts.push(format!("{many} minutes")),
+    }
+    match rest {
+        0 => {}
+        1 => parts.push("1 second".to_owned()),
+        many => parts.push(format!("{many} seconds")),
+    }
+    parts.join(" and ")
+}
+
+/// Who an estate request came from, and how the grid answers it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EstateAsker<'a> {
+    /// The region's identity.
+    pub(crate) identity: &'a RegionIdentity,
+    /// The asking agent.
+    pub(crate) agent: &'a AvatarIdentity,
+    /// What the agent may do.
+    pub(crate) policy: AgentPolicy,
+    /// How the grid answers the estate.
+    pub(crate) estate: EstatePolicy,
+}
 
 /// How many corners a region's terrain texture set has: the four the estate
 /// floater shows, blended by height across the region.
@@ -112,6 +220,11 @@ pub struct EstateFixture {
     pub allowed_groups: Vec<uuid::Uuid>,
     /// The agents refused entry.
     pub banned_agents: Vec<uuid::Uuid>,
+    /// Who banned each of [`banned_agents`](Self::banned_agents), where the
+    /// ban came through this grid — what the `EstateAccess` capability tells
+    /// beside the list. When is not kept: a fake grid has no wall clock it may
+    /// read.
+    pub banned_by: std::collections::BTreeMap<uuid::Uuid, uuid::Uuid>,
     /// The agents who may issue this estate's commands.
     ///
     /// A record, not the gate: whether *this session* may issue a command is
@@ -134,6 +247,7 @@ impl Default for EstateFixture {
             allowed_agents: Vec::new(),
             allowed_groups: Vec::new(),
             banned_agents: Vec::new(),
+            banned_by: std::collections::BTreeMap::new(),
             managers: Vec::new(),
         }
     }
@@ -181,6 +295,38 @@ impl EstateFixture {
         }
     }
 
+    /// The four lists as the `EstateAccess` capability answers them: a ban
+    /// with its banner where this grid knows it, and at no known time, as
+    /// OpenSim answers a ban whose time it holds none for.
+    #[must_use]
+    pub fn access_lists(&self) -> EstateAccessLists {
+        EstateAccessLists {
+            allowed_agents: self
+                .allowed_agents
+                .iter()
+                .copied()
+                .map(AgentKey::from)
+                .collect(),
+            allowed_groups: self
+                .allowed_groups
+                .iter()
+                .copied()
+                .map(GroupKey::from)
+                .collect(),
+            banned_agents: self
+                .banned_agents
+                .iter()
+                .map(|agent| sl_proto::EstateBan {
+                    agent: AgentKey::from(*agent),
+                    banning_agent: self.banned_by.get(agent).copied().map(AgentKey::from),
+                    ban_date: None,
+                    last_login_date: None,
+                })
+                .collect(),
+            managers: self.managers.iter().copied().map(AgentKey::from).collect(),
+        }
+    }
+
     /// This record as the `EstateCovenantReply` for `identity`'s region.
     #[must_use]
     pub fn covenant_reply(&self, identity: &RegionIdentity) -> EstateCovenant {
@@ -208,12 +354,12 @@ impl EstateFixture {
 )]
 pub(crate) fn answer_estate_request(
     world: &mut SceneFixtures,
-    identity: &RegionIdentity,
-    policy: AgentPolicy,
+    asker: EstateAsker<'_>,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
 ) -> Option<Vec<RegionChange>> {
+    let identity = asker.identity;
     let (method, invoice, params) = match event {
         // The covenant is the one estate read with a message of its own, and
         // the one command a resident may issue: a covenant is what somebody is
@@ -232,7 +378,7 @@ pub(crate) fn answer_estate_request(
         } => (method.as_str(), *invoice, params.as_slice()),
         _other => return None,
     };
-    if !policy.estate_manager {
+    if !asker.policy.estate_manager {
         tracing::debug!("the estate command {method} came from an agent with no estate powers");
         return Some(Vec::new());
     }
@@ -391,18 +537,46 @@ pub(crate) fn answer_estate_request(
             if delta.is_add() {
                 list.push(target);
             }
+            if kind == EstateAccessKind::BannedAgents {
+                if delta.is_add() {
+                    let _previous = world
+                        .estate
+                        .banned_by
+                        .insert(target, asker.agent.agent_id.uuid());
+                } else {
+                    let _removed = world.estate.banned_by.remove(&target);
+                }
+            }
             let estate_id = world.limits(identity).estate_id;
-            let members = world.estate.list(kind).to_vec();
-            if let Err(error) = sim.send_estate_access_list(estate_id, kind, &members, invoice, now)
-            {
-                tracing::warn!("answering an estate access change failed: {error}");
+            // OpenSim answers a change to the allowed or the banned agents
+            // with both lists, allowed first (measured by the `estate`
+            // census, 2026-10-17); a change to the managers or the groups
+            // with that list alone. Second Life is unmeasured and answers
+            // as OpenSim does.
+            let kinds: &[EstateAccessKind] = match kind {
+                EstateAccessKind::AllowedAgents | EstateAccessKind::BannedAgents => &[
+                    EstateAccessKind::AllowedAgents,
+                    EstateAccessKind::BannedAgents,
+                ],
+                _ => std::slice::from_ref(&kind),
+            };
+            for kind in kinds {
+                let members = world.estate.list(*kind).to_vec();
+                if let Err(error) =
+                    sim.send_estate_access_list(estate_id, *kind, &members, invoice, now)
+                {
+                    tracing::warn!("answering an estate access change failed: {error}");
+                }
             }
         }
         // A new covenant notecard. The timestamp is the estate's own record of
         // when it last changed, and a fake grid has no wall clock it may read
         // (a seeded grid has to mint the same run twice), so it counts changes
         // instead — which is all a viewer does with it: compare it to the one
-        // it last saw.
+        // it last saw. Nobody is told: OpenSim answers the change with nothing
+        // (measured by the `estate` census, 2026-10-17) and the reference
+        // viewer shows the covenant it sent; the next `EstateCovenantRequest`
+        // reads it back.
         CHANGE_COVENANT => {
             let covenant = params
                 .first()
@@ -410,10 +584,58 @@ pub(crate) fn answer_estate_request(
                 .filter(|id| !id.is_nil());
             world.estate.covenant = covenant;
             world.estate.covenant_timestamp = world.estate.covenant_timestamp.saturating_add(1);
-            let reply = world.estate.covenant_reply(identity);
-            if let Err(error) = sim.send_estate_covenant_reply(&reply, now) {
-                tracing::warn!("answering a covenant change failed: {error}");
+        }
+        // A restart: the first notice to everyone in the region, in the
+        // grid's own form. The countdown's later notices and the restart
+        // itself are `server-fake-grid-estate-actions`; a `-1` (the
+        // reference's cancel, OpenSim's delay) with nothing pending is
+        // answered with nothing, as OpenSim answers it.
+        RESTART => {
+            let Some(seconds) = params
+                .first()
+                .and_then(|value| value.trim().parse::<f32>().ok())
+                .filter(|seconds| *seconds > 0.0)
+            else {
+                return Some(Vec::new());
+            };
+            let Some(seconds) = format!("{:.0}", seconds.trunc())
+                .parse::<u32>()
+                .ok()
+                .filter(|seconds| *seconds > 0)
+            else {
+                return Some(Vec::new());
+            };
+            let notice = restart_notice(
+                asker.estate.restart_notice,
+                seconds,
+                &identity
+                    .sim_name
+                    .as_ref()
+                    .map_or_else(String::new, ToString::to_string),
+            );
+            if let Err(error) = send_notice(sim, asker.agent.agent_id, &notice, now) {
+                tracing::warn!("announcing a restart failed: {error}");
             }
+            return Some(vec![RegionChange::Notice(Box::new(notice))]);
+        }
+        // The region and the estate messages: OpenSim sends both as a
+        // non-modal agent alert with the text alone, to everyone in the
+        // region (measured by the `estate` census, 2026-10-17). The fake
+        // grid's estate is one region, so the two are the same here.
+        REGION_MESSAGE | ESTATE_MESSAGE => {
+            let body = if method == REGION_MESSAGE {
+                params.get(4)
+            } else {
+                params.get(1)
+            };
+            let Some(body) = body.filter(|body| !body.is_empty()) else {
+                return Some(Vec::new());
+            };
+            let notice = Notice::AgentAlert(format!("/{body}"));
+            if let Err(error) = send_notice(sim, asker.agent.agent_id, &notice, now) {
+                tracing::warn!("sending an estate message failed: {error}");
+            }
+            return Some(vec![RegionChange::Notice(Box::new(notice))]);
         }
         // The viewer's "regenerate the map tile" nudge. The fake grid's tiles
         // are static, so there is nothing to regenerate and the answer is the

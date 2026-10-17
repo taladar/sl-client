@@ -799,6 +799,8 @@ impl Survey {
             | Event::ParcelObjectOwners { .. }
             | Event::ParcelDetails(_)
             | Event::RemoteParcelId { .. }
+            | Event::EstateAccessLists(_)
+            | Event::RegionRestart(_)
             | Event::EstateCovenant(_)
             | Event::TelehubInfo(_)
             | Event::AlertMessage { .. }

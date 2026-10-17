@@ -61,14 +61,15 @@ pub use fixtures::{
 pub use groups::{GroupConfig, GroupsPolicy, InvitationForm, StockRoles};
 pub use imitates::{
     AbsentTile, ChildSale, ContentsAudience, ContentsPolicy, CopiedSerial, DerezKill, DotName,
-    EditEcho, EditPolicy, EmptyCells, EnvironmentChangeReply, GroupObjectTrash, ImitatedGrid,
-    LandOrigin, LastOwner, LinkPolicy, LoginFields, LoginRefusals, LogoutReply, MapLayerAnswer,
-    MapPolicy, MaskRules, NameMatch, Newcomers, NoBuildAlert, OPENSIM_ALL_PERMISSIONS,
-    OPENSIM_FOLDED_BITS, OPENSIM_MAX_AGENT_GROUPS, ObjectDelete, OutOfWorld, ParcelPolicy,
-    Placement, PrimResent, Promoted, PropertiesPolicy, RayAtNothing, RegionCapacity, RemovedItem,
-    RestoreToWorld, ReturnNotice, RezPolicy, RootRecord, SELECTED_PARCEL_SEQUENCE_ID,
-    SIT_TARGET_RAISE_M, SaveTold, ScriptStart, SecondLogin, SentOrder, SitPolicy, SitRefusal,
-    StockDay, StoppedScript, StoredText, TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
+    EditEcho, EditPolicy, EmptyCells, EnvironmentChangeReply, EstatePolicy, GroupObjectTrash,
+    ImitatedGrid, LandOrigin, LastOwner, LinkPolicy, LoginFields, LoginRefusals, LogoutReply,
+    MapLayerAnswer, MapPolicy, MaskRules, NameMatch, Newcomers, NoBuildAlert,
+    OPENSIM_ALL_PERMISSIONS, OPENSIM_FOLDED_BITS, OPENSIM_MAX_AGENT_GROUPS, ObjectDelete,
+    OutOfWorld, ParcelPolicy, Placement, PrimResent, Promoted, PropertiesPolicy, RayAtNothing,
+    RegionCapacity, RemovedItem, RestartNoticeForm, RestoreToWorld, ReturnNotice, RezPolicy,
+    RootRecord, SELECTED_PARCEL_SEQUENCE_ID, SIT_TARGET_RAISE_M, SaveTold, ScriptStart,
+    SecondLogin, SentOrder, SitPolicy, SitRefusal, StockDay, StoppedScript, StoredText,
+    TakenItemMasks, TerrainPolicy, TrashFolder, WindStart,
 };
 pub use inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,

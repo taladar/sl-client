@@ -761,6 +761,15 @@ pub const CAP_INVENTORY_THUMBNAIL_UPLOAD: &str = "InventoryThumbnailUpload";
 /// way (`llpanelsnapshotpostcard.cpp`).
 pub const CAP_SEND_POSTCARD: &str = "SendPostcard";
 
+/// The HTTP capability for the estate's four access lists (`EstateAccess`): a
+/// GET answering `{ AllowedAgents: [{ id }], AllowedGroups: [{ id }],
+/// BannedAgents: [{ id, banning_id, ban_date, last_login_date }], Managers:
+/// [{ agent_id }] }` — the lists a `getinfo` trails as `setaccess` replies,
+/// plus who banned whom and when, which only this read carries. Both grids
+/// grant it; edits stay on the UDP `estateaccessdelta`. Driven by
+/// `RequestEstateAccessLists`; decoded into [`Event::EstateAccessLists`].
+pub const CAP_ESTATE_ACCESS: &str = "EstateAccess";
+
 /// The HTTP capability for the **Second Life Marketplace (SLM)
 /// DirectDelivery API** (`DirectDelivery`): the base URL of the
 /// marketplace listing-management REST service. Unlike every other
@@ -901,6 +910,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_MESH_UPLOAD_FLAG,
     CAP_INVENTORY_THUMBNAIL_UPLOAD,
     CAP_SEND_POSTCARD,
+    CAP_ESTATE_ACCESS,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

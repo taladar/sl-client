@@ -55,3 +55,10 @@ parcel in Cale (Adult, estate, L$ 3920). There the grid's land helper fails
 the purchase's preflight: "Our billing system is currently down. Please try
 again later." The census's owner legs therefore wait on this task; naming a
 parcel the primary owns as `land_parcel` in `fixtures.aditi.toml` runs them.
+
+## From gridspec-estate (2026-10-17)
+
+Every estate manager's leg of the `estate` census reads "not measured" on
+Second Life: the messages, the access lists with the resident present, the
+covenant, freeze and eject as a parcel admin, home, kick and the restart
+notice's keyed form. A test estate (or estate-manager rights on one) runs them.

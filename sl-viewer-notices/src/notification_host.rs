@@ -1976,6 +1976,11 @@ pub fn ingest_alert_messages(
                 alert_info,
                 ..
             } => {
+                // A restart notice is the countdown card's to show
+                // (`crate::region_restart`).
+                if crate::region_restart::is_restart_notice(message, alert_info) {
+                    continue;
+                }
                 // A keyed alert whose key is in the catalogue raises that template
                 // with the parameters substituted; otherwise the plain string is a
                 // generic system message.
@@ -1984,9 +1989,8 @@ pub fn ingest_alert_messages(
                     .find_map(|info| template(&info.message).map(|tmpl| (info, tmpl)));
                 if let Some((info, tmpl)) = keyed {
                     let mut request = ShowNotification::new(tmpl.name);
-                    request.args = crate::notifications::NotificationArgs::parse_extra_params(
-                        &info.extra_params,
-                    );
+                    request.args =
+                        crate::notifications::NotificationArgs::from_pairs(info.parameters());
                     show.write(request);
                     continue;
                 }
@@ -2003,6 +2007,9 @@ pub fn ingest_alert_messages(
                 }
             }
             SlSessionEvent::AgentAlertMessage { modal, message, .. } => {
+                if crate::region_restart::is_restart_notice(message, &[]) {
+                    continue;
+                }
                 match named_server_alert(message) {
                     NamedAlert::Catalogued(name) => {
                         show.write(ShowNotification::new(name));

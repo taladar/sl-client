@@ -2,10 +2,9 @@
 id: protocol-cap-estate-access
 title: Read the estate access lists over the EstateAccess capability
 topic: protocol
-status: blocked
+status: done
 origin: protocol-reference-capabilities triage (2026-10-04)
 refs: [protocol-reference-capabilities, gridspec-estate, viewer-region-options-estate]
-blocked_by: [gridspec-estate]
 ---
 
 Context: [context/protocol.md](../context/protocol.md).
@@ -33,3 +32,12 @@ and Firestorm references: `book/src/comms/caps-reference.md`.
 This capability is adopted inside that gridspec task, which measures the
 feature on both grids over both paths, makes the fake grid serve the
 capability per flavour, and checks the viewer. Claim that task.
+
+## Done (2026-10-17, with gridspec-estate)
+
+`CAP_ESTATE_ACCESS` is requested, decoded by `sl_wire::parse_estate_access`
+into `Event::EstateAccessLists` (ban banner, date and last login; unknown
+values `None`) for `Command::RequestEstateAccessLists` on both runtimes, and
+served by `SimCaps` through the driver (`CapsDispatch::EstateAccess`). Measured
+answers: Second Life `200` with four `undef` lists to a resident, OpenSim
+`401` to a resident and arrays to a manager (`book/src/gridspec/estate.md`).

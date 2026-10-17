@@ -37,6 +37,7 @@ pub mod draw_distance;
 pub mod economy_data;
 pub mod effects_sounds;
 pub mod environment;
+pub mod estate;
 pub mod estate_access;
 pub mod estate_info;
 pub mod event_info;

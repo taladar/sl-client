@@ -117,10 +117,11 @@ use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     AgentKey, Asset, AssetKey, AssetType, Command, EstateAccessDelta, EstateAccessKind,
-    EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, ExperienceInfo, ExperienceKey,
-    GroupKey, LandArea, LandStatReportType, Maturity, OwnerKey, ProductType, RegionDebugUpdate,
-    RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName, RegionTerrainUpdate, SlCommand,
-    SlCurrentRegion, SlEvent, SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
+    EstateAccessLists, EstateBan, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate,
+    ExperienceInfo, ExperienceKey, GroupKey, LandArea, LandStatReportType, Maturity, OwnerKey,
+    ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName,
+    RegionTerrainUpdate, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity, SlRegionLimits,
+    SlSessionEvent, TextureKey, Uuid,
 };
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
 
@@ -246,8 +247,62 @@ const ALLOWED_TABLE: TableSpec = access_table("about-region-allowed");
 /// The allowed-groups list table.
 const ALLOWED_GROUPS_TABLE: TableSpec = access_table("about-region-allowed-groups");
 
-/// The banned-residents list table.
-const BANNED_TABLE: TableSpec = access_table("about-region-banned");
+/// The banned-residents list table: the name, the three ban details only the
+/// `EstateAccess` capability carries (the reference's `last_login_date`,
+/// `ban_date` and `bannedby` columns), and the Remove button.
+const BANNED_TABLE: TableSpec = TableSpec {
+    columns: &[
+        TableColumn {
+            header_key: "about-region-access-name",
+            token: "name",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Flex(1.0),
+            align: TableAlign::Start,
+            sortable: false,
+        },
+        TableColumn {
+            header_key: "about-region-ban-last-login",
+            token: "last_login_date",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed { default: 120.0 },
+            align: TableAlign::Start,
+            sortable: false,
+        },
+        TableColumn {
+            header_key: "about-region-ban-date",
+            token: "ban_date",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed { default: 120.0 },
+            align: TableAlign::Start,
+            sortable: false,
+        },
+        TableColumn {
+            header_key: "about-region-banned-by",
+            token: "bannedby",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Flex(1.0),
+            align: TableAlign::Start,
+            sortable: false,
+        },
+        TableColumn {
+            header_key: "about-region-access-remove",
+            token: "remove",
+            kind: TableColumnKind::Custom,
+            width: TableColumnWidth::Fixed { default: 70.0 },
+            align: TableAlign::End,
+            sortable: false,
+        },
+    ],
+    ..access_table("about-region-banned")
+};
+
+/// The column the Remove button sits in, per list: the last.
+const fn remove_column(list: AccessList) -> usize {
+    match list {
+        AccessList::Banned => 4,
+        AccessList::Managers | AccessList::Allowed | AccessList::AllowedGroups => 1,
+    }
+}
 
 /// The shared two-column layout (name, remove) of an estate access list table,
 /// parameterised by element.
@@ -419,6 +474,13 @@ struct AboutRegionState {
     allowed_groups: Vec<Uuid>,
     /// The banned residents.
     banned: Vec<Uuid>,
+    /// Who banned each banned resident and when, by the resident — what only
+    /// the `EstateAccess` capability tells.
+    ban_details: BTreeMap<Uuid, EstateBan>,
+    /// Whether the region answered the `EstateAccess` read with lists, which
+    /// makes it this window's source for them: a `setaccess` reply is then
+    /// only the cue to read them again, as the reference treats it.
+    access_over_capability: bool,
     /// A monotonically-increasing revision bumped when [`Self::managers`] changes.
     managers_revision: u64,
     /// A revision bumped when [`Self::allowed`] changes.
@@ -557,6 +619,7 @@ impl AboutRegionState {
         self.allowed.clear();
         self.allowed_groups.clear();
         self.banned.clear();
+        self.ban_details.clear();
         self.managers_revision = self.managers_revision.wrapping_add(1);
         self.allowed_revision = self.allowed_revision.wrapping_add(1);
         self.allowed_groups_revision = self.allowed_groups_revision.wrapping_add(1);
@@ -655,6 +718,37 @@ impl AboutRegionState {
         )
     }
 
+    /// Replace the four lists with the `EstateAccess` capability's answer,
+    /// bumping every revision so the views rebind. The capability's answer is
+    /// the whole of each list, so it replaces rather than merges.
+    fn set_access_lists(&mut self, lists: &EstateAccessLists) {
+        self.managers = lists.managers.iter().map(|agent| agent.uuid()).collect();
+        self.allowed = lists
+            .allowed_agents
+            .iter()
+            .map(|agent| agent.uuid())
+            .collect();
+        self.allowed_groups = lists
+            .allowed_groups
+            .iter()
+            .map(|group| group.uuid())
+            .collect();
+        self.banned = lists
+            .banned_agents
+            .iter()
+            .map(|ban| ban.agent.uuid())
+            .collect();
+        self.ban_details = lists
+            .banned_agents
+            .iter()
+            .map(|ban| (ban.agent.uuid(), ban.clone()))
+            .collect();
+        self.managers_revision = self.managers_revision.wrapping_add(1);
+        self.allowed_revision = self.allowed_revision.wrapping_add(1);
+        self.allowed_groups_revision = self.allowed_groups_revision.wrapping_add(1);
+        self.banned_revision = self.banned_revision.wrapping_add(1);
+    }
+
     /// The list for an access-list kind, with its revision counter.
     const fn list_mut(&mut self, list: AccessList) -> (&mut Vec<Uuid>, &mut u64) {
         match list {
@@ -717,6 +811,19 @@ struct AccessRowData {
     name: String,
     /// The agent / group id (for the Remove command).
     id: Uuid,
+    /// A ban's details, for the banned-residents list.
+    ban: Option<BanRow>,
+}
+
+/// A ban's three detail cells, as the banned-residents list shows them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BanRow {
+    /// When the banned resident last logged in, or "n/a".
+    last_login: String,
+    /// When the ban was set, or "n/a".
+    ban_date: String,
+    /// Who set it, or "n/a".
+    banned_by: String,
 }
 
 /// The estate-managers list view model.
@@ -2173,7 +2280,7 @@ fn build_access_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> A
         font_size,
     );
 
-    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS, LIST_COLUMN_MIN_WIDTH);
+    let cell = spawn_list_cell(commands, grid, ACCESS_COLUMN_BASIS, BANNED_COLUMN_MIN_WIDTH);
     spawn_section_label(commands, cell, "about-region-banned", font_size);
     let banned = spawn_bounded_table(commands, cell, &BANNED_TABLE);
     handles.banned_viewport = Some(banned.viewport);
@@ -2198,6 +2305,12 @@ const LIST_COLUMN_MIN_WIDTH: f32 = 180.0;
 /// The Access tab's lists sit two to a row: each column's basis, as a share of
 /// the row, leaving room for the gap between two and none for a third.
 const ACCESS_COLUMN_BASIS: f32 = 40.0;
+
+/// The narrowest the banned list's column may get before the grid wraps it,
+/// logical px. Its row is five columns, three of them fixed — the two dates
+/// (120 each) and Remove (70) — so the name and the banner need room of their
+/// own on top: at [`LIST_COLUMN_MIN_WIDTH`] both read "…".
+const BANNED_COLUMN_MIN_WIDTH: f32 = 620.0;
 
 /// The Experiences tab's lists sit three to a row, likewise.
 const EXPERIENCE_COLUMN_BASIS: f32 = 30.0;
@@ -2414,6 +2527,11 @@ fn open_about_region(
     // for a newer one.
     commands.write(SlCommand(Command::RequestRegionInfo));
     commands.write(SlCommand(Command::RequestEstateInfo));
+    // The lists again, over the `EstateAccess` capability, for the ban
+    // details the `setaccess` replies do not carry — the reference reads its
+    // Access tab from there. Without the capability the runtime sends nothing
+    // and the `setaccess` replies stand.
+    commands.write(SlCommand(Command::RequestEstateAccessLists));
     commands.write(SlCommand(Command::RequestEstateCovenant));
     match opened {
         KeyedFloaterOpen::Spawned(handle) => {
@@ -2489,6 +2607,7 @@ fn ingest_about_region_events(
     if frame.is_empty() {
         return;
     }
+    let mut refetch_access = false;
     for (mut state, mut dirty) in &mut windows {
         if !state.is_current {
             continue;
@@ -2528,7 +2647,44 @@ fn ingest_about_region_events(
                     dirty.covenant_values = true;
                 }
                 SlSessionEvent::EstateAccessList { kind, members, .. } => {
-                    ingest_access_list(&mut state, *kind, members, &mut commands);
+                    if state.access_over_capability {
+                        // The reference ignores the payload of a `setaccess`
+                        // reply and reads the lists again over the
+                        // capability; once per frame however many arrive.
+                        refetch_access = true;
+                    } else {
+                        ingest_access_list(&mut state, *kind, members, &mut commands);
+                    }
+                }
+                SlSessionEvent::EstateAccessLists(lists) => {
+                    // Second Life answers a resident without estate rights four
+                    // empty lists: that is no list to read the estate from, and
+                    // the `setaccess` replies it never sends such a resident are
+                    // no loss.
+                    let empty = lists.allowed_agents.is_empty()
+                        && lists.allowed_groups.is_empty()
+                        && lists.banned_agents.is_empty()
+                        && lists.managers.is_empty();
+                    if empty && !state.can_manage {
+                        continue;
+                    }
+                    state.access_over_capability = true;
+                    let mut names: Vec<AgentKey> =
+                        lists
+                            .managers
+                            .iter()
+                            .chain(lists.allowed_agents.iter())
+                            .copied()
+                            .chain(lists.banned_agents.iter().flat_map(|ban| {
+                                std::iter::once(ban.agent).chain(ban.banning_agent)
+                            }))
+                            .collect();
+                    names.sort_unstable();
+                    names.dedup();
+                    if !names.is_empty() {
+                        commands.write(SlCommand(Command::RequestAvatarNames(names)));
+                    }
+                    state.set_access_lists(lists);
                 }
                 SlSessionEvent::AssetReceived(asset)
                     if state.covenant_pending == Some(asset.id) =>
@@ -2569,6 +2725,9 @@ fn ingest_about_region_events(
                 _other => {}
             }
         }
+    }
+    if refetch_access {
+        commands.write(SlCommand(Command::RequestEstateAccessLists));
     }
 }
 
@@ -2978,6 +3137,9 @@ struct AccessNames<'a> {
     groups: &'a GroupsModel,
     /// The revisions that say whether either moved since the last build.
     names: NameRevisions,
+    /// For the banned-residents list: who banned whom and when, and the word
+    /// for a detail the grid did not say.
+    bans: Option<(&'a BTreeMap<Uuid, EstateBan>, &'a str)>,
 }
 
 /// The four pickers and two reports an About Region action opens, bundled as one
@@ -3339,6 +3501,7 @@ fn sync_managers_view(
                 avatars: &avatars,
                 groups: &groups,
                 names,
+                bans: None,
             },
         ) else {
             continue;
@@ -3373,6 +3536,7 @@ fn sync_allowed_view(
                 avatars: &avatars,
                 groups: &groups,
                 names,
+                bans: None,
             },
         ) else {
             continue;
@@ -3429,6 +3593,7 @@ fn sync_allowed_groups_view(
                 avatars: &avatars,
                 groups: &groups,
                 names,
+                bans: None,
             },
         ) else {
             continue;
@@ -3453,10 +3618,16 @@ fn sync_banned_view(
     )>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
+    translator: Translator,
     mut lists: Query<&mut VirtualList>,
 ) {
     let names = NameRevisions::read(&avatars, &groups);
+    let unknown = translator.get("about-region-ban-unknown");
     for (state, mut view, mut built, ui) in &mut windows {
+        // The "n/a" a ban's unknown details read is the locale's.
+        if translator.changed() {
+            built.banned = ViewBuilt::default();
+        }
         let Some(rows) = resolved_access_rows(
             AccessList::Banned,
             state.banned_revision,
@@ -3467,6 +3638,7 @@ fn sync_banned_view(
                 avatars: &avatars,
                 groups: &groups,
                 names,
+                bans: Some((&state.ban_details, &unknown)),
             },
         ) else {
             continue;
@@ -3496,6 +3668,7 @@ fn resolved_access_rows(
         avatars,
         groups,
         names,
+        bans,
     } = sources;
     if !built.due(revision, names) {
         return None;
@@ -3511,9 +3684,30 @@ fn resolved_access_rows(
                 avatars.label_text(AgentKey::from(*id))
             },
             id: *id,
+            ban: bans.map(|(details, unknown)| ban_row(details.get(id), unknown, avatars)),
         })
         .collect();
     (rows != current).then_some(rows)
+}
+
+/// A ban's detail cells: the dates as the grid wrote them, cut to the minute
+/// as the reference cuts them (`substr(0, 16)`), the banner by name, and
+/// `unknown` for what the grid did not say — every cell of a ban read off a
+/// `setaccess` reply, which carries none.
+fn ban_row(ban: Option<&EstateBan>, unknown: &str, avatars: &AvatarState) -> BanRow {
+    let date = |text: Option<&String>| {
+        text.map_or_else(
+            || unknown.to_owned(),
+            |text| text.chars().take(16).collect(),
+        )
+    };
+    BanRow {
+        last_login: date(ban.and_then(|ban| ban.last_login_date.as_ref())),
+        ban_date: date(ban.and_then(|ban| ban.ban_date.as_ref())),
+        banned_by: ban
+            .and_then(|ban| ban.banning_agent)
+            .map_or_else(|| unknown.to_owned(), |agent| avatars.label_text(agent)),
+    }
 }
 
 /// Point a virtual list at a row count.
@@ -3568,7 +3762,7 @@ fn populate_access_rows(
                 continue;
             };
             let cells = spawn_table_row(&mut commands, row_entity, table, spec);
-            if let Some(custom) = cells.cell(1) {
+            if let Some(custom) = cells.cell(remove_column(list)) {
                 spawn_remove_button(&mut commands, custom, list, row_entity);
             }
             break;
@@ -3631,6 +3825,11 @@ fn bind_access_rows(
                 continue;
             };
             set_cell(&mut texts, cells, 0, &data.name);
+            if let Some(ban) = &data.ban {
+                set_cell(&mut texts, cells, 1, &ban.last_login);
+                set_cell(&mut texts, cells, 2, &ban.ban_date);
+                set_cell(&mut texts, cells, 3, &ban.banned_by);
+            }
         }
         let want = if state.can_manage {
             Visibility::Inherited

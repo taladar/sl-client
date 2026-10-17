@@ -637,6 +637,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ExperienceUpdated(_)
             | Event::RegionExperiences { .. }
             | Event::ParcelExperiences { .. }
+            | Event::EstateAccessLists(_)
+            | Event::RegionRestart(_)
             | Event::EstateCovenant(_)
             | Event::TelehubInfo(_)
             | Event::AlertMessage { .. }

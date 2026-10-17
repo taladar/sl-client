@@ -566,25 +566,6 @@ impl NotificationArgs {
     pub const fn from_pairs(pairs: Vec<(String, String)>) -> Self {
         Self { pairs }
     }
-
-    /// Parse an `AlertInfo` `ExtraParams` blob into arguments: `key=value` pairs
-    /// separated by `|` or newlines, each side trimmed. A fragment without an
-    /// `=` is ignored. The reference parses this per-alert; this handles the
-    /// common `key=value` form.
-    #[must_use]
-    pub fn parse_extra_params(blob: &str) -> Self {
-        let mut args = Self::new();
-        for fragment in blob.split(['|', '\n']) {
-            let fragment = fragment.trim();
-            if fragment.is_empty() {
-                continue;
-            }
-            if let Some((key, value)) = fragment.split_once('=') {
-                args.set(key.trim(), value.trim());
-            }
-        }
-        args
-    }
 }
 
 /// Replace every `[KEY]` placeholder in `template` with its bound value from
@@ -1682,17 +1663,6 @@ mod tests {
     fn substitution_keeps_an_unterminated_bracket() {
         let args = NotificationArgs::new();
         assert_eq!(substitute("cost is [USD 5", &args), "cost is [USD 5");
-    }
-
-    /// `ExtraParams` parses `key=value` pairs on `|` / newline boundaries,
-    /// trims whitespace, and ignores a fragment with no `=`.
-    #[test]
-    fn extra_params_parse_into_args() {
-        let args = NotificationArgs::parse_extra_params("MINUTES=5 | NAME = Region A\nBOGUS");
-        assert_eq!(
-            substitute("[NAME]: [MINUTES] [BOGUS]", &args),
-            "Region A: 5 [BOGUS]"
-        );
     }
 
     /// A later `set` for the same key replaces the earlier value rather than

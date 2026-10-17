@@ -678,6 +678,10 @@ about-region-add-allowed-group = Add Group…
 about-region-add-banned = Ban Resident…
 about-region-access-name = Name
 about-region-access-remove = Remove
+about-region-ban-last-login = Last login
+about-region-ban-date = Banned
+about-region-banned-by = Banned by
+about-region-ban-unknown = n/a
 
 # Product-type labels.
 about-region-product-full = Estate / Full Region
@@ -5580,3 +5584,9 @@ web-browser-back-name = Back
 web-browser-forward-name = Forward
 web-browser-reload-or-stop-name = Reload or stop
 web-browser-open-external-name = Open in external browser
+
+# The region restart countdown (the reference's `region_restarting` floater).
+region-restart-heading = Region restarting
+region-restart-body = The region you are in now ({ $name }) is about to restart. If you stay in this region you will be logged out.
+region-restart-countdown = Time until restart: { $seconds } s
+region-restart-unknown-region = unknown
