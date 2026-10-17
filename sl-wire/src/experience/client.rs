@@ -90,9 +90,10 @@ pub fn build_set_experience_permission_request(
     )
 }
 
-/// Builds the LLSD-XML body for an `UpdateExperience` POST (the editable
-/// metadata; `quota`/`expiration`/`agent_id` are server-controlled and omitted,
-/// as the viewer does).
+/// Builds the LLSD-XML body for an `UpdateExperience` POST: the record less
+/// `quota`/`expiration`/`agent_id`, which are server-controlled and omitted as
+/// the reference omits them. `group_id` goes out as the reference sends it —
+/// the nil id for an experience with no group.
 #[must_use]
 pub fn build_update_experience_request(update: &ExperienceUpdate) -> String {
     let mut out = format!(
@@ -109,11 +110,18 @@ pub fn build_update_experience_request(update: &ExperienceUpdate) -> String {
     out.push_str("</integer><key>slurl</key><string>");
     push_escaped(
         &mut out,
-        &crate::optional_url_to_wire(update.slurl.as_ref()),
+        &super::ExperienceLocation::to_wire(update.slurl.as_ref()),
     );
     out.push_str("</string><key>extended_metadata</key><string>");
     push_escaped(&mut out, &update.extended_metadata);
-    out.push_str("</string></map></llsd>");
+    out.push_str("</string><key>group_id</key><uuid>");
+    out.push_str(
+        &update
+            .group
+            .map_or_else(Uuid::nil, |group| group.uuid())
+            .to_string(),
+    );
+    out.push_str("</uuid></map></llsd>");
     out
 }
 
@@ -236,10 +244,12 @@ pub fn parse_experience_permissions(
 /// Decodes the `{ allowed, blocked, trusted }` of a `RegionExperiences` reply,
 /// plus the estate's `default` experience when the reply names one.
 ///
-/// The `default` key is read leniently — absent, `<undef/>`, or a value that is
-/// not a UUID all decode as "no default" — because the reference reads it the
-/// same way (`content.has("default")`, then `asUUID()`), and a grid that has no
-/// estate default simply does not send it.
+/// The `default` key is read leniently — absent, `<undef/>`, the nil id, or a
+/// value that is not a UUID all decode as "no default" — because the reference
+/// reads it the same way (`content.has("default")`, then `asUUID()`, and only
+/// a `notNull()` id becomes the sticky trusted row). Second Life sends the key
+/// on every reply and writes the nil id for an estate with no default
+/// (measured on aditi, 2026-10-16), so the nil case is the common one.
 ///
 /// # Errors
 ///
@@ -259,6 +269,7 @@ pub fn parse_region_experiences(body: &Llsd) -> Result<RegionExperienceLists, Wi
         default_experience: body
             .get("default")
             .and_then(llsd_uuid)
+            .filter(|id| !id.is_nil())
             .map(ExperienceKey::from),
     })
 }

@@ -27,10 +27,14 @@
 //! `partial` — the request half still ran and its lists are recorded, but there
 //! is no experience the run may safely toggle.
 //!
-//! `1av`. Stock OpenSim ships **no** experience module, so with no fixture the
-//! OpenSim capabilities are absent: the request would hang and the set half has
-//! nothing to touch, so the case records `partial` up front rather than block on
-//! a reply that never comes.
+//! `1av`. Experiences are a Second Life feature: stock OpenSim ships **no**
+//! experience module and grants none of the capabilities. That absence is
+//! OpenSim's measured answer, so on a grid that imitates it (OpenSim and the
+//! fake grid's OpenSim flavour) the case checks the capability is withheld,
+//! records `experience_capabilities = absent` and stops there — and on Second
+//! Life's side it fails if the capability is missing. The fake grid supplies
+//! its own `experience` fixture, an experience the agent has no relationship
+//! to, as aditi's fixtures name a public one.
 
 use std::time::Instant;
 
@@ -39,7 +43,9 @@ use sl_client_tokio::{Command, Event, ExperienceKey, ExperiencePermission};
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, count_metric, is_opensim, secs_metric};
+use crate::support::{
+    LONG_TIMEOUT, REGION_TIMEOUT, check, count_metric, experience_capability, secs_metric,
+};
 
 /// The standing preference an agent holds for one experience, as read back from
 /// the `{ allowed, blocked }` lists.
@@ -108,28 +114,21 @@ impl GridTest for ExperiencePermissions {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
-            let grid = ctx.grid();
             let fixture = ctx.experience();
+            ctx.primary().wait_for_region(REGION_TIMEOUT).await?;
 
-            // Stock OpenSim ships no experience module, so with no configured
-            // experience there is nothing to read or toggle — record partial up
-            // front rather than block on capabilities the region never seeds.
-            if fixture.is_none() && is_opensim(grid) {
-                ctx.mark_partial(
-                    "stock OpenSim ships no experience module, and no `experience` \
-                     fixture is configured, so there are no experience preferences \
-                     to read or set",
-                );
+            // Stock OpenSim ships no experience module and grants none of the
+            // capabilities; that absence is its measured answer, recorded and
+            // held to the grid's flavour rather than waited out.
+            if !experience_capability(ctx, "GetExperiences").await? {
                 return Ok(());
             }
-
             let session = ctx.primary();
-            session.wait_for_region(REGION_TIMEOUT).await?;
 
             // The request half: GetExperiences returns the agent's per-experience
             // allow/block preferences. Either list may legitimately be empty; the

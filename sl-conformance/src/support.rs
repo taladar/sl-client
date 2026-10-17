@@ -86,6 +86,54 @@ pub const fn is_fake(grid: Grid) -> bool {
     grid.is_fake()
 }
 
+/// How long [`capability_granted`] waits for a region's capability map to
+/// arrive before it reads an empty one as "nothing granted".
+const CAPABILITY_MAP_WAIT: Duration = Duration::from_secs(15);
+
+/// Whether `session`'s region granted the capability `name`, waiting for the
+/// capability map if it has not arrived yet.
+///
+/// The question a case asks of a feature some grids have no service for: stock
+/// OpenSim grants no experience capability at all, and the measured answer
+/// there is that absence — something to record, not a reply to wait out.
+pub async fn capability_granted(session: &Session, name: &str) -> bool {
+    let started = Instant::now();
+    loop {
+        if session.cap(name).is_some() {
+            return true;
+        }
+        if session.capability_names().is_empty() && started.elapsed() < CAPABILITY_MAP_WAIT {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        } else {
+            return false;
+        }
+    }
+}
+
+/// The experience half of [`capability_granted`] the three experience cases
+/// share: whether the region grants `name`, checked against the grid's
+/// measured answer — Second Life grants every experience capability, OpenSim
+/// none (`book/src/gridspec/experiences.md`). Records `experience_capabilities`
+/// (`granted` / `absent`).
+///
+/// # Errors
+///
+/// Returns [`TestFailure::Assertion`] when the grid answers the other way.
+pub async fn experience_capability(ctx: &mut TestContext, name: &str) -> Result<bool, TestFailure> {
+    let granted = capability_granted(ctx.primary(), name).await;
+    let expected = ctx.grid().behaves_like() == sl_fake_grid::ImitatedGrid::SecondLife;
+    ctx.metrics().set(
+        "experience_capabilities",
+        if granted { "granted" } else { "absent" },
+    );
+    check_eq(
+        &format!("whether the region grants {name}"),
+        &granted,
+        &expected,
+    )?;
+    Ok(granted)
+}
+
 /// Whether the region's contents are something this workspace declares, so a
 /// case may *require* what it expects to find rather than record its absence.
 ///

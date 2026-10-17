@@ -88,8 +88,7 @@ use sl_viewer_ui_core::skin::{
 
 use bevy::ecs::system::RunSystemOnce as _;
 use sl_client_bevy::{
-    Command, ExperienceInfo, ExperienceKey, GroupKey, OwnerKey, SlCommand, SlEvent, SlSessionEvent,
-    Uuid,
+    AgentKey, Command, ExperienceInfo, ExperienceKey, SlCommand, SlEvent, SlSessionEvent, Uuid,
 };
 use sl_settings::{Scope, SettingValue};
 
@@ -110,7 +109,6 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::intents::{ExperiencePicked, ExperiencePickerFilter, OpenExperiencePicker};
 use crate::settings::ViewerSettings;
 use crate::skin_palette::SkinPalette;
-use crate::social::GroupsModel;
 use crate::ui::{UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -602,8 +600,8 @@ pub fn spawn_experience_picker_specimen(
         maturity_index(MATURITY_ADULT),
         cx.font_size,
     );
-    let group = GroupKey::from(Uuid::from_u128(0x6b));
-    let group_name = cx.text("Example Group");
+    let owner = AgentKey::from(Uuid::from_u128(0x6b));
+    let owner_name = cx.text("Example Resident");
     let infos: ExperienceInfos = [
         ("Sample Race Course", MATURITY_GENERAL),
         ("Test Adventure", MATURITY_MODERATE),
@@ -616,7 +614,7 @@ pub fn spawn_experience_picker_specimen(
         let info = ExperienceInfo {
             public_id: key,
             name: cx.text(name),
-            owner: Some(OwnerKey::Group(group)),
+            owner: Some(owner),
             maturity,
             ..ExperienceInfo::default()
         };
@@ -631,9 +629,9 @@ pub fn spawn_experience_picker_specimen(
     let status = ui.status;
     commands.queue(move |world: &mut World| {
         let drawn = world.run_system_once(move |mut commands: Commands, translator: Translator| {
-            let mut groups = GroupsModel::default();
-            groups.note_resolved_name(group, &group_name);
-            let mut rows = render_rows(&infos, &ids, &AvatarState::default(), &groups, &translator);
+            let mut avatars = AvatarState::default();
+            avatars.note_legacy_name(owner, &owner_name);
+            let mut rows = render_rows(&infos, &ids, &avatars, &translator);
             sort_experience_rows(&mut rows, &[("name", true)]);
             let cells: Vec<Vec<(String, Color)>> = rows
                 .into_iter()
@@ -869,13 +867,12 @@ fn rebuild_picker_view(
         &ExperiencePickerUi,
     )>,
     avatars: Res<AvatarState>,
-    groups: Res<GroupsModel>,
     settings: Option<Res<ViewerSettings>>,
     translator: Translator,
     tables: Query<&TableState>,
     mut lists: Query<&mut VirtualList>,
 ) {
-    let caches_moved = avatars.is_changed() || groups.is_changed() || translator.changed();
+    let caches_moved = avatars.is_changed() || translator.changed();
     let ceiling = search_ceiling(settings.as_deref());
     for (state, view, ui) in &mut windows {
         let view = view.into_inner();
@@ -905,7 +902,7 @@ fn rebuild_picker_view(
                     .is_none_or(|info| info.maturity <= ceiling)
             })
             .collect();
-        let mut rows = render_rows(&state.infos, &visible, &avatars, &groups, &translator);
+        let mut rows = render_rows(&state.infos, &visible, &avatars, &translator);
         let keys = tables
             .get(ui.table)
             .map(TableState::sort_tokens)

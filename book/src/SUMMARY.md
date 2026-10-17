@@ -58,6 +58,7 @@
 - [Groups](gridspec/groups.md)
 - [Profiles and display names](gridspec/profiles.md)
 - [Search and the directory](gridspec/search.md)
+- [Experiences](gridspec/experiences.md)
 - [World map](gridspec/world-map.md)
 - [Terrain, wind and clouds](gridspec/terrain.md)
 - [Objects](gridspec/objects.md)

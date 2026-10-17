@@ -1017,7 +1017,7 @@ mod test {
             assert!(!info.missing, "{} resolved to nothing", info.public_id);
             assert_eq!(
                 info.owner,
-                Some(sl_types::key::OwnerKey::Agent(agent_id)),
+                Some(agent_id),
                 "{} is in the agent's owned list and owned by somebody else",
                 info.name
             );

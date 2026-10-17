@@ -67,9 +67,10 @@ pub use server::{
     parse_set_experience_permission_request, parse_update_experience_request,
 };
 pub use types::{
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
-    ExperienceUpdate, PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID, PROPERTY_PRIVATE,
-    PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED, RegionExperienceLists, SEARCH_PAGE_SIZE,
+    ExperienceInfo, ExperienceLocation, ExperiencePermission, ExperienceProperties,
+    ExperienceSearchPage, ExperienceUpdate, PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID,
+    PROPERTY_PRIVATE, PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED, RegionExperienceLists,
+    SEARCH_PAGE_SIZE,
 };
 
 /// Reads a UUID-valued LLSD value, accepting either a `uuid` or a `string`.

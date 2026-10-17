@@ -22,12 +22,11 @@
 
 use std::collections::BTreeMap;
 
-use sl_client_bevy::{ExperienceInfo, ExperienceKey, ExperienceSearchPage, OwnerKey};
+use sl_client_bevy::{AgentKey, ExperienceInfo, ExperienceKey, ExperienceSearchPage};
 
 use crate::experience_profile::maturity_key;
 use crate::i18n::Translator;
 use crate::intents::ExperiencePickerFilter;
-use crate::social::GroupsModel;
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, keep_order, order_by_sort_keys,
 };
@@ -152,7 +151,6 @@ pub(crate) fn render_rows(
     infos: &ExperienceInfos,
     ids: &[ExperienceKey],
     avatars: &AvatarState,
-    groups: &GroupsModel,
     translator: &Translator,
 ) -> Vec<ExperienceRow> {
     ids.iter()
@@ -166,19 +164,20 @@ pub(crate) fn render_rows(
                 }),
                 owner: info
                     .and_then(|info| info.owner)
-                    .map_or_else(String::new, |owner| owner_label(owner, avatars, groups)),
+                    .map_or_else(String::new, |owner| owner_label(owner, avatars)),
             }
         })
         .collect()
 }
 
-/// One owner's resolved name, or its id in parentheses until the cache has it.
-pub(crate) fn owner_label(owner: OwnerKey, avatars: &AvatarState, groups: &GroupsModel) -> String {
-    let resolved = match owner {
-        OwnerKey::Agent(agent) => avatars.shown_name_of(agent).map(str::to_owned),
-        OwnerKey::Group(group) => groups.group_name(group).map(str::to_owned),
-    };
-    resolved.unwrap_or_else(|| format!("({})", owner.uuid()))
+/// The owning resident's resolved name, or its id in parentheses until the
+/// cache has it. A group's experience is listed under its owner too, as the
+/// reference's picker lists it (`LLPanelExperiencePicker::filterContent` names
+/// the `agent_id`), and Second Life names an owner on every record.
+pub(crate) fn owner_label(owner: AgentKey, avatars: &AvatarState) -> String {
+    avatars
+        .shown_name_of(owner)
+        .map_or_else(|| format!("({})", owner.uuid()), str::to_owned)
 }
 
 /// The resolved name for an experience id, if known and non-empty.

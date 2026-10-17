@@ -1,23 +1,23 @@
 //! Round-trip tests for the experience cap codecs.
 
 use pretty_assertions::assert_eq;
-use sl_types::key::{AgentKey, ExperienceKey, GroupKey, OwnerKey};
+use sl_types::key::{AgentKey, ExperienceKey, GroupKey};
 use uuid::Uuid;
 
 use super::{
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate, PROPERTY_GRID,
-    PROPERTY_INVALID, RegionExperienceLists, build_experience_ids_response,
-    build_experience_infos_response, build_experience_permissions_response,
-    build_experience_query_response, build_experience_search_response,
-    build_experience_status_response, build_region_experiences_request,
-    build_region_experiences_response, build_set_experience_permission_request,
-    build_update_experience_request, experience_id_query, experience_info_query, experience_query,
-    find_experience_query, forget_experience_query, group_experiences_query,
-    parse_experience_id_query, parse_experience_ids, parse_experience_info_query,
-    parse_experience_infos, parse_experience_permissions, parse_experience_query,
-    parse_experience_query_reply, parse_experience_search_page, parse_experience_status,
-    parse_find_experience_query, parse_forget_experience_query, parse_group_experiences_query,
-    parse_region_experiences, parse_region_experiences_request,
+    ExperienceInfo, ExperienceLocation, ExperiencePermission, ExperienceProperties,
+    ExperienceUpdate, PROPERTY_GRID, PROPERTY_INVALID, RegionExperienceLists,
+    build_experience_ids_response, build_experience_infos_response,
+    build_experience_permissions_response, build_experience_query_response,
+    build_experience_search_response, build_experience_status_response,
+    build_region_experiences_request, build_region_experiences_response,
+    build_set_experience_permission_request, build_update_experience_request, experience_id_query,
+    experience_info_query, experience_query, find_experience_query, forget_experience_query,
+    group_experiences_query, parse_experience_id_query, parse_experience_ids,
+    parse_experience_info_query, parse_experience_infos, parse_experience_permissions,
+    parse_experience_query, parse_experience_query_reply, parse_experience_search_page,
+    parse_experience_status, parse_find_experience_query, parse_forget_experience_query,
+    parse_group_experiences_query, parse_region_experiences, parse_region_experiences_request,
     parse_set_experience_permission_request, parse_update_experience_request,
 };
 use crate::WireError;
@@ -158,11 +158,16 @@ fn update_experience_round_trip() -> Result<(), String> {
         description: "desc".to_owned(),
         maturity: 13,
         properties: PROPERTY_GRID,
-        slurl: Some(url::Url::parse("http://maps/y").map_err(|e| e.to_string())?),
+        slurl: Some(ExperienceLocation::Slurl(
+            url::Url::parse("http://maps/y").map_err(|e| e.to_string())?,
+        )),
         extended_metadata: String::new(),
+        group: None,
     };
     let body = build_update_experience_request(&update);
     assert!(body.contains("<key>public_id</key><uuid>11111111-1111-1111-1111-111111111111</uuid>"));
+    // No group is the nil id, as the reference sends the record's `group_id`.
+    assert!(body.contains("<key>group_id</key><uuid>00000000-0000-0000-0000-000000000000</uuid>"));
     assert!(body.contains("<key>name</key><string>Renamed</string>"));
     assert!(body.contains("<key>properties</key><integer>16</integer>"));
     assert!(!body.contains("quota"));
@@ -340,8 +345,11 @@ fn update_experience_request_round_trip() -> Result<(), String> {
         description: "desc & more".to_owned(),
         maturity: 13,
         properties: PROPERTY_GRID,
-        slurl: Some(url::Url::parse("http://maps/y").map_err(|e| e.to_string())?),
+        slurl: Some(ExperienceLocation::Last),
         extended_metadata: "<x/>".to_owned(),
+        group: Some(GroupKey::from(uuid(
+            "44444444-4444-4444-4444-444444444444",
+        )?)),
     };
     let body = build_update_experience_request(&update);
     let parsed = parse_update_experience_request(&body).map_err(|error| format!("{error:?}"))?;
@@ -375,14 +383,14 @@ fn region_experiences_service_round_trip() -> Result<(), String> {
             .map_err(|error| format!("{error:?}"))?;
     assert_eq!(decoded, served);
 
-    // An estate with no default omits the key entirely, so the round trip is
-    // still lossless and the reply names nothing to be sticky about.
+    // An estate with no default writes the nil id, as Second Life does, and
+    // the round trip still names nothing to be sticky about.
     let plain = RegionExperienceLists {
         default_experience: None,
         ..served
     };
     let reply = build_region_experiences_response(&plain);
-    assert!(!reply.contains("default"));
+    assert!(reply.contains("<key>default</key><uuid>00000000-0000-0000-0000-000000000000</uuid>"));
     let decoded =
         parse_region_experiences(&parse_llsd_xml(&reply).map_err(|error| format!("{error:?}"))?)
             .map_err(|error| format!("{error:?}"))?;
@@ -471,13 +479,18 @@ fn experience_infos_response_round_trip() -> Result<(), String> {
     let real = ExperienceInfo {
         public_id: experience_key("11111111-1111-1111-1111-111111111111")?,
         name: "My Experience".to_owned(),
-        owner: Some(OwnerKey::Agent(AgentKey::from(uuid(
+        owner: Some(AgentKey::from(uuid(
             "22222222-2222-2222-2222-222222222222",
-        )?))),
+        )?)),
+        group: Some(GroupKey::from(uuid(
+            "44444444-4444-4444-4444-444444444444",
+        )?)),
         description: "fun & games".to_owned(),
         properties: ExperienceProperties(PROPERTY_GRID),
         maturity: 13,
-        slurl: Some(url::Url::parse("http://maps/x").map_err(|e| e.to_string())?),
+        slurl: Some(ExperienceLocation::Slurl(
+            url::Url::parse("http://maps/x").map_err(|e| e.to_string())?,
+        )),
         ..ExperienceInfo::default()
     };
     let missing = ExperienceInfo {
@@ -542,38 +555,134 @@ fn experience_search_page_without_markers_offers_no_paging() -> Result<(), Strin
     Ok(())
 }
 
-/// The `ExperienceInfo` owner — collapsed from the wire `(agent_id, group_id)`
-/// pair into one `Option<OwnerKey>` — round-trips through `to_llsd`/`from_llsd`
-/// for an agent owner, a group owner, and an unowned (placeholder) record, so
-/// the codec split is byte-identical in both directions.
+/// The owner and the group are two fields, as Second Life sends them: a
+/// group's experience carries both (every record aditi served named an agent
+/// owner, and some a group beside it), and either may be absent — each
+/// combination round-trips through `to_llsd`/`from_llsd`.
 #[test]
-fn experience_owner_round_trips() -> Result<(), String> {
+fn experience_owner_and_group_round_trip() -> Result<(), String> {
     let base = ExperienceInfo {
         public_id: experience_key("11111111-1111-1111-1111-111111111111")?,
         name: "X".to_owned(),
         ..ExperienceInfo::default()
     };
-    let cases = [
-        Some(OwnerKey::Agent(AgentKey::from(uuid(
-            "22222222-2222-2222-2222-222222222222",
-        )?))),
-        Some(OwnerKey::Group(GroupKey::from(uuid(
-            "33333333-3333-3333-3333-333333333333",
-        )?))),
-        None,
-    ];
-    for owner in cases {
+    let agent = Some(AgentKey::from(uuid(
+        "22222222-2222-2222-2222-222222222222",
+    )?));
+    let group = Some(GroupKey::from(uuid(
+        "33333333-3333-3333-3333-333333333333",
+    )?));
+    for (owner, group) in [(agent, None), (agent, group), (None, group), (None, None)] {
         let info = ExperienceInfo {
             owner,
+            group,
             ..base.clone()
         };
+        let decoded =
+            ExperienceInfo::from_llsd(&info.to_llsd()).map_err(|error| format!("{error:?}"))?;
+        assert_eq!((decoded.owner, decoded.group), (owner, group));
+    }
+    Ok(())
+}
+
+/// A search page as aditi serves it (2026-10-16): records whose `slurl` is a
+/// location URL, empty, or the word `last`; a group experience with both ids;
+/// `maturity` 254; `total_pages` and the paging URLs as relative paths. One
+/// `last` used to refuse the whole page, so a search showed nothing.
+#[test]
+fn an_aditi_search_page_decodes() -> Result<(), String> {
+    let reply = parse_llsd_xml(concat!(
+        "<llsd><map><key>total_pages</key><integer>4</integer>",
+        "<key>next_page_url</key><string>/experiences/search/name?page=3</string>",
+        "<key>previous_page_url</key><string>/experiences/search/name?page=1</string>",
+        "<key>experience_keys</key><array>",
+        "<map><key>public_id</key><uuid>040979ee-0aa5-11e8-8c52-00304892026a</uuid>",
+        "<key>agent_id</key><uuid>b4f26234-6778-43b3-b9e9-90e9773e84f1</uuid>",
+        "<key>group_id</key><uuid>766cdef0-fb8e-ab2f-b238-6000cb093b52</uuid>",
+        "<key>name</key><string>Bugsly Testing</string>",
+        "<key>slurl</key><string>secondlife://Aditi/secondlife/Est%20Full3/172/28/23</string>",
+        "<key>maturity</key><integer>13</integer><key>properties</key><integer>16</integer>",
+        "<key>expiration</key><integer>600</integer><key>quota</key><integer>128</integer>",
+        "<key>description</key><string /><key>extended_metadata</key><string /></map>",
+        "<map><key>public_id</key><uuid>2d41af16-faff-11e3-b448-00304860d196</uuid>",
+        "<key>agent_id</key><uuid>3de548e1-57be-cfea-2b78-83ae3ad95998</uuid>",
+        "<key>group_id</key><uuid>00000000-0000-0000-0000-000000000000</uuid>",
+        "<key>name</key><string>DanLoadtest-02</string><key>slurl</key><string>last</string>",
+        "<key>maturity</key><integer>254</integer><key>expiration</key><integer>10</integer>",
+        "</map>",
+        "<map><key>public_id</key><uuid>016ad6ae-df8c-11e2-af8c-0030489203e2</uuid>",
+        "<key>agent_id</key><uuid>870424b2-d6d3-4a89-975a-ec693c233319</uuid>",
+        "<key>name</key><string>iTools Test XP Key</string><key>slurl</key><string />",
+        "</map></array></map></llsd>",
+    ))
+    .map_err(|error| format!("{error:?}"))?;
+    let page = parse_experience_search_page(&reply).map_err(|error| format!("{error:?}"))?;
+    assert!(page.has_next_page && page.has_previous_page);
+    let locations: Vec<_> = page.infos.iter().map(|info| info.slurl.clone()).collect();
+    assert_eq!(
+        locations,
+        vec![
+            Some(ExperienceLocation::Slurl(
+                url::Url::parse("secondlife://Aditi/secondlife/Est%20Full3/172/28/23")
+                    .map_err(|error| error.to_string())?
+            )),
+            Some(ExperienceLocation::Last),
+            None,
+        ]
+    );
+    let groups: Vec<_> = page.infos.iter().map(|info| info.group).collect();
+    assert_eq!(
+        groups,
+        vec![
+            Some(GroupKey::from(uuid(
+                "766cdef0-fb8e-ab2f-b238-6000cb093b52"
+            )?)),
+            None,
+            None,
+        ]
+    );
+    assert!(page.infos.iter().all(|info| info.owner.is_some()));
+    Ok(())
+}
+
+/// The location words round-trip, and a value that is neither a word nor a URL
+/// is still refused rather than read as no location.
+#[test]
+fn experience_location_words_round_trip() -> Result<(), String> {
+    for location in [ExperienceLocation::Last, ExperienceLocation::Home] {
+        let wire = ExperienceLocation::to_wire(Some(&location));
         assert_eq!(
-            ExperienceInfo::from_llsd(&info.to_llsd())
-                .map_err(|error| format!("{error:?}"))?
-                .owner,
-            owner
+            ExperienceLocation::from_wire("slurl", &wire).map_err(|error| format!("{error:?}"))?,
+            Some(location)
         );
     }
+    assert_eq!(
+        ExperienceLocation::from_wire("slurl", "").map_err(|error| format!("{error:?}"))?,
+        None
+    );
+    if let Ok(location) = ExperienceLocation::from_wire("slurl", "not a location") {
+        return Err(format!("a non-location was read as {location:?}"));
+    }
+    Ok(())
+}
+
+/// Second Life's `RegionExperiences` reply for an estate with no default: the
+/// `default` key is there, holding the nil id, beside a `disabled` key and
+/// `<undef/>` for the empty lists. The nil id is no default — it must not
+/// become a sticky trusted row.
+#[test]
+fn an_aditi_region_reply_has_no_default() -> Result<(), String> {
+    let reply = parse_llsd_xml(concat!(
+        "<llsd><map><key>default</key><uuid>00000000-0000-0000-0000-000000000000</uuid>",
+        "<key>blocked</key><undef /><key>disabled</key><undef /><key>trusted</key><undef />",
+        "<key>allowed</key><array><uuid>233352b8-6e1b-11e6-b4e8-00304860d196</uuid>",
+        "<uuid>2e364f80-1160-11e5-93aa-0030489203e2</uuid></array></map></llsd>",
+    ))
+    .map_err(|error| format!("{error:?}"))?;
+    let lists = parse_region_experiences(&reply).map_err(|error| format!("{error:?}"))?;
+    assert_eq!(lists.default_experience, None);
+    assert_eq!(lists.allowed.len(), 2);
+    assert!(lists.blocked.is_empty() && lists.trusted.is_empty());
     Ok(())
 }
 

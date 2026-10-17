@@ -192,7 +192,8 @@ fn spawn_selected_cost(
                 let mut replies = Vec::with_capacity(requests.len());
                 for part in &requests {
                     let body = build_resource_cost_selected_request(kind, &part.objects);
-                    let Some(reply) = post_cap_llsd(&part.url, body, &http).await else {
+                    let Some(reply) = post_cap_llsd(&part.url, body, capability, &http).await
+                    else {
                         report_caps_failure(&caps_tx, capability).await;
                         return;
                     };

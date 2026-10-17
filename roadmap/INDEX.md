@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 347 |
+| ready | 346 |
 | blocked | 89 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1388 |
+| done | 1389 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2067** |
@@ -350,7 +350,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (347)
+## ready (346)
 
 ### protocol
 
@@ -1137,8 +1137,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   AvatarRenderInfo and AttachmentResources on each grid
 - [`gridspec-estate`](ready/gridspec-estate.md) — Estate info, access, covenant
   and estate actions on each grid
-- [`gridspec-experiences`](ready/gridspec-experiences.md) — Experience records,
-  permissions and admin on each grid
 - [`gridspec-god-tools`](ready/gridspec-god-tools.md) — God tools as OpenSim
   answers them
 - [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
@@ -1610,7 +1608,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1388)
+## done (1389)
 
 ### protocol
 
@@ -4619,6 +4617,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   resends, pings, inactivity, packet quirks and throttles
 - [`gridspec-environment`](done/gridspec-environment.md) — Region and parcel
   environments (EEP) on each grid
+- [`gridspec-experiences`](done/gridspec-experiences.md) — Experience records,
+  permissions and admin on each grid
 - [`gridspec-friends-presence`](done/gridspec-friends-presence.md) — Friendship,
   rights, presence notifications and calling cards on each grid
 - [`gridspec-group-chat-and-conference`](done/gridspec-group-chat-and-conference.md)

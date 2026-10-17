@@ -2062,8 +2062,20 @@ fn build_experience_update(
         description: args.str_or(ctx, "description", 2, "")?,
         maturity: args.parse_or(ctx, "maturity", 3, "i32", 0)?,
         properties: args.parse_or(ctx, "properties", 4, "i32", 0)?,
-        slurl: args.opt_url(ctx, "slurl", 5)?,
+        slurl: match args.opt_str(ctx, "slurl", 5)? {
+            Some(value) => {
+                sl_proto::ExperienceLocation::from_wire("slurl", &value).map_err(|_invalid| {
+                    ReplError::InvalidArg {
+                        field: "slurl".to_owned(),
+                        value,
+                        expected: "a URL, `last` or `home`".to_owned(),
+                    }
+                })?
+            }
+            None => None,
+        },
         extended_metadata: args.str_or(ctx, "extended_metadata", 6, "")?,
+        group: args.opt_uuid(ctx, "group_id", 7)?.map(GroupKey::from),
     })
 }
 
@@ -6037,7 +6049,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "update_experience",
-            usage: "public_id=<id> [name=] [description=] …",
+            usage: "public_id=<id> [name=] [description=] … [group_id=]",
             build: |args, ctx| {
                 Ok(Command::UpdateExperience {
                     update: build_experience_update(args, ctx)?,

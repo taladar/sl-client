@@ -826,7 +826,7 @@ pub(crate) async fn post_script_metadata(
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {
     let body = build_get_metadata_request(task, item);
-    match crate::voice::post_cap_llsd(&cap_url, body, &http).await {
+    match crate::voice::post_cap_llsd(&cap_url, body, CAP_GET_METADATA, &http).await {
         Some(reply) => {
             let stamped = stamp_get_metadata_reply(reply, task, item);
             deliver(&caps_tx, (CAP_GET_METADATA.to_owned(), stamped)).await;

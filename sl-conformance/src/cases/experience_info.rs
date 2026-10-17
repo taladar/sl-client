@@ -31,21 +31,24 @@
 //! paged) result set is best-effort and recorded, not asserted, since a common
 //! name can overflow one page or a private experience may be unlisted.
 //!
-//! `1av`. Experiences are Second-Life-centric — the legend lists them under
-//! SL-only — and stock OpenSim ships **no** experience module, so on OpenSim the
-//! capabilities are absent, every query is a silent no-op, and (with no fixture)
-//! the case records `partial` at once rather than blocking on replies that never
-//! come.
+//! `1av`. Experiences are a Second Life feature: stock OpenSim ships **no**
+//! experience module and grants none of the capabilities. That absence is
+//! OpenSim's measured answer, so on a grid that imitates it (OpenSim and the
+//! fake grid's OpenSim flavour) the case checks the capability is withheld,
+//! records `experience_capabilities = absent` and stops there — and on Second
+//! Life's side it fails if the capability is missing. The fake grid supplies
+//! its own `experience` fixture, an experience the agent has no relationship
+//! to, as aditi's fixtures name a public one.
 
 use std::time::Instant;
 
-use sl_client_tokio::{Command, Event, ExperienceKey};
+use sl_client_tokio::{Command, Event, ExperienceKey, ExperienceLocation};
 
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    LONG_TIMEOUT, REGION_TIMEOUT, check, check_eq, count_metric, is_opensim, secs_metric,
+    LONG_TIMEOUT, REGION_TIMEOUT, check, check_eq, count_metric, experience_capability, secs_metric,
 };
 
 /// The minimum query length `FindExperienceByName` accepts; a name shorter than
@@ -66,27 +69,21 @@ impl GridTest for ExperienceInfo {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
-            let grid = ctx.grid();
             let fixture = ctx.experience();
+            ctx.primary().wait_for_region(REGION_TIMEOUT).await?;
 
-            // Stock OpenSim ships no experience module, so with no configured
-            // experience there is nothing to resolve — record partial up front
-            // rather than block on capabilities the region never seeds.
-            if fixture.is_none() && is_opensim(grid) {
-                ctx.mark_partial(
-                    "stock OpenSim ships no experience module, and no `experience` \
-                     fixture is configured, so there is no experience to resolve",
-                );
+            // Stock OpenSim ships no experience module and grants none of the
+            // capabilities; that absence is its measured answer, recorded and
+            // held to the grid's flavour rather than waited out.
+            if !experience_capability(ctx, "GetExperienceInfo").await? {
                 return Ok(());
             }
-
             let session = ctx.primary();
-            session.wait_for_region(REGION_TIMEOUT).await?;
 
             // Settle on the experience to resolve: a fixture wins, else discover
             // one from the agent's own experience relationships.
@@ -150,6 +147,16 @@ impl GridTest for ExperienceInfo {
             let name = record.name.clone();
             let maturity = record.maturity;
             let is_grid = record.properties.is_grid();
+            let properties = record.properties.0;
+            let has_group = record.group.is_some();
+            // Which of the three kinds of home location the record carries:
+            // Second Life writes a SLURL, nothing, or the word `last`.
+            let location = match &record.slurl {
+                None => "none",
+                Some(ExperienceLocation::Last) => "last",
+                Some(ExperienceLocation::Home) => "home",
+                Some(ExperienceLocation::Slurl(_)) => "slurl",
+            };
 
             // FindExperienceByName: search for the resolved name and confirm the
             // search capability answers. Whether the anchor appears in the single
@@ -192,6 +199,12 @@ impl GridTest for ExperienceInfo {
             metrics.set("experience_name", name);
             metrics.set(&count_metric("maturity"), i64::from(maturity));
             metrics.set("experience_is_grid", is_grid);
+            metrics.set(
+                &count_metric("experience_properties"),
+                i64::from(properties),
+            );
+            metrics.set("experience_has_group", has_group);
+            metrics.set("experience_location", location);
             metrics.set_timing(&secs_metric("info_rtt"), info_rtt.as_secs_f64());
             metrics.set("searched_by_name", searched);
             if let Some(page) = search_page {

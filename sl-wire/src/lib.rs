@@ -82,10 +82,10 @@ pub use environment_push::{
 };
 pub use error::WireError;
 pub use experience::{
-    ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceSearchPage,
-    ExperienceUpdate, PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID, PROPERTY_PRIVATE,
-    PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED, RegionExperienceLists, SEARCH_PAGE_SIZE,
-    build_experience_ids_response, build_experience_infos_response,
+    ExperienceInfo, ExperienceLocation, ExperiencePermission, ExperienceProperties,
+    ExperienceSearchPage, ExperienceUpdate, PROPERTY_DISABLED, PROPERTY_GRID, PROPERTY_INVALID,
+    PROPERTY_PRIVATE, PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED, RegionExperienceLists,
+    SEARCH_PAGE_SIZE, build_experience_ids_response, build_experience_infos_response,
     build_experience_permissions_response, build_experience_query_response,
     build_experience_search_response, build_experience_status_response,
     build_region_experiences_request, build_region_experiences_response,

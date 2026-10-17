@@ -18,8 +18,12 @@ pub(crate) async fn fetch_group_experiences(
     events: mpsc::Sender<Event>,
 ) {
     if let Some(llsd) = get_llsd(&url, CAP_GROUP_EXPERIENCES, &http).await {
-        let Ok(experience_ids) = parse_experience_ids(&llsd) else {
-            return;
+        let experience_ids = match parse_experience_ids(&llsd) {
+            Ok(ids) => ids,
+            Err(error) => {
+                tracing::warn!(capability = CAP_GROUP_EXPERIENCES, %error, "a CAPS GET reply did not decode");
+                return;
+            }
         };
         deliver(
             &events,
@@ -41,8 +45,12 @@ pub(crate) async fn fetch_experience_admin(
     events: mpsc::Sender<Event>,
 ) {
     if let Some(llsd) = get_llsd(&url, CAP_IS_EXPERIENCE_ADMIN, &http).await {
-        let Ok(is_admin) = parse_experience_status(&llsd) else {
-            return;
+        let is_admin = match parse_experience_status(&llsd) {
+            Ok(is_admin) => is_admin,
+            Err(error) => {
+                tracing::warn!(capability = CAP_IS_EXPERIENCE_ADMIN, %error, "a CAPS GET reply did not decode");
+                return;
+            }
         };
         deliver(
             &events,
@@ -65,8 +73,12 @@ pub(crate) async fn fetch_experience_contributor(
     events: mpsc::Sender<Event>,
 ) {
     if let Some(llsd) = get_llsd(&url, CAP_IS_EXPERIENCE_CONTRIBUTOR, &http).await {
-        let Ok(is_contributor) = parse_experience_status(&llsd) else {
-            return;
+        let is_contributor = match parse_experience_status(&llsd) {
+            Ok(is_contributor) => is_contributor,
+            Err(error) => {
+                tracing::warn!(capability = CAP_IS_EXPERIENCE_CONTRIBUTOR, %error, "a CAPS GET reply did not decode");
+                return;
+            }
         };
         deliver(
             &events,

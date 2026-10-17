@@ -133,6 +133,7 @@ fn spawn_selected_cost(
                 post_cap_llsd(
                     &part.url,
                     build_resource_cost_selected_request(kind, &part.objects),
+                    capability,
                 )
             })
             .collect();

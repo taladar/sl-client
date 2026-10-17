@@ -216,6 +216,15 @@ impl Fixtures {
         self
     }
 
+    /// These fixtures with the stable experience set — what the fake grid
+    /// supplies for itself, as it supplies
+    /// [`with_other_avatar`](Self::with_other_avatar).
+    #[must_use]
+    pub const fn with_experience(mut self, experience: ExperienceKey) -> Self {
+        self.experience = Some(experience);
+        self
+    }
+
     /// These fixtures with the census group set — what the fake grid supplies
     /// for itself, as it supplies [`with_other_avatar`](Self::with_other_avatar).
     #[must_use]

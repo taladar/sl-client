@@ -82,7 +82,7 @@ pub use sl_proto::{
     EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, Error as SessionError,
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate,
     EventId, EventInfo, ExperienceEnvironmentPush, ExperienceEvent, ExperienceEventPermission,
-    ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
+    ExperienceInfo, ExperienceKey, ExperienceLocation, ExperiencePermission, ExperienceProperties,
     ExperienceSearchPage, ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData,
     FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence, FriendRights,
     GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupBan,

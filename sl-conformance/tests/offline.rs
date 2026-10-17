@@ -139,6 +139,9 @@ mod test {
         friends_presence => "friends-presence" [fake_sl, fake_opensim],
         groups => "groups" [fake_sl, fake_opensim],
         display_names => "display-names" [fake_sl, fake_opensim],
+        experience_info => "experience-info" [fake_sl, fake_opensim],
+        experience_permissions => "experience-permissions" [fake_sl, fake_opensim],
+        experience_admin_contributor => "experience-admin-contributor" [fake_sl, fake_opensim],
     }
 
     /// The tests declared above are exactly the offline cases, each on exactly

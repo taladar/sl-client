@@ -3,7 +3,7 @@
 use super::llsd_uuid;
 use crate::WireError;
 use crate::llsd::{Llsd, LlsdError};
-use sl_types::key::{AgentKey, ExperienceKey, GroupKey, OwnerKey};
+use sl_types::key::{AgentKey, ExperienceKey, GroupKey};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -137,17 +137,69 @@ impl ExperiencePermission {
     }
 }
 
-/// Resolves an experience's owner from the wire `(agent_id, group_id)` pair: a
-/// non-nil `agent_id` is an agent owner, else a non-nil `group_id` is a group
-/// owner, else `None` (e.g. a placeholder record carries neither).
-fn experience_owner(agent_id: Uuid, group_id: Uuid) -> Option<OwnerKey> {
-    if !agent_id.is_nil() {
-        Some(OwnerKey::Agent(AgentKey::from(agent_id)))
-    } else if !group_id.is_nil() {
-        Some(OwnerKey::Group(GroupKey::from(group_id)))
-    } else {
-        None
+/// An experience's home location, as its record's `slurl` states it.
+///
+/// Second Life writes three kinds of value there, measured on aditi
+/// (2026-10-16, an `sl-repl` probe over `FindExperienceByName`): a
+/// `secondlife://` location URL, the empty string (no home location — decoded
+/// as no [`ExperienceLocation`] at all), and the bare word **`last`**, which
+/// about one record in five carries. `last` and `home` are the two location
+/// words the reference's SLURL type knows (`LLSLURL::SIM_LOCATION_LAST` /
+/// `SIM_LOCATION_HOME`, `indra/newview/llslurl.cpp`), and its profile window
+/// shows either verbatim. A decoder that read the field as a URL refused
+/// `last` — and with it the whole reply, so any search page holding one such
+/// record came back as nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ExperienceLocation {
+    /// The word `last`: the resident's last location.
+    Last,
+    /// The word `home`: the resident's home.
+    Home,
+    /// A location SLURL.
+    Slurl(url::Url),
+}
+
+impl ExperienceLocation {
+    /// The wire word for [`Self::Last`].
+    const LAST: &'static str = "last";
+
+    /// The wire word for [`Self::Home`].
+    const HOME: &'static str = "home";
+
+    /// Decodes a record's `slurl` field: the empty string is no location, the
+    /// two location words are themselves, and anything else must be a URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WireError`] when the value is none of the three.
+    pub fn from_wire(field: &'static str, raw: &str) -> Result<Option<Self>, WireError> {
+        Ok(match raw.trim() {
+            "" => None,
+            Self::LAST => Some(Self::Last),
+            Self::HOME => Some(Self::Home),
+            _other => Some(Self::Slurl(crate::url_from_wire(field, raw)?)),
+        })
     }
+
+    /// Encodes an optional location as the `slurl` field's string — the inverse
+    /// of [`from_wire`](Self::from_wire).
+    #[must_use]
+    pub fn to_wire(location: Option<&Self>) -> String {
+        match location {
+            None => String::new(),
+            Some(Self::Last) => Self::LAST.to_owned(),
+            Some(Self::Home) => Self::HOME.to_owned(),
+            Some(Self::Slurl(url)) => crate::url_to_wire(url),
+        }
+    }
+}
+
+/// Reads one of a record's two identity ids (`agent_id` / `group_id`), where
+/// the nil id — which Second Life writes for an experience with no group —
+/// means there is none.
+fn non_nil(map: &Llsd, field: &str) -> Option<Uuid> {
+    map.get(field).and_then(llsd_uuid).filter(|id| !id.is_nil())
 }
 
 /// A single experience's metadata record, as carried in a cap reply's
@@ -159,10 +211,16 @@ pub struct ExperienceInfo {
     pub public_id: ExperienceKey,
     /// The experience's display name.
     pub name: String,
-    /// The experience's owner — an agent or a group — decoded from the wire
-    /// `(agent_id, group_id)` pair (exactly one is set), or `None` when neither
-    /// is (e.g. a [`missing`](Self::missing) placeholder).
-    pub owner: Option<OwnerKey>,
+    /// The resident who owns the experience (`agent_id`), or `None` for the
+    /// nil id (e.g. a [`missing`](Self::missing) placeholder). Every record
+    /// aditi served carried one, group experiences included.
+    pub owner: Option<AgentKey>,
+    /// The group the experience is associated with (`group_id`), or `None`
+    /// for the nil id. It sits **beside** the owner rather than replacing it:
+    /// Second Life sends both for a group's experience (measured on aditi,
+    /// 2026-10-16), and the reference's profile shows the owner and, when set,
+    /// the group (`LLFloaterExperienceProfile::refreshExperience`).
+    pub group: Option<GroupKey>,
     /// The free-text description.
     pub description: String,
     /// The [`ExperienceProperties`] bitfield.
@@ -171,12 +229,13 @@ pub struct ExperienceInfo {
     pub quota: i32,
     /// The cache expiration, in seconds (`expiration`).
     pub expiration: f64,
-    /// The content rating (`maturity`; `sim_access` codes: PG 13 / Mature 34 /
-    /// Adult 42).
+    /// The content rating (`maturity`; `sim_access` codes: PG 13 / Mature 21 /
+    /// Adult 42). Second Life also serves values outside the three — 0 and 254
+    /// were both measured on aditi — which the reference shows no rating for.
     pub maturity: i32,
-    /// A SLURL to the experience's home location (`slurl`). The empty wire value
-    /// (no home location set) decodes to [`None`].
-    pub slurl: Option<url::Url>,
+    /// The experience's home location (`slurl`). The empty wire value (no home
+    /// location set) decodes to [`None`].
+    pub slurl: Option<ExperienceLocation>,
     /// Opaque extended metadata XML (`extended_metadata`).
     pub extended_metadata: String,
     /// `true` when this is a placeholder for an `error_ids` entry — the grid could
@@ -190,6 +249,7 @@ impl Default for ExperienceInfo {
             public_id: ExperienceKey::from(Uuid::default()),
             name: String::default(),
             owner: None,
+            group: None,
             description: String::default(),
             properties: ExperienceProperties::default(),
             quota: i32::default(),
@@ -226,10 +286,8 @@ impl ExperienceInfo {
         Ok(Self {
             public_id: ExperienceKey::from(require_uuid_lenient(map, "public_id")?),
             name: string("name")?,
-            owner: experience_owner(
-                map.get("agent_id").and_then(llsd_uuid).unwrap_or_default(),
-                map.get("group_id").and_then(llsd_uuid).unwrap_or_default(),
-            ),
+            owner: non_nil(map, "agent_id").map(AgentKey::from),
+            group: non_nil(map, "group_id").map(GroupKey::from),
             description: string("description")?,
             properties: ExperienceProperties(
                 map.field_i32("properties", "properties")?.unwrap_or(0),
@@ -237,7 +295,7 @@ impl ExperienceInfo {
             quota: map.field_i32("quota", "quota")?.unwrap_or(0),
             expiration: map.field_f64("expiration", "expiration")?.unwrap_or(0.0),
             maturity: map.field_i32("maturity", "maturity")?.unwrap_or(0),
-            slurl: crate::optional_url_from_wire("slurl", &string("slurl")?)?,
+            slurl: ExperienceLocation::from_wire("slurl", &string("slurl")?)?,
             extended_metadata: string("extended_metadata")?,
             missing: map
                 .field_bool("DoesNotExist", "DoesNotExist")?
@@ -252,11 +310,8 @@ impl ExperienceInfo {
     /// reply's `error_ids` array (which decodes to the same placeholder).
     #[must_use]
     pub fn to_llsd(&self) -> Llsd {
-        let (agent_id, group_id) = match self.owner {
-            Some(OwnerKey::Agent(agent)) => (agent.uuid(), Uuid::nil()),
-            Some(OwnerKey::Group(group)) => (Uuid::nil(), group.uuid()),
-            None => (Uuid::nil(), Uuid::nil()),
-        };
+        let agent_id = self.owner.map_or_else(Uuid::nil, |owner| owner.uuid());
+        let group_id = self.group.map_or_else(Uuid::nil, |group| group.uuid());
         let mut map: HashMap<String, Llsd> = HashMap::from([
             ("public_id".to_owned(), Llsd::Uuid(self.public_id.uuid())),
             ("name".to_owned(), Llsd::String(self.name.clone())),
@@ -272,7 +327,7 @@ impl ExperienceInfo {
             ("maturity".to_owned(), Llsd::Integer(self.maturity)),
             (
                 "slurl".to_owned(),
-                Llsd::String(crate::optional_url_to_wire(self.slurl.as_ref())),
+                Llsd::String(ExperienceLocation::to_wire(self.slurl.as_ref())),
             ),
             (
                 "extended_metadata".to_owned(),
@@ -287,8 +342,11 @@ impl ExperienceInfo {
 }
 
 /// The editable metadata sent to the `UpdateExperience` cap (see
-/// [`build_update_experience_request`](crate::build_update_experience_request)). The viewer omits `quota`, `expiration`
-/// and `agent_id` (server-controlled), so this carries only the editable fields.
+/// [`build_update_experience_request`](crate::build_update_experience_request)).
+/// The reference posts the whole record less `quota`, `expiration` and
+/// `agent_id` (`LLExperienceCache::updateExperienceCoro`), so this carries the
+/// rest — the group included, which its profile edits through `Group_btn` and
+/// otherwise sends back as it read it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExperienceUpdate {
@@ -302,10 +360,12 @@ pub struct ExperienceUpdate {
     pub maturity: i32,
     /// The new [`ExperienceProperties`] bits (only admins may change them).
     pub properties: i32,
-    /// The new home-location SLURL ([`None`] clears it / leaves it unset).
-    pub slurl: Option<url::Url>,
+    /// The new home location ([`None`] clears it / leaves it unset).
+    pub slurl: Option<ExperienceLocation>,
     /// The new extended-metadata XML.
     pub extended_metadata: String,
+    /// The experience's group (`group_id`), [`None`] for the nil id.
+    pub group: Option<GroupKey>,
 }
 
 impl Default for ExperienceUpdate {
@@ -318,6 +378,7 @@ impl Default for ExperienceUpdate {
             properties: i32::default(),
             slurl: None,
             extended_metadata: String::default(),
+            group: None,
         }
     }
 }

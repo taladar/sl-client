@@ -43,8 +43,8 @@
 //! administers. A fixture where owned == admin == contributor cannot show that
 //! a viewer has wired each tab to its own capability.
 
-use sl_proto::{ExperienceInfo, ExperienceProperties, SimSession};
-use sl_types::key::{AgentKey, ExperienceKey, GroupKey, OwnerKey};
+use sl_proto::{ExperienceInfo, ExperienceLocation, ExperienceProperties, SimSession};
+use sl_types::key::{AgentKey, ExperienceKey, GroupKey};
 use sl_wire::{PROPERTY_GRID, PROPERTY_PRIVATE, PROPERTY_PRIVILEGED, PROPERTY_SUSPENDED};
 use uuid::Uuid;
 
@@ -58,7 +58,7 @@ const EXPERIENCE_ID_BASE: u128 = 0x00E4_0000;
 /// fixture resident, not the logged-in agent (see the module docs).
 const EXPERIENCE_OWNER_ID: u128 = 0x00E4_00A0;
 
-/// The id of the group that owns the catalogue's group-owned experience.
+/// The id of the group the catalogue's group experience belongs to.
 const EXPERIENCE_GROUP_ID: u128 = 0x00E4_00B0;
 
 /// The number of filler records, one more than a full search page so a query
@@ -73,7 +73,7 @@ const OFFSET_TOUR: u128 = 1;
 /// `llSetEnvironment` push comes from, which the agent has therefore admitted.
 const OFFSET_WEATHER: u128 = 2;
 
-/// The catalogue offset of the group-owned arena — the experience the agent
+/// The catalogue offset of the group's arena — the experience the agent
 /// administers but does not own, which is what makes Admin ≠ Owned.
 const OFFSET_ARENA: u128 = 3;
 
@@ -118,8 +118,20 @@ fn filler_key(n: u128) -> ExperienceKey {
     experience_key(OFFSET_FILLER_BASE.saturating_add(n))
 }
 
-/// The fixture resident every catalogue record that is not group-owned belongs
-/// to.
+/// A public catalogue experience the logged-in agent has no relationship to
+/// — not allowed, blocked, owned, administered or contributed to — as a
+/// stranger's experience on a live grid is: the stable `experience` fixture
+/// the conformance cases resolve, search for and toggle a preference on.
+#[must_use]
+pub fn stranger_experience() -> ExperienceKey {
+    filler_key(STRANGER_TRIAL)
+}
+
+/// The numbered trial [`stranger_experience`] names: one the agent's lists
+/// never mention ([`seed_for_agent`] blocks trial 1, the region blocks trial 2).
+const STRANGER_TRIAL: u128 = 3;
+
+/// The fixture resident every catalogue record belongs to.
 fn owner_identity() -> AvatarIdentity {
     AvatarIdentity::new(
         AgentKey::from(Uuid::from_u128(EXPERIENCE_OWNER_ID)),
@@ -129,18 +141,16 @@ fn owner_identity() -> AvatarIdentity {
 }
 
 /// The catalogue's records: five hand-written ones covering the corners of the
-/// record (grid-wide, privileged, group-owned, private, and the estate's
+/// record (grid-wide, privileged, a group's, private, and the estate's
 /// default) and a run of identical-but-numbered trials, one longer than a page,
 /// that make a search page (see the module docs).
 ///
-/// The private one is here to be *not* found: `SimExperiences::find` hides
-/// private records from the search surface as the grid does, and a fixture with
-/// nothing hidden cannot show that.
+/// The private one is still found by search: Second Life lists private
+/// experiences (aditi, 2026-10-16), and so does `SimExperiences::find`. What
+/// sets it apart is its profile's Private box.
 #[must_use]
 pub fn catalogue() -> Vec<ExperienceInfo> {
-    let agent_owner = Some(OwnerKey::Agent(AgentKey::from(Uuid::from_u128(
-        EXPERIENCE_OWNER_ID,
-    ))));
+    let agent_owner = Some(AgentKey::from(Uuid::from_u128(EXPERIENCE_OWNER_ID)));
     let mut records = vec![
         ExperienceInfo {
             public_id: experience_key(OFFSET_TOUR),
@@ -148,6 +158,10 @@ pub fn catalogue() -> Vec<ExperienceInfo> {
             owner: agent_owner,
             description: "A guided walk around the region, as an experience.".to_owned(),
             properties: ExperienceProperties(PROPERTY_GRID),
+            // The word about one aditi record in five carries instead of a
+            // SLURL (2026-10-16): a viewer that reads the field as a URL loses
+            // every page this record is on.
+            slurl: Some(ExperienceLocation::Last),
             quota: 128,
             maturity: MATURITY_PG,
             ..ExperienceInfo::default()
@@ -158,6 +172,9 @@ pub fn catalogue() -> Vec<ExperienceInfo> {
             owner: agent_owner,
             description: "Pushes a sky at anyone who agrees to let it.".to_owned(),
             properties: ExperienceProperties(PROPERTY_GRID | PROPERTY_PRIVILEGED),
+            slurl: url::Url::parse("secondlife://Fake%20Grid/secondlife/Fake%20Grid/128/128/25")
+                .ok()
+                .map(ExperienceLocation::Slurl),
             quota: 256,
             maturity: MATURITY_PG,
             ..ExperienceInfo::default()
@@ -165,10 +182,11 @@ pub fn catalogue() -> Vec<ExperienceInfo> {
         ExperienceInfo {
             public_id: experience_key(OFFSET_ARENA),
             name: "Fake Grid Arena".to_owned(),
-            owner: Some(OwnerKey::Group(GroupKey::from(Uuid::from_u128(
-                EXPERIENCE_GROUP_ID,
-            )))),
-            description: "A group-owned experience, rated Moderate.".to_owned(),
+            // A group's experience names its owner too: every group record
+            // aditi served carried an `agent_id` beside the `group_id`.
+            owner: agent_owner,
+            group: Some(GroupKey::from(Uuid::from_u128(EXPERIENCE_GROUP_ID))),
+            description: "A group's experience, rated Moderate.".to_owned(),
             properties: ExperienceProperties(0),
             quota: 64,
             maturity: MATURITY_MATURE,
@@ -178,7 +196,7 @@ pub fn catalogue() -> Vec<ExperienceInfo> {
             public_id: experience_key(OFFSET_WORKSHOP),
             name: "Fake Grid Workshop".to_owned(),
             owner: agent_owner,
-            description: "Private and suspended: search must not list this one.".to_owned(),
+            description: "Private and suspended: search lists it all the same.".to_owned(),
             properties: ExperienceProperties(PROPERTY_PRIVATE | PROPERTY_SUSPENDED),
             quota: 0,
             maturity: MATURITY_PG,
@@ -217,12 +235,10 @@ pub fn catalogue() -> Vec<ExperienceInfo> {
 /// naming the wrong owner is a record a fetch can catch naming the wrong owner.
 ///
 /// The private one is the pair to the fixture resident's: an owner sees their
-/// own unpublished experience in the Owned tab, and search still does not list
-/// it. A tab that only ever shows what search shows cannot demonstrate that it
-/// is reading `AgentExperiences` rather than filtering a search.
+/// own unpublished experience in the Owned tab with its Private box ticked.
 #[must_use]
 pub fn agent_catalogue(agent: &AvatarIdentity) -> Vec<ExperienceInfo> {
-    let owner = Some(OwnerKey::Agent(agent.agent_id));
+    let owner = Some(agent.agent_id);
     vec![
         ExperienceInfo {
             public_id: experience_key(OFFSET_AGENT_STUDIO),
@@ -238,7 +254,7 @@ pub fn agent_catalogue(agent: &AvatarIdentity) -> Vec<ExperienceInfo> {
             public_id: experience_key(OFFSET_AGENT_DRAFTS),
             name: "Fake Grid Drafts".to_owned(),
             owner,
-            description: "Yours and private: listed as owned, never by search.".to_owned(),
+            description: "Yours and private: listed as owned and by search.".to_owned(),
             properties: ExperienceProperties(PROPERTY_PRIVATE),
             quota: 8,
             maturity: MATURITY_PG,
@@ -293,10 +309,9 @@ pub fn seed_catalogue(sim: &mut SimSession) {
 ///
 /// Every list is non-empty and no two are equal, so each of the floater's tabs
 /// shows something different; the shape is documented in the module docs. The
-/// blocked list carries the fixture resident's *private* experience, because a
-/// preference is the agent's own keyed entry rather than a search result —
-/// blocking something search will not show you is a thing a viewer can do, and
-/// a list that only ever holds searchable ids cannot prove it round-trips.
+/// blocked list carries the fixture resident's *private* experience: a
+/// preference is the agent's own keyed entry, which Second Life keeps for any
+/// id at all — aditi stored an Allow for an id no experience has (2026-10-16).
 pub fn seed_for_agent(sim: &mut SimSession, agent: &AvatarIdentity) {
     let mut owned = Vec::new();
     for record in agent_catalogue(agent) {
@@ -371,7 +386,7 @@ mod tests {
         for record in agent_catalogue(&agent) {
             assert_eq!(
                 record.owner,
-                Some(OwnerKey::Agent(agent.agent_id)),
+                Some(agent.agent_id),
                 "{} is listed as the agent's and owned by somebody else",
                 record.name
             );
@@ -403,27 +418,27 @@ mod tests {
         assert!(second.has_previous_page);
     }
 
-    /// The private record is in the catalogue and out of the search results —
-    /// the grid hides private experiences from its search surface.
+    /// The private record resolves by id **and** is listed by search, as
+    /// Second Life lists private experiences (aditi, 2026-10-16).
     #[test]
-    fn the_private_record_is_not_searchable() {
+    fn the_private_record_is_searchable() {
         let mut store = sl_proto::SimExperiences::default();
         for record in catalogue() {
             store.insert(record);
         }
-        let workshop = experience_key(4);
+        let workshop = experience_key(OFFSET_WORKSHOP);
         assert_eq!(
             store.infos(&[workshop]).first().map(|info| info.missing),
             Some(false),
-            "the private record should still resolve by id"
+            "the private record should resolve by id"
         );
         assert!(
-            !store
+            store
                 .find("workshop", 1)
                 .infos
                 .iter()
                 .any(|info| info.public_id == workshop),
-            "the private record should not be listed by search"
+            "the private record should be listed by search"
         );
     }
 
@@ -481,50 +496,31 @@ mod tests {
         );
     }
 
-    /// The agent's own records are in the store the search reads, so the public
-    /// one is findable and the private one is not — the Owned tab's two rows
-    /// answer differently to the one surface that filters.
+    /// The agent's own records are in the store the search reads, the private
+    /// one included, and both are owned.
     #[test]
-    fn the_agents_private_record_is_owned_but_not_searchable() {
+    fn the_agents_private_record_is_owned_and_searchable() {
         let agent = test_agent();
         let sim = seeded_session(&agent);
         let store = sim.experiences();
-        let found: Vec<_> = store
-            .find("fake grid", 1)
-            .infos
-            .iter()
-            .map(|info| info.public_id)
-            .collect();
-        assert!(
-            found.contains(&experience_key(OFFSET_AGENT_STUDIO)),
-            "the agent's public experience should be findable"
-        );
-        assert!(
-            !found.contains(&experience_key(OFFSET_AGENT_DRAFTS)),
-            "the agent's private experience should not be listed by search"
-        );
-        assert!(
-            store.owned().contains(&experience_key(OFFSET_AGENT_DRAFTS)),
-            "the agent's private experience should still be owned"
-        );
-    }
-
-    /// The blocked list holds an id search never offers — a preference is the
-    /// agent's own keyed entry, not a search result.
-    #[test]
-    fn a_blocked_experience_need_not_be_a_findable_one() {
-        let agent = test_agent();
-        let sim = seeded_session(&agent);
-        let (_allowed, blocked) = sim.experiences().agent_permissions();
-        let workshop = experience_key(OFFSET_WORKSHOP);
-        assert!(blocked.contains(&workshop));
-        assert!(
-            !sim.experiences()
-                .find("workshop", 1)
-                .infos
-                .iter()
-                .any(|info| info.public_id == workshop)
-        );
+        for (query, offset) in [
+            ("studio", OFFSET_AGENT_STUDIO),
+            ("drafts", OFFSET_AGENT_DRAFTS),
+        ] {
+            let id = experience_key(offset);
+            assert!(
+                store
+                    .find(query, 1)
+                    .infos
+                    .iter()
+                    .any(|info| info.public_id == id),
+                "the agent's {query} experience should be findable"
+            );
+            assert!(
+                store.owned().contains(&id),
+                "the agent's {query} experience should be owned"
+            );
+        }
     }
 
     /// The estate's default experience is seeded, resolvable by id, and in

@@ -5,7 +5,7 @@ topic: viewer
 status: ready
 origin: split out of [[viewer-experiences-floater]] when the profile window was
   built (2026-09-11)
-refs: [viewer-experiences-floater, viewer-social-group-profile]
+refs: [viewer-experiences-floater, viewer-social-group-profile, gridspec-experiences]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -27,8 +27,11 @@ yet:
   `LLFloaterGroupPicker`). The group picker now exists
   (`sl-viewer-pickers/src/group_picker.rs`, from
   [[viewer-region-estate-group-picker]]; audit 2026-10-15), so what remains
-  is the protocol half: `ExperienceUpdate` (`sl-wire/src/experience/types.rs`)
-  carries no `group_id` field though the cap takes one.
+  is the window half: since [[gridspec-experiences]] the record carries the
+  group beside the owner, the profile shows it in a Group row, and
+  `ExperienceUpdate` carries `group` — a save sends the record's `group_id`
+  back as the reference does. What remains is the Set Group button feeding
+  the picker's choice into that field.
 
 Until then the window **preserves** what it cannot show: the blob goes back to
 `UpdateExperience` byte-for-byte, and the owner is not part of the update at

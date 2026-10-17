@@ -10,6 +10,10 @@ control the camera, and so on, without prompting every time.
 > clearest SL-vs-OpenSim feature gaps. (See the
 > [Introduction](../introduction.md#what-we-are-talking-to).)
 
+What each grid actually sends — a record's fields as Second Life fills them,
+search paging, the preference and estate replies, and the refusals — is
+measured in [Grid Behaviour: Experiences](../gridspec/experiences.md).
+
 ## The model
 
 - An **experience** has metadata: a name, description, owner/group, a

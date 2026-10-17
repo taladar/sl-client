@@ -98,8 +98,8 @@ use sl_viewer_ui_core::skin::{DISABLED_TEXT_CLASS, TEXT_CLASS, set_state_class, 
 use std::collections::BTreeSet;
 
 use sl_client_bevy::{
-    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, GroupKey, OwnerKey, SlCommand,
-    SlEvent, SlSessionEvent, Uuid,
+    AgentKey, Command, ExperienceInfo, ExperienceKey, ExperiencePermission, SlCommand, SlEvent,
+    SlSessionEvent, Uuid,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 use sl_settings::{Scope, SettingValue};
@@ -121,7 +121,6 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
 use crate::skin_palette::SkinPalette;
-use crate::social::GroupsModel;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
@@ -1352,8 +1351,6 @@ fn ingest_experience_events(
 struct ExperienceNames<'w> {
     /// The avatar mirror, for an experience's owner.
     avatars: Res<'w, AvatarState>,
-    /// The group roster, for a group-owned experience.
-    groups: Res<'w, GroupsModel>,
     /// The settings the shown columns are read from.
     settings: Option<Res<'w, ViewerSettings>>,
 }
@@ -1412,11 +1409,7 @@ fn rebuild_experience_views(
     mut view: ResMut<ExperiencesView>,
     widgets: ExperienceListWidgets,
 ) {
-    let ExperienceNames {
-        avatars,
-        groups,
-        settings,
-    } = names;
+    let ExperienceNames { avatars, settings } = names;
     let ExperienceListWidgets { tables, mut lists } = widgets;
     let Some(ui) = ui else {
         return;
@@ -1427,7 +1420,7 @@ fn rebuild_experience_views(
             .and_then(|handles| tables.get(handles.table).ok())
             .map_or(0, TableState::sort_revision)
     });
-    let caches_moved = avatars.is_changed() || groups.is_changed() || translator.changed();
+    let caches_moved = avatars.is_changed() || translator.changed();
     if !caches_moved
         && view.built_revision == Some(state.revision)
         && view.built_log_revision == Some(log.revision())
@@ -1440,7 +1433,7 @@ fn rebuild_experience_views(
     view.built_sorts = sorts;
 
     for tab in ListTab::ALL {
-        let mut rows = render_rows(&state.infos, state.ids(tab), &avatars, &groups, &translator);
+        let mut rows = render_rows(&state.infos, state.ids(tab), &avatars, &translator);
         sort_experience_rows(&mut rows, &sort_keys(&ui, &tables, Pane::List(tab)));
         if let Some(slot) = view.lists.get_mut(list_index(tab)) {
             *slot = rows;
@@ -1460,7 +1453,7 @@ fn rebuild_experience_views(
                 .is_none_or(|info| info.maturity <= ceiling)
         })
         .collect();
-    let mut search = render_rows(&state.infos, &visible, &avatars, &groups, &translator);
+    let mut search = render_rows(&state.infos, &visible, &avatars, &translator);
     sort_experience_rows(&mut search, &sort_keys(&ui, &tables, Pane::Search));
     view.search = search;
 
@@ -1858,8 +1851,8 @@ pub fn spawn_experiences_specimen(
     let content = spawn_experiences_content(commands, parent, cx.font_size);
     let tab = ListTab::Allowed;
     let pane = pane_at(&content.panes, list_index(tab));
-    let group = GroupKey::from(Uuid::from_u128(0x6c));
-    let group_name = cx.text("Example Group");
+    let owner = AgentKey::from(Uuid::from_u128(0x6c));
+    let owner_name = cx.text("Example Resident");
     let infos: ExperienceInfos = [
         ("Sample Race Course", MATURITY_GENERAL),
         ("Test Adventure", MATURITY_MODERATE),
@@ -1872,7 +1865,7 @@ pub fn spawn_experiences_specimen(
         let info = ExperienceInfo {
             public_id: key,
             name: cx.text(name),
-            owner: Some(OwnerKey::Group(group)),
+            owner: Some(owner),
             maturity,
             ..ExperienceInfo::default()
         };
@@ -1894,9 +1887,9 @@ pub fn spawn_experiences_specimen(
         .collect();
     commands.queue(move |world: &mut World| {
         let drawn = world.run_system_once(move |mut commands: Commands, translator: Translator| {
-            let mut groups = GroupsModel::default();
-            groups.note_resolved_name(group, &group_name);
-            let mut rows = render_rows(&infos, &ids, &AvatarState::default(), &groups, &translator);
+            let mut avatars = AvatarState::default();
+            avatars.note_legacy_name(owner, &owner_name);
+            let mut rows = render_rows(&infos, &ids, &avatars, &translator);
             sort_experience_rows(&mut rows, &keys);
             // Each row's rating KEY, beside its (possibly untranslated) text:
             // this runs as the gallery spawns, before the locale bundle has

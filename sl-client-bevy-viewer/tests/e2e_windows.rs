@@ -10,6 +10,8 @@
 //!   the Key list with no Remove, two About Region windows on two regions each
 //!   get a picker of their own and only the one that asked takes the pick, and
 //!   a picker closes with its window;
+//! - an experience's profile shows the word Second Life stores for a home
+//!   location, and a group's experience its Group row;
 //! - a sky editor with unsaved changes asks before its ✕ closes it;
 //! - every clothing layer in the inventory shows its own icon;
 //! - About Landmark, opened from an inventory landmark, fills every row, shows
@@ -694,6 +696,99 @@ mod test {
                             .get(Locator::role(Role::ListItem).name_containing(DEFAULT_EXPERIENCE)),
                     )
                     .to_be_detached()
+                    .await?;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// The Avatar ▸ Experiences menu path.
+    const EXPERIENCES: [&str; 2] = ["menu-bar-avatar", "menu-bar-experiences"];
+
+    /// The fake grid's tour experience — [`PICKED_EXPERIENCE`], one the agent
+    /// has allowed — by id (`sl_fake_grid::experiences`, catalogue offset 1).
+    const TOUR_ID: u128 = 0x00E4_0001;
+
+    /// The fake grid's arena — [`LAND_EXPERIENCE`], a group's experience the
+    /// agent administers — by id (catalogue offset 3).
+    const ARENA_ID: u128 = 0x00E4_0003;
+
+    /// From the open Experiences window, open the profile of the experience
+    /// `(id, name)` listed on the tab `tab` (its panel `panel` and table
+    /// `table`), and answer the profile window once it names it.
+    async fn experience_profile(
+        alpha: &Viewer,
+        (tab, panel, table): (&str, u32, &str),
+        (id, name): (u128, &str),
+    ) -> Result<UiLocator, BodyError> {
+        let window = alpha.ui().window("experiences");
+        let _tab = window
+            .get(Locator::role(Role::Tab).name_key(tab))
+            .click()
+            .await?;
+        let pane = window.test_id(&format!("experiences-tabs:panel:{panel}"));
+        let _row = pane
+            .test_id(&format!("{table}:table"))
+            .get(Locator::role(Role::ListItem).name_containing(name))
+            .timeout(WAIT)
+            .click()
+            .await?;
+        let _profile = pane.test_id("experiences-action:profile").click().await?;
+        let profile = alpha
+            .ui()
+            .window(&format!("experience-profile#{}", Uuid::from_u128(id)));
+        let _named = alpha
+            .expect(&profile.get(Locator::role(Role::Text).name_containing(name)))
+            .timeout(WAIT)
+            .to_be_visible()
+            .await?;
+        Ok(profile)
+    }
+
+    /// **An experience's profile shows what Second Life sends**: the tour the
+    /// agent has allowed carries the word `last` as its home location — as
+    /// about one aditi record in five does — and reads "(last location)",
+    /// with no Group row; the arena the agent administers is a group's
+    /// experience and shows the Group row beside its owner.
+    #[test]
+    fn an_experience_profile_shows_its_location_word_and_its_group() -> Result<(), TestError> {
+        stage("experience_profile_fields")
+            .region(home())
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let _opened = alpha.menu_path(&EXPERIENCES).await?;
+                let _shown = alpha
+                    .expect(&alpha.ui().window("experiences"))
+                    .timeout(WAIT)
+                    .to_be_visible()
+                    .await?;
+                let group = |profile: &UiLocator| {
+                    profile.get(Locator::role(Role::Text).name_key("experience-profile-group"))
+                };
+                let tour = experience_profile(
+                    alpha,
+                    ("experiences-tab-allowed", 1, "experiences-allowed"),
+                    (TOUR_ID, PICKED_EXPERIENCE),
+                )
+                .await?;
+                let _last = alpha
+                    .expect(&tour.get(Locator::role(Role::Text).name_containing("(last location)")))
+                    .timeout(WAIT)
+                    .to_be_visible()
+                    .await?;
+                let _no_group = alpha.expect(&group(&tour)).to_be_hidden().await?;
+                // It sits over the Experiences window's tab strip.
+                let _closed = tour.test_id("floater-button:close").click().await?;
+                let arena = experience_profile(
+                    alpha,
+                    ("experiences-tab-admin", 3, "experiences-admin"),
+                    (ARENA_ID, LAND_EXPERIENCE),
+                )
+                .await?;
+                let _group = alpha
+                    .expect(&group(&arena))
+                    .timeout(WAIT)
+                    .to_be_visible()
                     .await?;
                 Ok(())
             })?;

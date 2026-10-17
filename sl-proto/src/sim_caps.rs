@@ -3063,13 +3063,19 @@ impl SimCaps {
             return CapsResponse::bad_request();
         };
         let found = sim.experiences().find(&text, page);
-        let neighbour = |offered: bool, step: i32| {
-            offered.then(|| find_experience_query(&text, page.saturating_add(step)))
-        };
+        // Second Life numbers the neighbours from the page it was asked for, not
+        // the one it clamped to: page 0 offers page 2 next, page 9 of 4 offers
+        // page 8 back (aditi, 2026-10-16).
+        let next = found
+            .has_next_page
+            .then(|| find_experience_query(&text, page.max(1).saturating_add(1)));
+        let previous = found
+            .has_previous_page
+            .then(|| find_experience_query(&text, page.saturating_sub(1)));
         CapsResponse::llsd_xml(build_experience_search_response(
             &found.infos,
-            neighbour(found.has_next_page, 1).as_deref(),
-            neighbour(found.has_previous_page, -1).as_deref(),
+            next.as_deref(),
+            previous.as_deref(),
         ))
     }
 
@@ -3180,8 +3186,9 @@ impl SimCaps {
     /// to the stored record ([`SimSession::apply_experience_update`]), and
     /// echoes the updated record in the wrapped `{ experience_keys }` form
     /// (the client folds the first record into its updated-experience
-    /// event). An unknown `public_id` → `404`; a malformed body → `400`;
-    /// wrong method → `405`.
+    /// event). An experience the agent does not administer (an unknown one
+    /// included) → `403` with Second Life's sentence; a malformed body →
+    /// `400`; wrong method → `405`.
     fn dispatch_update_experience(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         if request.method != "POST" {
             return CapsResponse::method_not_allowed();
@@ -3192,6 +3199,18 @@ impl SimCaps {
         let Ok(update) = parse_update_experience_request(body) else {
             return CapsResponse::bad_request();
         };
+        // Second Life refuses an edit by anyone who does not administer the
+        // experience with a 403 and a sentence, not LLSD (aditi, 2026-10-16).
+        if !sim.experiences().is_admin(update.public_id) {
+            let agent = sim.agent_id().map_or_else(Uuid::nil, |agent| agent.uuid());
+            return CapsResponse::words(
+                403,
+                &format!(
+                    "Agent {agent} is not an admin for experience {}",
+                    update.public_id
+                ),
+            );
+        }
         match sim.apply_experience_update(update) {
             Some(updated) => CapsResponse::llsd_xml(build_experience_infos_response(&[updated])),
             None => CapsResponse::not_found(),

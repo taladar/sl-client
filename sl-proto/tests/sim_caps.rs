@@ -4111,7 +4111,7 @@ mod test {
         experiences.insert(ExperienceInfo {
             public_id: exp_key(EXP_A),
             name: "Magic Quest".to_owned(),
-            owner: Some(OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1)))),
+            owner: Some(AgentKey::from(uuid::Uuid::from_u128(1))),
             description: "A quest of magic".to_owned(),
             quota: 128,
             maturity: 13,
@@ -4126,9 +4126,8 @@ mod test {
         experiences.insert(ExperienceInfo {
             public_id: exp_key(EXP_C),
             name: "Tour Guide".to_owned(),
-            owner: Some(OwnerKey::Group(GroupKey::from(uuid::Uuid::from_u128(
-                EXP_GROUP,
-            )))),
+            owner: Some(AgentKey::from(uuid::Uuid::from_u128(1))),
+            group: Some(GroupKey::from(uuid::Uuid::from_u128(EXP_GROUP))),
             ..ExperienceInfo::default()
         });
         experiences.set_agent_permissions(vec![exp_key(EXP_A)], vec![exp_key(EXP_B)]);
@@ -4181,7 +4180,7 @@ mod test {
                 );
                 assert_eq!(
                     infos.first().and_then(|info| info.owner),
-                    Some(OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1))))
+                    Some(AgentKey::from(uuid::Uuid::from_u128(1)))
                 );
             }
             other => return Err(format!("expected ExperienceInfo, got {other:?}").into()),
@@ -4189,20 +4188,22 @@ mod test {
         Ok(())
     }
 
-    /// The `FindExperienceByName` GET matches case-insensitively, hides the
-    /// private record, and answers an empty second page. The paging markers
-    /// come through the fold too: a single-page result offers neither
-    /// neighbour, and page 2 offers only the way back.
+    /// The `FindExperienceByName` GET matches case-insensitively, lists the
+    /// private record as Second Life does, and answers page 2 of a one-page
+    /// result with that page again (aditi clamps). The paging markers come
+    /// through the fold too: a single-page result offers neither neighbour,
+    /// and page 2 offers only the way back.
     #[test]
-    fn find_experience_by_name_pages_and_hides_private() -> Result<(), TestError> {
+    fn find_experience_by_name_pages_and_lists_private() -> Result<(), TestError> {
         let mut caps = new_caps()?;
         let mut sim = new_sim();
         seed_experiences(&mut sim);
         let now = Instant::now();
         let mut client = new_client()?;
         let cap_path = granted_cap_path(&caps, CAP_FIND_EXPERIENCE_BY_NAME)?;
-        for (page, expected, previous) in [(1, vec![exp_key(EXP_A)], false), (2, Vec::new(), true)]
-        {
+        // "Magic Dungeon" (private) sorts before "Magic Quest".
+        let both = vec![exp_key(EXP_B), exp_key(EXP_A)];
+        for (page, expected, previous) in [(1, both.clone(), false), (2, both, true)] {
             let suffix = find_experience_query("mAgIc", page);
             let (path, query) = split_suffix(&cap_path, &suffix);
             let events = fold_into_client(
@@ -4556,6 +4557,7 @@ mod test {
             properties: 0,
             slurl: None,
             extended_metadata: String::new(),
+            group: None,
         });
         let events = fold_into_client(
             &mut caps,
@@ -4573,10 +4575,7 @@ mod test {
                 assert_eq!(info.maturity, 21);
                 // Server-controlled fields survive the edit untouched.
                 assert_eq!(info.quota, 128);
-                assert_eq!(
-                    info.owner,
-                    Some(OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1))))
-                );
+                assert_eq!(info.owner, Some(AgentKey::from(uuid::Uuid::from_u128(1))));
             }
             other => return Err(format!("expected ExperienceUpdated, got {other:?}").into()),
         }
@@ -4709,8 +4708,9 @@ mod test {
     }
 
     /// The experience handlers' status contract: wrong verbs answer `405`,
-    /// malformed queries/bodies `400`, and an `UpdateExperience` targeting
-    /// an unknown record `404`. (`GetExperienceInfo` with no query is the
+    /// malformed queries/bodies `400`, and an `UpdateExperience` by an agent
+    /// that does not administer the record — an unknown one included — `403`,
+    /// as Second Life refuses it. (`GetExperienceInfo` with no query is the
     /// documented lenient exception — `200` with no records.)
     #[test]
     fn experience_handlers_reject_wrong_methods_and_bad_requests() -> Result<(), TestError> {
@@ -4775,7 +4775,7 @@ mod test {
         assert_eq!(status, 400);
 
         // UpdateExperience: GET is 405, a malformed body 400, an unknown
-        // target 404.
+        // target or one the agent does not administer 403.
         let path = granted_cap_path(&caps, CAP_UPDATE_EXPERIENCE)?;
         let (status, _) = respond(&mut caps, &mut sim, &get(&path, None))?;
         assert_eq!(status, 405);
@@ -4789,9 +4789,26 @@ mod test {
             properties: 0,
             slurl: None,
             extended_metadata: String::new(),
+            group: None,
         });
         let (status, _) = respond(&mut caps, &mut sim, &post(&path, &unknown))?;
-        assert_eq!(status, 404);
+        assert_eq!(status, 403);
+        let not_ours = build_update_experience_request(&ExperienceUpdate {
+            public_id: exp_key(EXP_B),
+            name: "Taken".to_owned(),
+            description: String::new(),
+            maturity: 13,
+            properties: 0,
+            slurl: None,
+            extended_metadata: String::new(),
+            group: None,
+        });
+        let (status, body) = respond(&mut caps, &mut sim, &post(&path, &not_ours))?;
+        assert_eq!(status, 403);
+        assert!(
+            body.contains("is not an admin for experience"),
+            "the refusal says why, as Second Life's does"
+        );
 
         // RegionExperiences: PUT is 405, a malformed POST body 400.
         let path = granted_cap_path(&caps, CAP_REGION_EXPERIENCES)?;

@@ -196,47 +196,43 @@ impl SimExperiences {
             .collect()
     }
 
-    /// Serves one `FindExperienceByName` page: records whose name contains
-    /// `text` case-insensitively, excluding invalid and private experiences
-    /// (the grid's search surface only lists public ones), sorted by name
-    /// with an id tie-break, paged 1-based by [`SEARCH_PAGE_SIZE`] (the
-    /// reference viewer's picker starts at page 1). A page below 1 answers
-    /// empty.
+    /// Serves one `FindExperienceByName` page as Second Life does (measured
+    /// on aditi, 2026-10-16): records whose name contains `text`
+    /// case-insensitively, invalid ones excluded — **private** ones are listed,
+    /// as are disabled and suspended ones — sorted by name with an id
+    /// tie-break, paged 1-based by [`SEARCH_PAGE_SIZE`].
     ///
-    /// The answer carries the two paging markers as well
-    /// ([`ExperienceSearchPage`]), because only the grid can state them: it has
-    /// counted the matches this page was cut from, and the page itself cannot
-    /// say whether anything came after it. `has_previous_page` is simply
-    /// "`page` is not the first one" — the page a client would go back to
-    /// exists whether or not this one has any rows on it.
+    /// A page outside the result set is **clamped** into it rather than
+    /// answered empty: page 0 answers page 1's records and a page past the end
+    /// the last page's. The markers follow the requested number: there is a
+    /// previous page whenever `page` is above 1 (page 9 of 4 offers page 8),
+    /// and a next one only while the page actually shown is short of the last.
+    ///
+    /// The answer carries the two markers ([`ExperienceSearchPage`]) because
+    /// only the grid can state them: it has counted the matches this page was
+    /// cut from, and the page itself cannot say whether anything came after it.
     #[must_use]
     pub fn find(&self, text: &str, page: i32) -> ExperienceSearchPage {
-        if page < 1 {
-            return ExperienceSearchPage::default();
-        }
         let needle = text.to_lowercase();
         let mut matches: Vec<&ExperienceInfo> = self
             .records
             .values()
-            .filter(|info| !info.properties.is_invalid() && !info.properties.is_private())
+            .filter(|info| !info.properties.is_invalid())
             .filter(|info| info.name.to_lowercase().contains(&needle))
             .collect();
         matches.sort_by(|a, b| a.name.cmp(&b.name).then(a.public_id.cmp(&b.public_id)));
-        let page_size = usize::try_from(SEARCH_PAGE_SIZE).unwrap_or_default();
-        let skipped = usize::try_from(page.saturating_sub(1))
-            .unwrap_or_default()
-            .saturating_mul(page_size);
-        // One past the last match this page carries — anything beyond it is the
-        // next page, which is the whole of what `next_page_url` states.
-        let end = matches.len().min(skipped.saturating_add(page_size));
+        let page_size = usize::try_from(SEARCH_PAGE_SIZE).unwrap_or(1).max(1);
+        let pages = matches.len().div_ceil(page_size).max(1);
+        let requested = usize::try_from(page).unwrap_or(0);
+        let shown = requested.clamp(1, pages);
         ExperienceSearchPage {
             infos: matches
                 .iter()
-                .skip(skipped)
+                .skip(shown.saturating_sub(1).saturating_mul(page_size))
                 .take(page_size)
                 .map(|info| (*info).clone())
                 .collect(),
-            has_next_page: matches.len() > end,
+            has_next_page: shown < pages,
             has_previous_page: page > 1,
         }
     }
@@ -350,6 +346,7 @@ impl SimExperiences {
         record.maturity = update.maturity;
         record.properties = ExperienceProperties(update.properties);
         record.slurl.clone_from(&update.slurl);
+        record.group = update.group;
         record
             .extended_metadata
             .clone_from(&update.extended_metadata);
@@ -419,8 +416,9 @@ mod tests {
         );
     }
 
-    /// Search matches case-insensitively, hides private and invalid
-    /// records, and pages 1-based by [`SEARCH_PAGE_SIZE`].
+    /// Search matches case-insensitively, lists private records as Second
+    /// Life does, hides invalid ones, and clamps a page outside the results
+    /// into them.
     #[test]
     fn find_filters_and_pages() {
         let mut store = SimExperiences::default();
@@ -440,11 +438,13 @@ mod tests {
                 .iter()
                 .map(|info| info.public_id)
                 .collect::<Vec<_>>(),
-            vec![key(1)]
+            vec![key(2), key(1)]
         );
-        assert_eq!(store.find("magic", 2).infos, Vec::new());
-        assert_eq!(store.find("magic", 0), ExperienceSearchPage::default());
-        assert_eq!(store.find("magic", -3), ExperienceSearchPage::default());
+        for page in [0, -3, 2] {
+            assert_eq!(store.find("magic", page).infos, hits.infos, "page {page}");
+        }
+        assert!(!store.find("magic", 0).has_previous_page);
+        assert!(store.find("magic", 2).has_previous_page);
     }
 
     /// A full first page spills the remainder onto page 2, sorted by name
@@ -489,10 +489,10 @@ mod tests {
         let only = store.find("quest", 1);
         assert_eq!(only.infos.len(), page_size);
         assert!(!only.has_next_page);
-        // Asking for the page past the end answers empty, and still offers the
-        // way back.
+        // Asking for the page past the end answers the last page again, as
+        // aditi does, and still offers the way back.
         let past = store.find("quest", 2);
-        assert_eq!(past.infos, Vec::new());
+        assert_eq!(past.infos, only.infos);
         assert!(!past.has_next_page);
         assert!(past.has_previous_page);
     }
@@ -532,6 +532,7 @@ mod tests {
             properties: sl_wire::PROPERTY_GRID,
             slurl: None,
             extended_metadata: "<meta />".to_owned(),
+            group: None,
         };
         let updated = store.apply_update(&update);
         assert_eq!(

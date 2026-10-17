@@ -213,6 +213,9 @@ pub const OFFLINE_CASES: &[&str] = &[
     "friends-presence",
     "groups",
     "display-names",
+    "experience-info",
+    "experience-permissions",
+    "experience-admin-contributor",
 ];
 
 /// The offline cases meaningful on **one** fake flavour only, each with the
@@ -384,6 +387,7 @@ impl FakeGridHarness {
         Fixtures::default()
             .with_other_avatar(other_avatar_id())
             .with_census_group(GroupKey::from(Uuid::from_u128(CENSUS_GROUP)))
+            .with_experience(sl_fake_grid::experiences::stranger_experience())
     }
 
     /// The synthesised credentials: three avatars, each naming this grid's

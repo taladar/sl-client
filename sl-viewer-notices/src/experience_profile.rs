@@ -83,8 +83,8 @@ use sl_viewer_ui_core::skin::{
 
 use bevy::ecs::system::RunSystemOnce as _;
 use sl_client_bevy::{
-    AgentKey, Command, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, OwnerKey, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity,
+    AgentKey, Command, ExperienceInfo, ExperienceKey, ExperienceLocation, ExperiencePermission,
+    ExperienceProperties, ExperienceUpdate, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity,
     SlSessionEvent, Uuid,
 };
 
@@ -257,7 +257,7 @@ struct EditBuffer {
     /// The chosen rating, as a combo index.
     maturity: usize,
     /// The home location, or `None` for the reference's cleared SLURL.
-    location: Option<url::Url>,
+    location: Option<ExperienceLocation>,
     /// Raised whenever the two typed fields should be re-seeded from the record
     /// — entering edit mode, or a record arriving while not editing. Consumed by
     /// the paint pass, which otherwise never writes them (see
@@ -373,6 +373,9 @@ impl ExperienceProfileState {
             // Carried through untouched: this window does not decode the blob,
             // so it must not be the thing that deletes it (see the module docs).
             extended_metadata: info.extended_metadata.clone(),
+            // Sent back as read, as the reference's save sends the record's
+            // `group_id`: an update without it could be taken as "no group".
+            group: info.group,
         })
     }
 }
@@ -401,6 +404,10 @@ struct ExperienceProfileUi {
     rating_text: Entity,
     /// The owner name link.
     owner_link: Entity,
+    /// The group row, shown only for an experience that names a group.
+    group_row: Entity,
+    /// The group name link.
+    group_link: Entity,
     /// The home-location value (a SLURL or the "not set" note).
     location_text: Entity,
     /// The grid-wide / land-scoped line.
@@ -584,6 +591,8 @@ fn spawn_profile_content(
         description_text: view.description_text,
         rating_text: view.rating_text,
         owner_link: view.owner_link,
+        group_row: view.group_row,
+        group_link: view.group_link,
         location_text: view.location_text,
         scope_text: view.scope_text,
         privileged_text: view.privileged_text,
@@ -630,11 +639,12 @@ pub fn spawn_experience_profile_specimen(
             "An example experience that teleports visitors between the sample \
              gardens and keeps score for the test course.",
         ),
-        owner: Some(OwnerKey::Agent(AgentKey::from(Uuid::from_u128(0x5b)))),
+        owner: Some(AgentKey::from(Uuid::from_u128(0x5b))),
         properties: ExperienceProperties(sl_types::experience::PROPERTY_GRID),
         maturity: MATURITY_MODERATE,
         slurl: url::Url::parse("http://maps.secondlife.com/secondlife/Test%20Region/128/128/25")
-            .ok(),
+            .ok()
+            .map(ExperienceLocation::Slurl),
         ..ExperienceInfo::default()
     });
     state.reset_edit_buffer();
@@ -663,6 +673,10 @@ struct ViewPanel {
     rating_text: Entity,
     /// The owner name link.
     owner_link: Entity,
+    /// The group row.
+    group_row: Entity,
+    /// The group name link.
+    group_link: Entity,
     /// The home-location value.
     location_text: Entity,
     /// The scope line.
@@ -719,6 +733,17 @@ fn build_view_panel(commands: &mut Commands, parent: Entity, font_size: f32) -> 
     let owner_link = spawn_name_link(
         commands,
         owner_row,
+        NameLinkSpec::new(
+            "experience-profile-owner-loading",
+            "experience-profile-owner-none",
+        ),
+    );
+    // A group's experience names its group beside its owner; the reference
+    // shows the row only then (`PNL_GROUP`, `refreshExperience`).
+    let group_row = spawn_caption_row(commands, panel, "experience-profile-group", font_size);
+    let group_link = spawn_name_link(
+        commands,
+        group_row,
         NameLinkSpec::new(
             "experience-profile-owner-loading",
             "experience-profile-owner-none",
@@ -810,6 +835,8 @@ fn build_view_panel(commands: &mut Commands, parent: Entity, font_size: f32) -> 
         description_text,
         rating_text,
         owner_link,
+        group_row,
+        group_link,
         location_text,
         scope_text,
         privileged_text,
@@ -1265,7 +1292,7 @@ fn on_profile_button(
         ProfileButton::SetLocation => {
             match current_location(&position, &regions) {
                 Some(location) => {
-                    state.edit.location = Some(location);
+                    state.edit.location = Some(ExperienceLocation::Slurl(location));
                     state.status = None;
                 }
                 None => state.status = Some("experience-profile-no-location"),
@@ -1511,6 +1538,13 @@ fn paint_profile_windows(
             Some(ui.owner_link),
             NameTarget::from_option(info.is_some(), info.and_then(|info| info.owner)),
         );
+        let group = info.and_then(|info| info.group);
+        show(&mut nodes, ui.group_row, group.is_some());
+        set_name_link(
+            &mut links,
+            Some(ui.group_link),
+            NameTarget::from_option(info.is_some(), group),
+        );
         set_node_text(
             &mut texts,
             ui.location_text,
@@ -1597,12 +1631,16 @@ fn experience_display_name(info: &ExperienceInfo, translator: &Translator) -> St
     }
 }
 
-/// A home-location SLURL rendered for display, or the "not set" note.
-fn location_text(slurl: Option<&url::Url>, translator: &Translator) -> String {
-    slurl.map_or_else(
-        || translator.get("experience-profile-location-none"),
-        url::Url::to_string,
-    )
+/// A home location rendered for display, or the "not set" note. The two
+/// location words Second Life also stores there (`last` on about one aditi
+/// record in five) read as what they mean rather than as a bare word.
+fn location_text(location: Option<&ExperienceLocation>, translator: &Translator) -> String {
+    match location {
+        None => translator.get("experience-profile-location-none"),
+        Some(ExperienceLocation::Last) => translator.get("experience-profile-location-last"),
+        Some(ExperienceLocation::Home) => translator.get("experience-profile-location-home"),
+        Some(ExperienceLocation::Slurl(url)) => url.to_string(),
+    }
 }
 
 /// Write an edit field's value, only on a real change (so a repaint never moves
@@ -1708,14 +1746,18 @@ mod tests {
     }
 
     /// A Save writes the two toggles back into the bitfield without disturbing
-    /// any other bit, and carries the opaque extended metadata through
-    /// verbatim — the thing this window must not be able to delete.
+    /// any other bit, and carries the opaque extended metadata and the group
+    /// through verbatim — the things this window must not be able to delete.
     #[test]
     fn update_preserves_other_bits_and_the_metadata_blob() -> Result<(), Box<dyn core::error::Error>>
     {
         // A bit this window knows nothing about, alongside DISABLED.
         let foreign = 0x4000;
         let mut state = state_with(foreign | PROPERTY_DISABLED, MATURITY_GENERAL);
+        let group = sl_client_bevy::GroupKey::from(Uuid::from_u128(0x6a));
+        if let Some(info) = state.info.as_mut() {
+            info.group = Some(group);
+        }
         state.edit.enabled = true;
         state.edit.private = true;
         state.edit.maturity = 2;
@@ -1730,6 +1772,7 @@ mod tests {
         assert_eq!(update.properties & PROPERTY_PRIVATE, PROPERTY_PRIVATE);
         assert_eq!(update.properties & foreign, foreign);
         assert_eq!(update.extended_metadata, "<llsd><map/></llsd>");
+        assert_eq!(update.group, Some(group));
         Ok(())
     }
 

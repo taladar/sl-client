@@ -7,7 +7,7 @@ use super::{
 use crate::WireError;
 use crate::llsd::{Llsd, LlsdError, parse_llsd_xml};
 use crate::url::{percent_decode, query_param, url_query};
-use sl_types::key::ExperienceKey;
+use sl_types::key::{ExperienceKey, GroupKey};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -174,8 +174,13 @@ pub fn parse_update_experience_request(xml: &str) -> Result<ExperienceUpdate, Wi
         description: string("description")?,
         maturity: root.field_i32("maturity", "maturity")?.unwrap_or(0),
         properties: root.field_i32("properties", "properties")?.unwrap_or(0),
-        slurl: crate::optional_url_from_wire("slurl", &string("slurl")?)?,
+        slurl: super::ExperienceLocation::from_wire("slurl", &string("slurl")?)?,
         extended_metadata: string("extended_metadata")?,
+        group: root
+            .get("group_id")
+            .and_then(llsd_uuid)
+            .filter(|id| !id.is_nil())
+            .map(GroupKey::from),
     })
 }
 
@@ -206,6 +211,19 @@ fn uuid_array_llsd(ids: &[ExperienceKey]) -> Llsd {
     Llsd::Array(ids.iter().map(|id| Llsd::Uuid(id.uuid())).collect())
 }
 
+/// An id list as Second Life writes it in the preference and region replies:
+/// an empty list is `<undef/>`, not an empty array (measured on aditi,
+/// 2026-10-16 — `GetExperiences`, `ExperiencePreferences` and
+/// `RegionExperiences` all answer so, while the relationship lists of
+/// [`build_experience_ids_response`] send `[]`). Both decode to an empty list.
+fn uuid_list_or_undef(ids: &[ExperienceKey]) -> Llsd {
+    if ids.is_empty() {
+        Llsd::Undef
+    } else {
+        uuid_array_llsd(ids)
+    }
+}
+
 /// Builds a `GetExperienceInfo` / `FindExperienceByName` reply
 /// (`{ experience_keys, error_ids }`) from a list of records — the inverse of
 /// [`parse_experience_infos`](crate::parse_experience_infos). Records flagged [`missing`](ExperienceInfo::missing)
@@ -224,7 +242,8 @@ fn experience_infos_map(infos: &[ExperienceInfo]) -> HashMap<String, Llsd> {
     let mut errors = Vec::new();
     for info in infos {
         if info.missing {
-            errors.push(Llsd::Uuid(info.public_id.uuid()));
+            // As strings, the way aditi writes them; the id decoder takes both.
+            errors.push(Llsd::String(info.public_id.to_string()));
         } else {
             keys.push(info.to_llsd());
         }
@@ -291,35 +310,36 @@ pub fn build_experience_permissions_response(
     blocked: &[ExperienceKey],
 ) -> String {
     Llsd::Map(HashMap::from([
-        ("experiences".to_owned(), uuid_array_llsd(allowed)),
-        ("blocked".to_owned(), uuid_array_llsd(blocked)),
+        ("experiences".to_owned(), uuid_list_or_undef(allowed)),
+        ("blocked".to_owned(), uuid_list_or_undef(blocked)),
     ]))
     .to_llsd_xml()
 }
 
-/// Builds a `RegionExperiences` reply (`{ allowed, blocked, trusted }`, plus a
-/// `default` when the estate has one) — the inverse of
+/// Builds a `RegionExperiences` reply (`{ allowed, blocked, trusted }`, the
+/// estate's `default`, and a `disabled` key) — the inverse of
 /// [`parse_region_experiences`]. (The reply shares its shape with the POST body
 /// that [`build_region_experiences_request`](crate::build_region_experiences_request) writes.)
 ///
-/// An estate with no default experience is written as **no key at all**, not as
-/// a null id: the reference reads the key by presence
-/// (`LLPanelRegionExperiences::processResponse` guards it with
-/// `content.has("default")`) and only clears the sticky row it drives when the
-/// id it decodes is null — a `default` of `00000000-…` would therefore say the
-/// same thing at more length, and any grid that sends the key at all sends a
-/// real id.
+/// Written the way Second Life writes it (aditi, 2026-10-16): `default` is on
+/// every reply and holds the **nil** id for an estate with no default — which
+/// the reference reads as no default (`mDefaultExperience.notNull()` guards the
+/// sticky trusted row) — an empty list is `<undef/>`, and a `disabled` key rides
+/// along as `<undef/>`. The reference never reads `disabled`; it is written so
+/// the reply has the grid's shape, not because anything here gives it meaning.
 #[must_use]
 pub fn build_region_experiences_response(lists: &RegionExperienceLists) -> String {
-    let mut map = HashMap::from([
-        ("allowed".to_owned(), uuid_array_llsd(&lists.allowed)),
-        ("blocked".to_owned(), uuid_array_llsd(&lists.blocked)),
-        ("trusted".to_owned(), uuid_array_llsd(&lists.trusted)),
-    ]);
-    if let Some(default_experience) = lists.default_experience {
-        let _previous = map.insert("default".to_owned(), Llsd::Uuid(default_experience.uuid()));
-    }
-    Llsd::Map(map).to_llsd_xml()
+    let default_experience = lists
+        .default_experience
+        .map_or_else(Uuid::nil, |default_experience| default_experience.uuid());
+    Llsd::Map(HashMap::from([
+        ("allowed".to_owned(), uuid_list_or_undef(&lists.allowed)),
+        ("blocked".to_owned(), uuid_list_or_undef(&lists.blocked)),
+        ("trusted".to_owned(), uuid_list_or_undef(&lists.trusted)),
+        ("default".to_owned(), Llsd::Uuid(default_experience)),
+        ("disabled".to_owned(), Llsd::Undef),
+    ]))
+    .to_llsd_xml()
 }
 
 /// Builds an `ExperienceQuery` reply (`{ experiences: { "<id>": bool, … } }`) —

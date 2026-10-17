@@ -18,8 +18,12 @@ pub(crate) fn run_group_experiences(
     asset_tx: &Sender<SessionEvent>,
 ) {
     if let Some(llsd) = blocking_get_llsd(url, CAP_GROUP_EXPERIENCES) {
-        let Ok(experience_ids) = parse_experience_ids(&llsd) else {
-            return;
+        let experience_ids = match parse_experience_ids(&llsd) {
+            Ok(ids) => ids,
+            Err(error) => {
+                tracing::warn!(capability = CAP_GROUP_EXPERIENCES, %error, "a CAPS GET reply did not decode");
+                return;
+            }
         };
         deliver(
             asset_tx,
@@ -48,8 +52,12 @@ pub(crate) fn run_experience_status(
     let Some(llsd) = blocking_get_llsd(url, cap) else {
         return;
     };
-    let Ok(status) = parse_experience_status(&llsd) else {
-        return;
+    let status = match parse_experience_status(&llsd) {
+        Ok(status) => status,
+        Err(error) => {
+            tracing::warn!(capability = cap, %error, "a CAPS GET reply did not decode");
+            return;
+        }
     };
     let event = if admin {
         SessionEvent::ExperienceAdminStatus {
