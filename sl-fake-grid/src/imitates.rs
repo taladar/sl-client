@@ -388,6 +388,12 @@ impl ImitatedGrid {
                 adult_listing_bits: sl_proto::AdultListingBits::AdultAndMature,
                 list_update_sets_use_flag: false,
                 empty_list_placeholder_names_its_list: false,
+                land_change_reaches_region: false,
+                not_for_sale_told: Some("Unable to buy, this parcel is not for sale."),
+                deed_refused_told: Some("Unable to deed parcel to group."),
+                abandon_marks_abandoned: true,
+                pass_needs_pass_list: false,
+                pass_sale_told: Some("You purchased a pass."),
             },
             Self::OpenSim => ParcelPolicy {
                 answers_request_by_id: false,
@@ -401,6 +407,12 @@ impl ImitatedGrid {
                 adult_listing_bits: sl_proto::AdultListingBits::AdultOnly,
                 list_update_sets_use_flag: true,
                 empty_list_placeholder_names_its_list: true,
+                land_change_reaches_region: true,
+                not_for_sale_told: None,
+                deed_refused_told: None,
+                abandon_marks_abandoned: false,
+                pass_needs_pass_list: true,
+                pass_sale_told: None,
             },
         }
     }
@@ -2229,6 +2241,34 @@ pub struct ParcelPolicy {
     /// carries the list's own bit in its `Flags`. OpenSim's does; Second
     /// Life's is `0` (both measured by `parcel-access-list`, 2026-10-05).
     pub empty_list_placeholder_names_its_list: bool,
+    /// Whether a changed parcel's record — an About Land save, a purchase, a
+    /// deed, an abandonment, a reclaim — is pushed to every avatar in the
+    /// region, the ones not standing on it under `-10000`. OpenSim's
+    /// `UpdateLandProperties` and `SendLandUpdateToAvatars` do (measured by
+    /// `land-transactions`, 2026-10-17); Second Life is unmeasured for an
+    /// owner's change — the test avatars own no land there — and keeps the
+    /// occupants-only reading.
+    pub land_change_reaches_region: bool,
+    /// What a buyer is told when it buys land that is not for sale: Second
+    /// Life alerts and re-sends the overlay, OpenSim says nothing (both
+    /// measured by `land-transactions`, 2026-10-17).
+    pub not_for_sale_told: Option<&'static str>,
+    /// What an agent is told when it deeds land it may not: Second Life
+    /// alerts, OpenSim says nothing (`land-transactions`, 2026-10-17).
+    pub deed_refused_told: Option<&'static str>,
+    /// Whether abandoning land marks it abandoned. OpenSim's
+    /// `ClientOnParcelAbandonRequest` hands it to the estate owner and leaves
+    /// its status alone (`land-transactions`, 2026-10-17); Second Life is
+    /// unmeasured and keeps the reference viewer's `OS_ABANDONED`.
+    pub abandon_marks_abandoned: bool,
+    /// Whether a pass is sold only by a parcel with the pass list switched
+    /// on. OpenSim's `ClientParcelBuyPass` requires it; Second Life sold a
+    /// pass to the aditi sandbox off its price alone, the flag off
+    /// (`land-transactions`, 2026-10-17).
+    pub pass_needs_pass_list: bool,
+    /// What the buyer of a pass is told: Second Life alerts "You purchased a
+    /// pass.", OpenSim says nothing (`land-transactions`, 2026-10-17).
+    pub pass_sale_told: Option<&'static str>,
 }
 
 impl ParcelPolicy {

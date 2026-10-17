@@ -1119,7 +1119,9 @@ pub enum Command {
         price: i32,
         /// The parcel area in m².
         area: i32,
-        /// The group to buy for (`None` for a personal purchase).
+        /// The group the buy names: the group bought for, or — as the
+        /// reference viewer sends a personal purchase — the buyer's active
+        /// group, which OpenSim makes the land's group.
         group_id: Option<GroupKey>,
         /// Whether the purchase is group-owned.
         is_group_owned: bool,

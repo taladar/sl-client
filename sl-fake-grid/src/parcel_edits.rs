@@ -25,14 +25,14 @@ use std::time::Instant;
 
 use sl_proto::{
     LandStatExtended, LandStatItem, LandStatReportType, ParcelAccessFlags, ParcelAccessScope,
-    ParcelInfo, ParcelObjectOwner, ParcelReturnType, ParcelStatus, ParcelUpdate, RegionIdentity,
+    ParcelInfo, ParcelObjectOwner, ParcelReturnType, ParcelUpdate, RegionIdentity,
     RegionLocalParcelId, ServerEvent, SimSession, pcode,
 };
 use sl_types::key::{AgentKey, OwnerKey};
 use sl_types::map::RegionCoordinates;
-use sl_types::money::LindenAmount;
 
 use crate::imitates::{EditEcho, ParcelPolicy};
+use crate::land_sales;
 use crate::world::{AvatarIdentity, RegionChange, SceneFixtures};
 
 /// The sequence id of an unsolicited parcel push — what a simulator re-sends a
@@ -72,51 +72,110 @@ pub(crate) fn answer_parcel_edit(
             };
             return Some(echo_parcel(world, update.local_id, echo, sim));
         }
-        // A purchase: the buyer owns it and it comes off the market. The fake
-        // grid charges nobody — its economy is a price list, not a ledger — so
-        // the price the client believes it is paying is noted and dropped.
+        // A purchase, made only of land for sale to the buyer at its price:
+        // the buyer owns it, under the group its buy names, and it comes off
+        // the market. The fake grid charges nobody -- its economy is a price
+        // list, not a ledger -- so the price is checked and nothing is moved.
         ServerEvent::ParcelBought {
             local_id,
             group_id,
             is_group_owned,
+            price,
             ..
         } => {
-            let owner = match (is_group_owned, group_id) {
-                (true, Some(group)) => OwnerKey::Group(*group),
-                _ => OwnerKey::Agent(agent.agent_id),
+            let Some(parcel) = world.parcel_mut(*local_id) else {
+                return Some(Vec::new());
             };
-            set_owner(world, *local_id, owner, ParcelStatus::Leased);
-            return Some(push_parcel(world, *local_id, sim));
+            match land_sales::check_buy(parcel, agent.agent_id, price) {
+                Ok(()) => {
+                    let owner = match (is_group_owned, group_id) {
+                        (true, Some(group)) => OwnerKey::Group(*group),
+                        _ => OwnerKey::Agent(agent.agent_id),
+                    };
+                    land_sales::change_hands(parcel, owner, *group_id);
+                    return Some(hands_changed(world, *local_id, agent, sim, now));
+                }
+                Err(land_sales::BuyRefused::NotForSale) => {
+                    if let Some(told) = policy.not_for_sale_told {
+                        tell(sim, told, now);
+                        resend_overlay(world, agent, sim, now);
+                    }
+                }
+                Err(land_sales::BuyRefused::ToSomebodyElse | land_sales::BuyRefused::TooLittle) => {
+                }
+            }
+            return Some(Vec::new());
         }
+        // A deed, by the land's own holder only; the group then holds it.
         ServerEvent::ParcelDeededToGroup { local_id, group_id } => {
-            set_owner(
-                world,
-                *local_id,
-                OwnerKey::Group(*group_id),
-                ParcelStatus::Leased,
-            );
-            return Some(push_parcel(world, *local_id, sim));
+            let Some(parcel) = world.parcel_mut(*local_id) else {
+                return Some(Vec::new());
+            };
+            if !land_sales::holds(parcel, agent.agent_id) {
+                if let Some(told) = policy.deed_refused_told {
+                    tell(sim, told, now);
+                }
+                return Some(Vec::new());
+            }
+            land_sales::change_hands(parcel, OwnerKey::Group(*group_id), Some(*group_id));
+            return Some(hands_changed(world, *local_id, agent, sim, now));
         }
-        // Abandoning hands the land back to the estate: the region's owner
-        // holds it, and its status says nobody chose to.
+        // Abandoning, by the land's own holder only, hands it back to the
+        // estate. Neither grid says anything to an agent that may not.
         ServerEvent::ParcelReleased { local_id } => {
-            set_owner(
-                world,
-                *local_id,
-                OwnerKey::Agent(AgentKey::from(region.sim_owner)),
-                ParcelStatus::Abandoned,
-            );
-            return Some(push_parcel(world, *local_id, sim));
+            let Some(parcel) = world.parcel_mut(*local_id) else {
+                return Some(Vec::new());
+            };
+            if !land_sales::holds(parcel, agent.agent_id) {
+                return Some(Vec::new());
+            }
+            land_sales::abandon(parcel, AgentKey::from(region.sim_owner), policy);
+            return Some(hands_changed(world, *local_id, agent, sim, now));
         }
-        // Reclaiming is the estate manager taking abandoned land back into use.
+        // Reclaiming is the estate taking land back into use: its owner or a
+        // manager may, of land somebody else holds, and nobody is told when
+        // another agent tries.
         ServerEvent::ParcelReclaimed { local_id } => {
-            set_owner(
-                world,
-                *local_id,
-                OwnerKey::Agent(AgentKey::from(region.sim_owner)),
-                ParcelStatus::Leased,
-            );
-            return Some(push_parcel(world, *local_id, sim));
+            let estate_owner = AgentKey::from(region.sim_owner);
+            let of_the_estate = agent.agent_id == estate_owner || region.is_estate_manager;
+            let Some(parcel) = world.parcel_mut(*local_id) else {
+                return Some(Vec::new());
+            };
+            if !of_the_estate || land_sales::holds(parcel, estate_owner) {
+                return Some(Vec::new());
+            }
+            land_sales::reclaim(parcel, estate_owner);
+            return Some(hands_changed(world, *local_id, agent, sim, now));
+        }
+        // A pass writes a timed entry on the allow list, replacing the
+        // buyer's own; nothing else about the parcel changes, so nothing is
+        // pushed.
+        ServerEvent::BuyParcelPass { local_id } => {
+            let Some(parcel) = world.parcel_by_local_id(*local_id).cloned() else {
+                return Some(Vec::new());
+            };
+            let allowed = world
+                .access_list(*local_id, ParcelAccessScope::Access)
+                .to_vec();
+            match land_sales::sell_pass(&parcel, &allowed, agent.agent_id, unix_now(), policy) {
+                land_sales::PassAnswer::Sold { entry, told } => {
+                    let held = world.access_list_mut(*local_id, ParcelAccessScope::Access);
+                    held.retain(|kept| kept.id != entry.id);
+                    held.push(entry);
+                    if let Some(told) = told {
+                        tell(sim, told, now);
+                    }
+                }
+                land_sales::PassAnswer::Refused(told) => {
+                    if let Some(told) = told
+                        && let Err(error) =
+                            sim.send_agent_alert_message(agent.agent_id, false, &told, now)
+                    {
+                        tracing::warn!("refusing a pass failed: {error}");
+                    }
+                }
+            }
+            return Some(Vec::new());
         }
         // A return takes the objects out of the world. A real grid also files
         // each one into its owner's Lost and Found; the fake grid has one
@@ -562,28 +621,6 @@ fn owner_name_of(world: &SceneFixtures, agent: &AvatarIdentity, owner_id: uuid::
         })
 }
 
-/// Sets a parcel's owner and ownership status, and takes it off the market:
-/// every path that changes who holds land is also the end of its sale.
-fn set_owner(
-    world: &mut SceneFixtures,
-    local_id: RegionLocalParcelId,
-    owner: OwnerKey,
-    status: ParcelStatus,
-) {
-    let Some(parcel) = world.parcel_mut(local_id) else {
-        tracing::debug!("a land transfer named parcel {local_id:?}, which is not here");
-        return;
-    };
-    parcel.owner = owner;
-    parcel.status = status;
-    parcel.sale_price = None;
-    parcel.raw_parcel_flags = sl_wire::ParcelFlags::from_bits(parcel.raw_parcel_flags)
-        .difference(sl_wire::ParcelFlags::FOR_SALE)
-        .bits();
-    parcel.claim_price = LindenAmount(0);
-    parcel.auth_buyer_id = None;
-}
-
 /// Writes an About Land save into the stored record. Every field the form
 /// carries is re-asserted, so the record is rewritten rather than patched.
 fn apply_update(parcel: &mut ParcelInfo, update: &ParcelUpdate, policy: ParcelPolicy) {
@@ -648,6 +685,49 @@ fn echo_parcel(
     let mut record = echo;
     record.sequence_id = UNSOLICITED_SEQUENCE_ID;
     vec![RegionChange::ParcelChanged(Box::new(record))]
+}
+
+/// Tells the agent of this session `text` in an alert.
+fn tell(sim: &mut SimSession, text: &str, now: Instant) {
+    if let Err(error) = sim.send_alert_message(text, &[], &[], now) {
+        tracing::warn!("telling an agent about its land failed: {error}");
+    }
+}
+
+/// Re-sends this session's agent the region's ownership overlay.
+fn resend_overlay(
+    world: &SceneFixtures,
+    agent: &AvatarIdentity,
+    sim: &mut SimSession,
+    now: Instant,
+) {
+    if let Err(error) = sim.send_parcel_overlay(&world.overlay_for(agent.agent_id), now) {
+        tracing::warn!("re-sending the parcel overlay failed: {error}");
+    }
+}
+
+/// Land changed hands: the record is pushed back and the overlay re-sent to
+/// this session's agent, and both are the change the region's other sessions
+/// have to be told about.
+fn hands_changed(
+    world: &SceneFixtures,
+    local_id: RegionLocalParcelId,
+    agent: &AvatarIdentity,
+    sim: &mut SimSession,
+    now: Instant,
+) -> Vec<RegionChange> {
+    let mut changes = push_parcel(world, local_id, sim);
+    resend_overlay(world, agent, sim, now);
+    changes.push(RegionChange::OverlayChanged);
+    changes
+}
+
+/// The Unix time now, in the `time_t` an access-list entry carries.
+fn unix_now() -> i32 {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    i32::try_from(seconds).unwrap_or(i32::MAX)
 }
 
 /// Re-sends a changed parcel's whole record to the editing client, under the

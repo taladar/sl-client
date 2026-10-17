@@ -898,12 +898,27 @@ pub(crate) async fn run_region_watcher(
                                     // resident on the other side of the region
                                     // is not sent a record of land they are not
                                     // on.
+                                    //
+                                    // On a grid whose land changes reach the
+                                    // whole region (OpenSim's
+                                    // `SendLandUpdateToAvatars`), everybody
+                                    // else is sent it too, under `-10000`.
                                     RegionChange::ParcelChanged(parcel) => {
-                                        if !stands_on(state, parcel.local_id) {
-                                            return;
+                                        if stands_on(state, parcel.local_id) {
+                                            state.sim.enqueue_parcel_properties(parcel);
+                                        } else if state.parcel_policy.land_change_reaches_region {
+                                            let mut elsewhere = (**parcel).clone();
+                                            elsewhere.sequence_id = NOT_STANDING_SEQUENCE_ID;
+                                            state.sim.enqueue_parcel_properties(&elsewhere);
                                         }
-                                        state.sim.enqueue_parcel_properties(parcel);
                                         Ok(())
+                                    }
+                                    // The overlay as this session's viewer
+                                    // sees whose land is whose.
+                                    RegionChange::OverlayChanged => {
+                                        let overlay =
+                                            state.world.lock().overlay_for(state.avatar.agent_id);
+                                        state.sim.send_parcel_overlay(&overlay, now)
                                     }
                                     RegionChange::RegionConfigured(limits) => {
                                         state.sim.send_region_info(limits, now)
@@ -1109,6 +1124,11 @@ async fn avatar_over_the_border(
         offset,
     })
 }
+
+/// The sequence id a changed parcel's record is pushed under to an avatar not
+/// standing on it (the reference's `SELECTED_PARCEL_SEQ_ID`, which OpenSim's
+/// `SendLandUpdateToAvatars` uses).
+const NOT_STANDING_SEQUENCE_ID: i32 = -10000;
 
 /// Whether this session's avatar is standing on `parcel` — who a changed
 /// parcel's record is pushed to.

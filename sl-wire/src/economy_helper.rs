@@ -40,6 +40,82 @@ pub const PREFLIGHT_BUY_LAND_PREP_METHOD: &str = "preflightBuyLandPrep";
 /// The commit method on [`LAND_TOOL_HELPER_PATH`].
 pub const BUY_LAND_PREP_METHOD: &str = "buyLandPrep";
 
+/// The helper base Second Life's main grid (agni) is reached through: the
+/// reference viewer's built-in grid entry, since the grid names it nowhere on
+/// the wire.
+pub const AGNI_HELPER_URI: &str = "https://secondlife.com/helpers/";
+/// The helper base of Second Life's beta grid (aditi), as the reference
+/// viewer's built-in grid entry names it.
+pub const ADITI_HELPER_URI: &str = "https://secondlife.aditi.lindenlab.com/helpers/";
+
+/// The login host of Second Life's main grid.
+const AGNI_LOGIN_HOST: &str = "login.agni.lindenlab.com";
+/// The login host of Second Life's beta grid.
+const ADITI_LOGIN_HOST: &str = "login.aditi.lindenlab.com";
+
+/// What said where a grid's economy helper lives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelperSource {
+    /// The region's `SimulatorFeatures` `OpenSimExtras.currency-base-uri`
+    /// (OpenSim names its own money module there).
+    RegionFeatures,
+    /// The grid's `get_grid_info` (`economy`, or its alias `helperuri`).
+    GridInfo,
+    /// A Second Life grid, recognised by its login host: the helper is the
+    /// one the reference viewer's grid list names.
+    SecondLife,
+}
+
+/// Where a grid's economy helper scripts ([`CURRENCY_HELPER_PATH`],
+/// [`LAND_TOOL_HELPER_PATH`]) live, in the reference viewer's precedence: a
+/// region's `currency-base-uri` overrides the grid's `get_grid_info` entry,
+/// which overrides the built-in Second Life grids (Firestorm
+/// `LLGridManager::getHelperURI` and `LFSimFeatureHandler`).
+///
+/// `None` when nothing names one — a stock OpenSim grid whose money module
+/// announces nothing has no economy a viewer could reach, and the reference's
+/// last resort (`https://<grid>/helpers/`) is a guess this does not make.
+#[must_use]
+pub fn economy_helper_uri(
+    login_uri: &url::Url,
+    region_currency_base: Option<&url::Url>,
+    grid_info_helper: Option<&url::Url>,
+) -> Option<(url::Url, HelperSource)> {
+    if let Some(region) = region_currency_base {
+        return Some((region.clone(), HelperSource::RegionFeatures));
+    }
+    if let Some(grid) = grid_info_helper {
+        return Some((grid.clone(), HelperSource::GridInfo));
+    }
+    let known = match login_uri.host_str()? {
+        AGNI_LOGIN_HOST => AGNI_HELPER_URI,
+        ADITI_LOGIN_HOST => ADITI_HELPER_URI,
+        _ => return None,
+    };
+    url::Url::parse(known)
+        .ok()
+        .map(|helper| (helper, HelperSource::SecondLife))
+}
+
+/// The URL of one helper script under a helper base, as the reference joins
+/// them: by appending, so a base without its trailing slash still reaches the
+/// script beside it rather than replacing its last segment.
+///
+/// # Errors
+///
+/// Returns [`WireError`] if the joined text is not a URL.
+pub fn helper_script_url(base: &url::Url, script: &str) -> Result<url::Url, WireError> {
+    let mut text = base.as_str().to_owned();
+    if !text.ends_with('/') {
+        text.push('/');
+    }
+    text.push_str(script);
+    url::Url::parse(&text).map_err(|_invalid| WireError::InvalidUrl {
+        field: "helper script",
+        value: text.clone(),
+    })
+}
+
 /// The viewer version members every currency request carries.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -695,6 +771,60 @@ pub fn parse_buy_land_prep_response(xml: &str) -> Result<HelperOutcome<()>, Wire
 mod test {
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
+
+    /// A URL literal the tests know is well formed.
+    fn url(text: &str) -> Result<url::Url, url::ParseError> {
+        url::Url::parse(text)
+    }
+
+    /// The reference's precedence: a region's `currency-base-uri`, then the
+    /// grid's `get_grid_info`, then a known Second Life grid.
+    #[test]
+    fn the_helper_is_found_in_the_reference_precedence() -> Result<(), url::ParseError> {
+        use super::{HelperSource, economy_helper_uri};
+        let opensim = url("http://127.0.0.1:9000/")?;
+        let region = url("http://127.0.0.1:9000/")?;
+        let grid = url("http://economy.example/")?;
+        assert_eq!(
+            economy_helper_uri(&opensim, Some(&region), Some(&grid)),
+            Some((region.clone(), HelperSource::RegionFeatures))
+        );
+        assert_eq!(
+            economy_helper_uri(&opensim, None, Some(&grid)),
+            Some((grid, HelperSource::GridInfo))
+        );
+        assert_eq!(economy_helper_uri(&opensim, None, None), None);
+        let aditi = url("https://login.aditi.lindenlab.com/cgi-bin/login.cgi")?;
+        assert_eq!(
+            economy_helper_uri(&aditi, None, None),
+            Some((
+                url("https://secondlife.aditi.lindenlab.com/helpers/")?,
+                HelperSource::SecondLife
+            ))
+        );
+        let agni = url("https://login.agni.lindenlab.com/cgi-bin/login.cgi")?;
+        assert_eq!(
+            economy_helper_uri(&agni, None, None).map(|(helper, _source)| helper),
+            Some(url("https://secondlife.com/helpers/")?)
+        );
+        Ok(())
+    }
+
+    /// A script is appended to its base, with or without the base's trailing
+    /// slash, as the reference concatenates them.
+    #[test]
+    fn a_script_is_appended_to_its_base() -> Result<(), Box<dyn std::error::Error>> {
+        use super::{LAND_TOOL_HELPER_PATH, helper_script_url};
+        assert_eq!(
+            helper_script_url(&url("http://127.0.0.1:9000/")?, LAND_TOOL_HELPER_PATH)?.as_str(),
+            "http://127.0.0.1:9000/landtool.php"
+        );
+        assert_eq!(
+            helper_script_url(&url("http://example.org/economy")?, LAND_TOOL_HELPER_PATH)?.as_str(),
+            "http://example.org/economy/landtool.php"
+        );
+        Ok(())
+    }
 
     use super::{
         BuyCurrencyRequest, CurrencyQuote, CurrencyQuoteRequest, HelperFailure, HelperOutcome,

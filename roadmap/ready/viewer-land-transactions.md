@@ -39,3 +39,13 @@ Reference (Firestorm, read-only): `indra/newview/llfloaterland.cpp`
 (LLPanelLandGeneral), `indra/newview/llfloatersellland.cpp`,
 `indra/newview/skins/default/xui/en/floater_sell_land.xml`,
 `indra/newview/skins/default/xui/en/floater_about_land.xml`.
+
+## From gridspec-land-transactions (2026-10-17)
+
+The reference's `ParcelBuy` names the buyer's active group even for a
+personal purchase, and OpenSim makes it the bought land's group — pass the
+active group as `Command::BuyParcel::group_id`. Second Life refuses a
+purchase of land not for sale and a deed without rights with an alert, and
+says nothing to an abandon or a reclaim without rights; OpenSim says nothing
+to any of them, so the floaters should not wait for an answer.
+`book/src/gridspec/land.md` § Transactions.

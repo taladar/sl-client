@@ -1994,12 +1994,12 @@ pub fn ingest_alert_messages(
                     NamedAlert::Catalogued(name) => {
                         show.write(ShowNotification::new(name));
                     }
-                    NamedAlert::Plain(text) if !text.is_empty() => {
+                    NamedAlert::Plain(text) | NamedAlert::Important(text) if !text.is_empty() => {
                         show.write(
                             ShowNotification::new("SystemMessage").with_body(text.to_owned()),
                         );
                     }
-                    NamedAlert::Plain(_empty) => {}
+                    NamedAlert::Plain(_empty) | NamedAlert::Important(_empty) => {}
                 }
             }
             SlSessionEvent::AgentAlertMessage { modal, message, .. } => {
@@ -2015,7 +2015,12 @@ pub fn ingest_alert_messages(
                         };
                         show.write(ShowNotification::new(template_name).with_body(text.to_owned()));
                     }
-                    NamedAlert::Plain(_empty) => {}
+                    NamedAlert::Important(text) if !text.is_empty() => {
+                        show.write(
+                            ShowNotification::new("SystemMessage").with_body(text.to_owned()),
+                        );
+                    }
+                    NamedAlert::Plain(_empty) | NamedAlert::Important(_empty) => {}
                 }
             }
             _other => {}
@@ -2040,6 +2045,10 @@ enum NamedAlert<'a> {
     Catalogued(&'static str),
     /// The string is the text to show.
     Plain(&'a str),
+    /// The string was marked important with a leading `/` (OpenSim's
+    /// refusals of a pass, among others): the text after it, shown as a
+    /// system message whether or not the alert asked to be modal.
+    Important(&'a str),
 }
 
 /// Reads a plain alert string the way the reference's `process_alert_core`
@@ -2048,8 +2057,12 @@ enum NamedAlert<'a> {
 ///
 /// A name the catalogue does not have is shown as the text it is, without the
 /// prefix — the simulator said *something*, and a raw `NOTIFY: ` in front of
-/// it helps nobody.
+/// it helps nobody. One that begins `/` is the text after it, marked
+/// important (the reference's "show in upper-right box, not tip").
 fn named_server_alert(message: &str) -> NamedAlert<'_> {
+    if let Some(text) = message.strip_prefix('/') {
+        return NamedAlert::Important(text);
+    }
     let Some(name) = message
         .strip_prefix(ALERT_NAME_PREFIX)
         .or_else(|| message.strip_prefix(NOTIFY_NAME_PREFIX))
@@ -2547,6 +2560,12 @@ mod tests {
         assert_eq!(
             named_server_alert("He said NOTIFY: Cannot enter parcel: banned"),
             NamedAlert::Plain("He said NOTIFY: Cannot enter parcel: banned")
+        );
+        // OpenSim marks a pass refusal important with a leading slash, which
+        // is not part of the text (land-transactions, 2026-10-17).
+        assert_eq!(
+            named_server_alert("/You already have a pass valid for 59.87 minutes"),
+            NamedAlert::Important("You already have a pass valid for 59.87 minutes")
         );
     }
 

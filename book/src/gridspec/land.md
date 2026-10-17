@@ -10,7 +10,8 @@ Measured on 2026-10-05 on Second Life's beta grid (aditi) and the local OpenSim
 standalone by the conformance cases `parcel-properties`, `parcel-crossing`,
 `parcel-edit`, `parcel-edit-refused`, `parcel-divide-join`,
 `parcel-object-owners`, `parcel-info-dwell`, `parcel-access-list`,
-`parcel-ban-enforcement` and `parcel-ban-line`. Each case holds both grids, and
+`parcel-ban-enforcement` and `parcel-ban-line`, and on 2026-10-17 by
+`land-transactions`. Each case holds both grids, and
 both fake-grid flavours, to these answers as `Measured` constants. The aditi
 test accounts own no land and there is no known way for a resident to get some
 there (`gridspec-aditi-test-land`), so on Second Life only what a resident
@@ -128,7 +129,7 @@ rating and the ownership out of it (`llpanelplaceprofile.cpp`,
 | --- | --- | --- | --- | --- |
 | `0x01` | region rated moderate | set; **also set for an adult region** | set for moderate only | as its grid |
 | `0x02` | region rated adult | set (so adult reads `0x03`) | set (adult reads `0x02`; from source — the local grid has no adult region) | as its grid (`ParcelPolicy::adult_listing_bits`) |
-| `0x04` | a group owns the parcel | set (checked against the parcel's own `ParcelProperties`) | set (from source, `LLClientView.SendParcelInfo`) | set when the fixture's owner is a group |
+| `0x04` | a group owns the parcel | set (checked against the parcel's own `ParcelProperties`) | set (measured by `land-transactions` after a deed, 2026-10-17) | set when the fixture's owner is a group |
 | `0x80` | the parcel is for sale | set on all 8 land-search rows sampled, each at the row's price | set while the estate owner had the parcel for sale, cleared after | set while the parcel carries a sale price |
 
 Every listing's rating was compared with its region's rating on the world map
@@ -213,6 +214,87 @@ A return on OpenSim cannot take one object: it takes everything its owner has
 on the parcel. `parcel-object-owners` therefore rezzes and returns the object
 of an account that owns nothing anywhere on the local grid, and tallies and
 returns it as the land owner.
+
+## Transactions
+
+Land changing hands: a purchase, a sale to a named buyer, an access pass, a
+deed to a group, an abandonment and a reclaim. Measured on 2026-10-17 by the
+census `land-transactions`, two avatars a run: **A** owns the plot, **B** is
+another resident. On OpenSim A is the estate owner and the plot is a 32 m
+corner it divides off the Default Region; every leg is run. On aditi the test
+avatars own no land and cannot get any (`gridspec-aditi-test-land`): every
+parcel for sale lies in a Linden test region they may not enter but one, and
+there the grid's land helper refuses the purchase. So on Second Life B stands
+on somebody else's parcel at the build location (a group's sandbox, not for
+sale) and only the refusals and the helper are measured. Naming a parcel A
+owns as `land_parcel` in `fixtures.aditi.toml` runs the rest.
+
+### Refusals and passes
+
+| B asks to | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| buy land not for sale | refused: alert "Unable to buy, this parcel is not for sale." and the overlay re-sent | refused, nothing said | as its grid |
+| abandon land it does not hold | refused, nothing said | refused, nothing said | both |
+| deed land it does not hold | refused: alert "Unable to deed parcel to group." | refused, nothing said | as its grid |
+| reclaim land as a resident | refused, nothing said | refused, nothing said | both |
+| buy a pass to land that names a pass price but has the pass list off | **sold**: alert "You purchased a pass." and a balance reply, type `5006` (`LandPassSale`), L$ 10 from B to the parcel's group | refused, nothing said | as its grid, without the charge |
+| a second pass while the first has time left | sold again (aditi's sandbox, twice in an hour) | refused: agent alert "/You already have a pass valid for 59.87 minutes" | `FakeOpensim` the same |
+
+A refused purchase on Second Life also re-sends the overlay, and the alerts
+are `AlertMessage`s. OpenSim's pass refusal is an `AgentAlertMessage`: OpenSim
+puts `/` before the text of every non-modal one, which the reference reads as
+"show as a system message" and strips. This viewer shows the text without the
+slash since 2026-10-17.
+
+On OpenSim a pass is sold only by a parcel with the pass list on
+(`ClientParcelBuyPass`). It writes B onto the allow list as an `AL_ACCESS`
+entry that expires after the pass's hours, and is refused once a held pass has
+more than a quarter of its time left. The local OpenSim's money module charges
+nothing and sends no balance reply.
+
+### The economy helper
+
+Before a purchase the reference viewer asks the grid's helper
+(`landtool.php`, `preflightBuyLandPrep`) what it needs, with the region's
+billable factor times the parcel's area. The helper is found in the
+reference's order: a region's `currency-base-uri`, then `get_grid_info`, then
+the built-in Second Life grids (`sl_wire::economy_helper_uri`).
+
+| | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| where | `https://secondlife.aditi.lindenlab.com/helpers/` (built in) | the region's `currency-base-uri`, the simulator itself | its login endpoint |
+| billable factor (`RegionHandshake`) | 1 on mainland, 0 on estates | 0 | — |
+| answer | HTTP 200, `success` false: "Our billing system is currently down.  Please try again later." | `success` with `confirm`, `currency.estimatedCost`, `landuse.action`, `landuse.upgrade` and an empty `membership` | — |
+
+OpenSim writes `landuse` where the reference reads `landUse`, so the
+reference never sees its land-use answer; it is `false` anyway. The reference
+buys nothing on aditi's answer. With nothing to upgrade, no L$ to buy and a
+`confirm` other than `password`, it skips `buyLandPrep` and sends the
+`ParcelBuy` straight away.
+
+### Sales on OpenSim
+
+| behaviour | OpenSim | fake grid |
+| --- | --- | --- |
+| A sets the plot for sale (About Land) | the record pushed to every avatar in the region, under `-10000` to those not on the plot | `FakeOpensim` the same; `FakeSl` to the plot's occupants only (Second Life unmeasured) |
+| B offers less than the price | refused, nothing said | refused |
+| B buys | the plot is B's, off the market, its group the group the `ParcelBuy` names; the record pushed to everyone and the overlay re-sent | the same, without the charge |
+| a sale for L$ 0 to a named buyer | sold like any other | the same |
+| a deed (A first sets the plot's group) | the group holds it, off the market; record and overlay to everyone | the same |
+| the listing after a deed (`ParcelInfoReply`, 45 s later) | flags `0x04`: group-owned | — |
+| the group's land sold to A for L$ 0 | sold; its group is now the one the buy names | the same |
+| B abandons its plot | the estate owner holds it, no group, still **leased** | `FakeOpensim` the same; `FakeSl` marks it abandoned (Second Life unmeasured) |
+| the estate owner reclaims it | the estate owner holds it | the same |
+
+The reference viewer's `ParcelBuy` names the buyer's **active** group even for
+a personal purchase, and OpenSim makes it the bought land's group (A's buy
+back came under the group A had just founded). The fake grid writes whatever
+group the buy names. OpenSim writes `SalePrice` 0 after every change of hands.
+
+None of this is measured on Second Life, and none of it runs against the fake
+grid's flavours yet: the census divides its plot, which the fake grid cannot
+do (`server-fake-grid-parcel-divide-join`). The fake grid's rules are held by
+its own unit tests (`sl-fake-grid/src/land_sales.rs`) until then.
 
 ## Access
 

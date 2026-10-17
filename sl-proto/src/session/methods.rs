@@ -12566,8 +12566,10 @@ impl Session {
     }
 
     /// Buys a parcel via `ParcelBuy` for `price` L$ covering `area` m². Pass a
-    /// `group_id` with `is_group_owned` to buy on a group's behalf (nil/false for
-    /// a personal purchase).
+    /// `group_id` with `is_group_owned` to buy on a group's behalf. The
+    /// reference viewer sends the buyer's **active** group as `group_id` on a
+    /// personal purchase too (`is_group_owned` false), and OpenSim makes it
+    /// the bought land's group (`book/src/gridspec/land.md` § Transactions).
     ///
     /// # Errors
     ///

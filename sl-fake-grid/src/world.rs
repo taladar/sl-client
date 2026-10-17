@@ -405,6 +405,12 @@ pub enum RegionChange {
     /// of it as an unsolicited `ParcelProperties`, to the avatars standing on
     /// that parcel.
     ParcelChanged(Box<ParcelInfo>),
+    /// Land changed hands, so the region's ownership overlay reads
+    /// differently: every session re-sends its viewer the overlay as that
+    /// viewer sees it (whose land is whose is relative to the viewer), as
+    /// both live grids do after a purchase, a deed, an abandonment or a
+    /// reclaim.
+    OverlayChanged,
     /// The region's own configuration changed (the estate floater's Region and
     /// Terrain tabs); every session in the region needs the new `RegionInfo`.
     RegionConfigured(Box<sl_proto::RegionLimits>),

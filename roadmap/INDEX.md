@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 346 |
+| ready | 345 |
 | blocked | 89 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1389 |
+| done | 1390 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2067** |
@@ -350,7 +350,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (346)
+## ready (345)
 
 ### protocol
 
@@ -1145,8 +1145,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Inventory item and folder operations and their pushes on each grid
 - [`gridspec-inventory-offers`](ready/gridspec-inventory-offers.md) — Giving
   inventory, accepting and declining, and object gives on each grid
-- [`gridspec-land-transactions`](ready/gridspec-land-transactions.md) — Buying,
-  selling, deeding, abandoning land and passes on each grid
 - [`gridspec-landmarks-home`](ready/gridspec-landmarks-home.md) — Landmarks and
   the home location on each grid
 - [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
@@ -1334,7 +1332,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-inventory-mutations`)
 - [`server-fake-grid-money-ledger`](blocked/server-fake-grid-money-ledger.md) —
   Fake grid — a money ledger: balances, transfers, buying and paying (blocked by
-  `gridspec-money`, `gridspec-land-transactions`)
+  `gridspec-money`, `gridspec-land-transactions` (done))
 - [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
   — Fake grid — enforce parcel access and push ban lines (blocked by
   `gridspec-parcel-access-and-ban-lines` (done),
@@ -1608,7 +1606,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1389)
+## done (1390)
 
 ### protocol
 
@@ -4630,6 +4628,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grids
 - [`gridspec-instant-messages`](done/gridspec-instant-messages.md) — Instant
   messages, typing, busy replies and offline storage on each grid
+- [`gridspec-land-transactions`](done/gridspec-land-transactions.md) — Buying,
+  selling, deeding, abandoning land and passes on each grid
 - [`gridspec-local-chat`](done/gridspec-local-chat.md) — Local chat and typing
   on each grid
 - [`gridspec-login`](done/gridspec-login.md) — Login response fields, the

@@ -101,6 +101,11 @@ pub struct Session {
     /// scoped parcel/object commands take (e.g. the dwell request in
     /// `parcel-info-dwell`) for the region the agent is currently in.
     circuit_id: Option<CircuitId>,
+    /// The billable factor of the region the agent is in, from the last
+    /// `RegionHandshake` [`Session::wait_for`] saw (`None` before one): what
+    /// the reference multiplies a parcel's area by when it asks a grid's
+    /// economy helper about buying it.
+    billable_factor: Option<f32>,
     /// Inbound events from the run loop, after a forwarder has drained them off
     /// the run loop's bounded channel into this unbounded one. A case typically
     /// waits on one session at a time, leaving the others' event channels unread;
@@ -260,6 +265,14 @@ impl Session {
         self.circuit_id
     }
 
+    /// The billable factor of the region the agent is in, once a
+    /// `RegionHandshake` has been read ([`Session::wait_for_region`] reads the
+    /// first).
+    #[must_use]
+    pub const fn billable_factor(&self) -> Option<f32> {
+        self.billable_factor
+    }
+
     /// The avatar's own first (account) name, from the login credentials. Cases
     /// that must supply a real, grid-present name at runtime — without baking an
     /// avatar name into the source or the record — derive their query from this
@@ -268,6 +281,18 @@ impl Session {
     #[must_use]
     pub fn avatar_first_name(&self) -> &str {
         self.avatar.first()
+    }
+
+    /// The URI this avatar logs in at: its credentials' own, else the grid's
+    /// fixed address — what a viewer recognises a grid by, as when it looks
+    /// up the grid's economy helper.
+    #[must_use]
+    pub fn login_uri(&self) -> Option<url::Url> {
+        self.avatar
+            .login_uri()
+            .or_else(|| self.grid.default_login_uri())?
+            .parse()
+            .ok()
     }
 
     /// The avatar's own legacy name (`First Last`), from the login
@@ -335,6 +360,7 @@ impl Session {
         let events = &mut self.events;
         let region_handle = &mut self.region_handle;
         let circuit_id = &mut self.circuit_id;
+        let billable_factor = &mut self.billable_factor;
         let wait = async {
             loop {
                 match events.recv().await {
@@ -356,6 +382,9 @@ impl Session {
                         {
                             *region_handle = Some(*handle);
                             *circuit_id = Some(*circuit);
+                        }
+                        if let Event::RegionInfoHandshake(identity) = &event {
+                            *billable_factor = Some(identity.billable_factor);
                         }
                         if let Some(value) = predicate(&event) {
                             return Ok(value);
@@ -1021,6 +1050,7 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
         login_session_id,
         region_handle,
         circuit_id,
+        billable_factor: None,
         events: events_rx,
         commands: command_tx,
         diagnostics,
@@ -1136,12 +1166,33 @@ impl TestContext {
         self.fixtures.census_group()
     }
 
+    /// The parcel the `land-transactions` census works on, if the fixtures
+    /// name one.
+    #[must_use]
+    pub const fn land_parcel(&self) -> Option<sl_client_tokio::ParcelKey> {
+        self.fixtures.land_parcel()
+    }
+
+    /// The group the `land-transactions` census deeds to, if the fixtures name
+    /// one.
+    #[must_use]
+    pub const fn land_group(&self) -> Option<GroupKey> {
+        self.fixtures.land_group()
+    }
+
     /// The configured second avatar whose profile the `avatar-properties` case
     /// reads, if any. Needed only on Second Life (which has no built-in second
     /// avatar); OpenSim falls back to the local secondary test avatar.
     #[must_use]
     pub const fn other_avatar(&self) -> Option<AgentKey> {
         self.fixtures.other_avatar()
+    }
+
+    /// The region of the fixtures' build location, if they name one (see
+    /// [`Fixtures::build_region`]).
+    #[must_use]
+    pub fn build_region(&self) -> Option<&str> {
+        self.fixtures.build_region()
     }
 
     /// Where a case that rezzes places its objects, if the fixtures name a

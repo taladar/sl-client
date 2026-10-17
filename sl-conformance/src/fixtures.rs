@@ -72,11 +72,22 @@
 //! # the case asks the `SendPostcard` capability for an uploader and posts
 //! # nothing to it, so no mail is sent.
 //! postcard_to = "somebody@example.org"
+//!
+//! # The parcel the `land-transactions` census sells, deeds and passes on:
+//! # one the primary avatar owns. Absent on Second Life, the census measures
+//! # only the refusals, on the parcel at the build location; on OpenSim it
+//! # divides a corner off the region instead and needs none.
+//! land_parcel = "66666666-6666-6666-6666-666666666666"
+//!
+//! # The group the `land-transactions` census deeds its parcel to: one the
+//! # avatar that owns the land founded. Absent, the census founds one and
+//! # prints its id to be named here.
+//! land_group = "77777777-7777-7777-7777-777777777777"
 //! ```
 
 use std::path::{Path, PathBuf};
 
-use sl_client_tokio::{AgentKey, ExperienceKey, GroupKey, MeshKey, Uuid, Vector};
+use sl_client_tokio::{AgentKey, ExperienceKey, GroupKey, MeshKey, ParcelKey, Uuid, Vector};
 
 use crate::grid::Grid;
 
@@ -117,6 +128,12 @@ pub struct Fixtures {
     postcard_to: Option<String>,
     /// The group the `groups` census measures in; absent, it founds one.
     census_group: Option<GroupKey>,
+    /// The parcel the `land-transactions` census works on; absent on Second
+    /// Life, it measures only the refusals.
+    land_parcel: Option<ParcelKey>,
+    /// The group the `land-transactions` census deeds to; absent, it founds
+    /// one.
+    land_group: Option<GroupKey>,
 }
 
 /// The region-local position a login `start` string names
@@ -167,6 +184,14 @@ struct RawFixtures {
     /// [`Fixtures::census_group`].
     #[serde(default)]
     census_group: Option<String>,
+    /// The land parcel's id as a UUID string, parsed into
+    /// [`Fixtures::land_parcel`].
+    #[serde(default)]
+    land_parcel: Option<String>,
+    /// The land group's id as a UUID string, parsed into
+    /// [`Fixtures::land_group`].
+    #[serde(default)]
+    land_group: Option<String>,
 }
 
 /// Why a fixtures file could not be turned into [`Fixtures`].
@@ -344,6 +369,28 @@ impl Fixtures {
                     })
             })
             .transpose()?;
+        let land_parcel = raw
+            .land_parcel
+            .map(|value| {
+                Uuid::parse_str(&value)
+                    .map(ParcelKey::from)
+                    .map_err(|_invalid| FixturesError::BadUuid {
+                        field: "land_parcel",
+                        value,
+                    })
+            })
+            .transpose()?;
+        let land_group = raw
+            .land_group
+            .map(|value| {
+                Uuid::parse_str(&value)
+                    .map(GroupKey::from)
+                    .map_err(|_invalid| FixturesError::BadUuid {
+                        field: "land_group",
+                        value,
+                    })
+            })
+            .transpose()?;
         Ok(Self {
             premade_groups,
             other_avatar,
@@ -354,6 +401,8 @@ impl Fixtures {
             ban_line_regions: raw.ban_line_regions,
             postcard_to: raw.postcard_to,
             census_group,
+            land_parcel,
+            land_group,
         })
     }
 
@@ -362,6 +411,17 @@ impl Fixtures {
     #[must_use]
     pub fn build_location(&self) -> Option<&str> {
         self.build_location.as_deref()
+    }
+
+    /// The region the build location is in (`"uri:Region&x&y&z"`), if the
+    /// operator named one.
+    #[must_use]
+    pub fn build_region(&self) -> Option<&str> {
+        self.build_location()?
+            .strip_prefix("uri:")?
+            .split('&')
+            .next()
+            .filter(|region| !region.is_empty())
     }
 
     /// The regions the `parcel-ban-line` case visits after its login region,
@@ -401,6 +461,20 @@ impl Fixtures {
     #[must_use]
     pub const fn census_group(&self) -> Option<GroupKey> {
         self.census_group
+    }
+
+    /// The parcel the `land-transactions` census works on, if the operator
+    /// named one.
+    #[must_use]
+    pub const fn land_parcel(&self) -> Option<ParcelKey> {
+        self.land_parcel
+    }
+
+    /// The group the `land-transactions` census deeds to, if the operator
+    /// named one.
+    #[must_use]
+    pub const fn land_group(&self) -> Option<GroupKey> {
+        self.land_group
     }
 
     /// The `index`-th pre-made group, if one is configured at that position for
@@ -498,6 +572,8 @@ mod tests {
             ban_line_regions: Vec::new(),
             postcard_to: None,
             census_group: None,
+            land_parcel: None,
+            land_group: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.premade_group(0).is_some());
@@ -525,6 +601,8 @@ mod tests {
             ban_line_regions: Vec::new(),
             postcard_to: None,
             census_group: None,
+            land_parcel: None,
+            land_group: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.other_avatar().is_some());
@@ -545,6 +623,8 @@ mod tests {
             ban_line_regions: Vec::new(),
             postcard_to: None,
             census_group: None,
+            land_parcel: None,
+            land_group: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.mesh_asset().is_some());
@@ -565,6 +645,8 @@ mod tests {
             ban_line_regions: Vec::new(),
             postcard_to: None,
             census_group: None,
+            land_parcel: None,
+            land_group: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -588,6 +670,8 @@ mod tests {
             ban_line_regions: Vec::new(),
             postcard_to: None,
             census_group: None,
+            land_parcel: None,
+            land_group: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -612,6 +696,8 @@ mod tests {
             ban_line_regions: Vec::new(),
             postcard_to: None,
             census_group: None,
+            land_parcel: None,
+            land_group: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -636,6 +722,8 @@ mod tests {
             ban_line_regions: Vec::new(),
             postcard_to: None,
             census_group: None,
+            land_parcel: None,
+            land_group: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.experience().is_some());
@@ -656,6 +744,8 @@ mod tests {
             ban_line_regions: Vec::new(),
             postcard_to: None,
             census_group: None,
+            land_parcel: None,
+            land_group: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -681,6 +771,8 @@ mod tests {
                 ban_line_regions: Vec::new(),
                 postcard_to: None,
                 census_group: None,
+                land_parcel: None,
+                land_group: None,
             })
         };
         let position = with("uri:Mauve&48&64&30")?.build_position();
@@ -689,6 +781,8 @@ mod tests {
             Some((48.0, 64.0, 30.0))
         );
         assert_eq!(with("last")?.build_position(), None);
+        assert_eq!(with("uri:Mauve&48&64&30")?.build_region(), Some("Mauve"));
+        assert_eq!(with("last")?.build_region(), None);
         Ok(())
     }
 }

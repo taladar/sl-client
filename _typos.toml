@@ -81,6 +81,11 @@ Unsuported = "Unsuported"
 Wating = "Wating"
 Seach = "Seach"
 Dimentions = "Dimentions"
+# "suported" is OpenSim's own spelling in the alert `ClientParcelBuyPass`
+# refuses a pass to group-owned land with ("pass to group owned parcel not
+# suported"), which the OpenSim-flavoured fake grid sends verbatim
+# (sl-fake-grid/src/land_sales.rs); theirs to spell, not ours to correct.
+suported = "suported"
 # "offsett" is the object asset's own keyword for a face's T-axis texture
 # offset (LLTextureEntry's LLSD field name, beside "offsets" for S). Linden's
 # spelling, cited exactly by sl-object-asset and by the reference assets it is

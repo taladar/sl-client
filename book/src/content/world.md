@@ -224,6 +224,9 @@ Beyond reading a parcel, a client with land rights can **manage** it over UDP:
 - and **buy a temporary access pass** to a restricted parcel
   (`Command::BuyParcelPass`).
 
+What each grid refuses, says and charges when land changes hands is in
+[Grid Behaviour → Land](../gridspec/land.md#transactions).
+
 The places/search panels identify a parcel by a grid-wide **parcel id** rather
 than a region-local id. A client resolves that id from a region location through
 the `RemoteParcelRequest` capability (`Command::RequestRemoteParcelId` →

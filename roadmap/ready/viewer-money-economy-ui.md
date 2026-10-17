@@ -61,3 +61,21 @@ dialog (and no viewer consumer of `PayPriceReply`), no buy-object /
 buy-contents / buy-land / buy-currency floaters, no transaction history or
 money tracker, and the OpenSim `currency` symbol is decoded but no viewer
 label reads it.
+
+## From gridspec-land-transactions (2026-10-17)
+
+Where the helper scripts live is resolved by
+`sl_wire::economy_helper_uri` in the reference's precedence: a region's
+`OpenSimExtras.currency-base-uri`, then the grid's `get_grid_info`
+`economy`/`helperuri`, then the built-in Second Life helpers by login host;
+`sl_wire::helper_script_url` joins a script to it. The buy-land floater
+should take its URL from there. Measured answers to `preflightBuyLandPrep`:
+OpenSim's money module answers success with `landuse` (lower case — the
+reference reads `landUse`, so its upgrade flag is never seen) and an empty
+`membership`; aditi's helper fails every preflight with "Our billing system
+is currently down. Please try again later." (2026-10-17), which the
+reference shows as the floater's error and buys nothing. Free land needs no
+L$ prompt: the reference sends the `ParcelBuy` straight away when no
+membership or land-use upgrade is needed, no currency has to be bought and
+`confirm` is not `password` (`LLFloaterBuyLandUI::runWebSitePrep`).
+`book/src/gridspec/land.md` § Transactions.

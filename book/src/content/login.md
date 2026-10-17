@@ -133,7 +133,9 @@ hands out:
   (`preflightBuyLandPrep` → `buyLandPrep`). Each quote/preflight returns a
   `confirm` token the commit echoes; every response carries `success`
   plus `errorMessage`/`errorURI` on failure. OpenSim regions advertise the
-  helper base as the `currency-base-uri` `OpenSimExtras` key.
+  helper base as the `currency-base-uri` `OpenSimExtras` key, which wins
+  over `get_grid_info`'s `economy`; Second Life names it nowhere and the
+  viewer knows its grids' helpers (`sl_wire::economy_helper_uri`).
 
 > **In this codebase**
 >

@@ -44,3 +44,14 @@ Not applicable.
 line) ran on OpenSim only and waits on this for its Second Life column in
 `book/src/gridspec/avatars.md`. It needs a parcel it can divide; add
 `Grid::Aditi` to its grids and a fixture for where the parcel is.
+
+## From gridspec-land-transactions (2026-10-17)
+
+Buying land on aditi was tried and is not possible for now. Every parcel for
+sale (a `DirLandQuery` sorted by price, all maturities: 31 rows) lies in a
+Linden test region the avatars may not enter (`Product Engine *`,
+`LeviathanTest`, `MTester Playground`: `noaccess_tport`) except one rental
+parcel in Cale (Adult, estate, L$ 3920). There the grid's land helper fails
+the purchase's preflight: "Our billing system is currently down. Please try
+again later." The census's owner legs therefore wait on this task; naming a
+parcel the primary owns as `land_parcel` in `fixtures.aditi.toml` runs them.
