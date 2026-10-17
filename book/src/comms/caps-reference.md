@@ -27,9 +27,9 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `CharacterProperties` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `DeclineFriendship` | yes | — | current | task `protocol-cap-offline-friendship-answers` (UDP today) |
 | `DispatchOpenRegionSettings` | — | — | Aurora-Sim only | not adopted |
-| `DispatchRegionInfo` | yes | — | current | task `protocol-cap-dispatch-region-info` (UDP today) |
+| `DispatchRegionInfo` | yes | — | current | **used** since 2026-10-17 (`Command::SetRegionInfo`); UDP where not granted; measured in [Estate § Region info](../gridspec/estate.md#region-info) |
 | `EnvironmentSettings` | yes | yes | deprecated by `ExtEnvironment` | not adopted |
-| `EstateAccess` | yes | yes | current | task `protocol-cap-estate-access` (UDP today) |
+| `EstateAccess` | yes | yes | current | **used** since 2026-10-17 (`Command::RequestEstateAccessLists`); measured in [Estate](../gridspec/estate.md) |
 | `EstateChangeInfo` | — | off | unused | not adopted (UDP) |
 | `GetMetadata` | yes | — | current | **used** since 2026-10-12 (`Command::RequestScriptExperience`) |
 | `GroupAPIv1` | yes | — | current | **used** since 2026-10-14 (`Command::RequestGroupBans`, `BanGroupMembers`, `UnbanGroupMembers`); the panel is task `viewer-social-group-extras` |
@@ -46,7 +46,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `ParcelPropertiesUpdate` | yes | yes | current | **used** since 2026-10-05; UDP where not granted |
 | `ProductInfoRequest` | yes | — | current | **used** since 2026-10-16 (`Command::RequestLandProducts`); the search floater names a land row's type by it |
 | `RegionObjects` | yes | — | current | task `viewer-pathfinding-floaters` |
-| `RegionSchedule` | yes | — | current | task `viewer-region-restart-schedule` |
+| `RegionSchedule` | yes | — | current | **used** since 2026-10-17 (`Command::RequestRegionSchedule`, `SetRegionSchedule`); the floater is task `viewer-region-restart-schedule` |
 | `RequestTaskInventory` | yes | — | current | **used** since 2026-10-12 (`Command::FetchTaskInventory`); UDP where not granted |
 | `RequestTextureDownload` | yes | — | never used | not adopted |
 | `RetrieveNavMeshSrc` | yes | — | current | task `viewer-pathfinding-navmesh-view` |
@@ -194,8 +194,9 @@ block_parcel_search}`. The UDP `setregioninfo` has no `block_fly_over` or
 
 **`RegionSchedule`** (`llfloaterregionrestartschedule.cpp`). GET →
 `{restart:{type:"W"|"D", days:"MTWRFSU subset", time:<seconds after
-midnight>}}`, no `restart` meaning none. POST the same shape; empty `days`
-with type `W` resets.
+midnight>}}`, no `restart` meaning none — Second Life answers a region with
+no schedule `undef`. POST the same shape; empty `days` with type `W` resets.
+Days are the letters `s m t w r f a`, Sunday first.
 
 **`ModifyRegion`** (`llpbrterrainfeatures.cpp`). PBR terrain transforms. GET on
 every region handshake → `{success, message?, overrides:[4 GLTF material

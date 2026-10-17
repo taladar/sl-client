@@ -58,6 +58,9 @@ const CHANGE_INFO: &str = "estatechangeinfo";
 /// The estate command that saves the floater's **Region** tab.
 const SET_REGION_INFO: &str = "setregioninfo";
 
+/// The estate command that saves the floater's **Debug** tab.
+const SET_REGION_DEBUG: &str = "setregiondebug";
+
 /// The estate command that saves the floater's **Terrain** tab.
 const SET_REGION_TERRAIN: &str = "setregionterrain";
 
@@ -202,8 +205,8 @@ const TERRAIN_CORNERS: usize = 4;
 pub struct EstateFixture {
     /// The estate's name.
     pub name: String,
-    /// The raw estate-flags bitfield.
-    pub flags: u32,
+    /// The estate's flags: its bits of the region flag space.
+    pub flags: sl_proto::RegionFlags,
     /// The estate's fixed sun position, when it uses one.
     pub sun_position: u32,
     /// The covenant notecard's asset id, or [`None`] for an estate with no
@@ -239,7 +242,7 @@ impl Default for EstateFixture {
     fn default() -> Self {
         Self {
             name: DEFAULT_ESTATE_NAME.to_owned(),
-            flags: 0,
+            flags: sl_proto::RegionFlags::default(),
             sun_position: 0,
             covenant: None,
             covenant_timestamp: 0,
@@ -402,7 +405,7 @@ pub(crate) fn answer_estate_request(
                 world.estate.name.clone_from(name);
             }
             if let Some(flags) = number(params, 1) {
-                world.estate.flags = flags;
+                world.estate.flags = sl_proto::RegionFlags::from_legacy(flags);
             }
             if let Some(sun) = number(params, 2) {
                 world.estate.sun_position = sun;
@@ -413,27 +416,64 @@ pub(crate) fn answer_estate_request(
                 tracing::warn!("answering an estate change failed: {error}");
             }
         }
-        // The floater's Region tab. The nine parameters are positional and
-        // three of them are the region's own limits rather than the estate's.
+        // The floater's Region tab. The nine parameters are positional; the
+        // two settings only the capability carries keep what they were.
         SET_REGION_INFO => {
+            let mut update = region_info_update(&world.limits(identity));
+            if let Some(flag) = boolean(params, 0) {
+                update.block_terraform = flag;
+            }
+            if let Some(flag) = boolean(params, 1) {
+                update.block_fly = flag;
+            }
+            if let Some(flag) = boolean(params, 2) {
+                update.allow_damage = flag;
+            }
+            if let Some(flag) = boolean(params, 3) {
+                update.allow_land_resell = flag;
+            }
+            if let Some(agents) = number(params, 4) {
+                update.agent_limit = i32::try_from(agents).unwrap_or(i32::MAX);
+            }
+            if let Some(bonus) = decimal(params, 5) {
+                update.object_bonus = bonus;
+            }
+            if let Some(access) = number(params, 6) {
+                update.maturity =
+                    sl_proto::Maturity::from_sim_access(u8::try_from(access).unwrap_or(0));
+            }
+            if let Some(flag) = boolean(params, 7) {
+                update.restrict_pushobject = flag;
+            }
+            if let Some(flag) = boolean(params, 8) {
+                update.allow_parcel_changes = flag;
+            }
+            return Some(apply_region_info(world, identity, &update, sim, now));
+        }
+        // The floater's Debug tab: scripts, collisions and physics off.
+        SET_REGION_DEBUG => {
             {
                 let limits = world.limits_mut(identity);
-                if let Some(agents) = number(params, 4) {
-                    limits.max_agents = agents;
+                let mut flags = limits.flags();
+                for (index, flag) in [
+                    sl_proto::RegionFlags::SKIP_SCRIPTS,
+                    sl_proto::RegionFlags::SKIP_COLLISIONS,
+                    sl_proto::RegionFlags::SKIP_PHYSICS,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    if let Some(on) = boolean(params, index) {
+                        flags = flags.with(flag, on);
+                    }
                 }
-                if let Some(bonus) = decimal(params, 5) {
-                    limits.object_bonus_factor = bonus;
-                }
-                if let Some(access) = number(params, 6) {
-                    limits.maturity =
-                        sl_proto::Maturity::from_sim_access(u8::try_from(access).unwrap_or(0));
-                }
+                set_flags(limits, flags);
             }
-            let limits = world.limits(identity);
-            if let Err(error) = sim.send_region_info(&limits, now) {
-                tracing::warn!("answering a region info save failed: {error}");
-            }
-            return Some(vec![RegionChange::RegionConfigured(Box::new(limits))]);
+            // Told by `SimStats` alone, the writer included: no `RegionInfo`
+            // follows a Debug-tab save on either grid.
+            let flags = world.limits(identity).flags();
+            sim.set_region_stats_flags(flags);
+            return Some(vec![RegionChange::RegionFlagsChanged(flags)]);
         }
         // The floater's Terrain tab: the water line, how far a terraform may
         // move the ground, and the sun.
@@ -674,6 +714,75 @@ fn push_access_lists(
             tracing::warn!("sending an estate access list failed: {error}");
         }
     }
+}
+
+/// The Region tab's settings as `limits` state them.
+fn region_info_update(limits: &sl_proto::RegionLimits) -> sl_proto::RegionInfoUpdate {
+    use sl_proto::RegionFlags;
+    let flags = limits.flags();
+    sl_proto::RegionInfoUpdate {
+        block_terraform: flags.contains(RegionFlags::BLOCK_TERRAFORM),
+        block_fly: flags.contains(RegionFlags::BLOCK_FLY),
+        allow_damage: flags.contains(RegionFlags::ALLOW_DAMAGE),
+        allow_land_resell: !flags.contains(RegionFlags::BLOCK_LAND_RESELL),
+        agent_limit: i32::try_from(limits.max_agents).unwrap_or(i32::MAX),
+        object_bonus: limits.object_bonus_factor,
+        maturity: limits.maturity,
+        restrict_pushobject: flags.contains(RegionFlags::RESTRICT_PUSHOBJECT),
+        allow_parcel_changes: flags.contains(RegionFlags::ALLOW_PARCEL_CHANGES),
+        block_fly_over: flags.contains(RegionFlags::BLOCK_FLYOVER),
+        block_parcel_search: flags.contains(RegionFlags::BLOCK_PARCEL_SEARCH),
+    }
+}
+
+/// Writes `flags` into both of `limits`' flag fields: the legacy one takes
+/// the low half, the extended block the whole, where the region sends one.
+fn set_flags(limits: &mut sl_proto::RegionLimits, flags: sl_proto::RegionFlags) {
+    limits.region_flags = sl_proto::RegionFlags::from_legacy(flags.legacy_bits());
+    if limits.region_flags_extended.is_some() {
+        limits.region_flags_extended = Some(flags);
+    }
+}
+
+/// Applies the Region tab's `update` to the region — from `setregioninfo` or
+/// the `DispatchRegionInfo` capability alike — answers the writer with the
+/// region's new record, and returns the change the region's other sessions
+/// are told about.
+pub(crate) fn apply_region_info(
+    world: &mut SceneFixtures,
+    identity: &sl_proto::RegionIdentity,
+    update: &sl_proto::RegionInfoUpdate,
+    sim: &mut SimSession,
+    now: Instant,
+) -> Vec<RegionChange> {
+    use sl_proto::RegionFlags;
+    {
+        let limits = world.limits_mut(identity);
+        let flags = limits
+            .flags()
+            .with(RegionFlags::BLOCK_TERRAFORM, update.block_terraform)
+            .with(RegionFlags::BLOCK_FLY, update.block_fly)
+            .with(RegionFlags::ALLOW_DAMAGE, update.allow_damage)
+            .with(RegionFlags::BLOCK_LAND_RESELL, !update.allow_land_resell)
+            .with(RegionFlags::RESTRICT_PUSHOBJECT, update.restrict_pushobject)
+            .with(
+                RegionFlags::ALLOW_PARCEL_CHANGES,
+                update.allow_parcel_changes,
+            )
+            .with(RegionFlags::BLOCK_FLYOVER, update.block_fly_over)
+            .with(RegionFlags::BLOCK_PARCEL_SEARCH, update.block_parcel_search);
+        set_flags(limits, flags);
+        limits.max_agents = u32::try_from(update.agent_limit).unwrap_or(0);
+        limits.legacy_max_agents = u8::try_from(limits.max_agents).unwrap_or(u8::MAX);
+        limits.object_bonus_factor = update.object_bonus;
+        limits.maturity = update.maturity;
+    }
+    let limits = world.limits(identity);
+    sim.set_region_stats_flags(limits.flags());
+    if let Err(error) = sim.send_region_info(&limits, now) {
+        tracing::warn!("answering a region info save failed: {error}");
+    }
+    vec![RegionChange::RegionConfigured(Box::new(limits))]
 }
 
 /// Parameter `index` as an unsigned number, its whole part taken if it is

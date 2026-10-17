@@ -62,3 +62,10 @@ Every estate manager's leg of the `estate` census reads "not measured" on
 Second Life: the messages, the access lists with the resident present, the
 covenant, freeze and eject as a parcel admin, home, kick and the restart
 notice's keyed form. A test estate (or estate-manager rights on one) runs them.
+
+## From gridspec-region-info (2026-10-17)
+
+The `region-info` census's manager legs read "not measured" on Second Life:
+a manager's `DispatchRegionInfo` and `RegionSchedule` writes and their
+answers, and how a Region-tab and a Debug-tab save are told there (the fake
+grid keeps OpenSim's answer). Estate-manager rights on any region run them.

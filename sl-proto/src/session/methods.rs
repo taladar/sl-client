@@ -1318,6 +1318,16 @@ impl Session {
                     .push_back(Event::EstateAccessLists(Box::new(lists))),
                 Err(error) => self.caps_decode_error(message, &error),
             },
+            // The answer to a `DispatchRegionInfo` POST says nothing a client
+            // acts on — the reference logs it and moves on: the region's new
+            // settings arrive as the `RegionInfo` the simulator sends after
+            // the write. A refused write is a capability failure instead.
+            CapsEvent::DispatchRegionInfo => {}
+            // The answer to a `RegionSchedule` GET (or the read after a POST).
+            CapsEvent::RegionSchedule => match sl_wire::parse_region_schedule(body) {
+                Ok(schedule) => self.events.push_back(Event::RegionSchedule(schedule)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `RegionExperiences` GET or POST: the region's
             // allow/block/trust lists.
             CapsEvent::RegionExperiences => match parse_region_experiences(body) {
@@ -2695,7 +2705,7 @@ impl Session {
                     .unwrap_or(RegionHandle(0));
                 let identity = region_identity(handshake, region_handle)?;
                 if let Some(circuit_id) = self.circuit_id_for(from) {
-                    self.note_region_flags(circuit_id, identity.region_flags);
+                    self.note_region_flags(circuit_id, identity.flags());
                 }
                 self.events
                     .push_back(Event::RegionInfoHandshake(Box::new(identity)));
@@ -3914,10 +3924,11 @@ impl Session {
             .map(|local_id| ScopedObjectId::new(circuit.id, local_id))
     }
 
-    /// Records the raw `RegionFlags` a `RegionHandshake` carried for the region on
-    /// `circuit`, so [`Session::region_blocks_fly`] can read the current region's
-    /// fly setting.
-    fn note_region_flags(&mut self, circuit: CircuitId, flags: u32) {
+    /// Records the flags the region on `circuit` last stated — in its
+    /// `RegionHandshake`, a `RegionInfo` or a `SimStats` — so
+    /// [`Session::region_blocks_fly`] reads the current region's fly setting
+    /// as it stands, not as it stood on arrival.
+    fn note_region_flags(&mut self, circuit: CircuitId, flags: RegionFlags) {
         self.world.note_region_flags(circuit, flags);
     }
 
@@ -3928,14 +3939,14 @@ impl Session {
     }
 
     /// Whether the agent's current region blocks flying region-wide (the
-    /// `REGION_FLAGS_BLOCK_FLY` bit of the region's `RegionHandshake` flags — the
+    /// `REGION_FLAGS_BLOCK_FLY` bit of the region's flags as last stated — the
     /// region half of the reference viewer's `LLAgent::canFly`). `false` before
     /// the root region's handshake has been seen (flags unknown).
     #[must_use]
     pub fn region_blocks_fly(&self) -> bool {
         self.root_circuit_id()
             .and_then(|circuit| self.world.region_flags(circuit))
-            .is_some_and(|flags| RegionFlags::from_bits(flags).contains(RegionFlags::BLOCK_FLY))
+            .is_some_and(|flags| flags.contains(RegionFlags::BLOCK_FLY))
     }
 
     /// The parcel the agent's own avatar currently stands on, resolved from the
@@ -4055,9 +4066,14 @@ impl Session {
                     self.note_own_avatar(circuit_id, local_id);
                 }
             }
+            // A region's settings changed (or were asked for): its flags as
+            // they stand now — the handshake's are as they stood on arrival.
             AnyMessage::RegionInfo(info) => {
-                self.events
-                    .push_back(Event::RegionLimits(region_limits(info)?));
+                let limits = region_limits(info)?;
+                if let Some(circuit_id) = self.circuit_id_for(from) {
+                    self.note_region_flags(circuit_id, limits.flags());
+                }
+                self.events.push_back(Event::RegionLimits(limits));
             }
             AnyMessage::UUIDNameReply(reply) => {
                 self.events
@@ -5334,21 +5350,29 @@ impl Session {
             }
             // Periodic region performance telemetry (~1 Hz). `RegionX`/`RegionY`
             // carry the region's map-tile indices (grid coordinates); the
-            // 64-bit extended flags fall back to the zero-extended 32-bit flags
-            // when the sim sends no `RegionInfo` block.
+            // 64-bit extended flags are absent when the sim sends no
+            // `RegionInfo` block.
             AnyMessage::SimStats(stats) => {
                 let region_flags_extended = stats
                     .region_info
                     .first()
-                    .map_or_else(|| u64::from(stats.region.region_flags), |info| {
-                        info.region_flags_extended
-                    });
+                    .map(|info| RegionFlags::from_bits(info.region_flags_extended));
+                // The only message that tells of a Debug-tab change
+                // (`setregiondebug` sends no `RegionInfo`): keep the flags it
+                // carries as the region's current ones.
+                if let Some(circuit_id) = self.circuit_id_for(from) {
+                    self.note_region_flags(
+                        circuit_id,
+                        region_flags_extended
+                            .unwrap_or_else(|| RegionFlags::from_legacy(stats.region.region_flags)),
+                    );
+                }
                 self.events.push_back(Event::SimStats(Box::new(RegionStats {
                     grid_coordinates: GridCoordinates::new(
                         stats.region.region_x,
                         stats.region.region_y,
                     ),
-                    region_flags: stats.region.region_flags,
+                    region_flags: RegionFlags::from_legacy(stats.region.region_flags),
                     object_capacity: stats.region.object_capacity,
                     region_flags_extended,
                     stats: stats
@@ -13227,7 +13251,7 @@ impl Session {
     /// Updates the estate settings (the access / limit / voice / teleport flags
     /// and the fixed-sun hour) via `EstateOwnerMessage`/`estatechangeinfo`. The
     /// `flags` field is the whole estate flag bitfield, so build it from the
-    /// current flags and the toggles with [`EstateFlags`](crate::EstateFlags).
+    /// current flags and the toggles with [`RegionFlags::with`].
     ///
     /// # Errors
     ///
@@ -13244,7 +13268,7 @@ impl Session {
         let sun = (update.sun_hour * 1024.0).round();
         let params = [
             update.estate_name.clone(),
-            update.flags.to_string(),
+            update.flags.legacy_bits().to_string(),
             format!("{sun:.0}"),
         ];
         circuit.send_estate_owner_message("estatechangeinfo", &params, now)?;

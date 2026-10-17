@@ -83,14 +83,15 @@ use sl_proto::{
     ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5,
     PickKey, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProfileImage,
     ProfileUpdate, ProposalVoteId, ReflectionProbe, ReflectionProbeFlags, RegionDebugUpdate,
-    RegionHandle, RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RegionName,
-    RegionTerrainUpdate, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptLanguage,
-    ScriptPermissions, ScriptTarget, ScriptUploadLocation, SculptData, SculptOrMeshKey,
-    SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea, TextureEntry,
-    TextureFace, Throttle, ThumbnailTarget, TimestampFormat, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    RegionFlags, RegionHandle, RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId,
+    RegionName, RegionSchedule, RegionTerrainUpdate, RenderMaterialRef, RestartDays, RestartWhen,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    ScopedObjectId, ScopedParcelId, ScriptLanguage, ScriptPermissions, ScriptTarget,
+    ScriptUploadLocation, SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot,
+    TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle, ThumbnailTarget,
+    TimestampFormat, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
+    WearableType,
 };
 
 use crate::args::{self, Args};
@@ -1643,6 +1644,8 @@ fn build_region_info_update(
         maturity,
         restrict_pushobject: args.bool_or(ctx, "restrict_pushobject", 7, false)?,
         allow_parcel_changes: args.bool_or(ctx, "allow_parcel_changes", 8, true)?,
+        block_fly_over: args.bool_or(ctx, "block_fly_over", 9, false)?,
+        block_parcel_search: args.bool_or(ctx, "block_parcel_search", 10, false)?,
     })
 }
 
@@ -3557,7 +3560,12 @@ fn all_specs() -> Vec<CommandSpec> {
                         sim_name,
                         estate_id: args.req_parse(ctx, "estate_id", 1, "u32")?,
                         parent_estate_id: args.req_parse(ctx, "parent_estate_id", 2, "u32")?,
-                        region_flags: args.req_parse(ctx, "region_flags", 3, "u64")?,
+                        region_flags: RegionFlags::from_bits(args.req_parse(
+                            ctx,
+                            "region_flags",
+                            3,
+                            "u64",
+                        )?),
                         billable_factor: args.req_parse(ctx, "billable_factor", 4, "f32")?,
                         price_per_meter: args.req_parse(ctx, "price_per_meter", 5, "i32")?,
                         redirect_grid: GridCoordinates::new(
@@ -4049,6 +4057,33 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |_args, _ctx| Ok(Command::RequestEstateAccessLists),
         },
         CommandSpec {
+            name: "request_region_schedule",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestRegionSchedule),
+        },
+        CommandSpec {
+            name: "set_region_schedule",
+            usage: "[days=SMTWRFA] [daily=false] [time=<seconds after midnight>] [clear=false]",
+            build: |args, ctx| {
+                let schedule = if args.bool_or(ctx, "clear", 3, false)? {
+                    None
+                } else {
+                    let when = if args.bool_or(ctx, "daily", 1, false)? {
+                        RestartWhen::Daily
+                    } else {
+                        RestartWhen::Weekly(RestartDays::from_letters(
+                            &args.opt_str(ctx, "days", 0)?.unwrap_or_default(),
+                        ))
+                    };
+                    Some(RegionSchedule {
+                        when,
+                        seconds_after_midnight: args.parse_or(ctx, "time", 2, "u32", 0_u32)?,
+                    })
+                };
+                Ok(Command::SetRegionSchedule { schedule })
+            },
+        },
+        CommandSpec {
             name: "request_estate_info",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestEstateInfo),
@@ -4163,7 +4198,7 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::SetEstateInfo(EstateInfoUpdate {
                     estate_name: args.req_str(ctx, "estate_name", 0)?,
-                    flags: args.req_parse(ctx, "flags", 1, "u32")?,
+                    flags: RegionFlags::from_legacy(args.req_parse(ctx, "flags", 1, "u32")?),
                     sun_hour: args.parse_or(ctx, "sun_hour", 2, "f32", 0.0)?,
                 }))
             },
@@ -7256,7 +7291,7 @@ mod tests {
             Ok(Command::GodUpdateRegionInfo { update })
                 if update.sim_name.as_ref() == "Da Boom"
                     && update.estate_id == 1
-                    && update.region_flags == 7
+                    && update.region_flags == sl_proto::RegionFlags::from_bits(7)
                     && update.price_per_meter == 5
                     && update.redirect_grid == GridCoordinates::new(1000, 1001)
         ));
@@ -8073,7 +8108,7 @@ mod tests {
         assert!(matches!(
             build(r#"set_estate_info "Test Estate" 16 sun_hour=6"#),
             Ok(Command::SetEstateInfo(update))
-                if update.estate_name == "Test Estate" && update.flags == 16
+                if update.estate_name == "Test Estate" && update.flags == sl_proto::RegionFlags::from_bits(16)
         ));
     }
 

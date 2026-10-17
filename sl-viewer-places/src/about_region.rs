@@ -116,14 +116,16 @@ use bevy::ui::{Checked, InteractionDisabled};
 use bevy::ui_widgets::ValueChange;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    AgentKey, Asset, AssetKey, AssetType, Command, EstateAccessDelta, EstateAccessKind,
-    EstateAccessLists, EstateBan, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate,
+    AgentKey, Asset, AssetKey, AssetType, CAP_DISPATCH_REGION_INFO, Command, EstateAccessDelta,
+    EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateInfo, EstateInfoUpdate,
     ExperienceInfo, ExperienceKey, GroupKey, LandArea, LandStatReportType, Maturity, OwnerKey,
     ProductType, RegionDebugUpdate, RegionFlags, RegionIdentity, RegionInfoUpdate, RegionName,
-    RegionTerrainUpdate, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity, SlRegionLimits,
-    SlSessionEvent, TextureKey, Uuid,
+    RegionTerrainUpdate, SlCapabilities, SlCommand, SlCurrentRegion, SlEvent, SlRegionIdentity,
+    SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
 };
 use sl_viewer_notices::experience_profile::{OpenExperienceProfile, maturity_key};
+
+use crate::notifications::ShowNotification;
 
 use crate::edit_fields::{
     FieldSeed, seed_field_deferred, seed_one_field, set_combo, set_combo_deferred,
@@ -439,7 +441,7 @@ struct AboutRegionState {
     /// The editable region-terrain draft (water / limits / textures / elevation).
     terrain_draft: RegionTerrainUpdate,
     /// The editable estate-flags draft (access / limit / voice / teleport bits).
-    estate_draft: EstateFlags,
+    estate_draft: RegionFlags,
     /// The three records the drafts were last seeded or merged from — the
     /// **base** of their three-way merge, and `None` until the first region
     /// record arrives (which is also what "the drafts are not seeded yet"
@@ -1085,6 +1087,12 @@ enum CheckKind {
     AllowLandResell,
     /// Allow parcel join / divide (→ region draft).
     AllowLandJoinDivide,
+    /// Block flying over parcels above their access height (→ region
+    /// draft; written only where the region grants `DispatchRegionInfo`).
+    BlockFlyOver,
+    /// Keep the region's parcels out of search (→ region draft; written only
+    /// where the region grants `DispatchRegionInfo`).
+    BlockParcelSearch,
     /// Disable scripts region-wide (→ debug draft).
     DisableScripts,
     /// Disable collisions region-wide (→ debug draft).
@@ -1109,15 +1117,15 @@ enum CheckKind {
 
 impl CheckKind {
     /// The estate flag bit this checkbox drives, for the estate kinds.
-    const fn estate_bit(self) -> Option<EstateFlags> {
+    const fn estate_bit(self) -> Option<RegionFlags> {
         match self {
-            Self::EstatePublicAccess => Some(EstateFlags::EXTERNALLY_VISIBLE),
-            Self::EstateAllowDirectTeleport => Some(EstateFlags::ALLOW_DIRECT_TELEPORT),
-            Self::EstateRequirePayment => Some(EstateFlags::DENY_ANONYMOUS),
-            Self::EstateRequireAgeVerified => Some(EstateFlags::DENY_AGEUNVERIFIED),
-            Self::EstateAllowVoice => Some(EstateFlags::ALLOW_VOICE),
-            Self::EstateParcelOverride => Some(EstateFlags::ALLOW_ACCESS_OVERRIDE),
-            Self::EstateDenyBots => Some(EstateFlags::DENY_BOTS),
+            Self::EstatePublicAccess => Some(RegionFlags::EXTERNALLY_VISIBLE),
+            Self::EstateAllowDirectTeleport => Some(RegionFlags::ALLOW_DIRECT_TELEPORT),
+            Self::EstateRequirePayment => Some(RegionFlags::DENY_ANONYMOUS),
+            Self::EstateRequireAgeVerified => Some(RegionFlags::DENY_AGEUNVERIFIED),
+            Self::EstateAllowVoice => Some(RegionFlags::ALLOW_VOICE),
+            Self::EstateParcelOverride => Some(RegionFlags::ALLOW_ACCESS_OVERRIDE),
+            Self::EstateDenyBots => Some(RegionFlags::DENY_BOTS),
             _other => None,
         }
     }
@@ -1136,6 +1144,10 @@ impl CheckKind {
             }
             Self::AllowLandJoinDivide => {
                 state.draft.allow_parcel_changes = !state.draft.allow_parcel_changes;
+            }
+            Self::BlockFlyOver => state.draft.block_fly_over = !state.draft.block_fly_over,
+            Self::BlockParcelSearch => {
+                state.draft.block_parcel_search = !state.draft.block_parcel_search;
             }
             Self::DisableScripts => {
                 state.debug_draft.disable_scripts = !state.debug_draft.disable_scripts;
@@ -1164,6 +1176,8 @@ impl CheckKind {
             Self::RestrictPush => state.draft.restrict_pushobject,
             Self::AllowLandResell => state.draft.allow_land_resell,
             Self::AllowLandJoinDivide => state.draft.allow_parcel_changes,
+            Self::BlockFlyOver => state.draft.block_fly_over,
+            Self::BlockParcelSearch => state.draft.block_parcel_search,
             Self::DisableScripts => state.debug_draft.disable_scripts,
             Self::DisableCollisions => state.debug_draft.disable_collisions,
             Self::DisablePhysics => state.debug_draft.disable_physics,
@@ -1179,6 +1193,49 @@ impl CheckKind {
 /// swatch): its [`InteractionDisabled`] follows the agent's estate rights.
 #[derive(Component, Debug, Clone, Copy)]
 struct EditGate;
+
+/// A marker on a control only the `DispatchRegionInfo` capability can save
+/// (the Region tab's fly-over and search boxes, which the UDP
+/// `setregioninfo` has no room for): greyed where the region does not grant
+/// it — on OpenSim — whatever the agent's rights.
+#[derive(Component, Debug, Clone, Copy)]
+struct NeedsDispatch;
+
+/// Whether the agent's region grants `DispatchRegionInfo`, folded from each
+/// capability map: Second Life does, OpenSim does not
+/// (`book/src/gridspec/estate.md` § Region info).
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RegionDispatchSupport {
+    /// Whether the region grants the capability.
+    supported: bool,
+}
+
+impl RegionDispatchSupport {
+    /// The state a grid that does — or does not — grant the capability puts
+    /// this in, for a test that stands the window up without a session.
+    #[must_use]
+    pub const fn new(supported: bool) -> Self {
+        Self { supported }
+    }
+}
+
+/// Fold each capability map into [`RegionDispatchSupport`], and have every
+/// window repaint its controls when the answer changes.
+fn ingest_dispatch_capability(
+    mut capabilities: MessageReader<SlCapabilities>,
+    mut support: ResMut<RegionDispatchSupport>,
+    mut windows: Query<&mut AboutRegionDirty>,
+) {
+    for SlCapabilities(map) in capabilities.read() {
+        let supported = map.contains_key(CAP_DISPATCH_REGION_INFO);
+        if supported != support.supported {
+            support.supported = supported;
+            for mut dirty in &mut windows {
+                dirty.controls = true;
+            }
+        }
+    }
+}
 
 /// A marker on every write button (Apply / Add / Restart / …), so their
 /// visibility follows the agent's estate rights in one pass.
@@ -1444,6 +1501,11 @@ impl Plugin for AboutRegionPlugin {
             app.add_plugins(TopObjectsPlugin);
         }
         app.add_message::<OpenAboutRegion>()
+            .add_message::<SlCapabilities>()
+            .init_resource::<RegionDispatchSupport>()
+            // Every capability map is folded in, window or no window: the
+            // first comes at login, long before anybody opens the floater.
+            .add_systems(Update, ingest_dispatch_capability)
             .add_systems(
                 Update,
                 // After the manager's command pass — see `FloaterSystems`: the
@@ -1693,6 +1755,7 @@ pub fn spawn_about_region_specimen(
     commands.init_resource::<Messages<OpenExperiencePicker>>();
     commands.init_resource::<Messages<OpenTelehub>>();
     commands.init_resource::<Messages<OpenTopObjects>>();
+    commands.init_resource::<Messages<ShowNotification>>();
 
     let tabs = build_region_content(commands, parent, cx.font_size);
     let region = &tabs.region;
@@ -1808,6 +1871,16 @@ fn build_region_tab(commands: &mut Commands, panel: Entity, font_size: f32) -> R
         CheckKind::AllowLandJoinDivide,
         font_size,
     );
+    for (label, kind) in [
+        ("about-region-block-fly-over", CheckKind::BlockFlyOver),
+        (
+            "about-region-block-parcel-search",
+            CheckKind::BlockParcelSearch,
+        ),
+    ] {
+        let checkbox = spawn_check(commands, panel, label, kind, font_size);
+        commands.entity(checkbox).insert(NeedsDispatch);
+    }
 
     let limit_row = spawn_labeled_row(commands, panel, "about-region-agent-limit", font_size);
     handles.agent_limit_field = Some(spawn_edit_spinner(
@@ -2621,7 +2694,7 @@ fn ingest_about_region_events(
                     // Seed the estate-flags draft from the estate's current flags on
                     // the first reply after an open, preserving bits the UI omits.
                     if !state.estate_seeded {
-                        state.estate_draft = EstateFlags::from_bits(info.estate_flags);
+                        state.estate_draft = info.estate_flags;
                         state.estate_seeded = true;
                         dirty.controls = true;
                     }
@@ -2880,16 +2953,16 @@ fn region_flags_for_draft(
     identity: &SlRegionIdentity,
     limits: Option<&SlRegionLimits>,
 ) -> RegionFlags {
-    RegionFlags::from_bits(freshest_region_flags(
-        identity.0.region_flags,
-        limits.map(|limits| limits.0.region_flags),
-    ))
+    freshest_region_flags(identity.0.flags(), limits.map(|limits| limits.0.flags()))
 }
 
 /// The precedence [`region_flags_for_draft`] applies, without the components
 /// wrapped around it: the `RegionInfo`'s bits when there are any, else the
 /// handshake's.
-const fn freshest_region_flags(handshake: u32, region_info: Option<u32>) -> u32 {
+const fn freshest_region_flags(
+    handshake: RegionFlags,
+    region_info: Option<RegionFlags>,
+) -> RegionFlags {
     match region_info {
         Some(bits) => bits,
         None => handshake,
@@ -2913,6 +2986,8 @@ fn seed_draft(identity: &SlRegionIdentity, limits: Option<&SlRegionLimits>) -> R
         // Same reason as the flags: the handshake's maturity is the one it had
         // at entry, and a `RegionInfo` carries the current one.
         maturity: limits.map_or(identity.0.maturity, |limits| limits.0.maturity),
+        block_fly_over: flags.contains(RegionFlags::BLOCK_FLYOVER),
+        block_parcel_search: flags.contains(RegionFlags::BLOCK_PARCEL_SEARCH),
     }
 }
 
@@ -3122,6 +3197,10 @@ struct RegionEnableGates<'w, 's> {
     gated: Query<'w, 's, Entity, With<EditGate>>,
     /// Which of them already carry the disabled marker.
     disabled: Query<'w, 's, (), With<InteractionDisabled>>,
+    /// Which of them only the `DispatchRegionInfo` capability can save.
+    needs_dispatch: Query<'w, 's, (), With<NeedsDispatch>>,
+    /// Whether the region grants that capability.
+    dispatch: Res<'w, RegionDispatchSupport>,
     /// The checkboxes whose tick follows the region's own state.
     checks: Query<'w, 's, (Entity, &'static AboutRegionCheck, Has<Checked>)>,
 }
@@ -3158,6 +3237,8 @@ struct RegionActionOut<'w> {
     telehubs: MessageWriter<'w, OpenTelehub>,
     /// The top-objects report.
     reports: MessageWriter<'w, OpenTopObjects>,
+    /// The notice an Apply raises when it changes the region's rating.
+    notifications: MessageWriter<'w, ShowNotification>,
 }
 
 /// Grey each window's write buttons and every editable control to follow the
@@ -3189,6 +3270,8 @@ fn update_control_enable(
         write_buttons,
         gated,
         disabled,
+        needs_dispatch,
+        dispatch,
         checks,
     } = gates;
     // The windows repainting this frame, and what each one allows.
@@ -3213,6 +3296,7 @@ fn update_control_enable(
         let Some(can_manage) = can_manage(entity) else {
             continue;
         };
+        let can_manage = can_manage && (dispatch.supported || !needs_dispatch.contains(entity));
         let is_disabled = disabled.contains(entity);
         if can_manage && is_disabled {
             commands.entity(entity).remove::<InteractionDisabled>();
@@ -3462,7 +3546,7 @@ fn update_covenant_tab(
             handles.region_rating,
             &maturity_text(region.map(|region| region.maturity), &translator),
         );
-        let flags = region.map(|region| RegionFlags::from_bits(region.region_flags));
+        let flags = region.map(RegionIdentity::flags);
         set_value_node(&mut texts, handles.resale, &resale_text(flags, &translator));
         set_value_node(
             &mut texts,
@@ -4246,6 +4330,7 @@ fn on_about_region_action(
         mut experience_pickers,
         mut telehubs,
         mut reports,
+        mut notifications,
     } = out;
     if press.button != PointerButton::Primary {
         return;
@@ -4283,6 +4368,17 @@ fn on_about_region_action(
             }
             sl_commands.write(SlCommand(Command::SetRegionInfo(state.draft.clone())));
             sl_commands.write(SlCommand(Command::RequestRegionInfo));
+            // The reference's check (`LLPanelRegionGeneralInfo::sendUpdate`):
+            // the rating saved against the one the region's handshake states,
+            // not the record the combo was seeded from — the two can disagree
+            // (Mauve on aditi: the record `Adult`, the handshake `Mature`), and
+            // then the notice comes with every Apply, as it does there.
+            if regions
+                .single()
+                .is_ok_and(|region| region.0.maturity != state.draft.maturity)
+            {
+                notifications.write(ShowNotification::new("RegionMaturityChange"));
+            }
         }
         AboutRegionAction::ApplyDebug => {
             sl_commands.write(SlCommand(Command::SetRegionDebug(state.debug_draft)));
@@ -4307,10 +4403,7 @@ fn on_about_region_action(
             };
             // Preserve the estate's other flags; fixed-sun estates are no longer
             // supported (the reference clears the bit on any change).
-            let flags = state
-                .estate_draft
-                .with(EstateFlags::SUN_FIXED, false)
-                .bits();
+            let flags = state.estate_draft.with(RegionFlags::SUN_FIXED, false);
             let update = EstateInfoUpdate {
                 estate_name: estate.estate_name.clone(),
                 flags,
@@ -4835,7 +4928,7 @@ fn aim_environment_panel(
             editable: state.can_manage,
             allow_override: state
                 .estate_draft
-                .contains(EstateFlags::ALLOW_ENVIRONMENT_OVERRIDE),
+                .contains(RegionFlags::ALLOW_ENVIRONMENT_OVERRIDE),
             // A region has no area a minimum-parcel-size test could apply to.
             area: LandArea::ZERO,
         };
@@ -4871,11 +4964,11 @@ fn apply_environment_override(
             };
             state.estate_draft = state
                 .estate_draft
-                .with(EstateFlags::ALLOW_ENVIRONMENT_OVERRIDE, request.allow)
-                .with(EstateFlags::SUN_FIXED, false);
+                .with(RegionFlags::ALLOW_ENVIRONMENT_OVERRIDE, request.allow)
+                .with(RegionFlags::SUN_FIXED, false);
             sl_commands.write(SlCommand(Command::SetEstateInfo(EstateInfoUpdate {
                 estate_name,
-                flags: state.estate_draft.bits(),
+                flags: state.estate_draft,
                 sun_hour: 0.0,
             })));
         }
@@ -5276,7 +5369,7 @@ fn spawn_check(
     label_key: &'static str,
     kind: CheckKind,
     font_size: f32,
-) {
+) -> Entity {
     let row_entity = spawn_row(commands, parent);
     let checkbox = spawn_checkbox(
         commands,
@@ -5293,6 +5386,7 @@ fn spawn_check(
         .entity(checkbox.checkbox)
         .insert((AboutRegionCheck { kind }, EditGate))
         .observe(on_about_region_check);
+    checkbox.checkbox
 }
 
 /// A maturity combo on `parent`, gated on estate rights.
@@ -5350,7 +5444,7 @@ mod tests {
     use crate::intents::ExperiencePickerFilter;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
-        EstateAccessDelta, EstateFlags, ExperienceKey, Maturity, OwnerKey, RegionDebugUpdate,
+        EstateAccessDelta, ExperienceKey, Maturity, OwnerKey, RegionDebugUpdate, RegionFlags,
         RegionInfoUpdate, RegionTerrainUpdate, Uuid,
     };
 
@@ -5404,15 +5498,15 @@ mod tests {
     #[test]
     fn estate_check_toggles_only_its_bit() {
         let mut state = AboutRegionState {
-            estate_draft: EstateFlags::from_bits(EstateFlags::DENY_ANONYMOUS.bits()),
+            estate_draft: RegionFlags::DENY_ANONYMOUS,
             ..Default::default()
         };
         assert!(!CheckKind::EstatePublicAccess.checked(&state));
         CheckKind::EstatePublicAccess.toggle(&mut state);
         assert!(CheckKind::EstatePublicAccess.checked(&state));
-        assert!(state.estate_draft.contains(EstateFlags::EXTERNALLY_VISIBLE));
+        assert!(state.estate_draft.contains(RegionFlags::EXTERNALLY_VISIBLE));
         // The pre-existing bit survives.
-        assert!(state.estate_draft.contains(EstateFlags::DENY_ANONYMOUS));
+        assert!(state.estate_draft.contains(RegionFlags::DENY_ANONYMOUS));
     }
 
     /// `allow_land_resell` is the inverse of the `BLOCK_LAND_RESELL` flag, so a
@@ -5477,15 +5571,18 @@ mod tests {
     /// ([[viewer-floaters-never-reread-after-a-push]]).
     #[test]
     fn the_region_draft_prefers_the_region_info_flags() {
-        let handshake = 0b0001;
-        let pushed = 0b1010;
+        let handshake = RegionFlags::from_bits(0b0001);
+        let pushed = RegionFlags::from_bits(0b1010);
         assert_eq!(
             freshest_region_flags(handshake, Some(pushed)),
             pushed,
             "a RegionInfo's flags are newer than the handshake's and must win"
         );
         // A push that clears every flag is still a push, not an absent one.
-        assert_eq!(freshest_region_flags(handshake, Some(0)), 0);
+        assert_eq!(
+            freshest_region_flags(handshake, Some(RegionFlags::default())),
+            RegionFlags::default()
+        );
         // Before any RegionInfo the handshake is all there is.
         assert_eq!(freshest_region_flags(handshake, None), handshake);
     }
@@ -5763,8 +5860,8 @@ mod tests {
                 region_id: Uuid::from_u128(id),
                 region_handle: RegionHandle::new(0),
                 grid_coordinates: GridCoordinates::new(1000, 1000),
-                region_flags: 0,
-                region_flags_extended: 0,
+                region_flags: sl_client_bevy::RegionFlags::default(),
+                region_flags_extended: None,
                 region_protocols: 0,
                 maturity: Maturity::Pg,
                 product: ProductType::Unknown,

@@ -258,8 +258,10 @@ impl RegionEntry {
                 self.config.grid_x,
                 self.config.grid_y,
             ),
-            region_flags: crate::imitates::STOCK_REGION_FLAGS,
-            region_flags_extended: u64::from(crate::imitates::STOCK_REGION_FLAGS),
+            region_flags: sl_proto::RegionFlags::from_legacy(crate::imitates::STOCK_REGION_FLAGS),
+            region_flags_extended: Some(sl_proto::RegionFlags::from_legacy(
+                crate::imitates::STOCK_REGION_FLAGS,
+            )),
             region_protocols,
             maturity: self.config.maturity,
             product: self.config.product,
@@ -840,14 +842,15 @@ impl GridCore {
             self.logout_reply,
             crate::imitates::LogoutReply::Withheld
         ));
+        let telemetry_identity = region.identity(
+            self.estate_owner,
+            self.region_protocols,
+            &self.arrival_policy,
+        );
         sim.set_region_telemetry(
             Some(
                 self.arrival_policy.telemetry(
-                    &region.identity(
-                        self.estate_owner,
-                        self.region_protocols,
-                        &self.arrival_policy,
-                    ),
+                    &telemetry_identity,
                     self.imitated
                         .region_capacity(region.config.product)
                         .land_impact,
@@ -856,6 +859,9 @@ impl GridCore {
             ),
             now,
         );
+        // `SimStats` states the region's flags as its record does — without
+        // the estate's on OpenSim, and as an estate manager last left them.
+        sim.set_region_stats_flags(region.world.lock().limits(&telemetry_identity).flags());
         // The wind runs on the region's clock, down a root and a child circuit
         // alike.
         sim.set_wind_feed(
@@ -2102,6 +2108,7 @@ impl FakeGridBuilder {
                 fixtures.contents = self.imitates.contents_policy();
                 fixtures.relays = self.imitates.relay_policy();
                 fixtures.chat = self.imitates.chat_policy();
+                fixtures.region_info = self.imitates.region_info_policy();
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
                 RegionEntry {

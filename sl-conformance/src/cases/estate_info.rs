@@ -132,7 +132,7 @@ impl GridTest for EstateInfoCase {
             metrics.set("estate_name", info.estate_name.clone());
             metrics.set("estate_owner", info.estate_owner.to_string());
             metrics.set("estate_id", info.estate_id);
-            metrics.set("estate_flags", info.estate_flags);
+            metrics.set("estate_flags", info.estate_flags.legacy_bits());
             metrics.set("parent_estate", info.parent_estate);
             metrics.set("abuse_email_present", !info.abuse_email.is_empty());
             metrics.set("has_covenant", info.covenant_id.is_some());

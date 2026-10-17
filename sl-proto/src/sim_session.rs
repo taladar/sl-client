@@ -225,6 +225,7 @@ use crate::types::{
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
+use sl_wire::RegionFlags;
 use sl_wire::combine_uuids;
 use sl_wire::messages::{
     AbortXfer, AbortXferXferIDBlock, AssetUploadComplete, AssetUploadCompleteAssetBlockBlock,
@@ -4577,6 +4578,22 @@ impl SimSession {
         });
     }
 
+    /// Restates the region flags the periodic `SimStats` carries
+    /// ([`SimSession::set_region_telemetry`]): the legacy field takes the low
+    /// half, the extended block the whole where the telemetry sends one. How
+    /// both live grids tell a viewer of a change on the Region/Estate
+    /// floater's Debug tab, which no other message mentions. A session with no
+    /// telemetry has nothing to restate.
+    pub fn set_region_stats_flags(&mut self, flags: RegionFlags) {
+        if let Some(armed) = self.telemetry.as_mut() {
+            let stats = &mut armed.telemetry.stats;
+            stats.region_flags = RegionFlags::from_legacy(flags.legacy_bits());
+            if stats.region_flags_extended.is_some() {
+                stats.region_flags_extended = Some(flags);
+            }
+        }
+    }
+
     /// Sets the other avatars the periodic `CoarseLocationUpdate` lists
     /// ([`RegionTelemetry::coarse_interval`]), replacing any set before. The
     /// agent's own entry is not among them: it is added from where the agent
@@ -6941,7 +6958,7 @@ impl SimSession {
             text(&info.estate_name),
             text(&info.estate_owner.to_string()),
             text(&info.estate_id.to_string()),
-            text(&info.estate_flags.to_string()),
+            text(&info.estate_flags.legacy_bits().to_string()),
             text(&info.sun_position.to_string()),
             text(&info.parent_estate.to_string()),
             text(&info.covenant_id.unwrap_or_else(Uuid::nil).to_string()),
@@ -7068,10 +7085,10 @@ impl SimSession {
     /// [`ServerEvent::RequestRegionInfo`]) — the Region/Estate floater's first
     /// round trip.
     ///
-    /// The optional blocks are sent when [`RegionLimits`] carries them: the
-    /// extended region flags always (a modern grid sends them), and the chat and
-    /// combat settings only when the region has any, since an absent block and
-    /// an all-zero one are different answers.
+    /// The optional blocks are sent when [`RegionLimits`] carries them — the
+    /// extended region flags, the chat and the combat settings — since an
+    /// absent block and an all-zero one are different answers. Both agent
+    /// caps are sent as the limits state them.
     ///
     /// # Errors
     ///
@@ -7090,13 +7107,9 @@ impl SimSession {
                 sim_name: with_nul(&sl_wire::region_name_to_wire(limits.sim_name.as_ref())),
                 estate_id: limits.estate_id,
                 parent_estate_id: limits.parent_estate_id,
-                region_flags: limits.region_flags,
+                region_flags: limits.region_flags.legacy_bits(),
                 sim_access: limits.maturity.to_sim_access(),
-                // The legacy 8-bit cap saturates rather than wrapping: a region
-                // that allows more agents than a byte can say is reported as
-                // "as many as this field can hold", and the 32-bit field below
-                // carries the real number.
-                max_agents: u8::try_from(limits.max_agents).unwrap_or(u8::MAX),
+                max_agents: limits.legacy_max_agents,
                 billable_factor: limits.billable_factor,
                 object_bonus_factor: limits.object_bonus_factor,
                 water_height: limits.water_height,
@@ -7112,15 +7125,19 @@ impl SimSession {
                 sun_hour: limits.sun_hour,
             },
             region_info2: RegionInfoRegionInfo2Block {
-                product_sku: with_nul(""),
-                product_name: with_nul(""),
+                product_sku: with_nul(&limits.product_sku),
+                product_name: with_nul(&limits.product_name),
                 max_agents32: limits.max_agents,
                 hard_max_agents: limits.hard_max_agents,
                 hard_max_objects: limits.hard_max_objects,
             },
-            region_info3: vec![RegionInfoRegionInfo3Block {
-                region_flags_extended: limits.region_flags_extended,
-            }],
+            region_info3: limits
+                .region_flags_extended
+                .map(|flags| RegionInfoRegionInfo3Block {
+                    region_flags_extended: flags.bits(),
+                })
+                .into_iter()
+                .collect(),
             region_info5: limits
                 .chat_settings
                 .as_ref()
@@ -7814,7 +7831,7 @@ impl SimSession {
             region: SimStatsRegionBlock {
                 region_x: stats.grid_coordinates.x(),
                 region_y: stats.grid_coordinates.y(),
-                region_flags: stats.region_flags,
+                region_flags: stats.region_flags.legacy_bits(),
                 object_capacity: stats.object_capacity,
             },
             stat: stats
@@ -7826,9 +7843,13 @@ impl SimSession {
                 })
                 .collect(),
             pid_stat: SimStatsPidStatBlock { pid: 0 },
-            region_info: vec![SimStatsRegionInfoBlock {
-                region_flags_extended: stats.region_flags_extended,
-            }],
+            region_info: stats
+                .region_flags_extended
+                .map(|flags| SimStatsRegionInfoBlock {
+                    region_flags_extended: flags.bits(),
+                })
+                .into_iter()
+                .collect(),
         });
         self.send(&message, Reliability::Unreliable, now)?;
         Ok(())
@@ -12917,8 +12938,8 @@ impl SimSession {
                     // Recover the full 64-bit extended flags from RegionInfo2 when
                     // present, falling back to the legacy 32-bit block.
                     let region_flags = update.region_info2.first().map_or_else(
-                        || u64::from(info.region_flags),
-                        |block| block.region_flags_extended,
+                        || RegionFlags::from_legacy(info.region_flags),
+                        |block| RegionFlags::from_bits(block.region_flags_extended),
                     );
                     // The redirect grid coordinates are signed on the wire (`0`
                     // for no redirect); a negative value is meaningless, so clamp

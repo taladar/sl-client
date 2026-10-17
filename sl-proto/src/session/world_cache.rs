@@ -14,7 +14,7 @@ use super::ParentRequest;
 use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::{Object, ParcelInfo, TerrainPatch};
 use sl_types::key::ObjectKey;
-use sl_wire::{RegionHandle, RegionLocalObjectId, RegionLocalParcelId};
+use sl_wire::{RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
@@ -48,7 +48,7 @@ pub(crate) struct WorldCache {
     /// `EnableSimulator`, the login response, a teleport, or an object update.
     regions: BTreeMap<CircuitId, RegionHandle>,
     /// The raw `RegionFlags` each region's `RegionHandshake` carried.
-    region_flags: BTreeMap<CircuitId, u32>,
+    region_flags: BTreeMap<CircuitId, RegionFlags>,
     /// The parcels each region has pushed, keyed by region-local parcel id.
     parcels: BTreeMap<CircuitId, SimParcels>,
     /// The last raw time-dilation value seen per circuit, so a steady region
@@ -140,13 +140,13 @@ impl WorldCache {
     }
 
     /// Records the raw `RegionFlags` `circuit`'s `RegionHandshake` carried.
-    pub(crate) fn note_region_flags(&mut self, circuit: CircuitId, flags: u32) {
+    pub(crate) fn note_region_flags(&mut self, circuit: CircuitId, flags: RegionFlags) {
         self.region_flags.insert(circuit, flags);
     }
 
     /// The raw `RegionFlags` of `circuit`'s region, if its handshake has been
     /// seen.
-    pub(crate) fn region_flags(&self, circuit: CircuitId) -> Option<u32> {
+    pub(crate) fn region_flags(&self, circuit: CircuitId) -> Option<RegionFlags> {
         self.region_flags.get(&circuit).copied()
     }
 

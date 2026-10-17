@@ -749,21 +749,21 @@ enum Who {
 
 /// Who is who, for describing ids and scrubbing names.
 #[derive(Debug, Clone, Default)]
-struct Scene {
+pub(crate) struct Scene {
     /// Avatar A.
-    a: Uuid,
+    pub(crate) a: Uuid,
     /// Avatar B.
-    b: Uuid,
+    pub(crate) b: Uuid,
     /// The region the census stands in.
-    region: Option<RegionHandle>,
+    pub(crate) region: Option<RegionHandle>,
     /// Every way a grid may write A's or B's name, with the word that
     /// replaces it.
-    names: Vec<(String, &'static str)>,
+    pub(crate) names: Vec<(String, &'static str)>,
 }
 
 impl Scene {
     /// Whose `id` is, in a word.
-    fn whose(&self, id: Uuid) -> &'static str {
+    pub(crate) fn whose(&self, id: Uuid) -> &'static str {
         if id.is_nil() {
             "nobody"
         } else if id == self.a {
@@ -778,7 +778,7 @@ impl Scene {
     }
 
     /// `text` with every id and every name of A's and B's replaced.
-    fn scrub(&self, text: &str) -> String {
+    pub(crate) fn scrub(&self, text: &str) -> String {
         let mut out = without_ids(text);
         for (name, word) in &self.names {
             if !name.is_empty() {
@@ -1028,7 +1028,7 @@ async fn access_cap(scene: &Scene, session: &Session) -> String {
 
 /// An LLSD answer in words: a map's keys in order, an array's elements, ids
 /// by whose they are, dates by their form.
-fn describe_llsd(scene: &Scene, value: &Llsd) -> String {
+pub(crate) fn describe_llsd(scene: &Scene, value: &Llsd) -> String {
     match value {
         Llsd::Map(map) => {
             let mut keys: Vec<&String> = map.keys().collect();
@@ -1056,6 +1056,7 @@ fn describe_llsd(scene: &Scene, value: &Llsd) -> String {
         Llsd::Undef => "undef".to_owned(),
         Llsd::Boolean(flag) => flag.to_string(),
         Llsd::Integer(number) => format!("int {number}"),
+        Llsd::Real(number) => format!("real {number}"),
         other => scene.scrub(&format!("{other:?}")),
     }
 }
@@ -1799,7 +1800,7 @@ async fn restart(census: &mut Census<'_>, metrics: &mut Metrics) -> Result<(), T
 
 /// An `EstateOwnerMessage` with `method` and `params`, as `session`'s agent,
 /// for a method the client has no command for.
-fn raw_estate_message(
+pub(crate) fn raw_estate_message(
     session: &Session,
     method: &str,
     params: &[&str],

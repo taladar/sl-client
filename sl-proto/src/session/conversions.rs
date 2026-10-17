@@ -50,7 +50,6 @@ use sl_types::map::GridRectangleLike as _;
 use sl_types::map::RegionCoordinates;
 use sl_wire::DisplayName;
 use sl_wire::FakeParcelId;
-use sl_wire::RegionHandle;
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
     AvatarGroupsReplyGroupDataBlock, AvatarInterestsReplyPropertiesDataBlock,
@@ -73,6 +72,7 @@ use sl_wire::messages::{
 use sl_wire::{Direction, GlobalCoordinates};
 use sl_wire::{Llsd, LlsdEncoding, SkeletonFolder, parse_llsd_serialized, to_llsd_serialized};
 use sl_wire::{Permissions, Permissions5};
+use sl_wire::{RegionFlags, RegionHandle};
 
 use crate::asset_keys::AssetKey;
 use sl_types::money::LindenAmount;
@@ -660,17 +660,14 @@ pub(crate) fn region_identity(
     let product_sku = trimmed_string(&info3.product_sku);
     let product_name = trimmed_string(&info3.product_name);
     let info4 = handshake.region_info4.first();
-    let region_flags_extended = info4.map_or_else(
-        || u64::from(info.region_flags),
-        |i4| i4.region_flags_extended,
-    );
+    let region_flags_extended = info4.map(|i4| RegionFlags::from_bits(i4.region_flags_extended));
     let region_protocols = info4.map_or(0, |i4| i4.region_protocols);
     Ok(RegionIdentity {
         sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&info.sim_name))?,
         region_id: handshake.region_info2.region_id,
         region_handle,
         grid_coordinates: grid_coordinates_from_handle(region_handle),
-        region_flags: info.region_flags,
+        region_flags: RegionFlags::from_legacy(info.region_flags),
         region_flags_extended,
         region_protocols,
         maturity: Maturity::from_sim_access(info.sim_access),
@@ -726,7 +723,7 @@ pub(crate) fn region_handshake_message(
     let [range00, range01, range10, range11] = terrain.height_ranges;
     RegionHandshake {
         region_info: RegionHandshakeRegionInfoBlock {
-            region_flags: identity.region_flags,
+            region_flags: identity.region_flags.legacy_bits(),
             sim_access: identity.maturity.to_sim_access(),
             sim_name: with_nul(&sl_wire::region_name_to_wire(identity.sim_name.as_ref())),
             sim_owner: identity.sim_owner,
@@ -761,10 +758,17 @@ pub(crate) fn region_handshake_message(
             product_sku: with_nul(&identity.product_sku),
             product_name: with_nul(&identity.product_name),
         },
-        region_info4: vec![RegionHandshakeRegionInfo4Block {
-            region_flags_extended: identity.region_flags_extended,
-            region_protocols: identity.region_protocols,
-        }],
+        // The block carries the protocols too, so it is sent whenever either
+        // field has something to say.
+        region_info4: if identity.region_flags_extended.is_some() || identity.region_protocols != 0
+        {
+            vec![RegionHandshakeRegionInfo4Block {
+                region_flags_extended: identity.flags().bits(),
+                region_protocols: identity.region_protocols,
+            }]
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -1807,10 +1811,10 @@ pub(crate) fn region_limits(
     } else {
         info2.max_agents32
     };
-    let region_flags_extended = message.region_info3.first().map_or_else(
-        || u64::from(info.region_flags),
-        |i3| i3.region_flags_extended,
-    );
+    let region_flags_extended = message
+        .region_info3
+        .first()
+        .map(|i3| RegionFlags::from_bits(i3.region_flags_extended));
     let chat_settings = message
         .region_info5
         .first()
@@ -1837,9 +1841,12 @@ pub(crate) fn region_limits(
     Ok(RegionLimits {
         sim_name: sl_wire::region_name_from_wire("SimName", &trimmed_string(&info.sim_name))?,
         max_agents,
+        legacy_max_agents: info.max_agents,
+        product_sku: trimmed_string(&info2.product_sku),
+        product_name: trimmed_string(&info2.product_name),
         hard_max_agents: info2.hard_max_agents,
         hard_max_objects: info2.hard_max_objects,
-        region_flags: info.region_flags,
+        region_flags: RegionFlags::from_legacy(info.region_flags),
         region_flags_extended,
         maturity: Maturity::from_sim_access(info.sim_access),
         estate_id: info.estate_id,
@@ -3267,7 +3274,7 @@ pub(crate) fn estate_info_from_params(
         estate_name: text(0),
         estate_owner: parse_uuid_field("estate_owner", &text(1))?,
         estate_id: parse_u32_field("estate_id", &text(2))?,
-        estate_flags: parse_u32_field("estate_flags", &text(3))?,
+        estate_flags: RegionFlags::from_legacy(parse_u32_field("estate_flags", &text(3))?),
         sun_position: parse_u32_field("sun_position", &text(4))?,
         parent_estate: parse_u32_field("parent_estate", &text(5))?,
         covenant_id: parse_optional_uuid_field("covenant_id", &text(6))?,
@@ -8646,7 +8653,10 @@ mod caps_serializer_tests {
         assert_eq!(identity.region_handle, handle);
         assert_eq!(identity.grid_coordinates, GridCoordinates::from(handle));
         assert_eq!(identity.maturity, Maturity::Mature);
-        assert_eq!(identity.region_flags_extended, 0x0000_0001_0000_8001);
+        assert_eq!(
+            identity.region_flags_extended,
+            Some(sl_wire::RegionFlags::from_bits(0x0000_0001_0000_8001))
+        );
         assert_eq!(
             identity.terrain.detail_textures,
             [texture(0xD0), texture(0xD1), texture(0xD2), texture(0xD3)]

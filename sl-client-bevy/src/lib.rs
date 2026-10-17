@@ -26,8 +26,8 @@ use sl_proto::{
     CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE,
     CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_REQUEST_TASK_INVENTORY,
-    CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
+    CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
     CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT,
@@ -40,22 +40,23 @@ use sl_proto::{
     ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_environment_update_request,
-    build_interest_list_request, build_modify_material_params_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_properties_update_request, build_parcel_voice_info_request,
-    build_postcard_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_render_materials_put_request, build_send_user_report,
-    build_set_experience_permission_request, build_update_experience_request,
-    build_update_item_asset_request, build_update_script_agent_request,
-    build_update_script_task_request, build_update_task_item_asset_request,
-    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
-    chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
-    create_listing_request, delete_listing_request, display_names_query, environment_cap_url,
-    experience_id_query, experience_info_query, experience_query, find_experience_query,
-    forget_experience_query, friendship_answer_url, group_ban_request_body, group_bans_url,
-    group_experiences_query, group_invite_response_body, listing_request, listings_request,
-    merchant_status_request, parse_login_response, set_display_name_body, update_listing_request,
+    build_create_inventory_category_request, build_dispatch_region_info_request,
+    build_environment_update_request, build_interest_list_request,
+    build_modify_material_params_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_properties_update_request,
+    build_parcel_voice_info_request, build_postcard_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_region_schedule, build_render_materials_put_request,
+    build_send_user_report, build_set_experience_permission_request,
+    build_update_experience_request, build_update_item_asset_request,
+    build_update_script_agent_request, build_update_script_task_request,
+    build_update_task_item_asset_request, build_upload_baked_texture_request,
+    build_user_info_update, build_voice_signaling_request, chat_session_agents_body,
+    chat_session_request_body, copy_inventory_from_notecard_body, create_listing_request,
+    delete_listing_request, display_names_query, environment_cap_url, experience_id_query,
+    experience_info_query, experience_query, find_experience_query, forget_experience_query,
+    friendship_answer_url, group_ban_request_body, group_bans_url, group_experiences_query,
+    group_invite_response_body, listing_request, listings_request, merchant_status_request,
+    parse_login_response, set_display_name_body, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -80,8 +81,8 @@ pub use sl_proto::{
     DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility, DisconnectReason, DisplayName,
     DisplayNameUpdate, Distance, DynamicMenus, EconomyData, EnvironmentAsset,
     EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, Error as SessionError,
-    EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateFlags,
-    EstateInfo, EstateInfoUpdate, EventId, EventInfo, ExperienceEnvironmentPush, ExperienceEvent,
+    EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateInfo,
+    EstateInfoUpdate, EventId, EventInfo, ExperienceEnvironmentPush, ExperienceEvent,
     ExperienceEventPermission, ExperienceInfo, ExperienceKey, ExperienceLocation,
     ExperiencePermission, ExperienceProperties, ExperienceSearchPage, ExperienceUpdate,
     ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend,
@@ -122,26 +123,27 @@ pub use sl_proto::{
     ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId, ReflectionProbe,
     ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates,
     RegionDebugUpdate, RegionFlags, RegionHandle, RegionHandshakeReplyFlags, RegionIdentity,
-    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
-    RegionRestartNotice, RegionTerrainComposition, RegionTerrainUpdate, Reliability,
-    RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SKY_TRACK_COUNT, SaleInfo, SaleType, Scale,
-    ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction,
-    ScriptDialog, ScriptLanguage, ScriptMetadata, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
-    SequenceNumber, ServerHistoryMessage, SessionTransition, SetDisplayNameReply, SettingsKind,
-    SimulatorFeatures, SkySettings, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, StartLocationSlot, SurfaceInfo, TRACK_MAX, TaskInventoryCapReply,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags,
-    TerraformArea, TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader,
-    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
-    ThrottleError, ThumbnailTarget, TimestampFormat, TransactionId, TransferId, Transmit,
-    TriggeredSound, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP,
-    UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT,
-    UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN,
-    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest,
-    WaterSettings, Wearable, WearableType, WireError, XferId, XferListing, avatar_texture,
+    RegionInfoDispatch, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
+    RegionName, RegionRestartNotice, RegionSchedule, RegionTerrainComposition, RegionTerrainUpdate,
+    Reliability, RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestartDays,
+    RestartWhen, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
+    SKY_TRACK_COUNT, SaleInfo, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptCompileError,
+    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptMetadata,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptTeleportRequest,
+    ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber, ServerHistoryMessage,
+    SessionTransition, SetDisplayNameReply, SettingsKind, SimulatorFeatures, SkySettings,
+    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
+    SurfaceInfo, TRACK_MAX, TaskInventoryCapReply, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerraformArea, TerrainLayerBatch,
+    TerrainLayerType, TerrainPatch, TerrainPatchHeader, TextureAnimation, TextureEntry,
+    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, ThumbnailTarget,
+    TimestampFormat, TransactionId, TransferId, Transmit, TriggeredSound, UI_SOUND_ALERT,
+    UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
+    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
+    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
+    Wearable, WearableType, WireError, XferId, XferListing, avatar_texture,
     azimuth_altitude_to_rotation, build_get_metadata_request, chat_text_muted,
     decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
     environment_asset_from_bytes, environment_asset_to_bytes, expected_upload_cost, grid_to_handle,
@@ -200,6 +202,10 @@ pub use sl_proto::{CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK
 // a face: does this region serve media-on-a-prim at all. The URL itself is not
 // used directly: `Command::SetObjectMedia` resolves the cap.
 pub use sl_proto::CAP_OBJECT_MEDIA;
+// The `DispatchRegionInfo` capability name, for the Region/Estate floater's
+// question: may the fly-over and search settings be saved here at all — only
+// the capability carries them. `Command::SetRegionInfo` resolves the cap.
+pub use sl_proto::CAP_DISPATCH_REGION_INFO;
 // The `ModifyMaterialParams` capability name, for the same question about PBR
 // materials: a region that grants none (a stock OpenSim) takes no PBR edit, so
 // a frontend greys what would send one. `Command::ModifyMaterialParams`
@@ -467,7 +473,7 @@ use sl_client_common::lsl_syntax_cache::LslSyntaxCache;
 
 pub use crate::world::{
     SlAgentParcel, SlCurrentRegion, SlIdentity, SlNeighbor, SlParcel, SlParcelOverlay, SlRegion,
-    SlRegionIdentity, SlRegionLimits,
+    SlRegionFlags, SlRegionIdentity, SlRegionLimits,
 };
 
 /// How long to wait for a single CAPS event-queue long-poll before retrying.
@@ -3471,7 +3477,46 @@ fn apply_command(
             session.set_estate_covenant(*covenant, now)?;
         }
         Command::SetRegionInfo(update) => {
-            session.set_region_info(update, now)?;
+            // The capability where the region grants it (it carries every
+            // field), the UDP `setregioninfo` otherwise — as the reference.
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_DISPATCH_REGION_INFO).cloned()
+            {
+                let body = build_dispatch_region_info_request(&update.to_dispatch());
+                let events_tx = caps.events_tx.clone();
+                crate::log_context::spawn_thread(move || {
+                    run_voice_cap(&url, body, CAP_DISPATCH_REGION_INFO, &events_tx);
+                });
+            } else {
+                session.set_region_info(update, now)?;
+            }
+        }
+        Command::RequestRegionSchedule => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_REGION_SCHEDULE).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                crate::log_context::spawn_thread(move || {
+                    run_get_caps_llsd(&url, CAP_REGION_SCHEDULE, &events_tx);
+                });
+            }
+        }
+        Command::SetRegionSchedule { schedule } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_REGION_SCHEDULE).cloned()
+            {
+                let body = build_region_schedule(schedule.as_ref(), true);
+                let events_tx = caps.events_tx.clone();
+                crate::log_context::spawn_thread(move || {
+                    // The write's answer is not the schedule: read it back,
+                    // as the floater does when it next opens.
+                    if crate::voice::post_cap_llsd(&url, body, CAP_REGION_SCHEDULE).is_some() {
+                        run_get_caps_llsd(&url, CAP_REGION_SCHEDULE, &events_tx);
+                    } else {
+                        crate::caps::report_caps_failure(&events_tx, CAP_REGION_SCHEDULE);
+                    }
+                });
+            }
         }
         Command::SetRegionDebug(update) => {
             session.set_region_debug(update, now)?;

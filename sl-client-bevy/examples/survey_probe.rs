@@ -331,6 +331,7 @@ fn on_events(
             | SlSessionEvent::ParcelDetails(_)
             | SlSessionEvent::RemoteParcelId { .. }
             | SlSessionEvent::EstateAccessLists(_)
+            | SlSessionEvent::RegionSchedule(_)
             | SlSessionEvent::RegionRestart(_)
             | SlSessionEvent::EstateCovenant(_)
             | SlSessionEvent::TelehubInfo(_)

@@ -126,6 +126,55 @@ pub(crate) async fn dispatch_caps(
                 drop(guard);
                 return SimCaps::estate_access_response(style.map(|style| (&lists, style)));
             }
+            // The region's settings are the region's, and who may write them
+            // the session's: a manager's write is applied as `setregioninfo`
+            // would be, and the region's other sessions are told.
+            CapsDispatch::RegionInfoWrite(update) => {
+                let mut guard = shared.state.lock().await;
+                if !guard.policy.estate_manager {
+                    drop(guard);
+                    return SimCaps::region_info_write_response(false);
+                }
+                let now = shared.now();
+                {
+                    let state = &mut *guard;
+                    let world = Arc::clone(&state.world);
+                    let mut world = world.lock();
+                    let changes = crate::estate::apply_region_info(
+                        &mut world,
+                        &state.identity,
+                        &update,
+                        &mut state.sim,
+                        now,
+                    );
+                    drop(world);
+                    for change in changes {
+                        drop(state.changes.send(crate::world::RegionUpdate {
+                            source: state.seq,
+                            change,
+                        }));
+                    }
+                }
+                let outcome = shared.flush_locked(&mut guard);
+                drop(guard);
+                shared.finish_flush(outcome).await;
+                return SimCaps::region_info_write_response(true);
+            }
+            // The restart schedule is the region's; a manager may write it.
+            CapsDispatch::RegionSchedule { change } => {
+                let guard = shared.state.lock().await;
+                let manager = guard.policy.estate_manager;
+                let world = Arc::clone(&guard.world);
+                drop(guard);
+                if change.is_some() && !manager {
+                    return SimCaps::region_schedule_response(None);
+                }
+                let mut world = world.lock();
+                if let Some(schedule) = change {
+                    world.restart_schedule = schedule;
+                }
+                return SimCaps::region_schedule_response(Some(world.restart_schedule.as_ref()));
+            }
             CapsDispatch::EventQueueWouldBlock => {
                 if *shutdown_rx.borrow_and_update() {
                     let guard = shared.state.lock().await;

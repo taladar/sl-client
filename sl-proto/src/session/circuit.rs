@@ -3503,9 +3503,6 @@ impl Circuit {
         update: &GodRegionUpdate,
         now: Instant,
     ) -> Result<(), WireError> {
-        // The legacy field is the low 32 bits of the extended flags.
-        let legacy_flags =
-            u32::try_from(update.region_flags & u64::from(u32::MAX)).unwrap_or(u32::MAX);
         // The redirect grid coordinates are signed on the wire (`0` for none);
         // region indices never exceed `i32::MAX` in practice.
         let redirect_grid_x = i32::try_from(update.redirect_grid.x()).unwrap_or(i32::MAX);
@@ -3519,14 +3516,15 @@ impl Circuit {
                 sim_name: with_nul(update.sim_name.as_ref()),
                 estate_id: update.estate_id,
                 parent_estate_id: update.parent_estate_id,
-                region_flags: legacy_flags,
+                // The legacy field is the low 32 bits of the extended flags.
+                region_flags: update.region_flags.legacy_bits(),
                 billable_factor: update.billable_factor,
                 price_per_meter: update.price_per_meter,
                 redirect_grid_x,
                 redirect_grid_y,
             },
             region_info2: vec![GodUpdateRegionInfoRegionInfo2Block {
-                region_flags_extended: update.region_flags,
+                region_flags_extended: update.region_flags.bits(),
             }],
         });
         self.send(&message, Reliability::Reliable, now)

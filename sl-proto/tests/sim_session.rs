@@ -2813,9 +2813,9 @@ mod test {
 
         let stats = RegionStats {
             grid_coordinates: GridCoordinates::new(1000, 1100),
-            region_flags: 0x0000_0001,
+            region_flags: sl_proto::RegionFlags::from_bits(0x0000_0001),
             object_capacity: 15_000,
-            region_flags_extended: 0x0000_0001_0000_0002,
+            region_flags_extended: Some(sl_proto::RegionFlags::from_bits(0x0000_0001_0000_0002)),
             stats: vec![
                 (SimStatId::TimeDilation, 0.98),
                 (SimStatId::SimFps, 44.5),
@@ -2851,9 +2851,15 @@ mod test {
             })
             .ok_or("expected a SimStats client event")?;
         assert_eq!(got_stats.grid_coordinates, GridCoordinates::new(1000, 1100));
-        assert_eq!(got_stats.region_flags, 0x0000_0001);
+        assert_eq!(
+            got_stats.region_flags,
+            sl_proto::RegionFlags::from_bits(0x0000_0001)
+        );
         assert_eq!(got_stats.object_capacity, 15_000);
-        assert_eq!(got_stats.region_flags_extended, 0x0000_0001_0000_0002);
+        assert_eq!(
+            got_stats.region_flags_extended,
+            Some(sl_proto::RegionFlags::from_bits(0x0000_0001_0000_0002))
+        );
         assert_eq!(got_stats.stats.len(), 3);
         assert_eq!(
             got_stats.stats.first().map(|s| s.0),
@@ -4437,7 +4443,7 @@ mod test {
                 .map_err(|_invalid| "invalid region name")?,
             estate_id: 1,
             parent_estate_id: 1,
-            region_flags: 0x1_0000_0007,
+            region_flags: sl_proto::RegionFlags::from_bits(0x1_0000_0007),
             billable_factor: 1.0,
             price_per_meter: 5,
             redirect_grid: GridCoordinates::new(1000, 1001),
@@ -5545,9 +5551,9 @@ mod test {
                 stats_interval: Duration::from_secs(2),
                 stats: sl_proto::RegionStats {
                     grid_coordinates: sl_proto::GridCoordinates::new(1000, 1000),
-                    region_flags: 6,
+                    region_flags: sl_proto::RegionFlags::from_bits(6),
                     object_capacity: 15_000,
-                    region_flags_extended: 6,
+                    region_flags_extended: Some(sl_proto::RegionFlags::from_bits(6)),
                     stats: vec![(sl_proto::SimStatId::TimeDilation, 1.0)],
                 },
                 time_interval: Duration::from_secs(10),
@@ -5635,9 +5641,9 @@ mod test {
                 stats_interval: Duration::from_secs(3600),
                 stats: sl_proto::RegionStats {
                     grid_coordinates: sl_proto::GridCoordinates::new(1000, 1000),
-                    region_flags: 6,
+                    region_flags: sl_proto::RegionFlags::from_bits(6),
                     object_capacity: 15_000,
-                    region_flags_extended: 6,
+                    region_flags_extended: Some(sl_proto::RegionFlags::from_bits(6)),
                     stats: Vec::new(),
                 },
                 time_interval: Duration::from_secs(3600),
@@ -6267,8 +6273,8 @@ mod test {
             // Grid coordinates / handle are not wire fields of the handshake.
             region_handle: RegionHandle(0),
             grid_coordinates: GridCoordinates::new(0, 0),
-            region_flags: 0x40,
-            region_flags_extended: 0x1_0000_0040,
+            region_flags: sl_proto::RegionFlags::from_bits(0x40),
+            region_flags_extended: Some(sl_proto::RegionFlags::from_bits(0x1_0000_0040)),
             region_protocols: 0x5,
             maturity: Maturity::Mature,
             product: ProductType::Homestead,
@@ -10671,10 +10677,13 @@ mod test {
         let limits = sl_proto::RegionLimits {
             sim_name: region("Fake Region"),
             max_agents: 40,
+            legacy_max_agents: 40,
+            product_sku: "023".to_owned(),
+            product_name: "Estate / Full Region".to_owned(),
             hard_max_agents: 100,
             hard_max_objects: 15_000,
-            region_flags: 0x40,
-            region_flags_extended: 0x1_0000_0040,
+            region_flags: sl_proto::RegionFlags::from_bits(0x40),
+            region_flags_extended: Some(sl_proto::RegionFlags::from_bits(0x1_0000_0040)),
             maturity: Maturity::Mature,
             estate_id: 1,
             parent_estate_id: 1,
@@ -10702,8 +10711,14 @@ mod test {
             .ok_or("expected a RegionLimits client event")?;
         assert_eq!(seen.max_agents, 40);
         assert_eq!(seen.hard_max_objects, 15_000);
-        assert_eq!(seen.region_flags_extended, 0x1_0000_0040);
+        assert_eq!(
+            seen.region_flags_extended,
+            Some(sl_proto::RegionFlags::from_bits(0x1_0000_0040))
+        );
         assert_eq!(seen.maturity, Maturity::Mature);
+        // The whole record survives the round trip, the second block's product
+        // names and the legacy agent cap among it.
+        assert_eq!(seen, limits);
         assert_eq!(
             seen.sim_name.as_ref().map(ToString::to_string),
             Some("Fake Region".to_owned())
@@ -10730,7 +10745,7 @@ mod test {
             estate_name: "Fake Estate".to_owned(),
             estate_owner: owner,
             estate_id: 1,
-            estate_flags: 0x8,
+            estate_flags: sl_proto::RegionFlags::from_bits(0x8),
             sun_position: 6,
             parent_estate: 1,
             covenant_id: Some(uuid::Uuid::from_u128(0xC0FE)),

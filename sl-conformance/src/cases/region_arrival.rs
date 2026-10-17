@@ -227,7 +227,7 @@ fn record_identity(metrics: &mut Metrics, identity: &RegionIdentity, version: Op
     metrics.set("region_flags", format!("{:#010x}", identity.region_flags));
     metrics.set(
         "region_flags_extended",
-        format!("{:#018x}", identity.region_flags_extended),
+        format!("{:#018x}", identity.flags()),
     );
     metrics.set(
         "region_protocols",

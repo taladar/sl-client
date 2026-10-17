@@ -3008,7 +3008,7 @@ fn update_covenant_tab(
             handles.region_rating,
             &maturity_text(region.map(|r| r.maturity), &translator),
         );
-        let region_flags = region.map(|r| RegionFlags::from_bits(r.region_flags));
+        let region_flags = region.map(sl_client_bevy::RegionIdentity::flags);
         set_value_node(
             texts,
             handles.resale,

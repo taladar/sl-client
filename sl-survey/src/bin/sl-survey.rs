@@ -800,6 +800,7 @@ impl Survey {
             | Event::ParcelDetails(_)
             | Event::RemoteParcelId { .. }
             | Event::EstateAccessLists(_)
+            | Event::RegionSchedule(_)
             | Event::RegionRestart(_)
             | Event::EstateCovenant(_)
             | Event::TelehubInfo(_)
@@ -1002,7 +1003,7 @@ impl Survey {
                 .unwrap_or_default(),
             region_flags: identity
                 .as_ref()
-                .map_or(0, |identity| identity.region_flags),
+                .map_or(0, |identity| identity.region_flags.legacy_bits()),
             max_agents: limits.as_ref().map_or(0, |limits| limits.max_agents),
             hard_max_agents: limits.as_ref().map_or(0, |limits| limits.hard_max_agents),
             hard_max_objects: limits.as_ref().map_or(0, |limits| limits.hard_max_objects),

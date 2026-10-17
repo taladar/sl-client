@@ -35,6 +35,7 @@ mod object_physics;
 mod parcel_flags;
 mod permissions;
 mod reflection_probe_flags;
+mod region_caps;
 mod region_handle;
 mod region_local_id;
 mod region_name;
@@ -205,6 +206,11 @@ pub use object_physics::{
 pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use permissions::{Permissions, Permissions5};
 pub use reflection_probe_flags::ReflectionProbeFlags;
+pub use region_caps::{
+    RegionInfoDispatch, RegionSchedule, RestartDays, RestartWhen,
+    build_dispatch_region_info_request, build_region_schedule, parse_dispatch_region_info_request,
+    parse_region_schedule,
+};
 pub use region_handle::RegionHandle;
 pub use region_local_id::{RegionLocalObjectId, RegionLocalParcelId};
 pub use region_name::{region_name_from_wire, region_name_to_wire};

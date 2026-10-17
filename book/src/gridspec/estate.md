@@ -135,6 +135,69 @@ reads it as an `AlertMessage` keyed `RegionRestartMinutes` (parameters
 parameters serialized LLSD, and closes its countdown on a system message
 beginning "Region restart cancelled.". `FakeSl` sends the keyed form.
 
+## Region info
+
+Measured on 2026-10-17 by the census `region-info` (two avatars, the same
+standing as above: OpenSim's A the estate owner in the Default Region, aditi's
+two residents in Mauve). Every run, on all four grids, is held to these
+answers; what the region is configured with — its flags, rating, product,
+limits, estate ids, water and terrain limits — is recorded but not held, since
+it is the region's and not the grid's.
+
+### What a region says of itself
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `RequestRegionInfo`, by a resident | answered | answered | answered (both flavours) |
+| … what a resident reads against a manager | — | the same record | the same |
+| … who else is told | nobody | nobody | nobody |
+| the extended flags (`RegionInfo3`) | sent | **not sent** | each flavour as its grid |
+| the chat ranges (`RegionInfo5`) | 10 / 20 / 100 m, no offsets, flags 0 | not sent | each flavour as its grid |
+| the combat block | flags `0x5`, on death 0, throttle 100, regeneration 1, the rest 0 | not sent | each flavour as its grid |
+| the record's flags against the handshake's | the same | without the estate's bits: `ALLOW_ACCESS_OVERRIDE`, `EXTERNALLY_VISIBLE`, `ALLOW_DIRECT_TELEPORT` | each flavour as its grid (`ESTATE_ONLY_FLAGS`) |
+| the product (`RegionInfo2`) against the handshake's | the same (`023`, `Mainland / Full Region`) | the same (empty) | the same |
+| the legacy 8-bit agent cap against the wide one | the same | the same | the same |
+| the redirect when there is none | `-1,-1` | `0,0` | each flavour as its grid |
+| the estate sun and sun hour | no estate sun, hour 0 | no estate sun, hour 0 | the same |
+| the handshake's extended flags (`RegionInfo4`) | sent | sent | sent |
+| the handshake's data centre | named | none | each flavour as its grid |
+| the handshake's protocols | `0x1` | `0x8000000000000000` | each flavour as its grid |
+| the rating: record and map against the handshake | **record and map `Adult`, handshake `Mature`** | all `Pg` | one rating everywhere (not held on `FakeSl`) |
+
+OpenSim states the region's own flags in its record and in `SimStats`
+(`EstateManagementModule.GetRegionFlags`) and adds the estate's only in the
+handshake; the estate's bits are best read from the estate's own record
+(`getinfo`). Mauve's rating disagreement was seen on one region and has no
+explanation: the reference shows the record's rating in the Region tab's combo
+and the handshake's in the covenant tab and the location bar.
+
+### The two capabilities
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `DispatchRegionInfo` | granted | not granted | each flavour as its grid |
+| … a resident's write (the values it read) | HTTP **403**, `Forbidden`, no LLSD; nobody told | — | the same on `FakeSl` |
+| … an estate manager's write | not measured | — | applied as `setregioninfo` would be, the two extra settings with it |
+| `RegionSchedule` | granted | not granted | each flavour as its grid |
+| … a read, by a resident, with no schedule | HTTP 200, `undef` | — | the same on `FakeSl` |
+| … a resident's write | HTTP **403**, `Forbidden: You don't have permission to make this change.` | — | the same on `FakeSl` |
+| … an estate manager's write | not measured | — | stored, and read back |
+
+### Changing the settings
+
+A resident's `setregioninfo` and `setregiondebug` (the values it read) are
+answered with nothing on both grids. The rest needs estate rights, so it was
+measured on OpenSim only; the fake grid's Second Life flavour keeps OpenSim's
+answer.
+
+| A, the estate owner | OpenSim | fake grid |
+| --- | --- | --- |
+| saves the Region tab with every setting flipped (`setregioninfo`) | a `RegionInfo` to **both** avatars, then each one's next `SimStats` carries the changed flags; no handshake | the same |
+| … what the record keeps | every flipped flag, the agent limit and the bonus; the fly-over and search settings are not sent over UDP | the same (over the capability on `FakeSl`, which keeps them too) |
+| … restored | the record is as before | the same |
+| switches scripts off on the Debug tab (`setregiondebug`) | **no** `RegionInfo`: only each avatar's next `SimStats` says `SKIP_SCRIPTS`; a record read after carries it | the same |
+| … and back on | the same, the bit cleared | the same |
+
 ## In the viewer
 
 - Both restart notices are read into one `Event::RegionRestart`
@@ -146,6 +209,17 @@ beginning "Region restart cancelled.". `FakeSl` sends the keyed form.
 - A keyed alert's parameters are read as the serialized LLSD they are
   (`AlertInfo::parameters`); they were read as `KEY=value` text before, which
   no grid sends, so a keyed alert showed without them.
+- The region's flags are kept as last stated — by the handshake, a
+  `RegionInfo` or a `SimStats` — in the session (`region_blocks_fly`) and the
+  viewer (`SlRegionFlags`), so the status bar's fly, push, scripts and damage
+  icons follow a change made while the agent stands in the region, which they
+  did not when they read the handshake alone.
+- The Region tab has the reference's "Block parcel fly over" and "Block land
+  show in search" boxes, greyed where the region grants no
+  `DispatchRegionInfo` (OpenSim): only that capability carries them, and Apply
+  takes it where it is granted. An Apply that saves a rating other than the
+  handshake's raises `RegionMaturityChange`, as the reference's does — on a
+  region like Mauve, at every Apply.
 - A kick ends the session with the grid's reason in
   `DisconnectReason::Kicked`; the viewer logs it and exits, as it does for any
   disconnect — showing the reason in a window that stays open is

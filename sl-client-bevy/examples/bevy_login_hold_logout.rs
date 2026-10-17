@@ -412,6 +412,7 @@ fn on_events(
             | SlSessionEvent::ChatSessionEventReply { .. }
             | SlSessionEvent::ChatSessionForceClosed { .. }
             | SlSessionEvent::EstateAccessLists(_)
+            | SlSessionEvent::RegionSchedule(_)
             | SlSessionEvent::RegionRestart(_)
             | SlSessionEvent::EstateCovenant(_)
             | SlSessionEvent::TelehubInfo(_)

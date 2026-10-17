@@ -45,3 +45,12 @@ region_restart.rs`), in place of the notice's toast. What remains of the
 reference's `region_restarting` floater: its landmark combo and Teleport
 button, the `UISndRestart` sound (and OpenSim's `UISndRestartOpenSim`), the
 screen shake, and the nearby-chat line Firestorm adds.
+
+## The capability, from gridspec-region-info (2026-10-17)
+
+The protocol half is done: `Command::RequestRegionSchedule` and
+`Command::SetRegionSchedule { schedule }` (a write is read back) answer
+`Event::RegionSchedule(Option<RegionSchedule>)`, both runtimes; the fake grid
+serves it on `FakeSl`. Measured on aditi as a resident: an empty schedule reads
+`undef`, a write is refused `403`. What remains is the floater and its button
+(shown only where the capability is granted, as the reference's).

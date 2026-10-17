@@ -928,7 +928,12 @@ pub(crate) async fn run_region_watcher(
                                         state.sim.send_parcel_overlay(&overlay, now)
                                     }
                                     RegionChange::RegionConfigured(limits) => {
+                                        state.sim.set_region_stats_flags(limits.flags());
                                         state.sim.send_region_info(limits, now)
+                                    }
+                                    RegionChange::RegionFlagsChanged(flags) => {
+                                        state.sim.set_region_stats_flags(*flags);
+                                        Ok(())
                                     }
                                     // Heard by whoever is in earshot: an
                                     // avatar standing here, and — down the

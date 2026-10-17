@@ -50,3 +50,8 @@ estate-wide `instantmessage` (`Command::SendEstateMessage`), as the reference's
 does; the region-wide "Send message to region" (`simulatormessage`,
 `Command::SendRegionMessage`) has no button yet. `Command::SetEstateCovenant`
 now exists in sl-proto for the Covenant tab's drop-a-notecard and Reset.
+
+## From gridspec-region-info (2026-10-17)
+
+`EstateFlags` is merged into `RegionFlags` (the reference's one flag space);
+the estate draft is a `RegionFlags`.

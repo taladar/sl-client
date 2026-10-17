@@ -185,8 +185,9 @@ mod test {
         // of the profile capabilities (UploadAgentProfileImage, SetDisplayName,
         // SearchStatRequest; AgentProfile waits for a profile store), and the
         // land products (ProductInfoRequest), and the estate's access lists
-        // (EstateAccess).
-        assert_eq!(granted.len(), 81);
+        // (EstateAccess), and the region settings write and restart schedule
+        // (DispatchRegionInfo, RegionSchedule).
+        assert_eq!(granted.len(), 83);
         Ok(())
     }
 

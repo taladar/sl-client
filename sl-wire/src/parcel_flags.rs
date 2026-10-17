@@ -106,13 +106,20 @@ impl ParcelFlags {
     }
 }
 
-/// The `RegionFlags` bitfield carried in `RegionHandshake`/`RegionInfo`. Only the
-/// commonly useful bits are named; use [`RegionFlags::bits`] for the rest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The region flag space (`REGION_FLAGS_*`, the reference viewer's
+/// `indra/llmessage/llregionflags.h`), 64 bits wide as the reference keeps it.
+///
+/// One space serves the region and the estate: `RegionHandshake` and
+/// `RegionInfo` carry it as a legacy 32-bit `RegionFlags` field plus, where the
+/// grid sends the block, the full `RegionFlagsExtended`; an estate's
+/// `estateupdateinfo` reply and `estatechangeinfo` request carry the estate's
+/// bits of the same space ([`RegionFlags::ESTATE_MASK`] and the access,
+/// voice, teleport and environment toggles) as a decimal string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RegionFlags {
     /// The raw flags value.
-    bits: u32,
+    bits: u64,
 }
 
 impl RegionFlags {
@@ -126,24 +133,39 @@ impl RegionFlags {
     pub const RESET_HOME_ON_TELEPORT: Self = Self { bits: 1 << 3 };
     /// The sun position is fixed.
     pub const SUN_FIXED: Self = Self { bits: 1 << 4 };
+    /// Parcel owners may set stricter access than the estate (an estate bit).
+    pub const ALLOW_ACCESS_OVERRIDE: Self = Self { bits: 1 << 5 };
     /// Terraforming is blocked.
     pub const BLOCK_TERRAFORM: Self = Self { bits: 1 << 6 };
     /// Land resale is blocked.
     pub const BLOCK_LAND_RESELL: Self = Self { bits: 1 << 7 };
     /// The region is a sandbox (objects are auto-returned).
     pub const SANDBOX: Self = Self { bits: 1 << 8 };
-    /// Parcels may be joined or subdivided (`REGION_FLAGS_ALLOW_PARCEL_CHANGES`).
-    /// Drives the About Land covenant tab's "Subdivide" clause.
-    pub const ALLOW_PARCEL_CHANGES: Self = Self { bits: 1 << 26 };
-    /// Object entry across the region edge is blocked.
+    /// Parcel owners may publish their own environment (EEP) over the
+    /// region's — the estate half of the environment panel's "Parcel Owners
+    /// May Override" checkbox. With it clear, a parcel's `ExtEnvironment`
+    /// entry is ignored and every parcel renders the region's environment.
+    pub const ALLOW_ENVIRONMENT_OVERRIDE: Self = Self { bits: 1 << 9 };
+    /// Every non-agent rigid body is pinned (collisions disabled region-wide).
     pub const SKIP_COLLISIONS: Self = Self { bits: 1 << 12 };
     /// Scripts are disabled region-wide.
     pub const SKIP_SCRIPTS: Self = Self { bits: 1 << 13 };
     /// Physics is disabled region-wide.
     pub const SKIP_PHYSICS: Self = Self { bits: 1 << 14 };
+    /// The estate is publicly visible: anyone may visit (an estate bit).
+    pub const EXTERNALLY_VISIBLE: Self = Self { bits: 1 << 15 };
+    /// Parcel owners may return objects encroaching on their land.
+    pub const ALLOW_RETURN_ENCROACHING_OBJECT: Self = Self { bits: 1 << 16 };
+    /// Estate managers may return objects encroaching on the estate.
+    pub const ALLOW_RETURN_ENCROACHING_ESTATE_OBJECT: Self = Self { bits: 1 << 17 };
+    /// Traffic (dwell) is not counted.
+    pub const BLOCK_DWELL: Self = Self { bits: 1 << 18 };
     /// Flying is blocked region-wide (the viewer's `REGION_FLAGS_BLOCK_FLY` —
     /// `LLViewerRegion::getBlockFly`, part of `LLAgent::canFly`).
     pub const BLOCK_FLY: Self = Self { bits: 1 << 19 };
+    /// Direct teleport (rather than routing to a telehub) is allowed (an
+    /// estate bit).
+    pub const ALLOW_DIRECT_TELEPORT: Self = Self { bits: 1 << 20 };
     /// Scripts owned by non-estate-managers are disabled region-wide
     /// (`REGION_FLAGS_ESTATE_SKIP_SCRIPTS`, part of the reference viewer's
     /// `LLViewerParcelMgr::allowAgentScripts`).
@@ -152,27 +174,84 @@ impl RegionFlags {
     /// (`REGION_FLAGS_RESTRICT_PUSHOBJECT` / `LLViewerRegion::getRestrictPushObject`,
     /// part of the reference viewer's `LLViewerParcelMgr::allowAgentPush`).
     pub const RESTRICT_PUSHOBJECT: Self = Self { bits: 1 << 22 };
-    /// The region restricts access to age-verified avatars.
-    pub const DENY_AGEUNVERIFIED: Self = Self { bits: 1 << 24 };
+    /// Avatars without payment information on file are denied (an estate
+    /// bit).
+    pub const DENY_ANONYMOUS: Self = Self { bits: 1 << 23 };
+    /// Parcels may be joined or subdivided (`REGION_FLAGS_ALLOW_PARCEL_CHANGES`).
+    /// Drives the About Land covenant tab's "Subdivide" clause.
+    pub const ALLOW_PARCEL_CHANGES: Self = Self { bits: 1 << 26 };
     /// Flying above the region's height cap is blocked (`REGION_FLAGS_BLOCK_FLYOVER`).
     pub const BLOCK_FLYOVER: Self = Self { bits: 1 << 27 };
+    /// Voice chat is allowed (an estate bit).
+    pub const ALLOW_VOICE: Self = Self { bits: 1 << 28 };
+    /// The region's parcels are kept out of search
+    /// (`REGION_FLAGS_BLOCK_PARCEL_SEARCH`).
+    pub const BLOCK_PARCEL_SEARCH: Self = Self { bits: 1 << 29 };
+    /// Age-unverified avatars are denied (an estate bit).
+    pub const DENY_AGEUNVERIFIED: Self = Self { bits: 1 << 30 };
+    /// Scripted agents (bots) are denied (an estate bit).
+    pub const DENY_BOTS: Self = Self { bits: 1 << 31 };
+
+    /// The bits a region takes from its estate (`REGION_FLAGS_ESTATE_MASK`).
+    pub const ESTATE_MASK: Self = Self {
+        bits: Self::EXTERNALLY_VISIBLE.bits
+            | Self::SUN_FIXED.bits
+            | Self::DENY_ANONYMOUS.bits
+            | Self::DENY_AGEUNVERIFIED.bits,
+    };
 
     /// Builds flags from a raw value.
     #[must_use]
-    pub const fn from_bits(bits: u32) -> Self {
+    pub const fn from_bits(bits: u64) -> Self {
         Self { bits }
+    }
+
+    /// Builds flags from a legacy 32-bit field (the low half of the space).
+    #[must_use]
+    pub fn from_legacy(bits: u32) -> Self {
+        Self {
+            bits: u64::from(bits),
+        }
     }
 
     /// Returns the raw flags value.
     #[must_use]
-    pub const fn bits(self) -> u32 {
+    pub const fn bits(self) -> u64 {
         self.bits
+    }
+
+    /// The low 32 bits, as a legacy 32-bit `RegionFlags` field carries them —
+    /// the reference viewer truncates the same way.
+    #[must_use]
+    pub fn legacy_bits(self) -> u32 {
+        u32::try_from(self.bits & 0xffff_ffff).unwrap_or(u32::MAX)
     }
 
     /// Returns `true` if every bit in `other` is set in `self`.
     #[must_use]
     pub const fn contains(self, other: Self) -> bool {
         self.bits & other.bits == other.bits
+    }
+
+    /// A copy with the bits of `flag` set when `on`, cleared otherwise.
+    #[must_use]
+    pub const fn with(self, flag: Self, on: bool) -> Self {
+        if on {
+            Self {
+                bits: self.bits | flag.bits,
+            }
+        } else {
+            Self {
+                bits: self.bits & !flag.bits,
+            }
+        }
+    }
+}
+
+impl core::fmt::LowerHex for RegionFlags {
+    /// The raw value in hex, as a log line or a census writes flags.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::LowerHex::fmt(&self.bits, f)
     }
 }
 

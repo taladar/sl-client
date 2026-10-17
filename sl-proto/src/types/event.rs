@@ -451,6 +451,11 @@ pub enum Event {
     /// without estate rights with four empty lists; OpenSim refuses it (a
     /// capability failure), as it refuses its `getinfo` silently.
     EstateAccessLists(Box<EstateAccessLists>),
+    /// The region's restart schedule, from the `RegionSchedule` capability's
+    /// answer to a [`Command::RequestRegionSchedule`](crate::Command::RequestRegionSchedule)
+    /// or a [`Command::SetRegionSchedule`](crate::Command::SetRegionSchedule);
+    /// `None` when the region has none.
+    RegionSchedule(Option<sl_wire::RegionSchedule>),
     /// A region restart notice — Second Life's keyed `RegionRestartMinutes` /
     /// `RegionRestartSeconds` alert or OpenSim's spelled-out agent alert, read
     /// into one countdown ([`RegionRestartNotice`]). Follows the

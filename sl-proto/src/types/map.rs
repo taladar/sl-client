@@ -8,7 +8,7 @@ use sl_types::key::{ObjectKey, TextureKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_types::map::{GridCoordinates, GridRectangle, RegionCoordinates, RegionName};
-use sl_wire::{GlobalCoordinates, RegionHandle};
+use sl_wire::{GlobalCoordinates, RegionFlags, RegionHandle};
 use uuid::Uuid;
 
 /// A change to one of an estate's access lists, applied via
@@ -135,8 +135,8 @@ pub struct EstateInfo {
     pub estate_owner: Uuid,
     /// The estate id.
     pub estate_id: u32,
-    /// The raw estate-flags bitfield.
-    pub estate_flags: u32,
+    /// The estate's flags: its bits of the region flag space.
+    pub estate_flags: RegionFlags,
     /// The sun position (when the estate uses a fixed sun).
     pub sun_position: u32,
     /// The parent estate id.
@@ -214,6 +214,12 @@ pub struct RegionInfoUpdate {
     pub restrict_pushobject: bool,
     /// Allow parcel join/subdivide by owners.
     pub allow_parcel_changes: bool,
+    /// Block flying over the region's height cap. Only the
+    /// `DispatchRegionInfo` capability carries it; over UDP it is not sent.
+    pub block_fly_over: bool,
+    /// Keep the region's parcels out of search. Only the
+    /// `DispatchRegionInfo` capability carries it; over UDP it is not sent.
+    pub block_parcel_search: bool,
 }
 
 impl Default for RegionInfoUpdate {
@@ -228,6 +234,47 @@ impl Default for RegionInfoUpdate {
             maturity: Maturity::Pg,
             restrict_pushobject: false,
             allow_parcel_changes: true,
+            block_fly_over: false,
+            block_parcel_search: false,
+        }
+    }
+}
+
+impl RegionInfoUpdate {
+    /// The same settings as a `DispatchRegionInfo` POST carries them.
+    #[must_use]
+    pub const fn to_dispatch(&self) -> sl_wire::RegionInfoDispatch {
+        sl_wire::RegionInfoDispatch {
+            block_terraform: self.block_terraform,
+            block_fly: self.block_fly,
+            block_fly_over: self.block_fly_over,
+            allow_damage: self.allow_damage,
+            allow_land_resell: self.allow_land_resell,
+            agent_limit: self.agent_limit,
+            prim_bonus: self.object_bonus,
+            sim_access: self.maturity.to_sim_access(),
+            restrict_pushobject: self.restrict_pushobject,
+            allow_parcel_changes: self.allow_parcel_changes,
+            block_parcel_search: self.block_parcel_search,
+        }
+    }
+
+    /// The settings a `DispatchRegionInfo` POST carries — the server side of
+    /// [`RegionInfoUpdate::to_dispatch`].
+    #[must_use]
+    pub const fn from_dispatch(dispatch: &sl_wire::RegionInfoDispatch) -> Self {
+        Self {
+            block_terraform: dispatch.block_terraform,
+            block_fly: dispatch.block_fly,
+            allow_damage: dispatch.allow_damage,
+            allow_land_resell: dispatch.allow_land_resell,
+            agent_limit: dispatch.agent_limit,
+            object_bonus: dispatch.prim_bonus,
+            maturity: Maturity::from_sim_access(dispatch.sim_access),
+            restrict_pushobject: dispatch.restrict_pushobject,
+            allow_parcel_changes: dispatch.allow_parcel_changes,
+            block_fly_over: dispatch.block_fly_over,
+            block_parcel_search: dispatch.block_parcel_search,
         }
     }
 }
@@ -236,8 +283,8 @@ merge_unedited! {
     /// The three-way merge the Region / Estate form's **Region** tab needs.
     ///
     /// `setregioninfo` carries the whole form, so an estate manager with three
-    /// boxes ticked and an agent limit typed would otherwise re-assert all nine
-    /// fields as the region stood when the floater last read it — reverting
+    /// boxes ticked and an agent limit typed would otherwise re-assert every
+    /// field as the region stood when the floater last read it — reverting
     /// whatever another manager saved in between, and losing their own pending
     /// edits the moment the simulator pushes that save to the region.
     #[expect(
@@ -257,6 +304,8 @@ merge_unedited! {
         maturity,
         restrict_pushobject,
         allow_parcel_changes,
+        block_fly_over,
+        block_parcel_search,
     }
 }
 
@@ -365,80 +414,12 @@ merge_unedited! {
     }
 }
 
-/// An estate's flag bitfield, as carried in the `estateupdateinfo` reply and the
-/// `estatechangeinfo` request. These bit positions are the simulator's estate
-/// flags (`llregionflags.h` `REGION_FLAGS_*`), which differ from the 32-bit
-/// [`RegionFlags`](sl_wire::RegionFlags) carried in `RegionHandshake` — use this
-/// type for estate settings and that one for per-region handshake flags.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub struct EstateFlags {
-    /// The raw flags value.
-    bits: u32,
-}
-
-impl EstateFlags {
-    /// The estate's sun is fixed rather than cycling.
-    pub const SUN_FIXED: Self = Self { bits: 1 << 4 };
-    /// Parcel owners may set stricter access than the estate.
-    pub const ALLOW_ACCESS_OVERRIDE: Self = Self { bits: 1 << 5 };
-    /// Parcel owners may publish their own environment (EEP) over the
-    /// region's — `REGION_FLAGS_ALLOW_ENVIRONMENT_OVERRIDE`, the estate half of
-    /// the region / parcel environment panel's "Parcel Owners May Override"
-    /// checkbox. With it clear, a parcel's `ExtEnvironment` entry is ignored
-    /// and every parcel renders the region's environment.
-    pub const ALLOW_ENVIRONMENT_OVERRIDE: Self = Self { bits: 1 << 9 };
-    /// The estate is publicly visible / anyone may visit.
-    pub const EXTERNALLY_VISIBLE: Self = Self { bits: 1 << 15 };
-    /// Direct teleport (rather than routing to a telehub) is allowed.
-    pub const ALLOW_DIRECT_TELEPORT: Self = Self { bits: 1 << 20 };
-    /// Anonymous (no-payment-info) avatars are denied.
-    pub const DENY_ANONYMOUS: Self = Self { bits: 1 << 23 };
-    /// Voice chat is allowed in the estate.
-    pub const ALLOW_VOICE: Self = Self { bits: 1 << 28 };
-    /// Age-unverified avatars are denied.
-    pub const DENY_AGEUNVERIFIED: Self = Self { bits: 1 << 30 };
-    /// Scripted agents (bots) are denied.
-    pub const DENY_BOTS: Self = Self { bits: 1 << 31 };
-
-    /// Builds flags from a raw value.
-    #[must_use]
-    pub const fn from_bits(bits: u32) -> Self {
-        Self { bits }
-    }
-
-    /// The raw flags value.
-    #[must_use]
-    pub const fn bits(self) -> u32 {
-        self.bits
-    }
-
-    /// Whether every bit in `other` is set in `self`.
-    #[must_use]
-    pub const fn contains(self, other: Self) -> bool {
-        self.bits & other.bits == other.bits
-    }
-
-    /// A copy with the bits of `flag` set when `on`, cleared otherwise.
-    #[must_use]
-    pub const fn with(self, flag: Self, on: bool) -> Self {
-        if on {
-            Self {
-                bits: self.bits | flag.bits,
-            }
-        } else {
-            Self {
-                bits: self.bits & !flag.bits,
-            }
-        }
-    }
-}
-
 /// The estate settings to apply via
 /// [`Session::set_estate_info`](crate::Session::set_estate_info)
 /// (`EstateOwnerMessage` method `estatechangeinfo`). The `flags` are the full
 /// estate flag bitfield (build it from the current estate flags and the toggles
-/// with [`EstateFlags`]); the simulator applies the whole field, so preserve the
-/// bits the UI does not expose.
+/// with [`RegionFlags::with`]); the simulator applies the whole field, so
+/// preserve the bits the UI does not expose.
 ///
 /// (Not `Eq`: `sun_hour` is `f32`.)
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -446,7 +427,7 @@ pub struct EstateInfoUpdate {
     /// The estate name (unchanged by this UI, but the wire message carries it).
     pub estate_name: String,
     /// The full estate flag bitfield to apply.
-    pub flags: u32,
+    pub flags: RegionFlags,
     /// The estate's fixed sun hour (0–24); only meaningful with a fixed sun.
     pub sun_hour: f32,
 }
@@ -583,10 +564,10 @@ pub struct GodRegionUpdate {
     pub estate_id: u32,
     /// The parent estate (the "mainland" estate is `1`).
     pub parent_estate_id: u32,
-    /// The 64-bit `RegionFlagsExtended` bitfield (build it with
-    /// [`sl_wire::RegionFlags`]). The legacy 32-bit `RegionFlags` block is sent
-    /// as the low 32 bits, exactly as the reference viewer truncates it.
-    pub region_flags: u64,
+    /// The 64-bit `RegionFlagsExtended` bitfield. The legacy 32-bit
+    /// `RegionFlags` block is sent as the low 32 bits, exactly as the
+    /// reference viewer truncates it.
+    pub region_flags: RegionFlags,
     /// The billing factor applied to land tier in this region.
     pub billable_factor: f32,
     /// The price per square metre of land, in L$.

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 345 |
-| blocked | 87 |
+| ready | 344 |
+| blocked | 86 |
 | in-progress | 19 |
-| bugs | 37 |
-| done | 1392 |
+| bugs | 36 |
+| done | 1395 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2067** |
@@ -350,7 +350,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (345)
+## ready (344)
 
 ### protocol
 
@@ -1157,8 +1157,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Notecards, embedded items and gestures on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
   Current Outfit Folder and wearables on each grid
-- [`gridspec-region-info`](ready/gridspec-region-info.md) — RegionInfo, region
-  flags and limits on each grid
 - [`gridspec-seated-crossing`](ready/gridspec-seated-crossing.md) — A seated
   crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
@@ -1168,16 +1166,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
   Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (87)
+## blocked (86)
 
 ### protocol
 
 - [`protocol-avatar-render-info`](blocked/protocol-avatar-render-info.md) —
   AvatarRenderInfo — client request, SimCaps service and fake-grid answers
   (blocked by `gridspec-avatar-render-info`)
-- [`protocol-cap-dispatch-region-info`](blocked/protocol-cap-dispatch-region-info.md)
-  — Write region settings over the DispatchRegionInfo capability (blocked by
-  `gridspec-region-info`)
 - [`protocol-cap-home-location`](blocked/protocol-cap-home-location.md) — Set
   home over the HomeLocation capability (blocked by `gridspec-landmarks-home`)
 
@@ -1505,7 +1500,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (37)
+## bugs (36)
 
 ### protocol
 
@@ -1513,9 +1508,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reading the agent preferences gets no answer on Second Life
 - [`protocol-im-states-no-position`](bugs/protocol-im-states-no-position.md) —
   Every instant message the session sends states position zero
-- [`protocol-region-flag-deny-ageunverified-value`](bugs/protocol-region-flag-deny-ageunverified-value.md)
-  — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
-  are split
 - [`protocol-teleport-start-after-failure-rearms`](bugs/protocol-teleport-start-after-failure-rearms.md)
   — A TeleportStart that arrives after its own failure starts a teleport that
   never ends
@@ -1600,7 +1592,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1392)
+## done (1395)
 
 ### protocol
 
@@ -1795,6 +1787,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-cap-agent-profile`](done/protocol-cap-agent-profile.md) — Read and
   write profiles over the AgentProfile capability (blocked by
   `gridspec-profiles` (done))
+- [`protocol-cap-dispatch-region-info`](done/protocol-cap-dispatch-region-info.md)
+  — Write region settings over the DispatchRegionInfo capability
 - [`protocol-cap-estate-access`](done/protocol-cap-estate-access.md) — Read the
   estate access lists over the EstateAccess capability
 - [`protocol-cap-get-metadata`](done/protocol-cap-get-metadata.md) — Read a
@@ -1841,6 +1835,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-reference-capabilities`](done/protocol-reference-capabilities.md) —
   Request and use the capabilities the reference viewer asks for and the grids
   grant
+- [`protocol-region-flag-deny-ageunverified-value`](done/protocol-region-flag-deny-ageunverified-value.md)
+  — RegionFlags::DENY_AGEUNVERIFIED has the wrong bit; region and estate flags
+  are split
 - [`protocol-request-task-inventory-cap`](done/protocol-request-task-inventory-cap.md)
   — Fetch task inventory over the RequestTaskInventory capability
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —
@@ -4666,6 +4663,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   classifieds, notes and display names on each grid
 - [`gridspec-region-arrival`](done/gridspec-region-arrival.md) — Region
   handshake identity, the arrival burst and region telemetry on each grid
+- [`gridspec-region-info`](done/gridspec-region-info.md) — RegionInfo, region
+  flags and limits on each grid
 - [`gridspec-search-directory`](done/gridspec-search-directory.md) — Directory
   search and the avatar picker on each grid
 - [`gridspec-seed-capabilities`](done/gridspec-seed-capabilities.md) — Which

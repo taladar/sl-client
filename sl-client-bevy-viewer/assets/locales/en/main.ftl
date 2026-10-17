@@ -598,6 +598,8 @@ about-region-allow-damage = Allow damage
 about-region-restrict-push = Restrict pushing
 about-region-allow-resell = Allow land resell
 about-region-allow-join-divide = Allow land join / divide
+about-region-block-fly-over = Block parcel fly over
+about-region-block-parcel-search = Block land show in search
 
 # Region tab: estate-manager actions.
 about-region-teleport-home-one = Teleport Home One Resident…

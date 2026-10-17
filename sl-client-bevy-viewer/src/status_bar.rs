@@ -37,7 +37,7 @@
 //! (the hazard). The parcel comes from [`SlAgentParcel`], mirrored from the
 //! CAPS/UDP `ParcelProperties` the session ingests (see the
 //! `parcelproperties-via-caps-eventqueue` memory), combined with the current
-//! region's [`RegionFlags`].
+//! region's [`RegionFlags`] as it last stated them ([`SlRegionFlags`]).
 //!
 //! Each permission is a bundled icon (`assets/icons/parcel/*.png`, sources beside
 //! them) — an original glyph rather than the reference viewer's own art: a
@@ -68,7 +68,7 @@ use bevy::time::common_conditions::on_timer;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
     Command, LindenBalance, ParcelFlags, RegionFlags, SlAgentParcel, SlCommand, SlCurrentRegion,
-    SlEvent, SlIdentity, SlRegionIdentity, SlSessionEvent, Vector,
+    SlEvent, SlIdentity, SlRegionFlags, SlRegionIdentity, SlSessionEvent, Vector,
 };
 use sl_l10n::{DateTimeLength, DateTimeStyle};
 use sl_settings::SettingValue;
@@ -793,7 +793,7 @@ fn fps_text(translator: &Translator, diagnostics: &DiagnosticsStore) -> String {
 /// predicates), or a freshly spawned icon needing its initial visibility.
 fn parcel_icon_inputs_changed(
     agent_parcel: Res<SlAgentParcel>,
-    regions: Query<(), (With<SlCurrentRegion>, Changed<SlRegionIdentity>)>,
+    regions: Query<(), (With<SlCurrentRegion>, Changed<SlRegionFlags>)>,
     icons: Query<(), Added<ParcelIcon>>,
 ) -> bool {
     agent_parcel.is_changed() || !regions.is_empty() || !icons.is_empty()
@@ -807,13 +807,16 @@ fn parcel_icon_inputs_changed(
 /// [`parcel_icon_inputs_changed`].
 fn update_parcel_icons(
     agent_parcel: Res<SlAgentParcel>,
-    regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
+    regions: Query<&SlRegionFlags, With<SlCurrentRegion>>,
     mut icons: Query<(&ParcelIcon, &mut Visibility)>,
 ) {
-    let region_flags = regions.single().ok().map_or_else(
-        || RegionFlags::from_bits(0),
-        |region| RegionFlags::from_bits(region.0.region_flags),
-    );
+    // The flags as the region last stated them: a change on the Region or
+    // Debug tab reaches the viewer by a `RegionInfo` or a `SimStats`, never by
+    // a new handshake.
+    let region_flags = regions
+        .single()
+        .ok()
+        .map_or_else(RegionFlags::default, |flags| flags.0);
     // With no resolved parcel there is nothing in force, so every icon is hidden.
     let context = agent_parcel.current.as_ref().map(|parcel| ParcelIcons {
         parcel_flags: parcel.flags(),

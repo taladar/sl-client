@@ -70,7 +70,30 @@ Richer, updatable settings are requested on demand with
   full
   sky/water schedule see [Environment](#environment-eep) below);
 - optional **chat** ranges (`RegionInfo5`, newer Second Life only) and
-  **combat/damage** settings, each present only when the grid sends its block.
+  **combat/damage** settings, each present only when the grid sends its block;
+- the region's **product** (`product_sku`, `product_name`, the `RegionInfo2`
+  block's) and the legacy 8-bit agent cap beside the wide one.
+
+The flags come as the legacy 32-bit field (`region_flags`) and, where the grid
+sends the `RegionInfo3` block, the full 64-bit one (`region_flags_extended`,
+`None` when absent — OpenSim sends no such block); read them with
+`RegionLimits::flags`, which prefers the wide field. Both are typed
+`sl_wire::RegionFlags`, the reference's one 64-bit `REGION_FLAGS_*` space,
+which also carries an estate's flags (`EstateInfo::estate_flags`).
+
+Both grids answer the request to anybody, estate manager or not, and push a new
+`RegionInfo` to everybody in the region when its settings are saved; a change
+on the floater's Debug tab is told only in the next `SimStats`. Neither sends a
+new handshake. The session keeps each region's flags as last stated in any of
+the three (`Session::region_blocks_fly` reads them), as the viewer's
+`SlRegionFlags` does. The settings are written with `Command::SetRegionInfo`:
+over the Second Life `DispatchRegionInfo` capability where the region grants
+it, which also carries `block_fly_over` and `block_parcel_search`; over the UDP
+`setregioninfo` elsewhere. The restart schedule is Second Life's
+`RegionSchedule` capability (`Command::RequestRegionSchedule`,
+`Command::SetRegionSchedule`, `Event::RegionSchedule`). What each grid states
+and refuses is in
+[Grid Behaviour → Estate § Region info](../gridspec/estate.md#region-info).
 
 ## Region telemetry (`SimStats` / `SimulatorTime`)
 
@@ -79,10 +102,10 @@ region current. Neither is requested — they simply arrive.
 
 `SimStats` is the region's periodic **performance telemetry**, pushed roughly
 once a second, and surfaces as `Event::SimStats(Box<RegionStats>)`.
-`RegionStats` carries the region's `grid_coordinates`, the raw 32-bit
-`region_flags` and the full 64-bit `region_flags_extended` (which falls back to
-the zero-extended 32-bit field on older simulators that send no `RegionInfo`
-block), the
+`RegionStats` carries the region's `grid_coordinates`, the legacy 32-bit
+`region_flags` and the full 64-bit `region_flags_extended` (`None` on
+simulators that send no `RegionInfo` block; `RegionStats::flags` prefers it),
+the
 `object_capacity`, and a `stats` list of `(SimStatId, f32)` pairs in the order
 the simulator sent them. `SimStatId` is a typed enum over the individual
 statistics — time dilation, simulator FPS, physics FPS, agent and active-script

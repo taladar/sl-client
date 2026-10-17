@@ -31,7 +31,7 @@
 //! | whether an update capability's completion names the item it rewrote ([`UpdateCompletionItem`]) | omitted: `new_asset` alone, and the client uses the id it sent | echoed: `new_inventory_item` carries the rewritten item |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |
-//! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 47 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger, the interest-list switch, a prim's contents and a script's experience over HTTP, a material saved into a prim, the profile capabilities, the land products |
+//! | the capabilities the seed refuses ([`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | `ObjectAnimation`, `UploadBakedTexture` | 49 of ours: AIS3, the library fetches, experiences, voice, group invites, offline messages, the bake trigger, the interest-list switch, a prim's contents and a script's experience over HTTP, a material saved into a prim, the profile capabilities, the land products, the region settings write and the restart schedule |
 //! | the login response's fields beyond the `options` list ([`login_fields`](ImitatedGrid::login_fields)) | no `home`, no region size; `max-agent-groups` from the account's package | `home` and the region size; `max-agent-groups` fixed at 42 |
 //! | how a login is refused, and a second login of an avatar in world ([`login_refusals`](ImitatedGrid::login_refusals)) | `key` with a localisation key, its (empty) arguments and an incident id; the second login is admitted and the first session kicked | `key` with a text and nothing else; the second login is refused as `presence` and the first session kicked all the same |
 //! | whether a logout is answered ([`logout_reply`](ImitatedGrid::logout_reply)) | a `LogoutReply`, always | none: the session closes with the request unanswered and unacknowledged, which is what the live grid does six times in seven |
@@ -75,6 +75,9 @@
 //! | a thumbnail and a postcard over HTTP (`InventoryThumbnailUpload`, `SendPostcard`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted |
 //! | a prim's contents and a script's experience over HTTP (`RequestTaskInventory`, `GetMetadata`, in [`withheld_capabilities`](ImitatedGrid::withheld_capabilities)) | granted | not granted: the listing is UDP and `Xfer` alone |
 //! | the land products a land row's `ProductSKU` is named by ([`land_products`](ImitatedGrid::land_products)) | `ProductInfoRequest` granted, listing the 26 products aditi lists | not granted |
+//! | the region's record ([`region_info_policy`](ImitatedGrid::region_info_policy)) | the extended flags block and the combat settings sent, the flags the handshake's, no redirect stated as `-1,-1` | neither block; the flags without the estate's bits, in `SimStats` too; no redirect `0,0` |
+//! | a change of the region's settings ([`RegionInfoPolicy`]) | the Region tab answered with a `RegionInfo` to everybody, the Debug tab told by `SimStats` alone (OpenSim's, unmeasured here) | the same, measured |
+//! | the region settings write and the restart schedule (`DispatchRegionInfo`, `RegionSchedule`) | granted; a resident refused `403`, an empty schedule `undef` | not granted |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
 //! | the kill a derez sends ([`RezPolicy::derez_kill`]) | one `KillObject` naming every prim of the linkset | two, each naming the root alone |
@@ -614,6 +617,35 @@ impl ImitatedGrid {
             Self::OpenSim => EstatePolicy {
                 access_capability_refuses_residents: true,
                 restart_notice: RestartNoticeForm::Spelled,
+            },
+        }
+    }
+
+    /// How this grid states its region's record where the two disagree —
+    /// measured by the `region-info` census on aditi and the local OpenSim
+    /// (2026-10-17, `book/src/gridspec/estate.md` § Region info).
+    ///
+    /// Both answer `RequestRegionInfo` to anybody, estate manager or not, and
+    /// neither re-sends the handshake when the settings change. Second Life's
+    /// record carries every optional block and the flags its handshake does;
+    /// OpenSim's sends neither the extended flags nor the combat block, and
+    /// its record and its `SimStats` state the region's own flags without the
+    /// estate's (`EstateManagementModule.GetRegionFlags` against the
+    /// handshake's estate and region flags together).
+    #[must_use]
+    pub const fn region_info_policy(self) -> RegionInfoPolicy {
+        match self {
+            Self::SecondLife => RegionInfoPolicy {
+                extended_flags_block: true,
+                region_flags_only: false,
+                combat: Some(SECOND_LIFE_COMBAT),
+                no_redirect: -1,
+            },
+            Self::OpenSim => RegionInfoPolicy {
+                extended_flags_block: false,
+                region_flags_only: true,
+                combat: None,
+                no_redirect: 0,
             },
         }
     }
@@ -1661,6 +1693,7 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "DeclineFriendship",
     "DeclineGroupInvite",
     "DirectDelivery",
+    "DispatchRegionInfo",
     "ExperiencePreferences",
     "ExperienceQuery",
     "FetchLib2",
@@ -1687,6 +1720,7 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "ProvisionVoiceAccountRequest",
     "ReadOfflineMsgs",
     "RegionExperiences",
+    "RegionSchedule",
     "RequestTaskInventory",
     "SearchStatRequest",
     "SendPostcard",
@@ -3306,6 +3340,67 @@ pub enum Placement {
     /// The object leaves the world for its owner's Lost And Found.
     Returned,
 }
+
+/// How a grid states its region's record ([`ImitatedGrid::region_info_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegionInfoPolicy {
+    /// Whether the record carries the extended flags (`RegionInfo3`).
+    pub extended_flags_block: bool,
+    /// Whether the record and `SimStats` state the region's own flags alone,
+    /// leaving out the estate's ([`ESTATE_ONLY_FLAGS`]) the handshake carries.
+    pub region_flags_only: bool,
+    /// The combat settings the record carries, if it sends the block.
+    pub combat: Option<sl_proto::RegionCombatSettings>,
+    /// The redirect coordinates a region that redirects nowhere states, both
+    /// ways.
+    pub no_redirect: i32,
+}
+
+impl Default for RegionInfoPolicy {
+    /// Second Life's, the fake grid's default flavour.
+    fn default() -> Self {
+        ImitatedGrid::SecondLife.region_info_policy()
+    }
+}
+
+impl RegionInfoPolicy {
+    /// The flags the record and `SimStats` state, for a region whose flags
+    /// (as its handshake states them) are `flags`.
+    #[must_use]
+    pub const fn stated_flags(&self, flags: sl_proto::RegionFlags) -> sl_proto::RegionFlags {
+        if self.region_flags_only {
+            sl_proto::RegionFlags::from_bits(flags.bits() & !ESTATE_ONLY_FLAGS.bits())
+        } else {
+            flags
+        }
+    }
+}
+
+/// The estate's bits of the region flag space that OpenSim's handshake
+/// carries and its `RegionInfo` and `SimStats` leave out: what
+/// `EstateManagementModule.GetEstateFlags` adds and `GetRegionFlags` does not.
+/// Measured as the first three (`region-info`, 2026-10-17); the rest by the
+/// same source.
+pub const ESTATE_ONLY_FLAGS: sl_proto::RegionFlags = sl_proto::RegionFlags::from_bits(
+    sl_proto::RegionFlags::ALLOW_ACCESS_OVERRIDE.bits()
+        | sl_proto::RegionFlags::EXTERNALLY_VISIBLE.bits()
+        | sl_proto::RegionFlags::ALLOW_DIRECT_TELEPORT.bits()
+        | sl_proto::RegionFlags::ESTATE_SKIP_SCRIPTS.bits()
+        | sl_proto::RegionFlags::DENY_ANONYMOUS.bits()
+        | sl_proto::RegionFlags::DENY_AGEUNVERIFIED.bits(),
+);
+
+/// The combat block Second Life's record carries for a region with no combat
+/// rules of its own: flags `0x5`, a throttle of 100, regeneration 1, the rest
+/// zero (Mauve, aditi, 2026-10-17).
+pub const SECOND_LIFE_COMBAT: sl_proto::RegionCombatSettings = sl_proto::RegionCombatSettings {
+    flags: 0x5,
+    on_death: 0,
+    damage_throttle: 100.0,
+    regeneration_rate: 1.0,
+    invulnerability_time: 0.0,
+    damage_limit: 0.0,
+};
 
 /// How a grid answers the estate ([`ImitatedGrid::estate_policy`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -101,11 +101,9 @@ pub struct Session {
     /// scoped parcel/object commands take (e.g. the dwell request in
     /// `parcel-info-dwell`) for the region the agent is currently in.
     circuit_id: Option<CircuitId>,
-    /// The billable factor of the region the agent is in, from the last
-    /// `RegionHandshake` [`Session::wait_for`] saw (`None` before one): what
-    /// the reference multiplies a parcel's area by when it asks a grid's
-    /// economy helper about buying it.
-    billable_factor: Option<f32>,
+    /// The last `RegionHandshake` [`Session::wait_for`] saw from each region,
+    /// root and neighbours alike, by the region's handle.
+    handshakes: std::collections::HashMap<RegionHandle, sl_client_tokio::RegionIdentity>,
     /// Inbound events from the run loop, after a forwarder has drained them off
     /// the run loop's bounded channel into this unbounded one. A case typically
     /// waits on one session at a time, leaving the others' event channels unread;
@@ -269,8 +267,18 @@ impl Session {
     /// `RegionHandshake` has been read ([`Session::wait_for_region`] reads the
     /// first).
     #[must_use]
-    pub const fn billable_factor(&self) -> Option<f32> {
-        self.billable_factor
+    pub fn billable_factor(&self) -> Option<f32> {
+        self.region_identity()
+            .map(|identity| identity.billable_factor)
+    }
+
+    /// What the region the agent is in said of itself in its last
+    /// `RegionHandshake` ([`Session::wait_for_region`] reads the first): what
+    /// the reference multiplies a parcel's area by when it asks a grid's
+    /// economy helper about buying it, the region's flags, its product.
+    #[must_use]
+    pub fn region_identity(&self) -> Option<&sl_client_tokio::RegionIdentity> {
+        self.handshakes.get(&self.region_handle?)
     }
 
     /// The avatar's own first (account) name, from the login credentials. Cases
@@ -360,7 +368,7 @@ impl Session {
         let events = &mut self.events;
         let region_handle = &mut self.region_handle;
         let circuit_id = &mut self.circuit_id;
-        let billable_factor = &mut self.billable_factor;
+        let handshakes = &mut self.handshakes;
         let wait = async {
             loop {
                 match events.recv().await {
@@ -384,7 +392,8 @@ impl Session {
                             *circuit_id = Some(*circuit);
                         }
                         if let Event::RegionInfoHandshake(identity) = &event {
-                            *billable_factor = Some(identity.billable_factor);
+                            let _previous = handshakes
+                                .insert(identity.region_handle, identity.as_ref().clone());
                         }
                         if let Some(value) = predicate(&event) {
                             return Ok(value);
@@ -1050,7 +1059,7 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
         login_session_id,
         region_handle,
         circuit_id,
-        billable_factor: None,
+        handshakes: std::collections::HashMap::new(),
         events: events_rx,
         commands: command_tx,
         diagnostics,

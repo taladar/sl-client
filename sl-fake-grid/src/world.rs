@@ -164,6 +164,9 @@ pub struct SceneFixtures {
     /// Lazily written rather than stated, so a region nobody has reconfigured
     /// reports exactly what its own identity says and cannot drift from it.
     limits: Option<sl_proto::RegionLimits>,
+    /// The region's restart schedule, as an estate manager wrote it over
+    /// the `RegionSchedule` capability; `None` for none.
+    pub restart_schedule: Option<sl_proto::RegionSchedule>,
     /// What the region holds on the grid being imitated
     /// ([`ImitatedGrid::region_capacity`](crate::ImitatedGrid::region_capacity)),
     /// set when the grid starts; `None` in a world no grid has adopted, which
@@ -193,6 +196,9 @@ pub struct SceneFixtures {
     /// How the region passes local chat on, where the live grids disagree.
     /// Second Life's unless the grid's flavour says otherwise.
     pub(crate) chat: crate::chat::ChatPolicy,
+    /// How the region states its record, where the live grids disagree.
+    /// Second Life's unless the grid's flavour says otherwise.
+    pub(crate) region_info: crate::imitates::RegionInfoPolicy,
     /// The order each linkset keeps its prims in ([`crate::link_sets`]). Not
     /// a fixture: a set nobody has linked or delinked is in the order its
     /// prims were stated.
@@ -412,8 +418,12 @@ pub enum RegionChange {
     /// reclaim.
     OverlayChanged,
     /// The region's own configuration changed (the estate floater's Region and
-    /// Terrain tabs); every session in the region needs the new `RegionInfo`.
+    /// Terrain tabs); every session in the region needs the new `RegionInfo`,
+    /// and its `SimStats` the new flags.
     RegionConfigured(Box<sl_proto::RegionLimits>),
+    /// The region's flags changed with nothing else (the estate floater's
+    /// Debug tab): both live grids tell of it in `SimStats` alone.
+    RegionFlagsChanged(sl_proto::RegionFlags),
     /// An estate manager's notice to the region — a region or estate
     /// message, a restart notice — which every avatar in it is sent.
     Notice(Box<crate::estate::Notice>),
@@ -703,6 +713,7 @@ impl SceneFixtures {
             parcel_access: BTreeMap::new(),
             estate: EstateFixture::default(),
             limits: None,
+            restart_schedule: None,
             capacity: None,
             properties: crate::imitates::PropertiesPolicy::default(),
             rez: crate::imitates::RezPolicy::default(),
@@ -711,6 +722,7 @@ impl SceneFixtures {
             contents: crate::imitates::ContentsPolicy::default(),
             relays: crate::relays::RelayPolicy::default(),
             chat: crate::chat::ChatPolicy::default(),
+            region_info: crate::imitates::RegionInfoPolicy::default(),
             links: crate::link_sets::LinkSets::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
@@ -1074,6 +1086,12 @@ impl SceneFixtures {
     /// grid's region of this product holds.
     fn stock_limits(&self, identity: &RegionIdentity) -> sl_proto::RegionLimits {
         let mut limits = region_limits(identity);
+        let stated = self.region_info.stated_flags(identity.flags());
+        limits.region_flags = sl_proto::RegionFlags::from_legacy(stated.legacy_bits());
+        limits.region_flags_extended = self.region_info.extended_flags_block.then_some(stated);
+        limits.combat_settings = self.region_info.combat;
+        limits.redirect_grid_x = self.region_info.no_redirect;
+        limits.redirect_grid_y = self.region_info.no_redirect;
         if self.chat.states_ranges {
             limits.chat_settings = Some(sl_proto::RegionChatSettings {
                 whisper_range: crate::chat::WHISPER_RANGE_M,
@@ -1087,6 +1105,7 @@ impl SceneFixtures {
         }
         if let Some(capacity) = self.capacity {
             limits.max_agents = capacity.max_agents;
+            limits.legacy_max_agents = u8::try_from(capacity.max_agents).unwrap_or(u8::MAX);
             limits.hard_max_agents = capacity.hard_max_agents;
             limits.hard_max_objects = capacity.land_impact;
         }
@@ -2654,11 +2673,6 @@ const TERRAIN_LIMIT_M: f32 = 4.0;
 /// its parent's id are the same, the way a standalone region reports them.
 const ESTATE_ID: u32 = 1;
 
-/// The hour of the estate's day the region reports (mid-morning). A fake grid's
-/// sky is driven by the environment fixtures, not by this, but a region that
-/// claimed hour zero would be one whose floater disagreed with its own sky.
-const ESTATE_SUN_HOUR: f32 = 6.0;
-
 /// The region's configuration and limits, as a `RegionInfo` reports them.
 ///
 /// Derived from the region's own [`RegionIdentity`] wherever the two overlap —
@@ -2671,6 +2685,9 @@ pub fn region_limits(identity: &RegionIdentity) -> sl_proto::RegionLimits {
     sl_proto::RegionLimits {
         sim_name: identity.sim_name.clone(),
         max_agents: MAX_AGENTS,
+        legacy_max_agents: u8::try_from(MAX_AGENTS).unwrap_or(u8::MAX),
+        product_sku: identity.product_sku.clone(),
+        product_name: identity.product_name.clone(),
         hard_max_agents: HARD_MAX_AGENTS,
         hard_max_objects: HARD_MAX_OBJECTS,
         region_flags: identity.region_flags,
@@ -2686,8 +2703,10 @@ pub fn region_limits(identity: &RegionIdentity) -> sl_proto::RegionLimits {
         price_per_meter: LindenAmount(1),
         redirect_grid_x: 0,
         redirect_grid_y: 0,
-        use_estate_sun: true,
-        sun_hour: ESTATE_SUN_HOUR,
+        // What both live grids state (`region-info`, 2026-10-17): no estate
+        // sun and hour zero. The sky is the environment's either way.
+        use_estate_sun: false,
+        sun_hour: 0.0,
         // Absent rather than all-zero: a region that sends the block claims
         // custom chat ranges and a custom combat ruleset, and this one has
         // neither.
@@ -3930,8 +3949,8 @@ mod test {
             region_id: uuid::Uuid::nil(),
             region_handle: sl_wire::RegionHandle::from_grid(grid_x, grid_y),
             grid_coordinates: sl_types::map::GridCoordinates::new(grid_x, grid_y),
-            region_flags: 0,
-            region_flags_extended: 0,
+            region_flags: sl_proto::RegionFlags::default(),
+            region_flags_extended: None,
             region_protocols: 0,
             maturity: sl_proto::Maturity::Pg,
             product: sl_proto::ProductType::FullRegion,

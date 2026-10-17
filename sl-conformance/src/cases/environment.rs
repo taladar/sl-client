@@ -29,8 +29,8 @@
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    Command, DayCycleFrame, EnvironmentSettings, EnvironmentUpdate, EstateFlags, EstateInfo,
-    EstateInfoUpdate, Event, ParcelInfo,
+    Command, DayCycleFrame, EnvironmentSettings, EnvironmentUpdate, EstateInfo, EstateInfoUpdate,
+    Event, ParcelInfo, RegionFlags,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -216,7 +216,9 @@ impl GridTest for Environment {
                     _ => None,
                 })
                 .await?;
-            let allowed = estate.estate_flags & EstateFlags::ALLOW_ENVIRONMENT_OVERRIDE.bits() != 0;
+            let allowed = estate
+                .estate_flags
+                .contains(RegionFlags::ALLOW_ENVIRONMENT_OVERRIDE);
             let mut while_disallowed = None;
             if !allowed {
                 let answer = set_parcel(session, parcel_id, &env).await?;
@@ -229,7 +231,9 @@ impl GridTest for Environment {
                 set_estate_flags(
                     session,
                     &estate,
-                    estate.estate_flags | EstateFlags::ALLOW_ENVIRONMENT_OVERRIDE.bits(),
+                    estate
+                        .estate_flags
+                        .with(RegionFlags::ALLOW_ENVIRONMENT_OVERRIDE, true),
                 )
                 .await?;
             }
@@ -346,7 +350,7 @@ async fn reset_parcel(
 async fn set_estate_flags(
     session: &Session,
     estate: &EstateInfo,
-    flags: u32,
+    flags: RegionFlags,
 ) -> Result<(), TestFailure> {
     session
         .send(Command::SetEstateInfo(EstateInfoUpdate {

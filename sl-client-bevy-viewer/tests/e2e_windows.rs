@@ -634,6 +634,71 @@ mod test {
         Ok(window)
     }
 
+    /// **The Region tab on each grid** (`gridspec-region-info`): the
+    /// fly-over and search boxes only the `DispatchRegionInfo` capability can
+    /// save are open to an estate manager on Second Life and greyed on
+    /// OpenSim, which grants no such capability; and an Apply that saves a
+    /// rating other than the handshake's raises the reference's
+    /// `RegionMaturityChange` notice.
+    #[test]
+    fn the_region_tab_follows_each_grids_capability_and_rating() -> Result<(), TestError> {
+        for (name, flavour) in [
+            ("region_tab_second_life", ImitatedGrid::SecondLife),
+            ("region_tab_opensim", ImitatedGrid::OpenSim),
+        ] {
+            stage(name)
+                .region(home())
+                .estate_manager("Alpha")
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .needs(Need::GridControl)
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    let _opened = alpha.menu_path(&REGION_ESTATE).await?;
+                    let window = about_region(alpha, HOME_ID);
+                    let _shown = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+                    let fly_over = window.test_id("about-region-block-fly-over:checkbox");
+                    let search = window.test_id("about-region-block-parcel-search:checkbox");
+                    let fly = window.test_id("about-region-block-fly:checkbox");
+                    // The manager's rights arrive first: the plain box opens.
+                    let _open = alpha.expect(&fly).timeout(WAIT).to_be_enabled().await?;
+                    for only_over_the_capability in [&fly_over, &search] {
+                        if flavour == ImitatedGrid::SecondLife {
+                            let _open = alpha
+                                .expect(only_over_the_capability)
+                                .timeout(WAIT)
+                                .to_be_enabled()
+                                .await?;
+                        } else {
+                            let _greyed = alpha
+                                .expect(only_over_the_capability)
+                                .to_be_disabled()
+                                .await?;
+                        }
+                    }
+                    let _rated = window
+                        .test_id("about-region-maturity-combo:combo")
+                        .select_option(
+                            Locator::role(Role::ListItem).name_key("about-region-rating-mature"),
+                        )
+                        .await?;
+                    // The Region, Debug and Terrain tabs each have an Apply;
+                    // the Region tab's is the first built.
+                    let _applied = window
+                        .test_id("about-region-button:about-region-apply")
+                        .nth(0)
+                        .click()
+                        .await?;
+                    let _notice = alpha
+                        .expect_notification()
+                        .timeout(WAIT)
+                        .to_show("RegionMaturityChange")
+                        .await?;
+                    Ok(())
+                })?;
+        }
+        Ok(())
+    }
+
     /// The row of `list` (`trusted`, `allowed`, `blocked`) naming `name`.
     fn experience_row(window: &UiLocator, list: &str, name: &str) -> UiLocator {
         window

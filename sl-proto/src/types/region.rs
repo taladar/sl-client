@@ -4,7 +4,7 @@ use super::{Maturity, ProductType};
 use sl_types::lsl::Vector;
 use sl_types::map::{GridCoordinates, RegionName};
 use sl_types::money::LindenAmount;
-use sl_wire::RegionHandle;
+use sl_wire::{RegionFlags, RegionHandle};
 use uuid::Uuid;
 
 /// A region's identity, maturity, and product type, parsed from `RegionHandshake`.
@@ -28,12 +28,12 @@ pub struct RegionIdentity {
     /// metres divided by 256), derived from [`Self::region_handle`]; `(0, 0)`
     /// when the handle is unknown.
     pub grid_coordinates: GridCoordinates,
-    /// The raw 32-bit `RegionFlags` bitfield (decode with [`sl_wire::RegionFlags`]).
-    pub region_flags: u32,
-    /// The full 64-bit `RegionFlagsExtended` (from the `RegionInfo4` block); falls
-    /// back to the zero-extended 32-bit [`Self::region_flags`] when the grid sends
-    /// no `RegionInfo4` (e.g. OpenSim and older simulators).
-    pub region_flags_extended: u64,
+    /// The legacy 32-bit `RegionFlags` field, as sent. Read the region's flags
+    /// with [`Self::flags`], which prefers the extended field.
+    pub region_flags: RegionFlags,
+    /// The full 64-bit `RegionFlagsExtended` from the `RegionInfo4` block, or
+    /// `None` when the grid sent no such block.
+    pub region_flags_extended: Option<RegionFlags>,
     /// The `RegionProtocols` capability bitfield (from `RegionInfo4`), or `0` when
     /// the grid sends no `RegionInfo4`.
     pub region_protocols: u64,
@@ -69,6 +69,13 @@ pub struct RegionIdentity {
 }
 
 impl RegionIdentity {
+    /// The region's flags: the extended field where the grid sent it, the
+    /// legacy 32-bit one otherwise.
+    #[must_use]
+    pub fn flags(&self) -> RegionFlags {
+        self.region_flags_extended.unwrap_or(self.region_flags)
+    }
+
     /// The region/estate owner, or `None` when the grid sent a nil id (the
     /// on-wire sentinel for "unset").
     #[must_use]
@@ -160,17 +167,25 @@ pub struct RegionLimits {
     /// The maximum concurrent agents (prefers the 32-bit field, falling back to
     /// the legacy 8-bit `MaxAgents`).
     pub max_agents: u32,
+    /// The legacy 8-bit `MaxAgents` field, as sent.
+    pub legacy_max_agents: u8,
+    /// The `RegionInfo2` block's `ProductSKU` (empty where the grid names none,
+    /// or where it leaves the field empty for this reader).
+    pub product_sku: String,
+    /// The `RegionInfo2` block's `ProductName`: the region's type as the
+    /// Region/Estate floater shows it ("Estate / Full Region").
+    pub product_name: String,
     /// The hard agent cap, or `0` if the grid did not provide it (common for
     /// non-estate-managers on Second Life, and on OpenSim).
     pub hard_max_agents: u32,
     /// The hard region-wide object/prim cap, or `0` if not provided.
     pub hard_max_objects: u32,
-    /// The raw 32-bit `RegionFlags` bitfield (decode with [`sl_wire::RegionFlags`]).
-    pub region_flags: u32,
-    /// The full 64-bit `RegionFlagsExtended` (from the `RegionInfo3` block); falls
-    /// back to the zero-extended 32-bit [`Self::region_flags`] when the grid sends
-    /// no `RegionInfo3`.
-    pub region_flags_extended: u64,
+    /// The legacy 32-bit `RegionFlags` field, as sent. Read the region's flags
+    /// with [`Self::flags`], which prefers the extended field.
+    pub region_flags: RegionFlags,
+    /// The full 64-bit `RegionFlagsExtended` from the `RegionInfo3` block, or
+    /// `None` when the grid sent no such block.
+    pub region_flags_extended: Option<RegionFlags>,
     /// The maturity / content rating.
     pub maturity: Maturity,
     /// The estate this region belongs to.
@@ -206,6 +221,15 @@ pub struct RegionLimits {
     /// The region's combat/damage settings, present only when the grid sends a
     /// `CombatSettings` block.
     pub combat_settings: Option<RegionCombatSettings>,
+}
+
+impl RegionLimits {
+    /// The region's flags: the extended field where the grid sent it, the
+    /// legacy 32-bit one otherwise.
+    #[must_use]
+    pub fn flags(&self) -> RegionFlags {
+        self.region_flags_extended.unwrap_or(self.region_flags)
+    }
 }
 
 /// A single simulator performance/telemetry statistic id, as carried in a
@@ -445,17 +469,26 @@ pub struct RegionStats {
     /// from the `Region` block's `RegionX` / `RegionY` (which carry the region's
     /// map-tile indices, not a local position).
     pub grid_coordinates: GridCoordinates,
-    /// The raw 32-bit `RegionFlags` bitfield (decode with [`sl_wire::RegionFlags`]).
-    pub region_flags: u32,
+    /// The legacy 32-bit `RegionFlags` field, as sent. Read the region's flags
+    /// with [`Self::flags`], which prefers the extended field.
+    pub region_flags: RegionFlags,
     /// The region's maximum object (prim/task) capacity.
     pub object_capacity: u32,
-    /// The full 64-bit `RegionFlagsExtended` (from the `RegionInfo` block); falls
-    /// back to the zero-extended 32-bit [`Self::region_flags`] when the grid
-    /// sends no `RegionInfo` block (e.g. older simulators).
-    pub region_flags_extended: u64,
+    /// The full 64-bit `RegionFlagsExtended` from the `RegionInfo` block, or
+    /// `None` when the grid sent no such block (older simulators).
+    pub region_flags_extended: Option<RegionFlags>,
     /// The individual statistics, each a `(stat id, value)` pair in the order the
     /// simulator sent them.
     pub stats: Vec<(SimStatId, f32)>,
+}
+
+impl RegionStats {
+    /// The region's flags: the extended field where the grid sent it, the
+    /// legacy 32-bit one otherwise.
+    #[must_use]
+    pub fn flags(&self) -> RegionFlags {
+        self.region_flags_extended.unwrap_or(self.region_flags)
+    }
 }
 
 /// The simulator's world time and sun state, parsed from a
@@ -505,7 +538,7 @@ pub struct RegionChatSettings {
 /// `CombatSettings` block.
 ///
 /// (Not `Eq`: several fields are `f32`.)
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RegionCombatSettings {
     /// The raw combat-behaviour flag bitfield.
     pub flags: u32,

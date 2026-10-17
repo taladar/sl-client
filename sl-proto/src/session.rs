@@ -770,6 +770,20 @@ pub const CAP_SEND_POSTCARD: &str = "SendPostcard";
 /// `RequestEstateAccessLists`; decoded into [`Event::EstateAccessLists`].
 pub const CAP_ESTATE_ACCESS: &str = "EstateAccess";
 
+/// The HTTP capability for writing the region's settings
+/// (`DispatchRegionInfo`): a POST of the Region/Estate floater's General tab,
+/// every field of the UDP `setregioninfo` plus `block_fly_over` and
+/// `block_parcel_search`, which that message cannot carry. Second Life grants
+/// it, OpenSim does not; driven by `SetRegionInfo` where granted.
+pub const CAP_DISPATCH_REGION_INFO: &str = "DispatchRegionInfo";
+
+/// The HTTP capability for the region's restart schedule (`RegionSchedule`):
+/// a GET answering `{ restart: { type, days, time } }` (no `restart` for
+/// none) and a POST of the same shape. Second Life grants it, OpenSim does
+/// not; driven by `RequestRegionSchedule` / `SetRegionSchedule` and decoded
+/// into [`Event::RegionSchedule`].
+pub const CAP_REGION_SCHEDULE: &str = "RegionSchedule";
+
 /// The HTTP capability for the **Second Life Marketplace (SLM)
 /// DirectDelivery API** (`DirectDelivery`): the base URL of the
 /// marketplace listing-management REST service. Unlike every other
@@ -911,6 +925,8 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_INVENTORY_THUMBNAIL_UPLOAD,
     CAP_SEND_POSTCARD,
     CAP_ESTATE_ACCESS,
+    CAP_DISPATCH_REGION_INFO,
+    CAP_REGION_SCHEDULE,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

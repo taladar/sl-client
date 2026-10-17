@@ -92,18 +92,19 @@ use crate::{
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
     CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_FRIENDSHIP,
-    CAP_DECLINE_GROUP_INVITE, CAP_ESTATE_ACCESS, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
-    CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
-    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
-    CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
-    CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION,
-    CAP_INTEREST_LIST, CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD,
-    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_DECLINE_GROUP_INVITE, CAP_DISPATCH_REGION_INFO, CAP_ESTATE_ACCESS,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+    CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_METADATA,
+    CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES,
+    CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
+    CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED, CAP_SEARCH_STAT_REQUEST,
     CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
@@ -258,6 +259,9 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_EXPERIENCE_QUERY,
     // The estate's access lists.
     CAP_ESTATE_ACCESS,
+    // The region settings write and the restart schedule.
+    CAP_DISPATCH_REGION_INFO,
+    CAP_REGION_SCHEDULE,
     // The voice signalling cluster.
     CAP_PROVISION_VOICE_ACCOUNT,
     CAP_PARCEL_VOICE_INFO,
@@ -342,6 +346,13 @@ pub enum CapHandler {
     /// The `EstateAccess` GET of the estate's four lists. The estate is the
     /// driver's, so the request is handed to it ([`CapsDispatch::EstateAccess`]).
     EstateAccess,
+    /// The `DispatchRegionInfo` POST of the region's settings. The region is
+    /// the driver's, so the request is handed to it
+    /// ([`CapsDispatch::RegionInfoWrite`]).
+    DispatchRegionInfo,
+    /// The `RegionSchedule` GET and POST of the restart schedule, handed to
+    /// the driver ([`CapsDispatch::RegionSchedule`]).
+    RegionSchedule,
     /// The shared two-stage asset-upload state machine serving every
     /// `UPLOAD_CAPABILITIES` entry (`NewFileAgentInventory`,
     /// `UploadBakedTexture`, and the `Update*{Agent,Task}Inventory` family):
@@ -654,7 +665,7 @@ impl CapsResponse {
 }
 
 /// The outcome of dispatching one CAPS request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CapsDispatch {
     /// Respond immediately.
     Response(CapsResponse),
@@ -694,6 +705,17 @@ pub enum CapsDispatch {
     /// An `EstateAccess` GET: the estate and who may read it are the driver's
     /// to know. It answers with [`SimCaps::estate_access_response`].
     EstateAccess,
+    /// A `DispatchRegionInfo` POST: whether the writer may change the region
+    /// is the driver's to know. It answers with
+    /// [`SimCaps::region_info_write_response`].
+    RegionInfoWrite(crate::RegionInfoUpdate),
+    /// A `RegionSchedule` request: a read (`change` `None`) or a write of the
+    /// schedule (`Some(None)` clears it). The driver answers with
+    /// [`SimCaps::region_schedule_response`].
+    RegionSchedule {
+        /// The schedule a POST writes; `None` for a GET.
+        change: Option<Option<sl_wire::RegionSchedule>>,
+    },
 }
 
 /// What a request path resolved to.
@@ -973,6 +995,8 @@ impl SimCaps {
             CAP_UPDATE_EXPERIENCE => Some(CapHandler::UpdateExperience),
             CAP_REGION_EXPERIENCES => Some(CapHandler::RegionExperiences),
             CAP_ESTATE_ACCESS => Some(CapHandler::EstateAccess),
+            CAP_DISPATCH_REGION_INFO => Some(CapHandler::DispatchRegionInfo),
+            CAP_REGION_SCHEDULE => Some(CapHandler::RegionSchedule),
             CAP_EXPERIENCE_QUERY => Some(CapHandler::ExperienceQuery),
             CAP_PROVISION_VOICE_ACCOUNT => Some(CapHandler::ProvisionVoiceAccount),
             CAP_PARCEL_VOICE_INFO => Some(CapHandler::ParcelVoiceInfo),
@@ -1086,6 +1110,8 @@ impl SimCaps {
                             CapsDispatch::Response(CapsResponse::method_not_allowed())
                         }
                     }
+                    Some(CapHandler::DispatchRegionInfo) => Self::dispatch_region_info(request),
+                    Some(CapHandler::RegionSchedule) => Self::dispatch_region_schedule(request),
                     Some(CapHandler::DisplayNames) => {
                         CapsDispatch::Response(self.dispatch_display_names(sim, request))
                     }
@@ -1497,6 +1523,72 @@ impl SimCaps {
                 None => CapsDispatch::Response(CapsResponse::bad_request()),
             },
             _ => CapsDispatch::Response(CapsResponse::method_not_allowed()),
+        }
+    }
+
+    /// Resolves a `DispatchRegionInfo` request: a POST of the settings, read
+    /// into the update the UDP `setregioninfo` would carry plus its two extra
+    /// fields.
+    fn dispatch_region_info(request: &CapsRequest<'_>) -> CapsDispatch {
+        if request.method != "POST" {
+            return CapsDispatch::Response(CapsResponse::method_not_allowed());
+        }
+        match parse_llsd_body(request.body)
+            .as_ref()
+            .map(sl_wire::parse_dispatch_region_info_request)
+        {
+            Some(Ok(dispatch)) => {
+                CapsDispatch::RegionInfoWrite(crate::RegionInfoUpdate::from_dispatch(&dispatch))
+            }
+            Some(Err(_)) | None => CapsDispatch::Response(CapsResponse::bad_request()),
+        }
+    }
+
+    /// Resolves a `RegionSchedule` request: a GET reads, a POST writes.
+    fn dispatch_region_schedule(request: &CapsRequest<'_>) -> CapsDispatch {
+        match request.method {
+            "GET" => CapsDispatch::RegionSchedule { change: None },
+            "POST" => match parse_llsd_body(request.body)
+                .as_ref()
+                .map(sl_wire::parse_region_schedule)
+            {
+                Some(Ok(schedule)) => CapsDispatch::RegionSchedule {
+                    change: Some(schedule),
+                },
+                Some(Err(_)) | None => CapsDispatch::Response(CapsResponse::bad_request()),
+            },
+            _ => CapsDispatch::Response(CapsResponse::method_not_allowed()),
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::RegionInfoWrite`]: whether the driver
+    /// `applied` it. Second Life refuses a resident `403` with the word
+    /// `Forbidden` and no LLSD (`region-info`, 2026-10-17).
+    #[must_use]
+    pub fn region_info_write_response(applied: bool) -> CapsResponse {
+        if applied {
+            CapsResponse::llsd_xml(Llsd::Undef.to_llsd_xml())
+        } else {
+            CapsResponse::words(403, "Forbidden")
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::RegionSchedule`]: the region's
+    /// `schedule` after the request, or `None` for a writer the grid refuses —
+    /// `403` and a sentence, Second Life's answer to a resident
+    /// (`region-info`, 2026-10-17).
+    #[must_use]
+    pub fn region_schedule_response(
+        schedule: Option<Option<&sl_wire::RegionSchedule>>,
+    ) -> CapsResponse {
+        match schedule {
+            Some(schedule) => {
+                CapsResponse::llsd_xml(sl_wire::build_region_schedule(schedule, false))
+            }
+            None => CapsResponse::words(
+                403,
+                "Forbidden: You don't have permission to make this change.",
+            ),
         }
     }
 
@@ -3615,6 +3707,8 @@ mod tests {
             ("InventoryThumbnailUpload", CapStatus::Served),
             ("SendPostcard", CapStatus::Served),
             ("EstateAccess", CapStatus::Served),
+            ("DispatchRegionInfo", CapStatus::Served),
+            ("RegionSchedule", CapStatus::Served),
         ];
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES
             .iter()

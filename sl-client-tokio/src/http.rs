@@ -3,16 +3,16 @@
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
     AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_GROUP_API_V1,
-    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY,
-    CAP_SEARCH_STAT_REQUEST, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CHAT_SESSION_FETCH_HISTORY_TAG,
-    ClassifiedKey, EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, Llsd, ObjectKey, ParcelKey, ProfileImage, RemoteParcelRequest,
-    TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG, build_get_metadata_request,
-    build_land_resources_request, build_remote_parcel_request, parse_land_resources_reply,
-    parse_llsd_xml, profile_image_upload_body, profile_image_upload_outcome,
-    stamp_get_metadata_reply, stamp_remote_parcel_request, stamp_search_stat_answer,
-    stamp_task_inventory_cap_reply, task_inventory_cap_url, task_inventory_failed_body,
-    task_inventory_unchanged_body,
+    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST,
+    CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_UPLOAD_AGENT_PROFILE_IMAGE,
+    CHAT_SESSION_FETCH_HISTORY_TAG, ClassifiedKey, EXPERIENCE_QUERY_TAG, InventoryKey,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd, ObjectKey, ParcelKey, ProfileImage,
+    RemoteParcelRequest, TASK_INVENTORY_FAILED_TAG, TASK_INVENTORY_UNCHANGED_TAG,
+    build_get_metadata_request, build_land_resources_request, build_remote_parcel_request,
+    parse_land_resources_reply, parse_llsd_xml, profile_image_upload_body,
+    profile_image_upload_outcome, stamp_get_metadata_reply, stamp_remote_parcel_request,
+    stamp_search_stat_answer, stamp_task_inventory_cap_reply, task_inventory_cap_url,
+    task_inventory_failed_body, task_inventory_unchanged_body,
 };
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -415,6 +415,26 @@ pub(crate) async fn get_caps_llsd(
             deliver(&caps_tx, (cap.to_owned(), llsd)).await;
         }
         None => report_caps_failure(&caps_tx, cap).await,
+    }
+}
+
+/// POSTs a `RegionSchedule` write and, once the grid has taken it, reads the
+/// schedule back over the same capability — the write's answer is not the
+/// schedule. A refused write is reported as a failure of the capability.
+/// Mirrors the bevy `SetRegionSchedule` arm.
+pub(crate) async fn set_region_schedule(
+    url: String,
+    body: String,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    if crate::voice::post_cap_llsd(&url, body, CAP_REGION_SCHEDULE, &http)
+        .await
+        .is_some()
+    {
+        get_caps_llsd(url, CAP_REGION_SCHEDULE, http, caps_tx).await;
+    } else {
+        report_caps_failure(&caps_tx, CAP_REGION_SCHEDULE).await;
     }
 }
 

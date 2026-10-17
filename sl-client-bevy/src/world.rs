@@ -19,8 +19,8 @@ use bevy::prelude::*;
 
 use sl_proto::{
     AgentKey, CircuitCode, CircuitId, DEFAULT_GRIDS_PER_EDGE, Event as SessionEvent, ObjectKey,
-    ParcelInfo, ParcelOverlayGrid, ParcelOverlayInfo, RegionHandle, RegionIdentity, RegionLimits,
-    RegionLocalParcelId, Session, Uuid,
+    ParcelInfo, ParcelOverlayGrid, ParcelOverlayInfo, RegionFlags, RegionHandle, RegionIdentity,
+    RegionLimits, RegionLocalParcelId, Session, Uuid,
 };
 
 use crate::SlEvent;
@@ -275,6 +275,17 @@ pub struct SlRegionIdentity(pub RegionIdentity);
 #[derive(Component, Debug, Clone)]
 pub struct SlRegionLimits(pub RegionLimits);
 
+/// A region's flags as it last stated them — in its `RegionHandshake`, a
+/// `RegionInfo` or a `SimStats`, whichever came last. The handshake's are the
+/// flags of arrival: both grids tell of a Region-tab change by a `RegionInfo`
+/// pushed to everyone in the region, and of a Debug-tab change only in the
+/// next `SimStats` (`region-info`, 2026-10-17). On OpenSim the last two leave
+/// out the estate's bits the handshake carries (`EXTERNALLY_VISIBLE`,
+/// `ALLOW_DIRECT_TELEPORT`, `ALLOW_ACCESS_OVERRIDE`); read those from the
+/// estate's own record.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlRegionFlags(pub RegionFlags);
+
 /// A parcel within a region (`Event::ParcelProperties`), held on a child entity
 /// of the owning region entity and keyed by its region-local id.
 #[derive(Component, Debug, Clone)]
@@ -352,9 +363,10 @@ pub(crate) fn maintain_world(
                 );
                 match entity {
                     Some(entity) => {
-                        commands
-                            .entity(entity)
-                            .insert(SlRegionIdentity((**region_identity).clone()));
+                        commands.entity(entity).insert((
+                            SlRegionIdentity((**region_identity).clone()),
+                            SlRegionFlags(region_identity.flags()),
+                        ));
                     }
                     // A region with no entity yet (a teleport destination):
                     // named once its entity is spawned.
@@ -368,9 +380,19 @@ pub(crate) fn maintain_world(
             }
             SessionEvent::RegionLimits(limits) => {
                 if let Some(entity) = current_entity(&index) {
-                    commands
-                        .entity(entity)
-                        .insert(SlRegionLimits(limits.clone()));
+                    commands.entity(entity).insert((
+                        SlRegionLimits(limits.clone()),
+                        SlRegionFlags(limits.flags()),
+                    ));
+                }
+            }
+            // Every region's simulator states its flags every few seconds, the
+            // only word of a Debug-tab change; the grid coordinates say whose.
+            SessionEvent::SimStats(stats) => {
+                let handle =
+                    RegionHandle::from_grid(stats.grid_coordinates.x(), stats.grid_coordinates.y());
+                if let Some(entity) = entity_for_handle(&index, handle) {
+                    commands.entity(entity).insert(SlRegionFlags(stats.flags()));
                 }
             }
             SessionEvent::NeighborDiscovered(info) => {
@@ -490,7 +512,10 @@ fn attach_pending_identity(
     entity: Entity,
 ) {
     if let Some(identity) = index.pending_identities.remove(&handle) {
-        commands.entity(entity).insert(SlRegionIdentity(identity));
+        let flags = SlRegionFlags(identity.flags());
+        commands
+            .entity(entity)
+            .insert((SlRegionIdentity(identity), flags));
     }
 }
 
@@ -599,8 +624,8 @@ mod tests {
             region_id: Uuid::nil(),
             region_handle: handle,
             grid_coordinates: GridCoordinates::new(1000, 1000),
-            region_flags: 0,
-            region_flags_extended: 0,
+            region_flags: sl_proto::RegionFlags::default(),
+            region_flags_extended: None,
             region_protocols: 0,
             maturity: Maturity::Pg,
             product: ProductType::Unknown,
@@ -652,6 +677,47 @@ mod tests {
         let regions: Vec<(RegionHandle, SocketAddr)> =
             query.iter(app.world()).map(|r| (r.handle, r.sim)).collect();
         assert_eq!(regions, vec![(handle, sim(9000))]);
+    }
+
+    /// A region's flags follow the last word on them: the handshake's on
+    /// arrival, then a `SimStats` that states a Debug-tab change no other
+    /// message mentions (`region-info`, 2026-10-17).
+    #[test]
+    fn region_flags_follow_the_handshake_then_sim_stats() {
+        let mut app = world_app();
+        let handle = RegionHandle::from_grid(1000, 1000);
+        app.world_mut().resource_mut::<SlIdentity>().region_handle = Some(handle);
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::CircuitEstablished {
+                sim: sim(9000),
+                circuit: CircuitId(1),
+            }));
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::RegionInfoHandshake(Box::new(
+                region_identity(handle, "Home"),
+            ))));
+        app.update();
+        let flags = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<&super::SlRegionFlags, With<SlCurrentRegion>>()
+                .iter(app.world())
+                .map(|flags| flags.0)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(flags(&mut app), vec![sl_proto::RegionFlags::default()]);
+
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::SimStats(Box::new(
+                sl_proto::RegionStats {
+                    grid_coordinates: GridCoordinates::new(1000, 1000),
+                    region_flags: sl_proto::RegionFlags::SKIP_SCRIPTS,
+                    object_capacity: 15_000,
+                    region_flags_extended: None,
+                    stats: Vec::new(),
+                },
+            ))));
+        app.update();
+        assert_eq!(flags(&mut app), vec![sl_proto::RegionFlags::SKIP_SCRIPTS]);
     }
 
     #[test]

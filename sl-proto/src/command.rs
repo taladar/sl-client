@@ -1318,8 +1318,23 @@ pub enum Command {
         /// The covenant notecard's asset, or `None` for no covenant.
         covenant: Option<AssetKey>,
     },
-    /// Update the region's settings (`setregioninfo`).
+    /// Update the region's settings: over the `DispatchRegionInfo` capability
+    /// where the region grants it (Second Life), which carries every field;
+    /// over the UDP `setregioninfo` otherwise, which has no room for
+    /// [`RegionInfoUpdate::block_fly_over`] or
+    /// [`RegionInfoUpdate::block_parcel_search`].
     SetRegionInfo(RegionInfoUpdate),
+    /// Read the region's restart schedule over the `RegionSchedule`
+    /// capability, where the region grants it (Second Life); the answer
+    /// arrives as [`Event::RegionSchedule`](crate::Event::RegionSchedule).
+    RequestRegionSchedule,
+    /// Write the region's restart schedule over the `RegionSchedule`
+    /// capability (`None` clears it), then read it back: the answer arrives
+    /// as [`Event::RegionSchedule`](crate::Event::RegionSchedule).
+    SetRegionSchedule {
+        /// The schedule, or `None` for none.
+        schedule: Option<sl_wire::RegionSchedule>,
+    },
     /// Update the region's debug toggles — disable scripts / collisions /
     /// physics region-wide (`setregiondebug`).
     SetRegionDebug(RegionDebugUpdate),
@@ -3290,6 +3305,8 @@ impl Command {
             Self::SendEstateMessage { .. } => "SendEstateMessage",
             Self::SetEstateCovenant { .. } => "SetEstateCovenant",
             Self::SetRegionInfo(..) => "SetRegionInfo",
+            Self::RequestRegionSchedule => "RequestRegionSchedule",
+            Self::SetRegionSchedule { .. } => "SetRegionSchedule",
             Self::SetRegionDebug(..) => "SetRegionDebug",
             Self::SetRegionTerrain(..) => "SetRegionTerrain",
             Self::BakeRegionTerrain => "BakeRegionTerrain",

@@ -1044,10 +1044,16 @@ mod test {
             })
             .ok_or("expected a SimStats event")?;
         assert_eq!(received.grid_coordinates, GridCoordinates::new(1000, 1001));
-        assert_eq!(received.region_flags, 0x1234);
+        assert_eq!(
+            received.region_flags,
+            sl_proto::RegionFlags::from_bits(0x1234)
+        );
         assert_eq!(received.object_capacity, 15_000);
         // The extended flags come from the RegionInfo block, not the 32-bit field.
-        assert_eq!(received.region_flags_extended, 0xDEAD_BEEF_0000_0001);
+        assert_eq!(
+            received.region_flags_extended,
+            Some(sl_proto::RegionFlags::from_bits(0xDEAD_BEEF_0000_0001))
+        );
         assert_eq!(
             received.stats,
             vec![
@@ -1085,8 +1091,10 @@ mod test {
                 _ => None,
             })
             .ok_or("expected a SimStats event")?;
-        // No RegionInfo block: extended flags are the zero-extended 32-bit field.
-        assert_eq!(received.region_flags_extended, 0x00AB);
+        // No RegionInfo block: no extended flags, and the flags are the 32-bit
+        // field's.
+        assert_eq!(received.region_flags_extended, None);
+        assert_eq!(received.flags(), sl_proto::RegionFlags::from_bits(0x00AB));
         assert!(received.stats.is_empty());
         Ok(())
     }
@@ -4970,7 +4978,7 @@ mod test {
             sim_name: RegionName::try_new("Da Boom").map_err(|_invalid| "invalid region name")?,
             estate_id: 1,
             parent_estate_id: 1,
-            region_flags: 0x1_0000_0007,
+            region_flags: sl_proto::RegionFlags::from_bits(0x1_0000_0007),
             billable_factor: 1.0,
             price_per_meter: 5,
             redirect_grid: GridCoordinates::new(1000, 1001),
@@ -12214,10 +12222,14 @@ mod test {
         assert_eq!(identity.sim_name, region_name("TestRegion"));
         assert_eq!(identity.maturity, Maturity::Mature);
         assert_eq!(identity.product, ProductType::Homestead);
-        assert_eq!(identity.region_flags, 0x40);
-        // No RegionInfo4 block: the 64-bit flags fall back to the zero-extended
-        // 32-bit flags, and protocols default to 0.
-        assert_eq!(identity.region_flags_extended, 0x40);
+        assert_eq!(
+            identity.region_flags,
+            sl_proto::RegionFlags::from_bits(0x40)
+        );
+        // No RegionInfo4 block: no extended flags (the flags are the 32-bit
+        // field's), and protocols default to 0.
+        assert_eq!(identity.region_flags_extended, None);
+        assert_eq!(identity.flags(), sl_proto::RegionFlags::from_bits(0x40));
         assert_eq!(identity.region_protocols, 0);
         Ok(())
     }
@@ -12287,7 +12299,10 @@ mod test {
             })
             .ok_or("expected a refreshed RegionInfoHandshake event")?;
         assert_eq!(identity.sim_name, region_name("RenamedRegion"));
-        assert_eq!(identity.region_flags, 1 << 19);
+        assert_eq!(
+            identity.region_flags,
+            sl_proto::RegionFlags::from_bits(1 << 19)
+        );
         assert!(session.region_blocks_fly());
         assert!(
             !events
@@ -12295,6 +12310,43 @@ mod test {
                 .any(|e| matches!(e, Event::RegionHandshakeComplete)),
             "arrival is once-only, got {events:?}"
         );
+        Ok(())
+    }
+
+    /// A region's flags change without a new handshake: both grids push a
+    /// `RegionInfo` when the Region tab is saved and carry a Debug-tab change
+    /// only in `SimStats` (`region-info`, 2026-10-17). The session's view of a
+    /// region-wide fly block follows each, not the flags of arrival.
+    #[test]
+    fn region_flags_follow_a_region_info_push_and_sim_stats() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = handshaken_with_region_flags(now, 0)?;
+        assert!(!session.region_blocks_fly());
+
+        // An estate manager blocks flying: the region pushes its record.
+        let mut info = region_info_msg("TestRegion", 13, 40, 40, 100, 15_000);
+        if let AnyMessage::RegionInfo(message) = &mut info {
+            message.region_info.region_flags = 1 << 19;
+        }
+        session.handle_datagram(sim_addr(), &server_message(&info, 2, true)?, now)?;
+        drain_events(&mut session);
+        assert!(session.region_blocks_fly());
+
+        // Lifted again: the next `SimStats` says so before any other message.
+        let stats = AnyMessage::SimStats(SimStats {
+            region: SimStatsRegionBlock {
+                region_x: 1000,
+                region_y: 1000,
+                region_flags: 0,
+                object_capacity: 15_000,
+            },
+            stat: Vec::new(),
+            pid_stat: SimStatsPidStatBlock { pid: 0 },
+            region_info: Vec::new(),
+        });
+        session.handle_datagram(sim_addr(), &server_message(&stats, 3, false)?, now)?;
+        drain_events(&mut session);
+        assert!(!session.region_blocks_fly());
         Ok(())
     }
 
@@ -12416,7 +12468,10 @@ mod test {
         assert_eq!(identity.cpu_class_id, 4);
         assert_eq!(identity.cpu_ratio, 8);
         // RegionInfo4 supplies the full 64-bit flags and the protocols bitfield.
-        assert_eq!(identity.region_flags_extended, 0x1_0000_0040);
+        assert_eq!(
+            identity.region_flags_extended,
+            Some(sl_proto::RegionFlags::from_bits(0x1_0000_0040))
+        );
         assert_eq!(identity.region_protocols, 0x5);
         Ok(())
     }
@@ -13041,9 +13096,9 @@ mod test {
         assert_eq!(limits.max_agents, 40);
         assert_eq!(limits.hard_max_objects, 15000);
         assert_eq!(limits.maturity, Maturity::Pg);
-        // No RegionInfo3/5/CombatSettings blocks: the 64-bit flags fall back to
-        // the 32-bit flags and the optional blocks are absent.
-        assert_eq!(limits.region_flags_extended, 0);
+        // No RegionInfo3/5/CombatSettings blocks: every optional block is
+        // absent.
+        assert_eq!(limits.region_flags_extended, None);
         assert!(limits.chat_settings.is_none());
         assert!(limits.combat_settings.is_none());
         Ok(())
@@ -13111,7 +13166,10 @@ mod test {
         assert!((limits.terrain_lower_limit + 4.0).abs() < f32::EPSILON);
         assert!(limits.use_estate_sun);
         assert!((limits.sun_hour - 12.0).abs() < f32::EPSILON);
-        assert_eq!(limits.region_flags_extended, 0x1_0000_0040);
+        assert_eq!(
+            limits.region_flags_extended,
+            Some(sl_proto::RegionFlags::from_bits(0x1_0000_0040))
+        );
         let chat = limits
             .chat_settings
             .as_ref()
@@ -15480,7 +15538,7 @@ mod test {
         assert_eq!(info.estate_name, "My Estate");
         assert_eq!(info.estate_owner, owner);
         assert_eq!(info.estate_id, 101);
-        assert_eq!(info.estate_flags, 8);
+        assert_eq!(info.estate_flags, sl_proto::RegionFlags::from_bits(8));
         assert_eq!(info.abuse_email, "abuse@example.com");
         Ok(())
     }

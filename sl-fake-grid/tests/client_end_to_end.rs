@@ -6327,6 +6327,130 @@ mod test {
         Ok(())
     }
 
+    /// The Region tab's save takes each grid's road and keeps what that road
+    /// can carry (`region-info`, 2026-10-17): Second Life grants
+    /// `DispatchRegionInfo`, which carries the fly-over and search settings;
+    /// OpenSim grants none, and the UDP `setregioninfo` has no room for them.
+    /// Either way the region's record comes back without the extended block on
+    /// OpenSim and with it on Second Life.
+    #[tokio::test]
+    async fn a_region_save_keeps_what_each_grids_road_carries() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let grid = two_avatar_grid_imitating(imitates).await?;
+            let mut first = join(&grid, "First").await?;
+            first.commands.send(Command::RequestRegionInfo).await?;
+            let before = next_region_limits(&mut first).await?;
+            let update = sl_client_tokio::RegionInfoUpdate {
+                agent_limit: i32::try_from(before.max_agents)?,
+                object_bonus: before.object_bonus_factor,
+                maturity: before.maturity,
+                block_fly_over: true,
+                block_parcel_search: true,
+                ..sl_client_tokio::RegionInfoUpdate::default()
+            };
+            first.commands.send(Command::SetRegionInfo(update)).await?;
+            let saved = next_region_limits(&mut first).await?;
+            let second_life = imitates == ImitatedGrid::SecondLife;
+            for flag in [
+                sl_client_tokio::RegionFlags::BLOCK_FLYOVER,
+                sl_client_tokio::RegionFlags::BLOCK_PARCEL_SEARCH,
+            ] {
+                assert_eq!(
+                    saved.flags().contains(flag),
+                    second_life,
+                    "{imitates:?}: the save's {flag:?} came back wrong"
+                );
+            }
+            assert_eq!(
+                saved.region_flags_extended.is_some(),
+                second_life,
+                "{imitates:?}: the record's extended flags block"
+            );
+        }
+        Ok(())
+    }
+
+    /// A Debug-tab save is told by `SimStats` alone — both avatars' next
+    /// statistics carry the new flags, and no `RegionInfo` comes before them
+    /// (`region-info`, 2026-10-17, OpenSim; Second Life unmeasured and
+    /// imitated alike).
+    #[tokio::test]
+    async fn a_debug_save_is_told_by_sim_stats_alone() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::SecondLife, ImitatedGrid::OpenSim] {
+            let grid = two_avatar_grid_imitating(imitates).await?;
+            let mut first = join(&grid, "First").await?;
+            let mut second = join(&grid, "Second").await?;
+            first
+                .commands
+                .send(Command::SetRegionDebug(
+                    sl_client_tokio::RegionDebugUpdate {
+                        disable_scripts: true,
+                        ..sl_client_tokio::RegionDebugUpdate::default()
+                    },
+                ))
+                .await?;
+            for (who, avatar) in [("the manager", &mut first), ("the other", &mut second)] {
+                let told = wait_on(&mut avatar.events, |event| match event {
+                    Event::RegionLimits(_) => Some(Err(())),
+                    Event::SimStats(stats)
+                        if stats
+                            .flags()
+                            .contains(sl_client_tokio::RegionFlags::SKIP_SCRIPTS) =>
+                    {
+                        Some(Ok(()))
+                    }
+                    _ => None,
+                })
+                .await?;
+                assert!(
+                    told.is_ok(),
+                    "{imitates:?}: {who} was sent a RegionInfo for a Debug-tab save"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The restart schedule over Second Life's `RegionSchedule`: none to
+    /// start with, an estate manager's write read back, and a resident's
+    /// write refused without touching it.
+    #[tokio::test]
+    async fn the_restart_schedule_round_trips_for_a_manager_only() -> Result<(), TestError> {
+        let grid = two_avatar_grid_imitating(ImitatedGrid::SecondLife).await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+        let schedule_of = |event: &Event| match event {
+            Event::RegionSchedule(schedule) => Some(*schedule),
+            _ => None,
+        };
+        first.commands.send(Command::RequestRegionSchedule).await?;
+        assert_eq!(wait_on(&mut first.events, schedule_of).await?, None);
+        let weekly = sl_client_tokio::RegionSchedule {
+            when: sl_client_tokio::RestartWhen::Weekly(sl_client_tokio::RestartDays::from_letters(
+                "TR",
+            )),
+            seconds_after_midnight: 7200,
+        };
+        first
+            .commands
+            .send(Command::SetRegionSchedule {
+                schedule: Some(weekly),
+            })
+            .await?;
+        assert_eq!(wait_on(&mut first.events, schedule_of).await?, Some(weekly));
+        second
+            .commands
+            .send(Command::SetRegionSchedule { schedule: None })
+            .await?;
+        second.commands.send(Command::RequestRegionSchedule).await?;
+        assert_eq!(
+            wait_on(&mut second.events, schedule_of).await?,
+            Some(weekly),
+            "a resident's write changed the schedule"
+        );
+        Ok(())
+    }
+
     /// The next region-limits record `avatar` is sent, however it was prompted.
     async fn next_region_limits(
         avatar: &mut Joined,
