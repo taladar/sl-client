@@ -86,6 +86,11 @@ Dimentions = "Dimentions"
 # suported"), which the OpenSim-flavoured fake grid sends verbatim
 # (sl-fake-grid/src/land_sales.rs); theirs to spell, not ours to correct.
 suported = "suported"
+# "priviliged" is OpenSim's own spelling in the alert `LandManagementModule`
+# refuses a non-god's `ParcelGodMarkAsContent` with ("Request denied. You're
+# not priviliged."), quoted verbatim in the god-tools census and its chapter
+# (book/src/gridspec/estate.md § God tools); theirs to spell.
+priviliged = "priviliged"
 # "offsett" is the object asset's own keyword for a face's T-axis texture
 # offset (LLTextureEntry's LLSD field name, beside "offsets" for S). Linden's
 # spelling, cited exactly by sl-object-asset and by the reference assets it is

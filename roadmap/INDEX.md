@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 344 |
-| blocked | 85 |
+| blocked | 84 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1396 |
+| done | 1397 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2068** |
@@ -1082,6 +1082,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-object-edit` (done))
 - [`server-fake-grid-estate-actions`](ready/server-fake-grid-estate-actions.md)
   — Fake grid — kick, eject, freeze, teleport home, estate messages and restarts
+- [`server-fake-grid-god-tools`](ready/server-fake-grid-god-tools.md) — Fake
+  grid — god tools as OpenSim answers them (blocked by `gridspec-god-tools`
+  (done))
 - [`server-fake-grid-group-chat`](ready/server-fake-grid-group-chat.md) — Fake
   grid — group chat sessions (blocked by `gridspec-group-chat-and-conference`
   (done))
@@ -1140,8 +1143,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid: attach, detach, limits, HUDs, temporary
 - [`gridspec-avatar-render-info`](ready/gridspec-avatar-render-info.md) —
   AvatarRenderInfo and AttachmentResources on each grid
-- [`gridspec-god-tools`](ready/gridspec-god-tools.md) — God tools as OpenSim
-  answers them
 - [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
   skeleton, fetch caps, AIS3, the library and cache versions on each grid
 - [`gridspec-inventory-mutations`](ready/gridspec-inventory-mutations.md) —
@@ -1167,7 +1168,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (85)
+## blocked (84)
 
 ### protocol
 
@@ -1312,8 +1313,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-god-tools`](blocked/server-fake-grid-god-tools.md) — Fake
-  grid — god tools as OpenSim answers them (blocked by `gridspec-god-tools`)
 - [`server-fake-grid-inventory-offers`](blocked/server-fake-grid-inventory-offers.md)
   — Fake grid — inventory offers, filing and object gives (blocked by
   `gridspec-inventory-offers`, `server-fake-grid-im-relay`)
@@ -1593,7 +1592,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1396)
+## done (1397)
 
 ### protocol
 
@@ -4615,6 +4614,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   permissions and admin on each grid
 - [`gridspec-friends-presence`](done/gridspec-friends-presence.md) — Friendship,
   rights, presence notifications and calling cards on each grid
+- [`gridspec-god-tools`](done/gridspec-god-tools.md) — God tools as OpenSim
+  answers them
 - [`gridspec-group-chat-and-conference`](done/gridspec-group-chat-and-conference.md)
   — Group chat sessions and ad-hoc conferences on each grid
 - [`gridspec-groups`](done/gridspec-groups.md) — Groups: membership, roles,

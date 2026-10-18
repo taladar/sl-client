@@ -29,7 +29,7 @@ use sl_types::key::{
     InventoryItemOrFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
-use sl_types::map::{GridCoordinates, RegionCoordinates};
+use sl_types::map::RegionCoordinates;
 use sl_types::money::LindenAmount;
 use sl_wire::messages::{
     AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardTransactionBlockBlock,
@@ -12991,13 +12991,6 @@ impl SimSession {
                         || RegionFlags::from_legacy(info.region_flags),
                         |block| RegionFlags::from_bits(block.region_flags_extended),
                     );
-                    // The redirect grid coordinates are signed on the wire (`0`
-                    // for no redirect); a negative value is meaningless, so clamp
-                    // to `0`.
-                    let redirect_grid = GridCoordinates::new(
-                        u32::try_from(info.redirect_grid_x).unwrap_or(0),
-                        u32::try_from(info.redirect_grid_y).unwrap_or(0),
-                    );
                     self.events.push_back(ServerEvent::GodUpdateRegionInfo {
                         update: GodRegionUpdate {
                             sim_name,
@@ -13006,7 +12999,8 @@ impl SimSession {
                             region_flags,
                             billable_factor: info.billable_factor,
                             price_per_meter: info.price_per_meter,
-                            redirect_grid,
+                            redirect_grid_x: info.redirect_grid_x,
+                            redirect_grid_y: info.redirect_grid_y,
                         },
                     });
                 } else {

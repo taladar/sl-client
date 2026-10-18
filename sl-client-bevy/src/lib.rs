@@ -29,12 +29,12 @@ use sl_proto::{
     CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT,
-    CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY,
-    CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event as SessionEvent,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, MODIFY_REGION_WRITE_TAG, NeighbourCaps,
-    NewFileAgentInventoryRequest, OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE,
+    CAP_UNTRUSTED_SIMULATOR_MESSAGE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
+    CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
+    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, MODIFY_REGION_WRITE_TAG,
+    NeighbourCaps, NewFileAgentInventoryRequest, OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE,
     REQUESTED_CAPABILITIES, Session, SessionMessage, UserInfoUpdate, agent_profile_notes_body,
     agent_profile_put_body, agent_profile_url, ais_category_children_fetch_url,
     ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
@@ -3588,8 +3588,33 @@ fn apply_command(
         Command::RemoveTelehubSpawnPoint { spawn_index } => {
             session.remove_telehub_spawn_point(*spawn_index, now)?;
         }
-        Command::GodKickUser { target, reason } => {
-            session.god_kick_user(*target, reason, now)?;
+        Command::GodKickUser {
+            target,
+            action,
+            reason,
+        } => {
+            // The capability where the region grants it, as the reference's
+            // `message.xml` flavours the message `llsd`; the UDP message
+            // otherwise.
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_UNTRUSTED_SIMULATOR_MESSAGE).cloned()
+            {
+                let body = sl_proto::build_god_kick_user_untrusted(
+                    &session.god_kick_user_request(*target, *action, reason)?,
+                );
+                crate::log_context::spawn_thread(move || {
+                    run_caps_oneway(&url, body);
+                });
+            } else {
+                session.god_kick_user(*target, *action, reason, now)?;
+            }
+        }
+        Command::ForceObjectOwner {
+            local_ids,
+            owner,
+            group_id,
+        } => {
+            session.force_object_owner(local_ids, *owner, *group_id, now)?;
         }
         Command::SendGodlikeMessage { method, params } => {
             let refs: Vec<&str> = params.iter().map(String::as_str).collect();

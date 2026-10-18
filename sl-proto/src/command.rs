@@ -14,19 +14,19 @@ use crate::{
     DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance, EjectAction,
     EnvironmentUpdate, EstateAccessDelta, EstateInfoUpdate, EventId, ExperienceKey,
     ExperiencePermission, ExperienceUpdate, FaceMaterialPut, FolderType, FreezeAction, FriendKey,
-    FriendRights, GestureActivation, GodRegionUpdate, GroupKey, GroupNoticeAttachment,
-    GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange,
-    IceCandidate, ImSessionId, InterestListMode, InterestsUpdate, InventoryCursor,
-    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
-    LandSearchType, LandStatReportType, LindenAmount, ListingId, LureId, MapItemType,
-    MapRequestFlags, Material, MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform,
-    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
-    ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard, PrimShape,
-    PrimShapeParams, ProfileImage, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates,
-    RegionDebugUpdate, RegionHandle, RegionInfoUpdate, RegionTerrainUpdate, Reliability,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
+    FriendRights, GestureActivation, GodKickAction, GodKickTarget, GodRegionUpdate, GroupKey,
+    GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
+    GroupRoleMemberChange, IceCandidate, ImSessionId, InterestListMode, InterestsUpdate,
+    InventoryCursor, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
+    InventoryType, LandEdit, LandSearchType, LandStatReportType, LindenAmount, ListingId, LureId,
+    MapItemType, MapRequestFlags, Material, MaterialOverrideUpdate, MediaEntry, MeshKey,
+    MessageCursor, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
+    NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+    ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey,
+    ParcelReturnType, ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard,
+    PrimShape, PrimShapeParams, ProfileImage, ProfileUpdate, ProposalVoteId, QueryId,
+    RegionCoordinates, RegionDebugUpdate, RegionHandle, RegionInfoUpdate, RegionTerrainUpdate,
+    Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
     ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags,
     StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey, Throttle,
     ThumbnailTarget, TransactionId, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid,
@@ -1396,11 +1396,16 @@ pub enum Command {
         /// The zero-based index into the telehub's spawn-point list.
         spawn_index: u32,
     },
-    /// God-level eject of an agent (`GodKickUser`; needs grid-god rights).
+    /// God-level kick, freeze or unfreeze of an agent, or of everybody in the
+    /// region (`GodKickUser`; needs god powers). Sent over the
+    /// `UntrustedSimulatorMessage` capability where the region grants it, as
+    /// the reference does, and as a UDP message otherwise.
     GodKickUser {
-        /// The agent to kick.
-        target: AgentKey,
-        /// The kick reason.
+        /// Whom to act on.
+        target: GodKickTarget,
+        /// What to do.
+        action: GodKickAction,
+        /// The text the target is shown.
         reason: String,
     },
     /// Send a generic god-level command (`GodlikeMessage`; needs grid-god rights).
@@ -1707,6 +1712,17 @@ pub enum Command {
         local_ids: Vec<ScopedObjectId>,
         /// The group id.
         group_id: GroupKey,
+    },
+    /// Make `owner` the owner of objects, whoever owns them now (`ObjectOwner`
+    /// with `Override` set: the reference's Admin ▸ Object ▸ Force Owner To
+    /// Me; needs god powers).
+    ForceObjectOwner {
+        /// The region-local ids.
+        local_ids: Vec<ScopedObjectId>,
+        /// The new owner.
+        owner: AgentKey,
+        /// The group the objects are set to afterwards; [`None`] for none.
+        group_id: Option<GroupKey>,
     },
     /// Deed objects to the group they are set to (`ObjectOwner` with a nil
     /// owner); irreversible for a plain resident.
@@ -3331,6 +3347,7 @@ impl Command {
             Self::AddTelehubSpawnPoint { .. } => "AddTelehubSpawnPoint",
             Self::RemoveTelehubSpawnPoint { .. } => "RemoveTelehubSpawnPoint",
             Self::GodKickUser { .. } => "GodKickUser",
+            Self::ForceObjectOwner { .. } => "ForceObjectOwner",
             Self::SendGodlikeMessage { .. } => "SendGodlikeMessage",
             Self::RequestMoneyBalance => "RequestMoneyBalance",
             Self::RequestEconomyData => "RequestEconomyData",

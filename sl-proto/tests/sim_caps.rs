@@ -187,8 +187,9 @@ mod test {
         // land products (ProductInfoRequest), and the estate's access lists
         // (EstateAccess), and the region settings write and restart schedule
         // (DispatchRegionInfo, RegionSchedule), and the region's PBR terrain
-        // overrides (ModifyRegion).
-        assert_eq!(granted.len(), 84);
+        // overrides (ModifyRegion), and the LLSD message transport
+        // (UntrustedSimulatorMessage).
+        assert_eq!(granted.len(), 85);
         Ok(())
     }
 
@@ -233,6 +234,74 @@ mod test {
             .ok_or_else(|| format!("{name} not granted"))?
             .parse()?;
         Ok(url.path().to_owned())
+    }
+
+    /// A god kick the client builds reaches the driver as the message it is,
+    /// a body that is no message is refused `400`, and each grid's answers are
+    /// worded as measured (`god-tools`, 2026-10-18).
+    #[test]
+    fn untrusted_message_dispatches_and_answers_in_each_grids_words() -> Result<(), TestError> {
+        use sl_proto::{
+            GodKickUserRequest, UntrustedMessage, UntrustedMessageOutcome, UntrustedMessageStyle,
+            build_god_kick_user_untrusted,
+        };
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, "UntrustedSimulatorMessage")?;
+        let kick = GodKickUserRequest {
+            god: AgentKey::from(uuid::Uuid::from_u128(1)),
+            god_session: uuid::Uuid::from_u128(2),
+            target: uuid::Uuid::from_u128(3),
+            kick_flags: 1,
+            reason: "frozen".to_owned(),
+        };
+        let body = build_god_kick_user_untrusted(&kick);
+        match caps.dispatch(&mut sim, &post(&path, &body)) {
+            CapsDispatch::UntrustedMessage(UntrustedMessage::GodKickUser(got)) => {
+                assert_eq!(got, kick);
+            }
+            other => return Err(format!("unexpected {other:?}").into()),
+        }
+        let (status, _body) = respond(&mut caps, &mut sim, &post(&path, "not llsd"))?;
+        assert_eq!(status, 400);
+        let answer = |style, outcome| {
+            let response = SimCaps::untrusted_message_response(style, outcome);
+            (
+                response.status,
+                String::from_utf8_lossy(&response.body).into_owned(),
+            )
+        };
+        assert_eq!(
+            answer(UntrustedMessageStyle::Bare, UntrustedMessageOutcome::Taken),
+            (200, String::new())
+        );
+        assert_eq!(
+            answer(
+                UntrustedMessageStyle::Bare,
+                UntrustedMessageOutcome::WrongSession
+            )
+            .0,
+            401
+        );
+        assert_eq!(
+            answer(
+                UntrustedMessageStyle::Bare,
+                UntrustedMessageOutcome::Unknown
+            )
+            .0,
+            400
+        );
+        let (status, body) = answer(UntrustedMessageStyle::Llsd, UntrustedMessageOutcome::Taken);
+        assert_eq!(status, 200);
+        assert!(body.contains("<undef"), "{body}");
+        assert_eq!(
+            answer(
+                UntrustedMessageStyle::Llsd,
+                UntrustedMessageOutcome::Unknown
+            ),
+            (404, "Not Found".to_owned())
+        );
+        Ok(())
     }
 
     /// Grants the event queue and returns its URL path.

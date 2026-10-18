@@ -798,6 +798,13 @@ pub const CAP_MODIFY_REGION: &str = "ModifyRegion";
 /// so it is not read as a GET's answer.
 pub const MODIFY_REGION_WRITE_TAG: &str = "ModifyRegion#write";
 
+/// The HTTP capability that carries a template message as LLSD
+/// (`UntrustedSimulatorMessage`): a POST of `{ message, body }` for the
+/// messages the reference's `message.xml` flavours `llsd` — in practice the god
+/// kick, freeze and unfreeze (`GodKickUser`, `Command::GodKickUser`). Both
+/// grids grant it; the body is [`sl_wire::build_god_kick_user_untrusted`].
+pub const CAP_UNTRUSTED_SIMULATOR_MESSAGE: &str = "UntrustedSimulatorMessage";
+
 /// The HTTP capability for the **Second Life Marketplace (SLM)
 /// DirectDelivery API** (`DirectDelivery`): the base URL of the
 /// marketplace listing-management REST service. Unlike every other
@@ -942,6 +949,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_DISPATCH_REGION_INFO,
     CAP_REGION_SCHEDULE,
     CAP_MODIFY_REGION,
+    CAP_UNTRUSTED_SIMULATOR_MESSAGE,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

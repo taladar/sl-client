@@ -825,7 +825,12 @@ mod test {
             "come over",
             now,
         )?;
-        client.god_kick_user(AgentKey::from(uuid::Uuid::from_u128(9)), "spam", now)?;
+        client.god_kick_user(
+            sl_proto::GodKickTarget::Agent(AgentKey::from(uuid::Uuid::from_u128(9))),
+            sl_proto::GodKickAction::Kick,
+            "spam",
+            now,
+        )?;
         client.send_godlike_message("setregioninfo", &["1", "2"], now)?;
         client.autopilot_to(256_010.0, 256_020.0, 25.0, now)?;
 

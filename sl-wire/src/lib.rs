@@ -44,6 +44,7 @@ mod resource_report;
 mod sequence_number;
 mod sim_features;
 mod transfer;
+mod untrusted_message;
 mod url;
 mod user_info;
 mod voice;
@@ -248,6 +249,10 @@ pub use transfer::{
     ESTATE_ASSET_COVENANT, TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_ASSET,
     TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM, TransferSourceParamsAsset,
     TransferSourceParamsEstate, TransferSourceParamsInvItem,
+};
+pub use untrusted_message::{
+    ALL_AGENTS, GOD_KICK_USER_MESSAGE, GodKickUserRequest, UntrustedMessage,
+    build_god_kick_user_untrusted, parse_untrusted_message,
 };
 pub use url::{optional_url_from_wire, optional_url_to_wire, url_from_wire, url_to_wire};
 pub use user_info::{

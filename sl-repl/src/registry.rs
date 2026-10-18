@@ -47,6 +47,8 @@ use sl_proto::EventId;
 use sl_proto::ExperienceKey;
 use sl_proto::FriendKey;
 use sl_proto::GlobalCoordinates;
+use sl_proto::GodKickAction;
+use sl_proto::GodKickTarget;
 use sl_proto::GroupKey;
 use sl_proto::GroupRequestId;
 use sl_proto::GroupRoleKey;
@@ -71,27 +73,26 @@ use sl_proto::{
     DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, EjectAction,
     EstateAccessDelta, EstateInfoUpdate, ExperiencePermission, ExperienceUpdate, ExtendedMesh,
     FaceMaterialPut, FlexibleData, FolderType, FreezeAction, FriendRights, GestureActivation,
-    GodRegionUpdate, GridCoordinates, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange,
-    GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer,
-    InventoryType, LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandSearchType,
-    LandStatReportType, LegacyMaterial, LightData, LightImage, LindenAmount, ListingId,
-    LoggedChatType, LookAtType, MapItemType, MapRequestFlags, MarketplaceAssociateInventoryInfo,
-    MarketplaceInventoryInfo, Material, MaterialOverrideUpdate, Maturity, MediaEntry,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks,
-    ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions, Permissions5,
-    PickKey, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProfileImage,
-    ProfileUpdate, ProposalVoteId, ReflectionProbe, ReflectionProbeFlags, RegionDebugUpdate,
-    RegionFlags, RegionHandle, RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId,
-    RegionName, RegionSchedule, RegionTerrainUpdate, RenderMaterialRef, RestartDays, RestartWhen,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptLanguage, ScriptPermissions, ScriptTarget,
-    ScriptUploadLocation, SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot,
-    TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle, ThumbnailTarget,
-    TimestampFormat, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable,
-    WearableType,
+    GodRegionUpdate, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit,
+    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
+    LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, LandSearchType, LandStatReportType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, ListingId, LoggedChatType, LookAtType,
+    MapItemType, MapRequestFlags, MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo,
+    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry,
+    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType,
+    ParcelUpdate, PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType,
+    Postcard, PrimShape, PrimShapeParams, ProfileImage, ProfileUpdate, ProposalVoteId,
+    ReflectionProbe, ReflectionProbeFlags, RegionDebugUpdate, RegionFlags, RegionHandle,
+    RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionSchedule,
+    RegionTerrainUpdate, RenderMaterialRef, RestartDays, RestartWhen, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
+    ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SculptData,
+    SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea,
+    TextureEntry, TextureFace, Throttle, ThumbnailTarget, TimestampFormat, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -3568,10 +3569,8 @@ fn all_specs() -> Vec<CommandSpec> {
                         )?),
                         billable_factor: args.req_parse(ctx, "billable_factor", 4, "f32")?,
                         price_per_meter: args.req_parse(ctx, "price_per_meter", 5, "i32")?,
-                        redirect_grid: GridCoordinates::new(
-                            args.req_parse(ctx, "redirect_grid_x", 6, "u32")?,
-                            args.req_parse(ctx, "redirect_grid_y", 7, "u32")?,
-                        ),
+                        redirect_grid_x: args.req_parse(ctx, "redirect_grid_x", 6, "i32")?,
+                        redirect_grid_y: args.req_parse(ctx, "redirect_grid_y", 7, "i32")?,
                     },
                 })
             },
@@ -4284,11 +4283,29 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "god_kick_user",
-            usage: "<target> [reason]",
+            usage: "<target|everyone> [action:kick|freeze|unfreeze=kick] [reason]",
             build: |args, ctx| {
+                let target = if args.req_str(ctx, "target", 0)? == "everyone" {
+                    GodKickTarget::Everyone
+                } else {
+                    GodKickTarget::Agent(args.req_agent(ctx, "target", 0)?)
+                };
+                let action = match args.str_or(ctx, "action", 1, "kick")?.as_str() {
+                    "kick" => GodKickAction::Kick,
+                    "freeze" => GodKickAction::Freeze,
+                    "unfreeze" => GodKickAction::Unfreeze,
+                    other => {
+                        return Err(ReplError::InvalidArg {
+                            field: "action".to_owned(),
+                            value: other.to_owned(),
+                            expected: "kick, freeze or unfreeze".to_owned(),
+                        });
+                    }
+                };
                 Ok(Command::GodKickUser {
-                    target: args.req_agent(ctx, "target", 0)?,
-                    reason: args.str_or(ctx, "reason", 1, "")?,
+                    target,
+                    action,
+                    reason: args.str_or(ctx, "reason", 2, "")?,
                 })
             },
         },
@@ -4707,6 +4724,20 @@ fn all_specs() -> Vec<CommandSpec> {
                         args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
                     )?,
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 1)?),
+                })
+            },
+        },
+        CommandSpec {
+            name: "force_object_owner",
+            usage: "<local_ids: id,…> <owner> [group_id]",
+            build: |args, ctx| {
+                Ok(Command::ForceObjectOwner {
+                    local_ids: scoped_objects(
+                        ctx,
+                        args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
+                    )?,
+                    owner: args.req_agent(ctx, "owner", 1)?,
+                    group_id: args.opt_group(ctx, "group_id", 2)?,
                 })
             },
         },
@@ -6610,10 +6641,10 @@ mod tests {
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, ChatChannel, ChatType,
         CircuitId, ClockStyle, Command, ControlFlags, DirFindFlags, DirectoryVisibility,
-        EjectAction, EventId, FolderType, FreezeAction, FriendRights, GridCoordinates, GroupKey,
-        InventoryFolderKey, InventoryItemOrFolderKey, InventoryKey, InventoryType, LandBrushAction,
-        LandBrushSize, LandEdit, LandStatReportType, LindenAmount, MapItemType, MovementMode,
-        ObjectBuyItem, ObjectKey, OwnerKey, ReflectionProbeFlags, RegionDebugUpdate, RegionHandle,
+        EjectAction, EventId, FolderType, FreezeAction, FriendRights, GroupKey, InventoryFolderKey,
+        InventoryItemOrFolderKey, InventoryKey, InventoryType, LandBrushAction, LandBrushSize,
+        LandEdit, LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem,
+        ObjectKey, OwnerKey, ReflectionProbeFlags, RegionDebugUpdate, RegionHandle,
         RegionLocalObjectId, RegionLocalParcelId, RegionTerrainUpdate, RenderMaterialRef, SaleType,
         ScopedObjectId, ScopedParcelId, ScriptPermissions, SimWideDeleteFlags, StartLocationSlot,
         TaskInventoryKey, TerraformArea, TextureKey, TimestampFormat, TransactionId, Uuid,
@@ -7299,13 +7330,14 @@ mod tests {
     #[test]
     fn god_update_region_info_parses_region_params() {
         assert!(matches!(
-            build("god_update_region_info \"Da Boom\" 1 1 7 1.0 5 1000 1001"),
+            build("god_update_region_info \"Da Boom\" 1 1 7 1.0 5 -1 1001"),
             Ok(Command::GodUpdateRegionInfo { update })
                 if update.sim_name.as_ref() == "Da Boom"
                     && update.estate_id == 1
                     && update.region_flags == sl_proto::RegionFlags::from_bits(7)
                     && update.price_per_meter == 5
-                    && update.redirect_grid == GridCoordinates::new(1000, 1001)
+                    && update.redirect_grid_x == -1
+                    && update.redirect_grid_y == 1001
         ));
     }
 

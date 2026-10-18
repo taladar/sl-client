@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 
 use super::Maturity;
 use crate::types::merge::merge_unedited;
-use sl_types::key::{ObjectKey, TextureKey};
+use sl_types::key::{AgentKey, ObjectKey, TextureKey};
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_types::map::{GridCoordinates, GridRectangle, RegionCoordinates, RegionName};
@@ -500,6 +500,74 @@ impl FreezeAction {
     }
 }
 
+/// What a god kick does to its target (`GodKickUser` `KickFlags`), matching
+/// the reference viewer's `KICK_FLAGS_*` (`llavataractions.cpp`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum GodKickAction {
+    /// Log the target out (`KICK_FLAGS_DEFAULT`, `0`).
+    Kick,
+    /// Freeze the target where it stands (`KICK_FLAGS_FREEZE`, `1`).
+    Freeze,
+    /// Undo a god freeze (`KICK_FLAGS_UNFREEZE`, `2`).
+    Unfreeze,
+}
+
+impl GodKickAction {
+    /// The `KickFlags` wire value for this action.
+    #[must_use]
+    pub const fn to_wire(self) -> u32 {
+        match self {
+            Self::Kick => 0x0,
+            Self::Freeze => 0x1,
+            Self::Unfreeze => 0x2,
+        }
+    }
+
+    /// The action for a `KickFlags` wire value, or `None` for a value the
+    /// reference does not send. The inverse of [`GodKickAction::to_wire`].
+    #[must_use]
+    pub const fn from_wire(flags: u32) -> Option<Self> {
+        match flags {
+            0x0 => Some(Self::Kick),
+            0x1 => Some(Self::Freeze),
+            0x2 => Some(Self::Unfreeze),
+            _ => None,
+        }
+    }
+}
+
+/// Whom a god kick acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum GodKickTarget {
+    /// One agent.
+    Agent(AgentKey),
+    /// Every agent in the region but the god (the reference's
+    /// `LL_UUID_ALL_AGENTS`, [`sl_wire::ALL_AGENTS`]).
+    Everyone,
+}
+
+impl GodKickTarget {
+    /// The `AgentID` the message carries.
+    #[must_use]
+    pub const fn to_wire(self) -> Uuid {
+        match self {
+            Self::Agent(agent) => agent.uuid(),
+            Self::Everyone => sl_wire::ALL_AGENTS,
+        }
+    }
+
+    /// The target an `AgentID` names: [`GodKickTarget::Everyone`] for
+    /// [`sl_wire::ALL_AGENTS`]. The inverse of [`GodKickTarget::to_wire`].
+    #[must_use]
+    pub fn from_wire(agent_id: Uuid) -> Self {
+        if agent_id == sl_wire::ALL_AGENTS {
+            Self::Everyone
+        } else {
+            Self::Agent(AgentKey::from(agent_id))
+        }
+    }
+}
+
 /// Which objects a sim-wide delete targets, applied via
 /// [`Session::sim_wide_deletes`](crate::Session::sim_wide_deletes)
 /// (`SimWideDeletes`; needs estate/god rights). The wire `Flags` field is the
@@ -572,9 +640,13 @@ pub struct GodRegionUpdate {
     pub billable_factor: f32,
     /// The price per square metre of land, in L$.
     pub price_per_meter: i32,
-    /// The grid coordinates teleports into this region are redirected to
-    /// (`(0, 0)` for no redirect).
-    pub redirect_grid: GridCoordinates,
+    /// The grid x coordinate teleports into this region are redirected to,
+    /// signed as on the wire: none is `0` on OpenSim and `-1` on Second Life
+    /// (`god-tools`, 2026-10-18), and the reference echoes whichever the
+    /// region stated.
+    pub redirect_grid_x: i32,
+    /// The grid y coordinate of the redirect, as [`Self::redirect_grid_x`].
+    pub redirect_grid_y: i32,
 }
 
 /// A region reported by the world map (one `MapBlockReply` `Data` entry).

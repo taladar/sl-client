@@ -121,6 +121,13 @@ pub(crate) struct SimState {
     /// What this session's agent is permitted, and how the deprecated paths
     /// are answered ([`crate::agent_requests`]).
     pub(crate) policy: crate::agent_requests::AgentPolicy,
+    /// How the grid answers a request for god powers, and this session's god
+    /// state ([`crate::god_powers`]).
+    pub(crate) god_powers: crate::god_powers::PowersAnswer,
+    /// This session's god rights and the level its viewer was last told.
+    pub(crate) god_mode: crate::god_powers::GodMode,
+    /// How the grid words its `UntrustedSimulatorMessage` answers.
+    pub(crate) untrusted_style: sl_proto::UntrustedMessageStyle,
     /// Who the agent is, for its own avatar object.
     pub(crate) avatar: AvatarIdentity,
     /// What this client holds **selected**, which is the subscription an
@@ -536,6 +543,14 @@ impl SharedSim {
             crate::agent_requests::answer_agent_request(
                 state.policy,
                 &state.world.lock(),
+                state.avatar.agent_id,
+                &mut state.sim,
+                &event,
+                now,
+            );
+            crate::god_powers::answer_god_request(
+                state.god_powers,
+                &mut state.god_mode,
                 state.avatar.agent_id,
                 &mut state.sim,
                 &event,

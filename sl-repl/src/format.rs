@@ -704,6 +704,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::SetObjectExtraParams { .. } => "set_object_extra_params",
         Command::SetObjectGroup { .. } => "set_object_group",
         Command::DeedObjectsToGroup { .. } => "deed_objects_to_group",
+        Command::ForceObjectOwner { .. } => "force_object_owner",
         Command::SetObjectPermissions { .. } => "set_object_permissions",
         Command::SetObjectForSale { .. } => "set_object_for_sale",
         Command::SetObjectCategory { .. } => "set_object_category",

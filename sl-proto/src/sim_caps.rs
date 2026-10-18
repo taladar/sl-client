@@ -107,13 +107,14 @@ use crate::{
     CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED, CAP_SEARCH_STAT_REQUEST,
     CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_GESTURE_TASK_INVENTORY,
-    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_TASK_INVENTORY,
-    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
-    CAP_UPDATE_SETTINGS_TASK_INVENTORY, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_UPLOAD_BAKED_TEXTURE,
-    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES, CAP_UNTRUSTED_SIMULATOR_MESSAGE,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_UPDATE_GESTURE_TASK_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
+    CAP_UPDATE_MATERIAL_TASK_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPDATE_SETTINGS_TASK_INVENTORY,
+    CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event,
     InventoryFolder, InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal,
     offline_messages_to_llsd,
@@ -264,6 +265,8 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_REGION_SCHEDULE,
     // The region's PBR terrain overrides.
     CAP_MODIFY_REGION,
+    // A template message posted as LLSD (the god kick).
+    CAP_UNTRUSTED_SIMULATOR_MESSAGE,
     // The voice signalling cluster.
     CAP_PROVISION_VOICE_ACCOUNT,
     CAP_PARCEL_VOICE_INFO,
@@ -358,6 +361,9 @@ pub enum CapHandler {
     /// The `ModifyRegion` GET and POST of the region's PBR terrain overrides,
     /// handed to the driver ([`CapsDispatch::ModifyRegion`]).
     ModifyRegion,
+    /// The `UntrustedSimulatorMessage` POST of a template message as LLSD,
+    /// handed to the driver ([`CapsDispatch::UntrustedMessage`]).
+    UntrustedSimulatorMessage,
     /// The shared two-stage asset-upload state machine serving every
     /// `UPLOAD_CAPABILITIES` entry (`NewFileAgentInventory`,
     /// `UploadBakedTexture`, and the `Update*{Agent,Task}Inventory` family):
@@ -728,6 +734,32 @@ pub enum CapsDispatch {
         /// The overrides a POST writes; `None` for a GET.
         change: Option<sl_wire::TerrainMaterialOverrides>,
     },
+    /// A message posted to `UntrustedSimulatorMessage`. The driver acts on it
+    /// and answers with [`SimCaps::untrusted_message_response`].
+    UntrustedMessage(sl_wire::UntrustedMessage),
+}
+
+/// What a driver answers a [`CapsDispatch::UntrustedMessage`] with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UntrustedMessageOutcome {
+    /// A message the grid knows, taken — whether or not it then acts on it.
+    Taken,
+    /// A god kick whose god session is not the god's presence (OpenSim's
+    /// check; Second Life was not seen to make it).
+    WrongSession,
+    /// A message the grid does not know.
+    Unknown,
+}
+
+/// How a grid words its answers to `UntrustedSimulatorMessage`, measured by
+/// the `god-tools` census on 2026-10-18.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UntrustedMessageStyle {
+    /// OpenSim's `GodsModule`: `200`, `401` and `400`, none with a body.
+    Bare,
+    /// Second Life: `200` with an `undef` LLSD body for any god kick, and
+    /// `404` "Not Found" for a message it does not know.
+    Llsd,
 }
 
 /// What a driver answers a [`CapsDispatch::ModifyRegion`] with.
@@ -1022,6 +1054,7 @@ impl SimCaps {
             CAP_DISPATCH_REGION_INFO => Some(CapHandler::DispatchRegionInfo),
             CAP_REGION_SCHEDULE => Some(CapHandler::RegionSchedule),
             CAP_MODIFY_REGION => Some(CapHandler::ModifyRegion),
+            CAP_UNTRUSTED_SIMULATOR_MESSAGE => Some(CapHandler::UntrustedSimulatorMessage),
             CAP_EXPERIENCE_QUERY => Some(CapHandler::ExperienceQuery),
             CAP_PROVISION_VOICE_ACCOUNT => Some(CapHandler::ProvisionVoiceAccount),
             CAP_PARCEL_VOICE_INFO => Some(CapHandler::ParcelVoiceInfo),
@@ -1138,6 +1171,9 @@ impl SimCaps {
                     Some(CapHandler::DispatchRegionInfo) => Self::dispatch_region_info(request),
                     Some(CapHandler::RegionSchedule) => Self::dispatch_region_schedule(request),
                     Some(CapHandler::ModifyRegion) => Self::dispatch_modify_region(request),
+                    Some(CapHandler::UntrustedSimulatorMessage) => {
+                        Self::dispatch_untrusted_message(request)
+                    }
                     Some(CapHandler::DisplayNames) => {
                         CapsDispatch::Response(self.dispatch_display_names(sim, request))
                     }
@@ -1601,6 +1637,48 @@ impl SimCaps {
                 Some(Err(_)) | None => CapsDispatch::Response(CapsResponse::bad_request()),
             },
             _ => CapsDispatch::Response(CapsResponse::method_not_allowed()),
+        }
+    }
+
+    /// Resolves an `UntrustedSimulatorMessage` POST into the message it
+    /// carries.
+    fn dispatch_untrusted_message(request: &CapsRequest<'_>) -> CapsDispatch {
+        if request.method != "POST" {
+            return CapsDispatch::Response(CapsResponse::method_not_allowed());
+        }
+        match parse_llsd_body(request.body)
+            .as_ref()
+            .map(sl_wire::parse_untrusted_message)
+        {
+            Some(Ok(message)) => CapsDispatch::UntrustedMessage(message),
+            Some(Err(_)) | None => CapsDispatch::Response(CapsResponse::bad_request()),
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::UntrustedMessage`] in a grid's
+    /// `style`.
+    #[must_use]
+    pub fn untrusted_message_response(
+        style: UntrustedMessageStyle,
+        outcome: UntrustedMessageOutcome,
+    ) -> CapsResponse {
+        match (style, outcome) {
+            (UntrustedMessageStyle::Bare, UntrustedMessageOutcome::Taken) => {
+                CapsResponse::empty(200)
+            }
+            (UntrustedMessageStyle::Bare, UntrustedMessageOutcome::WrongSession) => {
+                CapsResponse::unauthorized()
+            }
+            (UntrustedMessageStyle::Bare, UntrustedMessageOutcome::Unknown) => {
+                CapsResponse::bad_request()
+            }
+            (
+                UntrustedMessageStyle::Llsd,
+                UntrustedMessageOutcome::Taken | UntrustedMessageOutcome::WrongSession,
+            ) => CapsResponse::llsd_xml(Llsd::Undef.to_llsd_xml()),
+            (UntrustedMessageStyle::Llsd, UntrustedMessageOutcome::Unknown) => {
+                CapsResponse::words(404, "Not Found")
+            }
         }
     }
 
@@ -3787,6 +3865,7 @@ mod tests {
             ("DispatchRegionInfo", CapStatus::Served),
             ("RegionSchedule", CapStatus::Served),
             ("ModifyRegion", CapStatus::Served),
+            ("UntrustedSimulatorMessage", CapStatus::Served),
         ];
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES
             .iter()

@@ -5958,6 +5958,71 @@ mod test {
         Ok(())
     }
 
+    /// What an avatar is told when it asks for god powers: a grant at its
+    /// level, an agent alert, or a keyed alert.
+    async fn ask_for_god_powers(avatar: &mut Joined, godlike: bool) -> Result<String, TestError> {
+        avatar
+            .commands
+            .send(Command::RequestGodlikePowers { godlike })
+            .await?;
+        wait_on(&mut avatar.events, |event| match event {
+            Event::GodlikePowersGranted { god_level } => Some(format!("granted {god_level}")),
+            Event::AgentAlertMessage { message, .. } if message.contains("god powers") => {
+                Some(format!("agent alert {message}"))
+            }
+            Event::AlertMessage { alert_info, .. } => alert_info
+                .first()
+                .map(|info| format!("keyed alert {}", info.message)),
+            _ => None,
+        })
+        .await
+    }
+
+    /// A request for god powers is answered as each grid answers it
+    /// (`god-tools`, 2026-10-18): OpenSim grants a god account its level and
+    /// the estate owner 220 and tells a resident it was denied; Second Life
+    /// refuses everybody in a keyed alert.
+    #[tokio::test]
+    async fn god_powers_are_granted_as_each_grid_grants_them() -> Result<(), TestError> {
+        for imitates in [ImitatedGrid::OpenSim, ImitatedGrid::SecondLife] {
+            let grid = FakeGridBuilder::new()
+                .account(AccountConfig::new("First", "User", "password").estate_manager())
+                .account(AccountConfig::new("Second", "User", "password"))
+                .account(AccountConfig::new("Third", "User", "password").god_level(250))
+                .imitates(imitates)
+                .event_queue_hold(Duration::from_secs(2))
+                .region(RegionConfig::default())
+                .start()
+                .await?;
+            let mut owner = join(&grid, "First").await?;
+            let mut resident = join(&grid, "Second").await?;
+            let mut god = join(&grid, "Third").await?;
+            let told = (
+                ask_for_god_powers(&mut owner, true).await?,
+                ask_for_god_powers(&mut resident, true).await?,
+                ask_for_god_powers(&mut god, true).await?,
+            );
+            match imitates {
+                ImitatedGrid::OpenSim => {
+                    assert_eq!(
+                        told,
+                        (
+                            "granted 220".to_owned(),
+                            "agent alert /Request for god powers denied".to_owned(),
+                            "granted 250".to_owned(),
+                        )
+                    );
+                    assert_eq!(ask_for_god_powers(&mut god, false).await?, "granted 0");
+                }
+                ImitatedGrid::SecondLife => {
+                    let refused = "keyed alert SpecialPowersRequestFailedLogged".to_owned();
+                    assert_eq!(told, (refused.clone(), refused.clone(), refused));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Takes a freshly rezzed cube into `avatar`'s Objects folder and returns
     /// the inventory item the simulator minted — a donor a task-inventory
     /// write can drop into something else.

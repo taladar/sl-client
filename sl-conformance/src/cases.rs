@@ -49,6 +49,7 @@ pub mod friendship_offer_accept;
 pub mod friendship_terminate;
 pub mod gestures;
 pub mod give_inventory;
+pub mod god_tools;
 pub mod grant_user_rights;
 pub mod group_accounting;
 pub mod group_admin;

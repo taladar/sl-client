@@ -3503,10 +3503,6 @@ impl Circuit {
         update: &GodRegionUpdate,
         now: Instant,
     ) -> Result<(), WireError> {
-        // The redirect grid coordinates are signed on the wire (`0` for none);
-        // region indices never exceed `i32::MAX` in practice.
-        let redirect_grid_x = i32::try_from(update.redirect_grid.x()).unwrap_or(i32::MAX);
-        let redirect_grid_y = i32::try_from(update.redirect_grid.y()).unwrap_or(i32::MAX);
         let message = AnyMessage::GodUpdateRegionInfo(GodUpdateRegionInfo {
             agent_data: GodUpdateRegionInfoAgentDataBlock {
                 agent_id: self.agent_id.uuid(),
@@ -3520,8 +3516,8 @@ impl Circuit {
                 region_flags: update.region_flags.legacy_bits(),
                 billable_factor: update.billable_factor,
                 price_per_meter: update.price_per_meter,
-                redirect_grid_x,
-                redirect_grid_y,
+                redirect_grid_x: update.redirect_grid_x,
+                redirect_grid_y: update.redirect_grid_y,
             },
             region_info2: vec![GodUpdateRegionInfoRegionInfo2Block {
                 region_flags_extended: update.region_flags.bits(),
@@ -4285,10 +4281,12 @@ impl Circuit {
         self.send(&message, Reliability::Reliable, now)
     }
 
-    /// Queues a `GodKickUser` reliably (god-level eject of `target`).
+    /// Queues a `GodKickUser` reliably: a god kick (`kick_flags` 0), freeze
+    /// (1) or unfreeze (2) of `target`.
     pub(crate) fn send_god_kick_user(
         &mut self,
         target: Uuid,
+        kick_flags: u32,
         reason: &str,
         now: Instant,
     ) -> Result<(), WireError> {
@@ -4297,7 +4295,7 @@ impl Circuit {
                 god_id: self.agent_id.uuid(),
                 god_session_id: self.session_id,
                 agent_id: target,
-                kick_flags: 0,
+                kick_flags,
                 reason: with_nul(reason),
             },
         });
@@ -4969,10 +4967,14 @@ impl Circuit {
     /// `LLSelectMgr::sendOwner(LLUUID::null, group_id)`); the simulator then
     /// makes the group the owner of each object, which must already be *set*
     /// to that group and owned by the agent.
+    ///
+    /// `owner` is [`None`] for a deed to `group_id`; a forced owner sets
+    /// `Override`, as the reference's god Force Owner does.
     pub(crate) fn send_object_owner(
         &mut self,
         local_ids: &[RegionLocalObjectId],
-        group_id: GroupKey,
+        owner: Option<AgentKey>,
+        group_id: Option<GroupKey>,
         now: Instant,
     ) -> Result<(), WireError> {
         let message = AnyMessage::ObjectOwner(ObjectOwner {
@@ -4981,9 +4983,9 @@ impl Circuit {
                 session_id: self.session_id,
             },
             header_data: ObjectOwnerHeaderDataBlock {
-                r#override: false,
-                owner_id: Uuid::nil(),
-                group_id: group_id.uuid(),
+                r#override: owner.is_some(),
+                owner_id: owner.map_or_else(Uuid::nil, |agent| agent.uuid()),
+                group_id: group_id.map_or_else(Uuid::nil, |group| group.uuid()),
             },
             object_data: local_ids
                 .iter()

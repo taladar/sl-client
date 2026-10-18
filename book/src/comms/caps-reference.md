@@ -60,7 +60,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `StartGroupProposal` | yes | — | removed feature | not adopted |
 | `TerrainNavMeshProperties` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `TextureStats` | yes | — | telemetry (debug) | task `viewer-telemetry-opt-in` |
-| `UntrustedSimulatorMessage` | yes | yes | current (god actions) | task `viewer-god-tools` |
+| `UntrustedSimulatorMessage` | yes | yes | current (god actions) | **used** since 2026-10-18 (`Command::GodKickUser`); measured in [Estate § God tools](../gridspec/estate.md#god-tools); the floater is task `viewer-god-tools` |
 | `UpdateAgentInformation` | yes | yes | current | task `protocol-cap-update-agent-information` |
 | `UpdateAgentLanguage` | yes | yes | current | task `viewer-i18n-agent-language` |
 | `UpdateGestureTaskInventory` | yes | yes | current | **requested** since 2026-10-12 (`Command::UpdateInventoryAsset`); the editor is task `viewer-gesture-management-ui` |

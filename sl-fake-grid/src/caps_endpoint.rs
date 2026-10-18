@@ -4,7 +4,10 @@
 
 use std::sync::Arc;
 
-use sl_proto::{CapsDispatch, CapsRequest, CapsResponse, ModifyRegionOutcome, SimCaps};
+use sl_proto::{
+    CapsDispatch, CapsRequest, CapsResponse, ModifyRegionOutcome, SimCaps, UntrustedMessage,
+    UntrustedMessageOutcome,
+};
 
 use crate::driver::{SharedSim, SimState, sleep_until_opt};
 use crate::runtime::GridCore;
@@ -196,6 +199,27 @@ pub(crate) async fn dispatch_caps(
                         &world.terrain_material_overrides,
                     )),
                 };
+            }
+            // A template message posted as LLSD: a god kick is checked as the
+            // grid checks it and answered in its words; what the kick then does
+            // is the roadmap's `server-fake-grid-god-tools`.
+            CapsDispatch::UntrustedMessage(message) => {
+                let guard = shared.state.lock().await;
+                let style = guard.untrusted_style;
+                let outcome = match message {
+                    UntrustedMessage::GodKickUser(kick) => {
+                        let presence = guard.sim.agent_id() == Some(kick.god)
+                            && guard.sim.session_id() == Some(kick.god_session);
+                        if presence || style == sl_proto::UntrustedMessageStyle::Llsd {
+                            UntrustedMessageOutcome::Taken
+                        } else {
+                            UntrustedMessageOutcome::WrongSession
+                        }
+                    }
+                    UntrustedMessage::Other(_) => UntrustedMessageOutcome::Unknown,
+                };
+                drop(guard);
+                return SimCaps::untrusted_message_response(style, outcome);
             }
             CapsDispatch::EventQueueWouldBlock => {
                 if *shutdown_rx.borrow_and_update() {

@@ -4981,7 +4981,8 @@ mod test {
             region_flags: sl_proto::RegionFlags::from_bits(0x1_0000_0007),
             billable_factor: 1.0,
             price_per_meter: 5,
-            redirect_grid: GridCoordinates::new(1000, 1001),
+            redirect_grid_x: 1000,
+            redirect_grid_y: 1001,
         };
         session.god_update_region_info(&update, now)?;
         let sent = drain(&mut session)?;
@@ -15409,7 +15410,12 @@ mod test {
             },
             now,
         )?;
-        session.god_kick_user(AgentKey::from(uuid::Uuid::from_u128(9)), "spam", now)?;
+        session.god_kick_user(
+            sl_proto::GodKickTarget::Agent(AgentKey::from(uuid::Uuid::from_u128(9))),
+            sl_proto::GodKickAction::Freeze,
+            "spam",
+            now,
+        )?;
         let sent = drain(&mut session)?;
 
         let estate: Vec<_> = sent
@@ -15486,6 +15492,8 @@ mod test {
             .ok_or("expected a GodKickUser")?;
         assert_eq!(god.user_info.agent_id, uuid::Uuid::from_u128(9));
         assert_eq!(trimmed(&god.user_info.reason), "spam");
+        // The reference's KICK_FLAGS_FREEZE.
+        assert_eq!(god.user_info.kick_flags, 1);
         Ok(())
     }
 

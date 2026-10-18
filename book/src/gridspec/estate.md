@@ -198,6 +198,85 @@ answer.
 | switches scripts off on the Debug tab (`setregiondebug`) | **no** `RegionInfo`: only each avatar's next `SimStats` says `SKIP_SCRIPTS`; a record read after carries it | the same |
 | … and back on | the same, the bit cleared | the same |
 
+## God tools
+
+Measured on 2026-10-18 by the census `god-tools`, three avatars a run: **A** a
+grid god where a test account is one, **B** a resident, **C** the estate owner
+where the test avatars hold estate rights. On OpenSim A is an account of user
+level 250 (the local grid sets `allow_grid_gods`; OpenSim's default does not)
+and C the estate owner, all three at the Default Region's centre with a cube of
+A's beside them; the parcel there is C's. On aditi no test account is a god and
+none holds estate rights, so all three are residents at the build location in
+Mauve, and every god's leg reads "not measured: no god account on Second Life".
+Each run is held to these answers; the census runs on the live grids only, as
+the fake grid answers the requests for powers and the capability but none of
+the god's actions (`server-fake-grid-god-tools`).
+
+### Asking for powers
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a resident asks (`RequestGodlikePowers`, godlike) | an `AlertMessage` keyed `SpecialPowersRequestFailedLogged`: "Request for special powers failed. This request has been logged." | an agent alert, "/Request for god powers denied" | each flavour as its grid |
+| … gives them up | nothing | nothing | nothing |
+| a god asks | not measured | `GrantGodlikePowers` at its user level (250) | the same on `FakeOpensim` (`AccountConfig::god_level`) |
+| … gives them up | not measured | `GrantGodlikePowers` at level 0 | the same |
+| the estate owner asks | not measured (a resident's refusal) | `GrantGodlikePowers` at **220** (`region_owner_is_god`) | the same on `FakeOpensim` |
+| who else is told | nobody | nobody | nobody |
+
+OpenSim sends a grant only when the level its viewer was last told changes
+(`GodController.RequestGodMode`), so a resident giving up powers it never had is
+told nothing.
+
+### What a resident is answered
+
+B, holding no powers, acts on A or on the region.
+
+| B | Second Life | OpenSim |
+| --- | --- | --- |
+| freezes A (`GodKickUser` over UDP) | nothing | nothing |
+| freezes A over `UntrustedSimulatorMessage` | HTTP 200, an `undef` body; nothing done | HTTP 200, no body; nothing done |
+| … naming A as the god, with its own session | HTTP 200, `undef` | HTTP **401**, no body |
+| posts a message the capability does not know | HTTP **404**, `Not Found` | HTTP **400**, no body |
+| sends a `GodlikeMessage` (`telehub`, `info ui`) | nothing | nothing |
+| rewrites the region (`GodUpdateRegionInfo`, with the values it states) | nothing | nothing |
+| returns A's objects (`SimWideDeletes`) | nothing | nothing |
+| forces the parcel's owner to itself (`ParcelGodForceOwner`) | nothing, the parcel unchanged | nothing, unchanged |
+| marks the parcel as content (`ParcelGodMarkAsContent`) | nothing | an alert, "Request denied. You're not priviliged." |
+| forces the owner of A's cube to itself (`ObjectOwner`, override) | nothing, the cube A's | nothing, the cube A's |
+
+The fake grid answers the capability as each grid does
+(`UntrustedMessageStyle`): OpenSim's statuses without a body, Second Life's
+`undef` and `404`.
+
+### What a god does
+
+OpenSim only. A grid god is a god in OpenSim's permission checks
+(`Permissions.IsGod` is "an administrator": user level 200 and up, or the
+region's owner) **whether or not it is in god mode**; only the parcel's mark as
+content looks at god mode.
+
+| A | OpenSim |
+| --- | --- |
+| out of god mode, freezes B (over the capability) | A: agent alert "/User Frozen"; B: an agent alert with the reason, "/" before it |
+| out of god mode, forces the owner of its cube to B | done, nobody told |
+| in god mode, freezes B, over UDP or the capability | as out of it |
+| unfreezes B, either way | A: "/User Unfrozen"; B: the reason |
+| kicks B | B: `KickUser` with the reason, then the circuit closes; A and C nothing |
+| C (estate owner, god mode 220) kicks A (250) | A: "/Kick from C ignored, kick reason: …" (C's id in the text); C nothing |
+| kicks everyone (the all-agents id) | B and C kicked with the reason; A not |
+| sends the `GodlikeMessage` | nothing — OpenSim handles no `GodlikeMessage` |
+| rewrites the region (`GodUpdateRegionInfo`) | nothing — no handler |
+| returns B's objects (`SimWideDeletes`) | nothing — the handler is not subscribed |
+| forces the parcel's owner to itself, and back | A: the parcel's properties, owned by A, then C; B and C nothing |
+| marks the parcel as content | A: an alert, "Please check ini files.\n[LandManagement] config section." (no default owner configured), the parcel unchanged |
+| forces the cube's owner to B, and back | done, nobody told |
+
+The reference sends the god kick, freeze and unfreeze over
+`UntrustedSimulatorMessage` (its `message.xml` flavours `GodKickUser` `llsd`),
+the `KickFlags` as four big-endian bytes; this client does the same where the
+capability is granted, and the UDP message otherwise. Second Life's god tools
+are unmeasured: no test account is a god there.
+
 ## In the viewer
 
 - Both restart notices are read into one `Event::RegionRestart`
@@ -225,3 +304,9 @@ answer.
   disconnect — showing the reason in a window that stays open is
   `viewer-disconnect-screen`. Freeze, eject and the messages are alerts and
   show as system messages.
+- A grant of god powers is kept as the agent's god level
+  (`sl-viewer-notices/src/god_mode.rs`, `AgentGodLevel`) and raises the
+  reference's tip, `EnteringGodMode` at the new level or `LeavingGodMode` at
+  the old one. Both grids' refusals show: Second Life's keyed alert from the
+  catalogue, OpenSim's "/…" as a system message. The god tools floater itself
+  is `viewer-god-tools`.

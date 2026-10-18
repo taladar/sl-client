@@ -1039,6 +1039,31 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid answers a request for god powers — measured by the
+    /// `god-tools` census on aditi and the local OpenSim (2026-10-18,
+    /// `book/src/gridspec/estate.md` § God tools). OpenSim grants by the
+    /// agent's rights; Second Life refused every test account, none of which
+    /// is a god, so a god's grant there is not measured and not imitated.
+    #[must_use]
+    pub const fn god_powers(self) -> crate::god_powers::PowersAnswer {
+        match self {
+            Self::SecondLife => crate::god_powers::PowersAnswer::Refused,
+            Self::OpenSim => crate::god_powers::PowersAnswer::ByRights,
+        }
+    }
+
+    /// How this grid words its answers to the `UntrustedSimulatorMessage`
+    /// capability — measured by the `god-tools` census (2026-10-18,
+    /// `book/src/gridspec/estate.md` § God tools): OpenSim's bare statuses,
+    /// Second Life's `undef` and `404` "Not Found".
+    #[must_use]
+    pub const fn untrusted_message_style(self) -> sl_proto::UntrustedMessageStyle {
+        match self {
+            Self::SecondLife => sl_proto::UntrustedMessageStyle::Llsd,
+            Self::OpenSim => sl_proto::UntrustedMessageStyle::Bare,
+        }
+    }
+
     /// How this grid announces an inventory item it just created — the item a
     /// take files away.
     ///

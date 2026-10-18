@@ -219,6 +219,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::map_blocks_items::MapBlocksItems),
         Box::new(crate::cases::terrain_composition::TerrainComposition),
         Box::new(crate::cases::terrain_editing::TerrainEditing),
+        Box::new(crate::cases::god_tools::GodTools),
         Box::new(crate::cases::terrain_raw_download::TerrainRawDownload),
         Box::new(crate::cases::terrain_raw_upload::TerrainRawUpload),
         Box::new(crate::cases::terrain_layerdata::TerrainLayerData),

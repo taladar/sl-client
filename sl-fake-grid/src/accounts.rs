@@ -26,6 +26,10 @@ pub struct AccountConfig {
     /// fails is not a check — see
     /// [`AgentPolicy`](crate::agent_requests::AgentPolicy).
     pub estate_manager: bool,
+    /// The account's god level — OpenSim's `UserLevel`: `0` for a resident,
+    /// 200 and up for a grid god, which an OpenSim-flavoured grid grants when
+    /// the agent asks for god powers ([`crate::god_powers`]). `0` by default.
+    pub god_level: u8,
     /// The highest content rating this account is entitled to
     /// (`agent_access_max`), and so the ceiling its maturity preference may not
     /// exceed.
@@ -69,6 +73,7 @@ impl AccountConfig {
             start_region: None,
             mfa: None,
             estate_manager: false,
+            god_level: 0,
             maturity_ceiling: Maturity::Adult,
             preferred_maturity: None,
             package: "Base".to_owned(),
@@ -120,6 +125,13 @@ impl AccountConfig {
     #[must_use]
     pub const fn estate_manager(mut self) -> Self {
         self.estate_manager = true;
+        self
+    }
+
+    /// The same account, at god level `level` (OpenSim's `UserLevel`).
+    #[must_use]
+    pub const fn god_level(mut self, level: u8) -> Self {
+        self.god_level = level;
         self
     }
 

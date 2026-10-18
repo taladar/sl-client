@@ -1089,6 +1089,13 @@ impl GridCore {
                 estate_manager: account.config.estate_manager,
                 legacy_udp_inventory: self.legacy_udp_inventory,
             },
+            god_powers: self.imitated.god_powers(),
+            untrusted_style: self.imitated.untrusted_message_style(),
+            god_mode: crate::god_powers::GodMode::at_login(
+                self.imitated.god_powers(),
+                account.config.god_level,
+                account.agent_id == self.estate_owner,
+            ),
             avatar,
             selection: crate::object_edits::Selection::new(),
             camera_at: None,

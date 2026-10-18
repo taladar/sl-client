@@ -312,12 +312,16 @@ pub struct NotificationSourcesPlugin;
 
 impl Plugin for NotificationSourcesPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<crate::god_mode::AgentGodLevel>();
         app.add_systems(
             Update,
             (
                 // Surface the simulator's `AlertMessage` / `AgentAlertMessage`
                 // (a stream nothing consumed before) as notifications.
                 ingest_alert_messages,
+                // Keep the agent's god level and raise the reference's tip on
+                // every grant (`GrantGodlikePowers`).
+                crate::god_mode::ingest_god_level,
                 // Surface a queued command whose send failed (no circuit, a
                 // stale scoped id, an encode error), so an action that never
                 // reached the simulator says so instead of looking as if it

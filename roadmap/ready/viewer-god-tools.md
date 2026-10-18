@@ -54,3 +54,13 @@ accepts both that and the UDP message.
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## God level (2026-10-18, gridspec-god-tools)
+
+The agent's god level is already kept in `sl-viewer-notices`'
+`AgentGodLevel` (each `GrantGodlikePowers`, with the reference's
+`EnteringGodMode` / `LeavingGodMode` tip) — gate the Admin menu on it. Kick,
+freeze and unfreeze are `Command::GodKickUser` (which takes the capability as
+the reference does); Force Owner is `Command::ForceObjectOwner`. What each
+grid answers is `book/src/gridspec/estate.md` § God tools — note that on
+OpenSim a grid god acts without god mode.

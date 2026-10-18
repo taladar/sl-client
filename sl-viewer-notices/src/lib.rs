@@ -58,6 +58,7 @@ pub mod experience_picker;
 pub mod experience_profile;
 pub(crate) mod experience_search;
 pub mod experiences_floater;
+pub mod god_mode;
 pub mod inspector_popup;
 pub mod linkified_text;
 pub mod load_url;

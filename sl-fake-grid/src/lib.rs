@@ -15,6 +15,7 @@ pub mod error;
 pub mod estate;
 pub mod experiences;
 pub mod fixtures;
+pub mod god_powers;
 mod grabs;
 pub mod groups;
 mod http_answer;

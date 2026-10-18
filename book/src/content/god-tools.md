@@ -12,9 +12,13 @@ then issue, and the two messages a god *receives*.
 
 > These commands are guarded entirely on the **server**. The client always lets
 > you send them; whether anything happens depends on the rights the simulator
-> has recorded for your agent. On a default OpenSim grid only the grid owner
-> holds god rights, so most of these are no-ops there unless you log in as the
-> owner.
+> has recorded for your agent. What each grid answers a god and a resident —
+> measured, not assumed — is in
+> [Grid Behaviour → Estate § God tools](../gridspec/estate.md#god-tools): on
+> OpenSim an account of user level 200 and up (where the grid allows grid gods)
+> and the region's owner are gods, and most god actions do not even need god
+> mode there; Second Life refuses a resident's request for powers with a keyed
+> alert and ignores the rest.
 
 ## Acquiring god powers
 
@@ -27,8 +31,23 @@ viewer, so this workspace neither sends a meaningful token nor surfaces one.
 
 The simulator answers a successful grant with a `GrantGodlikePowers`, surfaced
 as `Event::GodlikePowersGranted { god_level }`. The `god_level` is the granted
-tier (Linden gods run at various levels; `0` revokes god mode). Until that event
-arrives at a non-zero level, the admin operations below will be rejected.
+tier (Linden gods run at various levels, OpenSim grants a god account its user
+level and an estate owner 220; `0` revokes god mode). A refusal is an alert:
+Second Life's is keyed `SpecialPowersRequestFailedLogged`, OpenSim's an agent
+alert, "/Request for god powers denied".
+
+### Kick, freeze and unfreeze
+
+`Command::GodKickUser { target, action, reason }` is the god's kick, freeze and
+unfreeze. `target` is a `GodKickTarget` — one `Agent`, or `Everyone` in the
+region but the god (the reference's all-agents id); `action` a `GodKickAction`
+(`Kick`, `Freeze`, `Unfreeze`: `KickFlags` 0, 1, 2); `reason` the text the
+target is shown. Where the region grants `UntrustedSimulatorMessage` (both
+grids do) it is posted there as LLSD, as the reference's `message.xml` routes
+it, the `KickFlags` as four big-endian bytes
+(`sl_wire::build_god_kick_user_untrusted`); otherwise it goes as the UDP
+`GodKickUser`. The capability's answer carries nothing a client acts on, so the
+post is fire-and-forget, as it is in the reference.
 
 ### Forced object selection
 
@@ -65,9 +84,10 @@ rights over the parcel suffice.
   `region_flags` (`RegionFlagsExtended`, built with `sl_wire::RegionFlags`; its
   low 32 bits are also sent in the legacy `RegionFlags` block, exactly as the
   reference viewer truncates), the `billable_factor` land-tier multiplier, the
-  `price_per_meter` land price in L$, and the `redirect_grid`
-  [`GridCoordinates`](region.md) teleports are bounced to (`(0, 0)` for no
-  redirect).
+  `price_per_meter` land price in L$, and the `redirect_grid_x` /
+  `redirect_grid_y` grid coordinates teleports are bounced to, signed as on the
+  wire: a region with no redirect states `0,0` on OpenSim and `-1,-1` on Second
+  Life, and the reference echoes whichever it read.
 - `Command::SimWideDeletes { owner, flags }` deletes — or returns — every object
   a given `owner` (an `AgentKey`) has placed across the
   whole region. `flags` is a `SimWideDeleteFlags` selecting a subset:
@@ -85,6 +105,9 @@ Three operations act on a single parcel, identified by its region-local id
 - `Command::ParcelGodForceOwner { parcel, owner }` force-reassigns a parcel's
   ownership to `owner` (an `OwnerKey`). The wire carries no
   group flag, so the new owner is always treated as an agent.
+- `Command::ForceObjectOwner { local_ids, owner, group_id }` makes `owner` the
+  owner of objects whoever owns them now — an `ObjectOwner` with `Override`
+  set, the reference's Admin ▸ Object ▸ Force Owner To Me.
 - `Command::ParcelGodMarkAsContent { parcel }` marks a parcel — and the content
   on it — as owned by the governor/maintenance account (Second Life's "Governor
   Linden").
@@ -116,19 +139,23 @@ exactly as the reference viewer does.
 >   `GodRegionUpdate` are in `sl-proto/src/types/map.rs` (each `*Action` /
 >   `*Flags` type carries the `to_wire` / `from_wire` codec pair against the
 >   reference viewer's flag constants). `GodRegionUpdate` reuses the
->   `RegionName` and `GridCoordinates` newtypes and a 64-bit
+>   `RegionName` newtype, the wire's signed redirect pair and a 64-bit
 >   `RegionFlagsExtended`. Parcel ids are `ScopedParcelId`
 >   (`sl-proto/src/scoped_id.rs`); the wire-level local id is
 >   `sl_wire::RegionLocalParcelId`; the events-search ids
 >   (`sl_types::search::EventId`, `QueryId`) and `DirFindFlags`
 >   (`sl-proto/src/types/directory.rs`) come from the [search](search.md)
 >   surface.
-> - Commands `RequestGodlikePowers`, `EjectUser`, `FreezeUser`,
+> - `GodKickAction` and `GodKickTarget` are beside them; the LLSD body of the
+>   god kick is `sl-wire/src/untrusted_message.rs`.
+> - Commands `RequestGodlikePowers`, `GodKickUser`, `ForceObjectOwner`,
+>   `EjectUser`, `FreezeUser`,
 >   `SimWideDeletes`,
 >   `GodUpdateRegionInfo`, `ParcelGodForceOwner`, `ParcelGodMarkAsContent`,
 >   `EventGodDelete`, `StateSave`, and `ViewerStartAuction` are in
 >   `sl-proto/src/command.rs`; their `Session` helpers
->   (`request_godlike_powers`, `eject_user`, `freeze_user`, `sim_wide_deletes`,
+>   (`request_godlike_powers`, `god_kick_user`, `god_kick_user_request`,
+>   `force_object_owner`, `eject_user`, `freeze_user`, `sim_wide_deletes`,
 >   `god_update_region_info`, `parcel_god_force_owner`,
 >   `parcel_god_mark_as_content`, `event_god_delete`, `state_save`,
 >   `viewer_start_auction`) are in `sl-proto/src/session/methods.rs`.
@@ -145,6 +172,8 @@ exactly as the reference viewer does.
 >   flag falls through to `ClientMessage`. The two inbound messages are emitted
 >   by `SimSession::send_grant_godlike_powers` and `send_force_object_select`.
 > - In the [REPL](../tools/sl-repl.md): `request_godlike_powers <godlike:bool>`,
+>   `god_kick_user <target|everyone> [action:kick|freeze|unfreeze=kick]
+>   [reason]`, `force_object_owner <local_ids> <owner> [group_id]`,
 >   `eject_user <target> [ban:bool=false]`,
 >   `freeze_user <target> [unfreeze:bool=false]`,
 >   `sim_wide_deletes <owner> [others_land_only] [always_return_objects]

@@ -72,29 +72,29 @@ use crate::types::{
     DisconnectReason, EjectAction, EstateAccessDelta, EstateCovenant, EstateInfoUpdate, Event,
     EventInfo, FeatureDisabled, FolderInfo, FolderType, FollowCamProperty, FollowCamPropertyValue,
     FreezeAction, Friend, FriendRights, GenericMessage, GenericStreamingMessage, GestureActivation,
-    GodRegionUpdate, GroupNoticeAttachment, GroupNoticeKey, GroupRoleEdit, GroupRoleMember,
-    GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate, InventoryCursor, InventoryFolder,
-    InventoryItem, InventoryItemMove, InventoryOffer, ItemInfo, Kick, LandEdit, LandSearchType,
-    LandStatItem, LandStatReportType, LandStatScore, LoadUrlRequest, LoginAccount,
-    LoginHttpRequest, LoginParams, MapItemType, MapRequestFlags, Material, Maturity, MeanCollision,
-    MeanCollisionType, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
-    NeighborInfo, NeighborRetirement, NewInventoryItem, NewInventoryLink, NotecardRez, Object,
-    ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectPlayingAnimation,
-    ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry, ObjectTransform,
-    ObjectUpdateForm, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelInfo, ParcelListingFlags, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo, ParcelRect, ParcelReturnType,
-    ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult, Postcard, PrimShape,
-    PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionDebugUpdate, RegionHandshakeReplyFlags,
-    RegionInfoUpdate, RegionStats, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptControlAction,
-    ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage, ScriptPermissionState,
-    ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest, ServerError, SimStatId,
-    SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo,
-    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerBatch,
-    TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture, TextureEntry, Throttle,
-    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, Wearable, WearableType, XferListing,
+    GodKickAction, GodKickTarget, GodRegionUpdate, GroupNoticeAttachment, GroupNoticeKey,
+    GroupRoleEdit, GroupRoleMember, GroupRoleMemberChange, ImDialog, ImageCodec, InterestsUpdate,
+    InventoryCursor, InventoryFolder, InventoryItem, InventoryItemMove, InventoryOffer, ItemInfo,
+    Kick, LandEdit, LandSearchType, LandStatItem, LandStatReportType, LandStatScore,
+    LoadUrlRequest, LoginAccount, LoginHttpRequest, LoginParams, MapItemType, MapRequestFlags,
+    Material, Maturity, MeanCollision, MeanCollisionType, MoneyTransactionType, MovementMode,
+    MuteEntry, MuteFlags, MuteType, NeighborInfo, NeighborRetirement, NewInventoryItem,
+    NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry,
+    ObjectTransform, ObjectUpdateForm, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelDetails, ParcelInfo, ParcelListingFlags, ParcelMediaCommand,
+    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayInfo,
+    ParcelRect, ParcelReturnType, ParcelUpdate, PermissionField, PickKey, PickUpdate, PlacesResult,
+    Postcard, PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, RegionDebugUpdate,
+    RegionHandshakeReplyFlags, RegionInfoUpdate, RegionStats, RegionTerrainUpdate, Reliability,
+    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
+    ScriptControlAction, ScriptControlsInfo, ScriptGrantInfo, ScriptLanguage,
+    ScriptPermissionState, ScriptPermissionStatus, ScriptPermissions, ScriptTeleportRequest,
+    ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
+    StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TeleportFlags, TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable, WearableType, XferListing,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -13395,9 +13395,11 @@ impl Session {
         Ok(())
     }
 
-    /// Ejects an agent from the region with god powers via `GodKickUser`. Unlike
-    /// [`Session::kick_estate_user`] this needs grid-god rights, not just estate
-    /// ownership.
+    /// Kicks, freezes or unfreezes `target` with god powers via a UDP
+    /// `GodKickUser`. Unlike [`Session::kick_estate_user`] this needs god
+    /// powers, not just estate rights. Where the region grants
+    /// `UntrustedSimulatorMessage` the reference posts the same message there
+    /// instead: see [`Session::god_kick_user_request`].
     ///
     /// # Errors
     ///
@@ -13405,13 +13407,37 @@ impl Session {
     /// [`Error::Wire`] if the request fails to encode.
     pub fn god_kick_user(
         &mut self,
-        target: AgentKey,
+        target: GodKickTarget,
+        action: GodKickAction,
         reason: &str,
         now: Instant,
     ) -> Result<(), Error> {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        circuit.send_god_kick_user(target.uuid(), reason, now)?;
+        circuit.send_god_kick_user(target.to_wire(), action.to_wire(), reason, now)?;
         Ok(())
+    }
+
+    /// The `GodKickUser` this agent would send for `target`, `action` and
+    /// `reason`, for a runtime to post to the `UntrustedSimulatorMessage`
+    /// capability ([`sl_wire::build_god_kick_user_untrusted`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the session has no agent yet.
+    pub fn god_kick_user_request(
+        &self,
+        target: GodKickTarget,
+        action: GodKickAction,
+        reason: &str,
+    ) -> Result<sl_wire::GodKickUserRequest, Error> {
+        let circuit = self.circuit.as_ref().ok_or(Error::NoCircuit)?;
+        Ok(sl_wire::GodKickUserRequest {
+            god: circuit.agent_id,
+            god_session: circuit.session_id,
+            target: target.to_wire(),
+            kick_flags: action.to_wire(),
+            reason: reason.to_owned(),
+        })
     }
 
     /// Sends a `GodlikeMessage` with the given method and string parameters — the
@@ -14211,7 +14237,30 @@ impl Session {
     ) -> Result<(), Error> {
         for (scope, local_ids) in self.group_by_circuit(local_ids)? {
             let circuit = self.circuit_for_scope(scope)?;
-            circuit.send_object_owner(&local_ids, group_id, now)?;
+            circuit.send_object_owner(&local_ids, None, Some(group_id), now)?;
+        }
+        Ok(())
+    }
+
+    /// Makes `owner` the owner of the objects `local_ids`, whoever owns them
+    /// now, setting them to `group_id` (an `ObjectOwner` with `Override` set:
+    /// the reference's god Force Owner). A grid acts on it only for an agent in
+    /// god mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn force_object_owner(
+        &mut self,
+        local_ids: &[ScopedObjectId],
+        owner: AgentKey,
+        group_id: Option<GroupKey>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        for (scope, local_ids) in self.group_by_circuit(local_ids)? {
+            let circuit = self.circuit_for_scope(scope)?;
+            circuit.send_object_owner(&local_ids, Some(owner), group_id, now)?;
         }
         Ok(())
     }
