@@ -8057,7 +8057,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: chacha20 0.10.1
+used-by: chacha20 0.10.2
 
 Copyright (c) 2019-2026 The RustCrypto Project Developers
 

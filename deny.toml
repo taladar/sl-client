@@ -96,6 +96,13 @@ ignore = [
   # upgrade to; and the only YAML it ever parses is the viewer's own shipped
   # locale manifests. Drop this when `bevy_fluent` moves to another parser.
   { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml unmaintained: via bevy_fluent -> serde_yaml, which parses only the viewer's own shipped locale manifests. Not a vulnerability, and bevy_fluent 0.15 (the newest) has no release without it." },
+  # The three zbus sub-crates were folded into zbus 6 and are no longer
+  # maintained on their own. They reach us only through bevy_winit ->
+  # accesskit_winit -> accesskit_unix, which still requires zbus 5, so there is
+  # nothing to upgrade to until accesskit moves. Drop these when it does.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (folded into zbus 6): via bevy_winit -> accesskit_unix -> zbus 5. Not a vulnerability; accesskit_unix has no release on zbus 6." },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained (folded into zbus 6): via bevy_winit -> accesskit_unix -> zbus 5. Not a vulnerability; accesskit_unix has no release on zbus 6." },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained (folded into zbus 6): via bevy_winit -> accesskit_unix -> zbus 5. Not a vulnerability; accesskit_unix has no release on zbus 6." },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
