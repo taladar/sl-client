@@ -78,6 +78,9 @@
 //! | the region's record ([`region_info_policy`](ImitatedGrid::region_info_policy)) | the extended flags block and the combat settings sent, the flags the handshake's, no redirect stated as `-1,-1` | neither block; the flags without the estate's bits, in `SimStats` too; no redirect `0,0` |
 //! | a change of the region's settings ([`RegionInfoPolicy`]) | the Region tab answered with a `RegionInfo` to everybody, the Debug tab told by `SimStats` alone (OpenSim's, unmeasured here) | the same, measured |
 //! | the region settings write and the restart schedule (`DispatchRegionInfo`, `RegionSchedule`) | granted; a resident refused `403`, an empty schedule `undef` | not granted |
+//! | the RAW heightmap transfers ([`EstatePolicy::terrain_transfer_alerts`]) | an estate manager's only, a resident's ignored without a word; no alert (unmeasured) | the same, each step narrated in an alert |
+//! | when new terrain heights are told ([`EstatePolicy::terrain_heights_told_per_corner`]) | a handshake on the commit (unmeasured) | a `RegionInfo` and a handshake per corner, nothing on the commit |
+//! | the region's PBR terrain overrides (`ModifyRegion`) | granted; four `undef` overrides read, a resident's write refused `403` with an LLSD answer naming the region | not granted |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
 //! | the kill a derez sends ([`RezPolicy::derez_kill`]) | one `KillObject` naming every prim of the linkset | two, each naming the root alone |
@@ -613,10 +616,14 @@ impl ImitatedGrid {
             Self::SecondLife => EstatePolicy {
                 access_capability_refuses_residents: false,
                 restart_notice: RestartNoticeForm::Keyed,
+                terrain_transfer_alerts: false,
+                terrain_heights_told_per_corner: false,
             },
             Self::OpenSim => EstatePolicy {
                 access_capability_refuses_residents: true,
                 restart_notice: RestartNoticeForm::Spelled,
+                terrain_transfer_alerts: true,
+                terrain_heights_told_per_corner: true,
             },
         }
     }
@@ -1683,7 +1690,9 @@ pub const SECOND_LIFE_REFUSED_CAPABILITIES: &[&str] = &["ObjectAnimation", "Uplo
 /// capabilities (OpenSim reads and writes profiles over UDP only, and has no
 /// display names to set; `profiles`, 2026-10-15), and the land products
 /// (`ProductInfoRequest`: OpenSim answers no land search to name a type in;
-/// `search-directory`, 2026-10-16).
+/// `search-directory`, 2026-10-16), and the region's PBR terrain overrides
+/// (`ModifyRegion`: OpenSim has no PBR terrain; `terrain-editing`,
+/// 2026-10-18).
 pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "AcceptFriendship",
     "AcceptGroupInvite",
@@ -1714,6 +1723,7 @@ pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "IsExperienceContributor",
     "LibraryAPIv3",
     "ModifyMaterialParams",
+    "ModifyRegion",
     "ObjectAnimation",
     "ParcelVoiceInfoRequest",
     "ProductInfoRequest",
@@ -3411,6 +3421,18 @@ pub struct EstatePolicy {
     pub access_capability_refuses_residents: bool,
     /// How a restart is announced to the region.
     pub restart_notice: RestartNoticeForm,
+    /// Whether the region's RAW heightmap transfers are narrated in alerts —
+    /// OpenSim's "Terrain file written, starting download...", "Terrain
+    /// Upload Complete. Loading...." and "Your terrain was loaded as a .raw
+    /// file. It may take a few moments to appear." (`terrain-editing`,
+    /// 2026-10-18). Second Life's are unmeasured: no test avatar may
+    /// transfer them there.
+    pub terrain_transfer_alerts: bool,
+    /// When a region tells everybody of new terrain heights: on the commit
+    /// (Second Life's, unmeasured — no test avatar may write them there), or
+    /// a `RegionInfo` and a handshake for every corner of a `textureheights`
+    /// and nothing on the commit (OpenSim's, `terrain-editing`, 2026-10-18).
+    pub terrain_heights_told_per_corner: bool,
 }
 
 /// How a grid announces a region restart ([`EstatePolicy::restart_notice`]).

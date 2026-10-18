@@ -49,3 +49,11 @@ POST `{overrides:[4]}` from the terrain tab (experimental in Firestorm).
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## Protocol done (gridspec-terrain-editing, 2026-10-18)
+
+`Command::RequestTerrainMaterialOverrides` / `SetTerrainMaterialOverrides`
+read and write the overrides (`Event::TerrainMaterialOverrides`,
+`TerrainMaterialOverridesWritten`); the reference reads them after every
+region handshake where `ModifyRegion` is granted, which this task should do
+too. Second Life answers four `undef` overrides for none.

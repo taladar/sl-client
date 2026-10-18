@@ -837,7 +837,7 @@ async fn watch(
 /// A capability's raw answer to `session`, in words: the status and the body
 /// described; with the body parsed where it was LLSD. `post` is the body of a
 /// POST; `None` sends a GET.
-async fn raw_cap(
+pub(crate) async fn raw_cap(
     scene: &Scene,
     session: &Session,
     name: &str,

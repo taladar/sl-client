@@ -456,6 +456,17 @@ pub enum Event {
     /// or a [`Command::SetRegionSchedule`](crate::Command::SetRegionSchedule);
     /// `None` when the region has none.
     RegionSchedule(Option<sl_wire::RegionSchedule>),
+    /// The region's PBR terrain overrides, from the `ModifyRegion`
+    /// capability's answer to a
+    /// [`Command::RequestTerrainMaterialOverrides`](crate::Command::RequestTerrainMaterialOverrides):
+    /// the four overrides on success, or the grid's reason.
+    TerrainMaterialOverrides(Box<sl_wire::ModifyRegionAnswer>),
+    /// The `ModifyRegion` capability's answer to a
+    /// [`Command::SetTerrainMaterialOverrides`](crate::Command::SetTerrainMaterialOverrides):
+    /// whether the grid took the write (its `overrides` is always `None`).
+    /// The reference reads the overrides again once the region's next
+    /// handshake says they changed.
+    TerrainMaterialOverridesWritten(Box<sl_wire::ModifyRegionAnswer>),
     /// A region restart notice — Second Life's keyed `RegionRestartMinutes` /
     /// `RegionRestartSeconds` alert or OpenSim's spelled-out agent alert, read
     /// into one countdown ([`RegionRestartNotice`]). Follows the

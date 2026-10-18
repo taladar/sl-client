@@ -517,7 +517,7 @@ pub(crate) fn answer_estate_request(
         }
         // One parameter per corner, each `"<corner> <low> <high>"`.
         TEXTURE_HEIGHTS => {
-            let composition = world.terrain_composition_mut(identity);
+            let mut changes = Vec::new();
             for parameter in params {
                 let mut fields = parameter.split_whitespace();
                 let Some((corner, low, high)) = fields
@@ -533,18 +533,40 @@ pub(crate) fn answer_estate_request(
                 if corner >= TERRAIN_CORNERS {
                     continue;
                 }
+                let composition = world.terrain_composition_mut(identity);
                 if let Some(slot) = composition.start_heights.get_mut(corner) {
                     *slot = low;
                 }
                 if let Some(slot) = composition.height_ranges.get_mut(corner) {
                     *slot = high;
                 }
+                // OpenSim saves the region's settings for every corner and
+                // tells everybody each time: a `RegionInfo`, then a handshake.
+                if asker.estate.terrain_heights_told_per_corner {
+                    let limits = world.limits(identity);
+                    if let Err(error) = sim.send_region_info(&limits, now) {
+                        tracing::warn!("telling a terrain height change failed: {error}");
+                    }
+                    let mut updated = identity.clone();
+                    updated.terrain = world.terrain_composition(identity);
+                    if let Err(error) = sim.send_region_handshake(&updated, now) {
+                        tracing::warn!("re-handshaking after a terrain height failed: {error}");
+                    }
+                    changes.push(RegionChange::RegionConfigured(Box::new(limits)));
+                    changes.push(RegionChange::TerrainRetextured(Box::new(updated.terrain)));
+                }
             }
+            return Some(changes);
         }
         // "Apply". The textures and heights are already stored — this is when
         // every viewer is told, and a `RegionHandshake` is the only message
         // they travel in.
         TEXTURE_COMMIT => {
+            // OpenSim told everybody corner by corner already, and its commit
+            // answers nothing.
+            if asker.estate.terrain_heights_told_per_corner {
+                return Some(Vec::new());
+            }
             let composition = world.terrain_composition(identity);
             let mut updated = identity.clone();
             updated.terrain = composition;

@@ -639,6 +639,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ParcelExperiences { .. }
             | Event::EstateAccessLists(_)
             | Event::RegionSchedule(_)
+            | Event::TerrainMaterialOverrides(_)
+            | Event::TerrainMaterialOverridesWritten(_)
             | Event::RegionRestart(_)
             | Event::EstateCovenant(_)
             | Event::TelehubInfo(_)

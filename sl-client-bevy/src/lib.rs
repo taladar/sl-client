@@ -23,28 +23,30 @@ use sl_proto::{
     CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES,
     CAP_GROUP_MEMBER_DATA, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD,
     CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG, CAP_MODIFY_REGION, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
     CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT,
     CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY,
     CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event as SessionEvent,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, NeighbourCaps, NewFileAgentInventoryRequest,
-    OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session, SessionMessage,
-    UserInfoUpdate, agent_profile_notes_body, agent_profile_put_body, agent_profile_url,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
-    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, MODIFY_REGION_WRITE_TAG, NeighbourCaps,
+    NewFileAgentInventoryRequest, OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE,
+    REQUESTED_CAPABILITIES, Session, SessionMessage, UserInfoUpdate, agent_profile_notes_body,
+    agent_profile_put_body, agent_profile_url, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    associate_inventory_request, avatar_picker_search_query, build_agent_preferences_request,
+    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_dispatch_region_info_request,
     build_environment_update_request, build_interest_list_request,
-    build_modify_material_params_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_properties_update_request,
-    build_parcel_voice_info_request, build_postcard_request, build_provision_voice_account_request,
+    build_modify_material_params_request, build_modify_region_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_properties_update_request, build_parcel_voice_info_request,
+    build_postcard_request, build_provision_voice_account_request,
     build_region_experiences_request, build_region_schedule, build_render_materials_put_request,
     build_send_user_report, build_set_experience_permission_request,
     build_update_experience_request, build_update_item_asset_request,
@@ -106,8 +108,8 @@ pub use sl_proto::{
     MapRequestFlags, MarketplaceApiError, MarketplaceApiErrorKind,
     MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, MarketplaceOperation, Material,
     MaterialOverrideUpdate, Maturity, MediaEntry, MerchantStatus, MeshKey, MeshUploadStatus,
-    MessageCursor, MessageId, MessageStatus, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteList, MuteType,
+    MessageCursor, MessageId, MessageStatus, MfaChallenge, ModifyRegionAnswer, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteList, MuteType,
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement, NewInventoryItem,
     NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
     ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation,
@@ -135,10 +137,10 @@ pub use sl_proto::{
     SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
     SurfaceInfo, TRACK_MAX, TaskInventoryCapReply, TaskInventoryItem, TaskInventoryKey,
     TaskInventoryReply, TelehubInfo, TeleportFlags, TerraformArea, TerrainLayerBatch,
-    TerrainLayerType, TerrainPatch, TerrainPatchHeader, TextureAnimation, TextureEntry,
-    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, ThumbnailTarget,
-    TimestampFormat, TransactionId, TransferId, Transmit, TriggeredSound, UI_SOUND_ALERT,
-    UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
+    TerrainLayerType, TerrainMaterialOverrides, TerrainPatch, TerrainPatchHeader, TextureAnimation,
+    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
+    ThumbnailTarget, TimestampFormat, TransactionId, TransferId, Transmit, TriggeredSound,
+    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
     UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
     UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
     UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector, ViewerEffect,
@@ -3499,6 +3501,44 @@ fn apply_command(
                 crate::log_context::spawn_thread(move || {
                     run_get_caps_llsd(&url, CAP_REGION_SCHEDULE, &events_tx);
                 });
+            }
+        }
+        Command::RequestTerrainMaterialOverrides => {
+            if let Some(caps) = caps {
+                let events_tx = caps.events_tx.clone();
+                if let Some(url) = caps.map.get(CAP_MODIFY_REGION).cloned() {
+                    crate::log_context::spawn_thread(move || {
+                        run_get_caps_llsd(&url, CAP_MODIFY_REGION, &events_tx);
+                    });
+                } else {
+                    crate::caps::report_caps_failure(&events_tx, CAP_MODIFY_REGION);
+                }
+            }
+        }
+        Command::SetTerrainMaterialOverrides(overrides) => {
+            if let Some(caps) = caps {
+                let events_tx = caps.events_tx.clone();
+                match caps.map.get(CAP_MODIFY_REGION).cloned() {
+                    Some(url) => {
+                        let body = build_modify_region_request(overrides);
+                        crate::log_context::spawn_thread(move || {
+                            // The write's answer says only whether it was
+                            // taken — a refusal says why, in LLSD; the
+                            // overrides come with the next read.
+                            match crate::voice::post_cap_llsd_answer(&url, body, CAP_MODIFY_REGION)
+                            {
+                                Some(answer) => deliver(
+                                    &events_tx,
+                                    (MODIFY_REGION_WRITE_TAG.to_owned(), answer),
+                                ),
+                                None => {
+                                    crate::caps::report_caps_failure(&events_tx, CAP_MODIFY_REGION);
+                                }
+                            }
+                        });
+                    }
+                    None => crate::caps::report_caps_failure(&events_tx, CAP_MODIFY_REGION),
+                }
             }
         }
         Command::SetRegionSchedule { schedule } => {

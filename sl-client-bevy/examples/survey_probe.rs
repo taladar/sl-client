@@ -332,6 +332,8 @@ fn on_events(
             | SlSessionEvent::RemoteParcelId { .. }
             | SlSessionEvent::EstateAccessLists(_)
             | SlSessionEvent::RegionSchedule(_)
+            | SlSessionEvent::TerrainMaterialOverrides(_)
+            | SlSessionEvent::TerrainMaterialOverridesWritten(_)
             | SlSessionEvent::RegionRestart(_)
             | SlSessionEvent::EstateCovenant(_)
             | SlSessionEvent::TelehubInfo(_)

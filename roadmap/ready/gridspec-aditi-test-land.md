@@ -69,3 +69,11 @@ The `region-info` census's manager legs read "not measured" on Second Life:
 a manager's `DispatchRegionInfo` and `RegionSchedule` writes and their
 answers, and how a Region-tab and a Debug-tab save are told there (the fake
 grid keeps OpenSim's answer). Estate-manager rights on any region run them.
+
+## From gridspec-terrain-editing (2026-10-18)
+
+The `terrain-editing` census's manager legs read "not measured" on Second
+Life: every stroke and its patches, the limits, undo (whether Second Life
+honours `UndoLand`), bake, the RAW transfers, the terrain tab and a manager's
+`ModifyRegion` write. Any parcel the primary may terraform (or estate rights)
+runs the strokes; estate rights run the rest.

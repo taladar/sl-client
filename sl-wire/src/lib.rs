@@ -207,8 +207,10 @@ pub use parcel_flags::{ParcelFlags, RegionFlags, sim_access};
 pub use permissions::{Permissions, Permissions5};
 pub use reflection_probe_flags::ReflectionProbeFlags;
 pub use region_caps::{
-    RegionInfoDispatch, RegionSchedule, RestartDays, RestartWhen,
-    build_dispatch_region_info_request, build_region_schedule, parse_dispatch_region_info_request,
+    ModifyRegionAnswer, RegionInfoDispatch, RegionSchedule, RestartDays, RestartWhen,
+    TERRAIN_MATERIAL_SLOTS, TerrainMaterialOverrides, build_dispatch_region_info_request,
+    build_modify_region_answer, build_modify_region_request, build_region_schedule,
+    parse_dispatch_region_info_request, parse_modify_region_answer, parse_modify_region_request,
     parse_region_schedule,
 };
 pub use region_handle::RegionHandle;

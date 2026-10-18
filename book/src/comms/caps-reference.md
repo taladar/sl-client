@@ -40,7 +40,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `MapLayer` | yes | yes | unused since viewer 2.0 | not adopted |
 | `MapLayerGod` | yes | — | unused | not adopted |
 | `MeshUploadFlag` | yes | yes | current | **used** since 2026-10-13 (`Command::RequestMeshUploadFlag`); the upload itself is task `viewer-mesh-upload-sequence` |
-| `ModifyRegion` | yes | — | current | task `viewer-pbr-terrain` |
+| `ModifyRegion` | yes | — | current | **used** since 2026-10-18 (`Command::RequestTerrainMaterialOverrides`, `SetTerrainMaterialOverrides`); measured in [Terrain § Editing](../gridspec/terrain.md#editing); drawing them is task `viewer-pbr-terrain` |
 | `NavMeshGenerationStatus` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `ObjectNavMeshProperties` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `ParcelPropertiesUpdate` | yes | yes | current | **used** since 2026-10-05; UDP where not granted |
@@ -200,7 +200,10 @@ Days are the letters `s m t w r f a`, Sunday first.
 
 **`ModifyRegion`** (`llpbrterrainfeatures.cpp`). PBR terrain transforms. GET on
 every region handshake → `{success, message?, overrides:[4 GLTF material
-overrides]}`; POST `{overrides:[4]}`.
+overrides]}`; POST `{overrides:[4]}`, answered `{success, message?}`. Second
+Life answers a region with none `[undef ×4]` and refuses a resident's POST
+`403` with `{success: false, message}` (`gridspec/terrain.md` § Editing).
+Driven by `RequestTerrainMaterialOverrides` / `SetTerrainMaterialOverrides`.
 
 **`ProductInfoRequest`** (`llproductinforequest.cpp`). GET → `[{sku, name,
 description}]`, mapping a land `ProductSKU` to a land-type name. The SKU only

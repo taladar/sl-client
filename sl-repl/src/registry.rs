@@ -4057,6 +4057,18 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |_args, _ctx| Ok(Command::RequestEstateAccessLists),
         },
         CommandSpec {
+            name: "request_terrain_material_overrides",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::RequestTerrainMaterialOverrides),
+        },
+        CommandSpec {
+            name: "set_terrain_material_overrides",
+            usage: "",
+            // Clears every slot: an override is a GLTF document no command
+            // line spells, and none is what a cleared terrain tab writes.
+            build: |_args, _ctx| Ok(Command::SetTerrainMaterialOverrides(Box::default())),
+        },
+        CommandSpec {
             name: "request_region_schedule",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestRegionSchedule),

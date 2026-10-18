@@ -1335,6 +1335,17 @@ pub enum Command {
         /// The schedule, or `None` for none.
         schedule: Option<sl_wire::RegionSchedule>,
     },
+    /// Read the region's PBR terrain overrides over the `ModifyRegion`
+    /// capability, where the region grants it (Second Life); the answer
+    /// arrives as
+    /// [`Event::TerrainMaterialOverrides`](crate::Event::TerrainMaterialOverrides),
+    /// and a region that grants no such capability as a capability failure.
+    RequestTerrainMaterialOverrides,
+    /// Write the region's PBR terrain overrides over the `ModifyRegion`
+    /// capability; the answer arrives as
+    /// [`Event::TerrainMaterialOverridesWritten`](crate::Event::TerrainMaterialOverridesWritten),
+    /// a refused or impossible write as a capability failure.
+    SetTerrainMaterialOverrides(Box<sl_wire::TerrainMaterialOverrides>),
     /// Update the region's debug toggles — disable scripts / collisions /
     /// physics region-wide (`setregiondebug`).
     SetRegionDebug(RegionDebugUpdate),
@@ -3307,6 +3318,8 @@ impl Command {
             Self::SetRegionInfo(..) => "SetRegionInfo",
             Self::RequestRegionSchedule => "RequestRegionSchedule",
             Self::SetRegionSchedule { .. } => "SetRegionSchedule",
+            Self::RequestTerrainMaterialOverrides => "RequestTerrainMaterialOverrides",
+            Self::SetTerrainMaterialOverrides(..) => "SetTerrainMaterialOverrides",
             Self::SetRegionDebug(..) => "SetRegionDebug",
             Self::SetRegionTerrain(..) => "SetRegionTerrain",
             Self::BakeRegionTerrain => "BakeRegionTerrain",

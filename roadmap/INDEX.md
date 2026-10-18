@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 344 |
-| blocked | 86 |
+| blocked | 85 |
 | in-progress | 19 |
-| bugs | 36 |
-| done | 1395 |
+| bugs | 37 |
+| done | 1396 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2067** |
+| **total** | **2068** |
 
 ## ideas (134)
 
@@ -1113,6 +1113,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
   — Fake grid — push the parcel an agent walks onto, and serve parcel
   environments
+- [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
+  grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
+  (done))
 - [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
   size-proportional call costs and the region's script budget on aditi
 - [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
@@ -1163,10 +1166,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   down when Second Life pushes a ban line
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
-- [`gridspec-terrain-editing`](ready/gridspec-terrain-editing.md) —
-  Terraforming, raw terrain transfer and terrain textures on each grid
 
-## blocked (86)
+## blocked (85)
 
 ### protocol
 
@@ -1342,8 +1343,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
   — A scripts scenario — one prim per scripted behaviour (blocked by
   `server-fake-grid-script-engine-wiring`)
-- [`server-fake-grid-terraform`](blocked/server-fake-grid-terraform.md) — Fake
-  grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`)
 - [`server-lsl-memory-and-limits`](blocked/server-lsl-memory-and-limits.md) —
   Script memory and limits, because scripts observe them (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-memory-sizes`,
@@ -1500,7 +1499,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (36)
+## bugs (37)
 
 ### protocol
 
@@ -1574,6 +1573,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   joins at once
 - [`viewer-sliders-show-no-value`](bugs/viewer-sliders-show-no-value.md) — A
   slider shows no value, and no bounds or step either
+- [`viewer-terraform-parcel-refusal`](bugs/viewer-terraform-parcel-refusal.md) —
+  A brush over a parcel the agent may not terraform warns nothing
 - [`viewer-texture-filtering-in-linear-space`](bugs/viewer-texture-filtering-in-linear-space.md)
   — Colour textures are filtered after sRGB decoding, the reference before
 - [`viewer-vintage-radar-range-colours`](bugs/viewer-vintage-radar-range-colours.md)
@@ -1592,7 +1593,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1395)
+## done (1396)
 
 ### protocol
 
@@ -4683,6 +4684,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   offers, requests and their answers on each grid
 - [`gridspec-terrain`](done/gridspec-terrain.md) — Terrain, wind and cloud
   layers as each grid sends them
+- [`gridspec-terrain-editing`](done/gridspec-terrain-editing.md) — Terraforming,
+  raw terrain transfer and terrain textures on each grid
 - [`gridspec-touch-grab`](done/gridspec-touch-grab.md) — Touch and grab on each
   grid
 - [`gridspec-viewer-effects-sounds`](done/gridspec-viewer-effects-sounds.md) —

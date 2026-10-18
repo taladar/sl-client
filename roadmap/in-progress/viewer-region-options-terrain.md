@@ -45,3 +45,10 @@ action); and the
 PBR-terrain material variant's **elevation/transform sub-tabs**
 (`panel_region_terrain_texture_transform.xml`, material_detail_*) on
 top of the already-noted PBR material variant (refs viewer-pbr-terrain).
+
+## Write path measured (gridspec-terrain-editing, 2026-10-18)
+
+`Command::SetRegionTerrain`'s four messages were sent as OpenSim's estate
+owner by the `terrain-editing` census: the limits and a corner's start height
+took, and everybody was told five `RegionInfo`s and four handshakes. Second
+Life's answer waits on [[gridspec-aditi-test-land]].

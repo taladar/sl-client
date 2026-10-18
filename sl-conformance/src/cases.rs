@@ -146,6 +146,7 @@ pub mod teleport_offer_accept;
 pub mod teleport_offer_decline;
 pub mod teleport_request;
 pub mod terrain_composition;
+pub mod terrain_editing;
 pub mod terrain_layerdata;
 pub mod terrain_raw_download;
 pub mod terrain_raw_upload;

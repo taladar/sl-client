@@ -784,6 +784,20 @@ pub const CAP_DISPATCH_REGION_INFO: &str = "DispatchRegionInfo";
 /// into [`Event::RegionSchedule`].
 pub const CAP_REGION_SCHEDULE: &str = "RegionSchedule";
 
+/// The HTTP capability for the region's PBR terrain overrides
+/// (`ModifyRegion`): a GET answering `{ success, message?, overrides: [×4] }`
+/// — one GLTF material override per terrain material slot — and a POST of
+/// `{ overrides: [×4] }`. Second Life grants it, OpenSim does not; driven by
+/// `RequestTerrainMaterialOverrides` / `SetTerrainMaterialOverrides` and
+/// decoded into [`Event::TerrainMaterialOverrides`] /
+/// [`Event::TerrainMaterialOverridesWritten`].
+pub const CAP_MODIFY_REGION: &str = "ModifyRegion";
+
+/// The tag the runtimes attach to the answer to a `ModifyRegion` **POST** when
+/// forwarding it to [`Session::handle_caps_event`]: it carries no overrides,
+/// so it is not read as a GET's answer.
+pub const MODIFY_REGION_WRITE_TAG: &str = "ModifyRegion#write";
+
 /// The HTTP capability for the **Second Life Marketplace (SLM)
 /// DirectDelivery API** (`DirectDelivery`): the base URL of the
 /// marketplace listing-management REST service. Unlike every other
@@ -927,6 +941,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_ESTATE_ACCESS,
     CAP_DISPATCH_REGION_INFO,
     CAP_REGION_SCHEDULE,
+    CAP_MODIFY_REGION,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.

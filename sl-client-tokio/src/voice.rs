@@ -38,6 +38,31 @@ pub(crate) async fn post_cap_llsd(
     cap: &str,
     http: &ReqwestClient,
 ) -> Option<Llsd> {
+    post_cap(cap_url, body, cap, http, false).await
+}
+
+/// POSTs an LLSD body to a capability and returns its parsed reply **whatever
+/// the status**, for a capability whose refusal is an LLSD answer saying why
+/// (`ModifyRegion`'s `403 {success: false, message}`). `None` only when the
+/// request failed, the reply could not be read or is not LLSD.
+pub(crate) async fn post_cap_llsd_answer(
+    cap_url: &str,
+    body: String,
+    cap: &str,
+    http: &ReqwestClient,
+) -> Option<Llsd> {
+    post_cap(cap_url, body, cap, http, true).await
+}
+
+/// The POST behind [`post_cap_llsd`] and [`post_cap_llsd_answer`]:
+/// `keep_refusal` reads a refused request's body as its answer.
+async fn post_cap(
+    cap_url: &str,
+    body: String,
+    cap: &str,
+    http: &ReqwestClient,
+    keep_refusal: bool,
+) -> Option<Llsd> {
     let response = match http
         .post(cap_url)
         .header("Content-Type", "application/llsd+xml")
@@ -61,7 +86,9 @@ pub(crate) async fn post_cap_llsd(
     };
     if !status.is_success() {
         tracing::warn!(capability = cap, %status, body = %text, "a CAPS POST was refused");
-        return None;
+        if !keep_refusal {
+            return None;
+        }
     }
     match parse_llsd_xml(&text) {
         Ok(llsd) => Some(llsd),

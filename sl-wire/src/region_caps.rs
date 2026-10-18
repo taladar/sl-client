@@ -27,7 +27,20 @@
 //! `restart` means no schedule — Second Life answers a region with none
 //! `undef` — and a POST of type `W` with no days clears it.
 //!
-//! This module builds and reads both, on both sides.
+//! A third, **`ModifyRegion`**, carries the region's PBR terrain overrides
+//! (`LLPBRTerrainFeatures`): a GET answers
+//!
+//! ```text
+//! { success: bool, message?: string, overrides: [ <override>, ×4 ] }
+//! ```
+//!
+//! — one GLTF material override document per terrain material slot, the
+//! reference's `LLGLTFMaterial::getOverrideLLSD` form (an empty map for
+//! none) — and a POST of `{ overrides: [ ×4 ] }` writes them, answered
+//! `{ success, message? }`. The reference asks on every region handshake
+//! where the region grants it.
+//!
+//! This module builds and reads all three, on both sides.
 
 use std::collections::HashMap;
 
@@ -336,16 +349,214 @@ pub fn parse_region_schedule(body: &Llsd) -> Result<Option<RegionSchedule>, Wire
     }))
 }
 
+/// How many terrain material slots a region has: the four corners of the
+/// classic terrain composition.
+pub const TERRAIN_MATERIAL_SLOTS: usize = 4;
+
+/// A region's PBR terrain material overrides, as `ModifyRegion` carries them:
+/// one GLTF material override document per terrain material slot, passed
+/// through as LLSD (the reference's `getOverrideLLSD` map — texture
+/// transforms under `ti`, factors under `bc`, `mf`, `rf` and the rest); an
+/// empty map is no override.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TerrainMaterialOverrides(pub [Llsd; TERRAIN_MATERIAL_SLOTS]);
+
+impl Default for TerrainMaterialOverrides {
+    /// No override on any slot.
+    fn default() -> Self {
+        Self(core::array::from_fn(|_slot| Llsd::Map(HashMap::new())))
+    }
+}
+
+impl TerrainMaterialOverrides {
+    /// Reads the four overrides out of an `overrides` array, as the
+    /// reference reads them: an array of at least four, the rest ignored.
+    fn from_array(overrides: Option<&Llsd>) -> Result<Self, WireError> {
+        let slots = overrides
+            .and_then(Llsd::as_array)
+            .filter(|slots| slots.len() >= TERRAIN_MATERIAL_SLOTS)
+            .ok_or_else(|| {
+                WireError::from(sl_llsd::LlsdError::MalformedField {
+                    field: "overrides",
+                    value: "not an array of four".to_owned(),
+                })
+            })?;
+        let mut read = Self::default();
+        for (slot, value) in read.0.iter_mut().zip(slots) {
+            slot.clone_from(value);
+        }
+        Ok(read)
+    }
+
+    /// The overrides as an `overrides` array.
+    fn to_array(&self) -> Llsd {
+        Llsd::Array(self.0.to_vec())
+    }
+}
+
+/// A `ModifyRegion` answer: to a GET, the overrides; to a POST, whether they
+/// were taken.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ModifyRegionAnswer {
+    /// Whether the request succeeded (`success`).
+    pub success: bool,
+    /// Why it did not, where the grid says (`message`).
+    pub message: Option<String>,
+    /// The region's overrides: a successful GET's answer; `None` for a POST's
+    /// or a failure.
+    pub overrides: Option<TerrainMaterialOverrides>,
+}
+
+/// Builds the body of a `ModifyRegion` POST.
+#[must_use]
+pub fn build_modify_region_request(overrides: &TerrainMaterialOverrides) -> String {
+    Llsd::Map(HashMap::from([(
+        "overrides".to_owned(),
+        overrides.to_array(),
+    )]))
+    .to_llsd_xml()
+}
+
+/// Reads the body of a `ModifyRegion` POST — the server side of
+/// [`build_modify_region_request`].
+///
+/// # Errors
+/// Returns [`WireError`] if `overrides` is not an array of at least four.
+pub fn parse_modify_region_request(body: &Llsd) -> Result<TerrainMaterialOverrides, WireError> {
+    TerrainMaterialOverrides::from_array(body.get("overrides"))
+}
+
+/// Builds a `ModifyRegion` answer (server side).
+#[must_use]
+pub fn build_modify_region_answer(answer: &ModifyRegionAnswer) -> String {
+    let mut map = HashMap::from([("success".to_owned(), Llsd::Boolean(answer.success))]);
+    if let Some(message) = &answer.message {
+        let _previous = map.insert("message".to_owned(), Llsd::String(message.clone()));
+    }
+    if let Some(overrides) = &answer.overrides {
+        let _previous = map.insert("overrides".to_owned(), overrides.to_array());
+    }
+    Llsd::Map(map).to_llsd_xml()
+}
+
+/// Reads a `ModifyRegion` answer. `get` says whether it answers a GET, whose
+/// success carries the overrides.
+///
+/// # Errors
+/// Returns [`WireError`] if a field is of the wrong LLSD kind, or a
+/// successful GET's answer carries no array of four overrides — what the
+/// reference calls an invalid composition and treats as a failure.
+pub fn parse_modify_region_answer(body: &Llsd, get: bool) -> Result<ModifyRegionAnswer, WireError> {
+    let success = body.field_bool("success", "success")?.unwrap_or(false);
+    let message = body.field_str("message", "message")?.map(ToOwned::to_owned);
+    let overrides = if get && success {
+        Some(TerrainMaterialOverrides::from_array(body.get("overrides"))?)
+    } else {
+        None
+    };
+    Ok(ModifyRegionAnswer {
+        success,
+        message,
+        overrides,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
 
+    use std::collections::HashMap;
+
     use super::{
-        RegionInfoDispatch, RegionSchedule, RestartDays, RestartWhen,
-        build_dispatch_region_info_request, build_region_schedule,
-        parse_dispatch_region_info_request, parse_region_schedule,
+        ModifyRegionAnswer, RegionInfoDispatch, RegionSchedule, RestartDays, RestartWhen,
+        TerrainMaterialOverrides, build_dispatch_region_info_request, build_modify_region_answer,
+        build_modify_region_request, build_region_schedule, parse_dispatch_region_info_request,
+        parse_modify_region_answer, parse_modify_region_request, parse_region_schedule,
     };
-    use crate::llsd::parse_llsd_xml;
+    use crate::llsd::{Llsd, parse_llsd_xml};
+
+    /// Overrides with a texture transform on the second slot, the form the
+    /// reference's terrain tab writes.
+    fn transformed() -> TerrainMaterialOverrides {
+        let mut overrides = TerrainMaterialOverrides::default();
+        if let Some(slot) = overrides.0.get_mut(1) {
+            *slot = Llsd::Map(HashMap::from([(
+                "ti".to_owned(),
+                Llsd::Array(vec![Llsd::Map(HashMap::from([(
+                    "s".to_owned(),
+                    Llsd::Array(vec![Llsd::Real(2.0), Llsd::Real(2.0)]),
+                )]))]),
+            )]));
+        }
+        overrides
+    }
+
+    /// A write survives the trip through its body.
+    #[test]
+    fn modify_region_request_round_trips() -> Result<(), String> {
+        let overrides = transformed();
+        let body = build_modify_region_request(&overrides);
+        let parsed =
+            parse_modify_region_request(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
+        assert_eq!(parsed, overrides);
+        Ok(())
+    }
+
+    /// A GET's answer carries the overrides; a POST's and a failure's do not.
+    #[test]
+    fn modify_region_answers_round_trip() -> Result<(), String> {
+        for (answer, get) in [
+            (
+                ModifyRegionAnswer {
+                    success: true,
+                    message: None,
+                    overrides: Some(transformed()),
+                },
+                true,
+            ),
+            (
+                ModifyRegionAnswer {
+                    success: true,
+                    message: None,
+                    overrides: None,
+                },
+                false,
+            ),
+            (
+                ModifyRegionAnswer {
+                    success: false,
+                    message: Some("no".to_owned()),
+                    overrides: None,
+                },
+                true,
+            ),
+        ] {
+            let body = build_modify_region_answer(&answer);
+            let parsed = parse_modify_region_answer(
+                &parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?,
+                get,
+            )
+            .map_err(|error| format!("{error:?}"))?;
+            assert_eq!(parsed, answer);
+        }
+        Ok(())
+    }
+
+    /// A successful GET without four overrides is refused, as the reference
+    /// refuses an invalid composition.
+    #[test]
+    fn a_short_composition_is_refused() -> Result<(), String> {
+        let body = "<llsd><map><key>success</key><boolean>1</boolean>\
+                    <key>overrides</key><array><map /></array></map></llsd>";
+        let llsd = parse_llsd_xml(body).map_err(|error| format!("{error:?}"))?;
+        let Err(_refused) = parse_modify_region_answer(&llsd, true) else {
+            return Err("a short composition was read".to_owned());
+        };
+        Ok(())
+    }
 
     /// A settings write survives the trip through its body, the two settings
     /// UDP cannot carry among them.

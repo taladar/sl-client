@@ -1328,6 +1328,24 @@ impl Session {
                 Ok(schedule) => self.events.push_back(Event::RegionSchedule(schedule)),
                 Err(error) => self.caps_decode_error(message, &error),
             },
+            // The answer to a `ModifyRegion` GET: the region's PBR terrain
+            // overrides, or why there are none.
+            CapsEvent::ModifyRegion => match sl_wire::parse_modify_region_answer(body, true) {
+                Ok(answer) => self
+                    .events
+                    .push_back(Event::TerrainMaterialOverrides(Box::new(answer))),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            // The answer to a `ModifyRegion` POST: whether the write was taken.
+            // The new overrides come with the next read.
+            CapsEvent::ModifyRegionWrite => {
+                match sl_wire::parse_modify_region_answer(body, false) {
+                    Ok(answer) => self
+                        .events
+                        .push_back(Event::TerrainMaterialOverridesWritten(Box::new(answer))),
+                    Err(error) => self.caps_decode_error(message, &error),
+                }
+            }
             // The reply to a `RegionExperiences` GET or POST: the region's
             // allow/block/trust lists.
             CapsEvent::RegionExperiences => match parse_region_experiences(body) {

@@ -101,7 +101,7 @@ use crate::{
     CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
     CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_MODIFY_REGION, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
     CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
     CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
@@ -262,6 +262,8 @@ const SERVED_CAPABILITIES: &[&str] = &[
     // The region settings write and the restart schedule.
     CAP_DISPATCH_REGION_INFO,
     CAP_REGION_SCHEDULE,
+    // The region's PBR terrain overrides.
+    CAP_MODIFY_REGION,
     // The voice signalling cluster.
     CAP_PROVISION_VOICE_ACCOUNT,
     CAP_PARCEL_VOICE_INFO,
@@ -353,6 +355,9 @@ pub enum CapHandler {
     /// The `RegionSchedule` GET and POST of the restart schedule, handed to
     /// the driver ([`CapsDispatch::RegionSchedule`]).
     RegionSchedule,
+    /// The `ModifyRegion` GET and POST of the region's PBR terrain overrides,
+    /// handed to the driver ([`CapsDispatch::ModifyRegion`]).
+    ModifyRegion,
     /// The shared two-stage asset-upload state machine serving every
     /// `UPLOAD_CAPABILITIES` entry (`NewFileAgentInventory`,
     /// `UploadBakedTexture`, and the `Update*{Agent,Task}Inventory` family):
@@ -716,6 +721,25 @@ pub enum CapsDispatch {
         /// The schedule a POST writes; `None` for a GET.
         change: Option<Option<sl_wire::RegionSchedule>>,
     },
+    /// A `ModifyRegion` request: a read (`change` `None`) or a write of the
+    /// region's PBR terrain overrides. The driver answers with
+    /// [`SimCaps::modify_region_response`].
+    ModifyRegion {
+        /// The overrides a POST writes; `None` for a GET.
+        change: Option<sl_wire::TerrainMaterialOverrides>,
+    },
+}
+
+/// What a driver answers a [`CapsDispatch::ModifyRegion`] with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ModifyRegionOutcome<'overrides> {
+    /// A read: the region's overrides.
+    Read(&'overrides sl_wire::TerrainMaterialOverrides),
+    /// A write the region took.
+    Written,
+    /// A write by an agent who manages no estate of the region's — refused
+    /// naming the region, by its id.
+    Refused(uuid::Uuid),
 }
 
 /// What a request path resolved to.
@@ -997,6 +1021,7 @@ impl SimCaps {
             CAP_ESTATE_ACCESS => Some(CapHandler::EstateAccess),
             CAP_DISPATCH_REGION_INFO => Some(CapHandler::DispatchRegionInfo),
             CAP_REGION_SCHEDULE => Some(CapHandler::RegionSchedule),
+            CAP_MODIFY_REGION => Some(CapHandler::ModifyRegion),
             CAP_EXPERIENCE_QUERY => Some(CapHandler::ExperienceQuery),
             CAP_PROVISION_VOICE_ACCOUNT => Some(CapHandler::ProvisionVoiceAccount),
             CAP_PARCEL_VOICE_INFO => Some(CapHandler::ParcelVoiceInfo),
@@ -1112,6 +1137,7 @@ impl SimCaps {
                     }
                     Some(CapHandler::DispatchRegionInfo) => Self::dispatch_region_info(request),
                     Some(CapHandler::RegionSchedule) => Self::dispatch_region_schedule(request),
+                    Some(CapHandler::ModifyRegion) => Self::dispatch_modify_region(request),
                     Some(CapHandler::DisplayNames) => {
                         CapsDispatch::Response(self.dispatch_display_names(sim, request))
                     }
@@ -1558,6 +1584,57 @@ impl SimCaps {
                 Some(Err(_)) | None => CapsDispatch::Response(CapsResponse::bad_request()),
             },
             _ => CapsDispatch::Response(CapsResponse::method_not_allowed()),
+        }
+    }
+
+    /// Resolves a `ModifyRegion` request: a GET reads, a POST writes.
+    fn dispatch_modify_region(request: &CapsRequest<'_>) -> CapsDispatch {
+        match request.method {
+            "GET" => CapsDispatch::ModifyRegion { change: None },
+            "POST" => match parse_llsd_body(request.body)
+                .as_ref()
+                .map(sl_wire::parse_modify_region_request)
+            {
+                Some(Ok(overrides)) => CapsDispatch::ModifyRegion {
+                    change: Some(overrides),
+                },
+                Some(Err(_)) | None => CapsDispatch::Response(CapsResponse::bad_request()),
+            },
+            _ => CapsDispatch::Response(CapsResponse::method_not_allowed()),
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::ModifyRegion`], as Second Life gives
+    /// it (`terrain-editing`, 2026-10-18): a read `{success, overrides}`, a
+    /// taken write `{success}`, a refused one `403` and an LLSD answer naming
+    /// the region and why.
+    #[must_use]
+    pub fn modify_region_response(outcome: ModifyRegionOutcome<'_>) -> CapsResponse {
+        match outcome {
+            ModifyRegionOutcome::Read(overrides) => CapsResponse::llsd_xml(
+                sl_wire::build_modify_region_answer(&sl_wire::ModifyRegionAnswer {
+                    success: true,
+                    message: None,
+                    overrides: Some(overrides.clone()),
+                }),
+            ),
+            ModifyRegionOutcome::Written => CapsResponse::llsd_xml(
+                sl_wire::build_modify_region_answer(&sl_wire::ModifyRegionAnswer {
+                    success: true,
+                    message: None,
+                    overrides: None,
+                }),
+            ),
+            ModifyRegionOutcome::Refused(region) => CapsResponse::llsd_xml_status(
+                403,
+                sl_wire::build_modify_region_answer(&sl_wire::ModifyRegionAnswer {
+                    success: false,
+                    message: Some(format!(
+                        "Unable to modify region {region}: Not an estate owner or estate manager"
+                    )),
+                    overrides: None,
+                }),
+            ),
         }
     }
 
@@ -3709,6 +3786,7 @@ mod tests {
             ("EstateAccess", CapStatus::Served),
             ("DispatchRegionInfo", CapStatus::Served),
             ("RegionSchedule", CapStatus::Served),
+            ("ModifyRegion", CapStatus::Served),
         ];
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES
             .iter()

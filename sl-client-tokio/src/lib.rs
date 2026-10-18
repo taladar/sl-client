@@ -26,7 +26,7 @@ use sl_proto::{
     CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
     CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_MODIFY_REGION, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
     CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
     CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
@@ -45,10 +45,10 @@ use sl_proto::{
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_dispatch_region_info_request,
     build_environment_update_request, build_interest_list_request,
-    build_modify_material_params_request, build_new_file_agent_inventory_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_properties_update_request, build_parcel_voice_info_request,
-    build_postcard_request, build_provision_voice_account_request,
+    build_modify_material_params_request, build_modify_region_request,
+    build_new_file_agent_inventory_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_properties_update_request,
+    build_parcel_voice_info_request, build_postcard_request, build_provision_voice_account_request,
     build_region_experiences_request, build_region_schedule, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
@@ -104,38 +104,38 @@ pub use sl_proto::{
     MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
     MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
     MediaEntry, MerchantStatus, MeshKey, MeshUploadStatus, MessageCursor, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
-    MuteType, NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement,
-    NewInventoryItem, NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectProperties,
-    ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry, ObjectTransform,
-    ObjectUpdateForm, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags, ParcelAccessEntry,
-    ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelCollision, ParcelDetails,
-    ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags, ParcelMediaCommand,
-    ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart, ParcelOverlayCell,
-    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect, ParcelRequestResult,
-    ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField,
-    Permissions, Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate,
-    PingId, PlacesResult, PlayingAnimation, PointAtType, PrimShape, PrimShapeParams, ProductType,
-    ProfileImage, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
-    REQUESTED_CAPABILITIES, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
-    RegionCombatSettings, RegionCoordinates, RegionDebugUpdate, RegionFlags, RegionHandle,
-    RegionHandshakeReplyFlags, RegionIdentity, RegionInfoDispatch, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionRestartNotice, RegionSchedule,
-    RegionStats, RegionTerrainComposition, RegionTerrainUpdate, Reliability, RemoteParcelRequest,
-    RenderMaterialEntry, RenderMaterialRef, RestartDays, RestartWhen, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId,
-    ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage,
-    ScriptMetadata, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
-    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
-    ServerHistoryMessage, SessionMessage, SessionTransition, SetDisplayNameReply, SimStatId,
-    SimulatorFeatures, SimulatorTime, SkySettings, SoundFlags, SoundPreload, StartLocation,
-    StartLocationParseError, StartLocationSlot, SurfaceInfo, TaskInventoryCapReply,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea,
-    TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture,
-    TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder,
-    ThrottleError, ThumbnailTarget, TimestampFormat, TransactionId, TransferId, TransferStatus,
-    Transmit, TriggeredSound, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
+    ModifyRegionAnswer, MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode,
+    MuteEntry, MuteFlags, MuteType, NearbyHistoryLine, NegativeBalanceError, NeighborInfo,
+    NeighborRetirement, NewInventoryItem, NewInventoryLink, Object, ObjectExtraParams,
+    ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion, ObjectPermMasks,
+    ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch,
+    ObjectStreamEntry, ObjectTransform, ObjectUpdateForm, OpenRegionInfo, OpenSimExtras, OwnerKey,
+    PacketFlags, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
+    ParcelCollision, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey, ParcelListingFlags,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
+    ParcelOverlayCell, ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRect,
+    ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo,
+    ParticleSystem, PermissionField, Permissions, Permissions5, PhysicsShapeType,
+    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlacesResult, PlayingAnimation,
+    PointAtType, PrimShape, PrimShapeParams, ProductType, ProfileImage, ProfileUpdate,
+    ProposalCandidateId, ProposalVoteId, QueryId, REQUESTED_CAPABILITIES, ReflectionProbe,
+    ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings, RegionCoordinates,
+    RegionDebugUpdate, RegionFlags, RegionHandle, RegionHandshakeReplyFlags, RegionIdentity,
+    RegionInfoDispatch, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
+    RegionName, RegionRestartNotice, RegionSchedule, RegionStats, RegionTerrainComposition,
+    RegionTerrainUpdate, Reliability, RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef,
+    RestartDays, RestartWhen, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
+    ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptMetadata, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
+    SculptOrMeshKey, SequenceNumber, ServerHistoryMessage, SessionMessage, SessionTransition,
+    SetDisplayNameReply, SimStatId, SimulatorFeatures, SimulatorTime, SkySettings, SoundFlags,
+    SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot, SurfaceInfo,
+    TaskInventoryCapReply, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TeleportFlags,
+    TerraformArea, TerrainLayerBatch, TerrainLayerType, TerrainMaterialOverrides, TerrainPatch,
+    TerrainPatchHeader, Texture, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
+    ThrottleBuilder, ThrottleError, ThumbnailTarget, TimestampFormat, TransactionId, TransferId,
+    TransferStatus, Transmit, TriggeredSound, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
     UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
     UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
     UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UploadClass,
@@ -226,7 +226,8 @@ use crate::http::{
     get_task_inventory, group_bans, patch_caps_llsd, post_caps_oneway,
     post_chat_session_fetch_history, post_chat_session_request, post_remote_parcel_request,
     post_script_metadata, put_agent_profile, put_caps_llsd, search_stat, set_display_name,
-    set_region_schedule, settle_environment_change, upload_profile_image,
+    set_region_schedule, set_terrain_material_overrides, settle_environment_change,
+    upload_profile_image,
 };
 use crate::inventory::{
     fetch_ais3_folders, fetch_folder_contents, fetch_group_members, fetch_inventory,
@@ -2187,6 +2188,21 @@ impl Client {
                             if let Some(url) = caps.get(CAP_REGION_SCHEDULE).cloned() {
                                 let body = build_region_schedule(schedule.as_ref(), true);
                                 tokio::spawn(set_region_schedule(url, body, http.clone(), caps_tx.clone()));
+                            }
+                        }
+                        Some(Command::RequestTerrainMaterialOverrides) => {
+                            if let Some(url) = caps.get(CAP_MODIFY_REGION).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_MODIFY_REGION, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_caps_failure(&caps_tx, CAP_MODIFY_REGION).await;
+                            }
+                        }
+                        Some(Command::SetTerrainMaterialOverrides(overrides)) => {
+                            if let Some(url) = caps.get(CAP_MODIFY_REGION).cloned() {
+                                let body = build_modify_region_request(&overrides);
+                                tokio::spawn(set_terrain_material_overrides(url, body, http.clone(), caps_tx.clone()));
+                            } else {
+                                report_caps_failure(&caps_tx, CAP_MODIFY_REGION).await;
                             }
                         }
                         Some(Command::SetRegionDebug(update)) => {

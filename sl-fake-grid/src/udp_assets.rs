@@ -161,6 +161,28 @@ pub fn flat_terrain_raw(height_m: u8) -> Vec<u8> {
     sample.repeat(TERRAIN_RAW_SIDE * TERRAIN_RAW_SIDE)
 }
 
+/// What a session may do with the region's terrain, and how its grid tells
+/// it: the parts of [`answer_from_fixtures`]'s answer that are the session's
+/// and the flavour's rather than the fixtures'.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TerrainTerms {
+    /// The region the session is in.
+    pub(crate) region_id: Uuid,
+    /// Whether the session's agent manages the region's estate: the RAW
+    /// transfers and the bake are a manager's alone.
+    pub(crate) manages_estate: bool,
+    /// Whether the grid narrates a transfer in alerts
+    /// ([`EstatePolicy::terrain_transfer_alerts`](crate::imitates::EstatePolicy::terrain_transfer_alerts)).
+    pub(crate) transfer_alerts: bool,
+}
+
+/// Sends `message` to the session as an alert, logging a failure.
+fn alert(sim: &mut SimSession, message: &str, now: Instant) {
+    if let Err(error) = sim.send_alert_message(message, &[], &[], now) {
+        tracing::warn!("alerting {message:?} failed: {error}");
+    }
+}
+
 /// Answers one drained [`ServerEvent`] from the fixtures, under the session
 /// lock: answers `Transfer` requests (or refuses them), offers and captures
 /// the terrain RAW file, and re-arms a served named `Xfer` file. Send
@@ -171,10 +193,11 @@ pub(crate) fn answer_from_fixtures(
     assets: &crate::assets::GridAssets,
     world: &crate::world::RegionWorld,
     sim: &mut SimSession,
-    region_id: Uuid,
+    terms: TerrainTerms,
     event: &ServerEvent,
     now: Instant,
 ) {
+    let region_id = terms.region_id;
     match event {
         ServerEvent::TransferRequested {
             transfer_id,
@@ -200,12 +223,24 @@ pub(crate) fn answer_from_fixtures(
                 tracing::warn!("answering transfer {transfer_id:?} failed: {error}");
             }
         }
+        // Both grids ignore a resident's transfer without a word
+        // (`terrain-editing`, 2026-10-18).
+        ServerEvent::TerrainDownloadRequested { .. }
+        | ServerEvent::TerrainUploadRequested { .. }
+        | ServerEvent::TerrainBakeRequested
+            if !terms.manages_estate =>
+        {
+            tracing::debug!("a resident's terrain request ignored, as both grids ignore it");
+        }
         ServerEvent::TerrainDownloadRequested { viewer_filename } => {
             match &fixtures.terrain_raw {
                 Some(data) => {
                     // The shape OpenSim's estate module mints: a per-region
                     // unique name the viewer never sees.
                     let sim_filename = format!("{region_id}-{viewer_filename}");
+                    if terms.transfer_alerts {
+                        alert(sim, "Terrain file written, starting download...", now);
+                    }
                     if let Err(error) =
                         sim.send_initiate_download(sim_filename, viewer_filename, data.clone(), now)
                     {
@@ -216,7 +251,16 @@ pub(crate) fn answer_from_fixtures(
             }
         }
         ServerEvent::TerrainUploadRequested { viewer_filename } => {
-            if let Err(error) = sim.request_xfer_upload(viewer_filename, now) {
+            let pulled = if terms.transfer_alerts {
+                sim.request_xfer_upload_announced(
+                    viewer_filename,
+                    "Terrain Upload Complete. Loading....",
+                    now,
+                )
+            } else {
+                sim.request_xfer_upload(viewer_filename, now)
+            };
+            if let Err(error) = pulled {
                 tracing::warn!("pulling the terrain RAW upload failed: {error}");
             }
         }
@@ -226,6 +270,13 @@ pub(crate) fn answer_from_fixtures(
                 data.len()
             );
             fixtures.terrain_raw = Some(data.clone());
+            if terms.transfer_alerts {
+                alert(
+                    sim,
+                    "Your terrain was loaded as a .raw file. It may take a few moments to appear.",
+                    now,
+                );
+            }
         }
         ServerEvent::TerrainBakeRequested => {
             tracing::debug!("terrain bake requested; the fake grid keeps no revert baseline");

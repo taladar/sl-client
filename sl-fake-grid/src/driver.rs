@@ -20,7 +20,7 @@ use crate::runtime::{SessionIds, SessionRole};
 use crate::scenario::{SimEventHook, SimHook};
 use crate::terrain::TerrainFixture;
 use crate::time::Now;
-use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
+use crate::udp_assets::{TerrainTerms, UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{
     AvatarIdentity, Ground, RegionChange, RegionUpdate, RegionWorld, answer_world_request,
     push_arrival_world, push_child_world, push_own_appearance,
@@ -443,7 +443,11 @@ impl SharedSim {
                 &state.assets,
                 &state.world,
                 &mut state.sim,
-                state.identity.region_id,
+                TerrainTerms {
+                    region_id: state.identity.region_id,
+                    manages_estate: state.policy.estate_manager,
+                    transfer_alerts: state.estate_policy.terrain_transfer_alerts,
+                },
                 &event,
                 now,
             );

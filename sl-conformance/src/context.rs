@@ -104,6 +104,10 @@ pub struct Session {
     /// The last `RegionHandshake` [`Session::wait_for`] saw from each region,
     /// root and neighbours alike, by the region's handle.
     handshakes: std::collections::HashMap<RegionHandle, sl_client_tokio::RegionIdentity>,
+    /// The last land patch [`Session::wait_for`] saw at each patch position of
+    /// each region, root and neighbours alike: the ground as this avatar was
+    /// last told it.
+    ground: std::collections::HashMap<(RegionHandle, u32, u32), sl_client_tokio::TerrainPatch>,
     /// Inbound events from the run loop, after a forwarder has drained them off
     /// the run loop's bounded channel into this unbounded one. A case typically
     /// waits on one session at a time, leaving the others' event channels unread;
@@ -281,6 +285,17 @@ impl Session {
         self.handshakes.get(&self.region_handle?)
     }
 
+    /// The ground height at the region-local metre (`x`, `y`) of the region
+    /// the agent is in, as the last land patch [`Session::wait_for`] saw there
+    /// said; `None` before that patch came. A standard region's patches are
+    /// 16 m.
+    #[must_use]
+    pub fn ground_height(&self, x: u32, y: u32) -> Option<f32> {
+        let region = self.region_handle?;
+        let patch = self.ground.get(&(region, x / 16, y / 16))?;
+        patch.value(x % 16, y % 16)
+    }
+
     /// The avatar's own first (account) name, from the login credentials. Cases
     /// that must supply a real, grid-present name at runtime — without baking an
     /// avatar name into the source or the record — derive their query from this
@@ -369,6 +384,7 @@ impl Session {
         let region_handle = &mut self.region_handle;
         let circuit_id = &mut self.circuit_id;
         let handshakes = &mut self.handshakes;
+        let ground = &mut self.ground;
         let wait = async {
             loop {
                 match events.recv().await {
@@ -394,6 +410,14 @@ impl Session {
                         if let Event::RegionInfoHandshake(identity) = &event {
                             let _previous = handshakes
                                 .insert(identity.region_handle, identity.as_ref().clone());
+                        }
+                        if let Event::TerrainPatch(patch) = &event
+                            && patch.layer.is_land()
+                        {
+                            let _previous = ground.insert(
+                                (patch.region_handle, patch.patch_x, patch.patch_y),
+                                patch.as_ref().clone(),
+                            );
                         }
                         if let Some(value) = predicate(&event) {
                             return Ok(value);
@@ -1060,6 +1084,7 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
         region_handle,
         circuit_id,
         handshakes: std::collections::HashMap::new(),
+        ground: std::collections::HashMap::new(),
         events: events_rx,
         commands: command_tx,
         diagnostics,

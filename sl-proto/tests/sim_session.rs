@@ -6929,6 +6929,34 @@ mod test {
         Ok(())
     }
 
+    /// An announced pull alerts the client as it takes the last packet,
+    /// before confirming it — OpenSim's order — so the client hears the alert
+    /// ahead of the upload's completion.
+    #[test]
+    fn an_announced_upload_alerts_before_it_completes() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+        client.request_region_terrain_upload("terrain.raw", vec![3_u8; 2500], now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        let xfer_id = sim.request_xfer_upload_announced("terrain.raw", "Taken.", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        let alert = client_events
+            .iter()
+            .position(|e| matches!(e, Event::AlertMessage { message, .. } if message == "Taken."));
+        let uploaded = client_events
+            .iter()
+            .position(|e| matches!(e, Event::XferUploaded { xfer_id: got, .. } if *got == xfer_id));
+        assert!(
+            matches!((alert, uploaded), (Some(alert), Some(uploaded)) if alert < uploaded),
+            "expected the alert before the upload completed, got {client_events:?}"
+        );
+        Ok(())
+    }
+
     /// An `EstateOwnerMessage` without a typed event of its own surfaces as
     /// [`ServerEvent::EstateOwnerRequest`] with its method and parameters
     /// (never the `ClientMessage` catch-all), and the `terrain` `bake`

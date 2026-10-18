@@ -32,6 +32,20 @@ pub(crate) fn run_voice_cap(
 /// refused `UpdateExperience` or `RegionExperiences` POST says why only there
 /// (the URL is not logged — it carries the capability's secret).
 pub(crate) fn post_cap_llsd(cap_url: &str, body: String, cap: &str) -> Option<Llsd> {
+    post_cap(cap_url, body, cap, false)
+}
+
+/// POSTs an LLSD body to a capability and returns its parsed reply **whatever
+/// the status**, for a capability whose refusal is an LLSD answer saying why
+/// (`ModifyRegion`'s `403 {success: false, message}`). `None` only when the
+/// request failed, the reply could not be read or is not LLSD.
+pub(crate) fn post_cap_llsd_answer(cap_url: &str, body: String, cap: &str) -> Option<Llsd> {
+    post_cap(cap_url, body, cap, true)
+}
+
+/// The POST behind [`post_cap_llsd`] and [`post_cap_llsd_answer`]:
+/// `keep_refusal` reads a refused request's body as its answer.
+fn post_cap(cap_url: &str, body: String, cap: &str, keep_refusal: bool) -> Option<Llsd> {
     let http = match crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
@@ -64,7 +78,9 @@ pub(crate) fn post_cap_llsd(cap_url: &str, body: String, cap: &str) -> Option<Ll
     };
     if !status.is_success() {
         tracing::warn!(capability = cap, %status, body = %text, "a CAPS POST was refused");
-        return None;
+        if !keep_refusal {
+            return None;
+        }
     }
     match parse_llsd_xml(&text) {
         Ok(llsd) => Some(llsd),

@@ -495,6 +495,9 @@ enum SimXferReceivePurpose {
     NamedFile {
         /// The filename the pull named (the client's viewer-side name).
         filename: String,
+        /// An alert sent as the last packet is taken, before it is
+        /// confirmed ([`SimSession::request_xfer_upload_announced`]).
+        completion_alert: Option<String>,
     },
 }
 
@@ -9654,6 +9657,37 @@ impl SimSession {
     /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
     /// if the request fails to encode.
     pub fn request_xfer_upload(&mut self, filename: &str, now: Instant) -> Result<XferId, Error> {
+        self.pull_xfer_file(filename, None, now)
+    }
+
+    /// [`request_xfer_upload`](Self::request_xfer_upload), with an alert
+    /// (`AlertMessage`) sent as the last packet is taken and **before** it is
+    /// confirmed — OpenSim's "Terrain Upload Complete. Loading....", which its
+    /// estate module sends from the handler that takes the file, so a client
+    /// hears it ahead of the confirmation that ends its upload
+    /// (`terrain-editing`, 2026-10-18).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the request fails to encode.
+    pub fn request_xfer_upload_announced(
+        &mut self,
+        filename: &str,
+        completion_alert: &str,
+        now: Instant,
+    ) -> Result<XferId, Error> {
+        self.pull_xfer_file(filename, Some(completion_alert.to_owned()), now)
+    }
+
+    /// The pull behind [`request_xfer_upload`](Self::request_xfer_upload) and
+    /// [`request_xfer_upload_announced`](Self::request_xfer_upload_announced).
+    fn pull_xfer_file(
+        &mut self,
+        filename: &str,
+        completion_alert: Option<String>,
+        now: Instant,
+    ) -> Result<XferId, Error> {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
@@ -9663,6 +9697,7 @@ impl SimSession {
             SimXferReceive {
                 purpose: SimXferReceivePurpose::NamedFile {
                     filename: filename.to_owned(),
+                    completion_alert,
                 },
                 buffer: Vec::new(),
                 next_packet: 0,
@@ -12359,6 +12394,21 @@ impl SimSession {
                         receive.next_packet = receive.next_packet.saturating_add(1);
                         receive.expires = deadline(now, XFER_STALL_TIMEOUT);
                     }
+                    // An announced pull says so as it takes the last packet,
+                    // ahead of the confirmation.
+                    let announcement = packet_id
+                        .is_last()
+                        .then(|| self.xfer_receives.get(&xfer_id))
+                        .flatten()
+                        .and_then(|receive| match &receive.purpose {
+                            SimXferReceivePurpose::NamedFile {
+                                completion_alert, ..
+                            } => completion_alert.clone(),
+                            SimXferReceivePurpose::AssetUpload { .. } => None,
+                        });
+                    if let Some(alert) = announcement {
+                        self.send_alert_message(&alert, &[], &[], now)?;
+                    }
                     let confirm = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
                         xfer_id: ConfirmXferPacketXferIDBlock {
                             id: xfer_id.get(),
@@ -12383,7 +12433,7 @@ impl SimSession {
                                     data: receive.buffer,
                                 });
                             }
-                            SimXferReceivePurpose::NamedFile { filename } => {
+                            SimXferReceivePurpose::NamedFile { filename, .. } => {
                                 self.events.push_back(ServerEvent::XferReceived {
                                     xfer_id,
                                     filename,

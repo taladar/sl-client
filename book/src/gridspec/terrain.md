@@ -97,3 +97,88 @@ pointer can rest on beside its avatar.
 Not measured: whether Second Life counts "nearest" from the agent or from
 its camera, which sat beside it; what either grid does at a small draw
 distance; a region larger than 256 m.
+
+## Editing
+
+Measured on 2026-10-18 by the `terrain-editing` conformance case: four runs
+on the local OpenSim (in the Default Region, A its estate owner, B a resident,
+the brush 8 m north-east of both at 136, 136 — the middle of patch (8, 8), so a
+4 m brush stays inside it) and three on aditi (in Mauve at the fixtures' build
+location, both avatars residents: neither test avatar holds land or estate
+rights there, `gridspec-aditi-test-land`). Every height is read off the land
+patches each avatar was sent, so "what changed" is what a viewer would draw;
+a change is given to the nearest half metre, since a re-sent patch is
+quantized afresh and moves a height by a tenth of a metre from run to run.
+Rows marked **held** are checked on every run, live or offline.
+
+### The brushes
+
+One stroke of each, at a strength (the wire's `Seconds`) of 1 and a 4 m brush,
+in the point form the reference's bulldozer sends (a zero-area rectangle and
+`LocalID` −1), then the area form (a rectangle and the parcel's id).
+
+| behaviour | Second Life (a resident) | OpenSim (the owner) | fake grid |
+| --- | --- | --- | --- |
+| who is told (**held**) | nobody: no patch, no alert, for any brush | both avatars, the one patch the stroke moved, within 0.3 s | nothing (`server-fake-grid-terraform`) |
+| raise / lower (**held**) | nothing moves | the centre ±1.0 m: a cosine sphere, the strength added at the peak; nothing moves past 3.5 m | — |
+| flatten (**held**) | — | the centre to the reference height (1 m above the ground here): a strength of 1 levels it outright; moves reach 5 m (`√2` × the radius) | — |
+| smooth, roughen | — | one patch to both; the centre −0.5 and +0.5 m after the strokes before | — |
+| revert | — | toward the baked heightmap, but only within `√radius` of the centre — OpenSim's `RevertSphere` divides by the radius, not its square — so a 4 m revert left 1.16 m of the strokes before it standing | — |
+| the area form (**held**) | nothing | the whole rectangle +1.0 m, its corner as much as its centre | — |
+| undo (`UndoLand`, **held**) | nothing (no rights) | nothing: OpenSim's handler is empty | nothing |
+
+Neither grid answers a stroke it refuses — a resident's on Second Life, B's on
+OpenSim's owner's land — with anything at all; the reference viewer refuses
+up front where it can (`RegionNoTerraforming` when the region blocks
+terraforming, `ParcelNoTerraforming` when the parcel under the cursor is not
+the agent's).
+
+### The limits
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the region's limits | ±40 m in Mauve | ±100 m (OpenSim's default) | ±4 m |
+| a 5 m raise with the limits at 2 m, by the region owner (**held**) | not measured (no rights) | +5.0 m: the owner is a god (`region_owner_is_god` is on by default) and a god's edits are not limited | — |
+| the same by an estate manager, raise and lower (**held**) | not measured | +2.0 m and −2.0 m: held to the limit, counted from the baked heightmap | — |
+| what a terrain-tab save tells everybody (**held**) | not measured | five `RegionInfo`s and four handshakes: one `RegionInfo` for `setregionterrain`, then a `RegionInfo` and a handshake for each corner of `textureheights`; nothing for `texturecommit` | `FakeOpensim` the same; `FakeSl` a handshake on the commit |
+| one corner's start height raised (**held**) | not measured | the handshake carries it (10 → 11) | the same |
+
+### Bake and the RAW heightmap
+
+| behaviour | Second Life (a resident) | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a bake (**held**) | not measured | nothing told; a revert after it leaves a raise standing | nothing told |
+| a resident's bake, texture write, RAW download or upload (**held**) | nothing, any of them | nothing | nothing |
+| the owner's RAW download (**held**) | nothing (a resident) | an alert "Terrain file written, starting download...", then 851,968 bytes over `Xfer` in 25 s | the file, the alert on `FakeOpensim` |
+| the owner's RAW upload (**held**) | not measured | "Terrain Upload Complete. Loading...." *before* the last packet is confirmed, 13 s; then "Your terrain was loaded as a .raw file. It may take a few moments to appear." | the same alerts in the same order on `FakeOpensim` |
+| an upload that changes nothing (**held**) | not measured | no patch re-sent | none |
+| a RAW load re-bakes | — | yes: the loaded ground is the new baked heightmap | — |
+
+### The PBR terrain overrides (`ModifyRegion`)
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| granted (**held**) | yes, when the seed asks for it | no | `FakeSl` yes, `FakeOpensim` no |
+| a GET (**held**) | `{success: true, overrides: [undef ×4]}` to a resident and a manager alike | — | the same |
+| a resident's POST (**held**) | `403` and an LLSD answer: `{success: false, message: "Unable to modify region <id>: Not an estate owner or estate manager"}`; nobody told | — | the same |
+| a manager's POST | not measured (no rights) | — | taken, `{success: true}`, read back |
+
+## What our viewer does with the editing
+
+- The Land tool's brush sends one `ModifyLand` a frame, as the reference's
+  does, with the radius and force the panel sets; the limits are the region's
+  own and only show in the Terrain tab, which reads them from `RegionInfo`.
+- A brush in a region that blocks terraforming is refused before anything is
+  sent, with `RegionNoTerraforming`, unless the agent manages the estate. The
+  parcel check (`ParcelNoTerraforming`) waits on a hover parcel the viewer does
+  not ask for yet (`viewer-terraform-parcel-refusal`).
+- Undo sends `UndoLand` and expects nothing: on OpenSim nothing comes, and the
+  viewer draws whatever patches arrive.
+- `Command::RequestTerrainMaterialOverrides` and
+  `Command::SetTerrainMaterialOverrides` read and write the overrides; a
+  refusal arrives with the grid's reason. Drawing them is `viewer-pbr-terrain`.
+
+Not measured: anything a manager does on Second Life — its strokes, its
+limits, undo, bake, the RAW transfers and the terrain tab
+(`gridspec-aditi-test-land`); a terraform-allowing parcel on aditi (Mauve's
+parcels do not allow it, and the region does not block it).

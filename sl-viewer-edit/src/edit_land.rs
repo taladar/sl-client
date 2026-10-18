@@ -56,8 +56,9 @@ use bevy::ui_widgets::{SliderRange, SliderStep};
 use bevy::window::PrimaryWindow;
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{
-    Command, ParcelInfo, ParcelRequestResult, RegionHandle, RegionLocalParcelId, SlCommand,
-    SlEvent, SlIdentity, SlParcelOverlay, SlSessionEvent, Vector,
+    Command, ParcelInfo, ParcelRequestResult, RegionFlags, RegionHandle, RegionLocalParcelId,
+    SlCommand, SlCurrentRegion, SlEvent, SlIdentity, SlParcelOverlay, SlRegionFlags,
+    SlRegionIdentity, SlSessionEvent, Vector,
 };
 use sl_client_bevy::{LandBrushAction, LandBrushRadius, LandEdit, TerraformArea};
 use sl_settings::{Scope, SettingValue};
@@ -806,6 +807,8 @@ fn handle_land_pointer(
     mut hover: ResMut<LandHover>,
     mut selection: ResMut<LandSelection>,
     mut commands: MessageWriter<SlCommand>,
+    mut notify: MessageWriter<ShowNotification>,
+    current: Query<(&SlRegionFlags, &SlRegionIdentity), With<SlCurrentRegion>>,
 ) {
     // Leaving the Land tool cancels any live gesture and drops the hover, so
     // neither the half-drawn rectangle nor the bulldozer footprint is still on
@@ -838,6 +841,14 @@ fn handle_land_pointer(
         && !blocked
         && let Some(point) = ground
     {
+        // A brush in a region that blocks terraforming is refused before it
+        // sends anything, as the reference's `handleMouseDown` refuses it.
+        if land.action.brush().is_some()
+            && let Some(name) = refuses_terraform(&current)
+        {
+            notify.write(ShowNotification::new("RegionNoTerraforming").arg("REGION", name));
+            return;
+        }
         drag.start = Some(point);
         drag.current = Some(point);
         drag.brushing = land.action.brush().is_some();
@@ -895,6 +906,29 @@ fn handle_land_pointer(
         }
         commands.write(SlCommand(selection.select(rect, click)));
     }
+}
+
+/// The current region's name when it refuses the agent's terraforming
+/// outright, `None` when it does not (or is not known yet) — the reference's
+/// `LLToolBrushLand::canTerraformRegion`.
+fn refuses_terraform(
+    current: &Query<(&SlRegionFlags, &SlRegionIdentity), With<SlCurrentRegion>>,
+) -> Option<String> {
+    let (flags, identity) = current.iter().next()?;
+    region_refuses_terraform(flags.0, identity.0.is_estate_manager).then(|| {
+        identity
+            .0
+            .sim_name
+            .as_ref()
+            .map_or_else(String::new, ToString::to_string)
+    })
+}
+
+/// Whether a region with `flags` refuses an agent's terraforming before any
+/// parcel is asked: it blocks terraforming and the agent does not manage its
+/// estate (`LLToolBrushLand::canTerraformRegion`).
+const fn region_refuses_terraform(flags: RegionFlags, estate_manager: bool) -> bool {
+    !estate_manager && flags.contains(RegionFlags::BLOCK_TERRAFORM)
 }
 
 /// The region-local ground point under the cursor, or `None` when the cursor is
@@ -1691,12 +1725,24 @@ fn apply_land_confirmations(
 mod tests {
     use super::{
         APPLY_SCALE, LAND_ACTIONS, LandAction, LandRect, LandSelection, LandToolState,
-        PARCEL_UNIT_AREA, can_divide, can_join, outline_steps,
+        PARCEL_UNIT_AREA, can_divide, can_join, outline_steps, region_refuses_terraform,
     };
     use bevy::prelude::Vec2;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::Command;
     use sl_client_bevy::LandBrushAction;
+    use sl_client_bevy::RegionFlags;
+
+    /// A region that blocks terraforming refuses a resident's brush before
+    /// anything is sent, and an estate manager's never; a region that does not
+    /// block it leaves the answer to the parcel and the simulator.
+    #[test]
+    fn a_blocking_region_refuses_all_but_its_managers() {
+        let blocking = RegionFlags::BLOCK_TERRAFORM;
+        assert!(region_refuses_terraform(blocking, false));
+        assert!(!region_refuses_terraform(blocking, true));
+        assert!(!region_refuses_terraform(RegionFlags::default(), false));
+    }
 
     /// Re-selecting after a divide or join forgets the parcel the old answer
     /// described and waits on a fresh sequence id, so the answer to the new

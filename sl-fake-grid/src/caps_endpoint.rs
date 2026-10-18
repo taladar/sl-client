@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use sl_proto::{CapsDispatch, CapsRequest, CapsResponse, SimCaps};
+use sl_proto::{CapsDispatch, CapsRequest, CapsResponse, ModifyRegionOutcome, SimCaps};
 
 use crate::driver::{SharedSim, SimState, sleep_until_opt};
 use crate::runtime::GridCore;
@@ -174,6 +174,28 @@ pub(crate) async fn dispatch_caps(
                     world.restart_schedule = schedule;
                 }
                 return SimCaps::region_schedule_response(Some(world.restart_schedule.as_ref()));
+            }
+            // The terrain overrides are the region's; a manager may write
+            // them.
+            CapsDispatch::ModifyRegion { change } => {
+                let guard = shared.state.lock().await;
+                let manager = guard.policy.estate_manager;
+                let region = guard.sim.region_id();
+                let world = Arc::clone(&guard.world);
+                drop(guard);
+                if change.is_some() && !manager {
+                    return SimCaps::modify_region_response(ModifyRegionOutcome::Refused(region));
+                }
+                let mut world = world.lock();
+                return match change {
+                    Some(overrides) => {
+                        world.terrain_material_overrides = overrides;
+                        SimCaps::modify_region_response(ModifyRegionOutcome::Written)
+                    }
+                    None => SimCaps::modify_region_response(ModifyRegionOutcome::Read(
+                        &world.terrain_material_overrides,
+                    )),
+                };
             }
             CapsDispatch::EventQueueWouldBlock => {
                 if *shutdown_rx.borrow_and_update() {

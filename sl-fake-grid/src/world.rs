@@ -167,6 +167,11 @@ pub struct SceneFixtures {
     /// The region's restart schedule, as an estate manager wrote it over
     /// the `RegionSchedule` capability; `None` for none.
     pub restart_schedule: Option<sl_proto::RegionSchedule>,
+    /// The region's PBR terrain overrides, as an estate manager wrote them
+    /// over the `ModifyRegion` capability: none on any slot until then,
+    /// stated `undef` as Second Life states them (`terrain-editing`,
+    /// 2026-10-18).
+    pub terrain_material_overrides: sl_proto::TerrainMaterialOverrides,
     /// What the region holds on the grid being imitated
     /// ([`ImitatedGrid::region_capacity`](crate::ImitatedGrid::region_capacity)),
     /// set when the grid starts; `None` in a world no grid has adopted, which
@@ -714,6 +719,9 @@ impl SceneFixtures {
             estate: EstateFixture::default(),
             limits: None,
             restart_schedule: None,
+            terrain_material_overrides: sl_proto::TerrainMaterialOverrides(core::array::from_fn(
+                |_slot| sl_proto::Llsd::Undef,
+            )),
             capacity: None,
             properties: crate::imitates::PropertiesPolicy::default(),
             rez: crate::imitates::RezPolicy::default(),

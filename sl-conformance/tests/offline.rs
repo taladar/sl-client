@@ -131,6 +131,7 @@ mod test {
         parcel_edit => "parcel-edit" [fake_sl, fake_opensim],
         parcel_access_list => "parcel-access-list" [fake_sl, fake_opensim],
         region_info => "region-info" [fake_sl, fake_opensim],
+        terrain_editing => "terrain-editing" [fake_sl, fake_opensim],
         estate_info => "estate-info" [fake_sl, fake_opensim],
         estate_access => "estate-access" [fake_sl, fake_opensim],
         logout_clean => "logout-clean" [fake_sl, fake_opensim],

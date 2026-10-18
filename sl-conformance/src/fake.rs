@@ -205,6 +205,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "parcel-edit",
     "parcel-access-list",
     "region-info",
+    "terrain-editing",
     "estate-info",
     "estate-access",
     "logout-clean",

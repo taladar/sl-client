@@ -186,8 +186,9 @@ mod test {
         // SearchStatRequest; AgentProfile waits for a profile store), and the
         // land products (ProductInfoRequest), and the estate's access lists
         // (EstateAccess), and the region settings write and restart schedule
-        // (DispatchRegionInfo, RegionSchedule).
-        assert_eq!(granted.len(), 83);
+        // (DispatchRegionInfo, RegionSchedule), and the region's PBR terrain
+        // overrides (ModifyRegion).
+        assert_eq!(granted.len(), 84);
         Ok(())
     }
 

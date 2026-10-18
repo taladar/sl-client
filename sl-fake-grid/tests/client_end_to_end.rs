@@ -1592,10 +1592,36 @@ mod test {
         Ok(())
     }
 
+    /// The RAW heightmap transfers are an estate manager's: a resident's
+    /// download is ignored without a word, as both grids ignore it
+    /// (`terrain-editing`, 2026-10-18); a manager's download, upload and
+    /// download again round-trip the bytes.
     #[tokio::test]
     async fn terrain_raw_download_and_upload_round_trip() -> Result<(), TestError> {
-        let mut running = start().await?;
+        let grid = two_avatar_grid().await?;
+        let mut running = join(&grid, "First").await?;
+        let mut resident = join(&grid, "Second").await?;
         let mut server_events = running.agent.events();
+
+        resident
+            .commands
+            .send(Command::RequestRegionTerrainDownload {
+                viewer_filename: "refused.raw".to_owned(),
+            })
+            .await?;
+        let refused = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match resident.events.recv().await {
+                    Some(Event::ServerFileDownloaded { .. }) | None => return,
+                    Some(_) => {}
+                }
+            }
+        })
+        .await;
+        assert!(
+            refused.is_err(),
+            "a resident was sent the region's RAW file"
+        );
 
         running
             .commands
@@ -1603,15 +1629,14 @@ mod test {
                 viewer_filename: "terrain.raw".to_owned(),
             })
             .await?;
-        let data = running
-            .wait_for(|event| match event {
-                Event::ServerFileDownloaded {
-                    viewer_filename,
-                    data,
-                } if viewer_filename == "terrain.raw" => Some(data.clone()),
-                _ => None,
-            })
-            .await?;
+        let data = wait_on(&mut running.events, |event| match event {
+            Event::ServerFileDownloaded {
+                viewer_filename,
+                data,
+            } if viewer_filename == "terrain.raw" => Some(data.clone()),
+            _ => None,
+        })
+        .await?;
         // The stock scenario names no RAW file, so the download is the
         // region's own ground — the same heights the LAND patches carried.
         assert_eq!(data, sl_fake_grid::TerrainFixture::default().to_raw());
@@ -1625,16 +1650,15 @@ mod test {
                 data: uploaded.clone(),
             })
             .await?;
-        let byte_count = running
-            .wait_for(|event| match event {
-                Event::XferUploaded {
-                    viewer_filename,
-                    byte_count,
-                    ..
-                } if viewer_filename == "new.raw" => Some(*byte_count),
-                _ => None,
-            })
-            .await?;
+        let byte_count = wait_on(&mut running.events, |event| match event {
+            Event::XferUploaded {
+                viewer_filename,
+                byte_count,
+                ..
+            } if viewer_filename == "new.raw" => Some(*byte_count),
+            _ => None,
+        })
+        .await?;
         assert_eq!(byte_count, uploaded.len());
         let deadline = whole_wait();
         loop {
@@ -1654,15 +1678,14 @@ mod test {
                 viewer_filename: "again.raw".to_owned(),
             })
             .await?;
-        let data = running
-            .wait_for(|event| match event {
-                Event::ServerFileDownloaded {
-                    viewer_filename,
-                    data,
-                } if viewer_filename == "again.raw" => Some(data.clone()),
-                _ => None,
-            })
-            .await?;
+        let data = wait_on(&mut running.events, |event| match event {
+            Event::ServerFileDownloaded {
+                viewer_filename,
+                data,
+            } if viewer_filename == "again.raw" => Some(data.clone()),
+            _ => None,
+        })
+        .await?;
         assert_eq!(data, uploaded);
         Ok(())
     }
@@ -6447,6 +6470,89 @@ mod test {
             wait_on(&mut second.events, schedule_of).await?,
             Some(weekly),
             "a resident's write changed the schedule"
+        );
+        Ok(())
+    }
+
+    /// The PBR terrain overrides over Second Life's `ModifyRegion`: four
+    /// `undef` overrides to start with, as aditi states them; a resident's
+    /// write refused with the grid's reason, and nothing changed; an estate
+    /// manager's taken and read back.
+    #[tokio::test]
+    async fn the_terrain_overrides_round_trip_for_a_manager_only() -> Result<(), TestError> {
+        let grid = two_avatar_grid_imitating(ImitatedGrid::SecondLife).await?;
+        let mut first = join(&grid, "First").await?;
+        let mut second = join(&grid, "Second").await?;
+        let read_of = |event: &Event| match event {
+            Event::TerrainMaterialOverrides(answer) => Some(answer.as_ref().clone()),
+            _ => None,
+        };
+        let written_of = |event: &Event| match event {
+            Event::TerrainMaterialOverridesWritten(answer) => Some(answer.as_ref().clone()),
+            _ => None,
+        };
+        first
+            .commands
+            .send(Command::RequestTerrainMaterialOverrides)
+            .await?;
+        let none = sl_client_tokio::TerrainMaterialOverrides(core::array::from_fn(|_slot| {
+            sl_client_tokio::Llsd::Undef
+        }));
+        let read = wait_on(&mut first.events, read_of).await?;
+        assert!(read.success, "the read failed: {read:?}");
+        assert_eq!(read.overrides, Some(none.clone()));
+
+        let mut transformed = sl_client_tokio::TerrainMaterialOverrides::default();
+        if let Some(slot) = transformed.0.first_mut() {
+            *slot = sl_client_tokio::Llsd::Map(std::collections::HashMap::from([(
+                "ti".to_owned(),
+                sl_client_tokio::Llsd::Array(vec![sl_client_tokio::Llsd::Map(
+                    std::collections::HashMap::from([(
+                        "r".to_owned(),
+                        sl_client_tokio::Llsd::Real(0.5),
+                    )]),
+                )]),
+            )]));
+        }
+        second
+            .commands
+            .send(Command::SetTerrainMaterialOverrides(Box::new(
+                transformed.clone(),
+            )))
+            .await?;
+        let refused = wait_on(&mut second.events, written_of).await?;
+        assert!(!refused.success, "a resident's write was taken");
+        assert!(
+            refused
+                .message
+                .as_deref()
+                .is_some_and(|message| message.ends_with("Not an estate owner or estate manager")),
+            "the refusal says why: {refused:?}"
+        );
+        second
+            .commands
+            .send(Command::RequestTerrainMaterialOverrides)
+            .await?;
+        assert_eq!(
+            wait_on(&mut second.events, read_of).await?.overrides,
+            Some(none),
+            "a resident's write changed the overrides"
+        );
+
+        first
+            .commands
+            .send(Command::SetTerrainMaterialOverrides(Box::new(
+                transformed.clone(),
+            )))
+            .await?;
+        assert!(wait_on(&mut first.events, written_of).await?.success);
+        first
+            .commands
+            .send(Command::RequestTerrainMaterialOverrides)
+            .await?;
+        assert_eq!(
+            wait_on(&mut first.events, read_of).await?.overrides,
+            Some(transformed)
         );
         Ok(())
     }
