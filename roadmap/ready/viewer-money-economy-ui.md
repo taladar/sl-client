@@ -79,3 +79,19 @@ L$ prompt: the reference sends the `ParcelBuy` straight away when no
 membership or land-use upgrade is needed, no currency has to be bought and
 `confirm` is not `password` (`LLFloaterBuyLandUI::runWebSitePrep`).
 `book/src/gridspec/land.md` § Transactions.
+
+## From gridspec-money (2026-10-18)
+
+Now in place: the grid's currency symbol (`sl-viewer-kit` `grid_currency`,
+the reference's login `currency` → `OS$` on OpenSim → region
+`OpenSimExtras.currency` order), read by the status-bar balance; the
+`PaymentSent` / `PaymentReceived` / `PaymentFailure` notices from a balance
+reply's `TransactionInfo` block (`sl-viewer-notices` `payment_notices`); and
+OpenSim's `IM_MESSAGEBOX` refusals as the `SystemMessageTip`. Every other
+`L$` in the locale bundle is still literal: the reference rewrites them all
+through `Tea::wrapCurrency`, so the pay, buy and history floaters should take
+the symbol from `GridCurrency` as they are built. For the pay floater:
+Second Life answers `RequestPayPrice` with its default amounts (1, 5, 10, 20)
+already in place of `PAY_DEFAULT`, OpenSim with the raw `-2`, and the
+reference shows a quick-pay button only for an amount above zero
+(`LLFloaterPay::processPayPriceReply`). `book/src/gridspec/economy.md`.

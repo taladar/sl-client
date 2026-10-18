@@ -26,7 +26,9 @@
 //!   in place of its alert, which counts down and closes when the restart is
 //!   cancelled;
 //! - About Region's Access tab shows a ban's banner, which only the
-//!   `EstateAccess` capability tells.
+//!   `EstateAccess` capability tells;
+//! - the balance shows each grid's currency symbol, a Second Life payment
+//!   reply raises a payment notice and OpenSim's message box the system tip.
 
 #[cfg(test)]
 mod test {
@@ -40,8 +42,9 @@ mod test {
     use sl_fake_grid::scenario::{Scenario, class_folder};
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
     use sl_proto::{
-        AgentKey, AssetKey, AssetType, GroupKey, InventoryItem, InventoryKey, InventoryType,
-        Maturity, ObjectKey, OwnerKey, Permissions, Permissions5, RegionCoordinates,
+        AgentKey, AssetKey, AssetType, GroupKey, ImDialog, InstantMessage, InventoryItem,
+        InventoryKey, InventoryType, LandArea, LindenAmount, Maturity, MoneyBalance,
+        MoneyTransaction, ObjectKey, OwnerKey, Permissions, Permissions5, RegionCoordinates,
         RegionLocalObjectId, ServerEvent, TextureKey, Uuid, WearableType, landmark_to_wire,
     };
     use sl_test_assets::inventory::fixture_id;
@@ -1543,6 +1546,116 @@ mod test {
                 }
                 Ok(())
             })?;
+        Ok(())
+    }
+
+    // ---- Money -------------------------------------------------------------
+
+    /// `text` without Fluent's isolation marks around each placeable.
+    fn plain(text: &str) -> String {
+        text.replace(['\u{2068}', '\u{2069}'], "")
+    }
+
+    /// **Money as each grid tells it** (`book/src/gridspec/economy.md`): the
+    /// status bar shows the balance in `L$` on Second Life and in `OS$` on
+    /// OpenSim; Second Life's balance reply for a gift the agent gave itself
+    /// is a "You paid …" notice worded from its transaction block, and
+    /// OpenSim's refusal of a paid purchase — a message box from nobody — the
+    /// system tip.
+    #[test]
+    fn money_is_shown_and_told_as_each_grid_tells_it() -> Result<(), TestError> {
+        for (flavour, name, symbol) in [
+            (ImitatedGrid::SecondLife, "money_second_life", "L$"),
+            (ImitatedGrid::OpenSim, "money_open_sim", "OS$"),
+        ] {
+            stage(name)
+                .needs(Need::GridControl)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    let balance = alpha.ui().test_id("status-readout:balance");
+                    let _shown = alpha
+                        .expect(&balance)
+                        .timeout(WAIT)
+                        .to_contain_text(symbol)
+                        .await?;
+                    let agent = stage.agent("Alpha").await?;
+                    let agent_id = stage.agent_id("Alpha")?;
+                    let now = agent.now();
+                    let (template, wanted) = match flavour {
+                        ImitatedGrid::SecondLife => {
+                            let reply = MoneyBalance {
+                                agent_id,
+                                transaction_id: Uuid::from_u128(0x5001),
+                                success: true,
+                                balance: LindenAmount(0),
+                                square_meters_credit: LandArea(0),
+                                square_meters_committed: LandArea(0),
+                                description: "You paid yourself L$1.".to_owned(),
+                                transaction: Some(MoneyTransaction {
+                                    transaction_type: 5001,
+                                    source: OwnerKey::Agent(agent_id),
+                                    dest: OwnerKey::Agent(agent_id),
+                                    amount: LindenAmount(1),
+                                    item_description: "Payment".to_owned(),
+                                }),
+                            };
+                            agent
+                                .with_sim(|sim| sim.send_money_balance_reply(&reply, now))
+                                .await
+                                .map_err(|error| format!("sending the balance: {error}"))?;
+                            ("PaymentSent", "L$1.")
+                        }
+                        _ => {
+                            let refusal = InstantMessage {
+                                from_agent_id: AgentKey::from(Uuid::nil()),
+                                from_agent_name: String::new(),
+                                to_agent_id: agent_id,
+                                dialog: ImDialog::MessageBox,
+                                from_group: false,
+                                region_id: None,
+                                position: RegionCoordinates::new(0.0, 0.0, 0.0),
+                                offline: false,
+                                timestamp: None,
+                                id: Uuid::nil(),
+                                parent_estate_id: 0,
+                                message: "Buying anything for a price other than zero is not \
+                                          implemented"
+                                    .to_owned(),
+                                binary_bucket: Vec::new(),
+                            };
+                            agent
+                                .with_sim(|sim| sim.send_instant_message(&refusal, now))
+                                .await
+                                .map_err(|error| format!("sending the refusal: {error}"))?;
+                            ("SystemMessageTip", "other than zero is not implemented")
+                        }
+                    };
+                    let _told = alpha
+                        .expect_notification()
+                        .timeout(WAIT)
+                        .to_show(template)
+                        .await?;
+                    let told: Vec<String> = alpha
+                        .notifications()
+                        .await?
+                        .into_iter()
+                        .filter(|readout| readout.template == template)
+                        .map(|readout| plain(&readout.text))
+                        .collect();
+                    assert!(
+                        told.iter().any(|text| text.contains(wanted)),
+                        "{flavour:?}: {template} reads {told:?}"
+                    );
+                    if flavour == ImitatedGrid::SecondLife {
+                        assert!(
+                            told.iter().any(|text| text.starts_with("You paid ")),
+                            "the notice names the payee: {told:?}"
+                        );
+                    }
+                    Ok(())
+                })?;
+        }
         Ok(())
     }
 }

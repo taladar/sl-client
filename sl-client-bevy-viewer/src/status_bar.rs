@@ -79,6 +79,7 @@ use crate::slt;
 use crate::ui_font::UiFont;
 use crate::ui_perf::FixedSlotContentSize;
 use crate::world_api::{AgentRegionPosition, SHOW_COORDINATES_KEY};
+use sl_viewer_kit::grid_currency::GridCurrency;
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 
 /// The read-out font size, in logical pixels: the top bar's, which the
@@ -681,6 +682,8 @@ fn track_agent_position(
 struct StatusFacts<'w, 's> {
     /// The L$ balance.
     balance: Res<'w, AgentBalance>,
+    /// The symbol the grid's money is shown with.
+    currency: Res<'w, GridCurrency>,
     /// Where we are standing, region-local.
     position: Res<'w, AgentRegionPosition>,
     /// The parcel we are in, for its name and flags.
@@ -702,6 +705,7 @@ fn update_status_readouts(
 ) {
     let StatusFacts {
         balance,
+        currency,
         position,
         agent_parcel,
         settings,
@@ -732,7 +736,9 @@ fn update_status_readouts(
                 coords_text(&translator, position.position.as_ref(), show_coords)
             }
             StatusReadout::ParcelName => parcel_name.clone().unwrap_or_default(),
-            StatusReadout::Balance => balance_text(&translator, balance.balance.as_ref()),
+            StatusReadout::Balance => {
+                balance_text(&translator, currency.symbol(), balance.balance.as_ref())
+            }
             StatusReadout::Time => time_text(&translator),
             StatusReadout::Fps => fps_text(&translator, &diagnostics),
         };
@@ -759,11 +765,11 @@ fn coords_text(translator: &Translator, position: Option<&Vector>, show_coords: 
     format!("({x}, {y}, {z})")
 }
 
-/// Build the balance read-out (`L$1,234`), or a placeholder before the first
-/// reply.
-fn balance_text(translator: &Translator, balance: Option<&LindenBalance>) -> String {
+/// Build the balance read-out (`L$1,234`, `OS$0` on OpenSim), or a
+/// placeholder before the first reply.
+fn balance_text(translator: &Translator, symbol: &str, balance: Option<&LindenBalance>) -> String {
     match balance.and_then(LindenBalance::to_i64) {
-        Some(amount) => translator.currency_l(amount),
+        Some(amount) => translator.currency(symbol, amount),
         None => translator.get("status-bar-balance-unknown"),
     }
 }

@@ -22,11 +22,10 @@ where the **transaction type** records *why* the money moved — a gift between
 avatars, a payment to an object, an object sale, and so on. The transaction is
 echoed back, and a fresh `Event::MoneyBalance` reflects the new balance.
 
-> **Testing note.** The economy needs a real currency backend. On the OpenSim
-> test grid, money support is off by default; enabling the demo money module
-> lets the messages flow, but balances are effectively hardcoded (often `0`) and
-> there is no real settlement — enough to exercise the protocol, not to model
-> real spending.
+What each grid answers — Second Life's balance replies with their
+`TransactionInfo` blocks and refusals, OpenSim's stock money module that
+reports a balance of `0` and drops every transfer — is measured in
+[Grid Behaviour → Money](../gridspec/economy.md).
 
 ---
 

@@ -312,7 +312,8 @@ pub struct NotificationSourcesPlugin;
 
 impl Plugin for NotificationSourcesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::god_mode::AgentGodLevel>();
+        app.init_resource::<crate::god_mode::AgentGodLevel>()
+            .init_resource::<crate::payment_notices::PaymentNotices>();
         app.add_systems(
             Update,
             (
@@ -322,6 +323,17 @@ impl Plugin for NotificationSourcesPlugin {
                 // Keep the agent's god level and raise the reference's tip on
                 // every grant (`GrantGodlikePowers`).
                 crate::god_mode::ingest_god_level,
+                // Show a message box from the grid (`IM_MESSAGEBOX`, OpenSim's
+                // "blue box" refusals) as the reference's system tip.
+                crate::system_messages::ingest_message_boxes,
+                // Tell the agent what a balance reply says it paid or was paid
+                // (`PaymentSent` / `PaymentReceived` / `PaymentFailure`), once
+                // the other side's name is known.
+                (
+                    crate::payment_notices::ingest_payments,
+                    crate::payment_notices::show_payments,
+                )
+                    .chain(),
                 // Surface a queued command whose send failed (no circuit, a
                 // stale scoped id, an encode error), so an action that never
                 // reached the simulator says so instead of looking as if it

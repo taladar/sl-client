@@ -18,11 +18,14 @@ named in the command.
 
 To buy a single item out of an object's *contents* rather than the object
 itself, the client sends `BuyObjectInventory` (`Command::BuyObjectInventory`)
-with the object, the item, and the destination folder; on success the simulator
-copies the item into the agent's inventory.
+with the object, the item, and the destination folder. The reference viewer
+never sends it; Second Life refuses it (`InventoryNotForSale`) and OpenSim has
+no handler.
 
 There is no dedicated success reply — inventory and the world update the usual
-way (an `UpdateCreateInventoryItem`, an `ObjectUpdate`/`KillObject`).
+way (an `UpdateCreateInventoryItem`, an `ObjectUpdate`), and Second Life sends
+each side a balance reply naming the sale. What each grid sells, refuses and
+says is measured in [Grid Behaviour → Money](../gridspec/economy.md).
 
 ## Pay prices
 
@@ -30,7 +33,9 @@ Before paying a scripted object (a vendor, a tip jar), a viewer asks for its
 button layout with `RequestPayPrice` (`Command::RequestPayPrice`). The simulator
 answers with `PayPriceReply` (`Event::PayPriceReply`): a default pay amount and
 a list of quick-pay button amounts. LL's convention uses `-1`/`-2` for
-"hide"/"default" buttons, so a button amount can be negative.
+"hide"/"default" buttons, so a button amount can be negative: Second Life puts
+the default amounts in for a `-2` button, OpenSim sends it as it is
+([Grid Behaviour → Money § Paying an object](../gridspec/economy.md#paying-an-object)).
 
 ## Condensed properties (the property family)
 

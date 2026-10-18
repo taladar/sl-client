@@ -39,3 +39,13 @@ Scope:
 - Update the committed `object_pie_keeps_every_address` table in the same
   commit — the addresses themselves must not move (both chain members keep
   the west address, as chains already report).
+
+## From gridspec-money (2026-10-18)
+
+What the purchase flow will be answered with is measured in
+`book/src/gridspec/economy.md` § Buying an object: Second Life confirms a
+purchase only with balance replies (and `NowOwnObject` for an original) and
+refuses a stale price or sale type with an alert; OpenSim refuses any price
+but L$ 0 with an `IM_MESSAGEBOX` (now shown as the `SystemMessageTip`). Both
+grids sell a copy whose next owner may not copy, so the confirmation should
+show the next-owner rights the properties family carries.

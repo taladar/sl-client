@@ -83,6 +83,7 @@ pub mod marketplace_direct_delivery;
 pub mod materials;
 pub mod mesh_fetch_http;
 pub mod modify_land;
+pub mod money;
 pub mod money_balance;
 pub mod money_transfer;
 pub mod mute_list;

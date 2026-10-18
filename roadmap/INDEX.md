@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 344 |
-| blocked | 84 |
+| blocked | 83 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1397 |
+| done | 1398 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2068** |
@@ -1098,6 +1098,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-mesh-upload-cost`](ready/server-fake-grid-mesh-upload-cost.md)
   — Fake grid — mesh upload costing and refusals (blocked by
   `gridspec-asset-upload` (done))
+- [`server-fake-grid-money-ledger`](ready/server-fake-grid-money-ledger.md) —
+  Fake grid — a money ledger: balances, transfers, buying and paying (blocked by
+  `gridspec-money` (done), `gridspec-land-transactions` (done))
 - [`server-fake-grid-mute-list`](ready/server-fake-grid-mute-list.md) — Fake
   grid — mute list storage, the Xfer file and each grid's empty-list reply
   (blocked by `gridspec-mute-list` (done))
@@ -1155,8 +1158,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   committed LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](ready/gridspec-marketplace.md) — Marketplace direct
   delivery on each grid
-- [`gridspec-money`](ready/gridspec-money.md) — Balance, L$ transfers, pay
-  dialogs and buying objects on each grid
 - [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
   Notecards, embedded items and gestures on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
@@ -1168,7 +1169,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (84)
+## blocked (83)
 
 ### protocol
 
@@ -1319,9 +1320,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-inventory-udp-mutations`](blocked/server-fake-grid-inventory-udp-mutations.md)
   — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
   `gridspec-inventory-mutations`)
-- [`server-fake-grid-money-ledger`](blocked/server-fake-grid-money-ledger.md) —
-  Fake grid — a money ledger: balances, transfers, buying and paying (blocked by
-  `gridspec-money`, `gridspec-land-transactions` (done))
 - [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
   — Fake grid — enforce parcel access and push ban lines (blocked by
   `gridspec-parcel-access-and-ban-lines` (done),
@@ -1592,7 +1590,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1397)
+## done (1398)
 
 ### protocol
 
@@ -4637,6 +4635,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   logout does to seats and child circuits
 - [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material
   edits and overrides on each grid
+- [`gridspec-money`](done/gridspec-money.md) — Balance, L$ transfers, pay
+  dialogs and buying objects on each grid
 - [`gridspec-mute-list`](done/gridspec-mute-list.md) — Mute (block) list storage
   and enforcement on each grid
 - [`gridspec-neighbours-crossing`](done/gridspec-neighbours-crossing.md) — Child

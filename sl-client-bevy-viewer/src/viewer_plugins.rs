@@ -769,6 +769,9 @@ impl Plugin for ViewerUiPlugins {
             // region / parcel / position, L$ balance, SLT time and FPS read-outs that
             // share the top row, hugging its trailing edge next to the menu bar.
             .add_plugins(crate::status_bar::StatusBarPlugin)
+            // The symbol the grid's money is shown with (`L$`, `OS$`, or the
+            // grid's own), read by the balance read-out and the payment notices.
+            .add_plugins(sl_viewer_kit::grid_currency::GridCurrencyPlugin)
             // The toast / notification host (viewer-ui-notification-host): the screen
             // channel that stacks, times out, fades and dismisses transient
             // notifications from the declarative catalogue, plus the modal-alert scrim —

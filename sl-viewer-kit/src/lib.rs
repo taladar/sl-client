@@ -16,8 +16,8 @@
 //! - **Render leaves** — [`face_material`] and [`particle_render`], each a
 //!   material plus the shader it loads, and the render-layer bookkeeping in
 //!   [`probe_layers`].
-//! - **Small models** — [`avatar_assets`], [`parcel_names`], [`sky_presets`],
-//!   [`slt`].
+//! - **Small models** — [`avatar_assets`], [`grid_currency`], [`parcel_names`],
+//!   [`sky_presets`], [`slt`].
 //!
 //! # What is *not* here, and the rule that decides it
 //!
@@ -57,6 +57,7 @@ pub mod coords;
 pub mod face_material;
 pub mod flexi;
 pub mod geometry_cache;
+pub mod grid_currency;
 pub mod minimap_math;
 pub mod parcel_names;
 pub mod particle_render;

@@ -321,8 +321,16 @@ impl LocaleFormatters {
     /// Fluent bundle (word order) instead.
     #[must_use]
     pub fn currency_l(&self, value: i64) -> String {
+        self.currency(LINDEN_SYMBOL, value)
+    }
+
+    /// Format an amount of a grid's currency: the grouped integer prefixed
+    /// with `symbol` (`OS$1,234` on an OpenSim grid), placed as
+    /// [`currency_l`](Self::currency_l) places `L$`.
+    #[must_use]
+    pub fn currency(&self, symbol: &str, value: i64) -> String {
         let amount = self.integer(value);
-        format!("{LINDEN_SYMBOL}{amount}")
+        format!("{symbol}{amount}")
     }
 
     /// Parse a number a user typed in this locale's conventions back into an
@@ -501,6 +509,7 @@ mod tests {
     fn currency_prefixes_linden_symbol() -> Result<(), FormatError> {
         let fmt = LocaleFormatters::from_tag("en")?;
         assert_eq!(fmt.currency_l(1_234_567), "L$1,234,567");
+        assert_eq!(fmt.currency("OS$", 1_234_567), "OS$1,234,567");
         Ok(())
     }
 

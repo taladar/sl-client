@@ -2369,6 +2369,7 @@ impl Session {
                     max_agent_groups: success.max_agent_groups,
                     library_root: success.library_root,
                     library_owner: success.library_owner,
+                    currency: success.currency.clone(),
                     response_fields: success.response_fields.clone(),
                 };
                 self.login_account = Some(account.clone());

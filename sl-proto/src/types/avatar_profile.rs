@@ -465,6 +465,12 @@ pub struct LoginAccount {
     /// The agent id owning the shared Library (`inventory-lib-owner`), if
     /// provided. Library folder contents are fetched as this owner's inventory.
     pub library_owner: Option<AgentKey>,
+    /// The currency symbol the login response named (`currency`), if any.
+    ///
+    /// Neither Second Life nor a stock OpenSim sends one
+    /// (`book/src/gridspec/login.md`); a grid that does names the symbol its
+    /// money is shown with, ahead of a viewer's own default.
+    pub currency: Option<String>,
     /// The name of every top-level field the login response carried, sorted
     /// ([`LoginSuccess::response_fields`](sl_wire::LoginSuccess::response_fields)).
     ///

@@ -111,7 +111,7 @@ pub use sl_proto::{
     MessageCursor, MessageId, MessageStatus, MfaChallenge, ModifyRegionAnswer, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteList, MuteType,
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NeighborRetirement, NewInventoryItem,
-    NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
+    NewInventoryLink, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
     ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation,
     ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch, ObjectStreamEntry,
     ObjectTransform, ObjectUpdateForm, OpenRegionInfo, OpenSimExtras, OwnerKey, PacketFlags,

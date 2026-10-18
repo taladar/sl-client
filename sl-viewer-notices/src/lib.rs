@@ -64,9 +64,11 @@ pub mod linkified_text;
 pub mod load_url;
 pub mod notification_host;
 pub mod notification_persist;
+pub mod payment_notices;
 pub mod region_restart;
 pub mod script_dialog;
 pub mod script_permission;
+pub mod system_messages;
 pub mod ui_name_link;
 
 #[cfg(test)]

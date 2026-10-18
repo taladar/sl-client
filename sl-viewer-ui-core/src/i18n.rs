@@ -800,6 +800,16 @@ impl Translator<'_> {
         )
     }
 
+    /// Format an amount of the grid's currency (`OS$1,234`), the amount
+    /// grouped for the locale and prefixed with `symbol`.
+    #[must_use]
+    pub fn currency(&self, symbol: &str, value: i64) -> String {
+        self.formatters().map_or_else(
+            || format!("{symbol}{value}"),
+            |formatters| formatters.currency(symbol, value),
+        )
+    }
+
     /// Format a civil date / time for the locale at the given style and length.
     /// Falls back to an ISO-ish rendering before the formatters build or if a
     /// component is out of range.
