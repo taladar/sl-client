@@ -30,3 +30,11 @@ Reference (Firestorm, read-only): `ao.cpp` / `aoengine` / `aoset`,
 
 Builds on: the locomotion state machine + animation playback, inventory
 (animation items, notecard read for import).
+
+## From gridspec-animations (2026-10-19)
+
+Both aditi test avatars wear a scripted overrider: its animations are sourced
+to an attachment, and its posture replaces `stand` through
+`llSetAnimationOverride` (the nil-sourced entry); the nil-id reset clears it.
+Neither grid stops a one-shot by itself — a client-side overrider has to send
+the stops (`book/src/gridspec/avatars.md` § Animations).

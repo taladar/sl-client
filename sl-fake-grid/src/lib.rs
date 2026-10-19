@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod agent_requests;
+pub mod animations;
 pub mod assets;
 pub mod bakes;
 pub mod benefits;

@@ -9,6 +9,7 @@ pub mod agent_alert;
 pub mod agent_movement;
 pub mod ais3_folder_lifecycle;
 pub mod animation_play_stop;
+pub mod animations;
 pub mod asset_decode;
 pub mod asset_fetch_http;
 pub mod asset_http;

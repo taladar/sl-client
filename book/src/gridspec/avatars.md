@@ -250,6 +250,121 @@ gestures yet (`viewer-gesture-runtime`), so it triggers no sound itself;
 when it does, the sound has to come from the grid's echo, which both grids
 send, and it will be silent on a parcel that bars avatar sounds.
 
+## Animations
+
+A viewer starts and stops its avatar's animations with an `AgentAnimation`,
+a list of `(animation, start)` pairs, and the simulator states the avatar's
+whole set back to every viewer in view in an `AvatarAnimation`: each
+animation with the sequence number it was started under, an
+`AnimationSourceList` naming who started it, and a `PhysicalAvatarEventList`.
+A stop is an animation dropping out of a later statement.
+
+Measured on 2026-10-19 by the conformance case `animations`: one avatar
+starts and stops animations, a second one beside it listens. Five runs on
+aditi (Mauve, the build location; the last with every answer held) and
+three on the local OpenSim. On Second Life both test avatars wear an
+animation overrider, so their sets are never quiet; each leg looks only at
+the animations it is about.
+
+### What the extra animations on Second Life are
+
+The assets that are no built-in in a Second Life avatar's set
+(`gridspec-agent-movement` and `gridspec-sit-stand` saw two to five of them
+beside the locomotion state) are **the avatars' own overrider**:
+
+| entry | what names it as its source |
+| --- | --- |
+| three to five assets | an object **attached to the avatar** — the overrider's scripts' `llStartAnimation` |
+| one asset in place of `stand`, `falldown` or the posture | the **nil id**: the default posture, replaced by an `llSetAnimationOverride` |
+| a built-in the agent started | the agent itself |
+
+So a Second Life avatar with an overrider never states `stand`: the posture
+slot holds the overrider's own animation. The reference's reset (a stop of
+the nil id, sent by *Stop animations*) clears that override, and `stand` is
+back at once under a new number (**held** as each leg's change only). OpenSim
+stated exactly one built-in for the posture throughout.
+
+### What a request is answered with
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a start of a built-in (`clap`) (**held**) | stated to both — under a number above every other entry's in two runs of four; the overrider's restarts number past it in between | under a number above every other entry's (**held**) | as the flavour's grid |
+| the same start again while it plays | nothing in one run, a restart under a new number in another | a statement of the set unchanged (**held**) | nothing on `FakeSl`; the unchanged set on `FakeOpensim` |
+| a stop (**held**) | stated to both: it drops out | the same | the same |
+| a stop of what is not playing (**held**) | nothing | the set unchanged | as the flavour's grid |
+| two started in one message (**held**) | one statement holding both | the same, in the message's order after the default | the same |
+| two stopped and a third started in one message (**held**) | one statement | the same | the same |
+| an id no animation has (**held**) | started and stated like any other, and stopped | the same | the same |
+| a one-shot left playing for fifteen seconds (**held**) | never dropped by the grid | the same | the same |
+| `stand` stopped by hand | nothing changed (the overrider's posture held the slot) | the set unchanged: the default stays (**held**) | the set unchanged on `FakeOpensim`; nothing on `FakeSl` |
+| `stand` started by hand | added beside the overrider's posture, as the agent's | nothing changed (**held**) | nothing changed |
+| `walk` started and stopped by hand (**held**) | stated, and dropped | the same | the same |
+| typing begun and ended (`ChatFromViewer` types 4 and 5) (**held**) | no `type` added by the grid | the same | the same |
+| the away control set and cleared (**held**) | no `away` added by the grid | the same | the same |
+| the reset, a stop of the nil id | the overrider's posture cleared: `stand` restarted | nothing changed, the set restated (**held**) | nothing changed |
+
+Both grids leave every stop to the viewer: a one-shot the viewer never
+reports finished stays in the set. The reference sends that stop itself
+(`LLAgent::requestStopMotion`) — and starts `type` and `away` itself too.
+
+### What a statement holds
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the agent's own set at rest (**held**) | restated every second or two (the overrider's churn: seven to ten statements in twelve seconds) | never restated (**held**: none in twelve seconds) | never restated |
+| sources in a statement to the agent itself (**held**) | **one per entry**: nil for the posture, the agent for what it started, the object for a script's | **only the objects'**, and those entries first (`LLClientView.SendAnimations`) | as the flavour's grid |
+| sources in a statement to another viewer (**held**) | **only the first entry's**, and that one nil | none | not shown |
+| the `PhysicalAvatarEventList` (**held** offline) | one empty block in every statement | none | as the flavour's grid |
+| the order of the entries | as the overrider left them | the default first, then the rest in the order started | the default first, then the rest in order |
+| the sequence numbers the two viewers are sent (**held**) | the same | the same | not shown |
+
+Because the source list is positional (the reference reads entry `i`'s source
+from block `i`), OpenSim's habit of putting the scripted entries first is
+what makes its shorter list line up.
+
+### A script's animation
+
+A probe in a cube of the agent's asks for `PERMISSION_TRIGGER_ANIMATION`
+(granted), then starts and stops the built-in `dance2` (live grids only).
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| the permission request (**held**) | `TRIGGER_ANIMATION` (16) | the same |
+| `llStartAnimation` (**held**) | stated to both, sourced to the cube | the same |
+| `llStopAnimation` (**held**) | dropped for both | the same |
+| the agent's own stop of the script's animation (**held**) | dropped | the same |
+| the cube deleted while its animation plays (**held**) | **nothing**: the animation stays, still sourced to an object that is gone | the same |
+
+So a viewer's *Stop animations* is the only way out of an animation whose
+object is gone, on both grids.
+
+### What the fake grid does about them
+
+`sl-fake-grid` keeps each session's set (`animations.rs`,
+`ImitatedGrid::animation_policy`): it starts from `stand`, folds every
+`AgentAnimation` in, and states the set back to the agent by its flavour's
+rules — after every request on `FakeOpensim`, after a change on `FakeSl`;
+sources and the empty physical block on `FakeSl`. `animations` runs its first
+seven legs offline on both flavours and holds them to the agent's own column
+above; `animation-play-stop` joined the offline list. It wears no overrider
+and runs no script, and it shows no resident to another, so nothing a second
+viewer is told is held there
+(`server-fake-grid-agent-avatars-shared`).
+
+### What our viewer does with them
+
+It reads each statement as the whole set: an animation missing from it is
+eased out, one under a new sequence number is restarted, and it ignores the
+sources and the physical block — what both grids' shapes need.
+`e2e_two_avatars`
+(`the_own_animations_are_stated_back_as_each_grid_states_them`) types in the
+chat bar on each fake flavour and checks that the typing animation it starts
+comes back in its own set, in the flavour's shape, and drops out when it
+stops. It sends the stop of a one-shot that has run out itself
+(`motion_stops.rs`), which both grids rely on. It has no *Stop animations*
+yet, which is the only way out of an overrider's posture or of an animation
+whose object is gone (`viewer-stop-animating-me`).
+
 ## What the fake grid does about it
 
 `sl-fake-grid` now sends the coarse feed on each flavour's timer, as part of

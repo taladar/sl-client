@@ -689,6 +689,34 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid answers a viewer's `AgentAnimation` — measured by the
+    /// `animations` conformance case on aditi and the local OpenSim
+    /// (2026-10-19, `book/src/gridspec/avatars.md` § Animations), and
+    /// tabulated in [`crate::animations`].
+    ///
+    /// OpenSim states the avatar's set after every request, one that changed
+    /// nothing included; Second Life only after one that changed it. Second
+    /// Life names a source for every entry of a statement to the agent itself
+    /// (the nil id for the default posture, the agent for what it started);
+    /// OpenSim names one for an object's entries only. Every Second Life
+    /// statement carries one empty `PhysicalAvatarEventList` block, every
+    /// OpenSim one none.
+    #[must_use]
+    pub const fn animation_policy(self) -> crate::animations::AnimationPolicy {
+        match self {
+            Self::SecondLife => crate::animations::AnimationPolicy {
+                restates_unchanged: false,
+                names_sources: true,
+                empty_physical_block: true,
+            },
+            Self::OpenSim => crate::animations::AnimationPolicy {
+                restates_unchanged: true,
+                names_sources: false,
+                empty_physical_block: false,
+            },
+        }
+    }
+
     /// How this grid answers a select and tells of a change to an object's
     /// record where the two disagree — measured by the `object-properties`
     /// conformance case on aditi and the local OpenSim (2026-10-09,

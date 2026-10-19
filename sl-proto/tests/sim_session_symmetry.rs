@@ -46,11 +46,11 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        AgentKey, AnimationKey, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
-        ChatSessionKind, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags, Event,
-        FolderType, FriendKey, GridCoordinates, GroupKey, InterestsUpdate, InventoryFolderKey,
-        InventoryKey, LandStatExtended, LandStatItem, LandStatReportType, LandStatScore,
-        LindenAmount, LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType,
+        AgentKey, AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind,
+        ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags, Event, FolderType,
+        FriendKey, GridCoordinates, GroupKey, InterestsUpdate, InventoryFolderKey, InventoryKey,
+        LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LindenAmount,
+        LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType,
         ObjectExtraParams, ObjectKey, OwnerKey, ParcelObjectOwner, ParcelObjectOwnersPart, PickKey,
         PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId, RegionHandle,
         RegionIdentity, RegionLocalObjectId, RegionTerrainComposition, RezAttachment,
@@ -482,7 +482,6 @@ mod test {
         "UpdateMuteListEntry",
         "RemoveMuteListEntry",
         // appearance / misc agent
-        "AgentAnimation",
         "AgentIsNowWearing",
         "AgentSetAppearance",
         "AgentCachedTexture",
@@ -536,7 +535,6 @@ mod test {
     ];
     /// The raw-forwarded messages the matching family test sends, in order.
     const AGENT_FAMILY: &[&str] = &[
-        "AgentAnimation",
         "AgentIsNowWearing",
         "AgentSetAppearance",
         "AgentCachedTexture",
@@ -783,13 +781,6 @@ mod test {
         let (mut client, mut sim) = setup(now)?;
         let texture = TextureKey::from(uuid::Uuid::from_u128(0x7E));
 
-        client.set_animations(
-            &[
-                (AnimationKey::from(uuid::Uuid::from_u128(0x100)), true),
-                (AnimationKey::from(uuid::Uuid::from_u128(0x200)), false),
-            ],
-            now,
-        )?;
         client.set_wearing(
             &[Wearable {
                 item_id: InventoryKey::from(uuid::Uuid::from_u128(0x31)),

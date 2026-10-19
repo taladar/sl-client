@@ -23,7 +23,7 @@
 //!    confirmation, so an "absent" set here is genuinely post-stop and not a stale
 //!    pre-play baseline.
 //!
-//! `1av`, `[both]`. Self-contained on either grid: no inventory, permissions or
+//! `1av`, `[both]`, offline on both fake flavours. Self-contained on either grid: no inventory, permissions or
 //! peer avatar is needed — the agent drives its own animation set and observes
 //! its own broadcast. On OpenSim the avatar is forced into the "Default Region"
 //! so it is a root (not child) presence — `ScenePresenceAnimator` refuses to add
@@ -71,7 +71,7 @@ impl GridTest for AnimationPlayStop {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn start_location(&self, grid: Grid) -> &'static str {

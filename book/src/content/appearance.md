@@ -66,6 +66,8 @@ Animations are assets the avatar plays. The client starts/stops them
 (`Command::PlayAnimation` / `StopAnimation`, or `SetAnimations` for a batch),
 and sees what others are playing through `Event::AvatarAnimation` (see also the
 [avatars](world.md#avatars-in-the-region) section of the world chapter).
+What each grid states back, and when, is measured in
+[Grid Behaviour: Avatars](../gridspec/avatars.md#animations).
 
 ## Gestures
 

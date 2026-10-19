@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 83 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1398 |
+| done | 1399 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2068** |
+| **total** | **2069** |
 
 ## ideas (134)
 
@@ -257,7 +257,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   service — records, permissions, key-value store
 - [`server-fake-grid-agent-avatars-shared`](ideas/server-fake-grid-agent-avatars-shared.md)
   — Fake grid — logged-in agents see each other's avatars (blocked by
-  `gridspec-avatar-presence` (done), `gridspec-animations`)
+  `gridspec-avatar-presence` (done), `gridspec-animations` (done))
 - [`server-fake-grid-teleport-edges`](ideas/server-fake-grid-teleport-edges.md)
   — Fake grid — the teleport edges each grid was measured handling and the fake
   grid does not model
@@ -971,6 +971,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-stop-all-animations`](ready/viewer-stop-all-animations.md) — Stop all
   avatar animations (+ revoke variant)
+- [`viewer-stop-animating-me`](ready/viewer-stop-animating-me.md) — Stop
+  animating me — stop every own animation, reset the overrides, revoke animation
+  permissions
 - [`viewer-stream-favorites`](ready/viewer-stream-favorites.md) — Audio-stream
   favorites + now-playing title floater (blocked by `viewer-streaming-audio`
   (done))
@@ -1138,8 +1141,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-animations`](ready/gridspec-animations.md) — Animations as each
-  grid broadcasts them
 - [`gridspec-appearance-baking`](ready/gridspec-appearance-baking.md) —
   Appearance and baking on each grid
 - [`gridspec-attachments`](ready/gridspec-attachments.md) — Attachments on each
@@ -1590,7 +1591,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1398)
+## done (1399)
 
 ### protocol
 
@@ -4596,6 +4597,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`gridspec-agent-movement`](done/gridspec-agent-movement.md) — How each grid
   moves an agent: AgentUpdate handling, speeds, terse updates
+- [`gridspec-animations`](done/gridspec-animations.md) — Animations as each grid
+  broadcasts them
 - [`gridspec-asset-fetch-http`](done/gridspec-asset-fetch-http.md) — HTTP asset
   fetch details on each grid
 - [`gridspec-asset-upload`](done/gridspec-asset-upload.md) — Asset uploads and

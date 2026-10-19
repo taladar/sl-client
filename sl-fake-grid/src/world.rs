@@ -1749,7 +1749,6 @@ pub(crate) fn push_arrival_world(
         tracing::warn!("rezzing the arriving avatar failed: {error}");
     }
     push_own_appearance(identity, assets, bakes, sim, now);
-    push_own_animation(identity, sim, now);
     if let Err(error) = sim.send_parcel_overlay(&world.overlay_for(identity.agent_id), now) {
         tracing::warn!("sending the parcel overlay failed: {error}");
     }
@@ -1871,11 +1870,6 @@ fn push_object_animations(
     }
 }
 
-/// The built-in **stand** animation every avatar in a fake region plays: the
-/// `stand` entry of [`sl_anim::BUILTIN_ANIMATIONS`], which is the animation a
-/// real simulator puts an idle avatar into.
-const STAND_ANIMATION: uuid::Uuid = uuid::uuid!("2408fe9e-df1d-1d7d-f4ff-1384fa7b350f");
-
 /// The colour the arriving agent's own avatar is baked. Green, so a fixture
 /// session tells its own body from the catalogue NPC's blue one at a glance —
 /// and from the region's red-and-green checker, which no avatar wears.
@@ -1927,8 +1921,10 @@ pub(crate) fn push_own_appearance(
     }
 }
 
-/// Pushes the arriving agent the animation it is playing: the built-in
-/// **stand**.
+/// Pushes the arriving agent the animations it is playing: the arrival's
+/// set, which is the built-in **stand** alone. The driver sends it right after
+/// [`push_arrival_world`], as both grids state an arrival's animations just
+/// after its avatar and appearance.
 ///
 /// A simulator tells every avatar, its own included, what it is playing, and a
 /// real one always has an answer — OpenSim's `ScenePresence` puts an arriving
@@ -1942,13 +1938,20 @@ pub(crate) fn push_own_appearance(
 /// The asset needs no serving. `stand` is a Linden built-in every viewer ships
 /// (this workspace under `viewer-assets/static_assets`, the reference under
 /// `app_settings/static_assets`), so naming it costs the grid nothing.
-fn push_own_animation(identity: &AvatarIdentity, sim: &mut SimSession, now: Instant) {
-    let playing = vec![sl_proto::PlayingAnimation {
-        anim_id: STAND_ANIMATION,
-        sequence_id: 1,
-        source_id: None,
-    }];
-    if let Err(error) = sim.send_avatar_animation(identity.agent_id, &playing, now) {
+pub(crate) fn push_own_animation(
+    identity: &AvatarIdentity,
+    animations: &crate::animations::AnimationSet,
+    policy: crate::animations::AnimationPolicy,
+    sim: &mut SimSession,
+    now: Instant,
+) {
+    let playing = animations.playing(policy, identity.agent_id);
+    if let Err(error) = sim.send_avatar_animation_with_events(
+        identity.agent_id,
+        &playing,
+        &policy.physical_events(),
+        now,
+    ) {
         tracing::warn!("sending the arriving agent's own animation failed: {error}");
     }
 }
@@ -4165,7 +4168,7 @@ mod test {
     fn the_stand_animation_is_the_builtin_one() {
         assert_eq!(
             sl_anim::builtin_animation_by_name("stand").map(|found| found.id),
-            Some(STAND_ANIMATION)
+            Some(crate::animations::STAND)
         );
     }
 

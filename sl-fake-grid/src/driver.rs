@@ -47,6 +47,11 @@ pub(crate) struct SimState {
     /// How the region answers a sit request where the live grids disagree
     /// ([`crate::ImitatedGrid::sit_policy`]).
     pub(crate) sit_policy: crate::imitates::SitPolicy,
+    /// How the region answers a viewer's animations where the live grids
+    /// disagree ([`crate::ImitatedGrid::animation_policy`]).
+    pub(crate) animation_policy: crate::animations::AnimationPolicy,
+    /// The agent's animation set ([`crate::animations`]).
+    pub(crate) animations: crate::animations::AnimationSet,
     /// How the region answers the estate where the live grids disagree
     /// ([`crate::ImitatedGrid::estate_policy`]).
     pub(crate) estate_policy: crate::imitates::EstatePolicy,
@@ -397,6 +402,7 @@ impl SharedSim {
             }
             if matches!(event, ServerEvent::AgentArrived) {
                 state.arrived_at = Some(now);
+                state.animations = crate::animations::AnimationSet::arriving();
                 state.own_appearance_owed = state.sim.handshake_reply_flags().is_none();
                 // What Second Life tells an arriving agent about itself and
                 // OpenSim does not: its health, and — over the event queue —
@@ -441,10 +447,25 @@ impl SharedSim {
                     &mut state.sim,
                     now,
                 );
+                crate::world::push_own_animation(
+                    &state.avatar,
+                    &state.animations,
+                    state.animation_policy,
+                    &mut state.sim,
+                    now,
+                );
                 if let Some(hook) = &state.on_agent_arrived {
                     hook(&mut state.sim, now);
                 }
             }
+            let _animated = crate::animations::answer(
+                &mut state.animations,
+                state.animation_policy,
+                state.avatar.agent_id,
+                &mut state.sim,
+                &event,
+                now,
+            );
             answer_from_fixtures(
                 &mut state.udp_assets,
                 &state.assets,

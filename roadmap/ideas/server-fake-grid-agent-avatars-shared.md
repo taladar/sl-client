@@ -68,3 +68,19 @@ keeps another region's answer for two minutes; Second Life sends a count of
 the others at a coarse position and is current within two seconds. Until
 then `world_map::item_answer` sends only the item both grids send for a
 region with nobody to show.
+
+## From gridspec-animations (2026-10-19)
+
+Measured in `book/src/gridspec/avatars.md` § Animations. What another viewer
+is told of an avatar's animations:
+
+- every statement the avatar's own viewer is sent, the other is sent too, with
+  the same sequence numbers;
+- Second Life names only the **first** entry's source (nil) to the other
+  viewer and carries one empty `PhysicalAvatarEventList` block; OpenSim names
+  none and carries none;
+- the agent's own set is kept per session already (`crate::animations`): the
+  broadcast is that set, re-shaped per flavour for an observer.
+
+Add the `animations` census's `*_seen` keys to the held fake columns once this
+is built.

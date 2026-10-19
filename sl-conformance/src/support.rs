@@ -661,13 +661,32 @@ pub async fn settle_scene_with_avatar(
     window: Duration,
     idle: Duration,
 ) -> Result<SettledScene, TestFailure> {
+    settle_scene_observing(session, grid, build_position, window, idle, |_event| {}).await
+}
+
+/// [`settle_scene_with_avatar`], showing `on_event` every event the settle
+/// reads — the walk to the build location's included — for a case that
+/// measures something the arrival brings besides the objects (an avatar's
+/// animations, which a grid states once and may never state again).
+///
+/// # Errors
+///
+/// As [`settle_scene`].
+pub async fn settle_scene_observing(
+    session: &mut Session,
+    grid: Grid,
+    build_position: Option<Vector>,
+    window: Duration,
+    idle: Duration,
+    mut on_event: impl FnMut(&Event),
+) -> Result<SettledScene, TestFailure> {
     let own = session.agent_id().map(|agent| agent.uuid());
     let mut seen = HashSet::new();
     let mut anchor: Option<Vector> = None;
     let mut avatar: Option<Vector> = None;
     let root = session.circuit_id();
     let mut neighbour_object: Option<ObjectKey> = None;
-    drain_scene(session, window, idle, &mut seen, |object| {
+    drain_scene(session, window, idle, &mut seen, &mut on_event, |object| {
         if Some(object.full_id.uuid()) == own {
             avatar = Some(object.motion.position.clone());
         }
@@ -708,11 +727,11 @@ pub async fn settle_scene_with_avatar(
     let arrived = if within(&from, &build, ARRIVAL_RADIUS_M) {
         from
     } else {
-        let arrived = walk_within_region(session, from, &build, |_event| {}).await?;
+        let arrived = walk_within_region(session, from, &build, &mut on_event).await?;
         // The flight ends in the air: where the avatar comes down is where
         // it stands.
         let mut landed = arrived;
-        drain_scene(session, window, idle, &mut seen, |object| {
+        drain_scene(session, window, idle, &mut seen, &mut on_event, |object| {
             if Some(object.full_id.uuid()) == own {
                 landed = object.motion.position.clone();
             }
@@ -743,7 +762,7 @@ pub async fn settle_scene_with_avatar(
         )))
         .await?;
     let mut standing = arrived;
-    drain_scene(session, window, idle, &mut seen, |object| {
+    drain_scene(session, window, idle, &mut seen, &mut on_event, |object| {
         if Some(object.full_id.uuid()) == own {
             standing = object.motion.position.clone();
         }
@@ -759,12 +778,14 @@ pub async fn settle_scene_with_avatar(
 
 /// Records every [`Event::ObjectAdded`] into `seen` until none has arrived
 /// for `idle`, or `window` has passed, showing `observe` each of them and
-/// every [`Event::ObjectUpdated`] that arrives meanwhile.
+/// every [`Event::ObjectUpdated`] that arrives meanwhile, and `on_event`
+/// every event at all.
 async fn drain_scene(
     session: &mut Session,
     window: Duration,
     idle: Duration,
     seen: &mut HashSet<ScopedObjectId>,
+    on_event: &mut impl FnMut(&Event),
     mut observe: impl FnMut(&Object),
 ) -> Result<(), TestFailure> {
     let started = Instant::now();
@@ -774,18 +795,21 @@ async fn drain_scene(
             return Ok(());
         }
         match session
-            .wait_for(remaining.min(idle), |event| match event {
-                Event::ObjectAdded(object) => {
-                    observe(object);
-                    Some(object.scoped_id())
+            .wait_for(remaining.min(idle), |event| {
+                on_event(event);
+                match event {
+                    Event::ObjectAdded(object) => {
+                        observe(object);
+                        Some(object.scoped_id())
+                    }
+                    // An object already sighted that moved: shown, and not what
+                    // the idle gap waits for.
+                    Event::ObjectUpdated(object) => {
+                        observe(object);
+                        None
+                    }
+                    _ => None,
                 }
-                // An object already sighted that moved: shown, and not what
-                // the idle gap waits for.
-                Event::ObjectUpdated(object) => {
-                    observe(object);
-                    None
-                }
-                _ => None,
             })
             .await
         {

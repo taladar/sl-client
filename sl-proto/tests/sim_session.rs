@@ -697,6 +697,33 @@ mod test {
     }
 
     #[test]
+    fn client_agent_animation_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let clap = AnimationKey::from(uuid::Uuid::from_u128(0xC01));
+        let laugh = AnimationKey::from(uuid::Uuid::from_u128(0xC02));
+        client.set_animations(&[(clap, true), (laugh, false)], now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let (animations, physical_events) = drain_server(&mut sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::AgentAnimation {
+                    animations,
+                    physical_events,
+                } => Some((animations, physical_events)),
+                _ => None,
+            })
+            .ok_or("expected an AgentAnimation server event")?;
+        assert_eq!(animations, vec![(clap, true), (laugh, false)]);
+        // The reference's one empty block.
+        assert_eq!(physical_events, vec![Vec::<u8>::new()]);
+        Ok(())
+    }
+
+    #[test]
     fn client_track_and_find_agent_round_trip() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;

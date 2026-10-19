@@ -36,6 +36,7 @@
 mod test {
     use core::time::Duration;
     use std::path::Path;
+    use std::time::Instant;
 
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -704,10 +705,9 @@ mod test {
 
     /// Whether `event` is the viewer starting the typing animation.
     fn is_typing_animation(event: &ServerEvent) -> bool {
-        matches!(event, ServerEvent::ClientMessage(message)
-            if matches!(&**message, AnyMessage::AgentAnimation(animation)
-                if animation.animation_list.iter().any(|entry|
-                    entry.anim_id == TYPE_ANIMATION && entry.start_anim)))
+        matches!(event, ServerEvent::AgentAnimation { animations, .. }
+            if animations.iter().any(|(anim_id, start)|
+                anim_id.uuid() == TYPE_ANIMATION && *start))
     }
 
     /// The radar's floater id.
@@ -825,6 +825,101 @@ mod test {
                 assert!(animated, "the viewer heard the NPC's typing animation");
                 Ok(())
             })?;
+        Ok(())
+    }
+
+    /// The viewer's own `AvatarAnimation`s in its event log, oldest first:
+    /// whether each lists the typing animation, and its
+    /// `PhysicalAvatarEventList` as the log writes it.
+    async fn own_typing_statements(
+        viewer: &Viewer,
+        own: &str,
+    ) -> Result<Vec<(bool, String)>, BodyError> {
+        let typing = TYPE_ANIMATION.to_string();
+        Ok(viewer
+            .events_from_start()
+            .read(&[LogStream::Event])
+            .await?
+            .iter()
+            .filter(|entry| {
+                entry.kind == "AvatarAnimation"
+                    && entry
+                        .detail
+                        .split("animations:")
+                        .next()
+                        .is_some_and(|head| head.contains(own))
+            })
+            .map(|entry| {
+                let physical = entry
+                    .detail
+                    .split("physical_events: ")
+                    .nth(1)
+                    .map_or_else(String::new, |rest| {
+                        rest.trim_end_matches(['}', ' ']).to_owned()
+                    });
+                (entry.detail.contains(&typing), physical)
+            })
+            .collect())
+    }
+
+    /// **The own set, as each grid states it**: typing starts the typing
+    /// animation, which the grid states back in the agent's own set, and its
+    /// stop drops it out of a later statement — on a grid imitating Second
+    /// Life, whose every statement carries one empty `PhysicalAvatarEventList`
+    /// block and names a source for every entry, as on one imitating OpenSim,
+    /// whose carry neither (`book/src/gridspec/avatars.md` § Animations).
+    #[test]
+    fn the_own_animations_are_stated_back_as_each_grid_states_them() -> Result<(), TestError> {
+        for (flavour, name, physical) in [
+            (
+                ImitatedGrid::SecondLife,
+                "own_animations_second_life",
+                "[[]]",
+            ),
+            (ImitatedGrid::OpenSim, "own_animations_open_sim", "[]"),
+        ] {
+            stage(name, &["Alpha"])
+                .needs(Need::GridControl)
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    let own = stage.agent_id("Alpha")?.uuid().to_string();
+                    let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
+                    let _typed = bar.fill("half a thought").await?;
+                    let started = Instant::now();
+                    let stated = loop {
+                        let statements = own_typing_statements(alpha, &own).await?;
+                        if statements.iter().any(|(typing, _physical)| *typing) {
+                            break statements;
+                        }
+                        if started.elapsed() > WAIT {
+                            return Err("the grid never stated the typing animation back".into());
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    };
+                    for (_typing, carried) in &stated {
+                        assert_eq!(carried, physical, "each statement's physical events");
+                    }
+                    let _cleared = bar.fill("").await?;
+                    let started = Instant::now();
+                    loop {
+                        let statements = own_typing_statements(alpha, &own).await?;
+                        let after_start = statements
+                            .iter()
+                            .skip_while(|(typing, _physical)| !*typing)
+                            .skip_while(|(typing, _physical)| *typing);
+                        if after_start.count() > 0 {
+                            break;
+                        }
+                        if started.elapsed() > WAIT {
+                            return Err("the typing animation never dropped out of the set".into());
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                    alpha.press("Escape").await?;
+                    Ok(())
+                })?;
+        }
         Ok(())
     }
 

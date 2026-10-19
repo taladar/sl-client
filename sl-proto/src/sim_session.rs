@@ -77,12 +77,12 @@ use sl_wire::messages::{
 };
 use sl_wire::messages::{
     AvatarAnimation as AvatarAnimationWire, AvatarAnimationAnimationListBlock,
-    AvatarAnimationAnimationSourceListBlock, AvatarAnimationSenderBlock,
-    AvatarAppearance as AvatarAppearanceWire, AvatarAppearanceAppearanceDataBlock,
-    AvatarAppearanceAppearanceHoverBlock, AvatarAppearanceAttachmentBlockBlock,
-    AvatarAppearanceObjectDataBlock, AvatarAppearanceSenderBlock, AvatarAppearanceVisualParamBlock,
-    ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
-    ImprovedTerseObjectUpdateRegionDataBlock,
+    AvatarAnimationAnimationSourceListBlock, AvatarAnimationPhysicalAvatarEventListBlock,
+    AvatarAnimationSenderBlock, AvatarAppearance as AvatarAppearanceWire,
+    AvatarAppearanceAppearanceDataBlock, AvatarAppearanceAppearanceHoverBlock,
+    AvatarAppearanceAttachmentBlockBlock, AvatarAppearanceObjectDataBlock,
+    AvatarAppearanceSenderBlock, AvatarAppearanceVisualParamBlock, ImprovedTerseObjectUpdate,
+    ImprovedTerseObjectUpdateObjectDataBlock, ImprovedTerseObjectUpdateRegionDataBlock,
 };
 use sl_wire::messages::{
     ClearFollowCamProperties, ClearFollowCamPropertiesObjectDataBlock, ScriptControlChange,
@@ -1200,6 +1200,19 @@ pub enum ServerEvent {
         detach: DetachOrder,
         /// The items the client wore.
         attachments: Vec<RezAttachment>,
+    },
+    /// The client started and/or stopped its own animations (`AgentAnimation`):
+    /// each `(animation, start)` pair in the order the message carried them. A
+    /// simulator folds them into the avatar's set and states the whole set back
+    /// (`send_avatar_animation`). A stop of the nil id is the reference
+    /// viewer's reset of the avatar's animation-state overrides
+    /// (`LLAgent::sendAnimationStateReset`, part of *Stop animations*).
+    AgentAnimation {
+        /// The animations started (`true`) or stopped (`false`).
+        animations: Vec<(crate::AnimationKey, bool)>,
+        /// The raw `PhysicalAvatarEventList` blocks' `TypeData`, one per
+        /// block. The reference viewer sends one empty block.
+        physical_events: Vec<Vec<u8>>,
     },
     /// The client emitted one or more viewer effects (`ViewerEffect`): look-at /
     /// point-at gaze hints, the editing/touch beam, and other transient HUD
@@ -8554,6 +8567,24 @@ impl SimSession {
         animations: &[PlayingAnimation],
         now: Instant,
     ) -> Result<(), Error> {
+        self.send_avatar_animation_with_events(avatar_id, animations, &[], now)
+    }
+
+    /// [`send_avatar_animation`](Self::send_avatar_animation) with a
+    /// `PhysicalAvatarEventList` block per entry of `physical_events` (its
+    /// `TypeData`). Second Life sends one empty block in every statement;
+    /// OpenSim none.
+    ///
+    /// # Errors
+    ///
+    /// As [`send_avatar_animation`](Self::send_avatar_animation).
+    pub fn send_avatar_animation_with_events(
+        &mut self,
+        avatar_id: AgentKey,
+        animations: &[PlayingAnimation],
+        physical_events: &[Vec<u8>],
+        now: Instant,
+    ) -> Result<(), Error> {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
@@ -8585,7 +8616,12 @@ impl SimSession {
                 })
                 .collect(),
             animation_source_list,
-            physical_avatar_event_list: Vec::new(),
+            physical_avatar_event_list: physical_events
+                .iter()
+                .map(|type_data| AvatarAnimationPhysicalAvatarEventListBlock {
+                    type_data: type_data.clone(),
+                })
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -11119,6 +11155,20 @@ impl SimSession {
                     compound_id: rez.header_data.compound_msg_id,
                     detach: DetachOrder::from_first_detach_all(rez.header_data.first_detach_all),
                     attachments,
+                });
+            }
+            AnyMessage::AgentAnimation(animation) => {
+                self.events.push_back(ServerEvent::AgentAnimation {
+                    animations: animation
+                        .animation_list
+                        .iter()
+                        .map(|block| (crate::AnimationKey::from(block.anim_id), block.start_anim))
+                        .collect(),
+                    physical_events: animation
+                        .physical_avatar_event_list
+                        .iter()
+                        .map(|block| block.type_data.clone())
+                        .collect(),
                 });
             }
             AnyMessage::ViewerEffect(effect) => {
