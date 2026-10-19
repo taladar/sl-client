@@ -84,3 +84,18 @@ is told of an avatar's animations:
 
 Add the `animations` census's `*_seen` keys to the held fake columns once this
 is built.
+
+## From gridspec-appearance-baking (2026-10-19)
+
+Measured in `book/src/gridspec/appearance.md` § Baking. What another viewer
+is told of an avatar's appearance:
+
+- Second Life sends every viewer near the agent an `AvatarAppearance` after
+  each accepted bake, the same as the agent's own;
+- OpenSim sends every *other* viewer the publish of an `AgentSetAppearance`
+  verbatim, and the publisher nothing;
+- the published bakes are kept per session already
+  (`sl-fake-grid` `bakes::PublishedBakes`): the broadcast is that appearance.
+
+Add the `appearance-baking` census's `*_seen_*` keys to the held fake columns
+once this is built.

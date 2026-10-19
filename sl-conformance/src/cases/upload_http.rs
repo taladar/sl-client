@@ -1702,7 +1702,7 @@ impl Reply {
 
 /// An LLSD value as a metric writes it: a map key by key in order, an id as
 /// `<id>`, an address as `<url>`, a number as it stands.
-fn rendered(value: &Llsd, key: Option<&str>) -> String {
+pub(crate) fn rendered(value: &Llsd, key: Option<&str>) -> String {
     match value {
         Llsd::Map(map) => {
             let mut entries: Vec<(&String, &Llsd)> = map.iter().collect();

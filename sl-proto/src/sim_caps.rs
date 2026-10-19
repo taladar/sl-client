@@ -77,7 +77,7 @@ use crate::session::{
     chat_session_agent_params_from_llsd, chat_session_request_from_llsd,
     chat_session_roster_to_llsd, cof_version_increment_to_llsd, environment_to_llsd,
     environment_update_from_llsd, fetch_inventory_items_to_llsd, inventory_descendents_to_llsd,
-    parse_copy_inventory_from_notecard, server_appearance_update_to_llsd, session_history_to_llsd,
+    llsd_map, parse_copy_inventory_from_notecard, session_history_to_llsd,
 };
 use crate::sim_inventory::SimInventoryError;
 use crate::sim_new_file::{self, FirstStep, NewFilePolicy, SideUpload};
@@ -2629,12 +2629,21 @@ impl SimCaps {
         url
     }
 
-    /// Serves one `UpdateAvatarAppearance` POST: parses the requested Current
-    /// Outfit Folder version, surfaces it as
-    /// [`ServerEvent::ServerAppearanceRequested`](crate::ServerEvent::ServerAppearanceRequested),
-    /// and answers the accept reply `{ success: true }` (the baked-texture ids
-    /// arrive separately over UDP `AvatarAppearance`). Wrong method → `405`, a
-    /// non-LLSD body → `400`.
+    /// Serves one `UpdateAvatarAppearance` POST as Second Life does
+    /// (`appearance-baking`, 2026-10-19, `book/src/gridspec/appearance.md`
+    /// § Baking): a request for any version but the Current Outfit Folder's
+    /// is refused `400` with `{ success: false, code: 1, error: "Cof Version
+    /// Mismatch: <asked> != <current>", expected: <current>, observed:
+    /// <asked>, cof_version: <asked>, agent_id }`; one for the folder's
+    /// version is accepted `200` with `{ success: true, error: undef,
+    /// cof_version, agent_id, warnings: [] }` and surfaced as
+    /// [`ServerEvent::ServerAppearanceRequested`](crate::ServerEvent::ServerAppearanceRequested)
+    /// — the baked result then goes out over UDP `AvatarAppearance`. An
+    /// account with no Current Outfit Folder has no version to hold a request
+    /// to, and every request is accepted. Second Life's answers also carry
+    /// the bake's own payload (the textures, the visual parameters, the
+    /// scale, and on a refusal a dump of the outfit), which this does not
+    /// fabricate. Wrong method → `405`, a non-LLSD body → `400`.
     fn dispatch_update_avatar_appearance(
         sim: &mut SimSession,
         request: &CapsRequest<'_>,
@@ -2648,13 +2657,32 @@ impl SimCaps {
         let Ok(cof_version) = parse_update_avatar_appearance_request(text) else {
             return CapsResponse::bad_request();
         };
+        let agent = sim.agent_id().map_or_else(Uuid::nil, |agent| agent.uuid());
+        let current = sim.agent_inventory().current_outfit_version();
+        if let Some(current) = current.filter(|current| *current != cof_version) {
+            let reply = llsd_map(vec![
+                ("success", Llsd::Boolean(false)),
+                ("code", Llsd::Integer(1)),
+                (
+                    "error",
+                    Llsd::String(format!("Cof Version Mismatch: {cof_version} != {current}")),
+                ),
+                ("expected", Llsd::Integer(current)),
+                ("observed", Llsd::Integer(cof_version)),
+                ("cof_version", Llsd::Integer(cof_version)),
+                ("agent_id", Llsd::Uuid(agent)),
+            ]);
+            return CapsResponse::llsd_xml_status(400, reply.to_llsd_xml());
+        }
         sim.push_content_event(ServerEvent::ServerAppearanceRequested { cof_version });
-        let reply = Event::ServerAppearanceUpdate {
-            success: true,
-            error: None,
-            expected_cof_version: None,
-        };
-        CapsResponse::llsd_xml(server_appearance_update_to_llsd(&reply).to_llsd_xml())
+        let reply = llsd_map(vec![
+            ("success", Llsd::Boolean(true)),
+            ("error", Llsd::Undef),
+            ("cof_version", Llsd::Integer(cof_version)),
+            ("agent_id", Llsd::Uuid(agent)),
+            ("warnings", Llsd::Array(Vec::new())),
+        ]);
+        CapsResponse::llsd_xml(reply.to_llsd_xml())
     }
 
     /// Serves one `IncrementCOFVersion` GET: bumps the version of the agent's

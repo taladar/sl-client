@@ -45,6 +45,10 @@ use sl_wire::messages::{
     LandStatReplyRequestDataBlock, MeanCollisionAlert, MeanCollisionAlertMeanCollisionBlock,
     ViewerFrozenMessage, ViewerFrozenMessageFrozenDataBlock,
 };
+use sl_wire::messages::{
+    AgentCachedTextureResponse, AgentCachedTextureResponseAgentDataBlock,
+    AgentCachedTextureResponseWearableDataBlock,
+};
 use sl_wire::messages::{AgentDataUpdate, AgentDataUpdateAgentDataBlock};
 use sl_wire::messages::{
     AgentMovementComplete, AgentMovementCompleteAgentDataBlock, AgentMovementCompleteDataBlock,
@@ -1213,6 +1217,34 @@ pub enum ServerEvent {
         /// The raw `PhysicalAvatarEventList` blocks' `TypeData`, one per
         /// block. The reference viewer sends one empty block.
         physical_events: Vec<Vec<u8>>,
+    },
+    /// The client asked the region's baked-texture cache which of its bakes
+    /// it already holds (`AgentCachedTexture`): one `(cache id, texture
+    /// index)` per baked slot, the cache id being the hash of the wearables
+    /// the viewer would composite into it. A client-baking region answers with
+    /// [`send_cached_texture_response`](SimSession::send_cached_texture_response);
+    /// a central-baking one (Second Life) answers nothing.
+    CachedTexturesRequested {
+        /// The serial the answer echoes.
+        serial: i32,
+        /// The slots asked about, as `(cache id, texture index)`.
+        slots: Vec<(Uuid, u8)>,
+    },
+    /// The client published its own appearance (`AgentSetAppearance`): the
+    /// legacy client-side bake path. A client-baking region keeps the bakes
+    /// (and their cache ids) and shows them to every *other* viewer; a
+    /// central-baking one ignores it.
+    AppearanceSet {
+        /// The appearance serial.
+        serial: u32,
+        /// The avatar's bounding box, in metres.
+        size: Vector,
+        /// The packed avatar `TextureEntry`.
+        texture_entry: Vec<u8>,
+        /// The visual parameters, one byte each.
+        visual_params: Vec<u8>,
+        /// The bakes' cache ids, as `(cache id, texture index)`.
+        wearable_cache: Vec<(Uuid, u8)>,
     },
     /// The client emitted one or more viewer effects (`ViewerEffect`): look-at /
     /// point-at gaze hints, the editing/touch beam, and other transient HUD
@@ -6081,6 +6113,48 @@ impl SimSession {
         }
         let message = AnyMessage::HealthMessage(HealthMessage {
             health_data: HealthMessageHealthDataBlock { health },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AgentCachedTextureResponse`: the answer to a
+    /// [`ServerEvent::CachedTexturesRequested`], echoing its `serial`, with
+    /// one `(texture index, cached texture id)` per slot asked about — a nil
+    /// id where the region holds no bake for that slot's cache id. Surfaces on
+    /// the client as
+    /// [`Event::CachedTextureResponse`](crate::Event::CachedTextureResponse).
+    /// Sent reliably, with an empty host name per block as OpenSim sends it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_cached_texture_response(
+        &mut self,
+        serial: i32,
+        textures: &[(u8, Uuid)],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AgentCachedTextureResponse(AgentCachedTextureResponse {
+            agent_data: AgentCachedTextureResponseAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                session_id: self.session_id.unwrap_or_else(Uuid::nil),
+                serial_num: serial,
+            },
+            wearable_data: textures
+                .iter()
+                .map(
+                    |&(texture_index, texture_id)| AgentCachedTextureResponseWearableDataBlock {
+                        texture_id,
+                        texture_index,
+                        host_name: Vec::new(),
+                    },
+                )
+                .collect(),
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -11168,6 +11242,33 @@ impl SimSession {
                         .physical_avatar_event_list
                         .iter()
                         .map(|block| block.type_data.clone())
+                        .collect(),
+                });
+            }
+            AnyMessage::AgentCachedTexture(query) => {
+                self.events.push_back(ServerEvent::CachedTexturesRequested {
+                    serial: query.agent_data.serial_num,
+                    slots: query
+                        .wearable_data
+                        .iter()
+                        .map(|block| (block.id, block.texture_index))
+                        .collect(),
+                });
+            }
+            AnyMessage::AgentSetAppearance(appearance) => {
+                self.events.push_back(ServerEvent::AppearanceSet {
+                    serial: appearance.agent_data.serial_num,
+                    size: appearance.agent_data.size.clone(),
+                    texture_entry: appearance.object_data.texture_entry.clone(),
+                    visual_params: appearance
+                        .visual_param
+                        .iter()
+                        .map(|block| block.param_value)
+                        .collect(),
+                    wearable_cache: appearance
+                        .wearable_data
+                        .iter()
+                        .map(|block| (block.cache_id, block.texture_index))
                         .collect(),
                 });
             }

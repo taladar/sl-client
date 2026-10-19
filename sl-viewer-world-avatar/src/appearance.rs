@@ -569,6 +569,61 @@ mod tests {
         Ok(())
     }
 
+    /// **Second Life's version mismatch, as measured** (`appearance-baking`,
+    /// 2026-10-19): a bake of a version the grid does not hold is refused with
+    /// the one it `expected`, and the driver asks again at that version once;
+    /// the acceptance ends the handshake.
+    #[test]
+    fn a_version_mismatch_is_retried_at_the_expected_version() -> Result<(), String> {
+        let mut world = bake_world();
+        let map = [CAP_UPDATE_AVATAR_APPEARANCE]
+            .into_iter()
+            .map(|name| (name.to_owned(), format!("https://caps.example/{name}")))
+            .collect();
+        let _written = world.write_message(SlCapabilities(map));
+        let (commands, _) = step(&mut world, Vec::new())?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::QueryInventoryFolders]
+        ));
+        let (commands, _) = step(
+            &mut world,
+            vec![SlSessionEvent::InventoryFolders(
+                vec![folder(FolderType::CurrentOutfit, 160)].into(),
+            )],
+        )?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::RequestServerAppearanceUpdate { cof_version: 160 }]
+        ));
+        let (commands, _) = step(
+            &mut world,
+            vec![SlSessionEvent::ServerAppearanceUpdate {
+                success: false,
+                error: Some("Cof Version Mismatch: 160 != 161".to_owned()),
+                expected_cof_version: Some(161),
+            }],
+        )?;
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::RequestServerAppearanceUpdate { cof_version: 161 }]
+        ));
+        let (commands, _) = step(
+            &mut world,
+            vec![SlSessionEvent::ServerAppearanceUpdate {
+                success: true,
+                error: None,
+                expected_cof_version: None,
+            }],
+        )?;
+        assert!(commands.is_empty());
+        assert_eq!(
+            world.resource::<ServerBakeState>().stage,
+            super::BakeStage::Done
+        );
+        Ok(())
+    }
+
     /// Retries grow as `2^n - 1` seconds, and the one past the limit gives up
     /// (which requests a bake anyway).
     #[test]

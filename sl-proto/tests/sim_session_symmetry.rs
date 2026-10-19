@@ -483,8 +483,6 @@ mod test {
         "RemoveMuteListEntry",
         // appearance / misc agent
         "AgentIsNowWearing",
-        "AgentSetAppearance",
-        "AgentCachedTexture",
         "RequestImage",
         "RetrieveInstantMessages",
         "ScriptDialogReply",
@@ -536,8 +534,6 @@ mod test {
     /// The raw-forwarded messages the matching family test sends, in order.
     const AGENT_FAMILY: &[&str] = &[
         "AgentIsNowWearing",
-        "AgentSetAppearance",
-        "AgentCachedTexture",
         "RequestImage",
         "RetrieveInstantMessages",
         "ScriptDialogReply",
@@ -789,19 +785,6 @@ mod test {
             }],
             now,
         )?;
-        client.set_appearance(
-            3,
-            Vector {
-                x: 0.45,
-                y: 0.6,
-                z: 1.9,
-            },
-            &[0u8; 4],
-            &[128u8; 8],
-            &[(uuid::Uuid::from_u128(0x41), 0)],
-            now,
-        )?;
-        client.request_cached_textures(3, &[(uuid::Uuid::from_u128(0x51), 0)], now)?;
         client.request_texture(texture, 0, 1.0e6, now)?;
         client.retrieve_instant_messages(now)?;
         client.reply_script_dialog(
@@ -836,6 +819,60 @@ mod test {
     }
 
     // ----- client → simulator, typed events not covered elsewhere -----------
+
+    /// The legacy bake path's two messages surface typed: a publish as
+    /// `AppearanceSet`, a cache query as `CachedTexturesRequested`, and the
+    /// simulator's answer to the query reaches the client as its
+    /// `CachedTextureResponse`.
+    #[test]
+    fn the_legacy_bake_path_is_surfaced_and_answered() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        client.set_appearance(
+            3,
+            Vector {
+                x: 0.45,
+                y: 0.6,
+                z: 1.9,
+            },
+            &[0u8; 4],
+            &[128u8; 8],
+            &[(uuid::Uuid::from_u128(0x41), 8)],
+            now,
+        )?;
+        client.request_cached_textures(5, &[(uuid::Uuid::from_u128(0x51), 8)], now)?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_server(&mut sim);
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::AppearanceSet { serial: 3, visual_params, wearable_cache, .. }
+                    if visual_params == &vec![128u8; 8]
+                        && wearable_cache == &vec![(uuid::Uuid::from_u128(0x41), 8)]
+            )),
+            "the publish surfaces as AppearanceSet, got {events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::CachedTexturesRequested { serial: 5, slots }
+                    if slots == &vec![(uuid::Uuid::from_u128(0x51), 8)]
+            )),
+            "the query surfaces as CachedTexturesRequested, got {events:?}"
+        );
+        let cached = uuid::Uuid::from_u128(0x61);
+        sim.send_cached_texture_response(5, &[(8, cached)], now)?;
+        pump(&mut client, &mut sim, now)?;
+        let answered = drain_client(&mut client);
+        assert!(
+            answered.iter().any(|event| matches!(
+                event,
+                Event::CachedTextureResponse { serial: 5, textures } if textures == &vec![(8, cached)]
+            )),
+            "the answer reaches the client, got {answered:?}"
+        );
+        Ok(())
+    }
 
     #[test]
     fn region_handshake_reply_is_surfaced_during_arrival() -> Result<(), TestError> {

@@ -28,6 +28,11 @@
 //! | how an item a capability upload **rewrote** is announced ([`UploadAnnouncements::saved`]) | the legacy UDP `UpdateCreateInventoryItem` | nothing: the capability's HTTP response is the whole answer |
 //! | how an item a capability upload **created** is announced ([`UploadAnnouncements::created`]) | nothing | nothing |
 //! | who composites an avatar ([`BakePolicy`]) | the grid: an `agent_appearance_service`, the central-bake protocol bit, an `AppearanceData` block on every appearance, and the `UpdateAvatarAppearance` trigger | every viewer for itself: none of those four |
+//! | the baked-texture cache, `AgentCachedTexture` ([`BakePolicy::answers_cache_queries`]) | never answered | one entry per slot asked, in order: the bake an `AgentSetAppearance` published under that cache id, else nil |
+//! | a viewer's own publish, `AgentSetAppearance` ([`BakePolicy::keeps_published_appearance`]) | ignored | kept for the cache, and never shown to the publisher (the live grid shows it to every other viewer) |
+//! | a bake request of a version the Current Outfit Folder is not at (`UpdateAvatarAppearance`) | `400`, `success` false, "Cof Version Mismatch: asked != current", `expected` the folder's version; nothing baked | no capability |
+//! | an accepted bake, the same version again included | `200`, and the agent sent its appearance at the version baked (the live grid sends every viewer near it the same; the fake grid shows no resident to another) | no capability |
+//! | a texture the appearance service holds no bake under | `404` with an LLSD `code` 2, `"Hash mismatch: <id>"` | no service |
 //! | whether an update capability's completion names the item it rewrote ([`UpdateCompletionItem`]) | omitted: `new_asset` alone, and the client uses the id it sent | echoed: `new_inventory_item` carries the rewritten item |
 //! | the rest of `RegionProtocols` ([`region_protocol_bits`](ImitatedGrid::region_protocol_bits)) | nothing else claimed | bit 63, "more than 6 baked textures" |
 //! | the `EconomyData` price list ([`prices`](ImitatedGrid::prices)) | measured on aditi: L$ 10 an upload, L$ 100 a group, a 20 000 LI region | its `SampleMoneyModule` defaults: most prices free, no group price stated, a 15 000 LI region |

@@ -240,7 +240,7 @@ async fn handle_request(
         let Some(shared) = core.session(seq).await else {
             return Ok(plain_status(HttpStatusCode::NOT_FOUND));
         };
-        if let Some(texture) = appearance_texture_id(&path) {
+        if let Some((agent, texture)) = appearance_texture_id(&path) {
             if method != "GET" {
                 return Ok(plain_status(HttpStatusCode::METHOD_NOT_ALLOWED));
             }
@@ -262,7 +262,7 @@ async fn handle_request(
                 .map(|bytes| ranged_asset(bytes, range.as_deref(), J2C_CONTENT_TYPE));
             return Ok(match answer {
                 Some(answer) => answer_response(answer),
-                None => plain_status(HttpStatusCode::NOT_FOUND),
+                None => bake_not_found(agent, texture),
             });
         }
         let caps_response = dispatch_caps(
@@ -416,18 +416,45 @@ fn parse_byte_range(header: &str) -> Option<(usize, Option<usize>)> {
 /// deployment would use. The agent id and slot name are accepted and ignored
 /// — the store is keyed by texture id alone, and the fake grid has one
 /// appearance per session to serve.
-fn appearance_texture_id(path: &str) -> Option<uuid::Uuid> {
+fn appearance_texture_id(path: &str) -> Option<(uuid::Uuid, uuid::Uuid)> {
     let rest = path.strip_prefix("/sim/")?;
     let rest = rest.split_once('/')?.1;
     let rest = rest.strip_prefix("appearance/texture/")?;
     let mut parts = rest.split('/');
-    let _agent = parts.next()?;
+    let agent = parts.next()?;
     let _slot = parts.next()?;
     let texture = parts.next()?;
     if parts.next().is_some() {
         return None;
     }
-    uuid::Uuid::parse_str(texture).ok()
+    let agent = uuid::Uuid::parse_str(agent).unwrap_or_else(|_| uuid::Uuid::nil());
+    Some((agent, uuid::Uuid::parse_str(texture).ok()?))
+}
+
+/// The appearance service's answer for a texture it holds no bake under, as
+/// Second Life's answers it (`appearance-baking`, 2026-10-19,
+/// `book/src/gridspec/appearance.md` § Baking): `404` with an LLSD error
+/// naming the agent and the id asked for.
+fn bake_not_found(agent: uuid::Uuid, texture: uuid::Uuid) -> Response<Full<Bytes>> {
+    let body = sl_wire::Llsd::Map(
+        [
+            ("agent_id", sl_wire::Llsd::Uuid(agent)),
+            ("code", sl_wire::Llsd::Integer(2)),
+            ("debug_cof", sl_wire::Llsd::Undef),
+            (
+                "error",
+                sl_wire::Llsd::String(format!("Hash mismatch: {texture}")),
+            ),
+            ("success", sl_wire::Llsd::Boolean(false)),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect(),
+    );
+    let mut response = Response::new(Full::new(Bytes::from(body.to_llsd_xml())));
+    *response.status_mut() = HttpStatusCode::NOT_FOUND;
+    set_content_type(&mut response, "application/llsd+xml");
+    response
 }
 
 /// Parses `/sim/<seq>/…` into the session sequence number.

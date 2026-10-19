@@ -37,6 +37,10 @@ baked texture set and visual parameters); the client can also answer
 cached-texture queries (`Command::RequestCachedTextures` →
 `Event::CachedTextureResponse`) so unchanged bakes are not recomputed.
 
+How each grid answers both roads — the cache, the publish, the COF-version
+handshake and the appearance service — is measured in the *Grid behaviour*
+part's [appearance chapter](../gridspec/appearance.md#baking).
+
 If the simulator cannot find one of the agent's temporary baked textures, it
 pushes `Event::RebakeAvatarTextures { texture_id }` asking the viewer to
 regenerate that baked texture and upload it again. A baking client should

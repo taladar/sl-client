@@ -2048,6 +2048,63 @@ mod test {
         Ok(())
     }
 
+    /// `UpdateAvatarAppearance` holds a request to the Current Outfit Folder's
+    /// version as Second Life does: any other version is refused `400` naming
+    /// the one expected — which the client reads as a retry at that version —
+    /// and nothing is baked; the folder's own version is accepted.
+    #[test]
+    fn update_avatar_appearance_refuses_another_cof_version() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = new_client()?;
+        sim.agent_inventory_mut().insert_folder(InventoryFolder {
+            folder_id: folder_key(0xc0f),
+            parent_id: None,
+            name: "Current Outfit".to_owned(),
+            folder_type: sl_proto::FolderType::CurrentOutfit.to_code(),
+            version: 7,
+        });
+        let path = granted_cap_path(&caps, CAP_UPDATE_AVATAR_APPEARANCE)?;
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &post(&path, &build_update_avatar_appearance_request(0)),
+        )?;
+        assert_eq!(status, 400);
+        let body = parse_llsd_xml(&reply)?;
+        assert_eq!(
+            body.get("error"),
+            Some(&sl_proto::Llsd::String(
+                "Cof Version Mismatch: 0 != 7".to_owned()
+            ))
+        );
+        client.handle_caps_event(CAP_UPDATE_AVATAR_APPEARANCE, &body, now)?;
+        assert!(drain_client(&mut client).iter().any(|event| matches!(
+            event,
+            Event::ServerAppearanceUpdate {
+                success: false,
+                expected_cof_version: Some(7),
+                ..
+            }
+        )));
+        assert!(
+            sim.poll_event().is_none(),
+            "a refused request bakes nothing"
+        );
+        let (status, _) = respond(
+            &mut caps,
+            &mut sim,
+            &post(&path, &build_update_avatar_appearance_request(7)),
+        )?;
+        assert_eq!(status, 200);
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::ServerAppearanceRequested { cof_version: 7 })
+        ));
+        Ok(())
+    }
+
     /// `IncrementCOFVersion`: a GET bumps the served Current Outfit Folder's
     /// version and the reply folds into `Event::CofVersionIncremented` with the
     /// new one; an account without a Current Outfit Folder answers `404`, a

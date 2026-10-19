@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 82 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1402 |
+| done | 1403 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2069** |
+| **total** | **2070** |
 
 ## ideas (134)
 
@@ -248,7 +248,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-asset-service`](ideas/server-asset-service.md) — Asset service —
   grid-wide content store
 - [`server-bake-service`](ideas/server-bake-service.md) — Server-side appearance
-  bake service (blocked by `gridspec-appearance-baking`)
+  bake service (blocked by `gridspec-appearance-baking` (done))
 - [`server-economy-service`](ideas/server-economy-service.md) — Economy service
   — balances and transactions
 - [`server-estate-service`](ideas/server-estate-service.md) — Estate service —
@@ -431,6 +431,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   debug & maintenance tools (incl. Rebake)
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
+- [`viewer-bake-cache-query`](ready/viewer-bake-cache-query.md) — Ask a
+  client-baking region's cache before re-uploading the own bakes
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
   Client-side bake honours COF layer-ordering tokens
 - [`viewer-bake-publish-morph-mask`](ready/viewer-bake-publish-morph-mask.md) —
@@ -1141,8 +1143,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-appearance-baking`](ready/gridspec-appearance-baking.md) —
-  Appearance and baking on each grid
 - [`gridspec-attachments`](ready/gridspec-attachments.md) — Attachments on each
   grid: attach, detach, limits, HUDs, temporary
 - [`gridspec-avatar-render-info`](ready/gridspec-avatar-render-info.md) —
@@ -1585,7 +1585,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1402)
+## done (1403)
 
 ### protocol
 
@@ -4595,6 +4595,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   moves an agent: AgentUpdate handling, speeds, terse updates
 - [`gridspec-animations`](done/gridspec-animations.md) — Animations as each grid
   broadcasts them
+- [`gridspec-appearance-baking`](done/gridspec-appearance-baking.md) —
+  Appearance and baking on each grid
 - [`gridspec-asset-fetch-http`](done/gridspec-asset-fetch-http.md) — HTTP asset
   fetch details on each grid
 - [`gridspec-asset-upload`](done/gridspec-asset-upload.md) — Asset uploads and

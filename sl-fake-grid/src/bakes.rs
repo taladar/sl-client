@@ -69,7 +69,11 @@
 //! viewer reads that bit as an OpenSim extension (`// OS sets bit 63 when BOM
 //! supported`) and decides Bakes on Mesh support another way on Second Life.
 
-use sl_proto::AvatarAppearance;
+use std::collections::BTreeMap;
+use std::time::Instant;
+
+use sl_proto::{AvatarAppearance, ServerEvent, SimSession, avatar_texture, decode_texture_entry};
+use uuid::Uuid;
 
 /// `RegionProtocols` bit 0: this region's grid composites avatar bakes.
 ///
@@ -133,6 +137,29 @@ impl BakePolicy {
         }
     }
 
+    /// Whether the region answers an `AgentCachedTexture`.
+    ///
+    /// OpenSim answers every query, one entry per slot asked about; Second
+    /// Life answers none (`appearance-baking`, 2026-10-19,
+    /// `book/src/gridspec/appearance.md` § Baking): a central-baking region
+    /// has no cache of the viewer's own bakes to look in.
+    #[must_use]
+    pub const fn answers_cache_queries(self) -> bool {
+        matches!(self, Self::ClientSide)
+    }
+
+    /// Whether the region keeps what an `AgentSetAppearance` publishes.
+    ///
+    /// OpenSim keeps the bakes and their cache ids (a later cache query names
+    /// them) and shows them to every other viewer, not to the publisher;
+    /// Second Life ignores the message — the reference never sends it there
+    /// (`LLAgent::sendAgentSetAppearance` returns on a central-bake region),
+    /// and a grid that bakes for the agent has nothing to take from it.
+    #[must_use]
+    pub const fn keeps_published_appearance(self) -> bool {
+        matches!(self, Self::ClientSide)
+    }
+
     /// Whether the login response names an `agent_appearance_service`, and the
     /// per-session appearance-texture route answers at all.
     #[must_use]
@@ -193,6 +220,86 @@ impl BakePolicy {
     }
 }
 
+/// The bakes an agent published with `AgentSetAppearance` on a client-baking
+/// region, by texture index: each slot's cache id and the texture the
+/// published entry put there — what OpenSim keeps as the avatar's
+/// `WearableCacheItems` and answers an `AgentCachedTexture` from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PublishedBakes {
+    /// `(cache id, texture id)` by texture index.
+    slots: BTreeMap<u8, (Uuid, Uuid)>,
+}
+
+impl PublishedBakes {
+    /// Keeps what a publish names: for each `(cache id, texture index)`, the
+    /// texture the published entry holds at that index.
+    fn keep(&mut self, texture_entry: &[u8], wearable_cache: &[(Uuid, u8)]) {
+        let entry = decode_texture_entry(texture_entry, avatar_texture::COUNT);
+        for &(cache_id, index) in wearable_cache {
+            let texture = entry
+                .faces
+                .get(usize::from(index))
+                .map_or_else(Uuid::nil, |face| face.texture_id.uuid());
+            let _previous = self.slots.insert(index, (cache_id, texture));
+        }
+    }
+
+    /// The answer to a query of `slots`: each slot's kept texture where its
+    /// cache id is the one asked about and the texture is not nil, the nil id
+    /// otherwise — in the order asked.
+    fn answer(&self, slots: &[(Uuid, u8)]) -> Vec<(u8, Uuid)> {
+        slots
+            .iter()
+            .map(|&(cache_id, index)| {
+                let texture = self
+                    .slots
+                    .get(&index)
+                    .filter(|(kept, texture)| *kept == cache_id && !texture.is_nil())
+                    .map_or_else(Uuid::nil, |(_kept, texture)| *texture);
+                (index, texture)
+            })
+            .collect()
+    }
+}
+
+/// Answers a viewer's `AgentCachedTexture` and `AgentSetAppearance` as the
+/// grid `policy` names would. Anything else is not this module's, and `false`
+/// says so.
+pub(crate) fn answer(
+    published: &mut PublishedBakes,
+    policy: BakePolicy,
+    sim: &mut SimSession,
+    event: &ServerEvent,
+    now: Instant,
+) -> bool {
+    match event {
+        ServerEvent::CachedTexturesRequested { serial, slots } => {
+            if policy.answers_cache_queries()
+                && let Err(error) =
+                    sim.send_cached_texture_response(*serial, &published.answer(slots), now)
+            {
+                tracing::warn!("answering a cached-texture query failed: {error}");
+            }
+            true
+        }
+        ServerEvent::AppearanceSet {
+            texture_entry,
+            wearable_cache,
+            ..
+        } => {
+            // OpenSim shows the publish to every other viewer and never to
+            // the publisher; the fake grid shows no resident to another
+            // (`server-fake-grid-agent-avatars-shared`), so keeping it is all
+            // there is to do.
+            if policy.keeps_published_appearance() {
+                published.keep(texture_entry, wearable_cache);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
@@ -213,6 +320,44 @@ mod test {
             hover_height: None,
             attachments: Vec::new(),
         }
+    }
+
+    /// A query is answered in the order asked, naming a kept bake only where
+    /// the cache id asked about is the one it was published under.
+    #[test]
+    fn a_cache_query_names_only_the_bakes_published_under_its_ids() {
+        let plywood = Uuid::from_u128(0x89);
+        let mut faces = vec![
+            sl_proto::TextureFace::new(sl_proto::TextureKey::from(Uuid::nil()));
+            avatar_texture::COUNT
+        ];
+        if let Some(face) = faces.get_mut(avatar_texture::HEAD_BAKED) {
+            *face = sl_proto::TextureFace::new(sl_proto::TextureKey::from(plywood));
+        }
+        let entry = sl_proto::encode_texture_entry(&sl_proto::TextureEntry { faces });
+        let head = u8::try_from(avatar_texture::HEAD_BAKED).unwrap_or(0);
+        let upper = u8::try_from(avatar_texture::UPPER_BAKED).unwrap_or(0);
+        let cache = Uuid::from_u128(0xcace);
+        let mut published = PublishedBakes::default();
+        assert_eq!(
+            published.answer(&[(Uuid::nil(), head)]),
+            vec![(head, Uuid::nil())],
+            "nothing published, nothing cached"
+        );
+        published.keep(&entry, &[(cache, head), (cache, upper)]);
+        assert_eq!(
+            published.answer(&[(cache, upper), (cache, head), (Uuid::from_u128(1), head)]),
+            vec![(upper, Uuid::nil()), (head, plywood), (head, Uuid::nil())]
+        );
+    }
+
+    /// Only a client-baking region answers the cache or keeps a publish.
+    #[test]
+    fn only_a_client_baking_region_answers_the_cache() {
+        assert!(BakePolicy::ClientSide.answers_cache_queries());
+        assert!(BakePolicy::ClientSide.keeps_published_appearance());
+        assert!(!BakePolicy::ServerSide.answers_cache_queries());
+        assert!(!BakePolicy::ServerSide.keeps_published_appearance());
     }
 
     /// The server-baked side leaves the record exactly as the fixture wrote it.

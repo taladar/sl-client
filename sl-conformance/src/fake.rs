@@ -201,6 +201,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "object-touch-grab",
     "effects-sounds",
     "animations",
+    "appearance-baking",
     "animation-play-stop",
     "object-rez-derez",
     "object-rez-land",

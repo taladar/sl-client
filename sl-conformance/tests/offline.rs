@@ -127,6 +127,7 @@ mod test {
         object_touch_grab => "object-touch-grab" [fake_sl, fake_opensim],
         effects_sounds => "effects-sounds" [fake_sl, fake_opensim],
         animations => "animations" [fake_sl, fake_opensim],
+        appearance_baking => "appearance-baking" [fake_sl, fake_opensim],
         animation_play_stop => "animation-play-stop" [fake_sl, fake_opensim],
         object_rez_derez => "object-rez-derez" [fake_sl, fake_opensim],
         object_rez_land => "object-rez-land" [fake_sl, fake_opensim],

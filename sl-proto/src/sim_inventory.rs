@@ -143,6 +143,15 @@ impl SimInventoryTree {
             .min_by_key(|folder| folder.folder_id)
     }
 
+    /// The Current Outfit Folder's version, or `None` when the account has no
+    /// Current Outfit Folder: the version a central-baking grid holds a bake
+    /// request to.
+    #[must_use]
+    pub fn current_outfit_version(&self) -> Option<i32> {
+        self.folder_of_type(crate::FolderType::CurrentOutfit.to_code())
+            .map(|folder| folder.version)
+    }
+
     /// Bumps the Current Outfit Folder's version, as the grid's
     /// `IncrementCOFVersion` capability does, and returns the new version —
     /// `None` when the account has no Current Outfit Folder.

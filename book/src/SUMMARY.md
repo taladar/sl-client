@@ -53,6 +53,7 @@
 - [Teleport](gridspec/teleport.md)
 - [Movement](gridspec/movement.md)
 - [Avatars](gridspec/avatars.md)
+- [Appearance](gridspec/appearance.md)
 - [Local chat, instant messages and sessions](gridspec/chat.md)
 - [Friends and presence](gridspec/friends.md)
 - [Groups](gridspec/groups.md)

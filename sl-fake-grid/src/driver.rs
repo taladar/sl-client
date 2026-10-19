@@ -23,7 +23,7 @@ use crate::time::Now;
 use crate::udp_assets::{TerrainTerms, UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{
     AvatarIdentity, Ground, RegionChange, RegionUpdate, RegionWorld, answer_world_request,
-    push_arrival_world, push_child_world, push_own_appearance,
+    push_arrival_world, push_child_world, push_own_appearance, push_own_appearance_baked,
 };
 
 /// The lockable state of one logged-in session: the protocol machine, its
@@ -83,6 +83,9 @@ pub(crate) struct SimState {
     /// that whether it is sent its own appearance is still to be decided
     /// ([`crate::BakePolicy::sends_own_appearance`]).
     pub(crate) own_appearance_owed: bool,
+    /// What the agent published with `AgentSetAppearance`, where the grid
+    /// keeps it ([`crate::bakes::PublishedBakes`]).
+    pub(crate) published_bakes: crate::bakes::PublishedBakes,
     /// What the session knows of its agent's groups: the active one an
     /// `AgentDataUpdate` names, and the powers a deed and a move of a
     /// group's object are checked against ([`crate::groups`]).
@@ -411,7 +414,11 @@ impl SharedSim {
             if matches!(event, ServerEvent::AgentArrived) {
                 state.arrived_at = Some(now);
                 state.animations = crate::animations::AnimationSet::arriving();
-                state.own_appearance_owed = state.sim.handshake_reply_flags().is_none();
+                // Owed only where the arrival burst could not decide it: a
+                // grid that sends the agent its own appearance whatever the
+                // handshake says has already sent it with the burst.
+                state.own_appearance_owed = state.sim.handshake_reply_flags().is_none()
+                    && !state.bakes.sends_own_appearance(None);
                 // What Second Life tells an arriving agent about itself and
                 // OpenSim does not: its health, and — over the event queue —
                 // what it may do to the region's navmesh.
@@ -465,6 +472,25 @@ impl SharedSim {
                 if let Some(hook) = &state.on_agent_arrived {
                     hook(&mut state.sim, now);
                 }
+            }
+            let _baked = crate::bakes::answer(
+                &mut state.published_bakes,
+                state.bakes,
+                &mut state.sim,
+                &event,
+                now,
+            );
+            // An accepted central bake is stated back to the agent as its
+            // appearance at the version baked, as Second Life does.
+            if let ServerEvent::ServerAppearanceRequested { cof_version } = &event {
+                push_own_appearance_baked(
+                    &state.avatar,
+                    &state.assets,
+                    state.bakes,
+                    &mut state.sim,
+                    Some(*cof_version),
+                    now,
+                );
             }
             let _animated = crate::animations::answer(
                 &mut state.animations,

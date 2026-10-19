@@ -1905,6 +1905,21 @@ pub(crate) fn push_own_appearance(
     if !bakes.sends_own_appearance(sim.handshake_reply_flags()) {
         return;
     }
+    push_own_appearance_baked(identity, assets, bakes, sim, None, now);
+}
+
+/// Pushes the agent its own `AvatarAppearance`, stamped with `cof_version`
+/// — the version just baked — or, for `None`, the Current Outfit Folder's
+/// version (both grids send the agent the version its outfit is at). The
+/// record carries an `AppearanceHover` block, as both grids' do.
+pub(crate) fn push_own_appearance_baked(
+    identity: &AvatarIdentity,
+    assets: &crate::assets::GridAssets,
+    bakes: crate::bakes::BakePolicy,
+    sim: &mut SimSession,
+    cof_version: Option<i32>,
+    now: Instant,
+) {
     let appearance = NpcAppearance::solid(identity.agent_id, OWN_AVATAR_BAKE_COLOR);
     {
         let mut store = assets.write();
@@ -1915,9 +1930,18 @@ pub(crate) fn push_own_appearance(
     // Both flavours publish the same ids for the same body; only the
     // `AppearanceData` block around them tells the viewer whether to fetch them
     // from the appearance service or as ordinary assets (`crate::bakes`).
-    let record = bakes.applied(appearance.record(identity.agent_id, Vec::new()));
+    let mut record = appearance.record(identity.agent_id, Vec::new());
+    record.cof_version = cof_version
+        .or_else(|| sim.agent_inventory().current_outfit_version())
+        .or(record.cof_version);
+    record.hover_height = Some(Vector {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    let record = bakes.applied(record);
     if let Err(error) = sim.send_avatar_appearance(&record, now) {
-        tracing::warn!("sending the arriving agent's own appearance failed: {error}");
+        tracing::warn!("sending the agent's own appearance failed: {error}");
     }
 }
 

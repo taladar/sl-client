@@ -1085,6 +1085,7 @@ impl GridCore {
             },
             arrival: self.arrival_policy,
             own_appearance_owed: false,
+            published_bakes: crate::bakes::PublishedBakes::default(),
             groups: self
                 .groups
                 .lock()
