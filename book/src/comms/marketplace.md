@@ -149,7 +149,9 @@ mirroring listings should drop its local record.
 >   experience-capability fetchers. A missing capability (e.g. on
 >   OpenSim) surfaces as a connection-failure / transport event rather
 >   than a silent drop.
-> - The `marketplace-direct-delivery` conformance case (aditi-only)
->   records the transport ceiling reachable without a merchant store:
->   the probe's proper non-merchant answer and the `GET /listings`
->   behaviour.
+> - The `marketplace-direct-delivery` conformance census asks each
+>   route a storeless avatar can ask, raw and through the client, on
+>   both grids and both fake flavours; what each grid answered is in
+>   [Grid Behaviour § Marketplace](../gridspec/economy.md#marketplace).
+>   The fake grid's Second Life flavour serves the capability as
+>   aditi answers a storeless avatar (`404 Not found` on every route).

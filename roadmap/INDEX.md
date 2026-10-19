@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 344 |
+| ready | 343 |
 | blocked | 83 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1399 |
+| done | 1400 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2069** |
@@ -350,7 +350,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (344)
+## ready (343)
 
 ### protocol
 
@@ -1157,8 +1157,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the home location on each grid
 - [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
   committed LSL probe corpus and per-grid result files
-- [`gridspec-marketplace`](ready/gridspec-marketplace.md) — Marketplace direct
-  delivery on each grid
 - [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
   Notecards, embedded items and gestures on each grid
 - [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
@@ -1591,7 +1589,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1399)
+## done (1400)
 
 ### protocol
 
@@ -4636,6 +4634,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-logout`](done/gridspec-logout.md) — Logout reply, timing and what
   logout does to seats and child circuits
+- [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct
+  delivery on each grid
 - [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material
   edits and overrides on each grid
 - [`gridspec-money`](done/gridspec-money.md) — Balance, L$ transfers, pay

@@ -145,6 +145,7 @@ mod test {
         experience_info => "experience-info" [fake_sl, fake_opensim],
         experience_permissions => "experience-permissions" [fake_sl, fake_opensim],
         experience_admin_contributor => "experience-admin-contributor" [fake_sl, fake_opensim],
+        marketplace_direct_delivery => "marketplace-direct-delivery" [fake_sl, fake_opensim],
     }
 
     /// The tests declared above are exactly the offline cases, each on exactly

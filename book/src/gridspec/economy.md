@@ -2,8 +2,9 @@
 
 What each grid does with a viewer's money traffic: a balance request, a gift
 to another resident, a payment to an object and the pay buttons it offers, and
-a purchase of an object set for sale. The messages themselves are described in
-[Economy & Money](../content/economy.md) and
+a purchase of an object set for sale — and, last, the Marketplace's listing
+service ([§ Marketplace](#marketplace)). The messages themselves are described
+in [Economy & Money](../content/economy.md) and
 [Object Commerce](../content/object-commerce.md); land sales and passes are in
 [Land § Transactions](land.md#transactions), and the price list
 (`EconomyData`) and upload fees in [Assets](assets.md).
@@ -119,3 +120,51 @@ OpenSim (`ObjectPropertiesFamily`).
   as every agent alert does (see [Land § Transactions](land.md#transactions)).
 - Second Life's keyed alerts (`NowOwnObject`, `InventoryNotForSale`) raise
   their catalogue notices through the alert host.
+
+## Marketplace
+
+Whether a region grants the Second Life Marketplace's `DirectDelivery`
+capability, and what the listing service behind it answers each route for an
+avatar with no merchant store. The routes are described in
+[Marketplace JSON (SLM)](../comms/marketplace.md).
+
+Measured on 2026-10-19 on aditi (four runs) and the local OpenSim (three runs)
+by the census `marketplace-direct-delivery`, one avatar, asking each route raw
+(status, media type, redirect, body) and then through our own client's
+commands. None of the test accounts has a store, so the routes that change a
+listing in place (`PUT /listing/<id>`, `PUT /associate_inventory/<id>`,
+`DELETE /listing/<id>`) are not asked: they would name a listing of the
+avatar's own, which it has none of. What a merchant is answered is
+**unmeasured** and needs a merchant store.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `DirectDelivery` in the seed grant | granted (to a storeless avatar too) | **not granted** | Second Life: granted; OpenSim: withheld |
+| `GET /merchant`, no JSON headers | `404`, `text/plain; charset=utf-8`, body `Not found`, no redirect | — | Second Life: the same; OpenSim: — |
+| `GET /listings` | the same `404 Not found` | — | the same as its grid |
+| `GET /listing/1` (nobody's) | the same `404 Not found` | — | the same as its grid |
+| `POST /listings` of a nil listing folder | the same `404 Not found` | — | the same as its grid |
+| `GET /census-unknown-route` | the same `404 Not found` | — | the same as its grid |
+
+The merchant probe's `404` is the reference's "not a merchant", but a route
+the service does not have answers it too, word for word: for a storeless
+avatar, nothing behind the capability tells the service's refusal from a
+missing route, and a client cannot learn more than "not a merchant". The fake
+grid's Second Life flavour serves exactly that (`SimCaps`'s `DirectDelivery`
+handler) and keeps no stores.
+
+## The viewer and the marketplace
+
+- **The client's reading.** Our client reads Second Life's probe as *not a
+  merchant* and its listings answer as an SLM error (`404`, the body as the
+  message), the reference's `MARKET_FETCH_FAILED`. Without the capability
+  (OpenSim) both commands answer a connection failure naming the missing
+  capability, as the reference does for an empty capability URL. The census
+  holds both readings on all four grids.
+- **The viewer** shows no marketplace interface yet: the Content menu has no
+  Marketplace Listings entry and the inventory's marketplace menu block is
+  left out, so there is nothing to hide on a grid without the capability. The
+  listings window, the inventory's marketplace block and the merchant notices
+  are the roadmap task `viewer-inventory-marketplace-operations`, which can
+  now be built against the measured storeless answer the fake grid's Second
+  Life flavour serves.

@@ -42,3 +42,13 @@ Parity-audit extension: Received-Items (inbox) folder visibility
 toggles — show the inbox folder in the regular inventory tree
 (`FSShowInboxFolder`) and always show the inbox button/panel even when
 empty (`FSAlwaysShowInboxButton`).
+
+## From gridspec-marketplace (2026-10-19)
+
+Second Life grants `DirectDelivery` to a storeless avatar and answers its
+every route `404 Not found` (`text/plain`), which the client reads as "not a
+merchant" and, for the listings, as an SLM error; OpenSim grants none
+(`book/src/gridspec/economy.md` § Marketplace). The fake grid's Second Life
+flavour serves exactly that answer, so the storeless path (the reference's
+"not a merchant" listings window) can be e2e-tested offline. A merchant's
+answers are unmeasured.

@@ -92,7 +92,7 @@ use crate::{
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
     CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_FRIENDSHIP,
-    CAP_DECLINE_GROUP_INVITE, CAP_DISPATCH_REGION_INFO, CAP_ESTATE_ACCESS,
+    CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY, CAP_DISPATCH_REGION_INFO, CAP_ESTATE_ACCESS,
     CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
     CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
     CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
@@ -265,6 +265,8 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_REGION_SCHEDULE,
     // The region's PBR terrain overrides.
     CAP_MODIFY_REGION,
+    // The Marketplace's listing service, as it answers an avatar with no store.
+    CAP_DIRECT_DELIVERY,
     // A template message posted as LLSD (the god kick).
     CAP_UNTRUSTED_SIMULATOR_MESSAGE,
     // The voice signalling cluster.
@@ -361,6 +363,9 @@ pub enum CapHandler {
     /// The `ModifyRegion` GET and POST of the region's PBR terrain overrides,
     /// handed to the driver ([`CapsDispatch::ModifyRegion`]).
     ModifyRegion,
+    /// The Second Life Marketplace's `DirectDelivery` listing service, as it
+    /// answers an avatar with no merchant store: `404` on every route.
+    DirectDelivery,
     /// The `UntrustedSimulatorMessage` POST of a template message as LLSD,
     /// handed to the driver ([`CapsDispatch::UntrustedMessage`]).
     UntrustedSimulatorMessage,
@@ -1054,6 +1059,7 @@ impl SimCaps {
             CAP_DISPATCH_REGION_INFO => Some(CapHandler::DispatchRegionInfo),
             CAP_REGION_SCHEDULE => Some(CapHandler::RegionSchedule),
             CAP_MODIFY_REGION => Some(CapHandler::ModifyRegion),
+            CAP_DIRECT_DELIVERY => Some(CapHandler::DirectDelivery),
             CAP_UNTRUSTED_SIMULATOR_MESSAGE => Some(CapHandler::UntrustedSimulatorMessage),
             CAP_EXPERIENCE_QUERY => Some(CapHandler::ExperienceQuery),
             CAP_PROVISION_VOICE_ACCOUNT => Some(CapHandler::ProvisionVoiceAccount),
@@ -1171,6 +1177,9 @@ impl SimCaps {
                     Some(CapHandler::DispatchRegionInfo) => Self::dispatch_region_info(request),
                     Some(CapHandler::RegionSchedule) => Self::dispatch_region_schedule(request),
                     Some(CapHandler::ModifyRegion) => Self::dispatch_modify_region(request),
+                    Some(CapHandler::DirectDelivery) => {
+                        CapsDispatch::Response(Self::dispatch_direct_delivery())
+                    }
                     Some(CapHandler::UntrustedSimulatorMessage) => {
                         Self::dispatch_untrusted_message(request)
                     }
@@ -1875,6 +1884,23 @@ impl SimCaps {
             sim.push_side_upload(ServerEvent::DisplayNameChanged(Box::new(update)));
         }
         CapsResponse::llsd_xml(Llsd::Map(HashMap::new()).to_llsd_xml())
+    }
+
+    /// Serves one request of the Marketplace's `DirectDelivery` listing
+    /// service the way Second Life's answers an avatar with no merchant store:
+    /// `404` with a plain-text `Not found` on every route and method — the
+    /// merchant probe (which the client reads as "not a merchant"), the
+    /// listings, a listing, a new listing and a route the service does not
+    /// have alike (`marketplace-direct-delivery`, 2026-10-19). A fake grid
+    /// keeps no stores.
+    fn dispatch_direct_delivery() -> CapsResponse {
+        CapsResponse {
+            status: 404,
+            content_type: "text/plain; charset=utf-8",
+            content_range: None,
+            headers: Vec::new(),
+            body: b"Not found".to_vec(),
+        }
     }
 
     /// Serves one `SearchStatRequest` POST of `{ classified_id }` with the
@@ -3852,7 +3878,7 @@ mod tests {
             ("LandResources", CapStatus::Served),
             ("SendUserReport", CapStatus::Served),
             ("SendUserReportWithScreenshot", CapStatus::Served),
-            ("DirectDelivery", CapStatus::Pending),
+            ("DirectDelivery", CapStatus::Served),
             ("InterestList", CapStatus::Served),
             ("UpdateGestureTaskInventory", CapStatus::Served),
             ("UpdateMaterialTaskInventory", CapStatus::Served),

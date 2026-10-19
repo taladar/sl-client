@@ -1745,7 +1745,10 @@ pub const SECOND_LIFE_REFUSED_CAPABILITIES: &[&str] = &["ObjectAnimation", "Uplo
 /// (`ProductInfoRequest`: OpenSim answers no land search to name a type in;
 /// `search-directory`, 2026-10-16), and the region's PBR terrain overrides
 /// (`ModifyRegion`: OpenSim has no PBR terrain; `terrain-editing`,
-/// 2026-10-18).
+/// 2026-10-18), and the Marketplace's listing service (`DirectDelivery`:
+/// OpenSim has no marketplace, while Second Life grants it to a storeless
+/// avatar and answers its every route `404 Not found`;
+/// `marketplace-direct-delivery`, 2026-10-19).
 pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "AcceptFriendship",
     "AcceptGroupInvite",

@@ -188,8 +188,9 @@ mod test {
         // (EstateAccess), and the region settings write and restart schedule
         // (DispatchRegionInfo, RegionSchedule), and the region's PBR terrain
         // overrides (ModifyRegion), and the LLSD message transport
-        // (UntrustedSimulatorMessage).
-        assert_eq!(granted.len(), 85);
+        // (UntrustedSimulatorMessage), and the Marketplace's listing service
+        // (DirectDelivery).
+        assert_eq!(granted.len(), 86);
         Ok(())
     }
 
