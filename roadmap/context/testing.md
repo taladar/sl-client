@@ -203,8 +203,9 @@ reason.
   an opaque occluder is `Hidden`; under a translucent one `SeeThrough`;
   otherwise `Visible`. A scene overrides a rule only with a `reason`.
 - **Determinism before serialisation before exclusion.** GPU tests stay in
-  the pre-commit `nextest` run: the `gpu` test-group in
-  `.config/nextest.toml` runs one GPU app at a time and `gpu_lock()`
+  the pre-commit `nextest` run: the `viewer` test-group in
+  `.config/nextest.toml` runs one GPU app or e2e viewer test at a time
+  (beside four other tests at most) and `gpu_lock()`
   serialises plain `cargo test`; the rig disables pipelined rendering,
   drives time with `TimeUpdateStrategy::ManualDuration`, and holds the
   clock for the captured frame. Wall time is not a design constraint yet
