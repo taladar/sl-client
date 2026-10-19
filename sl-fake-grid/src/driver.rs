@@ -133,6 +133,14 @@ pub(crate) struct SimState {
     pub(crate) god_mode: crate::god_powers::GodMode,
     /// How the grid words its `UntrustedSimulatorMessage` answers.
     pub(crate) untrusted_style: sl_proto::UntrustedMessageStyle,
+    /// Every account's home, which a Set-Home of this session's agent writes.
+    pub(crate) homes: crate::agent_requests::Homes,
+    /// Who may set home where, what the grid says about it and what its
+    /// landmarks hold ([`crate::ImitatedGrid::home_policy`]).
+    pub(crate) home_policy: crate::imitates::HomePolicy,
+    /// The last thing this session's agent was told about its home, and when
+    /// ([`crate::imitates::HomePolicy::repeat_quiet`]).
+    pub(crate) home_told: Option<(std::time::Instant, crate::imitates::HomeNotice)>,
     /// Who the agent is, for its own avatar object.
     pub(crate) avatar: AvatarIdentity,
     /// What this client holds **selected**, which is the subscription an
@@ -486,7 +494,15 @@ impl SharedSim {
             let _upload = crate::uploads::answer_upload(
                 &state.assets,
                 &state.world,
-                state.upload_announcements,
+                crate::uploads::UploadTerms {
+                    announcements: state.upload_announcements,
+                    landmarks: crate::uploads::LandmarkTerms {
+                        body: state.home_policy.landmark_body,
+                        masks: state.home_policy.landmark_masks,
+                        region_id: state.identity.region_id,
+                        region_handle: state.identity.region_handle,
+                    },
+                },
                 &mut state.sim,
                 &event,
                 &move || upload_minter.uuid(),
@@ -563,6 +579,11 @@ impl SharedSim {
             );
             crate::agent_requests::answer_agent_request(
                 state.policy,
+                crate::agent_requests::HomeStore {
+                    homes: &state.homes,
+                    region_id: state.identity.region_id,
+                    policy: &state.home_policy,
+                },
                 &state.world.lock(),
                 state.avatar.agent_id,
                 &mut state.sim,

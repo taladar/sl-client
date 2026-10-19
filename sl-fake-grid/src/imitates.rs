@@ -81,6 +81,9 @@
 //! | the RAW heightmap transfers ([`EstatePolicy::terrain_transfer_alerts`]) | an estate manager's only, a resident's ignored without a word; no alert (unmeasured) | the same, each step narrated in an alert |
 //! | when new terrain heights are told ([`EstatePolicy::terrain_heights_told_per_corner`]) | a handshake on the commit (unmeasured) | a `RegionInfo` and a handshake per corner, nothing on the commit |
 //! | the region's PBR terrain overrides (`ModifyRegion`) | granted; four `undef` overrides read, a resident's write refused `403` with an LLSD answer naming the region | not granted |
+//! | who may set home, and what is said ([`home_policy`](ImitatedGrid::home_policy)) | the land's owner; the `HomeLocation` answer echoes the position asked, stored or not, with a refusal keyed `HomeLocationLimits` beside it (`ListValidHomeLocations` over UDP), the same notice left unsaid for 10 s, and `undef` for a body naming no location | the land's owner and an estate manager, anywhere in the region; the answer names the position only when stored, as `text/html`, with plain alerts and "Home position set." keyed `HomePositionSet` |
+//! | a landmark's body and masks ([`HomePolicy::landmark_body`], [`HomePolicy::landmark_masks`]) | the position to two decimals, no handle; masks `0x7fffffff`, everyone `0x7fffbfff` | the position as its floats print, and the region's handle; masks `0x0009e000`, everyone `0x0009a000` |
+//! | the flags beside a home or a landmark teleport's kind ([`TeleportPolicy::kind_flags`]) | none — and within a region no `WITHIN_REGION`, and the kind line all the same | `SET_LAST_TO_TARGET` |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
 //! | the kill a derez sends ([`RezPolicy::derez_kill`]) | one `KillObject` naming every prim of the linkset | two, each naming the root alone |
@@ -564,6 +567,7 @@ impl ImitatedGrid {
                 progress: &["resolving", "Sending to destination."],
                 names_the_kind: true,
                 local_flags: sl_types::map::TeleportFlags::WITHIN_REGION,
+                kind_flags: 0,
                 local_look_at: LocalLookAt::TowardsRegionOrigin,
                 finish_location_id: sl_proto::TELEPORT_FINISH_LOCATION_ID_SECOND_LIFE,
                 finish_states_region_size: false,
@@ -584,6 +588,7 @@ impl ImitatedGrid {
                 progress: &[],
                 names_the_kind: false,
                 local_flags: 0,
+                kind_flags: sl_types::map::TeleportFlags::SET_LAST_TO_TARGET,
                 local_look_at: LocalLookAt::Requested,
                 finish_location_id: sl_proto::TELEPORT_FINISH_LOCATION_ID,
                 finish_states_region_size: true,
@@ -1089,6 +1094,82 @@ impl ImitatedGrid {
         match self {
             Self::SecondLife => sl_proto::UntrustedMessageStyle::Llsd,
             Self::OpenSim => sl_proto::UntrustedMessageStyle::Bare,
+        }
+    }
+
+    /// How this grid answers "Set Home to Here" and what a landmark it makes
+    /// holds — measured by the `landmarks-home` census on aditi and the local
+    /// OpenSim (2026-10-19, `book/src/gridspec/teleport.md` § Home and
+    /// landmarks).
+    ///
+    /// OpenSim lets the land's owner and an estate manager set home anywhere
+    /// in the region, over either road, and says so in an alert beside the
+    /// capability's answer; Second Life refuses a resident on land it does not
+    /// own with a keyed alert (`HomeLocationLimits` beside the capability,
+    /// `ListValidHomeLocations` over UDP) and echoes the position it was asked
+    /// even when refusing.
+    #[must_use]
+    pub const fn home_policy(self) -> HomePolicy {
+        match self {
+            Self::SecondLife => HomePolicy {
+                capability: sl_proto::HomeLocationStyle::SecondLife,
+                managers_may_set_home: false,
+                udp: HomeNotices {
+                    stored: HomeNotice::AgentAlert(HOME_SET),
+                    refused: HomeNotice::Alert {
+                        message: SL_HOME_LIMITS,
+                        key: Some("ListValidHomeLocations"),
+                    },
+                    outside: HomeNotice::Nothing,
+                    no_location: HomeNotice::Nothing,
+                },
+                capability_notices: HomeNotices {
+                    stored: HomeNotice::Alert {
+                        message: HOME_SET,
+                        key: Some("HomePositionSet"),
+                    },
+                    refused: HomeNotice::Alert {
+                        message: SL_HOME_LIMITS,
+                        key: Some("HomeLocationLimits"),
+                    },
+                    outside: HomeNotice::Nothing,
+                    no_location: HomeNotice::Nothing,
+                },
+                landmark_body: LandmarkBody::SecondLife,
+                landmark_masks: [0x7fff_ffff, 0x7fff_ffff, 0x7fff_ffff, 0x7fff_bfff],
+                repeat_quiet: Some(std::time::Duration::from_secs(10)),
+            },
+            Self::OpenSim => HomePolicy {
+                capability: sl_proto::HomeLocationStyle::OpenSim,
+                managers_may_set_home: true,
+                udp: HomeNotices {
+                    stored: HomeNotice::AgentAlert(HOME_SET),
+                    refused: HomeNotice::AgentAlert(OPENSIM_HOME_REFUSED),
+                    outside: HomeNotice::AgentAlert("Set Home request failed."),
+                    no_location: HomeNotice::AgentAlert("Set Home request failed."),
+                },
+                capability_notices: HomeNotices {
+                    stored: HomeNotice::Alert {
+                        message: HOME_SET,
+                        key: Some("HomePositionSet"),
+                    },
+                    refused: HomeNotice::Alert {
+                        message: OPENSIM_HOME_REFUSED,
+                        key: None,
+                    },
+                    outside: HomeNotice::Alert {
+                        message: "Set Home request failed",
+                        key: None,
+                    },
+                    no_location: HomeNotice::Alert {
+                        message: "Set Home request failed",
+                        key: None,
+                    },
+                },
+                landmark_body: LandmarkBody::OpenSim,
+                landmark_masks: [0x0009_e000, 0x0009_e000, 0x0009_e000, 0x0009_a000],
+                repeat_quiet: None,
+            },
         }
     }
 
@@ -2097,6 +2178,93 @@ pub enum CrossingLookAt {
     FlightVelocity,
 }
 
+/// The alert a stored Set-Home is answered with on both grids. OpenSim's
+/// `LandManagementModule` notes that the text has to be exactly this, or the
+/// reference viewer does not save its home screenshot.
+pub const HOME_SET: &str = "Home position set.";
+
+/// OpenSim's refusal of a Set-Home on land the agent may not make its home,
+/// verbatim from its `LandManagementModule`.
+pub const OPENSIM_HOME_REFUSED: &str =
+    "You are not allowed to set your home location in this parcel.";
+
+/// Second Life's refusal of a Set-Home on land the agent may not make its
+/// home, as aditi words it under both of its keys.
+pub const SL_HOME_LIMITS: &str =
+    "You can only set your 'Home Location' on your land or at a mainland Infohub.";
+
+/// What a grid tells an agent about a Set-Home, beside or instead of an
+/// answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HomeNotice {
+    /// Nothing at all.
+    Nothing,
+    /// An `AgentAlertMessage` of this text.
+    AgentAlert(&'static str),
+    /// An `AlertMessage` of this text, keyed where the grid keys it.
+    Alert {
+        /// The text.
+        message: &'static str,
+        /// The reference viewer's notification key, in an `AlertInfo`.
+        key: Option<&'static str>,
+    },
+}
+
+/// What a grid tells an agent about each outcome of one road of Set-Home.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HomeNotices {
+    /// The location was stored.
+    pub stored: HomeNotice,
+    /// The location was refused by the set-home rule.
+    pub refused: HomeNotice,
+    /// The location is outside the region.
+    pub outside: HomeNotice,
+    /// The request named no location.
+    pub no_location: HomeNotice,
+}
+
+/// How a grid writes a landmark's body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LandmarkBody {
+    /// `region_id` and `local_pos` to two decimals.
+    SecondLife,
+    /// `region_id`, `local_pos` as its floats print and `region_handle`
+    /// (`InventoryAccessModule.GenerateLandmark`).
+    OpenSim,
+}
+
+/// How a grid answers "Set Home to Here" and what its landmarks hold
+/// ([`ImitatedGrid::home_policy`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HomePolicy {
+    /// How the `HomeLocation` capability words its answers.
+    pub capability: sl_proto::HomeLocationStyle,
+    /// Whether an estate manager may set home anywhere in the region
+    /// (OpenSim's `IsAdministrator`); the land's owner always may.
+    pub managers_may_set_home: bool,
+    /// What the UDP `SetStartLocationRequest` is answered with.
+    pub udp: HomeNotices,
+    /// What is told beside the capability's answer.
+    pub capability_notices: HomeNotices,
+    /// How a landmark's body is written.
+    pub landmark_body: LandmarkBody,
+    /// A new landmark's base, owner, group and everyone masks (the next
+    /// owner's is the creator's to ask).
+    pub landmark_masks: [u32; 4],
+    /// How long after telling an agent something about its home the grid
+    /// leaves the same notice unsaid: aditi sent no second `HomeLocationLimits`
+    /// 6 s after the first and sent one 18 s after; ten seconds is a bound
+    /// between the two, not a measured figure.
+    pub repeat_quiet: Option<std::time::Duration>,
+}
+
+impl Default for HomePolicy {
+    /// The Second Life policy, matching the default flavour.
+    fn default() -> Self {
+        ImitatedGrid::SecondLife.home_policy()
+    }
+}
+
 /// How a grid runs and refuses a teleport
 /// ([`ImitatedGrid::teleport_policy`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2111,8 +2279,14 @@ pub struct TeleportPolicy {
     /// [`progress`](Self::progress).
     pub names_the_kind: bool,
     /// The flags added to the request's own on a local teleport's
-    /// `TeleportStart` and `TeleportLocal`.
+    /// `TeleportStart` and `TeleportLocal` — of a teleport to a location or a
+    /// lure: a home or a landmark teleport that turns out to be local carries
+    /// its kind alone on Second Life (`landmarks-home`, 2026-10-19).
     pub local_flags: u32,
+    /// The flags a home or a landmark teleport carries beside its kind:
+    /// OpenSim's `SET_LAST_TO_TARGET` (`EntityTransferModule.TeleportHome`,
+    /// `Scene.RequestTeleportLandmark`), nothing on Second Life.
+    pub kind_flags: u32,
     /// Which way a `TeleportLocal` says the agent faces.
     pub local_look_at: LocalLookAt,
     /// The `LocationID` of a `TeleportFinish`.

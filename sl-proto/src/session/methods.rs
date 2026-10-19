@@ -1346,6 +1346,12 @@ impl Session {
                     Err(error) => self.caps_decode_error(message, &error),
                 }
             }
+            // The answer to a `HomeLocation` POST: whether the grid stored the
+            // location, and where. A refusal says why in an alert of its own.
+            CapsEvent::HomeLocation => match sl_wire::parse_home_location_answer(body) {
+                Ok(answer) => self.events.push_back(Event::HomeLocationAnswered(answer)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             // The reply to a `RegionExperiences` GET or POST: the region's
             // allow/block/trust lists.
             CapsEvent::RegionExperiences => match parse_region_experiences(body) {

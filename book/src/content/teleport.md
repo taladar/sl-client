@@ -52,6 +52,13 @@ location (`SetStartLocationRequest`): it stores the region-local `position` and
 viewer's other `EStartLocation` ordinals (`Last`, `Direct`, `Parcel`,
 `Telehub`, `Url`).
 
+Where the region grants the `HomeLocation` capability — both grids do — the
+command is a POST to it, as the reference viewer sends it, and its answer is
+`Event::HomeLocationAnswered`: whether the grid stored the location, and the
+position it names. A region without the capability is asked over UDP. Either
+way the grid says why in an alert of its own; what each grid allows and says
+is in [Grid Behaviour → Teleport](../gridspec/teleport.md#home-and-landmarks).
+
 > The login-time `start=` parameter is a *different* type — the SLURL-style
 > [`StartLocation`](login.md) (`last` / `home` / `uri:Region&x&y&z`) that says
 > *where to log in*. `StartLocationSlot` is the wire `LocationID` of the request

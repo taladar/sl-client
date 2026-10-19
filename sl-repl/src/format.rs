@@ -276,6 +276,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::RegionSchedule(..) => "region_schedule",
         Event::TerrainMaterialOverrides(..) => "terrain_material_overrides",
         Event::TerrainMaterialOverridesWritten(..) => "terrain_material_overrides_written",
+        Event::HomeLocationAnswered(..) => "home_location_answered",
         Event::RegionRestart(..) => "region_restart",
         Event::EstateCovenant(..) => "estate_covenant",
         Event::TelehubInfo(..) => "telehub_info",

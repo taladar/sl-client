@@ -14,19 +14,16 @@
 
 use std::time::Instant;
 
-use sl_proto::{AgentKey, ServerEvent, SimSession, TransactionId};
+use std::collections::HashMap;
+use std::sync::Arc;
 
+use sl_proto::{AgentKey, RegionCoordinates, ServerEvent, SimSession, TransactionId};
+use sl_types::lsl::Vector;
+use uuid::Uuid;
+
+use crate::imitates::{HomeNotice, HomeNotices, HomePolicy};
 use crate::inventory::LegacyUdpInventory;
 use crate::world::SceneFixtures;
-
-/// The alert a simulator answers a stored Set-Home with. OpenSim's
-/// `LandManagementModule` notes that the text has to be exactly this, or the
-/// reference viewer does not save its home screenshot.
-const HOME_SET: &str = "Home position set.";
-
-/// The alert a simulator answers a refused Set-Home with, verbatim from
-/// OpenSim's `LandManagementModule`.
-const HOME_REFUSED: &str = "You are not allowed to set your home location in this parcel.";
 
 /// The `ErrorMessage` a refused deprecated inventory fetch carries.
 const LEGACY_INVENTORY_REFUSED: &str = "The UDP inventory fetch is deprecated on this grid; use the \
@@ -49,10 +46,151 @@ pub struct AgentPolicy {
     pub legacy_udp_inventory: LegacyUdpInventory,
 }
 
+/// A home an account set: the region, and where in it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StoredHome {
+    /// The region's id.
+    pub(crate) region_id: Uuid,
+    /// Where in the region.
+    pub(crate) position: RegionCoordinates,
+    /// The direction to face on arrival.
+    pub(crate) look_at: Vector,
+}
+
+/// Every account's home, once it has set one: grid-wide, since a home is the
+/// account's and not the region's, and shared by every session of the grid.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Homes(Arc<parking_lot::Mutex<HashMap<AgentKey, StoredHome>>>);
+
+impl Homes {
+    /// The home `agent` set, if it has.
+    pub(crate) fn get(&self, agent: AgentKey) -> Option<StoredHome> {
+        self.0.lock().get(&agent).cloned()
+    }
+
+    /// Records `home` as `agent`'s.
+    pub(crate) fn set(&self, agent: AgentKey, home: StoredHome) {
+        let _previous = self.0.lock().insert(agent, home);
+    }
+}
+
+/// Where a session's Set-Home is stored and by which rule: the grid's homes,
+/// the region the session is of, and the grid's home policy.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HomeStore<'a> {
+    /// Every account's home.
+    pub(crate) homes: &'a Homes,
+    /// The session's region.
+    pub(crate) region_id: Uuid,
+    /// Who may set home where, and what the grid says about it
+    /// ([`ImitatedGrid::home_policy`](crate::ImitatedGrid::home_policy)).
+    pub(crate) policy: &'a HomePolicy,
+}
+
+/// What a Set-Home came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SetHome {
+    /// The location was stored.
+    Stored,
+    /// The set-home rule refused it.
+    Refused,
+    /// The position is outside the region.
+    Outside,
+    /// The request named no location.
+    NoLocation,
+}
+
+impl SetHome {
+    /// What `notices` says about this outcome.
+    pub(crate) const fn notice(self, notices: &HomeNotices) -> HomeNotice {
+        match self {
+            Self::Stored => notices.stored,
+            Self::Refused => notices.refused,
+            Self::Outside => notices.outside,
+            Self::NoLocation => notices.no_location,
+        }
+    }
+}
+
+/// Applies the grid's set-home rule to a Set-Home of `position` by `agent_id`,
+/// storing it where the rule allows: the land's owner may set home on it, and
+/// on a grid that lets them an estate manager may set home anywhere in the
+/// region (OpenSim's `IsAdministrator`).
+pub(crate) fn set_home(
+    estate_manager: bool,
+    store: HomeStore<'_>,
+    world: &SceneFixtures,
+    agent_id: AgentKey,
+    position: RegionCoordinates,
+    look_at: &Vector,
+) -> SetHome {
+    let Some(parcel) = world.parcel_at(position.x(), position.y()) else {
+        return SetHome::Outside;
+    };
+    let allowed = parcel.owner.uuid() == agent_id.uuid()
+        || (store.policy.managers_may_set_home && estate_manager);
+    if !allowed {
+        return SetHome::Refused;
+    }
+    store.homes.set(
+        agent_id,
+        StoredHome {
+            region_id: store.region_id,
+            position,
+            look_at: look_at.clone(),
+        },
+    );
+    SetHome::Stored
+}
+
+/// Tells `agent_id` `notice`, unless the grid leaves a repeat of the last
+/// notice unsaid and `last` is that notice, told within the quiet.
+pub(crate) fn tell(
+    sim: &mut SimSession,
+    agent_id: AgentKey,
+    notice: HomeNotice,
+    quiet: (
+        Option<std::time::Duration>,
+        &mut Option<(Instant, HomeNotice)>,
+    ),
+    now: Instant,
+) {
+    let (quiet, last) = quiet;
+    if let (Some(quiet), Some((at, told))) = (quiet, *last)
+        && told == notice
+        && now.saturating_duration_since(at) < quiet
+    {
+        return;
+    }
+    if notice != HomeNotice::Nothing {
+        *last = Some((now, notice));
+    }
+    let sent = match notice {
+        HomeNotice::Nothing => Ok(()),
+        HomeNotice::AgentAlert(message) => {
+            sim.send_agent_alert_message(agent_id, false, message, now)
+        }
+        HomeNotice::Alert { message, key } => {
+            let info: Vec<sl_proto::AlertInfo> = key
+                .map(|key| sl_proto::AlertInfo {
+                    message: key.to_owned(),
+                    extra_params: String::new(),
+                })
+                .into_iter()
+                .collect();
+            sim.send_alert_message(message, &info, &[], now)
+        }
+    };
+    if let Err(error) = sent {
+        tracing::warn!("answering a set-home request failed: {error}");
+    }
+}
+
 /// Answers one drained [`ServerEvent`] about the agent itself. Anything this
 /// module has no answer for is left alone.
 pub(crate) fn answer_agent_request(
     policy: AgentPolicy,
+    homes: HomeStore<'_>,
     world: &SceneFixtures,
     agent_id: AgentKey,
     sim: &mut SimSession,
@@ -92,22 +230,28 @@ pub(crate) fn answer_agent_request(
                 tracing::warn!("answering a name request failed: {error}");
             }
         }
-        // Set-Home. *Every* outcome is answered — that is what makes it the
-        // one deterministic way to provoke an `AgentAlertMessage` — and which
-        // outcome depends on the rule OpenSim applies: the land's owner may
-        // set home on it, and nobody else may.
-        ServerEvent::SetStartLocation { position, .. } => {
-            let owns_the_land = world
-                .parcel_at(position.x(), position.y())
-                .is_some_and(|parcel| parcel.owner.uuid() == agent_id.uuid());
-            let message = if owns_the_land {
-                HOME_SET
-            } else {
-                HOME_REFUSED
-            };
-            if let Err(error) = sim.send_agent_alert_message(agent_id, false, message, now) {
-                tracing::warn!("answering a set-home request failed: {error}");
-            }
+        // Set-Home over UDP: the grid's rule, and what it says of each
+        // outcome. OpenSim answers every one, which makes it the one
+        // deterministic way to provoke an `AgentAlertMessage` there.
+        ServerEvent::SetStartLocation {
+            position, look_at, ..
+        } => {
+            let outcome = set_home(
+                policy.estate_manager,
+                homes,
+                world,
+                agent_id,
+                *position,
+                look_at,
+            );
+            // A repeat over UDP was not measured: every one is told.
+            tell(
+                sim,
+                agent_id,
+                outcome.notice(&homes.policy.udp),
+                (None, &mut None),
+                now,
+            );
         }
         // The deprecated UDP inventory fetch, and which of the three roads
         // this grid takes is the flavour's answer, not this module's: a grid

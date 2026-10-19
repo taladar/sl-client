@@ -98,13 +98,14 @@ use crate::{
     CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
     CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_METADATA,
     CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
-    CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
-    CAP_MODIFY_MATERIAL_PARAMS, CAP_MODIFY_REGION, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_GROUP_MEMBER_DATA, CAP_HOME_LOCATION, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST,
+    CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
+    CAP_MESH_UPLOAD_FLAG, CAP_MODIFY_MATERIAL_PARAMS, CAP_MODIFY_REGION,
+    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED, CAP_SEARCH_STAT_REQUEST,
     CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES, CAP_UNTRUSTED_SIMULATOR_MESSAGE,
@@ -267,6 +268,8 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_MODIFY_REGION,
     // The Marketplace's listing service, as it answers an avatar with no store.
     CAP_DIRECT_DELIVERY,
+    // "Set Home to Here".
+    CAP_HOME_LOCATION,
     // A template message posted as LLSD (the god kick).
     CAP_UNTRUSTED_SIMULATOR_MESSAGE,
     // The voice signalling cluster.
@@ -366,6 +369,9 @@ pub enum CapHandler {
     /// The Second Life Marketplace's `DirectDelivery` listing service, as it
     /// answers an avatar with no merchant store: `404` on every route.
     DirectDelivery,
+    /// "Set Home to Here" (`HomeLocation`), handed to the driver
+    /// ([`CapsDispatch::HomeLocation`]).
+    HomeLocation,
     /// The `UntrustedSimulatorMessage` POST of a template message as LLSD,
     /// handed to the driver ([`CapsDispatch::UntrustedMessage`]).
     UntrustedSimulatorMessage,
@@ -742,6 +748,11 @@ pub enum CapsDispatch {
     /// A message posted to `UntrustedSimulatorMessage`. The driver acts on it
     /// and answers with [`SimCaps::untrusted_message_response`].
     UntrustedMessage(sl_wire::UntrustedMessage),
+    /// A "Set Home to Here" posted to `HomeLocation`: the location asked for,
+    /// or `None` for a body that names none, which a grid refuses rather than
+    /// rejects. The driver applies its set-home rule and answers with
+    /// [`SimCaps::home_location_response`].
+    HomeLocation(Option<sl_wire::HomeLocationRequest>),
 }
 
 /// What a driver answers a [`CapsDispatch::UntrustedMessage`] with.
@@ -765,6 +776,32 @@ pub enum UntrustedMessageStyle {
     /// Second Life: `200` with an `undef` LLSD body for any god kick, and
     /// `404` "Not Found" for a message it does not know.
     Llsd,
+}
+
+/// The media type OpenSim's HTTP server states for a handler that sets none.
+const OPENSIM_DEFAULT_CONTENT_TYPE: &str = "text/html;charset=UTF-8";
+
+/// How a grid words its answers to `HomeLocation`, measured by the
+/// `landmarks-home` census on 2026-10-19.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HomeLocationStyle {
+    /// OpenSim's `BunchOfCaps`: `success` as a string, the position only when
+    /// stored, `text/html` as the media type.
+    OpenSim,
+    /// Second Life: `success` as a string, the position asked for echoed
+    /// whether stored or not, LLSD as the media type.
+    SecondLife,
+}
+
+/// What a driver answers a [`CapsDispatch::HomeLocation`] with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HomeLocationOutcome {
+    /// The location was stored, at this position.
+    Stored(sl_types::map::RegionCoordinates),
+    /// The location asked for, at this position, was refused.
+    Refused(sl_types::map::RegionCoordinates),
+    /// The body named no location.
+    NoLocation,
 }
 
 /// What a driver answers a [`CapsDispatch::ModifyRegion`] with.
@@ -1060,6 +1097,7 @@ impl SimCaps {
             CAP_REGION_SCHEDULE => Some(CapHandler::RegionSchedule),
             CAP_MODIFY_REGION => Some(CapHandler::ModifyRegion),
             CAP_DIRECT_DELIVERY => Some(CapHandler::DirectDelivery),
+            CAP_HOME_LOCATION => Some(CapHandler::HomeLocation),
             CAP_UNTRUSTED_SIMULATOR_MESSAGE => Some(CapHandler::UntrustedSimulatorMessage),
             CAP_EXPERIENCE_QUERY => Some(CapHandler::ExperienceQuery),
             CAP_PROVISION_VOICE_ACCOUNT => Some(CapHandler::ProvisionVoiceAccount),
@@ -1180,6 +1218,7 @@ impl SimCaps {
                     Some(CapHandler::DirectDelivery) => {
                         CapsDispatch::Response(Self::dispatch_direct_delivery())
                     }
+                    Some(CapHandler::HomeLocation) => Self::dispatch_home_location(request),
                     Some(CapHandler::UntrustedSimulatorMessage) => {
                         Self::dispatch_untrusted_message(request)
                     }
@@ -1646,6 +1685,71 @@ impl SimCaps {
                 Some(Err(_)) | None => CapsDispatch::Response(CapsResponse::bad_request()),
             },
             _ => CapsDispatch::Response(CapsResponse::method_not_allowed()),
+        }
+    }
+
+    /// Resolves a `HomeLocation` POST into the location it asks for. A body
+    /// that is no LLSD is a bad request; one that names no location is still
+    /// asked, and refused by the driver.
+    fn dispatch_home_location(request: &CapsRequest<'_>) -> CapsDispatch {
+        if request.method != "POST" {
+            return CapsDispatch::Response(CapsResponse::method_not_allowed());
+        }
+        match parse_llsd_body(request.body)
+            .as_ref()
+            .map(sl_wire::parse_home_location_request)
+        {
+            Some(Ok(asked)) => CapsDispatch::HomeLocation(asked),
+            Some(Err(_)) | None => CapsDispatch::Response(CapsResponse::bad_request()),
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::HomeLocation`], in a grid's `style`
+    /// (`landmarks-home`, 2026-10-19).
+    #[must_use]
+    pub fn home_location_response(
+        style: HomeLocationStyle,
+        outcome: HomeLocationOutcome,
+    ) -> CapsResponse {
+        use sl_wire::{HomeLocationSuccessForm as Form, build_home_location_answer as build};
+        let answer = |success, position| sl_wire::HomeLocationAnswer { success, position };
+        match (style, outcome) {
+            // OpenSim's `BunchOfCaps.HomeLocation`: the string `success`, the
+            // stored position only on success, and no media type of its own
+            // (the HTTP server's default).
+            (HomeLocationStyle::OpenSim, HomeLocationOutcome::Stored(position)) => CapsResponse {
+                content_type: OPENSIM_DEFAULT_CONTENT_TYPE,
+                ..CapsResponse::llsd_xml(build(&answer(true, Some(position)), Form::String))
+            },
+            (
+                HomeLocationStyle::OpenSim,
+                HomeLocationOutcome::Refused(_) | HomeLocationOutcome::NoLocation,
+            ) => CapsResponse {
+                content_type: OPENSIM_DEFAULT_CONTENT_TYPE,
+                ..CapsResponse::llsd_xml(build(&answer(false, None), Form::String))
+            },
+            // Second Life: the string `success` and the position it was asked,
+            // stored or not.
+            (HomeLocationStyle::SecondLife, HomeLocationOutcome::Stored(position)) => {
+                CapsResponse::llsd_xml(build(&answer(true, Some(position)), Form::String))
+            }
+            (HomeLocationStyle::SecondLife, HomeLocationOutcome::Refused(position)) => {
+                CapsResponse::llsd_xml(build(&answer(false, Some(position)), Form::String))
+            }
+            // A body that names no location: Second Life answers `success`
+            // `true` with an undefined position, and says nothing else.
+            (HomeLocationStyle::SecondLife, HomeLocationOutcome::NoLocation) => {
+                CapsResponse::llsd_xml(
+                    Llsd::Map(HashMap::from([
+                        ("success".to_owned(), Llsd::String("true".to_owned())),
+                        (
+                            "HomeLocation".to_owned(),
+                            Llsd::Map(HashMap::from([("LocationPos".to_owned(), Llsd::Undef)])),
+                        ),
+                    ]))
+                    .to_llsd_xml(),
+                )
+            }
         }
     }
 
@@ -3891,6 +3995,7 @@ mod tests {
             ("DispatchRegionInfo", CapStatus::Served),
             ("RegionSchedule", CapStatus::Served),
             ("ModifyRegion", CapStatus::Served),
+            ("HomeLocation", CapStatus::Served),
             ("UntrustedSimulatorMessage", CapStatus::Served),
         ];
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES

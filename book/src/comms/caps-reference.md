@@ -34,7 +34,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `GetMetadata` | yes | — | current | **used** since 2026-10-12 (`Command::RequestScriptExperience`) |
 | `GroupAPIv1` | yes | — | current | **used** since 2026-10-14 (`Command::RequestGroupBans`, `BanGroupMembers`, `UnbanGroupMembers`); the panel is task `viewer-social-group-extras` |
 | `GroupProposalBallot` | yes | — | removed feature | not adopted |
-| `HomeLocation` | yes | yes | current | task `protocol-cap-home-location` (UDP today) |
+| `HomeLocation` | yes | yes | current | **used** since 2026-10-19 (`Command::SetStartLocation`); UDP where not granted; measured in [Teleport § Home and landmarks](../gridspec/teleport.md#home-and-landmarks) |
 | `InterestList` | yes | — | current | adopted (`Command::SetInterestListMode`) |
 | `InventoryThumbnailUpload` | yes | — | current | **used** since 2026-10-13 (`Command::UploadInventoryThumbnail`); the viewer side is task `viewer-inventory-thumbnails` |
 | `MapLayer` | yes | yes | unused since viewer 2.0 | not adopted |
@@ -179,7 +179,10 @@ the parcel's stored record. The client builds the body in `sl-proto`'s
 
 **`HomeLocation`** (`llagent.cpp`). POST `{HomeLocation:{LocationId,
 LocationPos:{X,Y,Z}, LocationLookAt:{X,Y,Z}}}` → `{success,
-HomeLocation:{LocationPos}}`. Replaces `SetStartLocationRequest`.
+HomeLocation:{LocationPos}}`. Replaces `SetStartLocationRequest`. Both grids
+send `success` as the string `"true"` / `"false"`, never a boolean; Second
+Life echoes the position it was asked even when it refuses, and says why in a
+keyed alert beside the answer, not in it.
 
 **`EstateAccess`** (`llfloaterregioninfo.cpp`). GET → `{AllowedAgents:[{id}],
 AllowedGroups:[{id}], BannedAgents:[{id, banning_id, last_login_date,

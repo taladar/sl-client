@@ -2,9 +2,11 @@
 
 How each grid carries out a teleport the client asks for, and how it refuses
 one; how it carries the offers and requests avatars make each other
-([Offers and requests](#offers-and-requests)); and which neighbouring regions
-it holds an agent in and how it hands the agent to one when it walks over a
-border ([Neighbours and crossings](#neighbours-and-crossings)). The messages
+([Offers and requests](#offers-and-requests)); which neighbouring regions it
+holds an agent in and how it hands the agent to one when it walks over a
+border ([Neighbours and crossings](#neighbours-and-crossings)); and how it
+sets an agent's home and makes a landmark
+([Home and landmarks](#home-and-landmarks)). The messages
 and the client's handover are described in
 [Teleport](../content/teleport.md).
 
@@ -34,7 +36,8 @@ millisecond apart on OpenSim, with no progress line between them.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the flags of the `TeleportStart` and the `TeleportLocal` | `VIA_LOCATION` and `WITHIN_REGION` (`0x20010`) | `VIA_LOCATION` alone (`0x10`) | each flavour's |
+| the flags of the `TeleportStart` and the `TeleportLocal` | `VIA_LOCATION` and `WITHIN_REGION` (`0x20010`); a home or a landmark teleport its kind alone, `VIA_HOME` (`0x20`) or `VIA_LANDMARK` (`0x08`) (`landmarks-home`, 2026-10-19) | `VIA_LOCATION` alone (`0x10`); a home or a landmark teleport its kind and `SET_LAST_TO_TARGET`, `0x22` or `0x0a` | each flavour's |
+| the progress lines | none; a home or a landmark teleport names its kind first, `sending_home` or `sending_landmark` (`landmarks-home`) | none | each flavour's |
 | the `TeleportLocal`'s `LocationID` | 2 | 2 | 2 |
 | the look-at the `TeleportLocal` states | the unit vector from the landing position towards the region's origin, whatever was asked for: five teleports, five look-ats equal to the negated, normalised position (asked to face east at 128/128/5000, told `-0.025 -0.026 -0.999`) | the direction asked for, flattened to the horizontal (asked north, told north); east when nothing horizontal is left (source) | each flavour's |
 | a height far above or below the ground | echoed as asked: `z` 5000 and `z` −50 both came back in the `TeleportLocal` | 5000 m accepted; below the ground is lifted onto it (source) | lifted onto the ground when below it, on both flavours |
@@ -52,8 +55,8 @@ and both viewers show it.
 | --- | --- | --- | --- |
 | the messages, in order | `TeleportStart`, `TeleportProgress` `resolving`, `TeleportProgress` `Sending to destination.`, then `TeleportFinish` over the event queue | `TeleportStart`, then `TeleportFinish` over the event queue | each flavour's |
 | the progress lines | a key and then a sentence that is no key, 0.11 s apart | none at all | each flavour's |
-| a home teleport's lines | `sending_home`, `resolving`, `Sending to destination.` | not measured: the test avatar has no home set, and the request is refused | Second Life's on that flavour, none on OpenSim's |
-| a landmark teleport's lines | `sending_landmark` first (seen ahead of a refusal; no landmark was at hand for a successful one) | none ahead of a refusal | `sending_landmark`, then the two lines, on the Second Life flavour |
+| a home teleport's lines | `sending_home`, `resolving`, `Sending to destination.` | none (`landmarks-home`: within the region; the start flagged `VIA_HOME` and `SET_LAST_TO_TARGET`, as OpenSim's `TeleportHome` sends it) | Second Life's on that flavour, none on OpenSim's |
+| a landmark teleport's lines | `sending_landmark` first; only seen ahead of a refusal and within a region (`landmarks-home`), so the two lines after it are assumed | none | `sending_landmark`, then the two lines, on the Second Life flavour |
 | the flags of the start, the lines and the finish | the kind of teleport and nothing else: `VIA_LOCATION` (`0x10`), `VIA_HOME` (`0x20`), `VIA_LANDMARK` (`0x08`), `VIA_LURE` (`0x04`) | the start says the kind; the **finish says `VIA_LOCATION` whatever the kind** (an accepted lure started `0x04` and finished `0x10`), keeping only the flying bit of the request (source: `EventQueueGetHandlers.TeleportFinishEvent`) | each flavour's |
 | the `TeleportFinish` body | `AgentID`, `LocationID` 3, `RegionHandle`, `SeedCapability`, `SimAccess`, `SimIP`, `SimPort`, `TeleportFlags`; no region size | the same with `LocationID` 4, and `RegionSizeX` / `RegionSizeY` | each flavour's |
 | anything naming the destination before the finish | nothing | nothing | nothing |
@@ -83,7 +86,7 @@ with a `TeleportFailed` **event on the event queue** —
 | --- | --- | --- | --- |
 | a region handle no region answers to | start (`0x10`), `resolving`, then `Reason` `no_host` with alert `no_host` | `The region you tried to teleport to was not found`, followed by a `MapBlockReply` marking that map cell empty (access 254) | each flavour's refusal; the map block is not sent |
 | a landmark asset the grid does not hold | start (`0x08`), `sending_landmark`, then `nolandmark_tport` with alert `nolandmark_tport` | `Could not find the landmark asset data` | each flavour's |
-| home, with no home set | not measurable: every test avatar has one | `Home set not` | OpenSim's on that flavour; `invalid_tport` on the Second Life one, unmeasured |
+| home, with no home set | not measurable: every test avatar has one, and none can be cleared (Second Life refuses them a new one, see [Home and landmarks](#home-and-landmarks)) | `Home set not` | OpenSim's on that flavour; `invalid_tport` on the Second Life one, unmeasured |
 | a region rated above the agent's maturity preference | start, both lines, then a paragraph beginning `You aren't allowed in that Region due to your maturity Rating.` with alert `RegionTPAccessBlocked`, its `ExtraParams` an LLSD/XML map `{ _region_access: <SimAccess> }` | no check: a region set Moderate for the probe admitted an agent whose preference was General | each flavour's |
 | home, into a region rated above the preference | carried out: an agent whose stored preference was General was sent home to an Adult region | — | carried out |
 | a region at its agent limit | not measured: needs estate rights | `The region is full` (the limit set to 0 on the console for one probe) | not modelled |
@@ -337,8 +340,76 @@ measured: a crossing that leaves a neighbour out of view (both blocks are two
 by two), a crossing at a corner, and what either grid does when the client
 never completes its movement.
 
+## Home and landmarks
+
+Measured on 2026-10-19 by `landmarks-home` (one avatar, three runs on each
+grid, run on both fake flavours too), standing in aditi's sandbox region and at
+the centre of OpenSim's Default Region. It sets home over UDP and over the
+`HomeLocation` capability — at a corner of the region, outside it, with a body
+that names no location, where the avatar stands, and where a home teleport
+lands — each time recording the answer and what the agent was told beside it;
+teleports home; creates a landmark as the reference creates one and reads it
+back; and teleports to it twice.
+
+### Setting home
+
+Both grids grant `HomeLocation` (as the reference, our client now POSTs to it
+and falls back to UDP only where a region withholds it). Its answer is `200`
+whatever happened, and says only whether the location was stored: why not is
+an alert sent beside it.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| who may set home | not a resident on land it does not own: refused in the sandbox, at a corner of the region and where a home teleport had just put the avatar ("on your land or at a mainland Infohub") | the land's owner and an estate manager, anywhere in the region (`IsAdministrator`; the test avatar manages the estate); a parcel with the telehub, and a group role with the power, by the source | the land's owner on both flavours, and an estate manager on OpenSim's |
+| the capability's answer | `success` the **string** `"false"`, and `HomeLocation.LocationPos` the position it was asked, `X`/`Y`/`Z` reals — echoed although refused | stored: `success` `"true"` and the position as sent; refused: `{ success: "false" }` alone | each flavour's |
+| its media type | `application/llsd+xml` | `text/html;charset=UTF-8`: the handler sets none | each flavour's |
+| told beside a refusal | an `AlertMessage` "You can only set your 'Home Location' on your land or at a mainland Infohub." keyed `HomeLocationLimits` | — | each flavour's |
+| told beside a stored home | not measurable: no test avatar may set one | an `AlertMessage` "Home position set." keyed `HomePositionSet` | OpenSim's on both flavours |
+| a position outside the region (300/300) | refused, the position echoed, and nothing told | refused, and an `AlertMessage` "Set Home request failed" | each flavour's |
+| a body that names no location | `success` `"true"` and `HomeLocation: { LocationPos: undef }`, nothing told | refused, and "Set Home request failed" | each flavour's; nothing is stored on either |
+| the same refusal again within seconds | not told: a second refusal 6 s after the first came with no alert, one 18 s after did | told every time | Second Life's flavour leaves a repeat unsaid for 10 s, a bound between the two figures |
+| the UDP `SetStartLocationRequest` | refused with the same sentence, keyed `ListValidHomeLocations` | an `AgentAlertMessage` "Home position set." (or the refusal; "Set Home request failed." outside the region, by the source) | each flavour's |
+| the login response's `home` | absent | sent | each flavour's: the home last set, else where the login lands |
+| a home teleport | a teleport to the home the account has, which no test avatar can change: `sending_home` and a `TeleportLocal` (it was in the region) | to the home just set | to the home last set, else the start region's centre |
+
+A grid that refuses a home says so twice: the capability's `success` and the
+alert. The reference reads the stored position out of a successful answer only
+(`setStartPositionSuccess`, which needs `X`, `Y` and `Z`); Second Life's echo
+in a refusal and its `success` with an undefined position are both errors to
+it, and `Event::HomeLocationAnswered` reports them as they came.
+
+### Landmarks
+
+The reference makes a landmark with an empty `CreateInventoryItem` of the
+landmark classes into the Landmarks folder; the grid writes the body.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the item | type 3, inventory type 3, in the folder asked, name and description as sent, flags 0, the asset id set, nothing else told | the same | the same |
+| its masks | base, owner and group `0x7fffffff`, everyone `0x7fffbfff` (all but modify), next owner as asked | base, owner and group `0x0009e000`, everyone `0x0009a000`, next owner as asked | each flavour's |
+| the body | `Landmark version 2`, `region_id` of the region, `local_pos` where the avatar stood, to two decimals | the same with `local_pos` as its floats print, and a `region_handle` line (`InventoryAccessModule.GenerateLandmark`) | each flavour's: the position where the session's agent arrived |
+| a teleport to it | `sending_landmark`, then a `TeleportLocal` — to the region's telehub, which takes every teleport into the sandbox | a `TeleportLocal` where it was made | where it was made |
+| a teleport to it from where it was made | carried out again, to the telehub | carried out, where the agent stands | carried out |
+
+One refusal was met on the first run and is the telehub's: with the avatar at
+its home and a landmark made there, a teleport to it was refused
+`Could not teleport closer to destination` with the alert `CouldntTPCloser` —
+the telehub would have put it further from the landmark than it stood. The
+fake grid models no telehub, and holds no one to where an arrival lands.
+
+Not measured: a successful Set Home on Second Life (no test avatar owns land
+or stands at an Infohub, `gridspec-aditi-test-land`), Second Life's refusal
+of a home teleport by an avatar with none, a landmark teleport to another
+region, and what either grid does with the other start-location slots.
+
 ## What the client does with it
 
+- **Set Home takes the `HomeLocation` capability** where the region grants it,
+  and reads its answer into `Event::HomeLocationAnswered`; a region that
+  withholds it is asked over UDP. The viewer shows the keyed alerts beside it
+  from its notification catalogue (`HomeLocationLimits`,
+  `ListValidHomeLocations`, `HomePositionSet`); it has no Set Home entry yet
+  (the roadmap's `viewer-places-landmarks`).
 - **Both failure transports end the teleport.** The event-queue
   `TeleportFailed` was not handled before this was measured: a refused
   teleport on Second Life ran into the session's own thirty-second timeout.

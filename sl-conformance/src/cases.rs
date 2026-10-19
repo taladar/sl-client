@@ -71,6 +71,7 @@ pub mod inventory_tree_crawl;
 pub mod keepalive_ping;
 pub mod kick_user;
 pub mod land_transactions;
+pub mod landmarks_home;
 pub mod library_tree_fetch;
 pub mod local_chat;
 pub mod login_buddy_list;

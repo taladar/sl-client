@@ -21,28 +21,29 @@ use sl_proto::{
     CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
     CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
     CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD,
-    CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG, CAP_MODIFY_REGION, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
-    CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_GROUP_MEMBER_DATA, CAP_HOME_LOCATION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
+    CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
+    CAP_MODIFY_REGION, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST, CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES,
     CAP_UNTRUSTED_SIMULATOR_MESSAGE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
     CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_USER_INFO, CAP_VOICE_SIGNALING,
     CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
-    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse, MODIFY_REGION_WRITE_TAG,
-    NeighbourCaps, NewFileAgentInventoryRequest, OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE,
-    REQUESTED_CAPABILITIES, Session, SessionMessage, UserInfoUpdate, agent_profile_notes_body,
-    agent_profile_put_body, agent_profile_url, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    associate_inventory_request, avatar_picker_search_query, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
+    Event as SessionEvent, HomeLocationRequest, INVENTORY_FETCH_MAX_IN_FLIGHT, LoginResponse,
+    MODIFY_REGION_WRITE_TAG, NeighbourCaps, NewFileAgentInventoryRequest,
+    OFFLINE_DRAIN_CAPABILITIES, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session, SessionMessage,
+    UserInfoUpdate, agent_profile_notes_body, agent_profile_put_body, agent_profile_url,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_dispatch_region_info_request,
-    build_environment_update_request, build_interest_list_request,
+    build_environment_update_request, build_home_location_request, build_interest_list_request,
     build_modify_material_params_request, build_modify_region_request,
     build_object_media_navigate_request, build_object_media_update_request,
     build_parcel_properties_update_request, build_parcel_voice_info_request,
@@ -93,8 +94,8 @@ pub use sl_proto::{
     GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeItem,
     GroupNoticeKey, GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange,
     GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
-    GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage,
-    InterestListMode, InterestListReply, InterestsUpdate, InventoryCacheConfig,
+    GroupTitle, HomeLocation, HomeLocationAnswer, IceCandidate, ImDialog, ImSessionId,
+    InstantMessage, InterestListMode, InterestListReply, InterestsUpdate, InventoryCacheConfig,
     InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
     InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
     ItemInfo, KEYFRAME_SLOP, Key, Kilobits, LOGOUT_TIMEOUT, LandArea, LandBrushAction,
@@ -5071,7 +5072,33 @@ fn apply_command(
             position,
             look_at,
         } => {
-            session.set_start_location(*slot, *position, look_at.clone(), now)?;
+            // The reference's "Set Home to Here" takes the capability where the
+            // region grants it, and falls back to UDP only where it does not.
+            match caps.and_then(|caps| {
+                caps.map
+                    .get(CAP_HOME_LOCATION)
+                    .cloned()
+                    .map(|url| (url, caps.events_tx.clone()))
+            }) {
+                Some((url, events_tx)) => {
+                    let body = build_home_location_request(&HomeLocationRequest {
+                        location_id: slot.to_code(),
+                        position: *position,
+                        look_at: look_at.clone(),
+                    });
+                    crate::log_context::spawn_thread(move || {
+                        // A refusal is an answer too; it says only that it was
+                        // refused, the grid's alert says why.
+                        match crate::voice::post_cap_llsd_answer(&url, body, CAP_HOME_LOCATION) {
+                            Some(answer) => {
+                                deliver(&events_tx, (CAP_HOME_LOCATION.to_owned(), answer));
+                            }
+                            None => crate::caps::report_caps_failure(&events_tx, CAP_HOME_LOCATION),
+                        }
+                    });
+                }
+                None => session.set_start_location(*slot, *position, look_at.clone(), now)?,
+            }
         }
         Command::RequestAgentDataUpdate => {
             session.request_agent_data_update(now)?;

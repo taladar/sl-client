@@ -641,6 +641,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::RegionSchedule(_)
             | Event::TerrainMaterialOverrides(_)
             | Event::TerrainMaterialOverridesWritten(_)
+            | Event::HomeLocationAnswered(_)
             | Event::RegionRestart(_)
             | Event::EstateCovenant(_)
             | Event::TelehubInfo(_)

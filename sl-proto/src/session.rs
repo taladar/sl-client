@@ -798,6 +798,16 @@ pub const CAP_MODIFY_REGION: &str = "ModifyRegion";
 /// so it is not read as a GET's answer.
 pub const MODIFY_REGION_WRITE_TAG: &str = "ModifyRegion#write";
 
+/// The HTTP capability "Set Home to Here" goes over (`HomeLocation`): a POST
+/// of `{ HomeLocation: { LocationId, LocationPos, LocationLookAt } }`
+/// answered `{ success, HomeLocation?: { LocationPos } }`
+/// (`LLAgent::setStartPosition`). Where a region grants it,
+/// [`Command::SetStartLocation`](crate::Command::SetStartLocation) takes it,
+/// as the reference does, and the answer is
+/// [`Event::HomeLocationAnswered`]; elsewhere the command is the UDP
+/// `SetStartLocationRequest`.
+pub const CAP_HOME_LOCATION: &str = "HomeLocation";
+
 /// The HTTP capability that carries a template message as LLSD
 /// (`UntrustedSimulatorMessage`): a POST of `{ message, body }` for the
 /// messages the reference's `message.xml` flavours `llsd` — in practice the god
@@ -949,6 +959,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_DISPATCH_REGION_INFO,
     CAP_REGION_SCHEDULE,
     CAP_MODIFY_REGION,
+    CAP_HOME_LOCATION,
     CAP_UNTRUSTED_SIMULATOR_MESSAGE,
 ];
 

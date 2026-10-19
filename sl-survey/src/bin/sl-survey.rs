@@ -803,6 +803,7 @@ impl Survey {
             | Event::RegionSchedule(_)
             | Event::TerrainMaterialOverrides(_)
             | Event::TerrainMaterialOverridesWritten(_)
+            | Event::HomeLocationAnswered(_)
             | Event::RegionRestart(_)
             | Event::EstateCovenant(_)
             | Event::TelehubInfo(_)

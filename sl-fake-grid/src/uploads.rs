@@ -42,7 +42,9 @@
 //! body: a settings item the default sky, water or day cycle of its subtype
 //! (OpenSim's `IEnvironmentModule.GetDefaultAsset`), with the subtype in its
 //! flags so a viewer can tell the three kinds apart before it fetches one; a
-//! script the starter script; anything else an empty asset of its type.
+//! script the starter script; a landmark the place the agent stands, in the
+//! grid's words and with its masks ([`HomePolicy`](crate::HomePolicy)); anything
+//! else an empty asset of its type.
 //!
 //! # Who is told, and how
 //!
@@ -140,19 +142,34 @@ impl UpdateCompletionItem {
 pub(crate) fn answer_upload(
     assets: &GridAssets,
     world: &RegionWorld,
-    announcements: UploadAnnouncements,
+    terms: UploadTerms,
     sim: &mut SimSession,
     event: &ServerEvent,
     mint: &dyn Fn() -> uuid::Uuid,
     now: Instant,
 ) -> bool {
+    let UploadTerms {
+        announcements,
+        landmarks,
+    } = terms;
     match event {
         ServerEvent::CreateInventoryItem {
             item,
             bound_asset,
             callback_id,
         } => {
-            create_item(assets, sim, item, *bound_asset, *callback_id, mint, now);
+            create_item(
+                assets,
+                sim,
+                NewItem {
+                    request: item,
+                    bound_asset: *bound_asset,
+                    callback_id: *callback_id,
+                    landmarks,
+                },
+                mint,
+                now,
+            );
             true
         }
         ServerEvent::CapsAssetUploaded {
@@ -256,18 +273,81 @@ fn default_settings_asset(subtype: u8) -> Option<(AssetKey, Vec<u8>)> {
     ))
 }
 
+/// How the grid announces what an upload made, and what a landmark it makes
+/// holds.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UploadTerms {
+    /// Who is told of an item an upload created or rewrote.
+    pub(crate) announcements: UploadAnnouncements,
+    /// What a landmark holds.
+    pub(crate) landmarks: LandmarkTerms,
+}
+
+/// What a landmark the grid makes holds, and where it is made: the region
+/// the session is of.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LandmarkTerms {
+    /// How the body is written.
+    pub(crate) body: crate::imitates::LandmarkBody,
+    /// The new item's base, owner, group and everyone masks.
+    pub(crate) masks: [u32; 4],
+    /// The region's id.
+    pub(crate) region_id: uuid::Uuid,
+    /// The region's handle.
+    pub(crate) region_handle: sl_wire::RegionHandle,
+}
+
+/// The body of a landmark of the place `at` in the region of `terms`, as the
+/// grid writes it (`landmarks-home`, 2026-10-19).
+fn landmark_body(terms: LandmarkTerms, at: sl_types::lsl::Vector) -> Vec<u8> {
+    let text = match terms.body {
+        crate::imitates::LandmarkBody::SecondLife => format!(
+            "Landmark version 2\nregion_id {}\nlocal_pos {:.2} {:.2} {:.2}\n",
+            terms.region_id, at.x, at.y, at.z
+        ),
+        // OpenSim formats its floats as they print, and names the handle.
+        crate::imitates::LandmarkBody::OpenSim => format!(
+            "Landmark version 2\nregion_id {}\nlocal_pos {} {} {}\nregion_handle {}\n",
+            terms.region_id,
+            at.x,
+            at.y,
+            at.z,
+            terms.region_handle.get()
+        ),
+    };
+    text.into_bytes()
+}
+
+/// One `CreateInventoryItem` to answer.
+#[derive(Debug, Clone, Copy)]
+struct NewItem<'a> {
+    /// What the client asked for.
+    request: &'a NewInventoryItem,
+    /// The asset a transaction bound to it, if any.
+    bound_asset: Option<AssetKey>,
+    /// The client's callback id, echoed in the answer.
+    callback_id: InventoryCallbackId,
+    /// What a landmark holds.
+    landmarks: LandmarkTerms,
+}
+
 /// Mints the item a `CreateInventoryItem` asked for, names the asset it starts
 /// as, and answers with the `UpdateCreateInventoryItem` that echoes the
 /// client's callback id (see the module docs on what each kind starts as).
 fn create_item(
     assets: &GridAssets,
     sim: &mut SimSession,
-    request: &NewInventoryItem,
-    bound_asset: Option<AssetKey>,
-    callback_id: InventoryCallbackId,
+    new: NewItem<'_>,
     mint: &dyn Fn() -> uuid::Uuid,
     now: Instant,
 ) {
+    let NewItem {
+        request,
+        bound_asset,
+        callback_id,
+        landmarks,
+    } = new;
+    let landmark = request.inv_type == InventoryType::Landmark;
     let subtype = request.wearable_type.to_code();
     let mut flags = 0;
     let asset_id = if request.asset_type == AssetType::Settings {
@@ -288,6 +368,9 @@ fn create_item(
         let key = AssetKey::from(mint());
         let body = if request.asset_type == AssetType::ScriptText {
             DEFAULT_SCRIPT.to_vec()
+        } else if landmark {
+            // A landmark of where the agent stands, which is what makes one.
+            landmark_body(landmarks, crate::chat::agent_position(sim))
         } else {
             Vec::new()
         };
@@ -320,13 +403,25 @@ fn create_item(
         creator_id: agent,
         group: None,
         // OpenSim: base and owner `AllAndExport`, everyone and group nothing,
-        // next owner what the client asked for.
-        permissions: Permissions5 {
-            base: sl_proto::Permissions::ALL,
-            owner: sl_proto::Permissions::ALL,
-            group: sl_proto::Permissions::from_bits(0),
-            everyone: sl_proto::Permissions::from_bits(0),
-            next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
+        // next owner what the client asked for — but a landmark the grid's
+        // own masks, group and everyone included.
+        permissions: if landmark {
+            let [base, owner, group, everyone] = landmarks.masks;
+            Permissions5 {
+                base: sl_proto::Permissions::from_bits(base),
+                owner: sl_proto::Permissions::from_bits(owner),
+                group: sl_proto::Permissions::from_bits(group),
+                everyone: sl_proto::Permissions::from_bits(everyone),
+                next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
+            }
+        } else {
+            Permissions5 {
+                base: sl_proto::Permissions::ALL,
+                owner: sl_proto::Permissions::ALL,
+                group: sl_proto::Permissions::from_bits(0),
+                everyone: sl_proto::Permissions::from_bits(0),
+                next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
+            }
         },
     };
     sim.agent_inventory_mut().insert_item(item.clone());

@@ -220,6 +220,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "experience-permissions",
     "experience-admin-contributor",
     "marketplace-direct-delivery",
+    "landmarks-home",
 ];
 
 /// The offline cases meaningful on **one** fake flavour only, each with the

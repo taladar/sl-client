@@ -197,16 +197,28 @@ pub(crate) async fn teleport_session(
 
     let policy = core.teleport_policy;
     if source_region == request.region {
-        let flags = request.flags | policy.local_flags;
+        // A home or a landmark teleport carries its kind alone; the grid's
+        // local flag is a location's and a lure's.
+        let flags = if request.kind_line.is_some() {
+            request.flags
+        } else {
+            request.flags | policy.local_flags
+        };
         let look_at = local_look_at(policy.local_look_at, &request.arrival);
         source
             .with_state(|state| {
                 let now = source.now();
                 let sim = &mut state.sim;
                 sim.send_teleport_start(flags, now)?;
-                // An accepted lure is the one local teleport Second Life puts a
-                // line into. (A home or landmark teleport that turns out to be
-                // local was never measured, so its kind line is not sent.)
+                // A home or a landmark teleport is named on a grid that names
+                // the kind, local or not (`landmarks-home`, 2026-10-19).
+                if policy.names_the_kind
+                    && let Some(line) = request.kind_line
+                {
+                    sim.send_teleport_progress(line, flags, now)?;
+                }
+                // An accepted lure is the one other local teleport Second Life
+                // puts a line into.
                 if request.flags & TeleportFlags::VIA_LURE != 0
                     && let Some(line) = policy.lure_line
                 {
@@ -578,30 +590,44 @@ async fn resolve_request(
             },
         )),
         ServerEvent::TeleportViaLandmark { landmark: None } => {
-            // Home: the account's start region, at its centre.
+            // Home: where the account last set it, and until it has, its start
+            // region at the centre.
             let agent_id = source.state.lock().await.avatar.agent_id;
-            Some(
+            let flags = TeleportFlags::VIA_HOME | policy.kind_flags;
+            let stored = core.homes.get(agent_id).and_then(|home| {
+                core.region_by_id(home.region_id).map(|region| {
+                    (
+                        region,
+                        ArrivalPlacement {
+                            position: home.position,
+                            look_at: home.look_at,
+                        },
+                    )
+                })
+            });
+            let home = stored.or_else(|| {
                 core.account_by_agent(agent_id)
                     .and_then(|account| core.start_region(account))
-                    .map_or_else(
-                        || {
-                            Err(Refusal::plain(
-                                TeleportFlags::VIA_HOME,
-                                first_line(Some(teleport_strings::SENDING_HOME)),
-                                policy.no_home,
-                            ))
-                        },
-                        |region| {
-                            Ok(TeleportRequest {
-                                region,
-                                arrival: ArrivalPlacement::default(),
-                                flags: TeleportFlags::VIA_HOME,
-                                kind_line: Some(teleport_strings::SENDING_HOME),
-                                client_requested: true,
-                            })
-                        },
-                    ),
-            )
+                    .map(|region| (region, ArrivalPlacement::default()))
+            });
+            Some(home.map_or_else(
+                || {
+                    Err(Refusal::plain(
+                        flags,
+                        first_line(Some(teleport_strings::SENDING_HOME)),
+                        policy.no_home,
+                    ))
+                },
+                |(region, arrival)| {
+                    Ok(TeleportRequest {
+                        region,
+                        arrival,
+                        flags,
+                        kind_line: Some(teleport_strings::SENDING_HOME),
+                        client_requested: true,
+                    })
+                },
+            ))
         }
         ServerEvent::TeleportViaLandmark {
             landmark: Some(landmark),
@@ -628,7 +654,7 @@ async fn resolve_request(
             Some(resolved.map_or_else(
                 || {
                     Err(Refusal::plain(
-                        TeleportFlags::VIA_LANDMARK,
+                        TeleportFlags::VIA_LANDMARK | policy.kind_flags,
                         first_line(Some(teleport_strings::SENDING_LANDMARK)),
                         policy.unknown_landmark,
                     ))
@@ -640,7 +666,7 @@ async fn resolve_request(
                             position,
                             look_at: ArrivalPlacement::default().look_at,
                         },
-                        flags: TeleportFlags::VIA_LANDMARK,
+                        flags: TeleportFlags::VIA_LANDMARK | policy.kind_flags,
                         kind_line: Some(teleport_strings::SENDING_LANDMARK),
                         client_requested: true,
                     })

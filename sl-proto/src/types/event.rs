@@ -467,6 +467,13 @@ pub enum Event {
     /// The reference reads the overrides again once the region's next
     /// handshake says they changed.
     TerrainMaterialOverridesWritten(Box<sl_wire::ModifyRegionAnswer>),
+    /// The `HomeLocation` capability's answer to a
+    /// [`Command::SetStartLocation`](crate::Command::SetStartLocation): whether
+    /// the grid stored the location, and the position it stored. A refusal
+    /// carries no reason; the grid sends it as an alert beside the answer. A
+    /// region without the capability is asked over UDP and answers with the
+    /// alert alone.
+    HomeLocationAnswered(sl_wire::HomeLocationAnswer),
     /// A region restart notice — Second Life's keyed `RegionRestartMinutes` /
     /// `RegionRestartSeconds` alert or OpenSim's spelled-out agent alert, read
     /// into one countdown ([`RegionRestartNotice`]). Follows the

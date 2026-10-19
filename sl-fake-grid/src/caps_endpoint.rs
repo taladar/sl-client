@@ -221,6 +221,59 @@ pub(crate) async fn dispatch_caps(
                 drop(guard);
                 return SimCaps::untrusted_message_response(style, outcome);
             }
+            // "Set Home to Here" over the capability: the grid's set-home rule,
+            // what it says beside the answer, and the answer in its words.
+            CapsDispatch::HomeLocation(asked) => {
+                use crate::agent_requests::{HomeStore, SetHome, set_home, tell};
+                use sl_proto::HomeLocationOutcome;
+                let mut guard = shared.state.lock().await;
+                let now = shared.now();
+                let state = &mut *guard;
+                let policy = state.home_policy;
+                let manager = state.policy.estate_manager;
+                let Some(agent) = state.sim.agent_id() else {
+                    drop(guard);
+                    return SimCaps::home_location_response(
+                        policy.capability,
+                        HomeLocationOutcome::NoLocation,
+                    );
+                };
+                let (outcome, answer) = match &asked {
+                    None => (SetHome::NoLocation, HomeLocationOutcome::NoLocation),
+                    Some(asked) => {
+                        let outcome = set_home(
+                            manager,
+                            HomeStore {
+                                homes: &state.homes,
+                                region_id: state.identity.region_id,
+                                policy: &policy,
+                            },
+                            &state.world.lock(),
+                            agent,
+                            asked.position,
+                            &asked.look_at,
+                        );
+                        let answer = if outcome == SetHome::Stored {
+                            HomeLocationOutcome::Stored(asked.position)
+                        } else {
+                            HomeLocationOutcome::Refused(asked.position)
+                        };
+                        (outcome, answer)
+                    }
+                };
+                let quiet = policy.repeat_quiet;
+                tell(
+                    &mut state.sim,
+                    agent,
+                    outcome.notice(&policy.capability_notices),
+                    (quiet, &mut state.home_told),
+                    now,
+                );
+                let flushed = shared.flush_locked(&mut guard);
+                drop(guard);
+                shared.finish_flush(flushed).await;
+                return SimCaps::home_location_response(policy.capability, answer);
+            }
             CapsDispatch::EventQueueWouldBlock => {
                 if *shutdown_rx.borrow_and_update() {
                     let guard = shared.state.lock().await;

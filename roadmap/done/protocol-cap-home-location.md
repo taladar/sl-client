@@ -2,10 +2,9 @@
 id: protocol-cap-home-location
 title: Set home over the HomeLocation capability
 topic: protocol
-status: blocked
+status: done
 origin: protocol-reference-capabilities triage (2026-10-04)
 refs: [protocol-reference-capabilities, gridspec-landmarks-home, viewer-places-landmarks]
-blocked_by: [gridspec-landmarks-home]
 ---
 
 Context: [context/protocol.md](../context/protocol.md).
@@ -32,3 +31,12 @@ and Firestorm references: `book/src/comms/caps-reference.md`.
 This capability is adopted inside that gridspec task, which measures the
 feature on both grids over both paths, makes the fake grid serve the
 capability per flavour, and checks the viewer. Claim that task.
+
+## Outcome (2026-10-19)
+
+Done in [[gridspec-landmarks-home]]: `CAP_HOME_LOCATION` is requested, and
+`Command::SetStartLocation` POSTs `sl_wire::build_home_location_request` to it
+where granted (both runtimes), the answer decoded by
+`parse_home_location_answer` into `Event::HomeLocationAnswered`; UDP where the
+region withholds it. `SimCaps` serves it, answering per `HomeLocationStyle` as
+each grid was measured.

@@ -189,8 +189,8 @@ mod test {
         // (DispatchRegionInfo, RegionSchedule), and the region's PBR terrain
         // overrides (ModifyRegion), and the LLSD message transport
         // (UntrustedSimulatorMessage), and the Marketplace's listing service
-        // (DirectDelivery).
-        assert_eq!(granted.len(), 86);
+        // (DirectDelivery), and "Set Home to Here" (HomeLocation).
+        assert_eq!(granted.len(), 87);
         Ok(())
     }
 

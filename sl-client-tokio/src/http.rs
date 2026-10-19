@@ -3,7 +3,7 @@
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
     AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_GET_METADATA, CAP_GROUP_API_V1,
-    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_REGION, CAP_REGION_SCHEDULE,
+    CAP_HOME_LOCATION, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_REGION, CAP_REGION_SCHEDULE,
     CAP_REMOTE_PARCEL_REQUEST, CAP_REQUEST_TASK_INVENTORY, CAP_SEARCH_STAT_REQUEST,
     CAP_UPLOAD_AGENT_PROFILE_IMAGE, CHAT_SESSION_FETCH_HISTORY_TAG, ClassifiedKey,
     EXPERIENCE_QUERY_TAG, InventoryKey, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd,
@@ -436,6 +436,24 @@ pub(crate) async fn set_region_schedule(
         get_caps_llsd(url, CAP_REGION_SCHEDULE, http, caps_tx).await;
     } else {
         report_caps_failure(&caps_tx, CAP_REGION_SCHEDULE).await;
+    }
+}
+
+/// POSTs a "Set Home to Here" to the `HomeLocation` capability and forwards
+/// the grid's answer — a refusal too, which says only that it was refused; a
+/// request with no readable answer is reported as a failure of the
+/// capability. Mirrors the bevy `SetStartLocation` arm.
+pub(crate) async fn post_home_location(
+    url: String,
+    body: String,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    match crate::voice::post_cap_llsd_answer(&url, body, CAP_HOME_LOCATION, &http).await {
+        Some(answer) => {
+            crate::caps::deliver(&caps_tx, (CAP_HOME_LOCATION.to_owned(), answer)).await;
+        }
+        None => report_caps_failure(&caps_tx, CAP_HOME_LOCATION).await,
     }
 }
 

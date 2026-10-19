@@ -17,6 +17,7 @@ mod field;
 mod geometry;
 mod grid_info;
 mod header;
+mod home_location;
 mod interest_list;
 mod inventory;
 mod landmark;
@@ -121,6 +122,10 @@ pub use grid_info::{
     parse_grid_info_xmlrpc_response,
 };
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
+pub use home_location::{
+    HomeLocationAnswer, HomeLocationRequest, HomeLocationSuccessForm, build_home_location_answer,
+    build_home_location_request, parse_home_location_answer, parse_home_location_request,
+};
 pub use interest_list::{
     InterestListMode, InterestListReply, build_interest_list_reply, build_interest_list_request,
     parse_interest_list_reply, parse_interest_list_request,

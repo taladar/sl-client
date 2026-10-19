@@ -55,8 +55,25 @@ mod test {
         handover_timeout: Option<Duration>,
         imitates: ImitatedGrid,
     ) -> Result<(FakeGrid, Client, FakeAgent), TestError> {
+        connect_as(
+            AccountConfig::new("Test", "User", "password"),
+            regions,
+            handover_timeout,
+            imitates,
+        )
+        .await
+    }
+
+    /// [`connect_configured`] as `account`, which must be called Test User
+    /// with the password `password`.
+    async fn connect_as(
+        account: AccountConfig,
+        regions: Vec<RegionConfig>,
+        handover_timeout: Option<Duration>,
+        imitates: ImitatedGrid,
+    ) -> Result<(FakeGrid, Client, FakeAgent), TestError> {
         let mut builder = FakeGridBuilder::new()
-            .account(AccountConfig::new("Test", "User", "password"))
+            .account(account)
             .imitates(imitates)
             .event_queue_hold(Duration::from_secs(2));
         if let Some(timeout) = handover_timeout {
@@ -282,7 +299,24 @@ mod test {
         handover_timeout: Option<Duration>,
         imitates: ImitatedGrid,
     ) -> Result<Running, TestError> {
-        let (grid, client, agent) = connect_configured(regions, handover_timeout, imitates).await?;
+        start_as(
+            AccountConfig::new("Test", "User", "password"),
+            regions,
+            imitates,
+            handover_timeout,
+        )
+        .await
+    }
+
+    /// [`start_configured`] as `account` (see [`connect_as`]).
+    async fn start_as(
+        account: AccountConfig,
+        regions: Vec<RegionConfig>,
+        imitates: ImitatedGrid,
+        handover_timeout: Option<Duration>,
+    ) -> Result<Running, TestError> {
+        let (grid, client, agent) =
+            connect_as(account, regions, handover_timeout, imitates).await?;
         let circuit = client.root_circuit_id().ok_or("no root circuit")?;
         let (event_tx, event_rx) = mpsc::channel::<Event>(256);
         let (command_tx, command_rx) = mpsc::channel::<Command>(8);
@@ -2286,6 +2320,172 @@ mod test {
                 (got - wanted).abs() < 1.0e-5,
                 "look-at {look_at:?} is not towards the region origin"
             );
+        }
+        Ok(())
+    }
+
+    /// Where the tests below set home.
+    const HOME_AT: (f32, f32, f32) = (100.0, 90.0, 25.0);
+
+    /// Sets home at [`HOME_AT`] with the client's own command.
+    async fn set_home(running: &Running) -> Result<(), TestError> {
+        let (x, y, z) = HOME_AT;
+        running
+            .commands
+            .send(Command::SetStartLocation {
+                slot: sl_client_tokio::StartLocationSlot::Home,
+                position: RegionCoordinates::new(x, y, z),
+                look_at: Vector {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// The test account, made an estate manager: OpenSim lets one set home
+    /// anywhere in the region.
+    fn manager() -> AccountConfig {
+        AccountConfig::new("Test", "User", "password").estate_manager()
+    }
+
+    /// **Set Home takes the `HomeLocation` capability where a region grants
+    /// it**, as the reference does, and the client reads the answer each grid
+    /// gives (`book/src/gridspec/teleport.md` § Home and landmarks): Second
+    /// Life refuses a resident on land it does not own, echoing the position,
+    /// with the keyed `HomeLocationLimits` alert beside it; OpenSim stores an
+    /// estate manager's and says so in the keyed `HomePositionSet`. Nothing
+    /// goes over UDP.
+    #[tokio::test]
+    async fn set_home_takes_the_capability_and_reads_its_answer() -> Result<(), TestError> {
+        let (x, y, z) = HOME_AT;
+        let at = Some(RegionCoordinates::new(x, y, z));
+        for (imitates, account, success, key) in [
+            (
+                ImitatedGrid::SecondLife,
+                AccountConfig::new("Test", "User", "password"),
+                false,
+                "HomeLocationLimits",
+            ),
+            (ImitatedGrid::OpenSim, manager(), true, "HomePositionSet"),
+        ] {
+            let mut running =
+                start_as(account, vec![RegionConfig::default()], imitates, None).await?;
+            let mut server_events = running.agent.events();
+            set_home(&running).await?;
+            let (mut answer, mut keyed) = (None, false);
+            running
+                .wait_until("the answer and the alert", |event| {
+                    match event {
+                        Event::HomeLocationAnswered(read) => answer = Some(read.clone()),
+                        Event::AlertMessage { alert_info, .. } => {
+                            keyed = alert_info.iter().any(|info| info.message == key);
+                        }
+                        _ => {}
+                    }
+                    answer.is_some() && keyed
+                })
+                .await?;
+            assert_eq!(
+                answer,
+                Some(sl_proto::HomeLocationAnswer {
+                    success,
+                    position: at,
+                }),
+                "{imitates:?}"
+            );
+            while let Ok(event) = server_events.try_recv() {
+                assert!(
+                    !matches!(event, ServerEvent::SetStartLocation { .. }),
+                    "{imitates:?}: Set Home went over UDP beside the capability"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// **Without the capability, Set Home goes over UDP**, as the reference
+    /// falls back to, and is answered with the agent alert alone.
+    #[tokio::test]
+    async fn set_home_without_the_capability_goes_over_udp() -> Result<(), TestError> {
+        let region = RegionConfig {
+            withheld_caps: vec!["HomeLocation".to_owned()],
+            ..RegionConfig::default()
+        };
+        let mut running = start_as(manager(), vec![region], ImitatedGrid::OpenSim, None).await?;
+        let mut server_events = running.agent.events();
+        set_home(&running).await?;
+        running
+            .wait_until("the agent alert", |event| {
+                assert!(
+                    !matches!(event, Event::HomeLocationAnswered(_)),
+                    "a capability the region withholds answered"
+                );
+                matches!(event, Event::AgentAlertMessage { message, .. }
+                    if message == "Home position set.")
+            })
+            .await?;
+        let deadline = whole_wait();
+        loop {
+            let event = tokio::time::timeout_at(deadline, server_events.recv()).await??;
+            if matches!(event, ServerEvent::SetStartLocation { .. }) {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// **A home teleport goes where home was set**, and to the start region's
+    /// centre while none is, named as each grid names it: Second Life's kind
+    /// line and its kind alone, OpenSim's kind with `SET_LAST_TO_TARGET` and
+    /// no line.
+    #[tokio::test]
+    async fn a_home_teleport_lands_where_home_was_set() -> Result<(), TestError> {
+        let (x, y, z) = HOME_AT;
+        for (imitates, account, flags, lines, lands) in [
+            (
+                ImitatedGrid::SecondLife,
+                AccountConfig::new("Test", "User", "password"),
+                0x20,
+                vec!["sending_home".to_owned()],
+                RegionCoordinates::new(128.0, 128.0, 30.0),
+            ),
+            (
+                ImitatedGrid::OpenSim,
+                manager(),
+                0x22,
+                Vec::new(),
+                RegionCoordinates::new(x, y, z),
+            ),
+        ] {
+            let mut running =
+                start_as(account, vec![RegionConfig::default()], imitates, None).await?;
+            set_home(&running).await?;
+            running
+                .wait_for(|event| matches!(event, Event::HomeLocationAnswered(_)).then_some(()))
+                .await?;
+            running
+                .commands
+                .send(Command::TeleportViaLandmark { landmark: None })
+                .await?;
+            let mut said = Vec::new();
+            let (position, local_flags) = running
+                .wait_for(|event| match event {
+                    Event::TeleportProgress { message, .. } => {
+                        said.push(message.clone());
+                        None
+                    }
+                    Event::TeleportLocal {
+                        position, flags, ..
+                    } => Some((*position, flags.0)),
+                    _ => None,
+                })
+                .await?;
+            assert_eq!(position, lands, "{imitates:?}");
+            assert_eq!(local_flags, flags, "{imitates:?}");
+            assert_eq!(said, lines, "{imitates:?}");
         }
         Ok(())
     }

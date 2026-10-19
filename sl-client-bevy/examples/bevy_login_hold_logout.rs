@@ -415,6 +415,7 @@ fn on_events(
             | SlSessionEvent::RegionSchedule(_)
             | SlSessionEvent::TerrainMaterialOverrides(_)
             | SlSessionEvent::TerrainMaterialOverridesWritten(_)
+            | SlSessionEvent::HomeLocationAnswered(_)
             | SlSessionEvent::RegionRestart(_)
             | SlSessionEvent::EstateCovenant(_)
             | SlSessionEvent::TelehubInfo(_)

@@ -62,3 +62,14 @@ and the show position / date column toggles.
 
 Shapes and Firestorm references: `book/src/comms/caps-reference.md`; which grid
 grants it: `book/src/gridspec/capabilities.md`.
+
+## From gridspec-landmarks-home (2026-10-19)
+
+The client side is done: `Command::SetStartLocation` takes `HomeLocation` and
+reports `Event::HomeLocationAnswered`. A resident on Second Life is refused
+almost everywhere — say so from the keyed alert (`HomeLocationLimits`), which
+the notification catalogue already renders. "Create landmark" is a
+`CreateInventoryItem` of the landmark classes with an empty asset into the
+Landmarks folder; the grid writes the body (Second Life to two decimals, no
+handle). Measured shapes: `book/src/gridspec/teleport.md` § Home and
+landmarks.

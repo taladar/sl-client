@@ -435,6 +435,10 @@ pub(crate) struct GridCore {
     pub(crate) friends_policy: crate::social::FriendsPolicy,
     /// The groups and what is pending in them ([`crate::groups`]).
     pub(crate) groups: parking_lot::Mutex<crate::groups::GroupStore>,
+    /// Each account's home, once it has set one
+    /// ([`crate::agent_requests::Homes`]): shared with every session, which
+    /// stores a Set-Home into it.
+    pub(crate) homes: crate::agent_requests::Homes,
     /// How groups run ([`ImitatedGrid::groups_policy`]).
     pub(crate) groups_policy: crate::groups::GroupsPolicy,
     /// The agent every region reports as its owner: the first account
@@ -781,6 +785,11 @@ impl GridCore {
                     account_entitlements: self.account_entitlements,
                     fields: self.login_fields,
                     packages: &self.packages,
+                    home: self.homes.get(account.agent_id).and_then(|home| {
+                        self.region_by_id(home.region_id)
+                            .and_then(|index| self.region(index))
+                            .map(|region| (region.handle(), home))
+                    }),
                 },
             );
         }
@@ -1094,6 +1103,9 @@ impl GridCore {
                 estate_manager: account.config.estate_manager,
                 legacy_udp_inventory: self.legacy_udp_inventory,
             },
+            home_policy: self.imitated.home_policy(),
+            home_told: None,
+            homes: self.homes.clone(),
             god_powers: self.imitated.god_powers(),
             untrusted_style: self.imitated.untrusted_message_style(),
             god_mode: crate::god_powers::GodMode::at_login(
@@ -1360,7 +1372,7 @@ fn register_account_display_name(sim: &mut SimSession, account: &Account) {
 const FOLDER_TYPE_CURRENT_OUTFIT: i8 = 46;
 
 /// What the flavour decides about a login response, resolved once at start.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct LoginPolicy<'grid> {
     /// Whether the response describes the account's entitlements
     /// ([`ImitatedGrid::describes_account_entitlements`]).
@@ -1370,6 +1382,9 @@ struct LoginPolicy<'grid> {
     fields: crate::imitates::LoginFields,
     /// Every subscription package the grid describes.
     packages: &'grid BTreeMap<String, sl_proto::AccountBenefits>,
+    /// The home the account set, and its region's handle; `None` until it
+    /// has set one.
+    home: Option<(sl_wire::RegionHandle, crate::agent_requests::StoredHome)>,
 }
 
 /// Fills the optional login-response fields the fixtures can answer:
@@ -1386,6 +1401,7 @@ fn enrich_success(
         account_entitlements,
         fields,
         packages,
+        home,
     } = policy;
     success.first_name = Some(account.config.first_name.clone());
     success.last_name = Some(account.config.last_name.clone());
@@ -1396,17 +1412,24 @@ fn enrich_success(
         success.region_size_y = Some(256);
     }
     // Both grids send the facing at the start location, and OpenSim also
-    // names home — the same spot here, since an account's home is where it
-    // lands when nothing else was asked for.
+    // names home: the one the account set, and until it has, the spot it
+    // lands on when nothing else was asked for.
     let arrival = sim.arrival_position();
     let facing = sl_wire::Direction::new(arrival.look_at.x, arrival.look_at.y, arrival.look_at.z);
     success.look_at = Some(facing);
     if fields.home {
-        success.home = Some(sl_wire::HomeLocation {
-            region_handle: region.handle(),
-            position: arrival.position,
-            look_at: facing,
-        });
+        success.home = Some(home.map_or_else(
+            || sl_wire::HomeLocation {
+                region_handle: region.handle(),
+                position: arrival.position,
+                look_at: facing,
+            },
+            |(region_handle, home)| sl_wire::HomeLocation {
+                region_handle,
+                position: home.position,
+                look_at: sl_wire::Direction::new(home.look_at.x, home.look_at.y, home.look_at.z),
+            },
+        ));
     }
     // Both grids send it, asked for or not: a fixed figure on OpenSim, the
     // account package's own limit on Second Life.
@@ -2209,6 +2232,7 @@ impl FakeGridBuilder {
             social: parking_lot::Mutex::new(crate::social::Social::with_friendships(&friendships)),
             friends_policy: self.imitates.friends_policy(),
             groups: parking_lot::Mutex::new(groups),
+            homes: crate::agent_requests::Homes::default(),
             groups_policy,
             estate_owner,
             regions,

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 343 |
-| blocked | 83 |
+| ready | 342 |
+| blocked | 82 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1400 |
+| done | 1402 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2069** |
@@ -350,7 +350,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (343)
+## ready (342)
 
 ### protocol
 
@@ -1153,8 +1153,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Inventory item and folder operations and their pushes on each grid
 - [`gridspec-inventory-offers`](ready/gridspec-inventory-offers.md) — Giving
   inventory, accepting and declining, and object gives on each grid
-- [`gridspec-landmarks-home`](ready/gridspec-landmarks-home.md) — Landmarks and
-  the home location on each grid
 - [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
   committed LSL probe corpus and per-grid result files
 - [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
@@ -1168,15 +1166,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (83)
+## blocked (82)
 
 ### protocol
 
 - [`protocol-avatar-render-info`](blocked/protocol-avatar-render-info.md) —
   AvatarRenderInfo — client request, SimCaps service and fake-grid answers
   (blocked by `gridspec-avatar-render-info`)
-- [`protocol-cap-home-location`](blocked/protocol-cap-home-location.md) — Set
-  home over the HomeLocation capability (blocked by `gridspec-landmarks-home`)
 
 ### viewer
 
@@ -1589,7 +1585,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1400)
+## done (1402)
 
 ### protocol
 
@@ -1792,6 +1788,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   script's experience over GetMetadata
 - [`protocol-cap-group-bans`](done/protocol-cap-group-bans.md) — Group ban lists
   over the GroupAPIv1 capability (blocked by `gridspec-groups` (done))
+- [`protocol-cap-home-location`](done/protocol-cap-home-location.md) — Set home
+  over the HomeLocation capability
 - [`protocol-cap-interest-list`](done/protocol-cap-interest-list.md) — Switch
   the interest list mode over the InterestList capability (blocked by
   `gridspec-object-update-stream` (done))
@@ -4626,6 +4624,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   messages, typing, busy replies and offline storage on each grid
 - [`gridspec-land-transactions`](done/gridspec-land-transactions.md) — Buying,
   selling, deeding, abandoning land and passes on each grid
+- [`gridspec-landmarks-home`](done/gridspec-landmarks-home.md) — Landmarks and
+  the home location on each grid
 - [`gridspec-local-chat`](done/gridspec-local-chat.md) — Local chat and typing
   on each grid
 - [`gridspec-login`](done/gridspec-login.md) — Login response fields, the
