@@ -88,6 +88,9 @@ pub(crate) struct SimState {
     /// What the agent published with `AgentSetAppearance`, where the grid
     /// keeps it ([`crate::bakes::PublishedBakes`]).
     pub(crate) published_bakes: crate::bakes::PublishedBakes,
+    /// Every account's Current Outfit Folder version, which an
+    /// `IncrementCOFVersion` moves ([`crate::bakes::OutfitVersions`]).
+    pub(crate) outfit_versions: crate::bakes::OutfitVersions,
     /// What the session knows of its agent's groups: the active one an
     /// `AgentDataUpdate` names, and the powers a deed and a move of a
     /// group's object are checked against ([`crate::groups`]).
@@ -483,6 +486,7 @@ impl SharedSim {
             }
             let _baked = crate::bakes::answer(
                 &mut state.published_bakes,
+                (&state.outfit_versions, state.avatar.agent_id),
                 state.bakes,
                 &mut state.sim,
                 &event,

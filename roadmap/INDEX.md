@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 342 |
+| ready | 341 |
 | blocked | 82 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1404 |
+| done | 1405 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2071** |
@@ -351,7 +351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (342)
+## ready (341)
 
 ### protocol
 
@@ -432,8 +432,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   debug & maintenance tools (incl. Rebake)
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
-- [`viewer-bake-cache-query`](ready/viewer-bake-cache-query.md) — Ask a
-  client-baking region's cache before re-uploading the own bakes
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
   Client-side bake honours COF layer-ordering tokens
 - [`viewer-bake-publish-morph-mask`](ready/viewer-bake-publish-morph-mask.md) —
@@ -1586,7 +1584,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1404)
+## done (1405)
 
 ### protocol
 
@@ -2198,6 +2196,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-avatar-tongue-protrudes`](done/viewer-avatar-tongue-protrudes.md) —
   Avatar tongue protrudes (rigged mesh + base-system head)
+- [`viewer-bake-cache-query`](done/viewer-bake-cache-query.md) — Ask a
+  client-baking region's cache before re-uploading the own bakes
 - [`viewer-beacons-beam-render`](done/viewer-beacons-beam-render.md) — Tracking
   beacon — beam + off-screen direction arrow
 - [`viewer-bevy-empty-text-measures-at-parley-defaults`](done/viewer-bevy-empty-text-measures-at-parley-defaults.md)

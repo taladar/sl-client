@@ -891,13 +891,15 @@ async fn connect_and_spawn(spec: LoginSpec<'_>) -> Result<Session, TestFailure> 
             // A stale presence from a prior session that did not log out cleanly
             // (the OpenSim no-`LogoutReply` quirk) rejects the next login as
             // "already logged in" — but that rejected attempt evicts the ghost,
-            // so a retry succeeds. Only OpenSim: Second Life may flag rapid
-            // repeated login attempts as suspicious, so there we surface the
-            // rejection unchanged rather than retrying.
+            // so a retry succeeds. Only OpenSim and the fake grid imitating it,
+            // which refuses a relogin while the session it replaces is still
+            // in world, as OpenSim does: Second Life may flag rapid repeated
+            // login attempts as suspicious, so there we surface the rejection
+            // unchanged rather than retrying.
             Err(sl_client_tokio::Error::LoginRejected {
                 kind: LoginRejectKind::AlreadyLoggedIn,
                 failure,
-            }) if grid == Grid::Opensim
+            }) if matches!(grid, Grid::Opensim | Grid::FakeOpensim)
                 && already_logged_in_retries < ALREADY_LOGGED_IN_MAX_RETRIES =>
             {
                 already_logged_in_retries = already_logged_in_retries.saturating_add(1);

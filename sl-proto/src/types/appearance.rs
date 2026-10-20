@@ -434,8 +434,9 @@ pub mod avatar_texture {
     /// lists them — and then the bake's seed. `None` when no wearable feeds the
     /// bake, or `slot` is no baked slot.
     ///
-    /// A viewer asks a client-baking region's cache for a bake under this id;
-    /// Second Life names its central bakes by it.
+    /// A viewer asks a client-baking region's cache for a bake under this id.
+    /// Second Life's central bakes are **not** named by it (`appearance-baking`
+    /// compared it with each slot's `hash_id`).
     #[must_use]
     pub fn wearables_hash(slot: usize, worn: &[(WearableType, Uuid)]) -> Option<Uuid> {
         let (_slot, seed, inputs) = BAKE_HASH_INPUTS

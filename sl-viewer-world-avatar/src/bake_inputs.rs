@@ -35,7 +35,7 @@ use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     AssetCacheLimits, AssetKey, AssetStore, AssetType, BakeRegion, BevyAssetFetcher, BlobFetcher,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_VIEWER_ASSET, Command, GateStats, Layer, SlCapabilities,
-    SlCommand, SlEvent, SlSessionEvent, StoreStats, TextureKey, VisualParams, Wearable,
+    SlCommand, SlEvent, SlSessionEvent, StoreStats, TextureKey, Uuid, VisualParams, Wearable,
     WearableAsset, WearableType, assemble_layers, avatar_texture,
 };
 use sl_viewer_world_api::DecodedTextures;
@@ -120,6 +120,20 @@ impl OwnBakeInputs {
     #[must_use]
     pub(crate) fn is_ready(&self) -> bool {
         self.stage == BakeInputStage::Ready
+    }
+
+    /// The worn wearables' `(type, asset id)` in worn order — what the
+    /// reference hashes each bake's cache id from
+    /// (`LLWearableData::computeBakedTextureHash`, here
+    /// [`avatar_texture::wearables_hash`]).
+    /// Unlike [`generation`](Self::generation) it does not move on an
+    /// appearance-editor preview, only when the outfit itself does.
+    #[must_use]
+    pub(crate) fn worn_assets(&self) -> Vec<(WearableType, Uuid)> {
+        self.wearables
+            .iter()
+            .filter_map(|wearable| Some((wearable.wearable_type, wearable.asset_id?)))
+            .collect()
     }
 
     /// The assembly generation, bumped on every (re)assembly. The client-side

@@ -6465,6 +6465,63 @@ mod test {
         uuid::Uuid::from_u128(3)
     }
 
+    /// An `AgentIsNowWearing` becomes the simulator's record of the outfit,
+    /// each worn item resolved to its asset through the agent's inventory —
+    /// so the next `AgentWearablesRequest` is answered with it — and is
+    /// surfaced as `WearingSet`.
+    #[test]
+    fn a_new_outfit_is_what_the_simulator_holds_the_agent_to_wear() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let shirt = InventoryItem {
+            asset_id: uuid::Uuid::from_u128(0x5A1),
+            ..wearable_item()
+        };
+        sim.agent_inventory_mut().insert_item(shirt.clone());
+        let (serial_before, _worn) = sim.agent_wearables();
+        let unknown = InventoryKey::from(uuid::Uuid::from_u128(0x99));
+        client.set_wearing(
+            &[
+                sl_proto::Wearable {
+                    item_id: shirt.item_id,
+                    asset_id: None,
+                    wearable_type: WearableType::Shirt,
+                },
+                sl_proto::Wearable {
+                    item_id: unknown,
+                    asset_id: None,
+                    wearable_type: WearableType::Pants,
+                },
+            ],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let expected = vec![
+            sl_proto::Wearable {
+                item_id: shirt.item_id,
+                asset_id: Some(shirt.asset_id),
+                wearable_type: WearableType::Shirt,
+            },
+            sl_proto::Wearable {
+                item_id: unknown,
+                asset_id: None,
+                wearable_type: WearableType::Pants,
+            },
+        ];
+        let events = drain_server(&mut sim);
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ServerEvent::WearingSet { wearables } if wearables == &expected
+            )),
+            "the outfit surfaces as WearingSet, got {events:?}"
+        );
+        let (serial, worn) = sim.agent_wearables();
+        assert_eq!(worn, expected.as_slice());
+        assert!(serial > serial_before, "the outfit's serial moves on");
+        Ok(())
+    }
+
     /// A minimal wearable inventory item for the legacy asset-upload tests.
     fn wearable_item() -> InventoryItem {
         InventoryItem {

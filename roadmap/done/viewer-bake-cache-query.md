@@ -2,7 +2,7 @@
 id: viewer-bake-cache-query
 title: Ask a client-baking region's cache before re-uploading the own bakes
 topic: viewer
-status: ready
+status: done
 origin: gridspec-appearance-baking (2026-10-19)
 refs: [gridspec-appearance-baking]
 ---
@@ -42,3 +42,29 @@ so a later query could not hit even if it were sent.
 
 An e2e test against `FakeOpensim`: a second login with the same outfit
 uploads nothing.
+
+## Done (2026-10-20): scope changed
+
+`appearance-baking` now logs A in again after the publish and asks the cache
+under the published ids: the local OpenSim answers **no hits**, and the new
+login arrives with the default placeholder on every slot. A stock region keeps
+the cache in memory for the session only; only the optional XBakes service
+(`[XBakes] URL`, unset by default and on the local grid) carries it into a
+later login. So "a second login uploads nothing" is not what OpenSim does, and
+the e2e test holds what it does instead: an outfit change re-uploads only the
+slots whose hash it changed.
+
+That needed what the task did not list:
+
+- the viewer publishes once **per outfit** (it was a one-shot per session, so
+  an outfit change on OpenSim was never shown to anyone): a new worn set
+  starts a query → upload of the misses → `AgentSetAppearance` round;
+- the fake grid takes an `AgentIsNowWearing` as the simulator's outfit
+  (`ServerEvent::WearingSet`), so a wear reaches the next
+  `AgentWearablesUpdate`;
+- the census's relogin found the fake Second Life flavour resetting the
+  Current Outfit Folder's version at each login (aditi keeps it): each
+  account's version now outlives its session (`OutfitVersions`,
+  `ServerEvent::CurrentOutfitVersionIncremented`);
+- the conformance harness retries an "already logged in" on `fake-opensim`
+  as it does on OpenSim.

@@ -28,7 +28,8 @@
 //! | how an item a capability upload **rewrote** is announced ([`UploadAnnouncements::saved`]) | the legacy UDP `UpdateCreateInventoryItem` | nothing: the capability's HTTP response is the whole answer |
 //! | how an item a capability upload **created** is announced ([`UploadAnnouncements::created`]) | nothing | nothing |
 //! | who composites an avatar ([`BakePolicy`]) | the grid: an `agent_appearance_service`, the central-bake protocol bit, an `AppearanceData` block on every appearance, and the `UpdateAvatarAppearance` trigger | every viewer for itself: none of those four |
-//! | the baked-texture cache, `AgentCachedTexture` ([`BakePolicy::answers_cache_queries`]) | never answered | one entry per slot asked, in order: the bake an `AgentSetAppearance` published under that cache id, else nil |
+//! | the baked-texture cache, `AgentCachedTexture` ([`BakePolicy::answers_cache_queries`]) | never answered | one entry per slot asked, in order: the bake an `AgentSetAppearance` of this session published under that cache id, else nil — a new login starts empty |
+//! | the Current Outfit Folder's version at a login | the version the account's last session bumped it to (`IncrementCOFVersion`) | no version named |
 //! | a viewer's own publish, `AgentSetAppearance` ([`BakePolicy::keeps_published_appearance`]) | ignored | kept for the cache, and never shown to the publisher (the live grid shows it to every other viewer) |
 //! | a bake request of a version the Current Outfit Folder is not at (`UpdateAvatarAppearance`) | `400`, `success` false, "Cof Version Mismatch: asked != current", `expected` the folder's version; nothing baked | no capability |
 //! | an accepted bake, the same version again included | `200` with the bake's `textures`, `visual_params` and `avatar_scale`, and the agent sent that appearance at the version baked (the live grid sends every viewer near it the same; the fake grid shows no resident to another) | no capability |

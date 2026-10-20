@@ -20,6 +20,8 @@
 //! - the minimap draws a resident and a tracking beacon in different colours;
 //! - an About Land window left open follows the owner's rename;
 //! - the viewer's own bake reaches the grid, and (OpenSim) the other viewer;
+//!   an outfit change uploads only the bakes it changes, the region's cache
+//!   naming the rest;
 //! - a teleport offer shows its destination's rating where the grid states
 //!   one, and each answer to an offer or a request reaches the grid as that
 //!   grid expects it;
@@ -1637,6 +1639,78 @@ mod test {
                         "the grid stores the published bake {bake}"
                     );
                 }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// **An outfit change re-uploads only what it changed**: on a grid that
+    /// leaves baking to the viewer, wearing a shirt republishes the outfit,
+    /// and the region's cache — asked under each slot's wearables hash —
+    /// names the bakes the shirt leaves alone, so only the upper body is
+    /// uploaded again (a re-upload would be named by a fresh id).
+    #[test]
+    fn an_outfit_change_uploads_only_the_bake_it_changes() -> Result<(), TestError> {
+        /// The stock shirt the agent's Clothing folder holds.
+        const SHIRT: &str = "Fixture Shirt";
+        stage("bake_cache", &["Alpha"])
+            .needs(Need::GridControl)
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::OpenSim))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let _published = alpha
+                    .expect_state(Probe::Agent)
+                    .at("/published_bakes")
+                    .timeout(WAIT)
+                    .to_be_present()
+                    .await?;
+                let before = alpha.agent().await?.published_bakes;
+                assert!(!before.is_empty(), "the first publish names no bake");
+
+                let inventory = alpha.ui().window("inventory");
+                alpha.press("Ctrl+I").await?;
+                let _shown = alpha.expect(&inventory).to_be_visible().await?;
+                // The list narrows to a search a moment after it is typed,
+                // and a row found before that is not where a click lands. So
+                // the shirt is searched away first: it can only show again
+                // once the list has narrowed to its name.
+                let search = inventory.test_id("inventory:search").role(Role::Textbox);
+                let row = inventory
+                    .get(Locator::role(Role::TreeItem).named(SHIRT))
+                    .timeout(WAIT);
+                let _searched = search.fill("no item is called this").await?;
+                let _narrowed = alpha.expect(&row).timeout(WAIT).to_be_hidden().await?;
+                let _searched = search.fill(SHIRT).await?;
+                let _filed = alpha.expect(&row).timeout(WAIT).to_be_visible().await?;
+                let _menu = row.right_click().await?;
+                let _worn = alpha
+                    .ui()
+                    .locator(Locator::role(Role::MenuItem).name_key("menu-inv-wear"))
+                    .timeout(WAIT)
+                    .click()
+                    .await?;
+
+                let started = Instant::now();
+                let after = loop {
+                    let published = alpha.agent().await?.published_bakes;
+                    if !published.is_empty() && published != before {
+                        break published;
+                    }
+                    if started.elapsed() > WAIT {
+                        return Err(format!(
+                            "the outfit change was never republished: {published:?}"
+                        )
+                        .into());
+                    }
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                };
+                let kept = after.iter().filter(|bake| before.contains(bake)).count();
+                assert_eq!(
+                    (after.len(), kept),
+                    (before.len(), before.len().saturating_sub(1)),
+                    "every bake but the upper body's is the cached one: \
+                     {before:?} -> {after:?}"
+                );
                 Ok(())
             })?;
         Ok(())

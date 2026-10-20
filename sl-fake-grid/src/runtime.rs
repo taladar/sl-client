@@ -440,6 +440,10 @@ pub(crate) struct GridCore {
     /// ([`crate::agent_requests::Homes`]): shared with every session, which
     /// stores a Set-Home into it.
     pub(crate) homes: crate::agent_requests::Homes,
+    /// Each account's Current Outfit Folder version
+    /// ([`crate::bakes::OutfitVersions`]): shared with every session, which
+    /// stores an `IncrementCOFVersion` into it, and read at each login.
+    pub(crate) outfit_versions: crate::bakes::OutfitVersions,
     /// How groups run ([`ImitatedGrid::groups_policy`]).
     pub(crate) groups_policy: crate::groups::GroupsPolicy,
     /// The agent every region reports as its owner: the first account
@@ -780,6 +784,13 @@ impl GridCore {
             for known in &self.accounts {
                 register_account_display_name(&mut state.sim, known);
             }
+            // The outfit folder as the last session left it.
+            if let Some(version) = self.outfit_versions.get(account.agent_id) {
+                let _seeded = state
+                    .sim
+                    .agent_inventory_mut()
+                    .set_current_outfit_version(version);
+            }
             enrich_success(
                 &mut success,
                 account,
@@ -1091,6 +1102,7 @@ impl GridCore {
             arrival: self.arrival_policy,
             own_appearance_owed: false,
             published_bakes: crate::bakes::PublishedBakes::default(),
+            outfit_versions: self.outfit_versions.clone(),
             groups: self
                 .groups
                 .lock()
@@ -2266,6 +2278,7 @@ impl FakeGridBuilder {
             friends_policy: self.imitates.friends_policy(),
             groups: parking_lot::Mutex::new(groups),
             homes: crate::agent_requests::Homes::default(),
+            outfit_versions: crate::bakes::OutfitVersions::default(),
             groups_policy,
             estate_owner,
             regions,

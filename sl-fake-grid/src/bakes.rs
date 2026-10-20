@@ -69,10 +69,13 @@
 //! viewer reads that bit as an OpenSim extension (`// OS sets bit 63 when BOM
 //! supported`) and decides Bakes on Mesh support another way on Second Life.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 use std::time::Instant;
 
-use sl_proto::{AvatarAppearance, ServerEvent, SimSession, avatar_texture, decode_texture_entry};
+use sl_proto::{
+    AgentKey, AvatarAppearance, ServerEvent, SimSession, avatar_texture, decode_texture_entry,
+};
 use uuid::Uuid;
 
 /// `RegionProtocols` bit 0: this region's grid composites avatar bakes.
@@ -262,17 +265,44 @@ impl PublishedBakes {
     }
 }
 
+/// Each account's Current Outfit Folder version as its last session left it:
+/// grid-wide, since the version is the folder's and the folder outlives the
+/// session — a login names the version the previous one bumped it to
+/// (`appearance-baking`'s `relogin_cof`).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OutfitVersions(Arc<parking_lot::Mutex<HashMap<AgentKey, i32>>>);
+
+impl OutfitVersions {
+    /// The version `agent`'s folder was left at, if a session of it ever
+    /// changed it.
+    pub(crate) fn get(&self, agent: AgentKey) -> Option<i32> {
+        self.0.lock().get(&agent).copied()
+    }
+
+    /// Records `version` as `agent`'s.
+    fn set(&self, agent: AgentKey, version: i32) {
+        let _previous = self.0.lock().insert(agent, version);
+    }
+}
+
 /// Answers a viewer's `AgentCachedTexture` and `AgentSetAppearance` as the
-/// grid `policy` names would. Anything else is not this module's, and `false`
-/// says so.
+/// grid `policy` names would, and keeps the outfit version an
+/// `IncrementCOFVersion` of `agent`'s moved to. Anything else is not this
+/// module's, and `false` says so.
 pub(crate) fn answer(
     published: &mut PublishedBakes,
+    versions: (&OutfitVersions, AgentKey),
     policy: BakePolicy,
     sim: &mut SimSession,
     event: &ServerEvent,
     now: Instant,
 ) -> bool {
     match event {
+        ServerEvent::CurrentOutfitVersionIncremented { version } => {
+            let (versions, agent) = versions;
+            versions.set(agent, *version);
+            true
+        }
         ServerEvent::CachedTexturesRequested { serial, slots } => {
             if policy.answers_cache_queries()
                 && let Err(error) =

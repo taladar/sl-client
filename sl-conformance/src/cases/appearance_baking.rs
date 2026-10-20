@@ -32,6 +32,10 @@
 //!    on every baked slot with made-up cache ids, the appearances both viewers
 //!    were sent after it, any `RebakeAvatarTextures`, and the cache asked again
 //!    with the published ids.
+//!    **Across a login**: then: A logs in again, its arrival
+//!    appearance is recorded, and the cache is asked with the published ids
+//!    once more — whether a region's cache outlives the session that filled
+//!    it.
 //! 7. **The restore**: A's arrival appearance published back (OpenSim keeps
 //!    what was published), and on a central-baking grid a bake at the current
 //!    version.
@@ -136,6 +140,8 @@ const SERIAL_NIL: i32 = 1;
 const SERIAL_MADE_UP: i32 = 2;
 /// The query after the publish.
 const SERIAL_PUBLISHED: i32 = 3;
+/// The serial of the query of the published cache ids after a new login.
+const SERIAL_RELOGIN: i32 = 4;
 
 /// An answer both grids give.
 const fn both(answer: Answer) -> Measured<Answer> {
@@ -700,6 +706,13 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
             ),
         ),
     ),
+    (
+        "cache_relogin",
+        each(
+            Answer::Text("nothing"),
+            Answer::Text("11 of 11 entries in order, no hits"),
+        ),
+    ),
     ("cache_unasked_answers", both(Answer::Count(0))),
     (
         "cap_increment",
@@ -744,6 +757,19 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ("publish_own_hover", both(Answer::Text("none"))),
     ("publish_own_told", both(Answer::Flag(false))),
     ("publish_rebakes", both(Answer::Text(""))),
+    (
+        "relogin_cof",
+        each(Answer::Text("current"), Answer::Text("none")),
+    ),
+    (
+        "relogin_own_block",
+        each(
+            Answer::Text("version 1 cof current flags 0"),
+            Answer::Text("no block"),
+        ),
+    ),
+    ("relogin_own_hover", both(Answer::Text("hover"))),
+    ("relogin_own_told", both(Answer::Flag(true))),
     ("restore_own", both(Answer::Text("no appearance"))),
     (
         "service_head",
@@ -900,6 +926,15 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         "publish_seen_told",
         each(Answer::Flag(false), Answer::Flag(true)),
     ),
+    (
+        "relogin_seen_block",
+        each(
+            Answer::Text("version 1 cof current flags 0"),
+            Answer::Text("no block"),
+        ),
+    ),
+    ("relogin_seen_hover", both(Answer::Text("hover"))),
+    ("relogin_seen_told", both(Answer::Flag(true))),
     (
         "restore_seen",
         each(
@@ -1971,7 +2006,7 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
     let _theirs = settle_scene_observing(
         b,
         grid,
-        build_position,
+        build_position.clone(),
         SETTLE_WINDOW,
         settle_idle,
         |event| seen.note(actor, event),
@@ -2109,6 +2144,57 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
         .map(|(_serial, textures)| textures.as_slice());
     metrics.set(
         "cache_published",
+        describe_cache(answer, asked, arrival.as_ref(), Some(plywood.uuid())),
+    );
+
+    // --- 6b. Across a login. ---
+    // No region wait: it would read past the arrival burst, which carries
+    // the appearance the new login arrives with.
+    census.a.relogin().await?;
+    // The Current Outfit Folder's version is the folder's, not the session's:
+    // the new login's against the one the grid last stated.
+    let relogin_cof = census.a.login_success().and_then(|login| login.cof_version);
+    metrics.set(
+        "relogin_cof",
+        relogin_cof.map_or_else(
+            || "none".to_owned(),
+            |version| relation(version, census.current),
+        ),
+    );
+    if relogin_cof.is_some() {
+        census.current = relogin_cof;
+    }
+    let from = census.mark();
+    let (actor, own) = (census.actor, &mut census.own);
+    let _settled = settle_scene_observing(
+        census.a,
+        grid,
+        build_position,
+        SETTLE_WINDOW,
+        settle_idle,
+        |event| own.note(actor, event),
+    )
+    .await?;
+    census.listen().await?;
+    census.record_appearances(metrics, "relogin", from, Some(plywood.uuid()));
+    let slots = query_slots(PUBLISHED_CACHE);
+    let asked = slots.len();
+    census
+        .a
+        .send(Command::RequestCachedTextures {
+            serial: SERIAL_RELOGIN,
+            slots,
+        })
+        .await?;
+    census.listen().await?;
+    let answer = census
+        .own
+        .cached
+        .iter()
+        .find(|(answered, _textures)| *answered == SERIAL_RELOGIN)
+        .map(|(_serial, textures)| textures.as_slice());
+    metrics.set(
+        "cache_relogin",
         describe_cache(answer, asked, arrival.as_ref(), Some(plywood.uuid())),
     );
 

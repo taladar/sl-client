@@ -17,7 +17,7 @@ it published before (`AgentCachedTexture`).
 
 Measured on 2026-10-19 and 2026-10-20 by the conformance case
 `appearance-baking`: avatar A asks, avatar B stands beside it and only listens.
-Ten runs on aditi (Mauve, the build location) and six on the local OpenSim
+Twelve runs on aditi (Mauve, the build location) and nine on the local OpenSim
 (Northeast Region), the last of each with every answer held. COF versions grow
 from run to run, so the case states each version by what it is — the one asked
 for, the one the grid last stated (*current*) — never as a number.
@@ -108,12 +108,33 @@ published back.
 | --- | --- | --- | --- |
 | what A is told (**held**) | nothing | **nothing**: OpenSim sends the appearance to every other viewer only | nothing |
 | what B is told (**held** live) | nothing | the publish, verbatim: no block, the plywood on every slot | — |
-| it is kept (**held**) | no | yes, and persisted: the next login arrives with it, which is why the case publishes A's arrival appearance back | kept for the cache on `FakeOpensim` |
+| it is kept (**held**) | no | yes, for the session (see [Across a login](#across-a-login)); an earlier run's publish was seen again at the next run's login, which is why the case publishes A's arrival appearance back | kept for the cache on `FakeOpensim`, per session |
 | the arrival appearance published back (**held** live) | — | B is sent the arrival bakes again | — |
 
 Second Life's central-bake regions ignore the message; the reference never
 sends it there (`LLAgent::sendAgentSetAppearance` returns on a region with a
 central-bake version).
+
+### Across a login
+
+A logs in again straight after the publish, and asks the cache once more
+under the ids the publish named.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the new login's `cof_version` (**held**) | the version the grid last stated: the folder's, not the session's | absent | the same; `FakeSl` keeps each account's version across logins |
+| A's own arrival appearance (**held**: told, block, hover) | as at the first arrival | no block, the **default placeholder** on every slot, not the publish | as the flavour's grid, but `FakeOpensim` names its fixture bakes |
+| B's of A (**held** live) | as A's own | the same as A's own | — |
+| the published ids asked again (**held**) | never answered | eleven entries, **no hits** | the same |
+
+OpenSim's cache is the avatar's `WearableCacheItems` in the region's memory;
+at a login it keeps only a slot whose texture its asset cache still holds, or
+asks the optional XBakes service (`[XBakes] URL`, unset in a stock
+`OpenSim.ini` and on the local grid) for the bakes it stored
+(`AvatarFactoryModule.ValidateBakedTextureCache`). A stock region therefore
+answers a query with a hit only within the session that published: after an
+outfit change, for each slot the change left alone. The reference asks at
+login and at every outfit change (`LLAgentWearables::queryWearableCache`).
 
 ### Not measured
 
@@ -123,3 +144,5 @@ central-bake version).
 - The viewer's own bakes uploaded over `UploadBakedTexture` on OpenSim, which
   the `baked-texture-upload` case exercises.
 - How Second Life computes a bake's id.
+- An OpenSim region with XBakes, where a cache hit is expected to survive the
+  login.

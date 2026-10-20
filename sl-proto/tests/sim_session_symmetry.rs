@@ -54,8 +54,7 @@ mod test {
         ObjectExtraParams, ObjectKey, OwnerKey, ParcelObjectOwner, ParcelObjectOwnersPart, PickKey,
         PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId, RegionHandle,
         RegionIdentity, RegionLocalObjectId, RegionTerrainComposition, RezAttachment,
-        ScopedObjectId, ServerEvent, Session, SimSession, TextureKey, Wearable, WearableType,
-        parse_event_queue_response,
+        ScopedObjectId, ServerEvent, Session, SimSession, TextureKey, parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_types::map::RegionCoordinates;
@@ -481,8 +480,7 @@ mod test {
         "MuteListRequest",
         "UpdateMuteListEntry",
         "RemoveMuteListEntry",
-        // appearance / misc agent
-        "AgentIsNowWearing",
+        // misc agent
         "RequestImage",
         "RetrieveInstantMessages",
         "ScriptDialogReply",
@@ -533,7 +531,6 @@ mod test {
     ];
     /// The raw-forwarded messages the matching family test sends, in order.
     const AGENT_FAMILY: &[&str] = &[
-        "AgentIsNowWearing",
         "RequestImage",
         "RetrieveInstantMessages",
         "ScriptDialogReply",
@@ -772,19 +769,11 @@ mod test {
     }
 
     #[test]
-    fn appearance_and_misc_agent_messages_forward_verbatim() -> Result<(), TestError> {
+    fn misc_agent_messages_forward_verbatim() -> Result<(), TestError> {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
         let texture = TextureKey::from(uuid::Uuid::from_u128(0x7E));
 
-        client.set_wearing(
-            &[Wearable {
-                item_id: InventoryKey::from(uuid::Uuid::from_u128(0x31)),
-                asset_id: None,
-                wearable_type: WearableType::Shape,
-            }],
-            now,
-        )?;
         client.request_texture(texture, 0, 1.0e6, now)?;
         client.retrieve_instant_messages(now)?;
         client.reply_script_dialog(

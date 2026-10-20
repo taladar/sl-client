@@ -162,6 +162,22 @@ impl SimInventoryTree {
             .map(|folder| folder.version)
     }
 
+    /// Sets the Current Outfit Folder's version — how a grid seeds a new
+    /// login with the version the folder had when the last session ended.
+    /// `false` when the account has no Current Outfit Folder.
+    pub fn set_current_outfit_version(&mut self, version: i32) -> bool {
+        let Some(folder_id) = self
+            .folder_of_type(crate::FolderType::CurrentOutfit.to_code())
+            .map(|folder| folder.folder_id)
+        else {
+            return false;
+        };
+        self.folders
+            .get_mut(&folder_id)
+            .map(|folder| folder.version = version)
+            .is_some()
+    }
+
     /// Bumps the Current Outfit Folder's version, as the grid's
     /// `IncrementCOFVersion` capability does, and returns the new version —
     /// `None` when the account has no Current Outfit Folder.

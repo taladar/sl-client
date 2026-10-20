@@ -1628,6 +1628,15 @@ pub enum ServerEvent {
     /// every wearable change, so this is the re-ask a viewer makes when it
     /// missed one.
     RequestAgentWearables,
+    /// The client told the simulator what the agent now wears
+    /// (`AgentIsNowWearing`); the session has already taken it as the outfit
+    /// [`SimSession::agent_wearables`] answers with, each item resolved to its
+    /// asset through the agent's inventory (`None` for an item it does not
+    /// hold).
+    WearingSet {
+        /// The outfit, one entry per worn item.
+        wearables: Vec<Wearable>,
+    },
     /// The client requested a group's financial summary
     /// (`GroupAccountSummaryRequest`); the simulator answers with
     /// [`SimSession::send_group_account_summary_reply`].
@@ -1849,6 +1858,12 @@ pub enum ServerEvent {
     ServerAppearanceRequested {
         /// The Current Outfit Folder version the client asked the grid to bake.
         cof_version: i32,
+    },
+    /// The client bumped its Current Outfit Folder's version
+    /// (`IncrementCOFVersion`); the capability has already answered it.
+    CurrentOutfitVersionIncremented {
+        /// The folder's new version.
+        version: i32,
     },
     /// The client copied an item embedded in a notecard into inventory
     /// (`CopyInventoryFromNotecard`). Fire-and-forget: the copied item is
@@ -11632,6 +11647,25 @@ impl SimSession {
             }
             AnyMessage::AgentWearablesRequest(_request) => {
                 self.events.push_back(ServerEvent::RequestAgentWearables);
+            }
+            AnyMessage::AgentIsNowWearing(wearing) => {
+                // The simulator's record of the outfit, which the next
+                // `AgentWearablesRequest` is answered from: each worn item
+                // resolved to its asset through the agent's inventory.
+                let wearables: Vec<Wearable> = wearing
+                    .wearable_data
+                    .iter()
+                    .map(|block| {
+                        let item_id = InventoryKey::from(block.item_id);
+                        Wearable {
+                            item_id,
+                            asset_id: self.agent_inventory.item(item_id).map(|item| item.asset_id),
+                            wearable_type: WearableType::from_code(block.wearable_type),
+                        }
+                    })
+                    .collect();
+                self.set_agent_wearables(wearables.clone());
+                self.events.push_back(ServerEvent::WearingSet { wearables });
             }
             AnyMessage::FetchInventoryDescendents(request) => {
                 self.events

@@ -2694,7 +2694,8 @@ impl SimCaps {
 
     /// Serves one `IncrementCOFVersion` GET: bumps the version of the agent's
     /// Current Outfit Folder in the served inventory tree and answers the new
-    /// version, `{ version }`. Wrong method → `405`; an account with no Current
+    /// version, `{ version }`, surfacing it as
+    /// [`ServerEvent::CurrentOutfitVersionIncremented`]. Wrong method → `405`; an account with no Current
     /// Outfit Folder has no version to bump → `404`.
     fn dispatch_increment_cof_version(
         sim: &mut SimSession,
@@ -2705,6 +2706,7 @@ impl SimCaps {
         }
         match sim.agent_inventory_mut().increment_current_outfit_version() {
             Some(version) => {
+                sim.push_content_event(ServerEvent::CurrentOutfitVersionIncremented { version });
                 CapsResponse::llsd_xml(cof_version_increment_to_llsd(version).to_llsd_xml())
             }
             None => CapsResponse::not_found(),
