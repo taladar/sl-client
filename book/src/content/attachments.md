@@ -35,8 +35,9 @@ The client can:
   `RezSingleAttachmentFromInv`) or several at once
   (`Command::RezAttachments`, `RezMultipleAttachmentsFromInv`, whose
   `DetachOrder` says whether to first detach everything currently worn or keep
-  it). Both take a `RezAttachment` describing the item, owner, point and
-  attachment mode.
+  it, sent four objects to a packet under one compound id, as the reference
+  packs them). Both take a `RezAttachment` describing the item, owner, point
+  and attachment mode.
 - **Detach back to inventory** by region-local id (`Command::DetachObjects`,
   `ObjectDetach`) or by inventory item id
   (`Command::DetachAttachmentIntoInventory`, `DetachAttachmentIntoInv`).
@@ -45,9 +46,12 @@ The client can:
   location.
 
 There is no dedicated reply message for these: the region confirms a change the
-usual way, by pushing the affected object's `ObjectUpdate` (and, for what others
-see, the attachment list inside `Event::AvatarAppearance`). When an object is
-attached the region also kills its in-world copy.
+usual way, by pushing the affected object's `ObjectUpdate` to every viewer in
+sight (a HUD's to the wearer only) and a `KillObject` when it comes off. An
+object attached from the world is not killed: it is sent again, attached,
+under the same ids. What each grid answers each message with — the inventory
+messages, a drop, a refusal, the limit, a teleport — is measured in the *Grid
+behaviour* part's [appearance chapter](../gridspec/appearance.md#attachments).
 
 The server side mirrors every inbound attachment message as a `ServerEvent`
 (`AttachObject`, `DetachObjects`, `DropAttachments`, `RezAttachment`,

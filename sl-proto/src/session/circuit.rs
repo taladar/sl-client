@@ -350,6 +350,10 @@ const fn severity_of(message: &AnyMessage) -> ReliableSeverity {
 /// messages; one that is not fails to encode.
 const MAX_VARIABLE_BLOCKS: usize = 255;
 
+/// How many objects one `RezMultipleAttachmentsFromInv` packet carries: the
+/// reference's `OBJECTS_PER_PACKET` (`llattachmentsmgr.cpp`).
+const REZ_ATTACHMENTS_PER_PACKET: usize = 4;
+
 /// The bucket of a session message (`IM_SESSION_SEND`, a session start or
 /// leave): one zero byte, the reference's `EMPTY_BINARY_BUCKET` of size 1
 /// (`llinstantmessage.cpp:46`), which it packs where a message carries none.
@@ -2408,32 +2412,40 @@ impl Circuit {
                 len: attachments.len(),
                 max: 255,
             })?;
-        let message = AnyMessage::RezMultipleAttachmentsFromInv(RezMultipleAttachmentsFromInv {
-            agent_data: RezMultipleAttachmentsFromInvAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-            },
-            header_data: RezMultipleAttachmentsFromInvHeaderDataBlock {
-                compound_msg_id: compound_id,
-                total_objects,
-                first_detach_all: detach.detaches_all_first(),
-            },
-            object_data: attachments
-                .iter()
-                .map(|rez| RezMultipleAttachmentsFromInvObjectDataBlock {
-                    item_id: rez.item_id.uuid(),
-                    owner_id: rez.owner_id,
-                    attachment_pt: rez.attachment_point.with_mode(rez.mode),
-                    item_flags: 0,
-                    group_mask: 0,
-                    everyone_mask: 0,
-                    next_owner_mask: 0,
-                    name: with_nul(&rez.name),
-                    description: with_nul(&rez.description),
-                })
-                .collect(),
-        });
-        self.send(&message, Reliability::Reliable, now)
+        // The reference packs four objects to a packet and starts a new one
+        // for the next four, every packet naming the same compound message and
+        // the total (`LLAttachmentsMgr::requestAttachments`): one packet of
+        // forty would not fit a datagram.
+        for chunk in attachments.chunks(REZ_ATTACHMENTS_PER_PACKET) {
+            let message =
+                AnyMessage::RezMultipleAttachmentsFromInv(RezMultipleAttachmentsFromInv {
+                    agent_data: RezMultipleAttachmentsFromInvAgentDataBlock {
+                        agent_id: self.agent_id.uuid(),
+                        session_id: self.session_id,
+                    },
+                    header_data: RezMultipleAttachmentsFromInvHeaderDataBlock {
+                        compound_msg_id: compound_id,
+                        total_objects,
+                        first_detach_all: detach.detaches_all_first(),
+                    },
+                    object_data: chunk
+                        .iter()
+                        .map(|rez| RezMultipleAttachmentsFromInvObjectDataBlock {
+                            item_id: rez.item_id.uuid(),
+                            owner_id: rez.owner_id,
+                            attachment_pt: rez.attachment_point.with_mode(rez.mode),
+                            item_flags: 0,
+                            group_mask: 0,
+                            everyone_mask: 0,
+                            next_owner_mask: 0,
+                            name: with_nul(&rez.name),
+                            description: with_nul(&rez.description),
+                        })
+                        .collect(),
+                });
+            self.send(&message, Reliability::Reliable, now)?;
+        }
+        Ok(())
     }
 
     /// Queues a `ViewerEffect` reliably, batching `effects` into one message

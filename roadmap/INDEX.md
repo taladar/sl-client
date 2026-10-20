@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 341 |
+| ready | 340 |
 | blocked | 82 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1405 |
+| done | 1406 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2071** |
@@ -351,7 +351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (341)
+## ready (340)
 
 ### protocol
 
@@ -1142,8 +1142,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-attachments`](ready/gridspec-attachments.md) — Attachments on each
-  grid: attach, detach, limits, HUDs, temporary
 - [`gridspec-avatar-render-info`](ready/gridspec-avatar-render-info.md) —
   AvatarRenderInfo and AttachmentResources on each grid
 - [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
@@ -1281,7 +1279,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`fake-grid-own-attachments-and-region-moves`](blocked/fake-grid-own-attachments-and-region-moves.md)
   — Fake grid — the agent's own attachments, the COF, and region moves (blocked
-  by `gridspec-outfits-wearables`, `gridspec-attachments`)
+  by `gridspec-outfits-wearables`, `gridspec-attachments` (done))
 - [`test-e2e-environment-parcel-layer`](blocked/test-e2e-environment-parcel-layer.md)
   — End-to-end test of the parcel environment layer when walking between parcels
   (blocked by `server-fake-grid-parcel-on-movement`)
@@ -1356,7 +1354,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-ecs-store`, `gridspec-object-link-delink` (done))
 - [`server-world-sit-and-attach`](blocked/server-world-sit-and-attach.md) —
   Sitting and attaching as world state a script can read (blocked by
-  `server-world-ecs-store`, `gridspec-attachments`)
+  `server-world-ecs-store`, `gridspec-attachments` (done))
 - [`server-world-touch-and-grab`](blocked/server-world-touch-and-grab.md) —
   Touch routing — a click on a prim reaches nothing (blocked by
   `protocol-sim-script-messages`)
@@ -1584,7 +1582,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1405)
+## done (1406)
 
 ### protocol
 
@@ -4604,6 +4602,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   fetch details on each grid
 - [`gridspec-asset-upload`](done/gridspec-asset-upload.md) — Asset uploads and
   their costs, refusals and announcements on each grid
+- [`gridspec-attachments`](done/gridspec-attachments.md) — Attachments on each
+  grid: attach, detach, limits, HUDs, temporary
 - [`gridspec-avatar-presence`](done/gridspec-avatar-presence.md) — Other avatars
   in the region: full updates, coarse locations and kills
 - [`gridspec-circuit`](done/gridspec-circuit.md) — Circuit behaviour: acks,

@@ -17,6 +17,7 @@ pub mod asset_http;
 pub mod asset_round_trip;
 pub mod asset_upload;
 pub mod attach_detach;
+pub mod attachments;
 pub mod avatar_appearance_npc;
 pub mod avatar_notes;
 pub mod avatar_picker;

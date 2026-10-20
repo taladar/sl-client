@@ -8359,6 +8359,55 @@ mod test {
         Ok(())
     }
 
+    /// More than four objects go out four to a packet, as the reference packs
+    /// them, every packet naming the same compound message and the total.
+    #[test]
+    fn rez_attachments_packs_four_objects_to_a_packet() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let compound = uuid::Uuid::from_u128(0xC1);
+        let attachments: Vec<RezAttachment> = (1..=9_u128)
+            .map(|n| RezAttachment {
+                item_id: InventoryKey::from(uuid::Uuid::from_u128(0xD0 + n)),
+                owner_id: uuid::Uuid::from_u128(0xD0),
+                attachment_point: AttachmentPoint::Chest,
+                mode: AttachmentMode::Add,
+                name: String::new(),
+                description: String::new(),
+            })
+            .collect();
+        session.rez_attachments(
+            TransactionId::from(compound),
+            DetachOrder::Keep,
+            &attachments,
+            now,
+        )?;
+        let sent = drain(&mut session)?;
+        let packets: Vec<_> = sent
+            .iter()
+            .filter_map(|m| match m {
+                AnyMessage::RezMultipleAttachmentsFromInv(rez) => Some(rez),
+                _ => None,
+            })
+            .collect();
+        let sizes: Vec<usize> = packets.iter().map(|rez| rez.object_data.len()).collect();
+        assert_eq!(sizes, vec![4, 4, 1]);
+        for rez in &packets {
+            assert_eq!(rez.header_data.compound_msg_id, compound);
+            assert_eq!(rez.header_data.total_objects, 9);
+            assert!(!rez.header_data.first_detach_all);
+        }
+        let items: Vec<uuid::Uuid> = packets
+            .iter()
+            .flat_map(|rez| rez.object_data.iter().map(|object| object.item_id))
+            .collect();
+        let expected: Vec<uuid::Uuid> = attachments.iter().map(|rez| rez.item_id.uuid()).collect();
+        assert_eq!(items, expected);
+        Ok(())
+    }
+
     #[test]
     fn viewer_effect_encodes_lookat() -> Result<(), TestError> {
         let now = Instant::now();

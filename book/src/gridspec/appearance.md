@@ -136,7 +136,7 @@ answers a query with a hit only within the session that published: after an
 outfit change, for each slot the change left alone. The reference asks at
 login and at every outfit change (`LLAgentWearables::queryWearableCache`).
 
-### Not measured
+### Not measured (baking)
 
 - A bake while another viewer is in a neighbouring region, and an appearance
   sent down a child circuit (see [teleport](teleport.md) for what a child
@@ -146,3 +146,117 @@ login and at every outfit change (`LLAgentWearables::queryWearableCache`).
 - How Second Life computes a bake's id.
 - An OpenSim region with XBakes, where a cache hit is expected to survive the
   login.
+
+## Attachments
+
+What each grid answers every way a viewer wears and takes off an object, and
+what the agent and a second viewer beside it are sent. Measured on 2026-10-20
+by the conformance case `attachments`: avatar A wears copies of a cube, each
+copy known by a role (`cube1`, `cube2`, `hud`, …), and avatar B stands beside
+it and only listens. Three runs on aditi (Mauve, the build location) and four
+on the local OpenSim (Northeast Region), the last of each with every answer
+held. The census wears on the first two body points and the first HUD point
+nothing of A's is on (the aditi avatars wear an animation overrider and six
+other attachments), so a point is named by which of those it is, never by
+number.
+
+### What an attachment is
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a worn item's object (**held**, as A and B see it) | a new object, parented to the avatar, on the point asked, with the same local id for both viewers | the same | not modelled: the fake grid drops every attach message |
+| its name-values (**held**) | `AttachItemID` only, naming the worn item, to both viewers | the same | — |
+| its `OwnerID` (**held**) | **nil**, to both viewers | nil | — |
+| its update flags (**held**) | A: `0x1002093c`; B: `0x10020810` — B is told the owner may modify it | A: the same; B: `0x00020810` | — |
+| a HUD's object (**held**) | sent to A only; B is never sent it | the same | — |
+| a HUD taken off (**held**) | B is sent a `KillObject` for the object it never saw | no kill to B | — |
+| a script's temporary attachment (`llAttachToAvatarTemp`) (**held**) | `AttachItemID` is the **object's own id**; no item is made | the same | — |
+| the agent's `AvatarAppearance` after a wear (**held**) | sent again, its attachment list naming what is worn | not sent | — |
+
+The temporary attachment's own id is what the reference's
+`LLViewerObject::isTempAttachment` tests, and what `Object::is_temp_attachment`
+tests here.
+
+### Wearing from inventory
+
+`RezSingleAttachmentFromInv` of one item at a time.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a free point, *replace* (**held**) | worn; no inventory message | the same | — |
+| a second item *added* to it (**held**) | both worn | the same | — |
+| a third *replacing* them (**held**) | **one** of the two (the first worn) is killed and its item restated; the other stays | **both** are killed and restated | — |
+| an item already worn, again on another point (**held**) | ignored: it stays where it was | the same | — |
+| an item nobody has (**held**) | an alert, "Attempt to rez an object failed." (`RezAttemptFailed`) | nothing | — |
+| several at once (`RezMultipleAttachmentsFromInv`, added) (**held**) | all worn | the same | — |
+
+OpenSim's *replace* takes off everything on the point under `[Attachments]
+WearReplacesAll`, true by default (`AttachmentsModule.AttachObjectInternal`);
+set to false, it takes off the first, as Second Life does.
+
+The reference packs four objects to a `RezMultipleAttachmentsFromInv` packet,
+every packet naming one compound message and the total; our client sent them
+all in one, which an outfit of a few dozen attachments would not fit in a
+datagram. It packs four too since 2026-10-20.
+
+### Taking off
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `ObjectDetach` by the object (**held**) | killed for both viewers; the item restated, on the event queue (`BulkUpdateInventory`) | killed; the item restated over UDP (`UpdateCreateInventoryItem`) | — |
+| `DetachAttachmentIntoInv` by the item (**held**) | killed; **no** inventory message | the same | — |
+| two in one `ObjectDetach` (**held**) | both killed; one item restated | the same, over UDP | — |
+| a drop (`ObjectDrop`) (**held**) | sent again **unattached under the same ids**, no kill; the item **removed** from the inventory | the same | — |
+| a dropped object (**held**) | no name-values; `OwnerID` nil | the same | — |
+
+### From the world, and by a script
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `ObjectAttach` of a rezzed cube (**held**) | sent again attached under the **same ids**; a new item announced over UDP, which its `AttachItemID` names | the same | — |
+| taken off again (**held**) | killed; the item restated on the event queue | killed; the item restated over UDP | — |
+| a probe asking for `PERMISSION_ATTACH` (**held**) | a `ScriptQuestion` for 32; granted, `run_time_permissions(32)` | the same | — |
+| `llAttachToAvatar` (**held**) | as `ObjectAttach`: same ids, an item made; the script's `attach` event names A and `llGetAttached` the point | the same | — |
+| `llAttachToAvatarTemp` (**held**) | same ids, **no** item; `AttachItemID` its own id | the same | — |
+| `llDetachFromAvatar` of a temporary attachment (**held**) | killed and gone: not sent back into the world, no item | the same | — |
+| `llDetachFromAvatar` of the other (**held**) | killed; the item restated on the event queue | the same, over UDP | — |
+
+### The limit
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the login's `attachment_limit` (**held**) | 38 (the `Base` package) | no benefits | — |
+| `SimulatorFeatures` `MaxAgentAttachments` (**held**) | 38 | 38 (`Constants.MaxAgentAttachments`) | — |
+| one more than the limit, in one compound message (**held**) | 38 worn, the last one refused **without a word** | the same | — |
+
+### Across a teleport and a login
+
+A teleport to another region (a neighbour on OpenSim; on aditi, where Mauve has
+none on the map, the first of the fixtures' `ban_line_regions` the map knows —
+it answers a name it does not know, such as `Plum`, with one placeholder block
+at grid 0,0 under access 255) and
+back, with `cube1` worn, B staying behind; then a new login with it worn.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the attachment in the destination (**held**) | sent anew, the **same full id**, a **new local id**, parented to the avatar's new local id | the same | — |
+| the region left, before the arrival (**held**) | kills A's avatar for A, never the attachment | kills nothing | — |
+| B, left behind (**held**) | sent a kill of A's avatar, **none** of its attachments | sent nothing | — |
+| back in the region left (**held**) | a new local id again; B is not sent A (the telehub is out of its sight) | the local id it had in the region it came from, kept; B is sent it again | — |
+| a new login with an item worn (**held**) | the grid puts it back on unasked, with everything else A wore | the same | — |
+| the agent's `AvatarAppearance` at the arrival (**held**) | lists it | sent, listing nothing | — |
+
+So a viewer keys an attachment by region and local id, and drops an avatar's
+attachments with the avatar: a Second Life region never kills them on its own.
+Neither grid needs the viewer to re-wear the Current Outfit Folder's
+attachments at a login.
+
+### Not measured (attachments)
+
+- Attachments of a linkset, and an attachment's position and rotation offsets.
+- Animated-object (animesh) attachments and their own limit.
+- A HUD's scripts and touches; another avatar's view of a scripted
+  attachment's chat.
+- A wear while the agent is still arriving, and two wears of one item racing.
+- What the fake grid answers: it models none of it
+  (`fake-grid-own-attachments-and-region-moves`).

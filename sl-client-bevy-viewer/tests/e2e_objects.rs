@@ -1656,4 +1656,252 @@ mod test {
             })?;
         Ok(())
     }
+
+    // ---- Attachments ------------------------------------------------------
+
+    /// The name the attachment test gives its prim.
+    const WORN: &str = "Worn By The Viewer";
+
+    /// Where the attachment test goes and comes back from: a region the
+    /// world map finds by name. Mauve, where the aditi avatars build, has no
+    /// neighbour on the map; Ahern is where the third aditi avatar stands.
+    fn elsewhere(stage: &Stage, here: &str) -> &'static str {
+        match stage.on_grid() {
+            Grid::Aditi => "Ahern",
+            Grid::OpenSim | Grid::Fake => {
+                if here == "East Region" {
+                    "Default Region"
+                } else {
+                    "East Region"
+                }
+            }
+        }
+    }
+
+    /// The region `alpha` stands in, by name.
+    async fn region_name(alpha: &Viewer) -> Result<String, BodyError> {
+        alpha
+            .agent()
+            .await?
+            .region
+            .and_then(|region| region.name)
+            .ok_or_else(|| "Alpha stands in no named region".into())
+    }
+
+    /// Teleport `alpha` to `region` from the world map and wait until it
+    /// stands there.
+    async fn teleport_by_map(alpha: &Viewer, region: &str) -> Result<(), BodyError> {
+        let map = alpha.open_floater("worldmap").await?;
+        let _typed = map
+            .test_id("worldmap:search")
+            .role(Role::Textbox)
+            .fill(region)
+            .await?;
+        let _picked = map
+            .get(Locator::role(Role::ListItem).named(region))
+            .timeout(WAIT)
+            .click()
+            .await?;
+        let _asked = map
+            .test_id("worldmap-button:teleport-selected")
+            .click()
+            .await?;
+        let _arrived = alpha
+            .expect_state(Probe::Agent)
+            .at("/region/name")
+            .timeout(SETTLE)
+            .to_equal(json!(region))
+            .await?;
+        Ok(())
+    }
+
+    /// The attachments `alpha`'s own avatar is drawn wearing: the root of
+    /// each, by full id.
+    async fn worn_roots(alpha: &Viewer, me: sl_proto::Uuid) -> Result<Vec<WorldNode>, BodyError> {
+        let mut nodes = alpha
+            .world()
+            .locator(WorldLocator::kind(WorldKind::Attachment))
+            .nodes()
+            .await?;
+        nodes.retain(|node| node.worn_by == Some(me) && node.attachment_point.is_some());
+        Ok(nodes)
+    }
+
+    /// Wait until `alpha`'s avatar is drawn wearing one object that `pick`
+    /// chooses out of what it wears, and return it.
+    async fn drawn_worn(
+        alpha: &Viewer,
+        me: sl_proto::Uuid,
+        what: &str,
+        pick: impl Fn(&WorldNode) -> bool,
+    ) -> Result<WorldNode, BodyError> {
+        let started = std::time::Instant::now();
+        loop {
+            let worn = worn_roots(alpha, me).await?;
+            let picked: Vec<&WorldNode> = worn.iter().filter(|node| pick(node)).collect();
+            if let [only] = picked.as_slice() {
+                return Ok((*only).clone());
+            }
+            if started.elapsed() > SETTLE {
+                return Err(format!(
+                    "{what}: the avatar is drawn wearing {} matching object(s) of {}",
+                    picked.len(),
+                    worn.len()
+                )
+                .into());
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+
+    /// Rez a prim, name it, take it, and wear it from the inventory window
+    /// with Add; teleport away and back; and take it off again. Each time
+    /// the avatar arrives the prim has to be drawn on it once — under the
+    /// same full id and a new local id, as both grids re-send it
+    /// ([[gridspec-attachments]]) — and the inventory's Worn tab has to list
+    /// it; once it is taken off, neither.
+    async fn a_worn_prim_follows_the_avatar(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        let me = alpha
+            .agent()
+            .await?
+            .agent_id
+            .ok_or("Alpha has no agent id")?;
+        let (build, _spot) = rez_a_prim(stage, alpha).await?;
+        let name = run_name(stage, WORN)?;
+        let field = build.test_id("build-name:field");
+        let _live = alpha.expect(&field).timeout(WAIT).to_be_enabled().await?;
+        let selected = alpha.selection().await?;
+        let [prim] = selected.as_slice() else {
+            return Err(format!("the rez left {selected:?} selected").into());
+        };
+        let prim_id = prim.full_id;
+        let _typed = field.fill(&name).await?;
+        field.press("Enter").await?;
+        let _kept = alpha
+            .expect(&field)
+            .timeout(WAIT)
+            .to_have_text(&name)
+            .await?;
+        alpha.press("Escape").await?;
+        alpha.press("Escape").await?;
+        let _cleared = alpha
+            .expect_state(Probe::Selection)
+            .to_equal(json!([]))
+            .await?;
+        alpha.press("Ctrl+B").await?;
+        let _closed = alpha.expect(&build).to_be_hidden().await?;
+        let rezzed = alpha
+            .world()
+            .locator(WorldLocator::full_id(prim_id))
+            .timeout(WAIT);
+        pie(alpha, &rezzed, &TAKE).await?;
+        let _gone = alpha
+            .expect_world(&rezzed)
+            .timeout(SETTLE)
+            .to_be_detached()
+            .await?;
+
+        let inventory = alpha.ui().window("inventory");
+        if !inventory.is_visible().await? {
+            alpha.press("Ctrl+I").await?;
+            let _shown = alpha.expect(&inventory).to_be_visible().await?;
+        }
+        let search = inventory.test_id("inventory:search").role(Role::Textbox);
+        let named = inventory.get(Locator::role(Role::TreeItem).named(&name));
+        let _searched = search.fill(NO_SUCH_ITEM).await?;
+        let _narrowed = alpha.expect(&named).timeout(WAIT).to_be_hidden().await?;
+        let _searched = search.fill(&name).await?;
+        let row = inventory
+            .get(Locator::role(Role::TreeItem).named(&name))
+            .timeout(WAIT);
+        let _filed = alpha.expect(&row).timeout(WAIT).to_be_visible().await?;
+
+        // Worn with Add, beside whatever the avatar already wears.
+        let before: Vec<sl_proto::Uuid> = worn_roots(alpha, me)
+            .await?
+            .iter()
+            .map(|node| node.full_id)
+            .collect();
+        let _menu = row.right_click().await?;
+        let _added = alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key("menu-inv-add"))
+            .timeout(WAIT)
+            .click()
+            .await?;
+        let worn = drawn_worn(alpha, me, "after the wear", |node| {
+            !before.contains(&node.full_id)
+        })
+        .await?;
+        let worn_tab = inventory.get(Locator::role(Role::Tab).name_key("inventory-tab-worn"));
+        let all_tab = inventory.get(Locator::role(Role::Tab).name_key("inventory-tab-everything"));
+        let _tab = worn_tab.click().await?;
+        let listed = inventory
+            .get(Locator::role(Role::TreeItem).named(&name))
+            .timeout(WAIT);
+        let _listed = alpha.expect(&listed).timeout(WAIT).to_be_visible().await?;
+        let _tab = all_tab.click().await?;
+
+        // Away and back: drawn on the avatar each time, once, the same object.
+        let home = region_name(alpha).await?;
+        let mut last = worn;
+        for region in [elsewhere(stage, &home).to_owned(), home] {
+            teleport_by_map(alpha, &region).await?;
+            let full_id = last.full_id;
+            let arrived_worn = drawn_worn(alpha, me, &format!("in {region}"), |node| {
+                node.full_id == full_id
+            })
+            .await?;
+            if arrived_worn.local_id == last.local_id {
+                return Err(format!(
+                    "in {region} the attachment kept its local id {:?}: the grid's \
+                     re-send under a new one was never read",
+                    last.local_id
+                )
+                .into());
+            }
+            last = arrived_worn;
+        }
+        let _tab = worn_tab.click().await?;
+        let _still = alpha.expect(&listed).timeout(WAIT).to_be_visible().await?;
+
+        // Taken off from its row: gone from the avatar and from the tab.
+        let _menu = listed.right_click().await?;
+        let _off = alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key("menu-inv-detach-from-yourself"))
+            .timeout(WAIT)
+            .click()
+            .await?;
+        let off = alpha
+            .world()
+            .locator(WorldLocator::full_id(last.full_id))
+            .timeout(SETTLE);
+        let _detached = alpha
+            .expect_world(&off)
+            .timeout(SETTLE)
+            .to_be_detached()
+            .await?;
+        let _unlisted = alpha.expect(&listed).timeout(WAIT).to_be_hidden().await?;
+        let _tab = all_tab.click().await?;
+        Ok(())
+    }
+
+    /// **An attachment follows the avatar, live** (`SL_E2E_GRID=opensim|aditi`):
+    /// a prim taken and worn from the inventory stays drawn on the avatar, once
+    /// and listed as worn, across a teleport away and back, and goes when it is
+    /// taken off. The item stays in the avatar's Objects folder.
+    #[test]
+    fn a_worn_prim_follows_the_avatar_on_a_live_grid() -> Result<(), TestError> {
+        StageBuilder::new("attachment_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid(
+                "a grid's own attachments, re-sent under new local ids by a teleport",
+            ))
+            .run(a_worn_prim_follows_the_avatar)?;
+        Ok(())
+    }
 }

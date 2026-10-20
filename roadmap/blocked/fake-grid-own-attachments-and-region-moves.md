@@ -57,6 +57,34 @@ OpenSim, because `sl-fake-grid` models none of it. The survey of
 - An `OwnerID` mode matching OpenSim (zeroed without a sound), defaulting to
   it.
 
+## Measured (gridspec-attachments, 2026-10-20)
+
+`book/src/gridspec/appearance.md` § Attachments has the model to build to, and
+the `attachments` census (live only for now) is the conformance case to put on
+both offline flavours when this lands. What the scope above misses or has to
+change:
+
+- An attach kills nothing in the world: `ObjectAttach` (and a script's
+  `llAttachToAvatar[Temp]`) sends the same object again, attached, under the
+  same ids. A drop is the same in reverse, and removes the item.
+- `OwnerID` is nil on an attachment and a dropped object on **both** grids;
+  Second Life gives a viewer that is not the owner `OBJECT_OWNER_MODIFY`
+  (`0x10000000`), OpenSim does not.
+- *Replace* takes off one attachment of the point on Second Life, all of them
+  on OpenSim. A worn item worn again, or an unknown item, is ignored; Second
+  Life alerts `RezAttemptFailed` for the unknown one.
+- The inventory messages: an `ObjectDetach` restates the item (event-queue
+  `BulkUpdateInventory` on Second Life, UDP `UpdateCreateInventoryItem` on
+  OpenSim); `DetachAttachmentIntoInv` restates nothing; an attach from the
+  world announces a new item over UDP on both.
+- A HUD goes to its wearer only; Second Life still sends other viewers the
+  kill when it comes off.
+- The limit is 38, the 39th refused silently.
+- Across a teleport the attachment keeps its full id under a new local id.
+  Second Life's region kills the avatar (for the agent and for viewers left
+  behind) and never its attachments; OpenSim's kills nothing. Both grids
+  re-wear what was worn at the next login.
+
 ## Verify
 
 End-to-end tests against the unmodified client: wear a HUD from inventory
