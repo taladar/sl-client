@@ -24,7 +24,7 @@ use bevy::prelude::Resource;
 use sl_client_bevy::{
     AttachmentPoints, BaseMesh, BaseMeshError, BaseMeshSkin, BevySkeleton, DecodedTexture,
     MorphMasks, ParamError, Skeleton, SkeletonError, VisualParams, avatar_texture,
-    shape_mask_files, static_layer_files,
+    load_static_layers,
 };
 use tracing::warn;
 
@@ -512,51 +512,19 @@ impl AvatarAssetLibrary {
 
 /// Load and decode the static `character/` TGA bake-layer textures the
 /// client-side compositor needs — the skin-grain base, eye sclera, and skin colour
-/// details ([`static_layer_files`]) plus the garment-shape masks
-/// ([`shape_mask_files`], R14) — from `dir`, keyed by file name. A file that
+/// details ([`static_layer_files`](sl_client_bevy::static_layer_files)) plus the
+/// garment-shape masks ([`shape_mask_files`](sl_client_bevy::shape_mask_files),
+/// R14) — from `dir`, keyed by file name ([`load_static_layers`]). A file that
 /// cannot be read or decoded is logged and skipped (its bake layer then falls
 /// back), never failing the whole load.
 fn load_static_layer_textures(dir: &Path) -> HashMap<&'static str, DecodedTexture> {
-    let mut textures = HashMap::new();
     // The diffuse static layers (skin grain, sclera, colour details) plus the
-    // garment-shape masks (sleeve / bottom / collar / pants length, … — R14),
-    // loaded and decoded the same way.
-    let files = static_layer_files().into_iter().chain(shape_mask_files());
-    for file in files {
-        match fs_err::read(dir.join(file)) {
-            Ok(bytes) => match decode_tga(&bytes) {
-                Ok(decoded) => {
-                    let _prev = textures.insert(file, decoded);
-                }
-                Err(error) => warn!("decoding static bake layer `{file}`: {error}; skipping"),
-            },
-            Err(error) => warn!("reading static bake layer `{file}`: {error}; skipping"),
-        }
+    // garment-shape masks (sleeve / bottom / collar / pants length, … — R14).
+    let loaded = load_static_layers(dir);
+    for (file, error) in &loaded.failures {
+        warn!("static bake layer `{file}`: {error}; skipping");
     }
-    textures
-}
-
-/// Decode a TGA image's bytes into a [`DecodedTexture`] (RGBA8), recording the
-/// source component count so the compositor reads a colour-detail layer's alpha
-/// but treats a grayscale skin-grain base as opaque.
-fn decode_tga(bytes: &[u8]) -> Result<DecodedTexture, image::ImageError> {
-    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Tga)?;
-    let components = match image.color() {
-        image::ColorType::L8 | image::ColorType::L16 => 1,
-        image::ColorType::La8 | image::ColorType::La16 => 2,
-        image::ColorType::Rgb8 | image::ColorType::Rgb16 | image::ColorType::Rgb32F => 3,
-        _other => 4,
-    };
-    let rgba = image.to_rgba8();
-    let (width, height) = (rgba.width(), rgba.height());
-    Ok(DecodedTexture::new(
-        width,
-        height,
-        components,
-        sl_client_bevy::DiscardLevel::FULL,
-        bytes::Bytes::from(rgba.into_raw()),
-        None,
-    ))
+    loaded.images
 }
 
 #[cfg(test)]

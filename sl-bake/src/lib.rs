@@ -29,10 +29,15 @@
 //! publishing the composite (P15.3 / P15.4) is the runtime crates' job.
 
 pub mod composite;
+pub mod outfit;
 pub mod plan;
 pub mod region;
 
 pub use composite::{BakedImage, Layer, LayerKind, ShapeMask, TexGen, composite_region};
+pub use outfit::{
+    BAKE_SIZE, StaticLayers, assemble_layers, bake_region, flip_rows_vertically,
+    load_static_layers, region_texture_ids,
+};
 pub use plan::{
     LayerSource, LayerTint, PlannedLayer, ShapeMaskSpec, region_layers, region_plan,
     shape_mask_files, static_layer_files,

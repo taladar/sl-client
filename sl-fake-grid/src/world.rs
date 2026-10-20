@@ -1931,6 +1931,18 @@ pub(crate) fn push_own_appearance_baked(
     // `AppearanceData` block around them tells the viewer whether to fetch them
     // from the appearance service or as ordinary assets (`crate::bakes`).
     let mut record = appearance.record(identity.agent_id, Vec::new());
+    // A grid that baked the outfit shows the bake: its ids on the baked faces
+    // and nothing on the others, and the parameters it was baked under.
+    if let Some(outfit) = sim.baked_outfit() {
+        record.texture_entry = sl_proto::TextureEntry {
+            faces: outfit
+                .textures
+                .iter()
+                .map(|id| sl_proto::TextureFace::new(sl_proto::TextureKey::from(*id)))
+                .collect(),
+        };
+        record.visual_params.clone_from(&outfit.visual_params);
+    }
     record.cof_version = cof_version
         .or_else(|| sim.agent_inventory().current_outfit_version())
         .or(record.cof_version);

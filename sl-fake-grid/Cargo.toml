@@ -20,14 +20,21 @@ path = "src/bin/sl-fake-grid.rs"
 [dependencies]
 bytes = { workspace = true }
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
+fs-err = { workspace = true }
 http = "1.4.2"
 http-body-util = "0.1.4"
 hyper = { version = "1.10.1", features = ["http1", "server"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
+md5 = { workspace = true }
 parking_lot = { workspace = true }
+sl-avatar = { workspace = true }
+# The central bake service composites with the client's own baker.
+sl-bake = { path = "../sl-bake", version = "0.1.0" }
 sl-object-asset = { workspace = true }
 sl-proto = { workspace = true }
 sl-test-assets = { workspace = true }
+# Decoding the layer textures a bake is made of, and encoding the bake.
+sl-texture = { path = "../sl-texture", version = "0.1.0", features = ["decode", "encode"] }
 sl-types = { workspace = true }
 sl-wire = { workspace = true }
 thiserror = { workspace = true }
@@ -46,9 +53,6 @@ sl-anim = { workspace = true }
 sl-client-tokio = { workspace = true }
 # The catalogue's rigged mesh asset is read back through the viewer's decoder.
 sl-mesh = { workspace = true }
-# The built-in library textures are decoded back through the viewer's own
-# JPEG2000 decoder, so a served id proves it carries a real image.
-sl-texture = { path = "../sl-texture", version = "0.1.0" }
 # `test-util` for the paused clock the injectable-clock tests run on.
 tokio = { workspace = true, features = ["test-util"] }
 

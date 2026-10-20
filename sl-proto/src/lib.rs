@@ -22,6 +22,7 @@ mod particles;
 mod region_restart;
 mod scoped_id;
 mod session;
+mod sim_bake;
 mod sim_caps;
 mod sim_experiences;
 mod sim_groups;
@@ -155,6 +156,7 @@ pub use session::{
     water_settings_from_legacy_preset, water_with_blended_values, water_with_pushed_values,
     windlight_refresh_to_llsd,
 };
+pub use sim_bake::{BakedItem, BakedOutfit, BakedSlot, WEARABLE_TYPE_COUNT};
 pub use sim_caps::{
     CapHandler, CapsDispatch, CapsRequest, CapsResponse, DisplayNameStyle, HomeLocationOutcome,
     HomeLocationStyle, LLSD_XML_CONTENT_TYPE, ModifyRegionOutcome, SimCaps,

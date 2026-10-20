@@ -1642,6 +1642,48 @@ mod test {
         Ok(())
     }
 
+    /// **The grid's bake reaches the viewer**: on a grid that bakes, the
+    /// viewer fetches every bake its own appearance names from the grid's
+    /// appearance service — which composites each one from the outfit on that
+    /// first fetch, so a bake the grid holds is one the viewer asked for — and
+    /// a slot nothing feeds is the default placeholder, never fetched.
+    #[test]
+    fn the_grids_bake_reaches_the_viewer() -> Result<(), TestError> {
+        stage("bake_fetch", &["Alpha"])
+            .needs(Need::GridControl)
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::SecondLife))
+            .run(async |stage: &Stage| {
+                let _alpha = &stage.viewer("Alpha")?;
+                let agent = stage.agent("Alpha").await?;
+                let outfit = agent
+                    .baked_outfit()
+                    .await
+                    .ok_or("the grid baked no outfit for Alpha")?;
+                let bakes: Vec<sl_proto::Uuid> = outfit
+                    .slots
+                    .iter()
+                    .map(|slot| slot.hash_id)
+                    .filter(|id| *id != sl_proto::avatar_texture::IMG_DEFAULT_AVATAR)
+                    .collect();
+                assert!(!bakes.is_empty(), "the outfit names no bake");
+                let started = Instant::now();
+                for bake in bakes {
+                    while agent
+                        .stored_asset(sl_proto::AssetKey::from(bake))
+                        .await
+                        .is_none()
+                    {
+                        if started.elapsed() > WAIT {
+                            return Err(format!("the viewer never fetched the bake {bake}").into());
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     // ---- Live grids -------------------------------------------------------
 
     /// What only a live grid does yet: two viewers seeing each other and

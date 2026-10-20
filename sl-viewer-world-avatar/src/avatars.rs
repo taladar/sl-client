@@ -45,7 +45,7 @@ use sl_client_bevy::{
     BodySizeMetrics, CoarseLocation, Command, DecodedTexture, JointOverrides, Layer, MaskTexture,
     MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
     ResolvedParams, SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
-    TextureEntry, TextureKey, TextureUpload, VolumeDeformations, avatar_texture, composite_region,
+    TextureEntry, TextureKey, TextureUpload, VolumeDeformations, avatar_texture, bake_region,
     cpu_skin_vertex, joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_morphed_mesh,
     to_bevy_runtime_morph_targets, upload_decoded, upload_pixels,
 };
@@ -2998,11 +2998,6 @@ pub(crate) fn apply_avatar_bake_textures(
     }
 }
 
-/// The side length, in pixels, of a locally composited client-side bake region
-/// (P15.3). The reference viewer bakes body regions at 512×512; each source
-/// wearable layer is bilinearly resampled to this by [`composite_region`].
-const LOCAL_BAKE_SIZE: u32 = 512;
-
 /// Our own avatar's **client-side** composited bake (P15.3): one uploaded
 /// [`Image`] plus its composited-alpha classification per baked slot, built once
 /// the client-side bake inputs ([`OwnBakeInputs`]) are assembled.
@@ -3064,44 +3059,6 @@ impl OwnLocalBake {
     }
 }
 
-/// Flip an RGBA8 image's rows in place — mirror it about its horizontal axis —
-/// mapping between the top-down decoded-image row order and the OpenGL bottom-up
-/// convention Second Life avatar UVs are authored in (P15.3). A zero dimension,
-/// or a pixel buffer too short for `width`×`height` RGBA, is left untouched.
-const fn flip_rows_vertically(pixels: &mut [u8], width: usize, height: usize) {
-    let stride = width.saturating_mul(RGBA_CHANNELS);
-    // Guard the swaps: every index touched must be within the buffer.
-    if stride == 0 || height == 0 || pixels.len() < stride.saturating_mul(height) {
-        return;
-    }
-    let mut row = 0_usize;
-    while row < height / 2 {
-        let opposite = height.saturating_sub(1).saturating_sub(row);
-        let top = row.saturating_mul(stride);
-        let bottom = opposite.saturating_mul(stride);
-        let mut offset = 0_usize;
-        while offset < stride {
-            pixels.swap(top.saturating_add(offset), bottom.saturating_add(offset));
-            offset = offset.saturating_add(1);
-        }
-        row = row.saturating_add(1);
-    }
-}
-
-/// Force every pixel of an RGBA8 image fully opaque (alpha byte → 255), so a
-/// bake draped on a solid surface (the eyeball) is not carved by stray
-/// source-texture transparency (P15.3).
-fn force_alpha_opaque(pixels: &mut [u8]) {
-    let mut index = RGBA_CHANNELS.saturating_sub(1);
-    while index < pixels.len() {
-        // The alpha byte of each RGBA texel.
-        if let Some(alpha) = pixels.get_mut(index) {
-            *alpha = u8::MAX;
-        }
-        index = index.saturating_add(RGBA_CHANNELS);
-    }
-}
-
 /// Composite one bake region of our own avatar from its ready client-side bake
 /// inputs (P15.2) into the canonical baked RGBA image for that region, or `None`
 /// when the region has no worn layers (an empty composite is wholly transparent
@@ -3135,16 +3092,7 @@ pub(crate) fn composite_own_region(
 /// composite task (`run_local_bake_job`). `None` for an empty region (no worn
 /// layers). See `composite_own_region` for the flip / opaque-eye rationale.
 fn composite_region_from_layers(region: BakeRegion, layers: &[Layer]) -> Option<DecodedTexture> {
-    if layers.is_empty() {
-        return None;
-    }
-    let mut baked = composite_region(region, LOCAL_BAKE_SIZE, layers);
-    let side = usize::try_from(LOCAL_BAKE_SIZE).unwrap_or(0);
-    flip_rows_vertically(&mut baked.pixels, side, side);
-    if region == BakeRegion::Eyes {
-        force_alpha_opaque(&mut baked.pixels);
-    }
-    Some(baked.to_decoded_image())
+    bake_region(region, layers)
 }
 
 /// Composite our own avatar's ready client-side bake inputs (P15.2) into one
@@ -5015,32 +4963,6 @@ mod tests {
                 Some(slot)
             );
         }
-    }
-
-    /// The client-side bake flip (P15.3) mirrors the image about its horizontal
-    /// axis: the top row and bottom row swap, and a degenerate buffer is left
-    /// untouched. A 1×2 RGBA image (one red row over one blue row) inverts.
-    #[test]
-    fn flip_rows_vertically_mirrors_top_and_bottom() {
-        // Row 0 red, row 1 blue (1 px wide, RGBA).
-        let mut pixels = vec![255, 0, 0, 255, 0, 0, 255, 255];
-        super::flip_rows_vertically(&mut pixels, 1, 2);
-        assert_eq!(pixels, vec![0, 0, 255, 255, 255, 0, 0, 255]);
-        // A buffer too short for its declared geometry is left as-is.
-        let mut short = vec![1, 2, 3];
-        super::flip_rows_vertically(&mut short, 1, 2);
-        assert_eq!(short, vec![1, 2, 3]);
-    }
-
-    /// The eye-bake opacity forcing (P15.3) sets every texel's alpha byte to 255
-    /// while leaving the colour channels untouched, so a transparent-surround iris
-    /// no longer carves the opaque eyeball away.
-    #[test]
-    fn force_alpha_opaque_fills_only_the_alpha_channel() {
-        // Two RGBA texels with varied colour and alpha 0 / 128.
-        let mut pixels = vec![10, 20, 30, 0, 40, 50, 60, 128];
-        super::force_alpha_opaque(&mut pixels);
-        assert_eq!(pixels, vec![10, 20, 30, 255, 40, 50, 60, 255]);
     }
 
     /// Only the head, upper-body and lower-body regions carry masked clothing

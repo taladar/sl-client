@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod agent_requests;
 pub mod animations;
 pub mod assets;
+mod bake_service;
 pub mod bakes;
 pub mod benefits;
 mod caps_endpoint;

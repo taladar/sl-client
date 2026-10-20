@@ -260,6 +260,13 @@ async fn handle_request(
                 .read()
                 .get(AssetKey::from(texture))
                 .map(|bytes| ranged_asset(bytes, range.as_deref(), J2C_CONTENT_TYPE));
+            // A bake the service named but nobody has fetched yet is
+            // composited now.
+            let answer = answer.or_else(|| {
+                core.bake_service
+                    .render(texture, &core.assets)
+                    .map(|bytes| ranged_asset(&bytes, range.as_deref(), J2C_CONTENT_TYPE))
+            });
             return Ok(match answer {
                 Some(answer) => answer_response(answer),
                 None => bake_not_found(agent, texture),

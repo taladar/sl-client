@@ -31,7 +31,7 @@ use bevy::mesh::morph::MorphAttributes;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
 use bevy::transform::components::Transform;
 use sl_avatar::{
-    AttachmentPoints, BaseMesh, CollisionVolume, Joint, JointSupport, MorphedMesh,
+    AttachmentPoints, BaseMesh, BodySizeMetrics, CollisionVolume, Joint, JointSupport, MorphedMesh,
     SkeletalDeformations, Skeleton, VertexSkinWeight, VolumeDeformations,
 };
 use sl_mesh::MeshSkin;
@@ -423,28 +423,6 @@ impl AnimationPose {
             let _prev = self.positions.insert(index, position);
         }
     }
-}
-
-/// The reference viewer's `computeBodySize` quantities for one avatar shape
-/// (Second Life Z-up metres), from [`BevySkeleton::body_size_metrics`] — what
-/// the viewer needs to place the body root from an avatar's wire position
-/// (the physics-capsule centre, R23).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BodySizeMetrics {
-    /// The reference's `mPelvisToFoot`: the vertical distance from the pelvis
-    /// joint down to the sole (it includes the foot-below-ankle segment).
-    /// ≈ 0.979 m at rest.
-    pub pelvis_to_foot: f32,
-    /// The reference's `mBodySize.z`: sole to (approximate) top of head —
-    /// the avatar height the simulator's physics capsule is sized by.
-    /// ≈ 1.707 m at rest.
-    pub body_size_z: f32,
-    /// The pelvis joint's current local (root-relative) Z — where the skeleton
-    /// instance's `mPelvis` sits above the body-root entity (1.067 m at rest).
-    /// The reference zeroes its pelvis under `mRoot` instead
-    /// (`llavatarappearance.cpp` `buildSkeleton`), so a consumer placing a root
-    /// *below* an un-zeroed pelvis must subtract this.
-    pub pelvis_local_z: f32,
 }
 
 impl BevySkeleton {
@@ -1034,34 +1012,7 @@ impl BevySkeleton {
             };
             Some((position_z, scale_z))
         };
-        let (pelvis_z, pelvis_scale) = joint("mPelvis")?;
-        let (torso_z, torso_scale) = joint("mTorso")?;
-        let (chest_z, chest_scale) = joint("mChest")?;
-        let (neck_z, neck_scale) = joint("mNeck")?;
-        let (head_z, head_scale) = joint("mHead")?;
-        let (skull_z, _skull_scale) = joint("mSkull")?;
-        let (hip_z, hip_scale) = joint("mHipLeft")?;
-        let (knee_z, knee_scale) = joint("mKneeLeft")?;
-        let (ankle_z, ankle_scale) = joint("mAnkleLeft")?;
-        let (foot_z, _foot_scale) = joint("mFootLeft")?;
-        // The reference formula verbatim, including its sign quirk on the hip
-        // term (the hip offset is *added* where the rest of the leg chain is
-        // subtracted) and the √2 skull approximation "to get to the top of the
-        // head". Each segment is scaled by its *parent's* local scale — the
-        // `scaleChildOffset` semantics of the recurrence above.
-        let pelvis_to_foot =
-            hip_z * pelvis_scale - knee_z * hip_scale - ankle_z * knee_scale - foot_z * ankle_scale;
-        let body_size_z = pelvis_to_foot
-            + std::f32::consts::SQRT_2 * skull_z * head_scale
-            + head_z * neck_scale
-            + neck_z * chest_scale
-            + chest_z * torso_scale
-            + torso_z * pelvis_scale;
-        Some(BodySizeMetrics {
-            pelvis_to_foot,
-            body_size_z,
-            pelvis_local_z: pelvis_z,
-        })
+        sl_avatar::body_size_from_joints(joint)
     }
 
     /// The canonical name of the joint at `index` (including any appended

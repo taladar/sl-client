@@ -12,9 +12,11 @@
 //!    visual-param weights;
 //! 3. request each layer texture through the shared [`TextureManager`];
 //! 4. once the assets and their textures are in hand, walk each bake region's
-//!    plan (`sl-bake`'s [`region_layers`]) — resolving each layer's texture and
-//!    its tint from the wearable params — into the ordered [`Layer`] list the
-//!    compositor wants, stored in [`OwnBakeInputs`] for P15.3.
+//!    plan (`sl-bake`'s [`assemble_layers`], over its
+//!    [`region_layers`](sl_client_bevy::region_layers)) — resolving each
+//!    layer's texture and its tint from the wearable params — into the ordered
+//!    [`Layer`] list the compositor wants, stored in [`OwnBakeInputs`] for
+//!    P15.3.
 //!
 //! Only the worn-wearable *texture* layers (skin bodypaint, clothing, tattoos,
 //! alpha masks) plus the solid skin-tone base are modelled; the reference
@@ -31,11 +33,10 @@ use bevy::prelude::*;
 
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
-    AppearanceValues, AssetCacheLimits, AssetKey, AssetStore, AssetType, BakeRegion,
-    BevyAssetFetcher, BlobFetcher, CAP_UPDATE_AVATAR_APPEARANCE, CAP_VIEWER_ASSET, Command,
-    DecodedTexture, GateStats, Layer, LayerTint, ResolvedParams, SlCapabilities, SlCommand,
-    SlEvent, SlSessionEvent, StoreStats, TextureKey, VisualParams, Wearable, WearableAsset,
-    WearableType, avatar_texture, combine_layer_color, global_color, region_layers,
+    AssetCacheLimits, AssetKey, AssetStore, AssetType, BakeRegion, BevyAssetFetcher, BlobFetcher,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_VIEWER_ASSET, Command, GateStats, Layer, SlCapabilities,
+    SlCommand, SlEvent, SlSessionEvent, StoreStats, TextureKey, VisualParams, Wearable,
+    WearableAsset, WearableType, assemble_layers, avatar_texture,
 };
 use sl_viewer_world_api::DecodedTextures;
 
@@ -736,132 +737,35 @@ fn assemble(
     store: &DecodedTextures,
     library: Option<&AvatarAssetLibrary>,
 ) {
-    let assets = state.assets.clone();
-    let params = library.map(AvatarAssetLibrary::params);
-    // Resolve each worn wearable's driver → driven params once (R14): a garment's
-    // shape masks are keyed on driven params (sleeve length 600, pants length
-    // 615, …) whose weight the wearable stores only as the group-0 driver
-    // (Sleeve Length 800, Pants Length 815, …), so the mask weight must come from
-    // the driver-propagated resolution, not the raw stored params.
-    let resolved = resolve_wearable_params(&assets, params);
-    let mut layers = HashMap::new();
-    let mut summary: Vec<String> = Vec::new();
-    for region in BakeRegion::ALL {
-        let region_layers = region_layers(
-            region,
-            |wearable| assets.iter().any(|asset| asset.wearable_type == wearable),
-            |slot| layer_image(&assets, store, slot),
-            |file| library.and_then(|lib| lib.static_texture(file).cloned()),
-            |tint, wearable| layer_tint(&assets, params, tint, wearable),
-            |param_id, wearable| mask_weight(&resolved, params, param_id, wearable),
-        );
-        summary.push(format!("{}={}", region.name(), region_layers.len()));
-        let _prev = layers.insert(region, region_layers);
-    }
+    let layers = assemble_layers(
+        &state.assets,
+        library.map(AvatarAssetLibrary::params),
+        |id| {
+            store
+                .get(TextureKey::from(id))
+                .map(|decoded| (**decoded).clone())
+        },
+        |file| library.and_then(|lib| lib.static_texture(file).cloned()),
+    );
+    let summary: Vec<String> = BakeRegion::ALL
+        .iter()
+        .map(|region| {
+            format!(
+                "{}={}",
+                region.name(),
+                layers.get(region).map_or(0, Vec::len)
+            )
+        })
+        .collect();
     info!(
         "assembled own client-side bake inputs from {} wearable(s): {}",
-        assets.len(),
+        state.assets.len(),
         summary.join(" ")
     );
     state.layers = layers;
     // Signal the client-side composite that the inputs changed so it re-composites
     // (a runtime outfit change, or an appearance-editor live edit).
     state.generation = state.generation.wrapping_add(1);
-}
-
-/// The decoded texture for a bake-region layer `slot`: the first worn wearable of
-/// the slot's wearable type that supplies it, if its texture has decoded.
-fn layer_image(
-    assets: &[WearableAsset],
-    store: &DecodedTextures,
-    slot: usize,
-) -> Option<DecodedTexture> {
-    let wearable_type = avatar_texture::layer_wearable_type(slot)?;
-    for asset in assets {
-        if asset.wearable_type != wearable_type {
-            continue;
-        }
-        if let Some(id) = asset.layer_texture(slot)
-            && let Some(decoded) = store.get(TextureKey::from(id))
-        {
-            return Some((**decoded).clone());
-        }
-    }
-    None
-}
-
-/// The linear-RGBA tint for a layer, resolved from the worn wearable's visual
-/// params against the `avatar_lad.xml` table (opaque white when the table is
-/// absent or the tint is [`LayerTint::White`]).
-fn layer_tint(
-    assets: &[WearableAsset],
-    params: Option<&VisualParams>,
-    tint: LayerTint,
-    wearable: WearableType,
-) -> [f32; 4] {
-    const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-    let (LayerTint::Global(_) | LayerTint::Params(_)) = tint else {
-        return WHITE;
-    };
-    let Some(params) = params else {
-        return WHITE;
-    };
-    // The worn wearable of this layer's type supplies the colour param weights.
-    let asset = assets.iter().find(|asset| asset.wearable_type == wearable);
-    let weight_of = |id: i32| asset.and_then(|asset| asset.params.get(&id).copied());
-    match tint {
-        LayerTint::Global(name) => global_color(params, name, weight_of).unwrap_or(WHITE),
-        LayerTint::Params(ids) => combine_layer_color(params, ids, weight_of),
-        LayerTint::White => WHITE,
-    }
-}
-
-/// Resolve each worn wearable's full param set — driver → driven propagation
-/// (R14) — keyed by wearable type, so a garment's driven shape params (sleeve /
-/// pants length, …) carry the weight derived from the wearable's stored group-0
-/// driver. Empty when the visual-param table is not loaded.
-fn resolve_wearable_params(
-    assets: &[WearableAsset],
-    params: Option<&VisualParams>,
-) -> Vec<(WearableType, ResolvedParams)> {
-    let Some(params) = params else {
-        return Vec::new();
-    };
-    // `WearableType` is not `Hash`, and there are only a handful of worn
-    // wearables, so a small assoc list (linear-searched below) suffices.
-    assets
-        .iter()
-        .map(|asset| {
-            let values = AppearanceValues::from_weights(
-                asset.params.iter().map(|(&id, &weight)| (id, weight)),
-            );
-            (
-                asset.wearable_type,
-                ResolvedParams::from_values(params, &values),
-            )
-        })
-        .collect()
-}
-
-/// The weight for a garment-shape mask's driving param (R14): the worn wearable's
-/// driver-resolved weight for `param_id` (a driven shape param), falling back to
-/// the visual-param table's default (then `0.0`). This is what carves a garment's
-/// fabric to its sleeve / bottom / collar / pants-length extent so it does not
-/// paint the bare hands and feet.
-fn mask_weight(
-    resolved: &[(WearableType, ResolvedParams)],
-    params: Option<&VisualParams>,
-    param_id: i32,
-    wearable: WearableType,
-) -> f32 {
-    if let Some((_, resolved)) = resolved.iter().find(|(kind, _)| *kind == wearable)
-        && let Some(weight) = resolved.weight(param_id)
-    {
-        return weight;
-    }
-    params
-        .and_then(|params| params.get(param_id))
-        .map_or(0.0, |param| param.default)
 }
 
 #[cfg(test)]

@@ -315,21 +315,22 @@ pub use sl_tree::{GRASS_MAX_BLADES, GrassMesh, GrassSpecies, grass_geometry, gra
 // re-exported (from `sl_proto`, which `sl_avatar` re-exports too).
 pub use sl_avatar::{
     AppearanceValues, AttachmentPointDef, AttachmentPoints, BaseMesh, BaseMeshError, BodyPhysics,
-    BodyPhysicsState, BoneDeform, CollisionVolume, ColorOp, ColorRamp, HAND_POSE_MORPH_PARAMS,
-    Joint, JointSample, MaskTexture, MorphMask, MorphMasks, MorphWeights, MorphedMesh,
-    PHYSICS_MORPH_PARAMS, ParamEffect, ParamError, ParamGroup, ParamSex, PartMorphMask,
-    PhysicsDrivenParam, PhysicsMotion, PhysicsMotionConfig, PhysicsSettings, RUNTIME_MORPH_PARAMS,
-    ResolvedParams, SaleType as WearableSaleType, SkeletalDeformations, Skeleton, SkeletonError,
-    VisualParam, VisualParams, VolumeDeform, VolumeDeformations, VolumeMorph, WearableAsset,
-    WearableError, WearablePermissions, combine_layer_color, global_color, global_color_params,
-    hand_pose_morph_param, is_runtime_morph_param,
+    BodyPhysicsState, BodySizeMetrics, BoneDeform, CollisionVolume, ColorOp, ColorRamp,
+    HAND_POSE_MORPH_PARAMS, Joint, JointSample, MaskTexture, MorphMask, MorphMasks, MorphWeights,
+    MorphedMesh, PHYSICS_MORPH_PARAMS, ParamEffect, ParamError, ParamGroup, ParamSex,
+    PartMorphMask, PhysicsDrivenParam, PhysicsMotion, PhysicsMotionConfig, PhysicsSettings,
+    RUNTIME_MORPH_PARAMS, ResolvedParams, SaleType as WearableSaleType, SkeletalDeformations,
+    Skeleton, SkeletonError, VisualParam, VisualParams, VolumeDeform, VolumeDeformations,
+    VolumeMorph, WearableAsset, WearableError, WearablePermissions, combine_layer_color,
+    global_color, global_color_params, hand_pose_morph_param, is_runtime_morph_param,
 };
 
 // The client-side avatar baker (`sl-bake`, the OpenSim / legacy path): compose a
 // bake region from ordered wearable layers, and the per-region layer plan (P15).
 pub use sl_bake::{
-    BakeRegion, BakedImage, Layer, LayerKind, LayerSource, LayerTint, PlannedLayer, ShapeMask,
-    ShapeMaskSpec, TexGen, composite_region, region_layers, region_plan, shape_mask_files,
+    BAKE_SIZE, BakeRegion, BakedImage, Layer, LayerKind, LayerSource, LayerTint, PlannedLayer,
+    ShapeMask, ShapeMaskSpec, StaticLayers, TexGen, assemble_layers, bake_region, composite_region,
+    load_static_layers, region_layers, region_plan, region_texture_ids, shape_mask_files,
     static_layer_files,
 };
 
@@ -337,9 +338,9 @@ pub use crate::animations::{SampledJoint, sample_motion};
 pub use crate::assets::BevyAssetFetcher;
 pub use crate::async_runtime::shared_runtime;
 pub use crate::avatars::{
-    AnimationPose, BaseMeshSkin, BevySkeleton, BodySizeMetrics, JointOverrides,
-    RuntimeMorphTargets, cpu_skin_vertex, joint_position_overrides, to_bevy_base_mesh,
-    to_bevy_morphed_mesh, to_bevy_runtime_morph_targets,
+    AnimationPose, BaseMeshSkin, BevySkeleton, JointOverrides, RuntimeMorphTargets,
+    cpu_skin_vertex, joint_position_overrides, to_bevy_base_mesh, to_bevy_morphed_mesh,
+    to_bevy_runtime_morph_targets,
 };
 #[cfg(feature = "bevy_pbr")]
 pub use crate::clouds::{CloudMaterial, CloudMaterialPlugin, CloudParams};

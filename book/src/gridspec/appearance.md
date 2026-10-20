@@ -15,12 +15,12 @@ composites its own avatar, uploads the bakes (`UploadBakedTexture`),
 publishes them (`AgentSetAppearance`) and asks the region's cache for bakes
 it published before (`AgentCachedTexture`).
 
-Measured on 2026-10-19 by the conformance case `appearance-baking`: avatar A
-asks, avatar B stands beside it and only listens. Four runs on aditi (Mauve,
-the build location) and four on the local OpenSim (Northeast Region), the
-last of each with every answer held. COF versions grow from run to run, so
-the case states each version by what it is — the one asked for, the one the
-grid last stated (*current*) — never as a number.
+Measured on 2026-10-19 and 2026-10-20 by the conformance case
+`appearance-baking`: avatar A asks, avatar B stands beside it and only listens.
+Ten runs on aditi (Mauve, the build location) and six on the local OpenSim
+(Northeast Region), the last of each with every answer held. COF versions grow
+from run to run, so the case states each version by what it is — the one asked
+for, the one the grid last stated (*current*) — never as a number.
 
 ### Who bakes
 
@@ -36,10 +36,10 @@ grid last stated (*current*) — never as a number.
 
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
-| the agent's own `AvatarAppearance` (**held**) | one | one | one |
+| the agent's own `AvatarAppearance` (**held**: at least one) | one | one | one |
 | its `AppearanceData` block (**held**) | version 1, the COF version the login named, flags 0 | no block | as the flavour's grid |
 | an `AppearanceHover` block (**held**) | yes | yes | yes |
-| the baked slots | all eleven baked but the skirt, which holds the default placeholder (the test avatars wear no skirt) | every slot the default placeholder: nothing has ever baked these avatars on the local grid | the fixture's solid bakes |
+| the baked slots | all eleven baked but the skirt, which holds the default placeholder (the test avatars wear no skirt) | every slot the default placeholder: nothing has ever baked these avatars on the local grid | `FakeSl`: the outfit's bakes, the slots nothing feeds the default; `FakeOpensim`: the fixture's solid bakes |
 | B's of A (**held** live) | one, with the same bakes as A's own | one or two, the same bakes | — (B is shown nobody) |
 
 ### The appearance service
@@ -78,13 +78,21 @@ request.
 | five ahead of it (**held**) | refused as version 0 is | no capability | the same |
 | our client's request at 0 (**held**) | read as `success` false with the expected version | no capability | the same |
 | `IncrementCOFVersion`, then a bake at its answer (**held**) | one above the current version; the bake accepted | no capability | the same |
-| the keys of an answer | refused: `agent_id code cof_raw cof_version debug_cof error expected observed success`; accepted: `agent_id avatar_scale cof_version error success textures visual_params warnings` | — | the same less the payload (**held**) |
+| the keys of an answer (**held**) | refused: `agent_id code cof_raw cof_version debug_cof error expected observed success`; accepted: `agent_id avatar_scale cof_version error success textures visual_params warnings` | — | the same |
+| an accepted bake's payload (**held**) | `textures`: the 45 face ids of the `AvatarAppearance` that follows, 34 of them nil; `visual_params`: its 253 bytes, as integers; `avatar_scale`: `[0.45, 0.6, height]` | — | the same, baked from the outfit |
+| a refusal's payload (**held**, as an outline without counts) | `cof_raw`: the Current Outfit Folder's links and the items they resolve to, a wearable's with its asset text (`contents`) and `wearable_type`; `debug_cof`: the same scale and parameters, each slot's `hash_id` and layer `texture_ids`, the worn items in seventeen lists by wearable type, the rigged meshes' joint offsets, the attachments' render cost (`lod`) | — | the same; no attachments, so no joint offsets and a zero `lod` |
+| a slot's `hash_id` (**held**) | the id of the bake on that slot when some layer feeds it; the default placeholder when none does (the skirt of an avatar wearing none) | — | the same |
+| what a `hash_id` is | **not** the reference viewer's wearables hash (`LLWearableData::computeBakedTextureHash`) on any slot, nor an MD5 of the slot's layer ids; the same within a run | — | the grid's own MD5 of the slot, its layers and the parameters |
 
-The payload keys carry the bake itself (`textures`, `visual_params`,
-`avatar_scale`) or, on a refusal, a dump of the outfit (`cof_raw`,
-`debug_cof` with the avatar's wearables, attachments, joint offsets and
-render cost). The fake grid does not fabricate them; the reference reads
-only `success`, `error` and `expected`.
+The payload was read by the case's second pass (2026-10-20, four aditi runs):
+the bake an accepted answer describes is the appearance that follows,
+exactly. Second Life names each bake by an id it states as the slot's
+`hash_id`; how it computes it is unknown, so the fake grid names its bakes by
+its own hash of what each is made of, and holds the relation rather than the
+id.
+
+In one aditi run of nine Second Life sent the agent its appearance **twice**
+after an accepted bake; the case holds that the agent was told, not how often.
 
 The first runs read the same-version bake as "no answer": the request had
 gone out on a kept-alive connection the grid had already closed. The case
@@ -114,5 +122,4 @@ central-bake version).
   circuit carries).
 - The viewer's own bakes uploaded over `UploadBakedTexture` on OpenSim, which
   the `baked-texture-upload` case exercises.
-- What Second Life's `textures` and `visual_params` keys hold against the
-  `AvatarAppearance` that follows: the case records their presence only.
+- How Second Life computes a bake's id.

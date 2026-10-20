@@ -26,10 +26,15 @@ so a later query could not hit even if it were sent.
 
 ## Work
 
-- Compute the reference's per-bake hash from the worn wearables
-  (`LLWearableData::computeBakedTextureHash`: an MD5 over what each
-  contributing wearable adds in `addToBakedTextureHash`, then the bake's
-  `mWearablesHashID`) and publish it as the slot's cache id.
+- Publish the reference's per-bake hash as the slot's cache id:
+  `sl_proto::avatar_texture::wearables_hash` (from
+  [[server-bake-service]], 2026-10-20) is
+  `LLWearableData::computeBakedTextureHash` — an MD5 of each contributing
+  worn wearable's asset id in the bake's type order, then the bake's
+  `mWearablesHashID`. It is **not** what Second Life names its bakes by (the
+  census compared it on every slot), which does not matter here: only a
+  client-baking region asks for it, and OpenSim compares the id it was
+  published under.
 - Before compositing, send the query and skip the upload of every slot the
   answer names, putting the named texture on the slot instead.
 - Only where the region does not central-bake (Second Life never answers the

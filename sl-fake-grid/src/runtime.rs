@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -588,6 +589,9 @@ pub(crate) struct GridCore {
     /// service, the central-bake protocol bit, the `AppearanceData` block and
     /// the `UpdateAvatarAppearance` capability all follow it.
     pub(crate) bakes: BakePolicy,
+    /// The grid's central bake service ([`crate::bake_service`]), used where
+    /// [`bakes`](Self::bakes) is [`BakePolicy::ServerSide`].
+    pub(crate) bake_service: crate::bake_service::BakeService,
     /// The `RegionProtocols` field every region handshake carries: the bake
     /// policy's bit 0 and whatever else the imitated grid claims.
     pub(crate) region_protocols: u64,
@@ -1074,6 +1078,7 @@ impl GridCore {
             inventory_announcement: self.inventory_announcement,
             upload_announcements: self.upload_announcements,
             bakes: self.bakes,
+            bake_service: self.bake_service.clone(),
             identity: {
                 let mut identity = region.identity(
                     self.estate_owner,
@@ -1634,6 +1639,9 @@ pub struct FakeGridBuilder {
     /// Who composites this grid's avatars, or `None` to follow
     /// [`imitates`](Self::imitates).
     bakes: Option<BakePolicy>,
+    /// Where the central bake service reads the character assets, or `None`
+    /// for the vendored directory.
+    character_dir: Option<PathBuf>,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
     /// The friendships between accounts, each pair of `First Last` names.
@@ -1739,6 +1747,7 @@ impl FakeGridBuilder {
             inventory_announcement: None,
             upload_announcements: None,
             bakes: None,
+            character_dir: None,
             map_tiles: MapTileStore::default(),
             friendships: Vec::new(),
             groups: Vec::new(),
@@ -2052,6 +2061,18 @@ impl FakeGridBuilder {
         self
     }
 
+    /// Where the central bake service reads the character assets
+    /// (`avatar_lad.xml`, `avatar_skeleton.xml` and the static layer TGAs of a
+    /// Linden `character/` directory), which otherwise are the vendored
+    /// `viewer-assets/character/` this crate was built beside. A directory
+    /// that does not hold them leaves the grid baking its fixture's solid
+    /// placeholders, with a warning.
+    #[must_use]
+    pub fn character_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.character_dir = Some(dir.into());
+        self
+    }
+
     /// Registers a world-map tile served at `map-<zoom>-<x>-<y>-objects.jpg`
     /// under the login URI. Every configured region gets a stock zoom-1 tile
     /// unless one is registered here.
@@ -2228,6 +2249,17 @@ impl FakeGridBuilder {
             .find(|account| account.config.estate_manager)
             .map_or_else(|| AgentKey::from(Uuid::nil()), |account| account.agent_id);
         let bakes = self.bakes.unwrap_or_else(|| self.imitates.bakes());
+        // Only a grid that bakes reads the character assets.
+        let bake_service = if bakes == BakePolicy::ServerSide {
+            crate::bake_service::BakeService::new(
+                &self
+                    .character_dir
+                    .clone()
+                    .unwrap_or_else(crate::bake_service::default_character_dir),
+            )
+        } else {
+            crate::bake_service::BakeService::default()
+        };
         let core = Arc::new(GridCore {
             accounts,
             social: parking_lot::Mutex::new(crate::social::Social::with_friendships(&friendships)),
@@ -2306,6 +2338,7 @@ impl FakeGridBuilder {
                 .upload_announcements
                 .unwrap_or_else(|| self.imitates.upload_announcements()),
             bakes,
+            bake_service,
             // The two halves of `RegionProtocols` compose: the bake policy
             // claims the central-bake bit (and an explicit `bakes` override
             // moves it), the flavour claims everything else it sets — today
@@ -2686,6 +2719,13 @@ impl FakeAgent {
     /// `set_*` / `enqueue_*` on it.
     pub async fn with_sim<R>(&self, f: impl FnOnce(&mut SimSession) -> R) -> R {
         self.shared.with_sim(f).await
+    }
+
+    /// The agent's outfit as the grid last baked it — the bakes its
+    /// appearance names, and what the bake trigger answers with — or `None`
+    /// where the grid does not bake ([`crate::BakePolicy::ClientSide`]).
+    pub async fn baked_outfit(&self) -> Option<sl_proto::BakedOutfit> {
+        self.with_sim(|sim| sim.baked_outfit().cloned()).await
     }
 
     /// The bytes the grid stores under `asset` — what a viewer's fetch of it

@@ -252,6 +252,24 @@ impl Skeleton {
         &self.roots
     }
 
+    /// The body size of this skeleton's rest pose under the shape's skeletal
+    /// deformation `deform` — no rig overrides, which is what a grid baking an
+    /// outfit computes the avatar's height from
+    /// ([`body_size_from_joints`](crate::body_size_from_joints)).
+    #[must_use]
+    pub fn body_size(
+        &self,
+        deform: &crate::SkeletalDeformations,
+    ) -> Option<crate::BodySizeMetrics> {
+        crate::body_size_from_joints(|name| {
+            let joint = self.joint(self.find(name)?)?;
+            Some((
+                joint.pos[2] + deform.offset(name)[2],
+                joint.scale[2] + deform.scale(name)[2],
+            ))
+        })
+    }
+
     /// The index of the joint with the given canonical name or alias.
     #[must_use]
     pub fn find(&self, name: &str) -> Option<usize> {

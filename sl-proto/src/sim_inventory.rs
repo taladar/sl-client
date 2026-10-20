@@ -143,6 +143,16 @@ impl SimInventoryTree {
             .min_by_key(|folder| folder.folder_id)
     }
 
+    /// The items directly in the Current Outfit Folder — its links — sorted by
+    /// name; empty when the account has no Current Outfit Folder. What a
+    /// central bake resolves the outfit from.
+    #[must_use]
+    pub fn current_outfit_items(&self) -> Vec<InventoryItem> {
+        self.folder_of_type(crate::FolderType::CurrentOutfit.to_code())
+            .map(|folder| self.child_items(folder.folder_id, 0))
+            .unwrap_or_default()
+    }
+
     /// The Current Outfit Folder's version, or `None` when the account has no
     /// Current Outfit Folder: the version a central-baking grid holds a bake
     /// request to.

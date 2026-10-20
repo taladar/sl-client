@@ -2640,10 +2640,11 @@ impl SimCaps {
     /// [`ServerEvent::ServerAppearanceRequested`](crate::ServerEvent::ServerAppearanceRequested)
     /// — the baked result then goes out over UDP `AvatarAppearance`. An
     /// account with no Current Outfit Folder has no version to hold a request
-    /// to, and every request is accepted. Second Life's answers also carry
-    /// the bake's own payload (the textures, the visual parameters, the
-    /// scale, and on a refusal a dump of the outfit), which this does not
-    /// fabricate. Wrong method → `405`, a non-LLSD body → `400`.
+    /// to, and every request is accepted. Where the server has baked the
+    /// outfit ([`SimSession::set_baked_outfit`]) both answers carry the
+    /// bake's payload as Second Life's do — the textures, the visual
+    /// parameters and the scale, and on a refusal a dump of the outfit.
+    /// Wrong method → `405`, a non-LLSD body → `400`.
     fn dispatch_update_avatar_appearance(
         sim: &mut SimSession,
         request: &CapsRequest<'_>,
@@ -2660,7 +2661,7 @@ impl SimCaps {
         let agent = sim.agent_id().map_or_else(Uuid::nil, |agent| agent.uuid());
         let current = sim.agent_inventory().current_outfit_version();
         if let Some(current) = current.filter(|current| *current != cof_version) {
-            let reply = llsd_map(vec![
+            let mut entries = vec![
                 ("success", Llsd::Boolean(false)),
                 ("code", Llsd::Integer(1)),
                 (
@@ -2671,18 +2672,24 @@ impl SimCaps {
                 ("observed", Llsd::Integer(cof_version)),
                 ("cof_version", Llsd::Integer(cof_version)),
                 ("agent_id", Llsd::Uuid(agent)),
-            ]);
-            return CapsResponse::llsd_xml_status(400, reply.to_llsd_xml());
+            ];
+            if let Some(outfit) = sim.baked_outfit() {
+                entries.extend(outfit.refused_payload());
+            }
+            return CapsResponse::llsd_xml_status(400, llsd_map(entries).to_llsd_xml());
         }
         sim.push_content_event(ServerEvent::ServerAppearanceRequested { cof_version });
-        let reply = llsd_map(vec![
+        let mut entries = vec![
             ("success", Llsd::Boolean(true)),
             ("error", Llsd::Undef),
             ("cof_version", Llsd::Integer(cof_version)),
             ("agent_id", Llsd::Uuid(agent)),
             ("warnings", Llsd::Array(Vec::new())),
-        ]);
-        CapsResponse::llsd_xml(reply.to_llsd_xml())
+        ];
+        if let Some(outfit) = sim.baked_outfit() {
+            entries.extend(outfit.accepted_payload());
+        }
+        CapsResponse::llsd_xml(llsd_map(entries).to_llsd_xml())
     }
 
     /// Serves one `IncrementCOFVersion` GET: bumps the version of the agent's

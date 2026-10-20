@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 82 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1403 |
+| done | 1404 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2070** |
+| **total** | **2071** |
 
 ## ideas (134)
 
@@ -247,8 +247,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   topology, service protocol, deployment
 - [`server-asset-service`](ideas/server-asset-service.md) — Asset service —
   grid-wide content store
-- [`server-bake-service`](ideas/server-bake-service.md) — Server-side appearance
-  bake service (blocked by `gridspec-appearance-baking` (done))
 - [`server-economy-service`](ideas/server-economy-service.md) — Economy service
   — balances and transactions
 - [`server-estate-service`](ideas/server-estate-service.md) — Estate service —
@@ -258,6 +256,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-agent-avatars-shared`](ideas/server-fake-grid-agent-avatars-shared.md)
   — Fake grid — logged-in agents see each other's avatars (blocked by
   `gridspec-avatar-presence` (done), `gridspec-animations` (done))
+- [`server-fake-grid-opensim-arrival-bakes`](ideas/server-fake-grid-opensim-arrival-bakes.md)
+  — The OpenSim flavour names solid fixture bakes where OpenSim names the
+  default placeholder
 - [`server-fake-grid-teleport-edges`](ideas/server-fake-grid-teleport-edges.md)
   — Fake grid — the teleport edges each grid was measured handling and the fake
   grid does not model
@@ -1585,7 +1586,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1403)
+## done (1404)
 
 ### protocol
 
@@ -4552,6 +4553,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
+- [`server-bake-service`](done/server-bake-service.md) — Server-side appearance
+  bake service (blocked by `gridspec-appearance-baking` (done))
 - [`server-fake-grid-agent-experiences`](done/server-fake-grid-agent-experiences.md)
   — Fake grid — the agent's own five experience lists
 - [`server-fake-grid-friends-presence`](done/server-fake-grid-friends-presence.md)

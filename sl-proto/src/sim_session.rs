@@ -3358,6 +3358,9 @@ pub struct SimSession {
     /// What a root agent is told when its circuit times out; see
     /// [`SimSession::set_timeout_kick`].
     timeout_kick: Option<String>,
+    /// The agent's outfit as the grid last baked it; see
+    /// [`SimSession::set_baked_outfit`].
+    baked_outfit: Option<crate::BakedOutfit>,
     /// What the root agent is told about the region on a timer, with the
     /// instant it was set and when each message is next due; see
     /// [`SimSession::set_region_telemetry`].
@@ -3777,6 +3780,7 @@ impl SimSession {
             bare_environment_replies: false,
             withholds_logout_reply: false,
             timeout_kick: None,
+            baked_outfit: None,
             telemetry: None,
             wind: None,
             coarse_others: Vec::new(),
@@ -5086,6 +5090,21 @@ impl SimSession {
     /// out of scope here — would apply.
     pub(crate) fn push_content_event(&mut self, event: ServerEvent) {
         self.events.push_back(event);
+    }
+
+    /// Sets the agent's outfit as the grid baked it, which the
+    /// `UpdateAvatarAppearance` answers then carry: an accepted bake's
+    /// `textures`, `visual_params` and `avatar_scale`, a refused one's
+    /// `cof_raw` and `debug_cof` ([`BakedOutfit`](crate::BakedOutfit)).
+    /// `None` (the default) answers without them.
+    pub fn set_baked_outfit(&mut self, outfit: Option<crate::BakedOutfit>) {
+        self.baked_outfit = outfit;
+    }
+
+    /// The agent's outfit as the grid last baked it, if it baked one.
+    #[must_use]
+    pub const fn baked_outfit(&self) -> Option<&crate::BakedOutfit> {
+        self.baked_outfit.as_ref()
     }
 
     /// The agent's inventory serving tree — read access for the fetch

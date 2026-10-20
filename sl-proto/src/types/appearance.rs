@@ -330,6 +330,135 @@ pub mod avatar_texture {
             .find_map(|&(index, _, wearable)| (index == slot).then_some(wearable))
     }
 
+    /// Each baked slot's wearables-hash seed (`BakedEntry::mWearablesHashID`)
+    /// and the wearable types whose worn assets feed its hash, in the order the
+    /// reference hashes them (`llavatarappearancedefines.cpp`).
+    pub const BAKE_HASH_INPUTS: [(usize, u128, &[WearableType]); 11] = [
+        (
+            HEAD_BAKED,
+            0xa4b9_dc38_e13b_4df9_b284_751e_fb05_66ff,
+            &[
+                WearableType::Shape,
+                WearableType::Skin,
+                WearableType::Hair,
+                WearableType::Tattoo,
+                WearableType::Alpha,
+                WearableType::Universal,
+            ],
+        ),
+        (
+            UPPER_BAKED,
+            0x5943_ff64_d26c_4a90_a8c0_d61f_56bd_98d4,
+            &[
+                WearableType::Shape,
+                WearableType::Skin,
+                WearableType::Shirt,
+                WearableType::Jacket,
+                WearableType::Gloves,
+                WearableType::Undershirt,
+                WearableType::Tattoo,
+                WearableType::Alpha,
+                WearableType::Universal,
+            ],
+        ),
+        (
+            LOWER_BAKED,
+            0x2944_ee70_90a7_425d_a5fb_d749_c782_ed7d,
+            &[
+                WearableType::Shape,
+                WearableType::Skin,
+                WearableType::Pants,
+                WearableType::Shoes,
+                WearableType::Socks,
+                WearableType::Jacket,
+                WearableType::Underpants,
+                WearableType::Tattoo,
+                WearableType::Alpha,
+                WearableType::Universal,
+            ],
+        ),
+        (
+            EYES_BAKED,
+            0x27b1_bc0f_979f_4b13_95fe_b981_c2ba_9788,
+            &[
+                WearableType::Eyes,
+                WearableType::Universal,
+                WearableType::Alpha,
+            ],
+        ),
+        (
+            SKIRT_BAKED,
+            0x03e7_e8cb_1368_483b_b6f3_7485_0838_ba63,
+            &[WearableType::Skirt, WearableType::Universal],
+        ),
+        (
+            HAIR_BAKED,
+            0xa60e_85a9_74e8_48d8_8a2d_8129_f28d_9b61,
+            &[
+                WearableType::Hair,
+                WearableType::Universal,
+                WearableType::Alpha,
+            ],
+        ),
+        (
+            LEFT_ARM_BAKED,
+            0x9f39_febf_22d7_0087_79d1_e9e8_c6c9_ed19,
+            &[WearableType::Universal],
+        ),
+        (
+            LEFT_LEG_BAKED,
+            0x054a_7a58_8ed5_6386_0add_3b63_6fb2_8b78,
+            &[WearableType::Universal],
+        ),
+        (
+            AUX1_BAKED,
+            0x790c_11be_b25c_c17e_b4d2_6a4a_d786_b752,
+            &[WearableType::Universal],
+        ),
+        (
+            AUX2_BAKED,
+            0xd78c_478f_48c7_5928_5864_8d99_fb1f_521e,
+            &[WearableType::Universal],
+        ),
+        (
+            AUX3_BAKED,
+            0x6a95_dd53_edd9_aac8_f6d3_27ed_99f3_c3eb,
+            &[WearableType::Universal],
+        ),
+    ];
+
+    /// The reference's wearables hash for the bake at `slot`
+    /// (`LLWearableData::computeBakedTextureHash`): an MD5 over the asset id of
+    /// every worn wearable of each type the bake draws on — in
+    /// [`BAKE_HASH_INPUTS`] order, each type's wearables in the order `worn`
+    /// lists them — and then the bake's seed. `None` when no wearable feeds the
+    /// bake, or `slot` is no baked slot.
+    ///
+    /// A viewer asks a client-baking region's cache for a bake under this id;
+    /// Second Life names its central bakes by it.
+    #[must_use]
+    pub fn wearables_hash(slot: usize, worn: &[(WearableType, Uuid)]) -> Option<Uuid> {
+        let (_slot, seed, inputs) = BAKE_HASH_INPUTS
+            .iter()
+            .find(|(baked, _seed, _inputs)| *baked == slot)?;
+        let mut context = md5::Context::new();
+        let mut any = false;
+        for wearable_type in *inputs {
+            for (_type, asset) in worn
+                .iter()
+                .filter(|(worn_type, _asset)| worn_type == wearable_type)
+            {
+                context.consume(asset.as_bytes());
+                any = true;
+            }
+        }
+        if !any {
+            return None;
+        }
+        context.consume(Uuid::from_u128(*seed).as_bytes());
+        Some(Uuid::from_bytes(context.compute().0))
+    }
+
     use sl_types::key::TextureKey;
     use uuid::Uuid;
 
@@ -1173,6 +1302,41 @@ pub struct RezAttachment {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+
+    /// The wearables hash is the reference's MD5: the contributing assets in
+    /// the bake's type order (not the order they are worn in), then the seed;
+    /// a bake nothing feeds has none.
+    #[test]
+    fn the_wearables_hash_is_the_references_md5() {
+        use super::WearableType;
+        use super::avatar_texture::{EYES_BAKED, SKIRT_BAKED, wearables_hash};
+        use uuid::Uuid;
+        let eyes = Uuid::from_u128(1);
+        let alpha = Uuid::from_u128(2);
+        let universal = Uuid::from_u128(3);
+        // Eyes hash eyes, universal, alpha — in that order.
+        let worn = [
+            (WearableType::Alpha, alpha),
+            (WearableType::Eyes, eyes),
+            (WearableType::Universal, universal),
+        ];
+        let mut bytes = Vec::new();
+        for id in [eyes, universal, alpha] {
+            bytes.extend_from_slice(id.as_bytes());
+        }
+        bytes.extend_from_slice(
+            Uuid::from_u128(0x27b1_bc0f_979f_4b13_95fe_b981_c2ba_9788).as_bytes(),
+        );
+        assert_eq!(
+            wearables_hash(EYES_BAKED, &worn),
+            Some(Uuid::from_bytes(md5::compute(&bytes).0))
+        );
+        assert_eq!(
+            wearables_hash(SKIRT_BAKED, &[(WearableType::Eyes, eyes)]),
+            None
+        );
+        assert_eq!(wearables_hash(0, &worn), None, "no baked slot");
+    }
 
     /// A bare [`TextureFace`] with a given packed `bump_shiny_fullbright` and
     /// `media_flags`, all other fields irrelevant to the accessor under test.

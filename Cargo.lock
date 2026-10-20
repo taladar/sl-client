@@ -8759,9 +8759,13 @@ name = "sl-bake"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "fs-err",
+ "image",
  "pretty_assertions",
+ "sl-avatar",
  "sl-proto",
  "sl-texture",
+ "uuid",
 ]
 
 [[package]]
@@ -9032,14 +9036,18 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "clap",
+ "fs-err",
  "http",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "md5",
  "parking_lot",
  "pretty_assertions",
  "reqwest 0.12.28",
  "sl-anim",
+ "sl-avatar",
+ "sl-bake",
  "sl-client-tokio",
  "sl-mesh",
  "sl-object-asset",
@@ -9733,9 +9741,7 @@ dependencies = [
  "arc-swap",
  "bevy",
  "bytemuck",
- "bytes",
  "fs-err",
- "image",
  "parry3d",
  "pretty_assertions",
  "serde",

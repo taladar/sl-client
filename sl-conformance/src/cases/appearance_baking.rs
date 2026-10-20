@@ -50,7 +50,7 @@ use std::time::Duration;
 use reqwest::header::CONTENT_TYPE;
 use sl_client_tokio::{
     AvatarAppearance, Command, Event, TextureEntry, TextureFace, TextureKey, Uuid, Vector,
-    avatar_texture, encode_texture_entry,
+    WearableType, avatar_texture, encode_texture_entry,
 };
 use sl_wire::{Llsd, parse_llsd_xml};
 
@@ -66,7 +66,7 @@ use crate::registry::{GridTest, TestFuture};
 use crate::support::{REGION_TIMEOUT, fixtures, is_opensim, settle_scene_observing};
 
 /// Where the measurements below are written down.
-const SOURCE: &str = "book/src/gridspec/appearance.md § Baking (appearance-baking, 2026-10-19)";
+const SOURCE: &str = "book/src/gridspec/appearance.md § Baking (appearance-baking, 2026-10-20)";
 
 /// Where both avatars log in on OpenSim: the level square in the block's
 /// north-eastern region.
@@ -158,7 +158,6 @@ const fn each(second_life: Answer, opensim: Answer) -> Measured<Answer> {
 /// What each grid was measured to answer of A's own avatar, by the metric the
 /// census records it under: every run, live or fake, is held to it.
 const MEASURED: &[(&str, Measured<Answer>)] = &[
-    ("arrival_own_appearances", both(Answer::Count(1))),
     (
         "arrival_own_block",
         each(
@@ -167,6 +166,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         ),
     ),
     ("arrival_own_hover", both(Answer::Text("hover"))),
+    ("arrival_own_told", both(Answer::Flag(true))),
     (
         "bake_again_asked",
         each(Answer::Text("current"), Answer::Text("no capability")),
@@ -183,8 +183,13 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("undef"), Answer::Text("no capability")),
     ),
     (
-        "bake_again_own_appearances",
-        each(Answer::Count(1), Answer::Text("no capability")),
+        "bake_again_keys",
+        each(
+            Answer::Text(
+                "agent_id avatar_scale cof_version error success textures visual_params warnings",
+            ),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_again_own_block",
@@ -196,6 +201,41 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "bake_again_own_hover",
         each(Answer::Text("hover"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_again_own_told",
+        each(Answer::Flag(true), Answer::Text("no capability")),
+    ),
+    (
+        "bake_again_payload_box",
+        each(Answer::Text("0.450 0.600"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_again_payload_outline",
+        each(
+            Answer::Text(
+                "{agent_id:uuid,avatar_scale:[real],cof_version:int,error:undef,success:bool,textures:[uuid],visual_params:[int],warnings:[]}",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_again_payload_params",
+        each(
+            Answer::Text("253 int, the appearance's bytes"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_again_payload_slot_rule",
+        each(Answer::Text("absent"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_again_payload_textures",
+        each(
+            Answer::Text("45 entries, 34 nil, every one the appearance's"),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_again_status",
@@ -231,8 +271,13 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         ),
     ),
     (
-        "bake_ahead_own_appearances",
-        each(Answer::Count(0), Answer::Text("no capability")),
+        "bake_ahead_keys",
+        each(
+            Answer::Text(
+                "agent_id code cof_raw cof_version debug_cof error expected observed success",
+            ),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_ahead_own_block",
@@ -241,6 +286,41 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "bake_ahead_own_hover",
         each(Answer::Text("none"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_ahead_own_told",
+        each(Answer::Flag(false), Answer::Text("no capability")),
+    ),
+    (
+        "bake_ahead_payload_box",
+        each(Answer::Text("0.450 0.600"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_ahead_payload_outline",
+        each(
+            Answer::Text(
+                "{agent_id:uuid,code:int,cof_raw:[{agent_id:string,asset_id:string,contents?:string,created_at:int,desc:string,flags:int,inv_type:int,item_id:string,metadata:{},name:string,parent_id:string,permissions:{base_mask:int,creator_id:string,everyone_mask:int,group_id:string,group_mask:int,last_owner_id:string,next_owner_mask:int,owner_id:string,owner_mask:int},sale_info:{sale_price:int,sale_type:int},type:int,wearable_type?:int}],cof_version:int,debug_cof:{avatar_scale:[real],dump_joint_offsets:[joint offsets],lod:{animesh_object_count:int,attachment_count:int,high_lod:real,low_lod:real,lowest_lod:real,medium_lod:real,mesh_count:int,mesh_rigged_count:int},params:[int],slot_textures:{aux1:{hash_id:uuid,texture_ids:[ids]},aux2:{hash_id:uuid,texture_ids:[ids]},aux3:{hash_id:uuid,texture_ids:[ids]},eyes:{hash_id:uuid,texture_ids:[ids]},hair:{hash_id:uuid,texture_ids:[ids]},head:{hash_id:uuid,texture_ids:[ids]},leftarm:{hash_id:uuid,texture_ids:[ids]},leftleg:{hash_id:uuid,texture_ids:[ids]},lower:{hash_id:uuid,texture_ids:[ids]},skirt:{hash_id:uuid,texture_ids:[ids]},upper:{hash_id:uuid,texture_ids:[ids]}},success:bool,warnings:[],wearables:[[{agent_id:string,asset_id:string,contents:string,created_at:int,desc:string,flags:int,inv_type:int,item_id:string,metadata:{},name:string,parent_id:string,permissions:{base_mask:int,creator_id:string,everyone_mask:int,group_id:string,group_mask:int,last_owner_id:string,next_owner_mask:int,owner_id:string,owner_mask:int},sale_info:{sale_price:int,sale_type:int},type:int,wearable_type:int}]]},error:string,expected:int,observed:int,success:bool}",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_ahead_payload_params",
+        each(
+            Answer::Text("253 int, the appearance's bytes"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_ahead_payload_slot_rule",
+        each(
+            Answer::Text("a fed slot names its bake, an unfed one the default"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_ahead_payload_textures",
+        each(Answer::Text("absent"), Answer::Text("no capability")),
     ),
     (
         "bake_ahead_status",
@@ -273,8 +353,13 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("undef"), Answer::Text("no capability")),
     ),
     (
-        "bake_expected_own_appearances",
-        each(Answer::Count(1), Answer::Text("no capability")),
+        "bake_expected_keys",
+        each(
+            Answer::Text(
+                "agent_id avatar_scale cof_version error success textures visual_params warnings",
+            ),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_expected_own_block",
@@ -286,6 +371,41 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "bake_expected_own_hover",
         each(Answer::Text("hover"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_expected_own_told",
+        each(Answer::Flag(true), Answer::Text("no capability")),
+    ),
+    (
+        "bake_expected_payload_box",
+        each(Answer::Text("0.450 0.600"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_expected_payload_outline",
+        each(
+            Answer::Text(
+                "{agent_id:uuid,avatar_scale:[real],cof_version:int,error:undef,success:bool,textures:[uuid],visual_params:[int],warnings:[]}",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_expected_payload_params",
+        each(
+            Answer::Text("253 int, the appearance's bytes"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_expected_payload_slot_rule",
+        each(Answer::Text("absent"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_expected_payload_textures",
+        each(
+            Answer::Text("45 entries, 34 nil, every one the appearance's"),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_expected_status",
@@ -318,8 +438,13 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("undef"), Answer::Text("no capability")),
     ),
     (
-        "bake_incremented_own_appearances",
-        each(Answer::Count(1), Answer::Text("no capability")),
+        "bake_incremented_keys",
+        each(
+            Answer::Text(
+                "agent_id avatar_scale cof_version error success textures visual_params warnings",
+            ),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_incremented_own_block",
@@ -331,6 +456,41 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "bake_incremented_own_hover",
         each(Answer::Text("hover"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_incremented_own_told",
+        each(Answer::Flag(true), Answer::Text("no capability")),
+    ),
+    (
+        "bake_incremented_payload_box",
+        each(Answer::Text("0.450 0.600"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_incremented_payload_outline",
+        each(
+            Answer::Text(
+                "{agent_id:uuid,avatar_scale:[real],cof_version:int,error:undef,success:bool,textures:[uuid],visual_params:[int],warnings:[]}",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_incremented_payload_params",
+        each(
+            Answer::Text("253 int, the appearance's bytes"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_incremented_payload_slot_rule",
+        each(Answer::Text("absent"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_incremented_payload_textures",
+        each(
+            Answer::Text("45 entries, 34 nil, every one the appearance's"),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_incremented_status",
@@ -363,8 +523,13 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("undef"), Answer::Text("no capability")),
     ),
     (
-        "bake_restore_own_appearances",
-        each(Answer::Count(1), Answer::Text("no capability")),
+        "bake_restore_keys",
+        each(
+            Answer::Text(
+                "agent_id avatar_scale cof_version error success textures visual_params warnings",
+            ),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_restore_own_block",
@@ -376,6 +541,41 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "bake_restore_own_hover",
         each(Answer::Text("hover"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_restore_own_told",
+        each(Answer::Flag(true), Answer::Text("no capability")),
+    ),
+    (
+        "bake_restore_payload_box",
+        each(Answer::Text("0.450 0.600"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_restore_payload_outline",
+        each(
+            Answer::Text(
+                "{agent_id:uuid,avatar_scale:[real],cof_version:int,error:undef,success:bool,textures:[uuid],visual_params:[int],warnings:[]}",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_restore_payload_params",
+        each(
+            Answer::Text("253 int, the appearance's bytes"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_restore_payload_slot_rule",
+        each(Answer::Text("absent"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_restore_payload_textures",
+        each(
+            Answer::Text("45 entries, 34 nil, every one the appearance's"),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_restore_status",
@@ -411,8 +611,13 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         ),
     ),
     (
-        "bake_stale_own_appearances",
-        each(Answer::Count(0), Answer::Text("no capability")),
+        "bake_stale_keys",
+        each(
+            Answer::Text(
+                "agent_id code cof_raw cof_version debug_cof error expected observed success",
+            ),
+            Answer::Text("no capability"),
+        ),
     ),
     (
         "bake_stale_own_block",
@@ -421,6 +626,41 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "bake_stale_own_hover",
         each(Answer::Text("none"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_stale_own_told",
+        each(Answer::Flag(false), Answer::Text("no capability")),
+    ),
+    (
+        "bake_stale_payload_box",
+        each(Answer::Text("0.450 0.600"), Answer::Text("no capability")),
+    ),
+    (
+        "bake_stale_payload_outline",
+        each(
+            Answer::Text(
+                "{agent_id:uuid,code:int,cof_raw:[{agent_id:string,asset_id:string,contents?:string,created_at:int,desc:string,flags:int,inv_type:int,item_id:string,metadata:{},name:string,parent_id:string,permissions:{base_mask:int,creator_id:string,everyone_mask:int,group_id:string,group_mask:int,last_owner_id:string,next_owner_mask:int,owner_id:string,owner_mask:int},sale_info:{sale_price:int,sale_type:int},type:int,wearable_type?:int}],cof_version:int,debug_cof:{avatar_scale:[real],dump_joint_offsets:[joint offsets],lod:{animesh_object_count:int,attachment_count:int,high_lod:real,low_lod:real,lowest_lod:real,medium_lod:real,mesh_count:int,mesh_rigged_count:int},params:[int],slot_textures:{aux1:{hash_id:uuid,texture_ids:[ids]},aux2:{hash_id:uuid,texture_ids:[ids]},aux3:{hash_id:uuid,texture_ids:[ids]},eyes:{hash_id:uuid,texture_ids:[ids]},hair:{hash_id:uuid,texture_ids:[ids]},head:{hash_id:uuid,texture_ids:[ids]},leftarm:{hash_id:uuid,texture_ids:[ids]},leftleg:{hash_id:uuid,texture_ids:[ids]},lower:{hash_id:uuid,texture_ids:[ids]},skirt:{hash_id:uuid,texture_ids:[ids]},upper:{hash_id:uuid,texture_ids:[ids]}},success:bool,warnings:[],wearables:[[{agent_id:string,asset_id:string,contents:string,created_at:int,desc:string,flags:int,inv_type:int,item_id:string,metadata:{},name:string,parent_id:string,permissions:{base_mask:int,creator_id:string,everyone_mask:int,group_id:string,group_mask:int,last_owner_id:string,next_owner_mask:int,owner_id:string,owner_mask:int},sale_info:{sale_price:int,sale_type:int},type:int,wearable_type:int}]]},error:string,expected:int,observed:int,success:bool}",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_stale_payload_params",
+        each(
+            Answer::Text("253 int, the appearance's bytes"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_stale_payload_slot_rule",
+        each(
+            Answer::Text("a fed slot names its bake, an unfed one the default"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "bake_stale_payload_textures",
+        each(Answer::Text("absent"), Answer::Text("no capability")),
     ),
     (
         "bake_stale_status",
@@ -481,16 +721,16 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         ),
     ),
     (
-        "client_bake_stale_own_appearances",
-        each(Answer::Count(0), Answer::Text("no capability")),
-    ),
-    (
         "client_bake_stale_own_block",
         each(Answer::Text("none"), Answer::Text("no capability")),
     ),
     (
         "client_bake_stale_own_hover",
         each(Answer::Text("none"), Answer::Text("no capability")),
+    ),
+    (
+        "client_bake_stale_own_told",
+        each(Answer::Flag(false), Answer::Text("no capability")),
     ),
     (
         "increment",
@@ -500,9 +740,9 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "login_cof_named",
         each(Answer::Flag(true), Answer::Flag(false)),
     ),
-    ("publish_own_appearances", both(Answer::Count(0))),
     ("publish_own_block", both(Answer::Text("none"))),
     ("publish_own_hover", both(Answer::Text("none"))),
+    ("publish_own_told", both(Answer::Flag(false))),
     ("publish_rebakes", both(Answer::Text(""))),
     ("restore_own", both(Answer::Text("no appearance"))),
     (
@@ -542,10 +782,7 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         ),
     ),
     ("arrival_seen_hover", both(Answer::Text("hover"))),
-    (
-        "bake_again_seen_appearances",
-        each(Answer::Count(1), Answer::Text("no capability")),
-    ),
+    ("arrival_seen_told", both(Answer::Flag(true))),
     (
         "bake_again_seen_block",
         each(
@@ -558,8 +795,8 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("hover"), Answer::Text("no capability")),
     ),
     (
-        "bake_ahead_seen_appearances",
-        each(Answer::Count(0), Answer::Text("no capability")),
+        "bake_again_seen_told",
+        each(Answer::Flag(true), Answer::Text("no capability")),
     ),
     (
         "bake_ahead_seen_block",
@@ -570,8 +807,8 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("none"), Answer::Text("no capability")),
     ),
     (
-        "bake_expected_seen_appearances",
-        each(Answer::Count(1), Answer::Text("no capability")),
+        "bake_ahead_seen_told",
+        each(Answer::Flag(false), Answer::Text("no capability")),
     ),
     (
         "bake_expected_seen_block",
@@ -585,8 +822,8 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("hover"), Answer::Text("no capability")),
     ),
     (
-        "bake_incremented_seen_appearances",
-        each(Answer::Count(1), Answer::Text("no capability")),
+        "bake_expected_seen_told",
+        each(Answer::Flag(true), Answer::Text("no capability")),
     ),
     (
         "bake_incremented_seen_block",
@@ -600,8 +837,8 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("hover"), Answer::Text("no capability")),
     ),
     (
-        "bake_restore_seen_appearances",
-        each(Answer::Count(1), Answer::Text("no capability")),
+        "bake_incremented_seen_told",
+        each(Answer::Flag(true), Answer::Text("no capability")),
     ),
     (
         "bake_restore_seen_block",
@@ -615,8 +852,8 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("hover"), Answer::Text("no capability")),
     ),
     (
-        "bake_stale_seen_appearances",
-        each(Answer::Count(0), Answer::Text("no capability")),
+        "bake_restore_seen_told",
+        each(Answer::Flag(true), Answer::Text("no capability")),
     ),
     (
         "bake_stale_seen_block",
@@ -627,8 +864,8 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         each(Answer::Text("none"), Answer::Text("no capability")),
     ),
     (
-        "client_bake_stale_seen_appearances",
-        each(Answer::Count(0), Answer::Text("no capability")),
+        "bake_stale_seen_told",
+        each(Answer::Flag(false), Answer::Text("no capability")),
     ),
     (
         "client_bake_stale_seen_block",
@@ -637,6 +874,10 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
     (
         "client_bake_stale_seen_hover",
         each(Answer::Text("none"), Answer::Text("no capability")),
+    ),
+    (
+        "client_bake_stale_seen_told",
+        each(Answer::Flag(false), Answer::Text("no capability")),
     ),
     (
         "publish_seen_appearance",
@@ -648,16 +889,16 @@ const MEASURED_LIVE: &[(&str, Measured<Answer>)] = &[
         ),
     ),
     (
-        "publish_seen_appearances",
-        each(Answer::Count(0), Answer::Count(1)),
-    ),
-    (
         "publish_seen_block",
         each(Answer::Text("none"), Answer::Text("no block")),
     ),
     (
         "publish_seen_hover",
         each(Answer::Text("none"), Answer::Text("hover")),
+    ),
+    (
+        "publish_seen_told",
+        each(Answer::Flag(false), Answer::Flag(true)),
     ),
     (
         "restore_seen",
@@ -834,6 +1075,9 @@ impl Census<'_> {
                 &format!("{key}_{side}_appearances"),
                 i64::try_from(new.len()).unwrap_or(i64::MAX),
             );
+            // Second Life now and then states an appearance twice: whether it
+            // was stated at all is the answer, how often only information.
+            metrics.set(&format!("{key}_{side}_told"), !new.is_empty());
             let described = new.last().map_or_else(
                 || "none".to_owned(),
                 |last| describe_appearance(last, self.current, published),
@@ -882,6 +1126,7 @@ impl Census<'_> {
         metrics.set(&format!("{key}_asked"), asked);
         let mut expected = None;
         let mut success = false;
+        let mut payload = None;
         match reply {
             Ok(response) => {
                 metrics.set(
@@ -901,6 +1146,7 @@ impl Census<'_> {
                     metrics.set(&format!("{key}_versions"), answer.versions);
                     metrics.set(&format!("{key}_keys"), answer.keys);
                     metrics.set(&format!("{key}_core_keys"), answer.core_keys);
+                    payload = Some(body);
                 } else {
                     let words = format!("not LLSD: \"{}\"", body_words(&text));
                     for suffix in ["success", "error", "versions", "keys", "core_keys"] {
@@ -927,8 +1173,392 @@ impl Census<'_> {
             self.current = Some(cof_version);
         }
         self.record_appearances(metrics, key, from, None);
+        if let Some(body) = payload.as_ref() {
+            record_payload(metrics, key, body, self.own.appearances.last());
+        }
         Ok(expected)
     }
+}
+
+/// Records what a bake answer's payload holds under `key`: its whole shape
+/// (`_payload_shape`), and against `appearance` — the agent's appearance as
+/// last stated, after the answer — what its `textures` (`_payload_textures`),
+/// its visual parameters (`_payload_params`, the accepted answer's
+/// `visual_params` or the refusal's `debug_cof.params`), its scale
+/// (`_payload_scale`) and the refusal's per-slot bake hashes
+/// (`_payload_slots`) are.
+fn record_payload(
+    metrics: &mut Metrics,
+    key: &str,
+    body: &Llsd,
+    appearance: Option<&AvatarAppearance>,
+) {
+    metrics.set(&format!("{key}_payload_shape"), shape_of(body));
+    metrics.set(&format!("{key}_payload_outline"), outline_of(body, None));
+    let debug = body.get("debug_cof");
+    metrics.set(
+        &format!("{key}_payload_textures"),
+        body.get("textures").map_or_else(
+            || "absent".to_owned(),
+            |textures| describe_payload_textures(textures, appearance),
+        ),
+    );
+    metrics.set(
+        &format!("{key}_payload_params"),
+        body.get("visual_params")
+            .or_else(|| debug.and_then(|debug| debug.get("params")))
+            .map_or_else(
+                || "absent".to_owned(),
+                |params| describe_payload_params(params, appearance),
+            ),
+    );
+    let scale = body
+        .get("avatar_scale")
+        .or_else(|| debug.and_then(|debug| debug.get("avatar_scale")));
+    metrics.set(
+        &format!("{key}_payload_scale"),
+        scale.map_or_else(|| "absent".to_owned(), describe_scale),
+    );
+    // The height is the avatar's shape; the depth and width are the grid's.
+    metrics.set(
+        &format!("{key}_payload_box"),
+        scale.map_or_else(
+            || "absent".to_owned(),
+            |scale| {
+                describe_scale(scale)
+                    .split(' ')
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            },
+        ),
+    );
+    metrics.set(
+        &format!("{key}_payload_slot_rule"),
+        debug
+            .and_then(|debug| debug.get("slot_textures"))
+            .map_or_else(|| "absent".to_owned(), |slots| slot_rule(slots, appearance)),
+    );
+    metrics.set(
+        &format!("{key}_payload_slots"),
+        debug
+            .and_then(|debug| debug.get("slot_textures"))
+            .map_or_else(
+                || "absent".to_owned(),
+                |slots| {
+                    let worn = debug
+                        .and_then(|debug| debug.get("wearables"))
+                        .map(worn_assets)
+                        .unwrap_or_default();
+                    describe_slot_textures(slots, appearance, &worn)
+                },
+            ),
+    );
+}
+
+/// The worn wearables a refusal's `debug_cof.wearables` lists: one list per
+/// wearable type, by the type's code, each item naming its asset.
+fn worn_assets(wearables: &Llsd) -> Vec<(WearableType, Uuid)> {
+    let Llsd::Array(by_type) = wearables else {
+        return Vec::new();
+    };
+    by_type
+        .iter()
+        .enumerate()
+        .filter_map(|(code, items)| Some((u8::try_from(code).ok()?, items)))
+        .flat_map(|(code, items)| {
+            let items = match items {
+                Llsd::Array(items) => items.as_slice(),
+                _ => &[],
+            };
+            items.iter().filter_map(move |item| {
+                let asset = item.get("asset_id").and_then(llsd_uuid)?;
+                Some((WearableType::from_code(code), asset))
+            })
+        })
+        .collect()
+}
+
+/// The structure of an LLSD value: a map key by key, an array as its length
+/// and its first element's shape, a scalar as its type.
+fn shape_of(value: &Llsd) -> String {
+    match value {
+        Llsd::Map(map) => {
+            let mut entries: Vec<(&String, &Llsd)> = map.iter().collect();
+            entries.sort_unstable_by_key(|(key, _value)| *key);
+            let entries: Vec<String> = entries
+                .into_iter()
+                .map(|(key, value)| format!("{key}:{}", shape_of(value)))
+                .collect();
+            format!("{{{}}}", entries.join(","))
+        }
+        Llsd::Array(items) => match items.first() {
+            None => "[]".to_owned(),
+            Some(first) => format!("[{}x{}]", items.len(), shape_of(first)),
+        },
+        Llsd::Undef => "undef".to_owned(),
+        Llsd::Boolean(_) => "bool".to_owned(),
+        Llsd::Integer(_) => "int".to_owned(),
+        Llsd::Real(_) => "real".to_owned(),
+        Llsd::String(_) => "string".to_owned(),
+        Llsd::Uri(_) => "uri".to_owned(),
+        Llsd::Uuid(_) => "uuid".to_owned(),
+        Llsd::Binary(_) => "binary".to_owned(),
+        Llsd::Date(_) => "date".to_owned(),
+    }
+}
+
+/// The structure of an LLSD value without the counts an outfit decides: a
+/// map key by key; an array as the outline every element shares (a key some
+/// element lacks marked `?`), `[]` when empty. `dump_joint_offsets` — one entry
+/// per rigged-mesh joint the avatar wears — is outlined as `[joint offsets]`
+/// and a slot's `texture_ids` as `[ids]`, whatever they hold.
+fn outline_of(value: &Llsd, key: Option<&str>) -> String {
+    match value {
+        Llsd::Array(_) if key == Some("dump_joint_offsets") => "[joint offsets]".to_owned(),
+        // Which slots some layer feeds is the outfit's.
+        Llsd::Array(_) if key == Some("texture_ids") => "[ids]".to_owned(),
+        Llsd::Map(map) => {
+            let mut entries: Vec<(&String, &Llsd)> = map.iter().collect();
+            entries.sort_unstable_by_key(|(key, _value)| *key);
+            let entries: Vec<String> = entries
+                .into_iter()
+                .map(|(key, value)| format!("{key}:{}", outline_of(value, Some(key))))
+                .collect();
+            format!("{{{}}}", entries.join(","))
+        }
+        Llsd::Array(items) => {
+            let maps: Vec<&std::collections::HashMap<String, Llsd>> = items
+                .iter()
+                .filter_map(|item| match item {
+                    Llsd::Map(map) => Some(map),
+                    _ => None,
+                })
+                .collect();
+            if items.is_empty() {
+                "[]".to_owned()
+            } else if maps.len() == items.len() {
+                // Every key any element has, outlined from the first element
+                // that has it, marked when some element lacks it.
+                let mut keys: Vec<&String> = maps.iter().flat_map(|map| map.keys()).collect();
+                keys.sort_unstable();
+                keys.dedup();
+                let entries: Vec<String> = keys
+                    .into_iter()
+                    .filter_map(|key| {
+                        let value = maps.iter().find_map(|map| map.get(key))?;
+                        let optional = if maps.iter().all(|map| map.contains_key(key)) {
+                            ""
+                        } else {
+                            "?"
+                        };
+                        Some(format!("{key}{optional}:{}", outline_of(value, Some(key))))
+                    })
+                    .collect();
+                format!("[{{{}}}]", entries.join(","))
+            } else {
+                // Arrays of arrays or scalars: the outlines their elements
+                // have, each once, the empty ones left out.
+                let mut outlines: Vec<String> = items
+                    .iter()
+                    .map(|item| outline_of(item, None))
+                    .filter(|outline| outline != "[]")
+                    .collect();
+                outlines.sort_unstable();
+                outlines.dedup();
+                format!("[{}]", outlines.join("|"))
+            }
+        }
+        other => shape_of(other),
+    }
+}
+
+/// Whether a refusal's slots follow Second Life's rule: a slot some layer
+/// texture feeds is named by its bake on the appearance, a slot nothing feeds
+/// by the default placeholder.
+fn slot_rule(slots: &Llsd, appearance: Option<&AvatarAppearance>) -> String {
+    let Llsd::Map(map) = slots else {
+        return format!("not a map: {}", shape_of(slots));
+    };
+    let mut broken: Vec<String> = map
+        .iter()
+        .filter_map(|(name, slot)| {
+            let hash = slot.get("hash_id").and_then(llsd_uuid);
+            let fed = matches!(slot.get("texture_ids"), Some(Llsd::Array(ids)) if !ids.is_empty());
+            let baked = avatar_texture::BAKED
+                .iter()
+                .find(|(_index, baked_name)| baked_name.replace('_', "") == *name)
+                .and_then(|(index, _name)| {
+                    appearance?
+                        .texture_entry
+                        .faces
+                        .get(*index)
+                        .map(|face| face.texture_id.uuid())
+                });
+            let holds = if fed {
+                hash.is_some() && hash == baked && hash != Some(avatar_texture::IMG_DEFAULT_AVATAR)
+            } else {
+                hash == Some(avatar_texture::IMG_DEFAULT_AVATAR)
+            };
+            (!holds).then(|| name.clone())
+        })
+        .collect();
+    broken.sort_unstable();
+    if broken.is_empty() {
+        "a fed slot names its bake, an unfed one the default".to_owned()
+    } else {
+        format!("broken at {}", broken.join(" "))
+    }
+}
+
+/// An LLSD value as an id, where it is one.
+fn llsd_uuid(value: &Llsd) -> Option<Uuid> {
+    match value {
+        Llsd::Uuid(id) => Some(*id),
+        Llsd::String(text) => Uuid::parse_str(text).ok(),
+        _ => None,
+    }
+}
+
+/// A payload's `textures` against `appearance`'s texture entry: how many,
+/// how many nil, and at which indices they are not the appearance's.
+fn describe_payload_textures(textures: &Llsd, appearance: Option<&AvatarAppearance>) -> String {
+    let Llsd::Array(items) = textures else {
+        return format!("not an array: {}", shape_of(textures));
+    };
+    let ids: Vec<Option<Uuid>> = items.iter().map(llsd_uuid).collect();
+    let nil = ids
+        .iter()
+        .filter(|id| id.is_some_and(|id| id.is_nil()))
+        .count();
+    let Some(appearance) = appearance else {
+        return format!("{} entries, {nil} nil, no appearance to compare", ids.len());
+    };
+    let differ: Vec<String> = ids
+        .iter()
+        .enumerate()
+        .filter(|(index, id)| {
+            let face = appearance
+                .texture_entry
+                .faces
+                .get(*index)
+                .map(|face| face.texture_id.uuid());
+            **id != face
+        })
+        .map(|(index, _id)| index.to_string())
+        .collect();
+    let relation = if differ.is_empty() {
+        "every one the appearance's".to_owned()
+    } else {
+        format!("not the appearance's at {}", differ.join(" "))
+    };
+    format!("{} entries, {nil} nil, {relation}", ids.len())
+}
+
+/// A payload's visual parameters against `appearance`'s bytes: how many, of
+/// what type, and whether they are the appearance's (as bytes, or as reals
+/// quantised the way the wire quantises them).
+fn describe_payload_params(params: &Llsd, appearance: Option<&AvatarAppearance>) -> String {
+    let Llsd::Array(items) = params else {
+        return format!("not an array: {}", shape_of(params));
+    };
+    let kinds: std::collections::BTreeSet<String> = items.iter().map(shape_of).collect();
+    let kinds = kinds.into_iter().collect::<Vec<_>>().join("/");
+    let Some(appearance) = appearance else {
+        return format!("{} {kinds}, no appearance to compare", items.len());
+    };
+    let as_bytes: Vec<Option<u8>> = items
+        .iter()
+        .map(|item| match item {
+            Llsd::Integer(number) => u8::try_from(*number).ok(),
+            _ => None,
+        })
+        .collect();
+    let bytes: Vec<Option<u8>> = appearance.visual_params.iter().copied().map(Some).collect();
+    let relation = if as_bytes == bytes {
+        "the appearance's bytes".to_owned()
+    } else if items.len() == bytes.len() {
+        let same = as_bytes
+            .iter()
+            .zip(&bytes)
+            .filter(|(ours, theirs)| ours == theirs)
+            .count();
+        format!("{same} of {} the appearance's bytes", bytes.len())
+    } else {
+        format!("the appearance has {}", bytes.len())
+    };
+    format!("{} {kinds}, {relation}", items.len())
+}
+
+/// A scale as its three numbers to the millimetre.
+fn describe_scale(scale: &Llsd) -> String {
+    let Llsd::Array(items) = scale else {
+        return format!("not an array: {}", shape_of(scale));
+    };
+    items
+        .iter()
+        .map(|item| match item {
+            Llsd::Real(number) => format!("{number:.3}"),
+            other => shape_of(other),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The refusal's `slot_textures` against `appearance`: per slot, whether its
+/// `hash_id` is the appearance's bake on that slot, and how many layer
+/// textures it names.
+fn describe_slot_textures(
+    slots: &Llsd,
+    appearance: Option<&AvatarAppearance>,
+    worn: &[(WearableType, Uuid)],
+) -> String {
+    let Llsd::Map(map) = slots else {
+        return format!("not a map: {}", shape_of(slots));
+    };
+    let mut names: Vec<&String> = map.keys().collect();
+    names.sort_unstable();
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let slot = map.get(name)?;
+            let hash = slot.get("hash_id").and_then(llsd_uuid);
+            let index = avatar_texture::BAKED
+                .iter()
+                .find(|(_index, baked_name)| baked_name.replace('_', "") == *name)
+                .map(|(index, _name)| *index);
+            let baked = index.and_then(|index| {
+                appearance?
+                    .texture_entry
+                    .faces
+                    .get(index)
+                    .map(|face| face.texture_id.uuid())
+            });
+            let reference = index.and_then(|index| avatar_texture::wearables_hash(index, worn));
+            let hash_word = match (hash, baked) {
+                (None, _) => "no hash",
+                (Some(hash), _) if hash.is_nil() => "nil hash",
+                (Some(hash), Some(baked)) if hash == baked => "hash = bake",
+                (Some(_), _) => "hash != bake",
+            };
+            let reference_word = match (hash, reference) {
+                (Some(hash), Some(reference)) if hash == reference => "the reference's",
+                (Some(hash), None) if hash == avatar_texture::IMG_DEFAULT_AVATAR => {
+                    "nothing feeds it: the default"
+                }
+                (_, None) => "nothing feeds it",
+                (_, Some(_)) => "not the reference's",
+            };
+            let layers = match slot.get("texture_ids") {
+                Some(Llsd::Array(ids)) => ids.len(),
+                _ => 0,
+            };
+            Some(format!(
+                "{name}: {hash_word}, {reference_word}, {layers} layers"
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// The suffixes of a bake leg's answer metrics.
@@ -942,13 +1572,25 @@ const ANSWER_SUFFIXES: [&str; 7] = [
     "core_keys",
 ];
 
+/// The suffixes of a bake leg's payload metrics ([`record_payload`]).
+const PAYLOAD_SUFFIXES: [&str; 8] = [
+    "payload_shape",
+    "payload_outline",
+    "payload_textures",
+    "payload_params",
+    "payload_scale",
+    "payload_box",
+    "payload_slots",
+    "payload_slot_rule",
+];
+
 /// The suffixes of the appearances a leg records for each viewer.
-const APPEARANCE_SUFFIXES: [&str; 4] = ["appearances", "appearance", "block", "hover"];
+const APPEARANCE_SUFFIXES: [&str; 5] = ["appearances", "told", "appearance", "block", "hover"];
 
 /// Records `why` under every metric of a bake leg that was never asked, so
 /// each key exists on every grid.
 fn record_unasked(metrics: &mut Metrics, key: &str, why: &str) {
-    for suffix in ANSWER_SUFFIXES {
+    for suffix in ANSWER_SUFFIXES.into_iter().chain(PAYLOAD_SUFFIXES) {
         metrics.set(&format!("{key}_{suffix}"), why);
     }
     record_no_appearances(metrics, key, why);

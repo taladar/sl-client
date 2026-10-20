@@ -274,6 +274,9 @@ mod test {
         /// The region name the `RegionHandshake` carried (it precedes
         /// `RegionHandshakeComplete`, so `start` captures it).
         region_name: Option<String>,
+        /// The login's `agent_appearance_service`, where a central-baking
+        /// grid serves its bakes.
+        appearance_service: Option<url::Url>,
     }
 
     impl Drop for Running {
@@ -318,6 +321,9 @@ mod test {
         let (grid, client, agent) =
             connect_as(account, regions, handover_timeout, imitates).await?;
         let circuit = client.root_circuit_id().ok_or("no root circuit")?;
+        let appearance_service = client
+            .login_success()
+            .and_then(|success| success.agent_appearance_service.clone());
         let (event_tx, event_rx) = mpsc::channel::<Event>(256);
         let (command_tx, command_rx) = mpsc::channel::<Command>(8);
         let (diag_tx, _diag_rx) = mpsc::channel(16);
@@ -330,6 +336,7 @@ mod test {
             commands: command_tx,
             run,
             region_name: None,
+            appearance_service,
         };
         let mut region_name = None;
         running
@@ -4974,9 +4981,16 @@ mod test {
             .await?;
         let appearance = appearance.ok_or("no appearance of the agent itself")?;
         let animations = animations.ok_or("no animation of the agent itself")?;
+        // The default flavour central-bakes, so the appearance carries the
+        // parameters the grid baked the outfit with.
+        let outfit = running
+            .agent
+            .baked_outfit()
+            .await
+            .ok_or("the grid baked no outfit")?;
         assert_eq!(
             appearance.visual_params.len(),
-            sl_fake_grid::fixtures::npcs::DEFAULT_VISUAL_PARAMS.len(),
+            outfit.visual_params.len(),
             "the own avatar's visual params were truncated on the wire"
         );
         assert!(
@@ -4988,12 +5002,19 @@ mod test {
         );
 
         // Every baked slot the entry names is served, so the body is painted
-        // rather than left with seven failed texture fetches.
+        // rather than left with seven failed texture fetches. The default
+        // flavour central-bakes, so the bakes come from the appearance service
+        // the login named, by the route the reference fetches them by.
+        let service = running
+            .appearance_service
+            .clone()
+            .ok_or("a central-baking login named no appearance service")?;
+        let http = reqwest::Client::new();
         let mut baked = 0_usize;
-        for slot in [
-            sl_proto::avatar_texture::HEAD_BAKED,
-            sl_proto::avatar_texture::UPPER_BAKED,
-            sl_proto::avatar_texture::LOWER_BAKED,
+        for (slot, name) in [
+            (sl_proto::avatar_texture::HEAD_BAKED, "head"),
+            (sl_proto::avatar_texture::UPPER_BAKED, "upper"),
+            (sl_proto::avatar_texture::LOWER_BAKED, "lower"),
         ] {
             let texture = appearance
                 .texture_entry
@@ -5004,21 +5025,9 @@ mod test {
                 sl_proto::avatar_texture::IMG_DEFAULT_AVATAR,
                 "slot {slot} is still the un-baked sentinel"
             );
-            running
-                .commands
-                .send(Command::FetchTexture {
-                    texture_id: texture,
-                    discard_level: sl_proto::j2c::DiscardLevel::FULL,
-                })
-                .await?;
-            let bytes = running
-                .wait_for(|event| match event {
-                    Event::TextureReceived(fetched) if fetched.id == texture => {
-                        Some(fetched.data.clone())
-                    }
-                    _ => None,
-                })
-                .await?;
+            let url = service.join(&format!("texture/{}/{name}/{}", me.uuid(), texture.uuid()))?;
+            let response = http.get(url).send().await?.error_for_status()?;
+            let bytes = response.bytes().await?;
             assert!(!bytes.is_empty(), "slot {slot}'s bake came back empty");
             // A bake is a five-component (`R G B alpha mask`) codestream, and
             // for these three slots in particular that is not cosmetic: the

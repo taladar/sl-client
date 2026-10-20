@@ -17,8 +17,12 @@ exclude = { workspace = true }
 
 [dependencies]
 bytes = { workspace = true }
+fs-err = { workspace = true }
+image = { version = "0.25.10", default-features = false, features = ["tga"] }
+sl-avatar = { workspace = true }
 sl-proto = { workspace = true }
 sl-texture = { path = "../sl-texture", version = "0.1.0", default-features = false }
+uuid = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

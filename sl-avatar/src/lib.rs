@@ -47,6 +47,7 @@ pub mod resolve;
 pub mod skeletal;
 pub mod skeleton;
 pub mod skin;
+pub mod stature;
 pub mod volume;
 pub mod wearable;
 
@@ -75,6 +76,7 @@ pub use skeleton::{
     SkeletonError,
 };
 pub use skin::SkinningPalette;
+pub use stature::{AVATAR_DEPTH, AVATAR_WIDTH, BodySizeMetrics, body_size_from_joints};
 pub use volume::{VolumeDeform, VolumeDeformations};
 pub use wearable::{SaleType, WearableAsset, WearableError, WearablePermissions};
 

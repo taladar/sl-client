@@ -73,6 +73,8 @@ pub(crate) struct SimState {
     /// and what decides whether an `AvatarAppearance` this session pushes
     /// carries an `AppearanceData` block at all.
     pub(crate) bakes: crate::bakes::BakePolicy,
+    /// The grid's central bake service ([`crate::bake_service`]).
+    pub(crate) bake_service: crate::bake_service::BakeService,
     /// The region identity sent in the automatic `RegionHandshake` greeting
     /// (on `UseCircuitCode`, before the agent's movement completes).
     pub(crate) identity: RegionIdentity,
@@ -446,6 +448,12 @@ impl SharedSim {
                             voice_server_type: Some(voice_server_type.to_owned()),
                         });
                 }
+                // A central-baking grid has baked the outfit by the time the
+                // agent is shown it: name the bakes the appearance carries.
+                if state.bakes == crate::bakes::BakePolicy::ServerSide {
+                    let outfit = state.bake_service.bake(&state.sim, &state.assets);
+                    state.sim.set_baked_outfit(outfit);
+                }
                 // The world burst a simulator sends on region entry: the
                 // agent's own avatar, the parcel overlay, its parcel, the
                 // ground, and every object in view — before the scenario's
@@ -483,6 +491,10 @@ impl SharedSim {
             // An accepted central bake is stated back to the agent as its
             // appearance at the version baked, as Second Life does.
             if let ServerEvent::ServerAppearanceRequested { cof_version } = &event {
+                // Bake what the agent wears now: the outfit may have changed
+                // since the last bake.
+                let outfit = state.bake_service.bake(&state.sim, &state.assets);
+                state.sim.set_baked_outfit(outfit);
                 push_own_appearance_baked(
                     &state.avatar,
                     &state.assets,
