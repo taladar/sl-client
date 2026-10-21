@@ -31,3 +31,12 @@ surface for the picked target. The avatar-target variant additionally
 depends on the FS bridge (viewer-fs-bridge-protocol, blocked) — the
 reference fetches avatar script info via the bridge; the object variants
 do not need it.
+
+## Measured (gridspec-avatar-render-info, 2026-10-21)
+
+The attachment report is one document on both grids
+(`book/src/gridspec/avatars.md` § Attachment resources): points by their LSL
+names (`ATTACH_RIGHT_PEC` — map them to the point's display name), HUDs
+listed, available memory `-1` (show as unlimited) and 38 URLs. OpenSim never
+states an object's `memory` and its used memory is always 0 — show "not
+reported", not 0 KB. Our client already reads it under either media label.

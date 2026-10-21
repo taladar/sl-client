@@ -660,6 +660,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ObjectPhysicsData(_)
             | Event::ObjectPhysicsProperties(_)
             | Event::AttachmentResources(_)
+            | Event::AvatarRenderInfo(_)
             | Event::LandResourcesUrls(_)
             | Event::LandResourceSummary(_)
             | Event::LandResourceDetail(_)

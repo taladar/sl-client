@@ -2,6 +2,7 @@
 
 mod abuse_report;
 mod agent_preferences;
+mod avatar_render_info;
 mod circuit_code;
 mod control_flags;
 mod display_name;
@@ -59,6 +60,11 @@ pub use abuse_report::{
 pub use agent_preferences::{
     AgentPreferences, ObjectPermMasks, build_agent_preferences_request,
     build_agent_preferences_response, parse_agent_preferences,
+};
+pub use avatar_render_info::{
+    AvatarRenderInfo, AvatarRenderReport, RenderLimitCounts, build_avatar_render_info_response,
+    build_avatar_render_report_request, build_avatar_render_report_response,
+    parse_avatar_render_info, parse_avatar_render_report_request,
 };
 pub use circuit_code::CircuitCode;
 pub use control_flags::ControlFlags;

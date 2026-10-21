@@ -226,6 +226,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::appearance_baking::AppearanceBaking),
         Box::new(crate::cases::attachments::Attachments),
         Box::new(crate::cases::outfits::Outfits),
+        Box::new(crate::cases::avatar_render_info::AvatarRenderInfo),
         Box::new(crate::cases::terrain_raw_download::TerrainRawDownload),
         Box::new(crate::cases::terrain_raw_upload::TerrainRawUpload),
         Box::new(crate::cases::terrain_layerdata::TerrainLayerData),

@@ -35,6 +35,7 @@ use sl_proto::AgentKey;
 use sl_proto::AnimationKey;
 use sl_proto::AssetKey;
 use sl_proto::AssetUpdateLocation;
+use sl_proto::AvatarRenderReport;
 use sl_proto::ChatChannel;
 use sl_proto::ChatSessionKind;
 use sl_proto::CircuitId;
@@ -4018,6 +4019,23 @@ fn all_specs() -> Vec<CommandSpec> {
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestAttachmentResources),
         },
+        // One avatar's report, or none (clearing it): enough to probe what a
+        // region states back.
+        CommandSpec {
+            name: "set_avatar_render_reports",
+            usage: "[agent] [weight] [too_complex]",
+            build: |args, ctx| {
+                let reports = match args.opt_agent(ctx, "agent", 0)? {
+                    Some(agent) => vec![AvatarRenderReport {
+                        agent,
+                        weight: args.req_parse(ctx, "weight", 1, "u32")?,
+                        too_complex: args.bool_or(ctx, "too_complex", 2, false)?,
+                    }],
+                    None => Vec::new(),
+                };
+                Ok(Command::SetAvatarRenderReports(reports))
+            },
+        },
         CommandSpec {
             name: "request_land_resources",
             usage: "<parcel_id>",
@@ -6639,15 +6657,16 @@ mod tests {
 
     use sl_proto::CircuitProbe;
     use sl_proto::{
-        AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, ChatChannel, ChatType,
-        CircuitId, ClockStyle, Command, ControlFlags, DirFindFlags, DirectoryVisibility,
-        EjectAction, EventId, FolderType, FreezeAction, FriendRights, GroupKey, InventoryFolderKey,
-        InventoryItemOrFolderKey, InventoryKey, InventoryType, LandBrushAction, LandBrushSize,
-        LandEdit, LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem,
-        ObjectKey, OwnerKey, ReflectionProbeFlags, RegionDebugUpdate, RegionHandle,
-        RegionLocalObjectId, RegionLocalParcelId, RegionTerrainUpdate, RenderMaterialRef, SaleType,
-        ScopedObjectId, ScopedParcelId, ScriptPermissions, SimWideDeleteFlags, StartLocationSlot,
-        TaskInventoryKey, TerraformArea, TextureKey, TimestampFormat, TransactionId, Uuid,
+        AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, AvatarRenderReport,
+        ChatChannel, ChatType, CircuitId, ClockStyle, Command, ControlFlags, DirFindFlags,
+        DirectoryVisibility, EjectAction, EventId, FolderType, FreezeAction, FriendRights,
+        GroupKey, InventoryFolderKey, InventoryItemOrFolderKey, InventoryKey, InventoryType,
+        LandBrushAction, LandBrushSize, LandEdit, LandStatReportType, LindenAmount, MapItemType,
+        MovementMode, ObjectBuyItem, ObjectKey, OwnerKey, ReflectionProbeFlags, RegionDebugUpdate,
+        RegionHandle, RegionLocalObjectId, RegionLocalParcelId, RegionTerrainUpdate,
+        RenderMaterialRef, SaleType, ScopedObjectId, ScopedParcelId, ScriptPermissions,
+        SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea, TextureKey,
+        TimestampFormat, TransactionId, Uuid,
     };
 
     use pretty_assertions::assert_eq;
@@ -7849,6 +7868,22 @@ mod tests {
         assert!(matches!(
             build("request_attachment_resources"),
             Ok(Command::RequestAttachmentResources)
+        ));
+    }
+
+    #[test]
+    fn set_avatar_render_reports_parses_one_report_or_none() {
+        assert!(matches!(
+            build(&format!("set_avatar_render_reports {ONE} 123457 true")),
+            Ok(Command::SetAvatarRenderReports(reports)) if reports == vec![AvatarRenderReport {
+                agent: AgentKey::from(uuid(ONE)),
+                weight: 123_457,
+                too_complex: true,
+            }]
+        ));
+        assert!(matches!(
+            build("set_avatar_render_reports"),
+            Ok(Command::SetAvatarRenderReports(reports)) if reports.is_empty()
         ));
     }
 

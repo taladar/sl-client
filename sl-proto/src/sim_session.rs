@@ -3590,6 +3590,9 @@ pub struct SimSession {
     /// capability serves ([`SimSession::set_attachment_resources`]).
     /// Driver-populated.
     attachment_resources: AttachmentResourcesReport,
+    /// How the `AttachmentResources` answer is labelled
+    /// ([`SimSession::set_attachment_resources_label`]).
+    attachment_resources_label: crate::sim_caps::LlsdLabel,
     /// The parcel script-resource summary the `LandResources` follow-up
     /// summary GET serves ([`SimSession::set_land_resource_summary`]).
     /// Driver-populated; the POST's parcel id is validated but the stored
@@ -3851,7 +3854,8 @@ impl SimSession {
             selection_costs: BTreeMap::new(),
             region_id: Uuid::nil(),
             parcels: Vec::new(),
-            attachment_resources: AttachmentResourcesReport::default(),
+            attachment_resources: AttachmentResourcesReport::nothing_scripted(),
+            attachment_resources_label: crate::sim_caps::LlsdLabel::Llsd,
             land_resource_summary: ResourceSummary::default(),
             land_resource_details: Vec::new(),
             experiences: SimExperiences::default(),
@@ -4943,6 +4947,19 @@ impl SimSession {
     /// The stored `AttachmentResources` report.
     pub(crate) const fn attachment_resources(&self) -> &AttachmentResourcesReport {
         &self.attachment_resources
+    }
+
+    /// Sets how the `AttachmentResources` answer is labelled (default
+    /// [`LlsdLabel::Llsd`](crate::LlsdLabel::Llsd), Second Life's; OpenSim's
+    /// handler states none, so its HTTP server's default stands).
+    pub const fn set_attachment_resources_label(&mut self, label: crate::sim_caps::LlsdLabel) {
+        self.attachment_resources_label = label;
+    }
+
+    /// How the `AttachmentResources` answer is labelled
+    /// ([`set_attachment_resources_label`](Self::set_attachment_resources_label)).
+    pub(crate) const fn attachment_resources_label(&self) -> crate::sim_caps::LlsdLabel {
+        self.attachment_resources_label
     }
 
     /// Replaces the script-resource summary the `LandResources` follow-up

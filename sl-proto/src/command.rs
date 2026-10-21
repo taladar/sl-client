@@ -8,11 +8,11 @@ use crate::j2c::DiscardLevel;
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
-    AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
-    ChatSessionKind, ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedQueryFlags,
-    ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams, CreateListing,
-    DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance, EjectAction,
-    EnvironmentUpdate, EstateAccessDelta, EstateInfoUpdate, EventId, ExperienceKey,
+    AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint, AvatarRenderReport,
+    Camera, ChatChannel, ChatSessionKind, ChatType, ClassifiedCategory, ClassifiedKey,
+    ClassifiedQueryFlags, ClassifiedUpdate, ClickAction, ControlFlags, CreateGroupParams,
+    CreateListing, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance,
+    EjectAction, EnvironmentUpdate, EstateAccessDelta, EstateInfoUpdate, EventId, ExperienceKey,
     ExperiencePermission, ExperienceUpdate, FaceMaterialPut, FolderType, FreezeAction, FriendKey,
     FriendRights, GestureActivation, GodKickAction, GodKickTarget, GodRegionUpdate, GroupKey,
     GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
@@ -972,6 +972,13 @@ pub enum Command {
     /// [`Event::AttachmentResources`](crate::Event::AttachmentResources). A no-op
     /// when the region seed omits the capability.
     RequestAttachmentResources,
+    /// Replace what the session reports to the region's `AvatarRenderInfo`
+    /// capability on its next report: this application's reckoning of each
+    /// avatar in the agent's region
+    /// ([`Session::set_avatar_render_reports`](crate::Session::set_avatar_render_reports)).
+    /// The session reports on the reference cadence while the region grants
+    /// the capability, and never on a grid that does not.
+    SetAvatarRenderReports(Vec<AvatarRenderReport>),
     /// Request a parcel's **script resource report** via the `LandResources`
     /// capability. The runtimes POST the parcel id, surface the follow-up cap URLs
     /// as [`Event::LandResourcesUrls`](crate::Event::LandResourcesUrls), then GET
@@ -3292,6 +3299,7 @@ impl Command {
             Self::RequestSelectedCost { .. } => "RequestSelectedCost",
             Self::RequestObjectPhysicsData { .. } => "RequestObjectPhysicsData",
             Self::RequestAttachmentResources => "RequestAttachmentResources",
+            Self::SetAvatarRenderReports(..) => "SetAvatarRenderReports",
             Self::RequestLandResources { .. } => "RequestLandResources",
             Self::RequestLandStat { .. } => "RequestLandStat",
             Self::RequestEnvironment { .. } => "RequestEnvironment",

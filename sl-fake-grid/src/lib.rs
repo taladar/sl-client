@@ -34,6 +34,7 @@ pub mod neighbours;
 mod object_edits;
 mod parcel_edits;
 pub mod relays;
+mod render_info;
 pub mod runtime;
 pub mod scenario;
 pub mod social;

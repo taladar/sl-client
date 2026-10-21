@@ -14,7 +14,7 @@ use std::collections::{BTreeSet, HashMap};
 use sl_proto::{
     AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_PAGE_SIZE,
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
-    CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH,
+    CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_AVATAR_RENDER_INFO,
     CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
     CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY, CAP_ESTATE_ACCESS,
     CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
@@ -42,12 +42,12 @@ use sl_proto::{
     ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_dispatch_region_info_request,
-    build_environment_update_request, build_home_location_request, build_interest_list_request,
-    build_modify_material_params_request, build_modify_region_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_properties_update_request, build_parcel_voice_info_request,
-    build_postcard_request, build_provision_voice_account_request,
+    build_avatar_render_report_request, build_create_inventory_category_request,
+    build_dispatch_region_info_request, build_environment_update_request,
+    build_home_location_request, build_interest_list_request, build_modify_material_params_request,
+    build_modify_region_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_properties_update_request,
+    build_parcel_voice_info_request, build_postcard_request, build_provision_voice_account_request,
     build_region_experiences_request, build_region_schedule, build_render_materials_put_request,
     build_send_user_report, build_set_experience_permission_request,
     build_update_experience_request, build_update_item_asset_request,
@@ -70,23 +70,23 @@ pub use sl_proto::{
     AgentOrObjectKey, AgentPreferences, AlertInfo, AnimatedObjects, AnimationKey, AnyMessage,
     Arrival, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint,
     AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
-    AvatarPick, AvatarPickerResult, AvatarProperties, BUILTIN_UI_SOUNDS, Camera, CameraError,
-    ChatAudible, ChatChannel, ChatLogConfig, ChatMessage, ChatSessionAgentUpdate, ChatSessionKind,
-    ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
-    CircuitProbe, ClassifiedCategory, ClassifiedClickStats, ClassifiedInfo, ClassifiedKey,
-    ClassifiedQueryFlags, ClassifiedSearchClicks, ClassifiedUpdate, ClickAction, ClientDirectories,
-    ClockStyle, CloudPosDensity, CoarseLocation, Color, ColorAlpha, Command, ControlFlags,
-    ConversationKind, CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE,
-    DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE,
-    DEFAULT_RAINBOW_TEXTURE, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, DayCycle,
-    DayCycleFrame, DayNames, DayTrack, DeRezDestination, DensityLayer, DetachOrder, Diagnostic,
-    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility, DisconnectReason, DisplayName,
-    DisplayNameUpdate, Distance, DynamicMenus, EconomyData, EnvironmentAsset,
-    EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate, Error as SessionError,
-    EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan, EstateCovenant, EstateInfo,
-    EstateInfoUpdate, EventId, EventInfo, ExperienceEnvironmentPush, ExperienceEvent,
-    ExperienceEventPermission, ExperienceInfo, ExperienceKey, ExperienceLocation,
+    AvatarPick, AvatarPickerResult, AvatarProperties, AvatarRenderInfo, AvatarRenderReport,
+    BUILTIN_UI_SOUNDS, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage,
+    ChatSessionAgentUpdate, ChatSessionKind, ChatSource, ChatSourceType, ChatType,
+    ChatTypeNotAVolume, Child, CircuitCode, CircuitId, CircuitProbe, ClassifiedCategory,
+    ClassifiedClickStats, ClassifiedInfo, ClassifiedKey, ClassifiedQueryFlags,
+    ClassifiedSearchClicks, ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle,
+    CloudPosDensity, CoarseLocation, Color, ColorAlpha, Command, ControlFlags, ConversationKind,
+    CreateGroupParams, CreateListing, DEFAULT_BLOOM_TEXTURE, DEFAULT_CLOUD_TEXTURE,
+    DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE, DEFAULT_RAINBOW_TEXTURE,
+    DEFAULT_SUN_TEXTURE, DEFAULT_WATER_NORMAL_TEXTURE, DayCycle, DayCycleFrame, DayNames, DayTrack,
+    DeRezDestination, DensityLayer, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult,
+    DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction,
+    DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance, DynamicMenus,
+    EconomyData, EnvironmentAsset, EnvironmentPushAction, EnvironmentSettings, EnvironmentUpdate,
+    Error as SessionError, EstateAccessDelta, EstateAccessKind, EstateAccessLists, EstateBan,
+    EstateCovenant, EstateInfo, EstateInfoUpdate, EventId, EventInfo, ExperienceEnvironmentPush,
+    ExperienceEvent, ExperienceEventPermission, ExperienceInfo, ExperienceKey, ExperienceLocation,
     ExperiencePermission, ExperienceProperties, ExperienceSearchPage, ExperienceUpdate,
     ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend,
     FriendKey, FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow,
@@ -128,26 +128,26 @@ pub use sl_proto::{
     RegionDebugUpdate, RegionFlags, RegionHandle, RegionHandshakeReplyFlags, RegionIdentity,
     RegionInfoDispatch, RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId,
     RegionName, RegionRestartNotice, RegionSchedule, RegionTerrainComposition, RegionTerrainUpdate,
-    Reliability, RemoteParcelRequest, RenderMaterialEntry, RenderMaterialRef, RestartDays,
-    RestartWhen, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation,
-    SKY_TRACK_COUNT, SaleInfo, SaleType, Scale, ScopedObjectId, ScopedParcelId, ScriptCompileError,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptMetadata,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptTeleportRequest,
-    ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber, ServerHistoryMessage,
-    SessionTransition, SetDisplayNameReply, SettingsKind, SimulatorFeatures, SkySettings,
-    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
-    SurfaceInfo, TRACK_MAX, TaskInventoryCapReply, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TeleportFlags, TerraformArea, TerrainLayerBatch,
-    TerrainLayerType, TerrainMaterialOverrides, TerrainPatch, TerrainPatchHeader, TextureAnimation,
-    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
-    ThumbnailTarget, TimestampFormat, TransactionId, TransferId, Transmit, TriggeredSound,
-    UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
-    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
-    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, UploadClass, UserInfo, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
-    Wearable, WearableType, WireError, XferId, XferListing, avatar_texture,
-    azimuth_altitude_to_rotation, build_get_metadata_request, chat_text_muted,
+    Reliability, RemoteParcelRequest, RenderLimitCounts, RenderMaterialEntry, RenderMaterialRef,
+    RestartDays, RestartWhen, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    Rotation, SKY_TRACK_COUNT, SaleInfo, SaleType, Scale, ScopedObjectId, ScopedParcelId,
+    ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage,
+    ScriptMetadata, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
+    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
+    ServerHistoryMessage, SessionTransition, SetDisplayNameReply, SettingsKind, SimulatorFeatures,
+    SkySettings, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
+    StartLocationSlot, SurfaceInfo, TRACK_MAX, TaskInventoryCapReply, TaskInventoryItem,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags, TerraformArea,
+    TerrainLayerBatch, TerrainLayerType, TerrainMaterialOverrides, TerrainPatch,
+    TerrainPatchHeader, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
+    ThrottleBuilder, ThrottleError, ThumbnailTarget, TimestampFormat, TransactionId, TransferId,
+    Transmit, TriggeredSound, UI_SOUND_ALERT, UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER,
+    UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT,
+    UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE,
+    UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UploadClass,
+    UserInfo, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo,
+    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, WireError, XferId, XferListing,
+    avatar_texture, azimuth_altitude_to_rotation, build_get_metadata_request, chat_text_muted,
     decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
     environment_asset_from_bytes, environment_asset_to_bytes, expected_upload_cost, grid_to_handle,
     group_powers, handle_to_global, handle_to_grid, legacy_day_cycle_from_bytes,
@@ -1572,6 +1572,9 @@ fn advance_running(
                 // simulator will not start streaming the scene.
                 tracing::warn!("could not release the deferred agent movement: {error}");
             }
+            // Start (or, where the region grants none, stop) the region's
+            // `AvatarRenderInfo` cadence.
+            session.start_avatar_render_info(map.contains_key(CAP_AVATAR_RENDER_INFO), now);
             // The viewer fetches `SimulatorFeatures` on arriving in a region, so
             // GET it once the capability map is known (at login and on each region
             // change), surfacing the flags as `Event::SimulatorFeatures`.
@@ -1743,6 +1746,34 @@ fn advance_running(
                         }
                     }
                 }
+            }
+        }
+
+        // The region's `AvatarRenderInfo`, on the reference cadence the session
+        // keeps: its statement every 15 s, our report every 60 s and more. The
+        // answer to a report is `{}`, read only for failure. Mirrors the tokio
+        // run loop.
+        let render_info = session.next_avatar_render_info(now);
+        if let Some(url) = caps.map.get(CAP_AVATAR_RENDER_INFO) {
+            if render_info.request {
+                let events_tx = caps.events_tx.clone();
+                let request_url = url.clone();
+                crate::log_context::spawn_thread(move || {
+                    run_get_caps_llsd(&request_url, CAP_AVATAR_RENDER_INFO, &events_tx);
+                });
+            }
+            if let Some(reports) = render_info.report {
+                let body = build_avatar_render_report_request(&reports);
+                let events_tx = caps.events_tx.clone();
+                let report_url = url.clone();
+                crate::log_context::spawn_thread(move || {
+                    crate::http::run_caps_reporting(
+                        &report_url,
+                        body,
+                        CAP_AVATAR_RENDER_INFO,
+                        &events_tx,
+                    );
+                });
             }
         }
 
@@ -4456,6 +4487,9 @@ fn apply_command(
             if let Some(caps) = caps {
                 object_caps::dispatch(command, now, session, caps, neighbours, now);
             }
+        }
+        Command::SetAvatarRenderReports(reports) => {
+            session.set_avatar_render_reports(reports.clone());
         }
         Command::RequestAttachmentResources => {
             if let Some(caps) = caps

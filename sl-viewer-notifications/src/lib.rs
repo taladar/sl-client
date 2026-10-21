@@ -1040,7 +1040,7 @@ mod tests {
             checkbox_only,
             ["ParcelPlayingMedia", "PromptMFATokenWithSave"]
         );
-        assert_eq!(suppressible, 140);
+        assert_eq!(suppressible, 141);
     }
 
     /// The keyed server alerts `notification_host::ingest_alert_messages`

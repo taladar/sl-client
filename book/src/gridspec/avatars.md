@@ -398,3 +398,105 @@ one offers the other a teleport from its row, on OpenSim and on aditi
 
 Not checked by a test: the placeholder at a coarse height of zero, which is
 what OpenSim sends above 1,024 m.
+
+## Render info
+
+Two capabilities state what an avatar costs. **`AvatarRenderInfo`** is how
+the viewers in a region tell each other's complexity: each viewer POSTs
+`{agents:{<id>:{weight, tooComplex}}}` for the avatars it draws, every 60 s,
+and GETs `{agents:{<id>:{weight}}, reportinglimit, overlimit}` every 15 s
+(Firestorm's `llavatarrenderinfoaccountant.cpp`) — the weights it shows for
+others, and the "N residents render you as a jellydoll" notice from the two
+counts. **`AttachmentResources`** tells an agent what the scripts it wears
+use.
+
+Measured on 2026-10-21 by the conformance case `avatar-render-info`, two
+residents together: B reports A, A reports itself, B reports A again as too
+complex, and both read. Our client has no render-info request yet, so the
+case speaks the capability raw. Five runs on aditi — three in the sandbox the
+build location is in, where about ten other residents' viewers report on A
+and B as well, and two in Ahern, which nobody else was in — and three on the
+local OpenSim.
+
+### `AvatarRenderInfo`
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| whether it is granted | only to a seed request that **names** it: aditi left it out of our seed until the client asked for it | never | never (`protocol-avatar-render-info`) |
+| the read before anyone reports | `200`, LLSD: `{agents:{}, overlimit:0, reportinglimit:0}` | — | — |
+| an entry of `agents` | `{weight}`, an integer; nothing else | — | — |
+| whom `agents` lists | every avatar of the region somebody has reported on, the reader included: in the sandbox, A and nine or ten other residents | — | — |
+| a report | `200` with an empty map, `{}`, in LLSD | — | — |
+| one report alone | stated as sent, 0.2 s later, to the subject and to the reporter alike | — | — |
+| a second report, of A by A itself | counted (`reportinglimit` 2), but the weight stated is neither report nor their mean: 174,738 for reports of 123,457 and 345,679, the same in both runs | — | — |
+| a third, B's again, `tooComplex` | 26 to 57 s later A's weight is 146,398 and 146,230, below every report of ours, and B is listed at 25,054 although nothing of ours reported B: the region states figures of its own | — | — |
+| `reportinglimit` | how many reports there are of the reader: 0, 1, 2, 3 as the three came in — reports, not reporters, since B's two count twice | — | — |
+| `overlimit` | stayed 0 after the `tooComplex` report, in both runs in Ahern; in the sandbox it went to 1 in one run of two, where another resident's viewer may have counted | — | — |
+| a report of an agent nobody is, an empty map, a body that is no map, an entry that is no map | `200` and `{}`, every one: nothing is refused | — | — |
+| `PUT`, `DELETE` | `405`, `text/plain`, "Method Not Allowed" | — | — |
+
+So a lone report is the weight, and anything more is the region's own
+reckoning, which the census could not reduce to its reports. In the sandbox
+other viewers stated A between 23,466 and 38,486 and B near 25,900, so the
+25,054 Ahern gave B is about B's real complexity. A viewer cannot tell a
+reported weight from a reckoned one, and does not need to: it shows the
+number.
+
+### Attachment resources
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| whether it is granted | yes | yes | yes |
+| the label | `application/llsd+xml` | `text/html;charset=UTF-8`: the handler states none, and the HTTP server's default stands over the same LLSD | each flavour's (`ImitatedGrid::attachment_resources_label`) |
+| the shape | `{attachments:[{location, objects:[{id, is_group_owned, location, name, owner_id, resources}]}], summary:{available, used}}`, `location` an array of three reals | the same | the same |
+| what is listed | the scripted attachments, by attachment point, HUDs included: the test avatar's overrider is three, on `ATTACH_CHIN`, `ATTACH_LWING` and `ATTACH_HUD_TOP_LEFT`; nothing unscripted | the scripted attachments; nothing worn is `attachments: []` | `attachments: []` |
+| how a point is named | the LSL constant's name: `ATTACH_RIGHT_PEC` | the same | — |
+| an object's `resources` | `memory`, 65,536 for one Mono script, and `urls` when it holds one | `urls` when it holds one; never `memory` | — |
+| `summary.available` | `memory` -1 (no limit) and `urls` 38 | the same | the same |
+| `summary.used` | the sums: 327,680 bytes for the overrider, 393,216 with the cube | `memory` 0 whatever is worn; `urls` the sum | 0 and 0 |
+| a URL asked for by a prim and the prim then attached from the world | granted, and still held worn: `urls` 1 | the same | — |
+| the attachment taken off | gone from the next report | the same | — |
+
+Our client reads the report on both grids, whatever the label
+(`Command::RequestAttachmentResources`).
+
+### What the fake grid does about it
+
+Each flavour answers `AttachmentResources` with what both grids answer an
+agent wearing nothing scripted, labelled as its grid labels it. It wears no
+attachments (`fake-grid-own-attachments-and-region-moves`), so it has none to
+list; `sl-proto`'s `attachment_resources_answer_nothing_scripted_by_default`
+holds the answer and the label.
+
+The Second Life flavour grants `AvatarRenderInfo`; the OpenSim flavour
+refuses it. The region holds every report its viewers send
+(`sl-fake-grid` `render_info`) and answers each one `200 {}`, whatever it
+holds, and a `PUT` or `DELETE` `405`. Before any report its statement is
+`{agents: {}, overlimit: 0, reportinglimit: 0}`. A lone report is stated as
+sent, to every reader, and `reportinglimit` counts the reports of the reader.
+Two rules are the fake grid's own, because Second Life's could not be worked
+out from what was measured: the latest report of an avatar is its stated
+weight, and a report is held for five minutes. `overlimit` stays `0`, as it
+did on Second Life. The census runs on both flavours. Each holds everything
+except the scripted cube's legs (the fake grid runs no scripts) and what
+Second Life states of its own reckoning (B in the statement, and the report
+of B that nobody of ours sent).
+
+### What our viewer does with it
+
+Our viewer reckons each avatar's complexity itself and jellydolls by it
+(`viewer-avatar-complexity-limit`). On a region that grants
+`AvatarRenderInfo` it uses the reference viewer's timing: it reads the
+statement on arrival and every 15 seconds after. Five seconds after arrival,
+and every 60 seconds plus two per avatar after that, it reports each avatar in
+its region that it has scored. Each report carries our score and whether that
+score or the attachments' area is past our limit (`tooComplex`). The region's
+stated weight is shown in the radar's Reported column and on the name tag's
+complexity line (`Complexity: N (reported M)`). The counts about our own
+avatar raise the reference's notice, "Your avatar complexity is N. You may
+not be rendered by …", under its rules: not in the first 70 seconds, not
+within five minutes of the last notice unless that one is still showing, and
+only for a change of more than a tenth in the share of viewers not rendering
+us. Since `overlimit` never moved on Second Life, the notice has only been
+seen in unit tests. On OpenSim nothing is ever asked or told. There is no
+floater for the attachment report yet (`viewer-script-limits`).

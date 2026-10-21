@@ -379,7 +379,9 @@ though OpenSim serves them too.
 - **`AttachmentResources`** — `Command::RequestAttachmentResources` (a `GET`)
   returns `Event::AttachmentResources(Box<AttachmentResourcesReport>)`: the
   agent's scripted attachments grouped by attachment point, plus a
-  `ResourceSummary` of available/used memory and URLs.
+  `ResourceSummary` of available/used memory and URLs. What each grid answers
+  is in
+  [Grid Behaviour: Avatars](../gridspec/avatars.md#attachment-resources).
 - **`LandResources`** — `Command::RequestLandResources { parcel_id }` is a
   two-step flow: the `POST` returns follow-up cap URLs
   (`Event::LandResourcesUrls`), which the runtimes then `GET`, surfacing the

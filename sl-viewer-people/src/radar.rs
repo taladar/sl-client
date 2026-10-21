@@ -217,6 +217,8 @@ const COL_SEEN: usize = 6;
 const COL_RANGE: usize = 7;
 /// Column index of the render-cost (ARC) cell.
 const COL_COMPLEXITY: usize = 8;
+/// Column index of the region's stated complexity cell.
+const COL_REPORTED: usize = 9;
 
 /// The radar table: a flexible name over the status / info columns, default
 /// sort range-ascending (the reference default).
@@ -301,6 +303,18 @@ static RADAR_TABLE: TableSpec = TableSpec {
         TableColumn {
             header_key: "radar-col-complexity",
             token: "complexity",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed { default: 64.0 },
+            align: TableAlign::End,
+            sortable: true,
+        },
+        // The complexity the region states for each avatar from every
+        // viewer's reports (Second Life's `AvatarRenderInfo`,
+        // `protocol-avatar-render-info`), beside our own measurement. Empty on
+        // a grid that states none.
+        TableColumn {
+            header_key: "radar-col-reported",
+            token: "reported",
             kind: TableColumnKind::Text,
             width: TableColumnWidth::Fixed { default: 64.0 },
             align: TableAlign::End,
@@ -535,6 +549,9 @@ struct RadarView {
     /// The avatar render-cost revision the rows were built at, so a re-scored
     /// (or newly jellied) avatar refreshes its Complexity cell.
     built_complexity_revision: u64,
+    /// The region's render-info revision the rows were built at, so a newly
+    /// stated complexity refreshes its Reported cell.
+    built_reported_revision: u64,
 }
 
 impl RadarView {
@@ -663,6 +680,9 @@ struct RadarRowFacts<'w> {
     mutes: Res<'w, MuteModel>,
     /// The render-cost scores behind the Complexity cell.
     complexity: Res<'w, crate::avatar_complexity::AvatarComplexityModel>,
+    /// The region's statement of each avatar's complexity, behind the Reported
+    /// cell.
+    reported: Res<'w, sl_viewer_world_avatar::avatar_render_info::ReportedComplexity>,
     /// Our own agent, whose region the Region cell is stated relative to.
     identity: Res<'w, SlIdentity>,
 }
@@ -966,7 +986,8 @@ pub fn radar_floater_spec() -> FloaterSpec {
         id: RADAR_FLOATER_ID,
         title: "Radar".to_owned(),
         position: Vec2::new(320.0, 120.0),
-        default_size: Some(Vec2::new(680.0, 380.0)),
+        // Wide enough for the name beside ten columns, the Reported one last.
+        default_size: Some(Vec2::new(760.0, 380.0)),
         min_size: Some(Vec2::new(480.0, 220.0)),
         dock_host: None,
         caps: FloaterCaps {
@@ -1546,6 +1567,7 @@ fn rebuild_radar_view(
         && radar.view.built_filter == radar.state.filter
         && radar.view.built_limit == limit
         && radar.view.built_complexity_revision == facts.complexity.revision()
+        && radar.view.built_reported_revision == facts.reported.revision()
     {
         return;
     }
@@ -1554,6 +1576,7 @@ fn rebuild_radar_view(
     radar.view.built_filter.clone_from(&radar.state.filter);
     radar.view.built_limit = limit;
     radar.view.built_complexity_revision = facts.complexity.revision();
+    radar.view.built_reported_revision = facts.reported.revision();
 
     let own_region = facts.identity.region_handle;
     let now = time.elapsed_secs_f64();
@@ -1590,6 +1613,7 @@ fn rebuild_radar_view(
                     .is_some_and(|friends| friends.is_friend(*agent)),
                 muted: facts.mutes.is_muted(agent.uuid()),
                 complexity: facts.complexity.complexity(*agent).map(|cost| cost.score),
+                reported_complexity: facts.reported.reported(*agent),
                 jellied: facts.complexity.jelly_reason_for(*agent).is_some(),
             }
         })
@@ -1752,7 +1776,7 @@ fn radar_row_values(
     data: &RadarRow,
     tags: RadarTagColors,
     state: &RadarState,
-) -> [(usize, String, Color); 9] {
+) -> [(usize, String, Color); 10] {
     let name_color = if data.muted {
         tags.muted
     } else if data.friend {
@@ -1808,6 +1832,13 @@ fn radar_row_values(
                 .map(|score| score.to_string())
                 .unwrap_or_default(),
             complexity_color,
+        ),
+        (
+            COL_REPORTED,
+            data.reported_complexity
+                .map(|weight| weight.to_string())
+                .unwrap_or_default(),
+            LABEL_COLOR,
         ),
     ]
 }
@@ -1979,6 +2010,7 @@ fn specimen_rows(cx: crate::ui_element::ElementCx) -> Vec<RadarRow> {
         friend: false,
         muted: false,
         complexity: None,
+        reported_complexity: None,
         jellied: false,
     };
     vec![
@@ -1991,6 +2023,7 @@ fn specimen_rows(cx: crate::ui_element::ElementCx) -> Vec<RadarRow> {
             sitting: true,
             friend: true,
             complexity: Some(48_200),
+            reported_complexity: None,
             ..row(
                 0x5a11_e000_0000_4000_8000_0000_0000_0011,
                 "Nearby Resident",
@@ -2004,6 +2037,7 @@ fn specimen_rows(cx: crate::ui_element::ElementCx) -> Vec<RadarRow> {
             seen_seconds: 95,
             away: true,
             complexity: Some(131_900),
+            reported_complexity: None,
             jellied: true,
             ..row(
                 0x5a11_e000_0000_4000_8000_0000_0000_0012,
@@ -2448,6 +2482,7 @@ mod tests {
             friend: false,
             muted: false,
             complexity: None,
+            reported_complexity: None,
             jellied: false,
         }
     }

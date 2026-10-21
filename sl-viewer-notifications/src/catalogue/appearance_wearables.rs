@@ -985,4 +985,18 @@ pub(crate) const ENTRIES: &[NotificationTemplate] = &[
         form: NO_FORM,
         input: None,
     },
+    NotificationTemplate {
+        name: "AgentComplexityWithVisibility",
+        kind: NotificationKind::Tip,
+        message_key: "notification-agent-complexity-with-visibility",
+        title_key: None,
+        priority: NotificationPriority::Low,
+        persist: false,
+        log_to_chat: false,
+        unique: true,
+        ignore: NotificationIgnore::DefaultResponse,
+        ignore_key: Some("notification-ignoretext-agent-complexity-with-visibility"),
+        form: NO_FORM,
+        input: None,
+    },
 ];

@@ -32,7 +32,10 @@
 //! - two editors of one prim: what the loser is told (live);
 //! - the world map knows the region it is opened in, draws its tiles and
 //!   counts the other resident there, and its search finds the region as
-//!   each grid matches names (live).
+//!   each grid matches names (live);
+//! - the region states back the complexity the viewer reports, in the radar's
+//!   Reported column and on the name tag, and on Second Life states the other
+//!   resident's (live).
 
 #[cfg(test)]
 mod test {
@@ -1758,6 +1761,109 @@ mod test {
         Ok(())
     }
 
+    // ---- Render info -------------------------------------------------------
+
+    /// The radar row cell of our own measurement of an avatar's complexity.
+    const COST_CELL: &str = "radar:table-cell:8";
+
+    /// The radar row cell of the complexity the region states for it.
+    const REPORTED_CELL: &str = "radar:table-cell:9";
+
+    /// The name-tag setting that keeps the complexity line to avatars the
+    /// viewer is limiting; off, every scored avatar's tag carries it.
+    const COMPLEXITY_WHEN_LIMITED_ONLY: &str = "ShowComplexityWhenLimitedOnly";
+
+    /// How long the region's statement of a report may take to show: the
+    /// first report goes five seconds after arrival, and the statement is read
+    /// every fifteen.
+    const RENDER_INFO_WAIT: Duration = Duration::from_secs(120);
+
+    /// What the cell `cell` of `row` shows: its text node's, empty while it
+    /// has none. The ellipsis a clipped text ends in is a text node of its
+    /// own, told apart by its test id, and is all an empty cell holds.
+    async fn cell_text(row: &UiLocator, cell: &str) -> Result<String, BodyError> {
+        Ok(row
+            .test_id(cell)
+            .get(Locator::role(Role::Text))
+            .nodes()
+            .await?
+            .into_iter()
+            .find(|node| node.test_id.is_none())
+            .and_then(|node| node.name)
+            .unwrap_or_default())
+    }
+
+    /// The Cost and Reported cells of `name`'s radar row once `settled`
+    /// accepts them, or the last pair seen when `wait` runs out.
+    async fn radar_complexity(
+        viewer: &Viewer,
+        name: &str,
+        wait: Duration,
+        settled: impl Fn(&str, &str) -> bool,
+    ) -> Result<(String, String), BodyError> {
+        open_radar(viewer).await?;
+        let row = radar_row(viewer, name);
+        let _listed = viewer.expect(&row).timeout(wait).to_be_visible().await?;
+        let started = Instant::now();
+        loop {
+            let cost = cell_text(&row, COST_CELL).await?;
+            let reported = cell_text(&row, REPORTED_CELL).await?;
+            if settled(&cost, &reported) || started.elapsed() >= wait {
+                return Ok((cost, reported));
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    /// The name tag `viewer` draws over the avatar it calls `name`, once it
+    /// carries `part` (or the last one seen when the wait runs out).
+    async fn tag_with(viewer: &Viewer, name: &str, part: &str) -> Result<String, BodyError> {
+        let avatar = viewer.world().avatar(name);
+        let started = Instant::now();
+        loop {
+            let tag = avatar.node().await?.name_tag.unwrap_or_default();
+            if tag.contains(part) || started.elapsed() >= RENDER_INFO_WAIT {
+                return Ok(tag);
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    /// **Render info**: the viewer reports the complexity it measures for the
+    /// catalogue NPC to the region (`AvatarRenderInfo`), and the region's
+    /// statement of it comes back. The only report is ours, so what the
+    /// region states is our own measurement, in the radar's Reported column
+    /// beside the Cost one and on the name tag's complexity line.
+    #[test]
+    fn the_region_states_back_the_complexity_the_viewer_reports() -> Result<(), TestError> {
+        stage("render_info", &["Alpha"])
+            .region(catalogue()?)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let (cost, reported) =
+                    radar_complexity(alpha, NEAR_NPC, RENDER_INFO_WAIT, |cost, reported| {
+                        !cost.is_empty() && reported == cost
+                    })
+                    .await?;
+                assert!(!cost.is_empty(), "the viewer never measured {NEAR_NPC}");
+                assert_eq!(
+                    reported, cost,
+                    "the region states the viewer's own report of {NEAR_NPC}"
+                );
+                let _all = alpha
+                    .set_setting(COMPLEXITY_WHEN_LIMITED_ONLY, json!(false))
+                    .await?;
+                let line = format!("(reported {reported})");
+                let tag = tag_with(alpha, NEAR_NPC, &line).await?;
+                assert!(
+                    tag.contains(&line),
+                    "the name tag states the region's figure: {tag:?}"
+                );
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     // ---- Live grids -------------------------------------------------------
 
     /// What only a live grid does yet: two viewers seeing each other and
@@ -2628,6 +2734,50 @@ mod test {
                 agreed.map_err(|_elapsed| {
                     format!("Beta never saw Alpha's published bakes {published:?}")
                 })??;
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// **Render info, live**: on Second Life the region states Beta's
+    /// complexity from every viewer's reports, and Alpha shows it in the
+    /// radar's Reported column and on Beta's name tag. OpenSim grants no
+    /// `AvatarRenderInfo`, so there the column stays empty.
+    #[test]
+    fn a_live_region_states_each_avatars_complexity_where_it_grants_render_info()
+    -> Result<(), TestError> {
+        stage("live_render_info", &["Alpha", "Beta"])
+            .needs(RELAYED)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let beta = &stage.viewer("Beta")?;
+                gather(stage, alpha, beta).await?;
+                let beta_name = shown_name(stage, alpha, "Beta").await?;
+                let states = std::env::var("SL_E2E_GRID").as_deref() == Ok("aditi");
+                let (cost, reported) = radar_complexity(
+                    alpha,
+                    &beta_name,
+                    if states { RENDER_INFO_WAIT } else { WAIT },
+                    |cost, reported| !cost.is_empty() && !reported.is_empty(),
+                )
+                .await?;
+                assert!(!cost.is_empty(), "Alpha never measured Beta");
+                if !states {
+                    assert_eq!(reported, "", "a grid without render info states nothing");
+                    return Ok(());
+                }
+                assert!(
+                    reported.parse::<u32>().is_ok_and(|weight| weight > 0),
+                    "the region states Beta's complexity (ours {cost}, stated {reported:?})"
+                );
+                let _all = alpha
+                    .set_setting(COMPLEXITY_WHEN_LIMITED_ONLY, json!(false))
+                    .await?;
+                let tag = tag_with(alpha, &beta_name, "(reported ").await?;
+                assert!(
+                    tag.contains("(reported "),
+                    "Beta's name tag states the region's figure: {tag:?}"
+                );
                 Ok(())
             })?;
         Ok(())

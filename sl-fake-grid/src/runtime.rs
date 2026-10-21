@@ -534,6 +534,9 @@ pub(crate) struct GridCore {
     /// What an accepted environment set or reset is answered with
     /// ([`ImitatedGrid::environment_change_reply`]).
     pub(crate) environment_change_reply: crate::imitates::EnvironmentChangeReply,
+    /// How the `AttachmentResources` answer is labelled
+    /// ([`ImitatedGrid::attachment_resources_label`]).
+    pub(crate) attachment_resources_label: sl_proto::LlsdLabel,
     /// Whether a logout is answered ([`ImitatedGrid::logout_reply`]).
     pub(crate) logout_reply: crate::imitates::LogoutReply,
     /// How a circuit is run ([`ImitatedGrid::circuit_policy`]).
@@ -918,6 +921,7 @@ impl GridCore {
             self.environment_change_reply,
             crate::imitates::EnvironmentChangeReply::Bare
         ));
+        sim.set_attachment_resources_label(self.attachment_resources_label);
         if let Some(arrival) = arrival {
             sim.set_arrival_position(arrival.position, arrival.look_at);
         } else {
@@ -2315,6 +2319,7 @@ impl FakeGridBuilder {
             asset_host,
             map_policy: self.imitates.map_policy(),
             environment_change_reply: self.imitates.environment_change_reply(),
+            attachment_resources_label: self.imitates.attachment_resources_label(),
             logout_reply: self.imitates.logout_reply(),
             circuit_policy: self.imitates.circuit_policy(),
             arrival_policy: self.imitates.arrival_policy(),

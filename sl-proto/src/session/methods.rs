@@ -314,6 +314,7 @@ impl Session {
             circuit_probe: CircuitProbe::Off,
             profile_reads: std::collections::BTreeSet::new(),
             profiles_awaiting_presence: std::collections::BTreeMap::new(),
+            avatar_render_info: super::render_info::RenderInfoSchedule::new(),
         }
     }
 
@@ -1239,6 +1240,15 @@ impl Session {
             },
             // The reply to an `AttachmentResources` GET: the agent's scripted
             // attachments grouped by attachment point, with a resource summary.
+            // The region's `AvatarRenderInfo` statement: each avatar's
+            // complexity as the region reckons it, and how many viewers
+            // report on (and would not render) ours.
+            CapsEvent::AvatarRenderInfo => match sl_wire::parse_avatar_render_info(body) {
+                Ok(info) => self
+                    .events
+                    .push_back(Event::AvatarRenderInfo(Box::new(info))),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
             CapsEvent::AttachmentResources => match parse_attachment_resources(body) {
                 Ok(report) => self
                     .events
@@ -1908,6 +1918,9 @@ impl Session {
             .as_ref()
             .map(|circuit| (circuit.sim_addr, circuit.id))
         {
+            // The region's capability went with it, and the reckonings were
+            // of the avatars there.
+            self.avatar_render_info.leave_region();
             self.events.push_back(Event::RegionChanged {
                 region_handle,
                 sim,
@@ -2020,6 +2033,7 @@ impl Session {
                     // `region_handle` is correct after a crossing, mirroring
                     // `commit_handover` for a teleport.
                     self.world.note_region(circuit, region_handle);
+                    self.avatar_render_info.leave_region();
                     self.events.push_back(Event::RegionChanged {
                         region_handle,
                         sim,
@@ -11266,6 +11280,36 @@ impl Session {
             .collect()
     }
 
+    /// Starts (or stops) the `AvatarRenderInfo` cadence for the region whose
+    /// capabilities just arrived: a driver calls this with whether the region
+    /// granted the capability, each time it installs a region's capability map.
+    /// Granted, the statement is due at once and the first report five seconds
+    /// later, as the reference schedules a region it has just found; not
+    /// granted (OpenSim), nothing is ever due. The application's report is
+    /// kept: it was set for the avatars of the region just arrived in.
+    pub fn start_avatar_render_info(&mut self, granted: bool, now: Instant) {
+        self.avatar_render_info.start(granted, now);
+    }
+
+    /// Replaces the report the session sends next: the application's
+    /// reckoning of each avatar in the agent's region — its complexity, and
+    /// whether that is past the application's limit. As the reference does, an
+    /// avatar the application has no complexity for yet is left out, and the
+    /// agent's own avatar is reported like any other.
+    pub fn set_avatar_render_reports(&mut self, reports: Vec<sl_wire::AvatarRenderReport>) {
+        self.avatar_render_info.set_reports(reports);
+    }
+
+    /// What of `AvatarRenderInfo` is due now, advancing the timers past it:
+    /// the statement every 15 seconds, the report every 60 seconds plus two
+    /// for each avatar it names (Firestorm `llavatarrenderinfoaccountant.cpp`).
+    /// A report with no avatar is not sent, but its timer still moves on, as
+    /// the reference's does. Nothing is ever due while the region grants no
+    /// `AvatarRenderInfo` ([`Self::start_avatar_render_info`]).
+    pub fn next_avatar_render_info(&mut self, now: Instant) -> super::AvatarRenderInfoDue {
+        self.avatar_render_info.next_due(now)
+    }
+
     /// Marks `session`'s server-history fetch cycle `Requested` without waiting
     /// for the scheduler — the explicit
     /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)
@@ -15048,6 +15092,9 @@ impl Session {
         merge_deadline(&mut earliest, self.next_asset_transfer_deadline());
         // And the parent re-asks, for a child that is otherwise quiet.
         merge_deadline(&mut earliest, self.next_parent_reask());
+        // And the region's `AvatarRenderInfo` cadence, which a driver serves
+        // from `next_avatar_render_info` on the same wake.
+        merge_deadline(&mut earliest, self.avatar_render_info.next_deadline());
         // A child circuit's timers are serviced on the same tick as the root's,
         // so they are merged the same way: the agent update and the ping are
         // sent per child, not piggybacked on the root's wake.

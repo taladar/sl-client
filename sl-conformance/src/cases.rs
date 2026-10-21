@@ -23,6 +23,7 @@ pub mod avatar_notes;
 pub mod avatar_picker;
 pub mod avatar_presence;
 pub mod avatar_properties;
+pub mod avatar_render_info;
 pub mod baked_texture_upload;
 pub mod calling_card;
 pub mod chat_border;

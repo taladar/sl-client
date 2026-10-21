@@ -19,7 +19,11 @@ capability OpenSim does not grant: the list is 69 names, aditi grants 67, and
 OpenSim's refused set is one longer. The four a prim's contents are read and
 saved through (2026-10-12) make it 73: aditi grants all four, and OpenSim
 `UpdateGestureTaskInventory` alone, refusing `RequestTaskInventory`,
-`GetMetadata` and `UpdateMaterialTaskInventory`.
+`GetMetadata` and `UpdateMaterialTaskInventory`. `AvatarRenderInfo`
+(2026-10-21) is asked for so that Second Life grants it — it is granted only
+to a seed request that names it, which ours did not, so a census of it found
+it missing on aditi until then — and OpenSim refuses it ([Avatars § Render
+info](avatars.md#render-info)).
 
 ## The client's own list
 
@@ -42,6 +46,7 @@ What OpenSim refuses, grouped by what a viewer loses:
 | search | `ProductInfoRequest` | nothing: OpenSim answers no land search, so there is no land type to name (since 2026-10-16, [Search](search.md#land-products)) |
 | appearance | `UpdateAvatarAppearance`, `IncrementCOFVersion` | the viewer bakes and uploads (`UploadBakedTexture`, which OpenSim grants) |
 | materials | `ModifyMaterialParams`, `UpdateMaterialAgentInventory`, `UpdateMaterialTaskInventory` | no PBR overrides or material saving; the client logs an edit it cannot send (since 2026-10-04) and the viewer greys its PBR tab (since 2026-10-12, [Materials](materials.md)) |
+| avatars | `AvatarRenderInfo` | nothing: OpenSim takes no complexity reports and states none (since 2026-10-21, [Avatars](avatars.md#render-info)) |
 | objects | `InterestList` | nothing: OpenSim sends a region's objects whichever way the camera looks (since 2026-10-09) |
 | contents | `RequestTaskInventory`, `GetMetadata` | the UDP `RequestTaskInventory` and the listing's `Xfer`; no script is under an experience (since 2026-10-12, [Building](building.md#contents)) |
 | uploads | `InventoryThumbnailUpload`, `SendPostcard` | nothing: no thumbnails, and OpenSim ignores the UDP `SendPostcard` too (the commands fail at once, since 2026-10-13, [Assets](assets.md#uploads)) |

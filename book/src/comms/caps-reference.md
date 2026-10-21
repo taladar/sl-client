@@ -23,7 +23,7 @@ grants it, and keep the older path (usually a UDP message) where it does not.
 | `AcceptFriendship` | yes | — | current | task `protocol-cap-offline-friendship-answers` (UDP today) |
 | `AgentProfile` | yes | — | current | **used** since 2026-10-15 (`Command::RequestAvatarProperties`, `RequestAvatarPicks`, `RequestAvatarNotes`, `UpdateProfile`, `UpdateAvatarNotes`); measured in [Profiles](../gridspec/profiles.md) |
 | `AgentState` | yes | — | current | task `viewer-pathfinding-floaters` |
-| `AvatarRenderInfo` | yes | — | current | task `protocol-avatar-render-info` |
+| `AvatarRenderInfo` | yes | — | current | **used** since 2026-10-21 (granted only when named): the session reads and reports on the reference cadence (`Session::next_avatar_render_info`, `Command::SetAvatarRenderReports`, `Event::AvatarRenderInfo`); measured in [Avatars](../gridspec/avatars.md#render-info) |
 | `CharacterProperties` | yes | — | current | task `viewer-pathfinding-floaters` |
 | `DeclineFriendship` | yes | — | current | task `protocol-cap-offline-friendship-answers` (UDP today) |
 | `DispatchOpenRegionSettings` | — | — | Aurora-Sim only | not adopted |
@@ -251,7 +251,9 @@ snapshot as the second step. Firestorm never sends the UDP `SendPostcard`.
 **`AvatarRenderInfo`** (`llavatarrenderinfoaccountant.cpp`). GET every 15 s →
 `{agents:{<id>:{weight}}, reportinglimit, overlimit}`; POST every 60 s
 `{agents:{<id>:{weight, tooComplex}}}`. Together they drive the "N residents
-render you as a jellydoll" notice.
+render you as a jellydoll" notice. Second Life answers every POST
+`200 {}`, refuses nothing, and states a lone report as sent
+([Grid Behaviour → Avatars](../gridspec/avatars.md#render-info)).
 
 **`UntrustedSimulatorMessage`** (`message.cpp`). A transport: POST `{message,
 body}` for messages flagged as LLSD in `message.xml`; in practice

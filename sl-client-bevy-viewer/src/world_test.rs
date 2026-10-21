@@ -106,6 +106,7 @@ pub(crate) fn world_app() -> App {
     // The avatar-complexity model the name-tag/complexity readers consult;
     // its owner sits with the preferences UI, outside the world group.
     app.init_resource::<sl_viewer_world_avatar::avatar_complexity::AvatarComplexityModel>();
+    app.init_resource::<sl_viewer_world_avatar::avatar_render_info::ReportedComplexity>();
     // The camera-mode state machine (mouselook / third person / flycam) the
     // look-at systems read; its owner is the input group's `CameraPlugin`.
     app.init_resource::<crate::world_api::CameraMode>();

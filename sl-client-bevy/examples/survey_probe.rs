@@ -353,6 +353,7 @@ fn on_events(
             | SlSessionEvent::ObjectPhysicsData(_)
             | SlSessionEvent::ObjectPhysicsProperties(_)
             | SlSessionEvent::AttachmentResources(_)
+            | SlSessionEvent::AvatarRenderInfo(_)
             | SlSessionEvent::LandResourcesUrls(_)
             | SlSessionEvent::LandResourceSummary(_)
             | SlSessionEvent::LandResourceDetail(_)

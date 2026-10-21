@@ -43,6 +43,18 @@
 //! first drawn in, it keeps. [`marker_occupies`] therefore reads the span the clip and the marker cover
 //! together, less the clip: the room the clip would get back were the marker
 //! hidden, gap, padding and all, on whichever side the direction puts it.
+//!
+//! # The two layouts round apart
+//!
+//! At a fractional UI scale the shown and the hidden layout round their edges
+//! separately, so the room read with the marker shown can come out a physical
+//! pixel wider than the room the hidden layout actually gives. A value whose
+//! natural width falls in that pixel then asks for the marker while it is
+//! hidden and lets it go while it is shown — every frame, for good (the radar's
+//! name cell, right to left at scale 1.25). A shown marker therefore stays
+//! until the value fits by more than `ROUNDING_SLACK`: a band one pixel wide
+//! that keeps whichever state it is in, which is no visible difference and is
+//! a resting state.
 
 use bevy::prelude::*;
 
@@ -64,6 +76,12 @@ const ELLIPSIS_GAP: f32 = 2.0;
 /// toggling it is itself a layout write.
 const OVERFLOW_TOLERANCE: f32 = 0.5;
 
+/// How much wider, in physical pixels, the room a shown marker would give back
+/// may read than the room the hidden layout really gives: one pixel of
+/// rounding, at each of the two layouts' edges together. See the [module
+/// documentation](self).
+const ROUNDING_SLACK: f32 = 1.0;
+
 /// On the node whose overflow decides — a clip container, or a label that clips
 /// itself — naming the `…` marker [`apply_reveal_ellipsis`] reveals while the
 /// value inside it does not fit.
@@ -84,10 +102,12 @@ pub struct RevealEllipsis {
 /// `laid_out + marker` is the space the value would have *without* the marker,
 /// which is the question that has an answer independent of the last one; see the
 /// [module documentation](self) for the latch that measuring against `laid_out`
-/// alone produces.
+/// alone produces. With the marker shown that space is read less
+/// `ROUNDING_SLACK`, for the pixel the two layouts can round apart.
 #[must_use]
 pub fn ellipsis_wanted(natural: f32, laid_out: f32, marker: f32) -> bool {
-    natural > laid_out + marker + OVERFLOW_TOLERANCE
+    let slack = if marker > 0.0 { ROUNDING_SLACK } else { 0.0 };
+    natural > laid_out + marker - slack + OVERFLOW_TOLERANCE
 }
 
 /// The width a shown marker takes from the clip beside it, in physical pixels:
@@ -263,6 +283,20 @@ mod tests {
         assert!(
             ellipsis_wanted(natural, cell - marker, marker),
             "shown marker: it still overflows, so the marker stays"
+        );
+    }
+
+    /// The layouts the radar's name cell alternated between, right to left at
+    /// scale 1.25: hidden, the clip got 135 px; shown, the clip read 113 px
+    /// and the marker 23 px more, 136 px in all. A 135.6 px name asked for the
+    /// marker hidden and let it go shown, every frame; now it keeps it.
+    #[test]
+    fn a_value_in_the_rounding_pixel_keeps_its_marker() {
+        let natural = 135.6;
+        assert!(ellipsis_wanted(natural, 135.0, 0.0), "hidden: it overflows");
+        assert!(
+            ellipsis_wanted(natural, 113.0, 23.0),
+            "shown: the pixel the layouts rounded apart is not room to hide in"
         );
     }
 

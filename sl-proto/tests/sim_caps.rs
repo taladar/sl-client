@@ -189,8 +189,9 @@ mod test {
         // (DispatchRegionInfo, RegionSchedule), and the region's PBR terrain
         // overrides (ModifyRegion), and the LLSD message transport
         // (UntrustedSimulatorMessage), and the Marketplace's listing service
-        // (DirectDelivery), and "Set Home to Here" (HomeLocation).
-        assert_eq!(granted.len(), 87);
+        // (DirectDelivery), and "Set Home to Here" (HomeLocation), and the
+        // avatars' render info (AvatarRenderInfo).
+        assert_eq!(granted.len(), 88);
         Ok(())
     }
 
@@ -4033,6 +4034,38 @@ mod test {
                 );
             }
             other => return Err(format!("expected AttachmentResources, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// A session that stored no report answers what both grids answer an agent
+    /// wearing nothing scripted, labelled LLSD — or, imitating OpenSim, with
+    /// its HTTP server's default label (`avatar-render-info`, 2026-10-21).
+    #[test]
+    fn attachment_resources_answer_nothing_scripted_by_default() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let path = granted_cap_path(&caps, CAP_ATTACHMENT_RESOURCES)?;
+        for (style, label) in [
+            (sl_proto::LlsdLabel::Llsd, LLSD_XML_CONTENT_TYPE),
+            (
+                sl_proto::LlsdLabel::ServerDefault,
+                "text/html;charset=UTF-8",
+            ),
+        ] {
+            sim.set_attachment_resources_label(style);
+            match caps.dispatch(&mut sim, &get(&path, None)) {
+                CapsDispatch::Response(response) => {
+                    assert_eq!(response.status, 200);
+                    assert_eq!(response.content_type, label);
+                    let body = sl_proto::parse_llsd_xml(&String::from_utf8(response.body)?)?;
+                    assert_eq!(
+                        sl_proto::parse_attachment_resources(&body)?,
+                        sl_proto::AttachmentResourcesReport::nothing_scripted()
+                    );
+                }
+                other => return Err(format!("unexpected {other:?}").into()),
+            }
         }
         Ok(())
     }

@@ -691,6 +691,15 @@ pub const CAP_GET_OBJECT_PHYSICS_DATA: &str = "GetObjectPhysicsData";
 /// [`Session::handle_caps_event`] into [`Event::AttachmentResources`].
 pub const CAP_ATTACHMENT_RESOURCES: &str = "AttachmentResources";
 
+/// The HTTP capability viewers report each other's **avatar complexity** to
+/// and read it back from (`AvatarRenderInfo`): a GET of
+/// `{agents:{<id>:{weight}}, reportinglimit, overlimit}`, a POST of
+/// `{agents:{<id>:{weight, tooComplex}}}`. Second Life only, and only granted
+/// to a seed request that names it. The session keeps the reference cadence
+/// ([`Session::next_avatar_render_info`]); a statement surfaces as
+/// [`Event::AvatarRenderInfo`].
+pub const CAP_AVATAR_RENDER_INFO: &str = "AvatarRenderInfo";
+
 /// The HTTP capability for a parcel's **script resource report** (`LandResources`):
 /// a POST of `{ parcel_id }` returning follow-up `ScriptResourceSummary` /
 /// `ScriptResourceDetails` capability URLs. Driven by the runtimes'
@@ -943,6 +952,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_RESOURCE_COST_SELECTED,
     CAP_GET_OBJECT_PHYSICS_DATA,
     CAP_ATTACHMENT_RESOURCES,
+    CAP_AVATAR_RENDER_INFO,
     CAP_LAND_RESOURCES,
     CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
@@ -2104,17 +2114,22 @@ pub struct Session {
     /// UDP `AvatarPropertiesReply` sent for it says whether the avatar is
     /// online.
     profiles_awaiting_presence: std::collections::BTreeMap<AgentKey, crate::AvatarProperties>,
+    /// When the region's `AvatarRenderInfo` is next asked and told, and what
+    /// it is told ([`Session::next_avatar_render_info`]).
+    avatar_render_info: render_info::RenderInfoSchedule,
 }
 
 mod caps_event;
 mod chat_session;
 mod circuit;
 pub(crate) mod conversions;
+pub use render_info::AvatarRenderInfoDue;
 mod inventory;
 mod inventory_cache;
 mod legacy_preset;
 mod methods;
 mod profile_caps;
+mod render_info;
 mod transfers;
 mod world_cache;
 

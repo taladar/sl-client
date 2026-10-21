@@ -313,12 +313,14 @@ fn scripted_objects_from_llsd(
 // AttachmentResources
 // ---------------------------------------------------------------------------
 
-/// One attachment point in an [`AttachmentResourcesReport`]: the point's display
-/// name and the scripted objects worn there.
+/// One attachment point in an [`AttachmentResourcesReport`]: the point's name
+/// and the scripted objects worn there.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AttachmentLocation {
-    /// The attachment point's display name (`location`), e.g. `"Right Hand"`.
+    /// The attachment point's name (`location`) as both grids state it: the
+    /// LSL constant's, e.g. `"ATTACH_RIGHT_PEC"` (`avatar-render-info`,
+    /// 2026-10-21).
     pub location: String,
     /// The scripted objects attached at this point (`objects`).
     pub objects: Vec<ScriptedObjectInfo>,
@@ -333,6 +335,27 @@ pub struct AttachmentResourcesReport {
     pub attachments: Vec<AttachmentLocation>,
     /// The total available/used resource summary (`summary`).
     pub summary: ResourceSummary,
+}
+
+impl AttachmentResourcesReport {
+    /// The report of an agent wearing nothing scripted, as both grids answer
+    /// it: no attachments, unlimited memory and 38 URLs available, none of
+    /// either used (`avatar-render-info`, 2026-10-21,
+    /// `book/src/gridspec/avatars.md` § Attachment resources).
+    #[must_use]
+    pub fn nothing_scripted() -> Self {
+        let amount = |resource_type: &str, amount| ResourceAmount {
+            resource_type: resource_type.to_owned(),
+            amount,
+        };
+        Self {
+            attachments: Vec::new(),
+            summary: ResourceSummary {
+                available: vec![amount("urls", 38), amount("memory", -1)],
+                used: vec![amount("urls", 0), amount("memory", 0)],
+            },
+        }
+    }
 }
 
 /// Decodes an `AttachmentResources` reply.

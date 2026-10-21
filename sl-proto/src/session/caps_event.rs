@@ -19,9 +19,9 @@
 use super::{
     AIS3_FETCH_INVENTORY_TAG, AIS3_FETCH_LIBRARY_TAG, AVATAR_PICKER_SEARCH_TAG,
     CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_AGENT_PROFILE, CAP_ATTACHMENT_RESOURCES,
-    CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_DISPATCH_REGION_INFO,
-    CAP_ESTATE_ACCESS, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
-    CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
+    CAP_AVATAR_RENDER_INFO, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_DISPATCH_REGION_INFO, CAP_ESTATE_ACCESS, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
+    CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
     CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
     CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_METADATA,
     CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_API_V1, CAP_GROUP_MEMBER_DATA,
@@ -150,6 +150,8 @@ pub(crate) enum CapsEvent {
     ObjectPhysicsProperties,
     /// The script resources an attachment uses.
     AttachmentResources,
+    /// The region's statement of each avatar's complexity.
+    AvatarRenderInfo,
     /// A parcel's script-resource report (the request's own reply).
     LandResources,
     /// A parcel's script-resource summary, fetched from the report's URL.
@@ -283,6 +285,7 @@ impl CapsEvent {
             CAP_GET_OBJECT_PHYSICS_DATA => Self::GetObjectPhysicsData,
             "ObjectPhysicsProperties" => Self::ObjectPhysicsProperties,
             CAP_ATTACHMENT_RESOURCES => Self::AttachmentResources,
+            CAP_AVATAR_RENDER_INFO => Self::AvatarRenderInfo,
             CAP_LAND_RESOURCES => Self::LandResources,
             LAND_RESOURCE_SUMMARY_TAG => Self::LandResourceSummary,
             LAND_RESOURCE_DETAIL_TAG => Self::LandResourceDetail,

@@ -18,7 +18,9 @@
 //!   budget, saturating red at twice it. With no budget set there is nothing to
 //!   judge against, so the number is reported in neutral grey instead; the same
 //!   goes for your own tag, where a red rating would be telling you off for a
-//!   limit that does not apply to you.
+//!   limit that does not apply to you. Where the region states the avatar's
+//!   complexity from every viewer's reports (Second Life's `AvatarRenderInfo`,
+//!   [`crate::avatar_render_info`]), the line ends with `(reported M)`.
 //! - **`Texture Area: N m²`**, in red, only when an avatar's attachments cover
 //!   more than the area limit. It appears alongside the cost rather than
 //!   instead of it: the reference notes that untangling *which* limit fired
@@ -228,6 +230,11 @@ pub(crate) struct TagInputs<'a> {
     /// scored — which suppresses the complexity line entirely rather than
     /// showing a zero that means "not known yet".
     pub(crate) complexity: Option<u32>,
+    /// The avatar's complexity as the region states it from every viewer's
+    /// reports ([`crate::avatar_render_info::ReportedComplexity`]), shown
+    /// beside our own measurement; `None` where no statement named it (and on
+    /// every grid without `AvatarRenderInfo`).
+    pub(crate) reported_complexity: Option<u32>,
     /// The avatar's total attachment surface area, in square metres, feeding
     /// the texture-area line.
     pub(crate) attachment_area_m2: f32,
@@ -616,7 +623,10 @@ pub(crate) fn compose_tag(
         && let Some(complexity) = inputs.complexity
     {
         lines.push(TagLine {
-            text: format!("Complexity: {complexity}"),
+            text: match inputs.reported_complexity {
+                Some(reported) => format!("Complexity: {complexity} (reported {reported})"),
+                None => format!("Complexity: {complexity}"),
+            },
             size: TagLineSize::Small,
             // Your own cost is reported, never rated: the limit does not apply
             // to you, so a red tag would be telling you off for nothing.
@@ -694,6 +704,8 @@ pub struct NameTagFacts<'w> {
     groups: Option<Res<'w, sl_viewer_social::GroupsModel>>,
     /// The render-cost scores shown beside the name.
     complexity: Option<Res<'w, crate::avatar_complexity::AvatarComplexityModel>>,
+    /// The region's statement of each avatar's complexity, shown beside ours.
+    reported: Option<Res<'w, crate::avatar_render_info::ReportedComplexity>>,
     /// Our own agent, whose tag is the one marked "self" and measured from.
     identity: Option<Res<'w, sl_client_bevy::SlIdentity>>,
     /// The settings store the content toggles and colours are read from.
@@ -797,6 +809,10 @@ pub fn compose_name_tags(
                 distance_cache.get(&agent).copied()
             },
             complexity: measured.map(|cost| cost.score),
+            reported_complexity: facts
+                .reported
+                .as_ref()
+                .and_then(|reported| reported.reported(agent)),
             attachment_area_m2: measured.map_or(0.0, |cost| cost.surface_area),
             is_limited: facts
                 .complexity
@@ -975,6 +991,17 @@ mod tests {
         assert_eq!(
             content.lines.last().map(|line| line.color),
             Some(complexity_color(250_000, 100_000)),
+        );
+
+        // The region's statement, where there is one, is shown beside ours.
+        let stated = TagInputs {
+            reported_complexity: Some(231_004),
+            ..inputs
+        };
+        let content = compose_tag(&stated, &complexity_toggles(), &TagColors::default());
+        assert_eq!(
+            texts(&content).last().copied(),
+            Some("Complexity: 250000 (reported 231004)")
         );
 
         let unscored = TagInputs {

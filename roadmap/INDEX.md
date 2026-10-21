@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 340 |
-| blocked | 81 |
+| ready | 339 |
+| blocked | 80 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1407 |
+| done | 1409 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2071** |
@@ -351,7 +351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (340)
+## ready (339)
 
 ### protocol
 
@@ -1145,8 +1145,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-avatar-render-info`](ready/gridspec-avatar-render-info.md) —
-  AvatarRenderInfo and AttachmentResources on each grid
 - [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
   skeleton, fetch caps, AIS3, the library and cache versions on each grid
 - [`gridspec-inventory-mutations`](ready/gridspec-inventory-mutations.md) —
@@ -1164,13 +1162,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (81)
-
-### protocol
-
-- [`protocol-avatar-render-info`](blocked/protocol-avatar-render-info.md) —
-  AvatarRenderInfo — client request, SimCaps service and fake-grid answers
-  (blocked by `gridspec-avatar-render-info`)
+## blocked (80)
 
 ### viewer
 
@@ -1580,7 +1572,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1407)
+## done (1409)
 
 ### protocol
 
@@ -1772,6 +1764,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   failure
 - [`protocol-audit-wire-error-contract`](done/protocol-audit-wire-error-contract.md)
   — sl-wire's public parse surface has five different failure disciplines
+- [`protocol-avatar-render-info`](done/protocol-avatar-render-info.md) —
+  AvatarRenderInfo — client request, SimCaps service and fake-grid answers
+  (blocked by `gridspec-avatar-render-info` (done))
 - [`protocol-cap-agent-profile`](done/protocol-cap-agent-profile.md) — Read and
   write profiles over the AgentProfile capability (blocked by
   `gridspec-profiles` (done))
@@ -4604,6 +4599,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid: attach, detach, limits, HUDs, temporary
 - [`gridspec-avatar-presence`](done/gridspec-avatar-presence.md) — Other avatars
   in the region: full updates, coarse locations and kills
+- [`gridspec-avatar-render-info`](done/gridspec-avatar-render-info.md) —
+  AvatarRenderInfo and AttachmentResources on each grid
 - [`gridspec-circuit`](done/gridspec-circuit.md) — Circuit behaviour: acks,
   resends, pings, inactivity, packet quirks and throttles
 - [`gridspec-environment`](done/gridspec-environment.md) — Region and parcel

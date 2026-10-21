@@ -451,6 +451,10 @@ pub struct RadarRow {
     /// The avatar's render cost (ARC), once it has been measured
     /// (`avatar_complexity`); `None` while it has not.
     pub complexity: Option<u32>,
+    /// The avatar's complexity as the region states it from every viewer's
+    /// reports (Second Life's `AvatarRenderInfo`); `None` where no statement
+    /// named it.
+    pub reported_complexity: Option<u32>,
     /// Whether the viewer is currently drawing this avatar as a jellydoll — the
     /// column's whole point is telling "expensive" from "expensive enough that I
     /// stopped drawing them".
@@ -583,6 +587,8 @@ pub enum SortColumn {
     Range,
     /// The render-cost (ARC) column.
     Complexity,
+    /// The region's stated complexity column.
+    Reported,
 }
 
 impl SortColumn {
@@ -597,6 +603,7 @@ impl SortColumn {
             "seen" => Some(Self::Seen),
             "range" => Some(Self::Range),
             "complexity" => Some(Self::Complexity),
+            "reported" => Some(Self::Reported),
             _ => None,
         }
     }
@@ -628,6 +635,11 @@ fn compare_rows(column: SortColumn, a: &RadarRow, b: &RadarRow) -> Ordering {
             .complexity
             .unwrap_or(u32::MAX)
             .cmp(&b.complexity.unwrap_or(u32::MAX)),
+        // Likewise an avatar no statement named.
+        SortColumn::Reported => a
+            .reported_complexity
+            .unwrap_or(u32::MAX)
+            .cmp(&b.reported_complexity.unwrap_or(u32::MAX)),
     }
 }
 
@@ -719,6 +731,7 @@ mod tests {
             friend: false,
             muted: false,
             complexity: None,
+            reported_complexity: None,
             jellied: false,
         }
     }

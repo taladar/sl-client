@@ -112,6 +112,20 @@ pub(crate) async fn dispatch_caps(
                 crate::groups::change_bans(core, group_id, action, &agents);
                 return SimCaps::group_bans_changed_response(action);
             }
+            // What the viewers report of each other is the region's.
+            CapsDispatch::AvatarRenderInfoRead { reader } => {
+                let world = Arc::clone(&shared.state.lock().await.world);
+                let statement = world.lock().render_info.statement(reader, shared.now());
+                return SimCaps::avatar_render_info_response(&statement);
+            }
+            CapsDispatch::AvatarRenderInfoReport {
+                reporter: _,
+                reports,
+            } => {
+                let world = Arc::clone(&shared.state.lock().await.world);
+                world.lock().render_info.file(&reports, shared.now());
+                return SimCaps::avatar_render_report_response();
+            }
             // The estate is the region's, and who may read it the session's:
             // a manager reads OpenSim's arrays on either flavour (Second
             // Life's manager answer is unmeasured), a resident Second Life's

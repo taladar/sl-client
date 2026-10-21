@@ -23,6 +23,7 @@
 //! | the `OpenSimExtras` block in `SimulatorFeatures` ([`advertises_open_sim_extras`](ImitatedGrid::advertises_open_sim_extras)) | absent | sent, carrying the grid's map-tile and currency-helper URLs |
 //! | the rest of `SimulatorFeatures` ([`stock_simulator_features`](ImitatedGrid::stock_simulator_features)) | 29 keys: the PBR, mirror and pathfinding switches, the estate and group limits, the dead-reckoning pair, the host's name, a 2048 px texture limit, four material requests a second | 14 keys and the 24 of `OpenSimExtras`: the grid's name and limits, the simulator's frame rate, `ExportSupported` as a string; five empty `menus`; no texture limit, three material requests a second |
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named two ways: `SimulatorFeatures.VoiceServerType` and the `RequiredVoiceVersion` push — **not** the login `voice-config`, which aditi does not send even when asked (2026-10-04) | none: a stock region loads no voice module, and nothing is advertised |
+//! | how the `AttachmentResources` answer is labelled ([`attachment_resources_label`](ImitatedGrid::attachment_resources_label)) | `application/llsd+xml` | `text/html;charset=UTF-8`: the handler states none, and the HTTP server's default stands |
 //! | an `AgentWearablesRequest` ([`wearables_reply`](ImitatedGrid::wearables_reply)) | four fixed placeholder items, wearable types 1 to 4, each naming a fixed asset, whatever is worn: the outfit is the Current Outfit Folder's | the outfit the simulator holds, which the last `AgentIsNowWearing` set |
 //! | how an AIS3 answer states a link's target | `linked_id`, with no `asset_id` | no AIS3 |
 //! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
@@ -368,6 +369,21 @@ impl ImitatedGrid {
                 name: "Default",
                 env_version: 0,
             },
+        }
+    }
+
+    /// How this grid labels its `AttachmentResources` answer.
+    ///
+    /// Second Life labels it LLSD; OpenSim's handler states no media type, so its HTTP
+    /// server's default, `text/html;charset=UTF-8`, stands over the same
+    /// LLSD body (`avatar-render-info`, 2026-10-21,
+    /// `book/src/gridspec/avatars.md` § Attachment resources). Neither viewer
+    /// reads the label, so it is imitated only to be the grid's answer.
+    #[must_use]
+    pub const fn attachment_resources_label(self) -> sl_proto::LlsdLabel {
+        match self {
+            Self::SecondLife => sl_proto::LlsdLabel::Llsd,
+            Self::OpenSim => sl_proto::LlsdLabel::ServerDefault,
         }
     }
 
@@ -1849,12 +1865,16 @@ pub const SECOND_LIFE_REFUSED_CAPABILITIES: &[&str] = &["ObjectAnimation", "Uplo
 /// 2026-10-18), and the Marketplace's listing service (`DirectDelivery`:
 /// OpenSim has no marketplace, while Second Life grants it to a storeless
 /// avatar and answers its every route `404 Not found`;
-/// `marketplace-direct-delivery`, 2026-10-19).
+/// `marketplace-direct-delivery`, 2026-10-19), and the avatars' render info
+/// (`AvatarRenderInfo`: OpenSim takes no complexity reports, while Second
+/// Life grants it to a seed request that names it; `avatar-render-info`,
+/// 2026-10-21).
 pub const OPENSIM_REFUSED_CAPABILITIES: &[&str] = &[
     "AcceptFriendship",
     "AcceptGroupInvite",
     "AgentExperiences",
     "AgentProfile",
+    "AvatarRenderInfo",
     "ChatSessionRequest",
     "DeclineFriendship",
     "DeclineGroupInvite",
@@ -3934,6 +3954,10 @@ mod test {
         assert_ne!(
             sl.environment_change_reply(),
             opensim.environment_change_reply()
+        );
+        assert_ne!(
+            sl.attachment_resources_label(),
+            opensim.attachment_resources_label()
         );
         assert_ne!(sl.stock_day(), opensim.stock_day());
         assert_ne!(sl.logout_reply(), opensim.logout_reply());

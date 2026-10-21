@@ -972,14 +972,17 @@ const fn usize_as_f32(value: usize) -> f32 {
 // The plugin.
 // ---------------------------------------------------------------------------
 
-/// Registers the avatar render-cost model, its settings, the scoring pass and
-/// the jellydoll render.
+/// Registers the avatar render-cost model, its settings, the scoring pass,
+/// the jellydoll render and the region's render info
+/// ([`crate::avatar_render_info`]).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AvatarComplexityPlugin;
 
 impl Plugin for AvatarComplexityPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AvatarComplexityModel>()
+            .init_resource::<crate::avatar_render_info::ReportedComplexity>()
+            .init_resource::<crate::avatar_render_info::OverLimitNotifier>()
             .add_systems(Startup, register_complexity_settings)
             .add_systems(
                 Update,
@@ -1005,6 +1008,16 @@ impl Plugin for AvatarComplexityPlugin {
                     // The base-region visibility override reads the decision, so
                     // it must already be made this frame.
                     .before(crate::avatars::apply_avatar_part_visibility),
+            )
+            .add_systems(
+                Update,
+                (
+                    // The region is told what this frame decided, and its
+                    // statements are heard beside it (`avatar_render_info`).
+                    crate::avatar_render_info::report_avatar_render_info
+                        .after(decide_avatar_appearance),
+                    crate::avatar_render_info::fold_avatar_render_info,
+                ),
             )
             .add_systems(
                 Update,

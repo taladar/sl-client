@@ -218,6 +218,10 @@ pub struct SceneFixtures {
     /// The listens registered in the region: what hears a line on a channel
     /// no avatar does ([`crate::chat`]).
     pub listens: crate::chat::Listens,
+    /// What the region's viewers report of each other's complexity over
+    /// `AvatarRenderInfo`, and what it states back ([`crate::render_info`]).
+    /// Not a fixture: empty until a viewer reports.
+    pub(crate) render_info: crate::render_info::RegionRenderInfo,
 }
 
 /// One parcel's two access lists: who may come in, and who may not.
@@ -734,6 +738,7 @@ impl SceneFixtures {
             links: crate::link_sets::LinkSets::default(),
             terrain_composition: None,
             listens: crate::chat::Listens::default(),
+            render_info: crate::render_info::RegionRenderInfo::default(),
         }
     }
 

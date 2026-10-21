@@ -42,7 +42,6 @@ use sl_types::key::{
 use sl_types::lsl::Rotation;
 use sl_types::lsl::Vector;
 use sl_types::map::RegionCoordinates;
-use sl_wire::AttachmentResourcesReport;
 use sl_wire::DisplayName;
 use sl_wire::EstateAccessLists;
 use sl_wire::ExperienceEnvironmentPush;
@@ -62,6 +61,7 @@ use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
 use sl_wire::WireError;
 use sl_wire::{AgentPreferences, InterestListReply};
+use sl_wire::{AttachmentResourcesReport, AvatarRenderInfo};
 use sl_wire::{ExperienceInfo, ExperienceSearchPage};
 use uuid::Uuid;
 
@@ -403,6 +403,12 @@ pub enum Event {
     /// [`Command::RequestAttachmentResources`](crate::Command::RequestAttachmentResources):
     /// the scripted attachments grouped by attachment point, with a summary.
     AttachmentResources(Box<AttachmentResourcesReport>),
+    /// The region's `AvatarRenderInfo` statement, asked for on the reference
+    /// cadence ([`Session::next_avatar_render_info`](crate::Session::next_avatar_render_info)):
+    /// each avatar's complexity as the region reckons it from the viewers'
+    /// reports, and how many of those viewers report on the agent and would
+    /// not render it.
+    AvatarRenderInfo(Box<AvatarRenderInfo>),
     /// The follow-up capability URLs from a `LandResources` capability reply to
     /// [`Command::RequestLandResources`](crate::Command::RequestLandResources).
     /// The runtimes GET these URLs and then surface [`Event::LandResourceSummary`]

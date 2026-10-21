@@ -90,22 +90,22 @@ use crate::types::TaskInventoryItem;
 use crate::types::{GroupBan, GroupBanAction, GroupMember};
 use crate::{
     CAP_ACCEPT_FRIENDSHIP, CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
-    CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
-    CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_FRIENDSHIP,
-    CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY, CAP_DISPATCH_REGION_INFO, CAP_ESTATE_ACCESS,
-    CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
-    CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
-    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_METADATA,
-    CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES,
-    CAP_GROUP_MEMBER_DATA, CAP_HOME_LOCATION, CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST,
-    CAP_INVENTORY_API_V3, CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN,
-    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
-    CAP_MESH_UPLOAD_FLAG, CAP_MODIFY_MATERIAL_PARAMS, CAP_MODIFY_REGION,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO, CAP_PRODUCT_INFO_REQUEST,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_ATTACHMENT_RESOURCES, CAP_AVATAR_PICKER_SEARCH, CAP_AVATAR_RENDER_INFO,
+    CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_DECLINE_FRIENDSHIP, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY,
+    CAP_DISPATCH_REGION_INFO, CAP_ESTATE_ACCESS, CAP_EXPERIENCE_PREFERENCES, CAP_EXPERIENCE_QUERY,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
+    CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_METADATA, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
+    CAP_GROUP_API_V1, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_HOME_LOCATION,
+    CAP_INCREMENT_COF_VERSION, CAP_INTEREST_LIST, CAP_INVENTORY_API_V3,
+    CAP_INVENTORY_THUMBNAIL_UPLOAD, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MESH_UPLOAD_FLAG,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_MODIFY_REGION, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_PROPERTIES_UPDATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PRODUCT_INFO_REQUEST, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REGION_SCHEDULE, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_REQUEST_TASK_INVENTORY, CAP_RESOURCE_COST_SELECTED, CAP_SEARCH_STAT_REQUEST,
     CAP_SEND_POSTCARD, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SET_DISPLAY_NAME, CAP_SIMULATOR_FEATURES, CAP_UNTRUSTED_SIMULATOR_MESSAGE,
@@ -120,7 +120,11 @@ use crate::{
     InventoryFolder, InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal,
     offline_messages_to_llsd,
 };
-use sl_wire::{EstateAccessLists, EstateAccessStyle, build_estate_access_response};
+use sl_wire::{
+    AvatarRenderInfo, AvatarRenderReport, EstateAccessLists, EstateAccessStyle,
+    build_avatar_render_info_response, build_avatar_render_report_response,
+    build_estate_access_response, parse_avatar_render_report_request,
+};
 
 /// The LLSD-XML media type CAPS bodies use.
 pub const LLSD_XML_CONTENT_TYPE: &str = "application/llsd+xml";
@@ -244,6 +248,7 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_GET_OBJECT_PHYSICS_DATA,
     CAP_RESOURCE_COST_SELECTED,
     CAP_ATTACHMENT_RESOURCES,
+    CAP_AVATAR_RENDER_INFO,
     CAP_LAND_RESOURCES,
     // The experience cluster.
     CAP_GET_EXPERIENCE_INFO,
@@ -438,6 +443,11 @@ pub enum CapHandler {
     /// The bodyless `AttachmentResources` GET
     /// ([`SimSession::set_attachment_resources`]).
     AttachmentResources,
+    /// The `AvatarRenderInfo` statement GET and report POST: what the viewers
+    /// of a region report is the region's, so both go to the driver
+    /// ([`CapsDispatch::AvatarRenderInfoRead`] /
+    /// [`CapsDispatch::AvatarRenderInfoReport`]).
+    AvatarRenderInfo,
     /// The two-stage `LandResources` surface: the POST answers the
     /// summary/detail follow-up URLs (sub-paths of the cap's own URL), the
     /// follow-up GETs serve the stored reports
@@ -727,6 +737,21 @@ pub enum CapsDispatch {
     /// An `EstateAccess` GET: the estate and who may read it are the driver's
     /// to know. It answers with [`SimCaps::estate_access_response`].
     EstateAccess,
+    /// An `AvatarRenderInfo` GET: the region's statement is made of every
+    /// viewer's reports, which are the driver's to hold. It answers with
+    /// [`SimCaps::avatar_render_info_response`].
+    AvatarRenderInfoRead {
+        /// The agent asking, whose counts the statement carries.
+        reader: AgentKey,
+    },
+    /// An `AvatarRenderInfo` POST: a viewer's report, for the driver to file.
+    /// It answers with [`SimCaps::avatar_render_report_response`].
+    AvatarRenderInfoReport {
+        /// The agent reporting.
+        reporter: AgentKey,
+        /// What it reported.
+        reports: Vec<AvatarRenderReport>,
+    },
     /// A `DispatchRegionInfo` POST: whether the writer may change the region
     /// is the driver's to know. It answers with
     /// [`SimCaps::region_info_write_response`].
@@ -780,6 +805,17 @@ pub enum UntrustedMessageStyle {
 
 /// The media type OpenSim's HTTP server states for a handler that sets none.
 const OPENSIM_DEFAULT_CONTENT_TYPE: &str = "text/html;charset=UTF-8";
+
+/// How a grid labels an LLSD answer whose handler may state no media type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LlsdLabel {
+    /// `application/llsd+xml`, as Second Life labels it.
+    #[default]
+    Llsd,
+    /// The HTTP server's default, `text/html;charset=UTF-8`: OpenSim's, for a
+    /// handler that states none.
+    ServerDefault,
+}
 
 /// How a grid words its answers to `HomeLocation`, measured by the
 /// `landmarks-home` census on 2026-10-19.
@@ -1078,6 +1114,7 @@ impl SimCaps {
             CAP_GET_OBJECT_PHYSICS_DATA => Some(CapHandler::ObjectPhysics),
             CAP_RESOURCE_COST_SELECTED => Some(CapHandler::ResourceCostSelected),
             CAP_ATTACHMENT_RESOURCES => Some(CapHandler::AttachmentResources),
+            CAP_AVATAR_RENDER_INFO => Some(CapHandler::AvatarRenderInfo),
             CAP_LAND_RESOURCES => Some(CapHandler::LandResources),
             CAP_GET_EXPERIENCE_INFO => Some(CapHandler::ExperienceInfo),
             CAP_FIND_EXPERIENCE_BY_NAME => Some(CapHandler::ExperienceSearch),
@@ -1325,6 +1362,9 @@ impl SimCaps {
                     }
                     Some(CapHandler::AttachmentResources) => {
                         CapsDispatch::Response(Self::dispatch_attachment_resources(sim, request))
+                    }
+                    Some(CapHandler::AvatarRenderInfo) => {
+                        Self::dispatch_avatar_render_info(sim, request)
                     }
                     Some(CapHandler::LandResources) => {
                         CapsDispatch::Response(self.dispatch_land_resources(sim, request))
@@ -3394,14 +3434,67 @@ impl SimCaps {
 
     /// Serves the bodyless `AttachmentResources` GET: the agent's stored
     /// scripted-attachment report
-    /// ([`SimSession::set_attachment_resources`]). Wrong method → `405`.
+    /// ([`SimSession::set_attachment_resources`]), labelled as the session's
+    /// grid labels it ([`SimSession::set_attachment_resources_label`]). Wrong
+    /// method → `405`.
     fn dispatch_attachment_resources(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         if request.method != "GET" {
             return CapsResponse::method_not_allowed();
         }
-        CapsResponse::llsd_xml(build_attachment_resources_response(
+        let response = CapsResponse::llsd_xml(build_attachment_resources_response(
             sim.attachment_resources(),
-        ))
+        ));
+        match sim.attachment_resources_label() {
+            LlsdLabel::Llsd => response,
+            LlsdLabel::ServerDefault => CapsResponse {
+                content_type: OPENSIM_DEFAULT_CONTENT_TYPE,
+                ..response
+            },
+        }
+    }
+
+    /// Reads one `AvatarRenderInfo` request: a GET asks the driver for the
+    /// region's statement, a POST hands it the report. Second Life answers
+    /// every POST `200 {}`, so a report it cannot read is answered the same
+    /// and files nothing; any other method is Second Life's `405` (measured
+    /// on aditi, 2026-10-21 — `book/src/gridspec/avatars.md` § Render info).
+    fn dispatch_avatar_render_info(sim: &SimSession, request: &CapsRequest<'_>) -> CapsDispatch {
+        let Some(agent) = sim.agent_id() else {
+            return CapsDispatch::Response(CapsResponse::not_found());
+        };
+        match request.method {
+            "GET" => CapsDispatch::AvatarRenderInfoRead { reader: agent },
+            "POST" => match parse_llsd_body(request.body)
+                .as_ref()
+                .map(parse_avatar_render_report_request)
+            {
+                Some(Ok(reports)) => CapsDispatch::AvatarRenderInfoReport {
+                    reporter: agent,
+                    reports,
+                },
+                Some(Err(_)) | None => {
+                    CapsDispatch::Response(Self::avatar_render_report_response())
+                }
+            },
+            _ => CapsDispatch::Response(CapsResponse {
+                body: b"Method Not Allowed".to_vec(),
+                ..CapsResponse::method_not_allowed()
+            }),
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::AvatarRenderInfoRead`]: the region's
+    /// statement.
+    #[must_use]
+    pub fn avatar_render_info_response(info: &AvatarRenderInfo) -> CapsResponse {
+        CapsResponse::llsd_xml(build_avatar_render_info_response(info))
+    }
+
+    /// The answer to a [`CapsDispatch::AvatarRenderInfoReport`], and to any
+    /// POST of `AvatarRenderInfo`: Second Life's empty map.
+    #[must_use]
+    pub fn avatar_render_report_response() -> CapsResponse {
+        CapsResponse::llsd_xml(build_avatar_render_report_response())
     }
 
     /// Serves the two-stage `LandResources` surface. The cap URL itself takes
@@ -4016,6 +4109,7 @@ mod tests {
             ("ResourceCostSelected", CapStatus::Served),
             ("GetObjectPhysicsData", CapStatus::Served),
             ("AttachmentResources", CapStatus::Served),
+            ("AvatarRenderInfo", CapStatus::Served),
             ("LandResources", CapStatus::Served),
             ("SendUserReport", CapStatus::Served),
             ("SendUserReportWithScreenshot", CapStatus::Served),

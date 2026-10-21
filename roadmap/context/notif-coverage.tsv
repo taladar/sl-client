@@ -1320,6 +1320,7 @@ ImageEmptyAlphaLayer	objects-edit	ported	viewer-notification-catalogue-objects-e
 WhitelistReminder	misc	ported	viewer-notification-catalogue-misc
 ConfirmPoserOverwrite	avatar-movement	ported	viewer-notification-catalogue-avatar-movement
 FSLargeOutfitsWarningInThisSession	appearance-wearables	ported	viewer-notification-catalogue-appearance-wearables
+AgentComplexityWithVisibility	appearance-wearables	ported	protocol-avatar-render-info
 PrimfeedLoginRequestFailed	snapshot-social	ported	viewer-notification-catalogue-snapshot-social
 PrimfeedAuthorizationFailed	snapshot-social	ported	viewer-notification-catalogue-snapshot-social
 PrimfeedAuthorizationAlreadyInProgress	snapshot-social	ported	viewer-notification-catalogue-snapshot-social

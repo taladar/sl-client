@@ -1339,6 +1339,9 @@ radar-col-range = Range
 # The avatar's render cost (ARC), dimmed while the viewer is drawing them as a
 # flat jellydoll instead (viewer-avatar-complexity-limit).
 radar-col-complexity = Cost
+# The avatar's complexity as the region states it from every viewer's reports
+# (Second Life only; empty elsewhere â€” protocol-avatar-render-info).
+radar-col-reported = Reported
 # What the region column's dot says to a screen reader: a fully-streamed
 # avatar's position is exact, a coarse-only one's approximate.
 radar-position-exact = Position exact
@@ -1887,6 +1890,17 @@ notification-cant-drop-attachment-insufficient-land-resources = Failed to drop a
 notification-cant-drop-attachment-insufficient-resources = Failed to drop attachments: insufficient available resources.
 notification-cant-drop-object-full-parcel = Cannot drop object here. Parcel is full.
 notification-cant-create-outfit = Cannot create outfit right now. Try again in a minute.
+# Raised from the region's AvatarRenderInfo counts (protocol-avatar-render-info).
+# Deviation: one line rather than two (a Fluent continuation line cannot start
+# with `[`), and the knowledge-base link around "avatar complexity" is dropped.
+notification-agent-complexity-with-visibility = Your avatar complexity is [AGENT_COMPLEXITY]. [OVERLIMIT_MSG]
+# The sentence that ends it, by the share of the viewers reporting on us that
+# render us as a jellydoll (the reference's av_render_* strings).
+avatar-render-everyone-now = Everyone can see you now.
+avatar-render-not-everyone = You may not be rendered by everyone around you.
+avatar-render-over-half = You may not be rendered by over half of those around you.
+avatar-render-most-of = You may not be rendered by most of those around you.
+avatar-render-anyone = You may not be rendered by anyone around you.
 
 ## Avatar movement (viewer-notification-catalogue-avatar-movement): animation
 ## upload, the animation overrider (AO), movement-mode toggles and the sit /
@@ -3460,6 +3474,7 @@ notification-rl-va-toggled-off = RLV is now off, and takes effect immediately â€
 ## notification, keyed notification-ignoretext-<kebab-of-name>. The alerts
 ## tab's row labels; for a CheckboxOnly template, the checkbox label.
 notification-ignoretext-add-group-owner-warning = Confirm before I add a new group Owner
+notification-ignoretext-agent-complexity-with-visibility = Warn me if my avatar complexity may be too high
 notification-ignoretext-alert-merchant-listing-activate-required = Alert about version folder activation when I create a listing with several version folders
 notification-ignoretext-alert-merchant-stock-folder-empty = Alert when a listing is unlisted because stock folder is empty
 notification-ignoretext-alert-merchant-stock-folder-split = Alert when stock folder is being split before being listed
