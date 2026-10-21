@@ -17,7 +17,10 @@ use std::time::Instant;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use sl_proto::{AgentKey, RegionCoordinates, ServerEvent, SimSession, TransactionId};
+use sl_proto::{
+    AgentKey, InventoryKey, RegionCoordinates, ServerEvent, SimSession, TransactionId, Wearable,
+    WearableType,
+};
 use sl_types::lsl::Vector;
 use uuid::Uuid;
 
@@ -44,6 +47,60 @@ pub struct AgentPolicy {
     /// How the deprecated UDP inventory fetch is answered
     /// ([`LegacyUdpInventory`], which follows [`ImitatedGrid`](crate::ImitatedGrid)).
     pub legacy_udp_inventory: LegacyUdpInventory,
+    /// What an `AgentWearablesRequest` is answered with ([`WearablesReply`],
+    /// which follows [`ImitatedGrid`](crate::ImitatedGrid)).
+    pub wearables_reply: WearablesReply,
+}
+
+/// What a simulator answers an `AgentWearablesRequest` with.
+///
+/// Measured by the `outfits` census (2026-10-20,
+/// `book/src/gridspec/appearance.md` § Outfits): OpenSim answers the outfit
+/// it holds, which the last `AgentIsNowWearing` set and a new login keeps;
+/// Second Life answers four fixed items whatever is worn — the ids the
+/// reference viewer sends in its own dummy `AgentIsNowWearing`
+/// (`LLAgentWearables::sendDummyAgentWearablesUpdate`), "the same as returned
+/// by the modified sim" — and keeps the outfit in the Current Outfit Folder
+/// alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WearablesReply {
+    /// The outfit the simulator holds.
+    #[default]
+    Outfit,
+    /// The four placeholder items, for wearable types 1 to 4, each naming
+    /// its fixed asset ([`PLACEHOLDER_ASSET_IDS`]).
+    Placeholders,
+}
+
+/// The assets Second Life names for the four placeholder items, in order:
+/// fixed, and served by nothing the census found (`outfits`, 2026-10-20).
+pub const PLACEHOLDER_ASSET_IDS: [Uuid; 4] = [
+    Uuid::from_u128(0xd3d2_5329_42a7_4526_a622_7db0_c33d_72c3),
+    Uuid::from_u128(0x57ca_535e_1f23_49e5_a478_a443_a538_0564),
+    Uuid::from_u128(0xbb10_89a8_3060_4722_9692_8b8e_d1ab_7a29),
+    Uuid::from_u128(0x0965_6fd9_a624_491d_9370_919a_a721_aa09),
+];
+
+impl WearablesReply {
+    /// The wearables the reply states, given the outfit the simulator holds.
+    #[must_use]
+    pub fn stated(self, held: &[Wearable]) -> Vec<Wearable> {
+        match self {
+            Self::Outfit => held.to_vec(),
+            Self::Placeholders => (1_u8..)
+                .zip(
+                    Wearable::PLACEHOLDER_ITEM_IDS
+                        .into_iter()
+                        .zip(PLACEHOLDER_ASSET_IDS),
+                )
+                .map(|(wearable_type, (id, asset))| Wearable {
+                    item_id: InventoryKey::from(id),
+                    asset_id: Some(asset),
+                    wearable_type: WearableType::from_code(wearable_type),
+                })
+                .collect(),
+        }
+    }
 }
 
 /// A home an account set: the region, and where in it.
@@ -205,7 +262,7 @@ pub(crate) fn answer_agent_request(
         // before concluding the same thing.
         ServerEvent::RequestAgentWearables => {
             let (serial, worn) = sim.agent_wearables();
-            let worn = worn.to_vec();
+            let worn = policy.wearables_reply.stated(worn);
             if let Err(error) = sim.send_agent_wearables_update(serial, &worn, now) {
                 tracing::warn!("answering an agent wearables request failed: {error}");
             }
@@ -300,5 +357,43 @@ pub(crate) fn answer_agent_request(
             }
         },
         _other => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PLACEHOLDER_ASSET_IDS, WearablesReply};
+    use pretty_assertions::assert_eq;
+    use sl_proto::{InventoryKey, Wearable, WearableType};
+    use uuid::Uuid;
+
+    /// The worn shape, as a simulator holds it.
+    fn held() -> Vec<Wearable> {
+        vec![Wearable {
+            item_id: InventoryKey::from(Uuid::from_u128(1)),
+            asset_id: Some(Uuid::from_u128(2)),
+            wearable_type: WearableType::Shape,
+        }]
+    }
+
+    /// OpenSim states the outfit it holds; Second Life its four placeholders
+    /// whatever is worn, which the client recognises as no outfit at all.
+    #[test]
+    fn each_flavour_states_its_own_wearables() {
+        assert_eq!(WearablesReply::Outfit.stated(&held()), held());
+        let placeholders = WearablesReply::Placeholders.stated(&held());
+        assert!(Wearable::is_placeholder_outfit(&placeholders));
+        assert_eq!(
+            placeholders
+                .iter()
+                .map(|worn| (worn.wearable_type, worn.asset_id))
+                .collect::<Vec<_>>(),
+            vec![
+                (WearableType::Skin, PLACEHOLDER_ASSET_IDS.first().copied()),
+                (WearableType::Hair, PLACEHOLDER_ASSET_IDS.get(1).copied()),
+                (WearableType::Eyes, PLACEHOLDER_ASSET_IDS.get(2).copied()),
+                (WearableType::Shirt, PLACEHOLDER_ASSET_IDS.get(3).copied()),
+            ]
+        );
     }
 }

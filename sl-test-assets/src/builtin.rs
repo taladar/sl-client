@@ -460,24 +460,31 @@ pub const DEFAULT_BODY_PARTS: [(WearableType, &str, Uuid); 4] = [
 pub fn library_wearables() -> Vec<(Uuid, Vec<u8>)> {
     DEFAULT_BODY_PARTS
         .iter()
-        .map(|&(wearable_type, name, id)| {
-            let asset = WearableAsset {
-                version: WEARABLE_VERSION,
-                name: name.to_owned(),
-                wearable_type,
-                // No weights: a wearable with no `parameters` rows is one whose
-                // every param sits at its default, which is exactly what a
-                // stand-in for pixels we do not have should claim.
-                params: BTreeMap::new(),
-                textures: sl_proto::avatar_texture::WEARABLE_LAYER_TEXTURES
-                    .into_iter()
-                    .filter(|&(_id, layer)| layer_slot(layer).0 == wearable_type)
-                    .map(|(texture, layer)| (layer_slot(layer).1, texture))
-                    .collect(),
-            };
-            (id, asset.to_text(&LIBRARY_PERMISSIONS).into_bytes())
-        })
+        .map(|&(wearable_type, name, id)| (id, stand_in_wearable(wearable_type, name)))
         .collect()
+}
+
+/// One stand-in wearable asset of `wearable_type` called `name`, in the
+/// shape of [`library_wearables`]: the slot's layer textures and no weights.
+/// For a grid that names a wearable asset of its own and has to serve
+/// something under it.
+#[must_use]
+pub fn stand_in_wearable(wearable_type: WearableType, name: &str) -> Vec<u8> {
+    let asset = WearableAsset {
+        version: WEARABLE_VERSION,
+        name: name.to_owned(),
+        wearable_type,
+        // No weights: a wearable with no `parameters` rows is one whose
+        // every param sits at its default, which is exactly what a
+        // stand-in for pixels we do not have should claim.
+        params: BTreeMap::new(),
+        textures: sl_proto::avatar_texture::WEARABLE_LAYER_TEXTURES
+            .into_iter()
+            .filter(|&(_id, layer)| layer_slot(layer).0 == wearable_type)
+            .map(|(texture, layer)| (layer_slot(layer).1, texture))
+            .collect(),
+    };
+    asset.to_text(&LIBRARY_PERMISSIONS).into_bytes()
 }
 
 /// The wearable-asset format version the stand-ins are written at — the version

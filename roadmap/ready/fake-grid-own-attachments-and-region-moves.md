@@ -2,7 +2,7 @@
 id: fake-grid-own-attachments-and-region-moves
 title: Fake grid — the agent's own attachments, the COF, and region moves
 topic: test
-status: blocked
+status: ready
 origin: gap found while fixing viewer-inventory-worn-before-attach-confirmed (2026-09-27)
 refs: [viewer-inventory-worn-before-attach-confirmed, viewer-object-moved-region-reuse, viewer-menu-touch-object]
 blocked_by: [gridspec-outfits-wearables, gridspec-attachments]
@@ -84,6 +84,35 @@ change:
   Second Life's region kills the avatar (for the agent and for viewers left
   behind) and never its attachments; OpenSim's kills nothing. Both grids
   re-wear what was worn at the next login.
+
+## Measured (gridspec-outfits-wearables, 2026-10-20)
+
+`book/src/gridspec/appearance.md` § Outfits, from the `outfits` census (live
+only for now; put it on both offline flavours when this lands). What the COF
+half of the scope has to be:
+
+- Second Life writes the folder over AIS3 alone: a link created (`201`) or
+  removed (`200`) states `_updated_category_versions` with the folder one
+  version on, and a link is stated with `linked_id`, never `asset_id` (the
+  fake grid's AIS3 writer does that since). A UDP `LinkInventoryItem` into
+  the folder is refused with the `AlertMessage` "Cannot create requested
+  inventory." and nothing made.
+- OpenSim takes UDP `LinkInventoryItem` (an `UpdateCreateInventoryItem`
+  back) and `RemoveInventoryItem` (nothing back) into the folder, one version
+  on each; its descendents listing of the folder carries every link's target
+  item too. An item link's description, an outfit folder link
+  (`AT_LINK_FOLDER`) and a description rewritten later are kept on both.
+- Neither grid says anything unasked about a change of the folder: no
+  `AgentWearablesUpdate`, no appearance.
+- `AgentWearablesRequest`: OpenSim answers the outfit it holds, which the
+  last `AgentIsNowWearing` set (in the order sent) and a new login keeps;
+  Second Life four fixed placeholders whatever is worn — already imitated
+  (`WearablesReply`). But the Second Life flavour's bake service still bakes
+  the outfit `AgentIsNowWearing` set, where Second Life bakes the folder's:
+  read the outfit from the COF there once the COF takes writes.
+- Second Life bakes a slot's layers in the order of their links' `@` tokens;
+  its bake version moves only by `IncrementCOFVersion`, not with the
+  folder's own version.
 
 ## Verify
 

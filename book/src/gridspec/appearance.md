@@ -2,7 +2,8 @@
 
 How each grid makes an avatar look the way it does: who composites the worn
 layers into the baked textures, what the agent and the viewers around it are
-told, and what each of the protocol's two baking roads answers on each grid.
+told, what each of the protocol's two baking roads answers on each grid, how
+attachments are worn, and where each grid keeps the outfit.
 The protocol side is in the *Content Layer*'s
 [appearance chapter](../content/appearance.md).
 
@@ -260,3 +261,120 @@ attachments at a login.
 - A wear while the agent is still arriving, and two wears of one item racing.
 - What the fake grid answers: it models none of it
   (`fake-grid-own-attachments-and-region-moves`).
+
+## Outfits
+
+What each grid keeps as the outfit, what it answers every way a viewer changes
+it, and what it says unasked. Measured on 2026-10-20 by the conformance case
+`outfits`: avatar A alone copies its worn shape and, twice, its worn clothing
+layer of the lowest slot, wears and takes off the copies every way, logs in
+again, and puts its outfit back. Eight runs on aditi (Mauve, the build
+location) and five on the local OpenSim (Northeast Region), the last of each
+with every answer held. The avatar's own outfit differs between the grids (the
+aditi avatars wear attachments and several alpha layers), so a layer is named
+by its role in the census, never by its slot.
+
+### The folder
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the login's `cof_version` (**held**) | named; the skeleton lists the folder at that version, and the folder's own listing states it too | absent; the skeleton lists the folder | as the flavour's grid |
+| what the folder holds (**held**) | links only: the four body parts, the clothing, the attachments | links only: the four body parts and the clothing | a link per seeded body part |
+| a clothing link's description (**held**) | every one the reference's order token, `@` and `type × 100 + index` | the same (written by viewers that keep the convention) | — |
+| a listing of the folder (**held**) | its own links (AIS3, `InventoryAPIv3`) | its links **and every link's target item** (`FetchInventoryDescendents2`) | — |
+| how AIS3 states a link (**held**) | `linked_id` names the target; **no `asset_id`** | no AIS3 | `linked_id`, as Second Life |
+
+The reference reads an AIS3 link's `linked_id` into the link's asset id
+(`LLInventoryItem::fromLLSD`). Our parser read only `asset_id`, so every link
+of Second Life's folder named no target — the folder's whole outfit
+unresolved, which the `current-outfit-folder` case had been failing on. It
+reads `linked_id` since.
+
+### The legacy reply
+
+`AgentWearablesRequest`, against the folder.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| an `AgentWearablesUpdate` before one is asked for, at a login (**held**) | none | none | — |
+| the answer (**held**) | four **placeholder items**, wearable types 1 to 4 (skin, hair, eyes, shirt) — the ids the reference sends in its own dummy `AgentIsNowWearing`, "the same as returned by the modified sim" — each naming one of four fixed assets; **no shape** | the outfit: the folder's wearables, each with its asset | `FakeSl`: the four placeholders and their assets; `FakeOpensim`: the outfit it holds |
+| after any change below (**held**) | the same four, whatever is worn | the outfit as the last `AgentIsNowWearing` stated it | as the flavour's grid |
+
+The four assets are `d3d25329-42a7-4526-a622-7db0c33d72c3`,
+`57ca535e-1f23-49e5-a478-a443a5380564`, `bb1089a8-3060-4722-9692-8b8ed1ab7a29`
+and `09656fd9-a624-491d-9370-919aa721aa09`; nothing in the reference's
+sources names them, but Second Life serves them as wearables of those types
+(`asset-fetch-http` fetches the first; the fake grid serves a stand-in under
+each). A viewer that takes the answer as the outfit dresses its
+own avatar in them, with no shape at all: ours did, and gave its own avatar
+the default body on Second Life. It reads the outfit from the folder where
+the answer is the placeholders since.
+
+### Wearing by the folder
+
+The reference's road on Second Life: a link to the new item, then the old
+item's link removed, then a bake.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a link made (**held**) | over AIS3, `201`; `_updated_category_versions` states the folder one version on; the link is listed with its description as written | over UDP (`LinkInventoryItem`), an `UpdateCreateInventoryItem` back; the folder one version on | the link refused (`FakeSl`) or ignored (`FakeOpensim`): the fake grid does not take a write into the folder yet |
+| a link removed (**held**) | over AIS3, `200`; one version on | over UDP (`RemoveInventoryItem`), nothing back; one version on | — |
+| what A is told of either (**held**) | nothing: no `AgentWearablesUpdate`, no appearance, no inventory message | an inventory message for the link made, nothing else | — |
+| a UDP `LinkInventoryItem` into the folder (**held**) | **refused**: the `AlertMessage` "Cannot create requested inventory.", nothing made, the folder unchanged | made, as above | not taken |
+| the link's description rewritten (AIS3 `PATCH` / UDP `UpdateInventoryItem`) (**held**) | kept, the folder one version on | the same | — |
+| a folder link (`AT_LINK_FOLDER`) to an outfit folder (**held**) | made and listed as type 25 | the same | — |
+| a new login with the change made (**held**) | the folder kept as left, the login's `cof_version` the folder's | the folder kept as left | — |
+
+### The bake's version
+
+A bake (`UpdateAvatarAppearance`, see [the bake handshake](#the-bake-handshake))
+names a version of the outfit, and on Second Life that is not the folder's.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the version a bake expects after changes to the folder | the one of the last `IncrementCOFVersion`: behind the folder's own version by however many writes followed it | no capability | — |
+| `IncrementCOFVersion` (**held**) | answers the folder's version plus one, and moves the folder's own version with it | no capability | — |
+| a bake at the version it answered (**held**) | accepted | no capability | — |
+| a refused bake's dump of the outfit (`cof_raw`, `debug_cof`) | the outfit of the **last accepted bake**, not the folder as it stands | no capability | — |
+
+So a bake that follows a write to the folder is preceded by
+`IncrementCOFVersion`, as the reference's appearance refresh is. The bake
+service now and then refuses an accepted version with "Asset download error:
+Connection Error", sometimes several times in a row; the census asks again
+after 2, 4, 8 and 16 seconds.
+
+### Wearing by `AgentIsNowWearing`
+
+The legacy road: the whole outfit stated, the shape's copy in the shape's slot.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| what A is told (**held**) | nothing | nothing | nothing |
+| the folder (**held**) | untouched | untouched | untouched |
+| the next answer to `AgentWearablesRequest` (**held**) | the placeholders | names the copy | as the flavour's grid |
+| a new login (**held**) | the placeholders | names the copy: the outfit is kept | — |
+
+### Layer order
+
+Two more copies of the layer linked behind it with the next two order tokens,
+then the two tokens swapped; and the same three stated by `AgentIsNowWearing`
+in each order.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the slot's layers as the bake lists them (**held**) | in the order of their tokens: the layer, then the first copy, then the second; with the tokens swapped, the second before the first | no capability | — |
+| the slot's layers in the answer after `AgentIsNowWearing` (**held**) | the placeholders | **as sent**, in either order | `FakeOpensim`: as sent |
+
+The reference sorts a slot's links by their description's token
+(`LLAppearanceMgr` `sortItemsByActualDescription`); the order a folder lists
+them in says nothing. Our viewer orders the folder's wearables the same way.
+
+### Not measured (outfits)
+
+- Wearing a whole outfit folder by replacing the folder's contents in one
+  request (`LLAppearanceMgr::wearInventoryCategory`), and an outfit folder's
+  own contents.
+- A body part replaced by a different asset, where a bake would show it.
+- Two viewers of one account changing the folder at once.
+- What the fake grid answers a write into the folder: it takes none yet
+  (`fake-grid-own-attachments-and-region-moves` carries this model).

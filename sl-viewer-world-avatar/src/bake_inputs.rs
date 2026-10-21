@@ -34,9 +34,10 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     AssetCacheLimits, AssetKey, AssetStore, AssetType, BakeRegion, BevyAssetFetcher, BlobFetcher,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_VIEWER_ASSET, Command, GateStats, Layer, SlCapabilities,
-    SlCommand, SlEvent, SlSessionEvent, StoreStats, TextureKey, Uuid, VisualParams, Wearable,
-    WearableAsset, WearableType, assemble_layers, avatar_texture,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_VIEWER_ASSET, Command, FolderType, GateStats,
+    InventoryFolderKey, InventoryItem, InventoryKey, Layer, SlCapabilities, SlCommand, SlEvent,
+    SlSessionEvent, StoreStats, TextureKey, Uuid, VisualParams, Wearable, WearableAsset,
+    WearableType, assemble_layers, avatar_texture,
 };
 use sl_viewer_world_api::DecodedTextures;
 
@@ -91,6 +92,9 @@ pub struct OwnBakeInputs {
     /// empty bake. The latest deferred wearables win; applied by
     /// [`drive_wearable_requests`] once ready.
     queued_refetch: Option<Vec<Wearable>>,
+    /// The outfit read from the Current Outfit Folder, where the grid's
+    /// `AgentWearablesUpdate` is Second Life's placeholder answer.
+    cof: CofOutfit,
     /// The worn wearables (those carrying an asset id), from `AgentWearables`.
     wearables: Vec<Wearable>,
     /// The parsed worn wearable assets, in worn order.
@@ -444,6 +448,155 @@ const fn outfit_action(stage: BakeInputStage) -> OutfitAction {
     }
 }
 
+/// The `AT_LINK` asset type of an item link.
+const AT_LINK: i8 = 24;
+
+/// The outfit as the Current Outfit Folder states it.
+///
+/// Second Life answers every `AgentWearablesRequest` with four fixed
+/// placeholder items ([`Wearable::is_placeholder_outfit`]) and never states a
+/// shape there: the outfit is the folder's links alone
+/// (`book/src/gridspec/appearance.md` § Outfits). On such a grid the worn
+/// wearables are read from the folder — its links, and each link's target
+/// item for the wearable's asset and slot — as the reference's
+/// `LLAppearanceMgr::updateAppearanceFromCOF` does.
+#[derive(Debug, Default)]
+struct CofOutfit {
+    /// Whether the outfit is read from the folder: the grid answered the
+    /// placeholders.
+    active: bool,
+    /// The folder, once known.
+    folder: Option<InventoryFolderKey>,
+    /// The folder's item links as last listed: each target and the link's
+    /// description, in listed order.
+    links: Vec<(InventoryKey, String)>,
+    /// What each target resolved to: a wearable, or `None` for anything
+    /// else (an attachment, a gesture).
+    targets: HashMap<InventoryKey, Option<Wearable>>,
+    /// When the current links were listed (`Time::elapsed_secs`), so a target
+    /// that never resolves cannot hold the outfit back for ever.
+    listed_at: Option<f32>,
+    /// Whether the outfit of the current links was handed on.
+    delivered: bool,
+}
+
+impl CofOutfit {
+    /// Takes a listing of the folder: its item links. Returns the targets not
+    /// yet resolved, to fetch; nothing when the links are unchanged.
+    fn listed(&mut self, items: &[InventoryItem], now: f32) -> Vec<InventoryKey> {
+        let links: Vec<(InventoryKey, String)> = items
+            .iter()
+            .filter(|item| item.item_type == AT_LINK)
+            .map(|item| (InventoryKey::from(item.asset_id), item.description.clone()))
+            .collect();
+        self.note_items(items);
+        if links == self.links {
+            return Vec::new();
+        }
+        self.links = links;
+        self.listed_at = Some(now);
+        self.delivered = false;
+        self.links
+            .iter()
+            .map(|(target, _description)| *target)
+            .filter(|target| !self.targets.contains_key(target))
+            .collect()
+    }
+
+    /// Notes every item of `items` that is a link's target.
+    fn note_items(&mut self, items: &[InventoryItem]) {
+        for item in items {
+            if self.links.iter().any(|(target, _)| *target == item.item_id) {
+                let _previous = self.targets.insert(item.item_id, wearable_of(item));
+            }
+        }
+    }
+
+    /// The outfit, once every target resolved or `grace` seconds passed since
+    /// the listing — `None` before, and after it was handed on.
+    fn ready(&mut self, now: f32, grace: f32) -> Option<Vec<Wearable>> {
+        if !self.active || self.delivered || self.links.is_empty() {
+            return None;
+        }
+        let resolved = self
+            .links
+            .iter()
+            .all(|(target, _)| self.targets.contains_key(target));
+        let waited = self.listed_at.is_some_and(|at| now >= at + grace);
+        if !resolved && !waited {
+            return None;
+        }
+        self.delivered = true;
+        Some(cof_wearables(&self.links, &self.targets))
+    }
+}
+
+/// The wearable `item` is, where it is one: a body part or clothing, its slot
+/// the low byte of its flags.
+fn wearable_of(item: &InventoryItem) -> Option<Wearable> {
+    let asset_type = AssetType::from_code(i32::from(item.item_type));
+    matches!(asset_type, AssetType::Bodypart | AssetType::Clothing).then(|| Wearable {
+        item_id: item.item_id,
+        asset_id: Some(item.asset_id),
+        wearable_type: WearableType::from_code(u8::try_from(item.flags & 0xFF).unwrap_or(0)),
+    })
+}
+
+/// The order a link's description gives its layer: the number of the
+/// reference's `@<type * 100 + index>` token, or `None` where it is not one.
+fn order_token(description: &str) -> Option<u32> {
+    description.strip_prefix('@')?.parse().ok()
+}
+
+/// The worn wearables `links` resolve to, by slot and, within one, in the
+/// order of the links' tokens — the order Second Life bakes the layers in —
+/// and then as listed.
+fn cof_wearables(
+    links: &[(InventoryKey, String)],
+    targets: &HashMap<InventoryKey, Option<Wearable>>,
+) -> Vec<Wearable> {
+    let mut worn: Vec<(u8, u32, Wearable)> = links
+        .iter()
+        .filter_map(|(target, description)| {
+            let wearable = (*targets.get(target)?)?;
+            Some((
+                wearable.wearable_type.to_code(),
+                order_token(description).unwrap_or(u32::MAX),
+                wearable,
+            ))
+        })
+        .collect();
+    worn.sort_by_key(|(slot, order, _wearable)| (*slot, *order));
+    let mut seen: HashSet<InventoryKey> = HashSet::new();
+    worn.into_iter()
+        .map(|(_slot, _order, wearable)| wearable)
+        .filter(|wearable| seen.insert(wearable.item_id))
+        .collect()
+}
+
+/// Hands `wearables` — the outfit — to the pipeline: the first bake while it
+/// awaits the outfit, a runtime change once it has one.
+fn take_outfit(
+    state: &mut OwnBakeInputs,
+    manager: &mut WearableAssetManager,
+    wearables: &[Wearable],
+    now: f32,
+) {
+    if state.stage == BakeInputStage::AwaitingWearables {
+        start_asset_fetch(state, manager, wearables, now);
+        return;
+    }
+    match outfit_action(state.stage) {
+        OutfitAction::Refetch => {
+            reset_for_refetch(state, manager);
+            start_asset_fetch(state, manager, wearables, now);
+            debug!("own outfit changed at runtime; re-fetching worn assets for a re-bake");
+        }
+        OutfitAction::Defer => state.queued_refetch = Some(wearables.to_vec()),
+        OutfitAction::Ignore => {}
+    }
+}
+
 /// Drive the request half: once the region handshake completes, ask the sim for
 /// our current outfit; when it replies, record the worn wearables and start
 /// fetching their assets.
@@ -472,6 +625,23 @@ pub fn drive_wearable_requests(
                 state.deadline = Some(time.elapsed_secs() + FETCH_GRACE_SECS);
                 debug!("requested own wearables for client-side bake inputs");
             }
+            // Second Life's placeholder answer: the outfit is the Current
+            // Outfit Folder's, so read the folder (again, on every answer, as
+            // a request after a change is how a change is noticed).
+            SlSessionEvent::AgentWearables { wearables, .. }
+                if Wearable::is_placeholder_outfit(wearables) =>
+            {
+                state.cof.active = true;
+                match state.cof.folder {
+                    Some(folder) => {
+                        writer.write(SlCommand(Command::RequestFolderContents(folder)));
+                    }
+                    None => {
+                        writer.write(SlCommand(Command::QueryInventoryFolders));
+                    }
+                }
+                debug!("the grid keeps the outfit in the Current Outfit Folder; reading it");
+            }
             // The initial outfit reply: start the first bake.
             SlSessionEvent::AgentWearables { wearables, .. }
                 if state.stage == BakeInputStage::AwaitingWearables =>
@@ -484,17 +654,45 @@ pub fn drive_wearable_requests(
             // never changes no longer holds. Only when the pipeline is settled; a
             // change mid-fetch is deferred (applied above once ready) so it cannot
             // corrupt the in-flight bake.
-            SlSessionEvent::AgentWearables { wearables, .. } => match outfit_action(state.stage) {
-                OutfitAction::Refetch => {
-                    reset_for_refetch(&mut state, &mut manager);
-                    start_asset_fetch(&mut state, &mut manager, wearables, time.elapsed_secs());
-                    debug!("own outfit changed at runtime; re-fetching worn assets for a re-bake");
+            SlSessionEvent::AgentWearables { wearables, .. } => {
+                take_outfit(&mut state, &mut manager, wearables, time.elapsed_secs());
+            }
+            SlSessionEvent::InventoryFolders(folders)
+                if state.cof.active && state.cof.folder.is_none() =>
+            {
+                state.cof.folder = folders
+                    .iter()
+                    .find(|folder| folder.folder_type == FolderType::CurrentOutfit)
+                    .map(|folder| folder.folder_id);
+                if let Some(folder) = state.cof.folder {
+                    writer.write(SlCommand(Command::RequestFolderContents(folder)));
                 }
-                OutfitAction::Defer => state.queued_refetch = Some(wearables.clone()),
-                OutfitAction::Ignore => {}
-            },
+            }
+            // A listing of the folder: its links, and the targets still to
+            // fetch. A listing whose links changed is an outfit change.
+            SlSessionEvent::InventoryDescendents {
+                folder_id, items, ..
+            } if state.cof.active && state.cof.folder == Some(*folder_id) => {
+                for target in state.cof.listed(items, time.elapsed_secs()) {
+                    writer.write(SlCommand(Command::Ais3FetchItem(target)));
+                }
+            }
+            SlSessionEvent::InventoryDescendents { items, .. }
+            | SlSessionEvent::InventoryBulkUpdate { items, .. }
+                if state.cof.active =>
+            {
+                state.cof.note_items(items);
+            }
             _other => {}
         }
+    }
+    let now = time.elapsed_secs();
+    if let Some(wearables) = state.cof.ready(now, FETCH_GRACE_SECS) {
+        info!(
+            "read {} worn wearable(s) from the Current Outfit Folder",
+            wearables.len()
+        );
+        take_outfit(&mut state, &mut manager, &wearables, now);
     }
 }
 
@@ -784,7 +982,12 @@ fn assemble(
 
 #[cfg(test)]
 mod tests {
-    use super::{BakeInputStage, OutfitAction, outfit_action};
+    use super::{BakeInputStage, CofOutfit, OutfitAction, outfit_action};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{
+        AgentKey, InventoryFolderKey, InventoryItem, InventoryKey, OwnerKey, Permissions5, Uuid,
+        WearableType,
+    };
 
     /// A runtime `AgentWearables` is ignored before the handshake requested the
     /// first outfit; the initial reply itself is handled by its own arm, not here.
@@ -817,5 +1020,110 @@ mod tests {
             outfit_action(BakeInputStage::FetchingTextures),
             OutfitAction::Defer
         ));
+    }
+
+    /// An item `id` of `item_type` holding `asset`, its flags `flags` and its
+    /// description `description`.
+    fn record(
+        id: u128,
+        item_type: i8,
+        flags: u32,
+        asset: u128,
+        description: &str,
+    ) -> InventoryItem {
+        InventoryItem {
+            item_id: InventoryKey::from(Uuid::from_u128(id)),
+            folder_id: InventoryFolderKey::from(Uuid::nil()),
+            name: String::new(),
+            description: description.to_owned(),
+            asset_id: Uuid::from_u128(asset),
+            item_type,
+            inv_type: 18,
+            flags,
+            sale_type: 0,
+            sale_price: None,
+            creation_date: 0,
+            owner: OwnerKey::Agent(AgentKey::from(Uuid::nil())),
+            last_owner_id: Uuid::nil(),
+            creator_id: AgentKey::from(Uuid::nil()),
+            group: None,
+            permissions: Permissions5::default(),
+        }
+    }
+
+    /// An item of `item_type` and wearable `slot`, holding `asset`.
+    fn item(id: u128, item_type: i8, slot: u8, asset: u128) -> InventoryItem {
+        record(id, item_type, u32::from(slot), asset, "")
+    }
+
+    /// A link to `target` described `description`.
+    fn link(id: u128, target: u128, description: &str) -> InventoryItem {
+        record(id, 24, 0, target, description)
+    }
+
+    /// The folder's links resolve to the worn wearables: body parts and
+    /// clothing only, by slot, each slot's layers in the order of their
+    /// tokens rather than as listed.
+    #[test]
+    fn the_folder_states_the_outfit_in_token_order() {
+        let mut cof = CofOutfit {
+            active: true,
+            ..CofOutfit::default()
+        };
+        let fetch = cof.listed(
+            &[
+                link(1, 0x10, "@402"),
+                link(2, 0x11, ""),
+                link(3, 0x12, "@401"),
+                link(4, 0x13, ""),
+            ],
+            0.0,
+        );
+        assert_eq!(fetch.len(), 4);
+        assert_eq!(cof.ready(1.0, 20.0), None, "nothing resolved yet");
+        cof.note_items(&[
+            item(0x10, 5, 4, 0xa0),
+            item(0x11, 13, 0, 0xa1),
+            item(0x12, 5, 4, 0xa2),
+            // An attachment is no wearable.
+            item(0x13, 6, 0, 0xa3),
+        ]);
+        let worn = cof.ready(1.0, 20.0).unwrap_or_default();
+        let order: Vec<(WearableType, Option<Uuid>)> = worn
+            .iter()
+            .map(|worn| (worn.wearable_type, worn.asset_id))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                (WearableType::Shape, Some(Uuid::from_u128(0xa1))),
+                (WearableType::Shirt, Some(Uuid::from_u128(0xa2))),
+                (WearableType::Shirt, Some(Uuid::from_u128(0xa0))),
+            ]
+        );
+        assert_eq!(cof.ready(2.0, 20.0), None, "handed on once");
+    }
+
+    /// The same links listed again are no change; different ones are, and
+    /// only their new targets are fetched.
+    #[test]
+    fn a_relisted_folder_is_a_change_only_when_its_links_are() {
+        let mut cof = CofOutfit {
+            active: true,
+            ..CofOutfit::default()
+        };
+        let _fetch = cof.listed(&[link(1, 0x10, "")], 0.0);
+        cof.note_items(&[item(0x10, 13, 0, 0xa0)]);
+        assert!(cof.ready(0.0, 20.0).is_some());
+        assert!(cof.listed(&[link(1, 0x10, "")], 1.0).is_empty());
+        assert_eq!(cof.ready(1.0, 20.0), None);
+        let fetch = cof.listed(&[link(1, 0x10, ""), link(2, 0x11, "")], 2.0);
+        assert_eq!(fetch, vec![InventoryKey::from(Uuid::from_u128(0x11))]);
+        assert_eq!(cof.ready(3.0, 20.0), None, "the new target is unresolved");
+        assert_eq!(
+            cof.ready(22.0, 20.0).map(|worn| worn.len()),
+            Some(1),
+            "after the grace, what resolved"
+        );
     }
 }

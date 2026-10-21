@@ -2924,12 +2924,12 @@ mod test {
         Ok(())
     }
 
-    /// An AIS3 create with a `links` payload mints link items whose
-    /// `asset_id` is the linked object's id, embeds them **under
-    /// `_embedded.links`** (not `_embedded.items` — AIS files the two
-    /// separately, and the reference viewer's `AISUpdate::parseEmbeddedLinks`
-    /// and `parseDescendentCount` both depend on the distinction), and
-    /// surfaces the server event.
+    /// An AIS3 create with a `links` payload mints link items whose target is
+    /// the linked object's id, stated under `linked_id` as AIS states it,
+    /// embeds them **under `_embedded.links`** (not `_embedded.items` — AIS
+    /// files the two separately, and the reference viewer's
+    /// `AISUpdate::parseEmbeddedLinks` and `parseDescendentCount` both depend
+    /// on the distinction), and surfaces the server event.
     #[test]
     fn ais3_link_creation_round_trips() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -2954,7 +2954,7 @@ mod test {
             .get("_embedded")
             .and_then(|embedded| embedded.get("links"))
             .and_then(|links| links.get(&created.to_string()))
-            .and_then(|link| link.get("asset_id"))
+            .and_then(|link| link.get("linked_id"))
             .and_then(Llsd::as_uuid);
         assert_eq!(embedded_asset, Some(linked));
         // And it is filed there *instead of* under `items`, not as well as.

@@ -211,6 +211,18 @@ pub fn default_assets() -> sl_proto::InMemoryAssetSource {
     for (id, wearable) in sl_test_assets::builtin::library_wearables() {
         let _previous = assets.insert(AssetKey::from(id), wearable);
     }
+    // The assets Second Life's placeholder wearables reply names, which it
+    // serves as wearables of their types (`outfits` and `asset-fetch-http`,
+    // aditi): a stand-in of each type under each id.
+    for placeholder in crate::agent_requests::WearablesReply::Placeholders.stated(&[]) {
+        if let Some(id) = placeholder.asset_id {
+            let wearable = sl_test_assets::builtin::stand_in_wearable(
+                placeholder.wearable_type,
+                "Placeholder",
+            );
+            let _previous = assets.insert(AssetKey::from(id), wearable);
+        }
+    }
     // One real body per inventory class the stock account is seeded with. The
     // ids are the fixture table's own, so the id in the item and the id in the
     // store are the same id by construction rather than by two places agreeing
@@ -867,12 +879,13 @@ mod test {
         }
         // Four terrain solids, seven environment textures, the prim texture,
         // two avatar sentinels, fifteen bump maps, two viewer textures, two
-        // water plane textures, five wearable layer textures, four body parts
-        // and twelve UI sounds — the library — plus one body per seeded
+        // water plane textures, five wearable layer textures, four body parts,
+        // the four wearables Second Life's placeholder outfit names and
+        // twelve UI sounds — the library — plus one body per seeded
         // inventory class and the stock scripted object's script, and nothing
         // else: a stock scenario's store is the library and what its own items
         // name, not a fixture dump.
-        let library = 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4 + sl_proto::BUILTIN_UI_SOUNDS.len();
+        let library = 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4 + 4 + sl_proto::BUILTIN_UI_SOUNDS.len();
         let seeded = sl_test_assets::inventory::seeded_assets()?.len();
         assert_eq!(assets.len(), library + seeded + 1);
         Ok(())

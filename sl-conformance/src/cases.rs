@@ -108,6 +108,7 @@ pub mod object_touch_grab;
 pub mod object_update_decode;
 pub mod offline_msg_fetch;
 pub mod open_region_info;
+pub mod outfits;
 pub mod parcel_access_list;
 pub mod parcel_ban_enforcement;
 pub mod parcel_ban_line;

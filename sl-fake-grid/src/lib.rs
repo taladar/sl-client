@@ -49,7 +49,7 @@ pub mod world;
 mod world_map;
 
 pub use accounts::AccountConfig;
-pub use agent_requests::AgentPolicy;
+pub use agent_requests::{AgentPolicy, WearablesReply};
 pub use assets::ObjectAssetPolicy;
 pub use bakes::{BakePolicy, REGION_PROTOCOL_BAKES_ON_MESH, REGION_PROTOCOL_SERVER_BAKES};
 pub use benefits::{DEFAULT_PACKAGE, second_life_packages};

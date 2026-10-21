@@ -4225,4 +4225,30 @@ mod tests {
             at,
         );
     }
+
+    /// The own avatar's worn wearables, which its shape is made from, are
+    /// read on both flavours: from the Current Outfit Folder where the grid
+    /// answers `AgentWearablesRequest` with Second Life's placeholders — four
+    /// items that are no outfit and name no shape — and from the answer
+    /// itself where it is the outfit, as OpenSim's is
+    /// (`book/src/gridspec/appearance.md` § Outfits).
+    #[test]
+    fn the_own_shape_is_read_from_where_the_grid_keeps_the_outfit() -> Result<(), TestError> {
+        for grid in [
+            sl_fake_grid::ImitatedGrid::SecondLife,
+            sl_fake_grid::ImitatedGrid::OpenSim,
+        ] {
+            let mut harness = ViewerHarness::start_imitating(stock_fixture(), grid)?;
+            harness.login()?;
+            harness.run_until(&format!("the worn shape on {grid:?}"), |harness| {
+                harness
+                    .world()
+                    .get_resource::<sl_viewer_world_avatar::bake_inputs::OwnBakeInputs>()
+                    .and_then(|inputs| inputs.worn_asset(sl_proto::WearableType::Shape))
+                    .map(|_shape| ())
+            })?;
+            harness.logout()?;
+        }
+        Ok(())
+    }
 }

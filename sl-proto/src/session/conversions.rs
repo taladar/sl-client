@@ -5519,6 +5519,12 @@ pub(crate) fn inventory_folder_from_llsd(category: &Llsd) -> InventoryFolder {
 /// `parent_id` / `asset_id` (and the nested permission ids) as LLSD `string`,
 /// OpenSim as LLSD `uuid`; a strict read would nil every Second Life item id and
 /// the caller would drop the entire folder's contents.
+///
+/// A link's target is its `asset_id`, but an AIS3 body states it as
+/// `linked_id` instead, which the reference reads into the same field
+/// (`LLInventoryItem::fromLLSD`). Read only as `asset_id`, every link Second
+/// Life's `InventoryAPIv3` lists — the whole Current Outfit Folder — named no
+/// target.
 pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
     let permissions = item.get("permissions");
     let sale_info = item.get("sale_info");
@@ -5536,7 +5542,11 @@ pub(crate) fn inventory_item_from_llsd(item: &Llsd) -> Option<InventoryItem> {
         folder_id: InventoryFolderKey::from(uuid_member_lenient(item, "parent_id")),
         name: string_member(item, "name"),
         description: string_member(item, "desc"),
-        asset_id: uuid_member_lenient(item, "asset_id"),
+        asset_id: if item.get("linked_id").is_some() {
+            uuid_member_lenient(item, "linked_id")
+        } else {
+            uuid_member_lenient(item, "asset_id")
+        },
         item_type: i8::try_from(i32_member(item, "type")).unwrap_or(-1),
         inv_type: i8::try_from(i32_member(item, "inv_type")).unwrap_or(-1),
         flags: u32_member(item, "flags"),
@@ -7280,9 +7290,24 @@ fn ais_item_map(items: &[InventoryItem]) -> Result<Llsd, sl_wire::WireError> {
     Ok(Llsd::Map(
         items
             .iter()
-            .map(|item| Ok((item.item_id.to_string(), inventory_item_to_llsd(item)?)))
+            .map(|item| Ok((item.item_id.to_string(), ais_item_to_llsd(item)?)))
             .collect::<Result<_, sl_wire::WireError>>()?,
     ))
+}
+
+/// One item as AIS3 states it: the [`inventory_item_to_llsd`] shape, but a
+/// link names its target as `linked_id` and carries no `asset_id`, as Second
+/// Life's `InventoryAPIv3` does (`book/src/gridspec/appearance.md` §
+/// Outfits).
+fn ais_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_wire::WireError> {
+    let mut llsd = inventory_item_to_llsd(item)?;
+    // `AT_LINK` and `AT_LINK_FOLDER`.
+    let is_link = matches!(item.item_type, 24 | 25);
+    if is_link && let Llsd::Map(map) = &mut llsd {
+        let _asset = map.remove("asset_id");
+        let _previous = map.insert("linked_id".to_owned(), Llsd::Uuid(item.asset_id));
+    }
+    Ok(llsd)
 }
 
 /// Serializes listings as an AIS3 uuid-keyed `categories` map, each entry
@@ -7519,7 +7544,7 @@ fn ais_listing_to_llsd(listing: &InventoryListing) -> Result<Llsd, sl_wire::Wire
 /// the item's L$ sale price exceeds the signed 32-bit range the wire field can
 /// hold.
 pub fn ais_item_reply_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_wire::WireError> {
-    inventory_item_to_llsd(item)
+    ais_item_to_llsd(item)
 }
 
 /// Serializes an [`InventoryFolder`] as an AIS-shaped `categories` entry (inverse
@@ -10277,6 +10302,23 @@ mod caps_serializer_tests {
                 1
             ))
         );
+    }
+
+    /// An AIS3 link names its target as `linked_id` and carries no `asset_id`;
+    /// the target is read into the link's `asset_id`, as the reference reads it.
+    #[test]
+    fn an_ais_link_reads_its_target_from_linked_id() {
+        let link = llsd_map(vec![
+            ("item_id", Llsd::String(Uuid::from_u128(0xd1).to_string())),
+            ("parent_id", Llsd::String(Uuid::from_u128(0xd2).to_string())),
+            ("linked_id", Llsd::String(Uuid::from_u128(0xd3).to_string())),
+            ("name", Llsd::String("Shape".to_owned())),
+            ("desc", Llsd::String(String::new())),
+            ("type", Llsd::Integer(24)),
+            ("inv_type", Llsd::Integer(18)),
+        ]);
+        let read = inventory_item_from_llsd(&link).map(|item| item.asset_id);
+        assert_eq!(read, Some(Uuid::from_u128(0xd3)));
     }
 
     #[test]

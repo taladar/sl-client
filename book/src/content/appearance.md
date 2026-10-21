@@ -19,6 +19,15 @@ moved from the client to the server over the years.
 The client tells the region what it is wearing (`Command::SetWearing`) and can
 fetch the current set (`Command::RequestWearables`, → `Event::AgentWearables`).
 
+That legacy pair is OpenSim's record of the outfit. Second Life keeps the
+outfit in the **Current Outfit Folder** alone — links to the worn items, a
+clothing link's description its layer's order token — and answers
+`AgentWearablesRequest` with four fixed placeholder items whatever is worn
+(`Wearable::is_placeholder_outfit` recognises them). A viewer there reads the
+folder; the viewer here does. Where each grid keeps the outfit, and what each
+answers every way of changing it, is measured in the *Grid behaviour* part's
+[appearance chapter](../gridspec/appearance.md#outfits).
+
 ## Baking: client-side vs server-side
 
 To render an avatar, the layered wearables must be composited into a small set

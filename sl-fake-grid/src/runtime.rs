@@ -1120,6 +1120,7 @@ impl GridCore {
             policy: crate::agent_requests::AgentPolicy {
                 estate_manager: account.config.estate_manager,
                 legacy_udp_inventory: self.legacy_udp_inventory,
+                wearables_reply: self.imitated.wearables_reply(),
             },
             home_policy: self.imitated.home_policy(),
             home_told: None,

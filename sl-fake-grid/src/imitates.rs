@@ -23,6 +23,8 @@
 //! | the `OpenSimExtras` block in `SimulatorFeatures` ([`advertises_open_sim_extras`](ImitatedGrid::advertises_open_sim_extras)) | absent | sent, carrying the grid's map-tile and currency-helper URLs |
 //! | the rest of `SimulatorFeatures` ([`stock_simulator_features`](ImitatedGrid::stock_simulator_features)) | 29 keys: the PBR, mirror and pathfinding switches, the estate and group limits, the dead-reckoning pair, the host's name, a 2048 px texture limit, four material requests a second | 14 keys and the 24 of `OpenSimExtras`: the grid's name and limits, the simulator's frame rate, `ExportSupported` as a string; five empty `menus`; no texture limit, three material requests a second |
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named two ways: `SimulatorFeatures.VoiceServerType` and the `RequiredVoiceVersion` push — **not** the login `voice-config`, which aditi does not send even when asked (2026-10-04) | none: a stock region loads no voice module, and nothing is advertised |
+//! | an `AgentWearablesRequest` ([`wearables_reply`](ImitatedGrid::wearables_reply)) | four fixed placeholder items, wearable types 1 to 4, each naming a fixed asset, whatever is worn: the outfit is the Current Outfit Folder's | the outfit the simulator holds, which the last `AgentIsNowWearing` set |
+//! | how an AIS3 answer states a link's target | `linked_id`, with no `asset_id` | no AIS3 |
 //! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
 //! | how a **taken** item is announced ([`InventoryAnnouncement`]) | the legacy UDP `UpdateCreateInventoryItem` | the same |
 //! | how an item a capability upload **rewrote** is announced ([`UploadAnnouncements::saved`]) | the legacy UDP `UpdateCreateInventoryItem` | nothing: the capability's HTTP response is the whole answer |
@@ -1076,6 +1078,17 @@ impl ImitatedGrid {
         match self {
             Self::SecondLife => LegacyUdpInventory::Refused,
             Self::OpenSim => LegacyUdpInventory::Served,
+        }
+    }
+
+    /// What this grid answers an `AgentWearablesRequest` with — measured by
+    /// the `outfits` census on aditi and the local OpenSim (2026-10-20,
+    /// `book/src/gridspec/appearance.md` § Outfits).
+    #[must_use]
+    pub const fn wearables_reply(self) -> crate::agent_requests::WearablesReply {
+        match self {
+            Self::SecondLife => crate::agent_requests::WearablesReply::Placeholders,
+            Self::OpenSim => crate::agent_requests::WearablesReply::Outfit,
         }
     }
 

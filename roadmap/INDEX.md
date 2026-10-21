@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 340 |
-| blocked | 82 |
+| blocked | 81 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1406 |
+| done | 1407 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2071** |
@@ -1051,6 +1051,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`fake-grid-own-attachments-and-region-moves`](ready/fake-grid-own-attachments-and-region-moves.md)
+  — Fake grid — the agent's own attachments, the COF, and region moves (blocked
+  by `gridspec-outfits-wearables` (done), `gridspec-attachments` (done))
 - [`test-asset-save-mutation-survey`](ready/test-asset-save-mutation-survey.md)
   — Does a grid hand back the asset you saved?
 - [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
@@ -1154,8 +1157,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   committed LSL probe corpus and per-grid result files
 - [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
   Notecards, embedded items and gestures on each grid
-- [`gridspec-outfits-wearables`](ready/gridspec-outfits-wearables.md) — The
-  Current Outfit Folder and wearables on each grid
 - [`gridspec-seated-crossing`](ready/gridspec-seated-crossing.md) — A seated
   crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
@@ -1163,7 +1164,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (82)
+## blocked (81)
 
 ### protocol
 
@@ -1277,9 +1278,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`fake-grid-own-attachments-and-region-moves`](blocked/fake-grid-own-attachments-and-region-moves.md)
-  — Fake grid — the agent's own attachments, the COF, and region moves (blocked
-  by `gridspec-outfits-wearables`, `gridspec-attachments` (done))
 - [`test-e2e-environment-parcel-layer`](blocked/test-e2e-environment-parcel-layer.md)
   — End-to-end test of the parcel environment layer when walking between parcels
   (blocked by `server-fake-grid-parcel-on-movement`)
@@ -1582,7 +1580,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1406)
+## done (1407)
 
 ### protocol
 
@@ -4661,6 +4659,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   take-copy, delete, return and auto-return on each grid
 - [`gridspec-object-update-stream`](done/gridspec-object-update-stream.md) —
   Object update forms, the interest list and kills on each grid
+- [`gridspec-outfits-wearables`](done/gridspec-outfits-wearables.md) — The
+  Current Outfit Folder and wearables on each grid
 - [`gridspec-parcel-access-and-ban-lines`](done/gridspec-parcel-access-and-ban-lines.md)
   — Parcel access and ban lists, enforcement and ban lines on each grid
 - [`gridspec-parcel-info-dwell`](done/gridspec-parcel-info-dwell.md) — Parcel

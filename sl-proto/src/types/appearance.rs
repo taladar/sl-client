@@ -131,6 +131,34 @@ pub struct Wearable {
     pub wearable_type: WearableType,
 }
 
+impl Wearable {
+    /// The item ids Second Life answers every `AgentWearablesRequest` with,
+    /// for wearable types 1 to 4 (skin, hair, eyes, shirt), whatever the
+    /// agent wears: the region keeps the outfit in the Current Outfit Folder
+    /// alone (`outfits` census, 2026-10-20, `book/src/gridspec/appearance.md`
+    /// § Outfits). They are the ids the reference viewer sends in its own
+    /// dummy `AgentIsNowWearing` (`LLAgentWearables::sendDummyAgentWearablesUpdate`,
+    /// "the same as returned by the modified sim").
+    pub const PLACEHOLDER_ITEM_IDS: [Uuid; 4] = [
+        Uuid::from_u128(0xdb5a_4e5f_9da3_44c8_992d_1181_c579_5498),
+        Uuid::from_u128(0x6969_c7cc_f72f_4a76_a19b_c293_cce8_ce4f),
+        Uuid::from_u128(0x7999_702b_b291_48f9_8903_c91d_fb82_8408),
+        Uuid::from_u128(0x566c_b59e_ef60_41d7_bfa6_e0f2_93fb_ea40),
+    ];
+
+    /// Whether `wearables` is Second Life's placeholder answer rather than an
+    /// outfit: not empty, and every item one of
+    /// [`PLACEHOLDER_ITEM_IDS`](Self::PLACEHOLDER_ITEM_IDS). The outfit is then
+    /// the Current Outfit Folder's.
+    #[must_use]
+    pub fn is_placeholder_outfit(wearables: &[Self]) -> bool {
+        !wearables.is_empty()
+            && wearables
+                .iter()
+                .all(|worn| Self::PLACEHOLDER_ITEM_IDS.contains(&worn.item_id.uuid()))
+    }
+}
+
 /// Avatar texture-entry slot indices (LL's `ETextureIndex`): the faces of the
 /// per-avatar `TextureEntry` carried by `AvatarAppearance`. The *baked* slots
 /// (`*_BAKED`) hold the composited texture UUIDs other clients fetch and render
