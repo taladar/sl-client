@@ -4252,6 +4252,38 @@ mod tests {
         Ok(())
     }
 
+    /// Asks for a folder named `name` under `parent` and waits for the grid's
+    /// answer: the id it gave the folder, which Second Life's AIS3 mints
+    /// itself (`Event::InventoryFolderCreated`).
+    fn make_folder(
+        harness: &mut ViewerHarness,
+        parent: sl_proto::InventoryFolderKey,
+        name: &str,
+    ) -> Result<sl_proto::InventoryFolderKey, TestError> {
+        let requested = sl_proto::InventoryFolderKey::from(sl_proto::Uuid::new_v4());
+        harness.command(sl_client_bevy::Command::CreateInventoryFolder {
+            folder_id: requested,
+            parent_id: parent,
+            folder_type: sl_proto::FolderType::None,
+            name: name.to_owned(),
+        });
+        harness.run_until(&format!("the folder {name:?}"), |harness| {
+            harness
+                .app
+                .world()
+                .resource::<Recorded>()
+                .events
+                .iter()
+                .find_map(|event| match event {
+                    sl_client_bevy::SlSessionEvent::InventoryFolderCreated {
+                        requested: answered,
+                        folder,
+                    } if *answered == requested => Some(folder.folder_id),
+                    _other => None,
+                })
+        })
+    }
+
     /// A delete — the viewer's move into the Trash — moves the folder and the
     /// item on the grid, on both flavours: the moves go over UDP on every
     /// grid, because Second Life's AIS3 refuses one
@@ -4291,13 +4323,7 @@ mod tests {
             let trash = trash.ok_or("the fixture has no Trash")?;
             let item = item.ok_or("the fixture has no item to delete")?;
 
-            let folder = sl_proto::InventoryFolderKey::from(sl_proto::Uuid::new_v4());
-            harness.command(sl_client_bevy::Command::CreateInventoryFolder {
-                folder_id: folder,
-                parent_id: root,
-                folder_type: sl_proto::FolderType::None,
-                name: "Deleted".to_owned(),
-            });
+            let folder = make_folder(&mut harness, root, "Deleted")?;
             harness.run_until(&format!("the made folder on {grid:?}"), |harness| {
                 harness.grid(
                     agent.with_sim(|sim| sim.agent_inventory().folder(folder).map(|_folder| ())),
@@ -4320,6 +4346,135 @@ mod tests {
                         .then_some(())
                 }))
             })?;
+            harness.logout()?;
+        }
+        Ok(())
+    }
+
+    /// A folder rename and an item update reach the grid on both flavours:
+    /// through AIS3 on Second Life, as the reference sends them
+    /// (`update_inventory_category`, `update_inventory_item`), and over UDP on
+    /// OpenSim (`book/src/gridspec/inventory.md` § Changing inventory).
+    #[test]
+    fn a_rename_and_an_item_update_reach_the_grid() -> Result<(), TestError> {
+        for grid in [
+            sl_fake_grid::ImitatedGrid::SecondLife,
+            sl_fake_grid::ImitatedGrid::OpenSim,
+        ] {
+            let mut harness = ViewerHarness::start_imitating(stock_fixture(), grid)?;
+            harness.login()?;
+            let agent = harness.agent()?;
+            let (root, item) = harness.grid(agent.with_sim(|sim| {
+                let tree = sim.agent_inventory();
+                let root = tree
+                    .folders()
+                    .find(|folder| {
+                        folder.folder_type == sl_proto::FolderType::RootInventory.to_code()
+                    })
+                    .map(|folder| folder.folder_id);
+                // An item nothing wears: no link, body part or clothing.
+                let item = tree
+                    .items()
+                    .find(|item| !matches!(item.item_type, 5 | 13 | 24 | 25))
+                    .cloned();
+                (root, item)
+            }));
+            let root = root.ok_or("the fixture has no inventory root")?;
+            let mut item = item.ok_or("the fixture has no item to update")?;
+
+            let folder = make_folder(&mut harness, root, "Before")?;
+            harness.run_until(&format!("the made folder on {grid:?}"), |harness| {
+                harness.grid(
+                    agent.with_sim(|sim| sim.agent_inventory().folder(folder).map(|_folder| ())),
+                )
+            })?;
+            harness.command(sl_client_bevy::Command::UpdateInventoryFolder {
+                folder_id: folder,
+                parent_id: root,
+                folder_type: sl_proto::FolderType::None,
+                name: "After".to_owned(),
+            });
+            "Renamed item".clone_into(&mut item.name);
+            "Renamed description".clone_into(&mut item.description);
+            let item_id = item.item_id;
+            harness.command(sl_client_bevy::Command::UpdateInventoryItem {
+                item: Box::new(item),
+                transaction_id: sl_proto::TransactionId::from(sl_proto::Uuid::nil()),
+            });
+            harness.run_until(&format!("both updated on {grid:?}"), |harness| {
+                harness.grid(agent.with_sim(|sim| {
+                    let tree = sim.agent_inventory();
+                    let item = tree.item(item_id)?;
+                    (tree.folder(folder)?.name == "After"
+                        && tree.folder(folder)?.parent_id == Some(root)
+                        && item.name == "Renamed item"
+                        && item.description == "Renamed description")
+                        .then_some(())
+                }))
+            })?;
+            harness.logout()?;
+        }
+        Ok(())
+    }
+
+    /// A folder the viewer asks for is answered with the id the grid gave it:
+    /// a new one on Second Life, whose AIS3 mints it, and the asked-for one
+    /// over OpenSim's UDP create (`book/src/gridspec/inventory.md` § Changing
+    /// inventory). Work that waits on the folder — a deep copy's next level, a
+    /// New Folder's rename — goes to that id.
+    #[test]
+    fn a_made_folder_is_answered_with_the_grids_id() -> Result<(), TestError> {
+        for grid in [
+            sl_fake_grid::ImitatedGrid::SecondLife,
+            sl_fake_grid::ImitatedGrid::OpenSim,
+        ] {
+            let mut harness = ViewerHarness::start_imitating(stock_fixture(), grid)?;
+            harness.login()?;
+            let agent = harness.agent()?;
+            let root = harness
+                .grid(agent.with_sim(|sim| {
+                    sim.agent_inventory()
+                        .folders()
+                        .find(|folder| {
+                            folder.folder_type == sl_proto::FolderType::RootInventory.to_code()
+                        })
+                        .map(|folder| folder.folder_id)
+                }))
+                .ok_or("the fixture has no inventory root")?;
+            let requested = sl_proto::InventoryFolderKey::from(sl_proto::Uuid::new_v4());
+            harness.command(sl_client_bevy::Command::CreateInventoryFolder {
+                folder_id: requested,
+                parent_id: root,
+                folder_type: sl_proto::FolderType::None,
+                name: "Made".to_owned(),
+            });
+            let created =
+                harness.run_until(&format!("the created folder on {grid:?}"), |harness| {
+                    harness
+                        .app
+                        .world()
+                        .resource::<Recorded>()
+                        .events
+                        .iter()
+                        .find_map(|event| match event {
+                            sl_client_bevy::SlSessionEvent::InventoryFolderCreated {
+                                requested: answered,
+                                folder,
+                            } if *answered == requested => Some(folder.folder_id),
+                            _other => None,
+                        })
+                })?;
+            let made = harness.grid(agent.with_sim(|sim| {
+                sim.agent_inventory()
+                    .folder(created)
+                    .map(|folder| (folder.name.clone(), folder.parent_id))
+            }));
+            pretty_assertions::assert_eq!(made, Some(("Made".to_owned(), Some(root))), "{grid:?}");
+            pretty_assertions::assert_eq!(
+                created == requested,
+                grid == sl_fake_grid::ImitatedGrid::OpenSim,
+                "{grid:?}: the UDP create keeps the asked-for id, AIS3 mints one"
+            );
             harness.logout()?;
         }
         Ok(())

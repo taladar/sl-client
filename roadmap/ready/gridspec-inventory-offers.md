@@ -4,7 +4,8 @@ title: Giving inventory, accepting and declining, and object gives on each grid
 topic: gridspec
 status: ready
 origin: gridspec survey (2026-10-03)
-refs: [gridspec-survey, server-message-routing, gridspec-object-rez-derez]
+refs: [gridspec-survey, server-message-routing, gridspec-object-rez-derez,
+  gridspec-inventory-mutations]
 ---
 
 Context: [context/gridspec.md](../context/gridspec.md).
@@ -13,6 +14,22 @@ Context: [context/gridspec.md](../context/gridspec.md).
 
 OpenSim files the copy at offer time and relays `IM_INVENTORY_ACCEPTED`; SL
 assigns the copy id on accept and relays nothing to the giver.
+
+## Seen on the way (2026-10-22)
+
+[[gridspec-inventory-mutations]] measured a no-copy give and give-back on
+OpenSim (`book/src/gridspec/inventory.md` § Changing inventory, *Gives*): the
+giver's copy is gone at offer time, the giver is told `InventoryAccepted`. On
+aditi **the primary test account files no accepted gift at all**: B's offer
+reaches it and its `AcceptInventoryOffer` is answered with nothing — no
+`BulkUpdateInventory`, nothing in its Notecards or root after 30 s — for a
+full-permission notecard as much as a no-copy one, while the same account's
+gifts to the secondary are filed. `give-inventory` with its roles swapped
+(`--avatar secondary --secondary primary`) fails the same way. Find out why —
+the account (an inventory or offer setting), where it stands (the Mauve
+sandbox, which already silences avatar sounds), or our accept — first by
+accepting such a gift in Firestorm on that account; the census's `control_`
+and `nocopy_` rows on Second Life wait on it.
 
 ## Discover
 

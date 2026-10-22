@@ -15,9 +15,10 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    Camera, Command, ControlFlags, CreateGroupParams, Diagnostic, Event, GroupKey, InventoryItem,
-    InventoryKey, LindenAmount, Object, ObjectKey, RegionLocalObjectId, Rotation, ScopedObjectId,
-    TaskInventoryItem, Uuid, Vector, XferListing, pcode, prim_flags,
+    Camera, Command, ControlFlags, CreateGroupParams, Diagnostic, Event, FolderType, GroupKey,
+    InventoryFolderKey, InventoryItem, InventoryKey, LindenAmount, Object, ObjectKey,
+    RegionLocalObjectId, Rotation, ScopedObjectId, TaskInventoryItem, Uuid, Vector, XferListing,
+    pcode, prim_flags,
 };
 
 use crate::context::{Session, TestContext, TestFailure};
@@ -55,6 +56,43 @@ where
 {
     session.send(command).await?;
     session.wait_for(timeout, predicate).await
+}
+
+/// Asks for a folder named `name` of `folder_type` under `parent` through the
+/// client's [`Command::CreateInventoryFolder`] and waits for the grid's answer:
+/// the id it gave the folder ([`Event::InventoryFolderCreated`]). That is the
+/// asked-for id over UDP (OpenSim) and a new one through AIS3, which mints its
+/// own (Second Life).
+///
+/// # Errors
+///
+/// Propagates [`send_then_wait`] errors — a timeout where the grid made no
+/// folder.
+pub async fn create_folder(
+    session: &mut Session,
+    parent: InventoryFolderKey,
+    folder_type: FolderType,
+    name: &str,
+) -> Result<InventoryFolderKey, TestFailure> {
+    let requested = InventoryFolderKey::from(Uuid::new_v4());
+    send_then_wait(
+        session,
+        Command::CreateInventoryFolder {
+            folder_id: requested,
+            parent_id: parent,
+            folder_type,
+            name: name.to_owned(),
+        },
+        LONG_TIMEOUT,
+        |event| match event {
+            Event::InventoryFolderCreated {
+                requested: answered,
+                folder,
+            } if *answered == requested => Some(folder.folder_id),
+            _ => None,
+        },
+    )
+    .await
 }
 
 /// Whether the test is running on the local OpenSim grid.

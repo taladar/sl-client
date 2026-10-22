@@ -238,20 +238,45 @@ forms:
   item's real id, so `link_inventory_item` returns an `InventoryCallbackId` to
   correlate the confirming `Event::InventoryItemCreated`.
 
-On Second Life the runtimes route a folder or item removal and an emptying
-(`RemoveInventoryFolders`, `RemoveInventoryItems`, `PurgeInventoryDescendents`)
-over AIS3 and keep the UDP message for OpenSim. A **move**
-(`MoveInventoryItem`, `MoveInventoryFolder`) is the UDP message on every grid,
-as the reference sends it: Second Life's AIS3 refuses to change a
-`parent_id` ([Grid Behaviour](../gridspec/inventory.md#fetching)), so until
-2026-10-21, when the runtimes sent moves there, every move and every
-delete-to-Trash on Second Life changed only the viewer's own cache. **Every
-path changes the held cache when the command is sent**: the UDP methods do it
-themselves, and the AIS3 branch calls their wire-free halves
+On Second Life the runtimes take AIS3 wherever the reference does, and keep
+the UDP messages (or the `CreateInventoryCategory` capability) for OpenSim,
+which grants no AIS3
+([Grid Behaviour](../gridspec/inventory.md#changing-inventory)):
+
+| command | Second Life | OpenSim |
+| --- | --- | --- |
+| `CreateInventoryFolder`, `CreateInventoryCategory` | AIS3 `POST /category/<parent>` | UDP / the capability |
+| `UpdateInventoryFolder` | AIS3 `PATCH /category/<id>` with the name (a change of parent is a UDP move first) | UDP |
+| `UpdateInventoryItem` | AIS3 `PATCH /item/<id>` with the whole item, `asset_id` left out | UDP |
+| `RemoveInventoryFolders`, `RemoveInventoryItems`, `RemoveInventoryObjects` | AIS3 `DELETE` per folder and item | UDP |
+| `PurgeInventoryDescendents` | AIS3 `DELETE /category/<id>/children` | UDP |
+| `LinkInventoryItem` | AIS3 `POST` with `links` | UDP |
+| `CreateInventoryItem`, `CopyInventoryItem`, `ChangeInventoryItemFlags` | UDP | UDP |
+| `MoveInventoryFolder`, `MoveInventoryItem` | UDP | UDP |
+
+A **move** is the UDP message on every grid, as the reference sends it:
+Second Life's AIS3 refuses to change a `parent_id`
+([Grid Behaviour](../gridspec/inventory.md#fetching)), so until 2026-10-21,
+when the runtimes sent moves there, every move and every delete-to-Trash on
+Second Life changed only the viewer's own cache.
+
+**AIS3 mints a new folder's id itself** and ignores one the request names,
+where the UDP create keeps the id the client chose. So a folder create is
+answered with `Event::InventoryFolderCreated { requested, folder }` on every
+grid — the id the command asked for and the folder as the grid made it — and
+work that waits on a new folder addresses `folder.folder_id`, as the
+reference continues in its `createNewCategory` callback. The viewer's deep
+copy goes a level at a time that way, and a New Folder starts its inline
+rename on the answer. The session matches an AIS3 answer to its request by
+parent and name (`Session::note_folder_create`).
+
+**Every path changes the held cache when the command is sent**: the UDP
+methods do it themselves, and the AIS3 branch calls their wire-free halves
 (`remove_inventory_folders_local`, `remove_inventory_items_local`,
-`purge_inventory_descendents_local`). An AIS3 reply carries no payload for
-what it removed, so a cache left for the reply to fix kept a deleted item
-listed where it was.
+`purge_inventory_descendents_local`, `update_inventory_folder_local`,
+`update_inventory_item_local`). An AIS3 reply carries no payload for what it
+removed, so a cache left for the reply to fix kept a deleted item listed where
+it was. A new folder enters the cache from the AIS3 answer.
 
 When the simulator creates an item, it allocates the real id and confirms via
 `Event::InventoryItemCreated`. Changes the server makes (including ones it made

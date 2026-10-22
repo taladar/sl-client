@@ -843,6 +843,20 @@ pub enum Event {
         /// callback id (the CAPS event-queue / AIS3 forms).
         item_callbacks: Vec<(InventoryKey, InventoryCallbackId)>,
     },
+    /// A folder this client asked for exists on the grid, under the id the
+    /// grid gave it. Over UDP (`CreateInventoryFolder`) that is the id the
+    /// client chose; Second Life's AIS3 mints its own and ignores an id the
+    /// request names, so a caller that chains work on a new folder waits for
+    /// this event and addresses the work to [`folder`](Self::InventoryFolderCreated::folder)'s id
+    /// — as the reference viewer continues in its `createNewCategory`
+    /// callback (`book/src/gridspec/inventory.md` § Changing inventory).
+    InventoryFolderCreated {
+        /// The id the [`Command::CreateInventoryFolder`](crate::Command::CreateInventoryFolder)
+        /// asked for.
+        requested: InventoryFolderKey,
+        /// The folder as the grid made it.
+        folder: InventoryFolder,
+    },
     /// The agent's friends (the buddy list), parsed from the login response.
     /// Emitted once, right after [`Event::CircuitEstablished`], when the login
     /// provided a non-empty list.

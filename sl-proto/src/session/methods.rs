@@ -313,6 +313,7 @@ impl Session {
             diagnostics: VecDeque::new(),
             circuit_probe: CircuitProbe::Off,
             profile_reads: std::collections::BTreeSet::new(),
+            pending_folder_creates: std::collections::VecDeque::new(),
             profiles_awaiting_presence: std::collections::BTreeMap::new(),
             avatar_render_info: super::render_info::RenderInfoSchedule::new(),
         }
@@ -884,6 +885,7 @@ impl Session {
                     InventoryOwner::Agent
                 };
                 let (folders, items) = ais_inventory_update_from_llsd(body);
+                self.answer_folder_creates(body, &folders);
                 if !folders.is_empty() || !items.is_empty() {
                     self.cache_inventory(&folders, &items, owner);
                     self.events.push_back(Event::InventoryBulkUpdate {
@@ -11721,12 +11723,18 @@ impl Session {
             name,
             now,
         )?;
-        self.cache_inventory_folder(InventoryFolder {
+        let folder = InventoryFolder {
             folder_id,
             parent_id: crate::types::optional_key_from_wire(parent_id.uuid()),
             name: name.to_owned(),
             folder_type: folder_type.to_code(),
             version: 1,
+        };
+        self.cache_inventory_folder(folder.clone());
+        // The UDP create keeps the id the caller chose.
+        self.events.push_back(Event::InventoryFolderCreated {
+            requested: folder_id,
+            folder,
         });
         Ok(folder_id)
     }
@@ -11757,6 +11765,21 @@ impl Session {
             name,
             now,
         )?;
+        self.update_inventory_folder_local(folder_id, parent_id, folder_type, name);
+        Ok(())
+    }
+
+    /// Applies an update of folder `folder_id` — its parent, type and name — to
+    /// the cache only, for a runtime that sends the change another way (an AIS3
+    /// `PATCH` on Second Life, where the reference renames a folder through
+    /// AIS3).
+    pub fn update_inventory_folder_local(
+        &mut self,
+        folder_id: InventoryFolderKey,
+        parent_id: InventoryFolderKey,
+        folder_type: FolderType,
+        name: &str,
+    ) {
         self.cache_inventory_folder(InventoryFolder {
             folder_id,
             parent_id: crate::types::optional_key_from_wire(parent_id.uuid()),
@@ -11767,7 +11790,6 @@ impl Session {
                 .folder(folder_id)
                 .map_or(1, |folder| folder.version),
         });
-        Ok(())
     }
 
     /// Renames the folder `folder_id` to `name` without touching its parent or
@@ -12066,8 +12088,68 @@ impl Session {
         let callback_id = self.next_inventory_callback();
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         circuit.send_update_inventory_item(item, transaction_id.get(), callback_id, now)?;
-        self.cache_inventory_item(item.clone());
+        self.update_inventory_item_local(item);
         Ok(())
+    }
+
+    /// Applies an update of `item` to the cache only, for a runtime that sends
+    /// it another way (an AIS3 `PATCH` on Second Life, where the reference
+    /// updates an item through AIS3).
+    pub fn update_inventory_item_local(&mut self, item: &InventoryItem) {
+        self.cache_inventory_item(item.clone());
+    }
+
+    /// Notes a folder create a runtime sends through AIS3 — `requested` is the
+    /// id the caller asked for, which the grid will not keep — so that the
+    /// answer naming the folder under `parent_id` and `name` surfaces as
+    /// [`Event::InventoryFolderCreated`] with both ids.
+    pub fn note_folder_create(
+        &mut self,
+        requested: InventoryFolderKey,
+        parent_id: InventoryFolderKey,
+        name: &str,
+    ) {
+        self.pending_folder_creates
+            .push_back((requested, parent_id, name.to_owned()));
+    }
+
+    /// Answers the noted folder creates an AIS3 reply's
+    /// `_created_categories` names, oldest request first, with an
+    /// [`Event::InventoryFolderCreated`] each.
+    fn answer_folder_creates(&mut self, body: &Llsd, folders: &[InventoryFolder]) {
+        let created: Vec<Uuid> = body
+            .get("_created_categories")
+            .and_then(Llsd::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| match id {
+                        Llsd::Uuid(id) => Some(*id),
+                        Llsd::String(text) => Uuid::parse_str(text.trim()).ok(),
+                        _other => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for folder in folders
+            .iter()
+            .filter(|folder| created.contains(&folder.folder_id.uuid()))
+        {
+            let Some(index) =
+                self.pending_folder_creates
+                    .iter()
+                    .position(|(_requested, parent, name)| {
+                        Some(*parent) == folder.parent_id && *name == folder.name
+                    })
+            else {
+                continue;
+            };
+            if let Some((requested, _parent, _name)) = self.pending_folder_creates.remove(index) {
+                self.events.push_back(Event::InventoryFolderCreated {
+                    requested,
+                    folder: folder.clone(),
+                });
+            }
+        }
     }
 
     /// Saves fresh asset bytes onto an **existing** inventory item over the

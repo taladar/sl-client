@@ -167,6 +167,9 @@ pub use sl_proto::{
     install_preset_day_cycle, preset_day_cycle, preset_sky_schedule, sky_settings_from,
 };
 pub use sl_proto::{WireLandmarkAsset, landmark_to_wire, parse_landmark};
+// The two encodings of an inventory item update: the AIS3 `PATCH` body this
+// runtime sends where the region grants AIS3, and the legacy UDP message.
+pub use sl_proto::{ais_item_update_body, update_inventory_item_message};
 // The `GetTexture` capability name, so a frontend driving the texture store
 // directly (rather than the `Command::FetchTexture` path) can resolve the cap
 // URL from an [`SlCapabilities`] map and hand it to a [`BevyTextureFetcher`].
@@ -1404,8 +1407,10 @@ fn bind_socket() -> Result<UdpSocket, ()> {
 enum Ais3Verb {
     /// `POST` — create (a folder, a link).
     Post,
-    // No `PATCH`: the only mutation it carried here was a move, which
-    // Second Life's AIS3 refuses ("Use MOVE method"); moves go UDP.
+    /// `PATCH` — update a folder's name or an item's fields. Never a move:
+    /// Second Life's AIS3 refuses a `parent_id` ("Use MOVE method"); moves go
+    /// UDP.
+    Patch,
     /// `DELETE` — remove a folder / item / a folder's children.
     Delete,
 }
@@ -1484,6 +1489,12 @@ fn route_ais3(caps: Option<&Caps>, suffix: &str, verb: Ais3Verb, body: Option<St
                 &events_tx,
             );
         }
+        Ais3Verb::Patch => run_patch_caps_llsd(
+            &url,
+            body.unwrap_or_default(),
+            CAP_INVENTORY_API_V3,
+            &events_tx,
+        ),
         Ais3Verb::Delete => run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx),
     });
     true
@@ -2233,7 +2244,26 @@ fn apply_command(
             folder_type,
             name,
         } => {
-            session.create_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)?;
+            // Second Life creates a folder through AIS3, as the reference's
+            // `createNewCategory` does. It mints the id itself, so the session
+            // matches the answer to this request and names both ids
+            // (`Event::InventoryFolderCreated`). OpenSim keeps the UDP create,
+            // which keeps `folder_id`.
+            if has_ais3(caps) {
+                session.note_folder_create(*folder_id, *parent_id, name);
+                route_ais3(
+                    caps,
+                    &ais_create_category_url(*parent_id, Uuid::new_v4()),
+                    Ais3Verb::Post,
+                    Some(build_ais_create_category_body(
+                        *parent_id,
+                        i32::from(folder_type.to_code()),
+                        name,
+                    )),
+                );
+            } else {
+                session.create_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)?;
+            }
         }
         Command::UpdateInventoryFolder {
             folder_id,
@@ -2241,7 +2271,26 @@ fn apply_command(
             folder_type,
             name,
         } => {
-            session.update_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)?;
+            // Second Life renames through AIS3, as the reference's
+            // `update_inventory_category` does; a change of parent is a move,
+            // which goes UDP on every grid. OpenSim keeps the UDP update.
+            if has_ais3(caps) {
+                let parent = session
+                    .inventory_folder(*folder_id)
+                    .and_then(|folder| folder.parent_id);
+                if parent != Some(*parent_id) {
+                    session.move_inventory_folder(*folder_id, *parent_id, now)?;
+                }
+                session.update_inventory_folder_local(*folder_id, *parent_id, *folder_type, name);
+                route_ais3(
+                    caps,
+                    &ais_category_url(*folder_id),
+                    Ais3Verb::Patch,
+                    Some(build_ais_rename_category_body(name)),
+                );
+            } else {
+                session.update_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)?;
+            }
         }
         Command::MoveInventoryFolder {
             folder_id,
@@ -2308,7 +2357,22 @@ fn apply_command(
             item,
             transaction_id,
         } => {
-            session.update_inventory_item(item, *transaction_id, now)?;
+            // Second Life updates an item through AIS3 (`PATCH /item/<id>` with
+            // the whole item), as the reference's `update_inventory_item` does;
+            // OpenSim keeps the UDP message.
+            if has_ais3(caps) {
+                let body =
+                    ais_item_update_body(item, *transaction_id).map_err(sl_proto::Error::from)?;
+                session.update_inventory_item_local(item);
+                route_ais3(
+                    caps,
+                    &ais_item_url(item.item_id),
+                    Ais3Verb::Patch,
+                    Some(body),
+                );
+            } else {
+                session.update_inventory_item(item, *transaction_id, now)?;
+            }
         }
         Command::SaveInventoryAsset {
             item,
@@ -2382,14 +2446,41 @@ fn apply_command(
             folder_ids,
             item_ids,
         } => {
-            session.remove_inventory_objects(folder_ids, item_ids, now)?;
+            // Second Life deletes each folder and item through AIS3, as the
+            // reference's `remove_inventory_object` does (it never sends
+            // `RemoveInventoryObjects`); OpenSim keeps the UDP batch.
+            if has_ais3(caps) {
+                session.remove_inventory_folders_local(folder_ids);
+                session.remove_inventory_items_local(item_ids);
+                for folder_id in folder_ids {
+                    route_ais3(caps, &ais_category_url(*folder_id), Ais3Verb::Delete, None);
+                }
+                for item_id in item_ids {
+                    route_ais3(caps, &ais_item_url(*item_id), Ais3Verb::Delete, None);
+                }
+            } else {
+                session.remove_inventory_objects(folder_ids, item_ids, now)?;
+            }
         }
         Command::CreateInventoryCategory {
             parent_id,
             folder_type,
             name,
         } => {
-            if let Some(caps) = caps
+            // Second Life creates a folder through AIS3, as the reference's
+            // `createNewCategory` does; elsewhere the capability.
+            if has_ais3(caps) {
+                route_ais3(
+                    caps,
+                    &ais_create_category_url(*parent_id, Uuid::new_v4()),
+                    Ais3Verb::Post,
+                    Some(build_ais_create_category_body(
+                        *parent_id,
+                        *folder_type,
+                        name,
+                    )),
+                );
+            } else if let Some(caps) = caps
                 && let Some(url) = caps.map.get(CAP_CREATE_INVENTORY_CATEGORY).cloned()
             {
                 let events_tx = caps.events_tx.clone();

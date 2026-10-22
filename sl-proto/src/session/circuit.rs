@@ -1,8 +1,6 @@
 //! Per-simulator circuit: reliable-UDP bookkeeping and outgoing message encoders.
 
-use super::conversions::{
-    OutgoingIm, compute_im_session_id, inventory_item_crc, pack_quaternion_to_vec3, with_nul,
-};
+use super::conversions::{OutgoingIm, compute_im_session_id, pack_quaternion_to_vec3, with_nul};
 use super::{Circuit, Timers};
 use crate::AssetKey;
 use crate::GroupRoleKey;
@@ -203,8 +201,7 @@ use sl_wire::messages::{
     TransferRequestTransferInfoBlock, UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock,
     UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock, UpdateGroupInfo,
     UpdateGroupInfoAgentDataBlock, UpdateGroupInfoGroupDataBlock, UpdateInventoryFolder,
-    UpdateInventoryFolderAgentDataBlock, UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem,
-    UpdateInventoryItemAgentDataBlock, UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry,
+    UpdateInventoryFolderAgentDataBlock, UpdateInventoryFolderFolderDataBlock, UpdateMuteListEntry,
     UpdateMuteListEntryAgentDataBlock, UpdateMuteListEntryMuteDataBlock, UseCircuitCode,
     UseCircuitCodeCircuitCodeBlock, UserReport, UserReportAgentDataBlock,
     UserReportReportDataBlock, ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock,
@@ -3058,41 +3055,13 @@ impl Circuit {
         callback_id: InventoryCallbackId,
         now: Instant,
     ) -> Result<(), WireError> {
-        let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
-        let message = AnyMessage::UpdateInventoryItem(UpdateInventoryItem {
-            agent_data: UpdateInventoryItemAgentDataBlock {
-                agent_id: self.agent_id.uuid(),
-                session_id: self.session_id,
-                transaction_id,
-            },
-            inventory_data: vec![UpdateInventoryItemInventoryDataBlock {
-                item_id: item.item_id.uuid(),
-                folder_id: item.folder_id.uuid(),
-                callback_id: callback_id.get(),
-                creator_id: item.creator_id.uuid(),
-                owner_id,
-                group_id,
-                base_mask: item.permissions.base.bits(),
-                owner_mask: item.permissions.owner.bits(),
-                group_mask: item.permissions.group.bits(),
-                everyone_mask: item.permissions.everyone.bits(),
-                next_owner_mask: item.permissions.next_owner.bits(),
-                group_owned: item.owner.is_group(),
-                transaction_id,
-                r#type: item.item_type,
-                inv_type: item.inv_type,
-                flags: item.flags,
-                sale_type: item.sale_type,
-                sale_price: crate::types::linden_price_to_wire(
-                    "SalePrice",
-                    item.sale_price.as_ref(),
-                )?,
-                name: with_nul(&item.name),
-                description: with_nul(&item.description),
-                creation_date: item.creation_date,
-                crc: inventory_item_crc(item, item.folder_id.uuid())?,
-            }],
-        });
+        let message = super::conversions::update_inventory_item_message(
+            self.agent_id,
+            self.session_id,
+            item,
+            transaction_id,
+            callback_id,
+        )?;
         self.send(&message, Reliability::Reliable, now)
     }
 

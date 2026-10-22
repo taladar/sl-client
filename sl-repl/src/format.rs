@@ -317,6 +317,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::InventoryDescendents { .. } => "inventory_descendents",
         Event::InventoryItemCreated { .. } => "inventory_item_created",
         Event::InventoryBulkUpdate { .. } => "inventory_bulk_update",
+        Event::InventoryFolderCreated { .. } => "inventory_folder_created",
         Event::FriendList(..) => "friend_list",
         Event::FriendsOnline(..) => "friends_online",
         Event::FriendsOffline(..) => "friends_offline",

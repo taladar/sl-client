@@ -3210,8 +3210,17 @@ impl SimCaps {
                     .get("parent_id")
                     .is_some()
                     .then(|| parse_ais_move_body(text));
+                // A `parent_id` is refused only where it names another
+                // parent: the reference's updates carry the unchanged one
+                // (`LLInventoryItem::asLLSD`).
                 if let Some(folder_id) = parse_ais_category_url(&suffix) {
-                    if let Some(parent) = new_parent {
+                    let current = sim
+                        .agent_inventory()
+                        .folder(folder_id)
+                        .and_then(|folder| folder.parent_id);
+                    if let Some(parent) = new_parent
+                        && parent.as_ref().ok() != current.as_ref()
+                    {
                         let Ok(parent) = parent else {
                             return CapsResponse::bad_request();
                         };
@@ -3247,7 +3256,13 @@ impl SimCaps {
                     };
                 }
                 if let Some(item_id) = parse_ais_item_url(&suffix) {
-                    if let Some(parent) = new_parent {
+                    let current = sim
+                        .agent_inventory()
+                        .item(item_id)
+                        .map(|item| item.folder_id);
+                    if let Some(parent) = new_parent
+                        && parent.as_ref().ok() != current.as_ref()
+                    {
                         let Ok(parent) = parent else {
                             return CapsResponse::bad_request();
                         };

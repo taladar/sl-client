@@ -574,6 +574,8 @@ pub(crate) struct DragOutputs<'w, 's> {
     add_embedded: MessageWriter<'w, crate::inventory::AddEmbeddedItem>,
     /// The local-chat line a refused drop explains itself with.
     notices: MessageWriter<'w, LocalChatNotice>,
+    /// The deep copies waiting for their folders to exist.
+    folder_copies: ResMut<'w, crate::inventory_actions::PendingFolderCopies>,
 }
 
 /// The UI-occlusion guard, bundled as one
@@ -912,6 +914,7 @@ pub(crate) fn on_row_drag_end(
         mut commands_bevy,
         mut add_embedded,
         mut notices,
+        mut folder_copies,
     } = outputs;
     let Some(ui) = ui else {
         return;
@@ -958,6 +961,7 @@ pub(crate) fn on_row_drag_end(
                 dest,
                 &model,
                 identity.agent_id,
+                &mut folder_copies,
                 &mut actions,
                 &mut commands,
             );
@@ -1151,6 +1155,7 @@ fn drop_into_folder(
     dest: InventoryFolderKey,
     model: &InventoryModel,
     own_agent: Option<AgentKey>,
+    folder_copies: &mut crate::inventory_actions::PendingFolderCopies,
     actions: &mut MessageWriter<InventoryUiAction>,
     commands: &mut MessageWriter<SlCommand>,
 ) {
@@ -1202,15 +1207,13 @@ fn drop_into_folder(
             }
             (FolderDrop::Copy, MenuTarget::Folder(folder)) => {
                 // A dragged Library folder deep-copies into the drop target.
-                for command in crate::inventory_actions::deep_copy_commands(
-                    model,
+                commands.write(SlCommand(crate::inventory_actions::begin_deep_copy(
                     folder.folder_id,
                     &folder.name,
                     dest,
                     own_agent,
-                ) {
-                    commands.write(SlCommand(command));
-                }
+                    folder_copies,
+                )));
                 commands.write(SlCommand(Command::QueryInventoryFolders));
                 query_folder_page(dest, commands);
             }

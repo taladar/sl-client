@@ -146,3 +146,102 @@ the check is the same on both.
 | `inventory-cache-skip` | passed (2026-10-21) | passed (2026-10-21) |
 | `inventory-tree-crawl` | passed (2026-10-21) | passed (2026-10-21) |
 | `library-tree-fetch` | passed (2026-10-21) | passed (2026-10-21) |
+
+## Changing inventory
+
+Measured on 2026-10-22 on aditi and the local OpenSim by the census
+`inventory-mutations` (two avatars), run ten times on aditi and eight on
+OpenSim while it grew, and held to the tables below on the last two runs of
+each. Every operation is sent **raw** — the UDP message with the circuit probe
+on, the AIS3 request with `reqwest` — because the client routes several of
+them per grid; each is then read back through the folder fetch and the item
+fetch, and what arrived in a five-second window after it is recorded by name
+and road. The census makes two run folders, `F` and `G`, a notecard in `F`, and
+copies of it for the removal legs, and takes them all away again; a run costs
+nothing.
+
+The census holds both live grids to these answers as `Measured` constants
+(`sl-conformance/src/cases/inventory_mutations.rs`). The fake grid is not held
+to it yet: its serving the item mutations, the Trash gating and the gives is
+`server-fake-grid-inventory-udp-mutations`.
+
+### Items over UDP
+
+| operation | Second Life | OpenSim |
+| --- | --- | --- |
+| `CreateInventoryItem`, a notecard in `F` | answered with `UpdateCreateInventoryItem` (UDP, the callback id echoed); `F` +1; base and owner mask `0x7fffffff`; **no asset** (nil) | the same answer; `F` +1; base and owner mask `0x0009e000`; an asset |
+| `CopyInventoryItem` into `F` | copied; answered with `BulkUpdateInventory` over the **event queue**; `F` +1 | copied; answered with `UpdateCreateInventoryItem` (UDP, the callback id echoed); `F` +1 |
+| `UpdateInventoryItem`, a new name and description | applied; nothing pushed; `F` +1 | the same |
+| `ChangeInventoryItemFlags` (flags 1) | the flags read back 0; nothing pushed; `F` **+1** | the flags read back 0; nothing pushed; `F` unchanged — OpenSim has no handler for the message |
+| `MoveInventoryItem` from `F` to `G` | moved; `BulkUpdateInventory` over the event queue; `F` and `G` +1 each | the same |
+| `LinkInventoryItem` to the notecard, into `G` | **refused**: an `AlertMessage` "Cannot create requested inventory." (UDP); nothing made | made, type 24 naming the notecard; `UpdateCreateInventoryItem` (UDP, no callback id); `G` +1 |
+| `LinkInventoryItem` into the Current Outfit Folder | refused the same way | made, as into `G` |
+| a notecard body saved with `UpdateNotecardAgentInventory` | saved | saved |
+
+Second Life refuses the UDP link in every folder, not only the Current Outfit
+Folder; the client links through AIS3 there. A notecard made on Second Life
+names no asset until a body is saved, and neither road links to such an item
+(AIS3 answers `400` "Cannot link to items with a NULL asset_id."), so the
+census saves a body before its link legs.
+
+### Removals and the Trash
+
+| operation | Second Life | OpenSim |
+| --- | --- | --- |
+| `RemoveInventoryItem` of an item outside the Trash | **removed**; its folder +1, the Trash unchanged; nothing pushed | the same |
+| `RemoveInventoryItem` of an item in the Trash | removed; the Trash +1; nothing pushed | the same |
+| `RemoveInventoryFolder` of a folder outside the Trash | **refused silently**: still under the root, no version moves | the same |
+| `PurgeInventoryDescendents` of a folder outside the Trash | **refused silently**: every item left, the folder's version unchanged | the same |
+| `PurgeInventoryDescendents` of a folder in the Trash | emptied; the folder +1; nothing pushed | the same |
+| `RemoveInventoryObjects`, a folder and an item, outside the Trash | the **item removed, the folder left** | the same |
+| `RemoveInventoryObjects` in the Trash | both removed | the same |
+
+So the Trash gates a folder's removal and an emptying on both grids, and an
+item's removal on neither. No grid pushes anything after a removal: a viewer
+that sent one has already changed its own model.
+
+### AIS3 (Second Life only)
+
+Every answer carries the item or folder itself at the top level (with
+`_base_uri` and `_links`) beside the keys that say what changed, and nothing
+is pushed over UDP or the event queue after any of them.
+
+| request | answer | what its keys say |
+| --- | --- | --- |
+| `POST /category/<root>` with `categories` | `201` | `_created_categories` [the folder], `_created_items` [], `_embedded` the new folder, `_updated_category_versions` {root +1} |
+| the same, naming a `category_id` | `201`, the folder made under **another id** | as above: AIS3 mints a folder's id and ignores one the request names |
+| `PATCH /category/<id>` with `name` | `200` | `_updated_categories` [the folder], `_updated_category_versions` {**the parent** +1} |
+| `PATCH /item/<id>` with `name`, `desc` | `200`, the item | `_updated_items` [the item], `_updated_category_versions` {its folder +1} |
+| `PATCH /item/<id>` with the **whole item** (the reference's `asLLSD` without `asset_id`, the unchanged `parent_id` included) | `200`; name, description and next-owner mask all applied | as above |
+| `POST /category/<id>` with `links` | `201` | `_created_items` [the link], `_embedded` {links}, `_updated_category_versions` {the folder +1} |
+| `PUT /category/<id>/links`, a bare array of one link | `201` | `_updated_items` [the folder's existing link to the same item], `_linked_ids`, `_category_items_removed` [], `_created_items` [] — it rewrote the existing link rather than making one |
+| `DELETE /item/<id>` outside the Trash | `200`, **removed** | `_category_items_removed` [the item], `_active_gestures_removed`, `_attachments_removed`, `_broken_links_removed`, `_wearables_removed`, `_updated_category_versions` {its folder +1} |
+| `DELETE /category/<id>/children` outside the Trash | `200`, **emptied** | `_category_items_removed` [each item], `_categories_removed` [], `_total_items_removed`, and the four above |
+| `DELETE /category/<id>` outside the Trash | `200`, removed | `_categories_removed` [the folder], `_updated_category_versions` {the parent +1}, and the rest above |
+| `COPY` (`LibraryAPIv3`) of a Library folder, `Destination` `F`, `?tid=…,depth=0` | `201`; a copy of the folder and its two items in `F` | `_created_categories` [the copy], `_created_items` [two], `_moved_items` [], `_removed_items` [], `_top_category_id`, `_updated_category_versions` {`F` +1} |
+
+AIS3 removes and empties **outside the Trash**, where the UDP messages refuse.
+A slam with two links to one item is refused `400` "Duplicate links or invalid
+link type."; a map `{ links: [...] }` instead of the bare array, `400` "List of
+links required.".
+
+### Gives
+
+The no-copy give the task asked about — a notecard whose next owner may not
+copy it, given by B to A and given back — was measured on OpenSim; on aditi
+the first gift never arrived (below).
+
+| step | Second Life | OpenSim |
+| --- | --- | --- |
+| A gives B a notecard (`give-inventory`'s shape), B accepts | filed in B's Notecards | filed in B's Notecards |
+| B gives A a notecard, A accepts into its Notecards | the offer arrives; **nothing is filed and nothing pushed** in 30 s — the same for a full-permission control | filed in A's Notecards; nothing pushed to A |
+| A's copy of the no-copy notecard | not received | owner may not copy |
+| A gives it back: where A's copy is when the offer is made | not received | **gone** at once — OpenSim files B's copy at offer time |
+| what A is told when B accepts | not received | `ImprovedInstantMessage` `InventoryAccepted` (UDP) |
+| B holds it again | not received | yes |
+
+The aditi failure is the primary test account's, not the census's:
+`give-inventory` with its roles swapped (`--avatar secondary --secondary
+primary`) fails the same way, while the same case as written (the primary
+giving) passes. Why that account files no accepted gift is
+`gridspec-inventory-offers`' to find out.

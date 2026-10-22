@@ -233,6 +233,7 @@ impl Plugin for InventoryPlugin {
             .init_resource::<SkeletonMergeBudget>()
             .init_resource::<InventorySelection>()
             .init_resource::<InlineRename>()
+            .init_resource::<crate::inventory_actions::PendingFolderCopies>()
             .init_resource::<PendingReveal>()
             .init_resource::<SuffixStyle>()
             .add_message::<InventoryUiAction>()
@@ -249,6 +250,7 @@ impl Plugin for InventoryPlugin {
                 (
                     refresh_inventory_on_show,
                     ingest_inventory,
+                    crate::inventory_actions::follow_created_folders.after(ingest_inventory),
                     drain_skeleton_merge,
                     bridge_tab_selection,
                     route_gear_menu,
@@ -1784,6 +1786,11 @@ pub(crate) struct InlineRename {
     /// A rename asked for but not yet started — the row may not be on screen
     /// (or, for a freshly created folder, not in the model) yet.
     pub(crate) pending: Option<RowKey>,
+    /// The id a New Folder's create asked for, while the grid has not yet
+    /// said which id it gave the folder (Second Life's AIS3 mints its own):
+    /// the rename starts on the answer
+    /// ([`follow_created_folders`](crate::inventory_actions::follow_created_folders)).
+    pub(crate) awaiting_folder: Option<InventoryFolderKey>,
     /// The live in-row editor.
     active: Option<ActiveRename>,
 }
@@ -5138,7 +5145,7 @@ mod tests {
     /// items (copyable copied, no-copy skipped, links re-linked), then the
     /// sub-folders recursively into the fresh parent.
     #[test]
-    fn deep_copy_plans_folders_items_and_links() {
+    fn deep_copy_plans_folders_items_and_links() -> Result<(), String> {
         use sl_client_bevy::Command;
         let mut model = sample_model();
         let clothing = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(2));
@@ -5152,34 +5159,37 @@ mod tests {
         model.set_items(clothing, &[copyable.clone(), no_copy, link]);
 
         let dest = sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0xD0));
-        let plan = crate::inventory_actions::deep_copy_commands(
-            &model,
+        let mut pending = crate::inventory_actions::PendingFolderCopies::default();
+        let create = crate::inventory_actions::begin_deep_copy(
             clothing,
             "Clothing",
             dest,
             Some(sl_client_bevy::AgentKey::from(
                 sl_client_bevy::Uuid::from_u128(1),
             )),
+            &mut pending,
         );
-        // Create-the-folder first, into the destination.
-        assert!(matches!(
-            plan.first(),
-            Some(Command::CreateInventoryFolder { parent_id, name, .. })
-                if *parent_id == dest && name == "Clothing"
-        ));
-        let new_folder = plan
-            .iter()
-            .find_map(|command| match command {
-                Command::CreateInventoryFolder {
-                    folder_id,
-                    parent_id,
-                    ..
-                } if *parent_id == dest => Some(*folder_id),
-                _other => None,
-            })
-            .unwrap_or_else(|| {
-                sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::nil())
-            });
+        // Create-the-folder first, into the destination; nothing else until
+        // the grid has made it.
+        let Command::CreateInventoryFolder {
+            folder_id: requested,
+            parent_id,
+            name,
+            ..
+        } = create
+        else {
+            return Err(format!("the copy did not begin with a create: {create:?}"));
+        };
+        assert_eq!((parent_id, name.as_str()), (dest, "Clothing"));
+        // The grid may give the folder another id (Second Life's AIS3 mints
+        // its own): the rest of the level goes into that one.
+        let new_folder =
+            sl_client_bevy::InventoryFolderKey::from(sl_client_bevy::Uuid::from_u128(0xE0));
+        let level = pending
+            .take(requested)
+            .ok_or("the copy's level is not waiting on its folder")?;
+        let plan =
+            crate::inventory_actions::continue_deep_copy(&model, level, new_folder, &mut pending);
         // Exactly one item copy (the copyable one), into the fresh folder.
         let copies: Vec<_> = plan
             .iter()
@@ -5199,6 +5209,7 @@ mod tests {
             Command::LinkInventoryItem(link_command)
                 if link_command.folder_id == new_folder
         )));
+        Ok(())
     }
 
     /// An active type filter narrows the tree like a search: passing items

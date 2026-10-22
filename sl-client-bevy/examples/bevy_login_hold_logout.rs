@@ -189,6 +189,12 @@ fn on_events(
             SlSessionEvent::InventoryItemCreated { item, .. } => {
                 info!("inventory item created: {}", item.name);
             }
+            SlSessionEvent::InventoryFolderCreated { requested, folder } => {
+                info!(
+                    "inventory folder created: {} (asked for {requested})",
+                    folder.folder_id
+                );
+            }
             SlSessionEvent::InventoryBulkUpdate { folders, items, .. } => {
                 info!(
                     "bulk inventory update: {} folder(s), {} item(s)",

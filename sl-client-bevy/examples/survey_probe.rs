@@ -165,6 +165,7 @@ fn on_events(
             | SlSessionEvent::InventoryDescendents { .. }
             | SlSessionEvent::InventoryItemCreated { .. }
             | SlSessionEvent::InventoryBulkUpdate { .. }
+            | SlSessionEvent::InventoryFolderCreated { .. }
             | SlSessionEvent::FriendList(_)
             | SlSessionEvent::FriendsOnline(_)
             | SlSessionEvent::FriendsOffline(_)

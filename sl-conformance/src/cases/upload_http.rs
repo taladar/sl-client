@@ -3201,15 +3201,14 @@ async fn thumbnail_legs(
         return Ok(());
     };
     // A folder of the case's own to give a thumbnail.
-    let folder = InventoryFolderKey::from(Uuid::new_v4());
-    session
-        .send(Command::CreateInventoryFolder {
-            folder_id: folder,
-            parent_id: InventoryFolderKey::from(destinations.root),
-            folder_type: FolderType::None,
-            name: census.name("thumbnail-folder"),
-        })
-        .await?;
+    // The id the grid gave it: AIS3 mints its own on Second Life.
+    let folder = crate::support::create_folder(
+        session,
+        InventoryFolderKey::from(destinations.root),
+        FolderType::None,
+        &census.name("thumbnail-folder"),
+    )
+    .await?;
     census.residue.folders.push(folder);
     let _heard = told(session, census.quiet).await?;
 

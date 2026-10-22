@@ -108,3 +108,17 @@ Acceptance: a record per savable asset class, on OpenSim and on aditi,
 saying whether a re-fetch returns the uploaded bytes and — where it does not
 — what changed; and [[test-fake-grid-asset-round-trip]] can state its own
 acceptance in terms of it instead of assuming an echo.
+
+## Since `gridspec-inventory-mutations` (2026-10-22)
+
+`Command::SaveInventoryAsset` still binds the saved bytes to the item with a
+UDP `UpdateInventoryItem` on every grid. The reference's `saveWearable` sends
+that update through `update_inventory_item`, which is AIS3's `PATCH
+/item/<id>` with the transaction as `hash_id` wherever AIS3 is granted, and
+the census found Second Life taking a whole-item `PATCH` and applying it
+(`book/src/gridspec/inventory.md` § Changing inventory). Measure what Second
+Life answers to each road for a save — the UDP update with a transaction, and
+the AIS3 `PATCH` with `hash_id` (`sl_proto::ais_item_update_body` already
+writes it) — and route the save's update the way the reference does
+(`Session::save_inventory_asset` sends both messages today; split it as
+`update_inventory_item` / `update_inventory_item_local` are split).

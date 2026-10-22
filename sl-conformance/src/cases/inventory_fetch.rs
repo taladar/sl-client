@@ -45,16 +45,19 @@ use std::time::{Duration, Instant};
 
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use sl_client_tokio::{
-    AnyMessage, CircuitProbe, Command, Diagnostic, Event, FolderType, InventoryFolderKey,
-    Reliability, Uuid,
+    AnyMessage, CircuitProbe, Command, Diagnostic, FolderType, InventoryFolderKey, Reliability,
+    Uuid,
 };
 use sl_wire::messages::{
-    FetchInventory, FetchInventoryAgentDataBlock, FetchInventoryDescendents,
-    FetchInventoryDescendentsAgentDataBlock, FetchInventoryDescendentsInventoryDataBlock,
-    FetchInventoryInventoryDataBlock, MoveInventoryFolder, MoveInventoryFolderAgentDataBlock,
-    MoveInventoryFolderInventoryDataBlock, MoveInventoryItem, MoveInventoryItemAgentDataBlock,
-    MoveInventoryItemInventoryDataBlock, RemoveInventoryFolder,
-    RemoveInventoryFolderAgentDataBlock, RemoveInventoryFolderFolderDataBlock,
+    CreateInventoryFolder, CreateInventoryFolderAgentDataBlock,
+    CreateInventoryFolderFolderDataBlock, FetchInventory, FetchInventoryAgentDataBlock,
+    FetchInventoryDescendents, FetchInventoryDescendentsAgentDataBlock,
+    FetchInventoryDescendentsInventoryDataBlock, FetchInventoryInventoryDataBlock,
+    MoveInventoryFolder, MoveInventoryFolderAgentDataBlock, MoveInventoryFolderInventoryDataBlock,
+    MoveInventoryItem, MoveInventoryItemAgentDataBlock, MoveInventoryItemInventoryDataBlock,
+    RemoveInventoryFolder, RemoveInventoryFolderAgentDataBlock,
+    RemoveInventoryFolderFolderDataBlock, UpdateInventoryFolder,
+    UpdateInventoryFolderAgentDataBlock, UpdateInventoryFolderFolderDataBlock,
 };
 use sl_wire::{Llsd, parse_llsd_xml};
 
@@ -72,22 +75,22 @@ use crate::support::REGION_TIMEOUT;
 const SOURCE: &str = "book/src/gridspec/inventory.md § Fetching (inventory-fetch, 2026-10-21)";
 
 /// The agent folder fetch.
-const FID2: &str = "FetchInventoryDescendents2";
+pub(crate) const FID2: &str = "FetchInventoryDescendents2";
 
 /// The Library folder fetch.
-const FLD2: &str = "FetchLibDescendents2";
+pub(crate) const FLD2: &str = "FetchLibDescendents2";
 
 /// The agent item fetch.
-const FI2: &str = "FetchInventory2";
+pub(crate) const FI2: &str = "FetchInventory2";
 
 /// The Library item fetch.
 const FL2: &str = "FetchLib2";
 
 /// AIS3 over the agent's tree.
-const AIS: &str = "InventoryAPIv3";
+pub(crate) const AIS: &str = "InventoryAPIv3";
 
 /// AIS3 over the Library.
-const LIBRARY_AIS: &str = "LibraryAPIv3";
+pub(crate) const LIBRARY_AIS: &str = "LibraryAPIv3";
 
 /// Every capability the census asks the seed about.
 const CAPABILITIES: [&str; 7] = [
@@ -101,23 +104,23 @@ const CAPABILITIES: [&str; 7] = [
 ];
 
 /// What a raw answer reads on a grid that grants no capability.
-const NO_CAPABILITY: &str = "no capability";
+pub(crate) const NO_CAPABILITY: &str = "no capability";
 
 /// How long to poll for the capabilities after region arrival: the seed fetch
 /// races the arrival.
-const CAP_WAIT: Duration = Duration::from_secs(20);
+pub(crate) const CAP_WAIT: Duration = Duration::from_secs(20);
 
 /// How long one HTTP answer may take.
-const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a UDP fetch is listened to.
-const UDP_WINDOW: Duration = Duration::from_secs(6);
+pub(crate) const UDP_WINDOW: Duration = Duration::from_secs(6);
 
 /// How long a mutation may take to show in the folder fetch.
-const SETTLE: Duration = Duration::from_secs(12);
+pub(crate) const SETTLE: Duration = Duration::from_secs(12);
 
 /// How often a settling mutation is re-read.
-const POLL: Duration = Duration::from_millis(750);
+pub(crate) const POLL: Duration = Duration::from_millis(750);
 
 /// How many folders one folder-fetch request names, as the reference batches.
 const BATCH: usize = 10;
@@ -830,16 +833,16 @@ impl GridTest for InventoryFetch {
 
 /// One raw HTTP answer.
 #[derive(Debug, Clone)]
-struct Raw {
+pub(crate) struct Raw {
     /// The status, or why there is none.
-    status: Result<u16, String>,
+    pub(crate) status: Result<u16, String>,
     /// The body, where it was LLSD.
-    body: Option<Llsd>,
+    pub(crate) body: Option<Llsd>,
 }
 
 impl Raw {
     /// The answer of a grid that grants no capability.
-    fn ungranted() -> Self {
+    pub(crate) fn ungranted() -> Self {
         Self {
             status: Err(NO_CAPABILITY.to_owned()),
             body: None,
@@ -847,7 +850,7 @@ impl Raw {
     }
 
     /// The status as a metric: the code, or the reason there is none.
-    fn status_metric(&self) -> String {
+    pub(crate) fn status_metric(&self) -> String {
         match &self.status {
             Ok(status) => status.to_string(),
             Err(reason) => reason.clone(),
@@ -855,7 +858,7 @@ impl Raw {
     }
 
     /// The keys of the body's top-level map, or what stands in for them.
-    fn top_keys(&self) -> String {
+    pub(crate) fn top_keys(&self) -> String {
         match (&self.status, &self.body) {
             (Err(reason), _) => reason.clone(),
             (Ok(_), Some(body)) => keys_of(body),
@@ -865,7 +868,7 @@ impl Raw {
 
     /// One line for the whole answer: status, top keys and, where the body
     /// names a refused entry, that entry's keys.
-    fn summary(&self, refused: &str) -> String {
+    pub(crate) fn summary(&self, refused: &str) -> String {
         let Ok(status) = &self.status else {
             return self.status_metric();
         };
@@ -970,22 +973,22 @@ struct Folder {
 }
 
 /// Everything the legs share.
-struct Census<'a> {
+pub(crate) struct Census<'a> {
     /// The avatar's session.
-    a: &'a mut Session,
+    pub(crate) a: &'a mut Session,
     /// The agent's id.
-    agent: Uuid,
+    pub(crate) agent: Uuid,
     /// The session id, for a raw message.
-    session_id: Uuid,
+    pub(crate) session_id: Uuid,
     /// The HTTP client.
-    http: reqwest::Client,
+    pub(crate) http: reqwest::Client,
     /// A tag naming this run's folders.
-    tag: String,
+    pub(crate) tag: String,
 }
 
 impl Census<'_> {
     /// POSTs `body` to the capability `name`, if granted.
-    async fn post(&self, name: &str, body: &Llsd) -> Raw {
+    pub(crate) async fn post(&self, name: &str, body: &Llsd) -> Raw {
         let Some(url) = self.a.cap(name) else {
             return Raw::ungranted();
         };
@@ -999,7 +1002,7 @@ impl Census<'_> {
     }
 
     /// GETs `suffix` under the capability `name`, if granted.
-    async fn get(&self, name: &str, suffix: &str) -> Raw {
+    pub(crate) async fn get(&self, name: &str, suffix: &str) -> Raw {
         let Some(url) = self.a.cap(name) else {
             return Raw::ungranted();
         };
@@ -1012,7 +1015,7 @@ impl Census<'_> {
 
     /// Sends `method` with an LLSD `body` to `suffix` under the capability
     /// `name`, if granted.
-    async fn send_llsd(
+    pub(crate) async fn send_llsd(
         &self,
         name: &str,
         method: reqwest::Method,
@@ -1033,7 +1036,7 @@ impl Census<'_> {
 
     /// An AIS3 `MOVE` of `suffix` to `destination` (the `Destination`
     /// header), if AIS3 is granted.
-    async fn move_method(&self, suffix: &str, destination: &str) -> Raw {
+    pub(crate) async fn move_method(&self, suffix: &str, destination: &str) -> Raw {
         let Some(url) = self.a.cap(AIS) else {
             return Raw::ungranted();
         };
@@ -1052,7 +1055,7 @@ impl Census<'_> {
     }
 
     /// The folder fetch of `folders`, all owned by `owner`, through `cap`.
-    async fn fetch_folders(&self, cap: &str, owner: Uuid, folders: &[Uuid]) -> Raw {
+    pub(crate) async fn fetch_folders(&self, cap: &str, owner: Uuid, folders: &[Uuid]) -> Raw {
         let entries = folders
             .iter()
             .map(|folder| {
@@ -1070,7 +1073,7 @@ impl Census<'_> {
     }
 
     /// The item fetch of `item`, owned by `owner`, through `cap`.
-    async fn fetch_item(&self, cap: &str, owner: Uuid, item: Uuid) -> Raw {
+    pub(crate) async fn fetch_item(&self, cap: &str, owner: Uuid, item: Uuid) -> Raw {
         let body = map([
             ("agent_id", Llsd::Uuid(self.agent)),
             (
@@ -1085,7 +1088,7 @@ impl Census<'_> {
     }
 
     /// The versions of `folders` through the agent's folder fetch.
-    async fn versions(&self, folders: &[Uuid]) -> HashMap<Uuid, i32> {
+    pub(crate) async fn versions(&self, folders: &[Uuid]) -> HashMap<Uuid, i32> {
         let raw = self.fetch_folders(FID2, self.agent, folders).await;
         listed_folders(raw.body.as_ref())
             .filter_map(|entry| {
@@ -1099,7 +1102,7 @@ impl Census<'_> {
 
     /// The names of the sub-folders the agent fetch lists under `folder`,
     /// with their ids.
-    async fn children(&self, folder: Uuid) -> Vec<(String, Uuid)> {
+    pub(crate) async fn children(&self, folder: Uuid) -> Vec<(String, Uuid)> {
         let raw = self.fetch_folders(FID2, self.agent, &[folder]).await;
         listed_folders(raw.body.as_ref())
             .flat_map(|entry| {
@@ -1119,7 +1122,7 @@ impl Census<'_> {
 
     /// The names and ids of the sub-folders AIS3 lists under `folder`, or
     /// `None` where AIS3 is not granted or gave no listing.
-    async fn ais_children(&self, folder: Uuid) -> Option<Vec<(String, Uuid)>> {
+    pub(crate) async fn ais_children(&self, folder: Uuid) -> Option<Vec<(String, Uuid)>> {
         self.a.cap(AIS)?;
         let raw = self
             .get(AIS, &format!("/category/{folder}/children?depth=0"))
@@ -1145,7 +1148,7 @@ impl Census<'_> {
 
     /// The versions of `folders` as AIS3 states them, one `GET` each; empty
     /// where AIS3 is not granted.
-    async fn ais_versions(&self, folders: &[Uuid]) -> HashMap<Uuid, i32> {
+    pub(crate) async fn ais_versions(&self, folders: &[Uuid]) -> HashMap<Uuid, i32> {
         let mut versions = HashMap::new();
         for folder in folders {
             let raw = self.get(AIS, &format!("/category/{folder}")).await;
@@ -1162,7 +1165,7 @@ impl Census<'_> {
     }
 
     /// The sub-folders under `folder` by `view`: AIS3, or the folder fetch.
-    async fn listing(&self, folder: Uuid, view: View) -> Vec<(String, Uuid)> {
+    pub(crate) async fn listing(&self, folder: Uuid, view: View) -> Vec<(String, Uuid)> {
         match view {
             View::Ais => self.ais_children(folder).await.unwrap_or_default(),
             View::Fetch => self.children(folder).await,
@@ -1171,7 +1174,7 @@ impl Census<'_> {
 
     /// Polls `folder`'s folder-fetch listing until `wanted` says it is
     /// right, or [`SETTLE`] passes; whether it came right.
-    async fn settle(
+    pub(crate) async fn settle(
         &self,
         folder: Uuid,
         wanted: impl Fn(&[(String, Uuid)]) -> bool + Send + Sync,
@@ -1180,7 +1183,7 @@ impl Census<'_> {
     }
 
     /// [`Self::settle`] by `view`.
-    async fn settle_by(
+    pub(crate) async fn settle_by(
         &self,
         folder: Uuid,
         view: View,
@@ -1199,17 +1202,17 @@ impl Census<'_> {
     }
 
     /// Lets the session take in what arrives for `window`.
-    async fn idle(&mut self, window: Duration) {
+    pub(crate) async fn idle(&mut self, window: Duration) {
         let _idle = self.a.wait_for(window, |_event| None::<()>).await;
     }
 
     /// A folder name of this run's.
-    fn name(&self, word: &str) -> String {
+    pub(crate) fn name(&self, word: &str) -> String {
         format!("conf-inv-{}-{word}", self.tag)
     }
 
     /// Sends a raw UDP message.
-    async fn send_raw(&self, message: AnyMessage) -> Result<(), TestFailure> {
+    pub(crate) async fn send_raw(&self, message: AnyMessage) -> Result<(), TestFailure> {
         self.a
             .send(Command::Send {
                 message: Box::new(message),
@@ -1221,7 +1224,10 @@ impl Census<'_> {
     /// Sends `message` raw and names the inventory datagrams that arrived in
     /// [`UDP_WINDOW`], or `nothing`, with how many arrived: how a listing is
     /// split into packets is the tree's, not the grid's.
-    async fn udp_answer(&mut self, message: AnyMessage) -> Result<(String, usize), TestFailure> {
+    pub(crate) async fn udp_answer(
+        &mut self,
+        message: AnyMessage,
+    ) -> Result<(String, usize), TestFailure> {
         let before = self.a.diagnostics().len();
         self.send_raw(message).await?;
         self.idle(UDP_WINDOW).await;
@@ -1331,7 +1337,7 @@ impl Census<'_> {
 
 /// Which listing a leg reads a folder through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum View {
+pub(crate) enum View {
     /// `FetchInventoryDescendents2`.
     Fetch,
     /// AIS3's children listing.
@@ -1339,7 +1345,7 @@ enum View {
 }
 
 /// Reads one HTTP answer.
-async fn answer(request: reqwest::RequestBuilder) -> Raw {
+pub(crate) async fn answer(request: reqwest::RequestBuilder) -> Raw {
     match request.send().await {
         Ok(response) => {
             let status = response.status().as_u16();
@@ -1360,7 +1366,7 @@ async fn answer(request: reqwest::RequestBuilder) -> Raw {
 }
 
 /// An LLSD map of `entries`.
-fn map<const N: usize>(entries: [(&str, Llsd); N]) -> Llsd {
+pub(crate) fn map<const N: usize>(entries: [(&str, Llsd); N]) -> Llsd {
     Llsd::Map(
         entries
             .into_iter()
@@ -1370,7 +1376,7 @@ fn map<const N: usize>(entries: [(&str, Llsd); N]) -> Llsd {
 }
 
 /// The sorted keys of an LLSD map, `,`-joined; `not a map` for anything else.
-fn keys_of(value: &Llsd) -> String {
+pub(crate) fn keys_of(value: &Llsd) -> String {
     value.as_map().map_or_else(
         || "not a map".to_owned(),
         |map| {
@@ -1385,7 +1391,7 @@ fn keys_of(value: &Llsd) -> String {
 }
 
 /// A UUID an LLSD value states, as a UUID or a string.
-fn uuid_of(value: &Llsd) -> Option<Uuid> {
+pub(crate) fn uuid_of(value: &Llsd) -> Option<Uuid> {
     match value {
         Llsd::Uuid(id) => Some(*id),
         Llsd::String(text) => Uuid::parse_str(text.trim()).ok(),
@@ -1394,7 +1400,7 @@ fn uuid_of(value: &Llsd) -> Option<Uuid> {
 }
 
 /// The id of a folder-fetch sub-folder entry, under either name a grid uses.
-fn category_id(category: &Llsd) -> Option<Uuid> {
+pub(crate) fn category_id(category: &Llsd) -> Option<Uuid> {
     category
         .get("category_id")
         .or_else(|| category.get("folder_id"))
@@ -1402,7 +1408,7 @@ fn category_id(category: &Llsd) -> Option<Uuid> {
 }
 
 /// The folder entries of a folder-fetch answer.
-fn listed_folders(body: Option<&Llsd>) -> impl Iterator<Item = &Llsd> {
+pub(crate) fn listed_folders(body: Option<&Llsd>) -> impl Iterator<Item = &Llsd> {
     body.and_then(|body| body.get("folders"))
         .and_then(Llsd::as_array)
         .unwrap_or_default()
@@ -1431,7 +1437,7 @@ fn differing_keys(a: &Llsd, b: &Llsd) -> String {
 /// The shape of an LLSD value as [`shape_of`] states it, but with every
 /// array named `array` rather than counted: how long a listing is belongs to
 /// the tree, not the grid.
-fn flat_shape(value: &Llsd) -> String {
+pub(crate) fn flat_shape(value: &Llsd) -> String {
     match value {
         Llsd::Map(map) => {
             let entries: BTreeMap<&String, &Llsd> = map.iter().collect();
@@ -1480,13 +1486,13 @@ fn entry_values(entry: &Llsd, agent: Uuid) -> String {
 }
 
 /// A count as a metric.
-fn count(value: usize) -> i64 {
+pub(crate) fn count(value: usize) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 /// A version step as a metric: how far `after` is from `before`, or
 /// `-1000` where either was not read.
-fn step(before: Option<i32>, after: Option<i32>) -> i64 {
+pub(crate) fn step(before: Option<i32>, after: Option<i32>) -> i64 {
     match (before, after) {
         (Some(before), Some(after)) => i64::from(after).saturating_sub(i64::from(before)),
         _ => -1000,
@@ -2300,9 +2306,9 @@ async fn ais(
 
 /// The folders the version legs made, by how they were made.
 #[derive(Debug, Default)]
-struct Made {
+pub(crate) struct Made {
     /// Every folder this run made, so the clean-up can find it.
-    folders: Vec<Uuid>,
+    pub(crate) folders: Vec<Uuid>,
 }
 
 /// Leg 7: what each change does to the versions, and the relogin.
@@ -2353,14 +2359,20 @@ async fn versions(
     // A folder over UDP.
     let udp_name = census.name("udp");
     let udp_id = Uuid::new_v4();
+    // Raw: the client's own command takes AIS3 where it is granted.
     census
-        .a
-        .send(Command::CreateInventoryFolder {
-            folder_id: InventoryFolderKey::from(udp_id),
-            parent_id: InventoryFolderKey::from(root),
-            folder_type: FolderType::None,
-            name: udp_name.clone(),
-        })
+        .send_raw(AnyMessage::CreateInventoryFolder(CreateInventoryFolder {
+            agent_data: CreateInventoryFolderAgentDataBlock {
+                agent_id: census.agent,
+                session_id: census.session_id,
+            },
+            folder_data: CreateInventoryFolderFolderDataBlock {
+                folder_id: udp_id,
+                parent_id: root,
+                r#type: FolderType::None.to_code(),
+                name: format!("{udp_name}\0").into_bytes(),
+            },
+        }))
         .await?;
     let listed = census
         .settle(root, |children| {
@@ -2380,25 +2392,25 @@ async fn versions(
 
     // A folder over the capability.
     let cap_name = census.name("cap");
-    census
-        .a
-        .send(Command::CreateInventoryCategory {
-            parent_id: InventoryFolderKey::from(root),
-            folder_type: -1,
-            name: cap_name.clone(),
-        })
-        .await?;
-    let cap_id = census
-        .a
-        .wait_for(HTTP_TIMEOUT, |event| match event {
-            Event::InventoryBulkUpdate { folders, .. } => folders
-                .iter()
-                .find(|folder| folder.name == cap_name)
-                .map(|folder| folder.folder_id.uuid()),
-            _ => None,
-        })
-        .await
-        .ok();
+    // Raw: the client's own command takes AIS3 where it is granted.
+    let answered = census
+        .send_llsd(
+            "CreateInventoryCategory",
+            reqwest::Method::POST,
+            "",
+            &sl_wire::build_create_inventory_category_request(
+                InventoryFolderKey::from(Uuid::new_v4()),
+                InventoryFolderKey::from(root),
+                -1,
+                &cap_name,
+            ),
+        )
+        .await;
+    let cap_id = answered
+        .body
+        .as_ref()
+        .and_then(|body| body.get("folder_id"))
+        .and_then(uuid_of);
     let listed = census
         .settle(root, |children| {
             children.iter().any(|(name, _id)| *name == cap_name)
@@ -2483,14 +2495,20 @@ async fn versions(
     if let Some(subject) = subject {
         let before = census.versions(&[subject]).await;
         let renamed = census.name("renamed");
+        // Raw: the client's own command takes AIS3 where it is granted.
         census
-            .a
-            .send(Command::UpdateInventoryFolder {
-                folder_id: InventoryFolderKey::from(subject),
-                parent_id: InventoryFolderKey::from(root),
-                folder_type: FolderType::None,
-                name: renamed.clone(),
-            })
+            .send_raw(AnyMessage::UpdateInventoryFolder(UpdateInventoryFolder {
+                agent_data: UpdateInventoryFolderAgentDataBlock {
+                    agent_id: census.agent,
+                    session_id: census.session_id,
+                },
+                folder_data: vec![UpdateInventoryFolderFolderDataBlock {
+                    folder_id: subject,
+                    parent_id: root,
+                    r#type: FolderType::None.to_code(),
+                    name: format!("{renamed}\0").into_bytes(),
+                }],
+            }))
             .await?;
         let listed = census
             .settle(root, |children| {
@@ -2774,7 +2792,7 @@ async fn versions(
 }
 
 /// The ids of the items the agent folder fetch lists in `folder`.
-async fn items_in(census: &Census<'_>, folder: Uuid) -> Vec<Uuid> {
+pub(crate) async fn items_in(census: &Census<'_>, folder: Uuid) -> Vec<Uuid> {
     let raw = census.fetch_folders(FID2, census.agent, &[folder]).await;
     listed_folders(raw.body.as_ref())
         .flat_map(|entry| {
@@ -2941,7 +2959,7 @@ async fn ais_view(
 
 /// Puts the run's folders that are left into the Trash and removes them, by
 /// the grid's own road: AIS3 where it is granted, UDP otherwise.
-async fn clean_up(
+pub(crate) async fn clean_up(
     census: &Census<'_>,
     made: &Made,
     root: Uuid,

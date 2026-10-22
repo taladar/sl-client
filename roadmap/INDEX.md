@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 339 |
-| blocked | 80 |
+| blocked | 79 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1410 |
+| done | 1411 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2072** |
@@ -1101,6 +1101,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-inventory-persists-across-logins`](ready/server-fake-grid-inventory-persists-across-logins.md)
   — Fake grid — keep an account's inventory, versions included, from one login
   to the next (blocked by `gridspec-inventory-fetch` (done))
+- [`server-fake-grid-inventory-udp-mutations`](ready/server-fake-grid-inventory-udp-mutations.md)
+  — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
+  `gridspec-inventory-mutations` (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
@@ -1148,8 +1151,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-inventory-mutations`](ready/gridspec-inventory-mutations.md) —
-  Inventory item and folder operations and their pushes on each grid
 - [`gridspec-inventory-offers`](ready/gridspec-inventory-offers.md) — Giving
   inventory, accepting and declining, and object gives on each grid
 - [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
@@ -1163,7 +1164,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (80)
+## blocked (79)
 
 ### viewer
 
@@ -1300,9 +1301,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-inventory-offers`](blocked/server-fake-grid-inventory-offers.md)
   — Fake grid — inventory offers, filing and object gives (blocked by
   `gridspec-inventory-offers`, `server-fake-grid-im-relay`)
-- [`server-fake-grid-inventory-udp-mutations`](blocked/server-fake-grid-inventory-udp-mutations.md)
-  — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
-  `gridspec-inventory-mutations`)
 - [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
   — Fake grid — enforce parcel access and push ban lines (blocked by
   `gridspec-parcel-access-and-ban-lines` (done),
@@ -1573,7 +1571,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1410)
+## done (1411)
 
 ### protocol
 
@@ -4625,6 +4623,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   messages, typing, busy replies and offline storage on each grid
 - [`gridspec-inventory-fetch`](done/gridspec-inventory-fetch.md) — Inventory
   skeleton, fetch caps, AIS3, the library and cache versions on each grid
+- [`gridspec-inventory-mutations`](done/gridspec-inventory-mutations.md) —
+  Inventory item and folder operations and their pushes on each grid
 - [`gridspec-land-transactions`](done/gridspec-land-transactions.md) — Buying,
   selling, deeding, abandoning land and passes on each grid
 - [`gridspec-landmarks-home`](done/gridspec-landmarks-home.md) — Landmarks and

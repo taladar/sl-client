@@ -70,6 +70,7 @@ pub mod instant_messages;
 pub mod inventory_cache_skip;
 pub mod inventory_fetch;
 pub mod inventory_item_ops;
+pub mod inventory_mutations;
 pub mod inventory_tree_crawl;
 pub mod keepalive_ping;
 pub mod kick_user;

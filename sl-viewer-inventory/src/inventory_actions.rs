@@ -2165,6 +2165,8 @@ struct InventoryStashes<'w> {
     settings_creations: ResMut<'w, PendingSettingsCreations>,
     /// The reveal a "Show in Main view" is waiting to perform.
     pending_reveal: ResMut<'w, crate::inventory::PendingReveal>,
+    /// The deep copies waiting for their folders to exist.
+    folder_copies: ResMut<'w, PendingFolderCopies>,
 }
 
 /// Everything a menu action raises or writes, bundled as one
@@ -2250,6 +2252,7 @@ fn handle_inventory_menu_actions(
         mut pending_creations,
         mut settings_creations,
         mut pending_reveal,
+        mut folder_copies,
     } = stashes;
     let InventoryMenuOut {
         mut ui_actions,
@@ -2400,15 +2403,13 @@ fn handle_inventory_menu_actions(
                     for entry in &entries {
                         if let (ClipboardMode::Copy, MenuTarget::Folder(folder)) = (mode, entry) {
                             // A copied folder pastes as a recursive deep copy.
-                            for command in deep_copy_commands(
-                                &model,
+                            commands.write(SlCommand(begin_deep_copy(
                                 folder.folder_id,
                                 &folder.name,
                                 dest,
                                 identity.agent_id,
-                            ) {
-                                commands.write(SlCommand(command));
-                            }
+                                &mut folder_copies,
+                            )));
                             commands.write(SlCommand(Command::QueryInventoryFolders));
                             query_folder_page(dest, &mut commands);
                         } else {
@@ -2935,56 +2936,101 @@ pub(crate) fn attach_point_of(action: &str) -> Option<AttachmentPoint> {
 /// handling.
 const LINK_ASSET_CODES: (i32, i32) = (24, 25);
 
-/// The commands of a **recursive folder copy** into `dest` — the reference's
-/// `copy_inventory_category`: create the destination folder first, then per
-/// folder copy its loaded items (a link is **re-linked** to its target, a
-/// no-copy item is **skipped**, everything else `CopyInventoryItem`s), then
-/// recurse into the sub-folders. Only **loaded** contents copy — the Copy
-/// action prefetches the subtree so a paste normally sees everything.
-pub(crate) fn deep_copy_commands(
-    model: &InventoryModel,
+/// One level of a deep copy waiting for its folder to exist on the grid: the
+/// folder it copies and how deep below the copy's top it sits.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CopyLevel {
+    /// The folder whose contents this level copies.
     source: InventoryFolderKey,
-    source_name: &str,
-    dest: InventoryFolderKey,
+    /// How far below the copied folder it sits.
+    depth: usize,
+    /// Our own agent, the owner a copy names for an item owned otherwise.
     own_agent: Option<AgentKey>,
-) -> Vec<Command> {
-    let mut out = Vec::new();
-    deep_copy_folder(model, source, 0, source_name, dest, own_agent, &mut out);
-    out
 }
 
-/// One level of [`deep_copy_commands`]'s walk, bounded by
-/// [`MAX_FOLDER_DEPTH`] like every other downward walk — this one would emit a
-/// *command per level*, so an unbounded descent would not merely overflow the
-/// stack, it would spend the batch on the way down.
-fn deep_copy_folder(
-    model: &InventoryModel,
+/// The levels of the **recursive folder copies** in flight, by the id their
+/// folder's create asked for — the reference's `copy_inventory_category`,
+/// which creates each folder and continues in the create's callback.
+///
+/// A level waits because the grid may not keep the id the viewer chose:
+/// Second Life's AIS3 mints a new folder's id itself, so the items cannot be
+/// addressed into it before the grid says what it is
+/// ([`SlSessionEvent::InventoryFolderCreated`]).
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PendingFolderCopies {
+    /// The waiting levels, by the id their folder's create asked for.
+    levels: HashMap<InventoryFolderKey, CopyLevel>,
+}
+
+impl PendingFolderCopies {
+    /// The level waiting on the folder whose create asked for `requested`,
+    /// taken out of the waiting set.
+    pub(crate) fn take(&mut self, requested: InventoryFolderKey) -> Option<CopyLevel> {
+        self.levels.remove(&requested)
+    }
+}
+
+/// Starts a recursive copy of `source` (named `source_name`) into `dest`:
+/// the create of the copy's top folder, whose level waits in `pending` until
+/// the grid has made it ([`continue_deep_copy`]).
+pub(crate) fn begin_deep_copy(
     source: InventoryFolderKey,
-    depth: usize,
     source_name: &str,
     dest: InventoryFolderKey,
     own_agent: Option<AgentKey>,
-    out: &mut Vec<Command>,
-) {
-    if depth >= MAX_FOLDER_DEPTH {
-        return;
-    }
-    // The UDP create lets the viewer pick the id, so the items can be
-    // addressed into the new folder in the same command batch.
-    let new_id = InventoryFolderKey::from(Uuid::new_v4());
-    out.push(Command::CreateInventoryFolder {
-        folder_id: new_id,
-        parent_id: dest,
+    pending: &mut PendingFolderCopies,
+) -> Command {
+    copy_level_create(
+        CopyLevel {
+            source,
+            depth: 0,
+            own_agent,
+        },
+        source_name,
+        dest,
+        pending,
+    )
+}
+
+/// The create of one level's folder under `parent`, the level noted in
+/// `pending` under the id the create asks for.
+fn copy_level_create(
+    level: CopyLevel,
+    name: &str,
+    parent: InventoryFolderKey,
+    pending: &mut PendingFolderCopies,
+) -> Command {
+    let requested = InventoryFolderKey::from(Uuid::new_v4());
+    let _previous = pending.levels.insert(requested, level);
+    Command::CreateInventoryFolder {
+        folder_id: requested,
+        parent_id: parent,
         folder_type: FolderType::None,
-        name: source_name.to_owned(),
-    });
-    let from_library = model.is_library(source);
-    for item in model.loaded_items_of(source) {
+        name: name.to_owned(),
+    }
+}
+
+/// The rest of a level once its folder exists as `created`: its loaded items
+/// copied in (a link is **re-linked** to its target, a no-copy item is
+/// **skipped**, everything else `CopyInventoryItem`s), then the create of
+/// each sub-folder, whose own level waits in `pending`. Only **loaded**
+/// contents copy — the Copy action prefetches the subtree so a paste normally
+/// sees everything. Bounded by [`MAX_FOLDER_DEPTH`] like every other downward
+/// walk.
+pub(crate) fn continue_deep_copy(
+    model: &InventoryModel,
+    level: CopyLevel,
+    created: InventoryFolderKey,
+    pending: &mut PendingFolderCopies,
+) -> Vec<Command> {
+    let mut out = Vec::new();
+    let from_library = model.is_library(level.source);
+    for item in model.loaded_items_of(level.source) {
         let (link_code, link_folder_code) = LINK_ASSET_CODES;
         if item.asset_type == AssetType::Other(link_code) {
             // A link re-links to its original target in the copy.
             out.push(Command::LinkInventoryItem(NewInventoryLink {
-                folder_id: new_id,
+                folder_id: created,
                 linked_id: InventoryItemOrFolderKey::Item(InventoryKey::from(item.asset_id)),
                 link_type: AssetType::Other(link_code),
                 inv_type: item.inv_type,
@@ -2996,7 +3042,7 @@ fn deep_copy_folder(
         if item.asset_type == AssetType::Other(link_folder_code) {
             // A folder link likewise re-links.
             out.push(Command::LinkInventoryItem(NewInventoryLink {
-                folder_id: new_id,
+                folder_id: created,
                 linked_id: InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(
                     item.asset_id,
                 )),
@@ -3014,29 +3060,66 @@ fn deep_copy_folder(
         }
         let owner = match item.owner {
             sl_client_bevy::OwnerKey::Agent(agent) => agent,
-            _other => own_agent.unwrap_or_else(|| AgentKey::from(Uuid::nil())),
+            _other => level
+                .own_agent
+                .unwrap_or_else(|| AgentKey::from(Uuid::nil())),
         };
         out.push(Command::CopyInventoryItem {
             old_agent_id: owner,
             old_item_id: item.item_id,
-            new_folder_id: new_id,
+            new_folder_id: created,
             new_name: String::new(),
         });
     }
-    let children: Vec<InventoryFolderKey> = model.child_folders_of(source).to_vec();
-    for child in children {
-        let child_name = model
-            .folder_info(child)
-            .map_or_else(String::new, |info| info.name.clone());
-        deep_copy_folder(
-            model,
-            child,
-            depth.saturating_add(1),
-            &child_name,
-            new_id,
-            own_agent,
-            out,
-        );
+    let depth = level.depth.saturating_add(1);
+    if depth < MAX_FOLDER_DEPTH {
+        let children: Vec<InventoryFolderKey> = model.child_folders_of(level.source).to_vec();
+        for child in children {
+            let child_name = model
+                .folder_info(child)
+                .map_or_else(String::new, |info| info.name.clone());
+            out.push(copy_level_create(
+                CopyLevel {
+                    source: child,
+                    depth,
+                    own_agent: level.own_agent,
+                },
+                &child_name,
+                created,
+                pending,
+            ));
+        }
+    }
+    out
+}
+
+/// Carries on the work that waits for a folder to exist on the grid
+/// ([`SlSessionEvent::InventoryFolderCreated`]): the next level of a deep
+/// copy, and the inline rename a New Folder starts in — under the id the
+/// grid gave the folder, which Second Life's AIS3 mints itself.
+pub(crate) fn follow_created_folders(
+    mut events: MessageReader<SlEvent>,
+    model: Res<InventoryModel>,
+    mut pending: ResMut<PendingFolderCopies>,
+    mut rename: ResMut<crate::inventory::InlineRename>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    for event in events.read() {
+        let SlSessionEvent::InventoryFolderCreated { requested, folder } = &event.0 else {
+            continue;
+        };
+        let created = folder.folder_id;
+        if rename.awaiting_folder == Some(*requested) {
+            rename.awaiting_folder = None;
+            rename.pending = Some(RowKey::Folder(created));
+        }
+        if let Some(level) = pending.take(*requested) {
+            for command in continue_deep_copy(&model, level, created, &mut pending) {
+                commands.write(SlCommand(command));
+            }
+            commands.write(SlCommand(Command::QueryInventoryFolders));
+            query_folder_page(created, &mut commands);
+        }
     }
 }
 
@@ -3497,10 +3580,11 @@ fn dispatch_create(
     }
     match action {
         "new-folder" => {
-            // The UDP create lets the viewer pick the id, so the fresh
-            // folder can be put straight into **inline rename** (the
-            // reference's new-folder-starts-editing behaviour) once the
-            // refreshed skeleton shows it under its (expanded) parent.
+            // The fresh folder goes into **inline rename** (the reference's
+            // new-folder-starts-editing behaviour) once the grid has made it
+            // — under the id the grid gave it, which Second Life's AIS3
+            // mints itself ([`follow_created_folders`]) — and the refreshed
+            // skeleton shows it under its (expanded) parent.
             let folder_id = InventoryFolderKey::from(Uuid::new_v4());
             commands.write(SlCommand(Command::CreateInventoryFolder {
                 folder_id,
@@ -3510,7 +3594,7 @@ fn dispatch_create(
             }));
             commands.write(SlCommand(Command::QueryInventoryFolders));
             ui_actions.write(crate::inventory::InventoryUiAction::ExpandFolder(dest));
-            rename.pending = Some(RowKey::Folder(folder_id));
+            rename.awaiting_folder = Some(folder_id);
             true
         }
         "new-script" => {

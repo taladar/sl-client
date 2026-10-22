@@ -113,6 +113,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::login_refusals::LoginRefusals),
         Box::new(crate::cases::login_buddy_list::LoginBuddyList),
         Box::new(crate::cases::inventory_fetch::InventoryFetch),
+        Box::new(crate::cases::inventory_mutations::InventoryMutations),
         Box::new(crate::cases::inventory_tree_crawl::InventoryTreeCrawl),
         Box::new(crate::cases::library_tree_fetch::LibraryTreeFetch),
         Box::new(crate::cases::inventory_item_ops::InventoryItemOps),

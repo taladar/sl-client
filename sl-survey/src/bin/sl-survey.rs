@@ -632,6 +632,7 @@ impl Survey {
             | Event::InventoryDescendents { .. }
             | Event::InventoryItemCreated { .. }
             | Event::InventoryBulkUpdate { .. }
+            | Event::InventoryFolderCreated { .. }
             | Event::FriendList(_)
             | Event::FriendsOnline(_)
             | Event::FriendsOffline(_)

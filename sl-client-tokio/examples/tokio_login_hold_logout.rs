@@ -237,6 +237,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::InventoryItemCreated { item, .. } => {
                 info!("inventory item created: {}", item.name);
             }
+            Event::InventoryFolderCreated { requested, folder } => {
+                info!(
+                    "inventory folder created: {} (asked for {requested})",
+                    folder.folder_id
+                );
+            }
             Event::InventoryBulkUpdate { folders, items, .. } => {
                 info!(
                     "bulk inventory update: {} folder(s), {} item(s)",

@@ -119,21 +119,15 @@ where
 
 /// Create a UDP folder under `parent` (the same fire-and-forget
 /// `CreateInventoryFolder` `ais3-folder-lifecycle` uses for its scaffolding), and
-/// poll until the grid reflects it. Returns the new folder's (client-minted) key.
+/// poll until the grid reflects it. Returns the new folder's key, as the grid
+/// gave it.
 async fn make_folder(
     session: &mut Session,
     parent: InventoryFolderKey,
     name: &str,
 ) -> Result<InventoryFolderKey, TestFailure> {
-    let folder_id = InventoryFolderKey::from(Uuid::new_v4());
-    session
-        .send(Command::CreateInventoryFolder {
-            folder_id,
-            parent_id: parent,
-            folder_type: FolderType::None,
-            name: name.to_owned(),
-        })
-        .await?;
+    // The id the grid gave it: AIS3 mints its own on Second Life.
+    let folder_id = crate::support::create_folder(session, parent, FolderType::None, name).await?;
     // Confirm via the folder's appearance under its parent.
     let wanted = folder_id;
     poll_subfolder(session, parent, wanted, "new working folder did not appear").await?;

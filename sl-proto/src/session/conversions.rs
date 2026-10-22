@@ -7564,6 +7564,82 @@ pub(crate) fn inventory_folder_to_llsd(folder: &InventoryFolder) -> Llsd {
     ])
 }
 
+/// The AIS3 `PATCH /item/<id>` body that writes `item`'s fields — the
+/// reference viewer's `update_inventory_item` on a grid with AIS3, which sends
+/// the whole item (`LLInventoryItem::asLLSD`) with its `asset_id` taken out
+/// and, for an item whose asset a transaction replaces, the transaction as
+/// `hash_id`.
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange)
+/// if the item's L$ sale price exceeds the signed 32-bit range.
+pub fn ais_item_update_body(
+    item: &InventoryItem,
+    transaction_id: crate::TransactionId,
+) -> Result<String, sl_wire::WireError> {
+    let mut llsd = inventory_item_to_llsd(item)?;
+    if let Llsd::Map(map) = &mut llsd {
+        let _asset = map.remove("asset_id");
+        if !transaction_id.get().is_nil() {
+            let _previous = map.insert("hash_id".to_owned(), Llsd::Uuid(transaction_id.get()));
+        }
+    }
+    Ok(llsd.to_llsd_xml())
+}
+
+/// The legacy UDP `UpdateInventoryItem` that writes `item`'s fields, as the
+/// reference packs it (`LLInventoryItem::packMessage`, with the item's CRC).
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange)
+/// if the item's L$ sale price exceeds the signed 32-bit range.
+pub fn update_inventory_item_message(
+    agent_id: AgentKey,
+    session_id: Uuid,
+    item: &InventoryItem,
+    transaction_id: Uuid,
+    callback_id: crate::bookkeeping_ids::InventoryCallbackId,
+) -> Result<sl_wire::messages::AnyMessage, sl_wire::WireError> {
+    use sl_wire::messages::{
+        AnyMessage, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
+        UpdateInventoryItemInventoryDataBlock,
+    };
+    let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+    Ok(AnyMessage::UpdateInventoryItem(UpdateInventoryItem {
+        agent_data: UpdateInventoryItemAgentDataBlock {
+            agent_id: agent_id.uuid(),
+            session_id,
+            transaction_id,
+        },
+        inventory_data: vec![UpdateInventoryItemInventoryDataBlock {
+            item_id: item.item_id.uuid(),
+            folder_id: item.folder_id.uuid(),
+            callback_id: callback_id.get(),
+            creator_id: item.creator_id.uuid(),
+            owner_id,
+            group_id,
+            base_mask: item.permissions.base.bits(),
+            owner_mask: item.permissions.owner.bits(),
+            group_mask: item.permissions.group.bits(),
+            everyone_mask: item.permissions.everyone.bits(),
+            next_owner_mask: item.permissions.next_owner.bits(),
+            group_owned: item.owner.is_group(),
+            transaction_id,
+            r#type: item.item_type,
+            inv_type: item.inv_type,
+            flags: item.flags,
+            sale_type: item.sale_type,
+            sale_price: crate::types::linden_price_to_wire("SalePrice", item.sale_price.as_ref())?,
+            name: with_nul(&item.name),
+            description: with_nul(&item.description),
+            creation_date: item.creation_date,
+            crc: inventory_item_crc(item, item.folder_id.uuid())?,
+        }],
+    }))
+}
+
 /// Serializes an [`InventoryItem`] as an AIS-shaped `items` entry with the nested
 /// `permissions` and `sale_info` maps (inverse of [`inventory_item_from_llsd`]).
 pub(crate) fn inventory_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_wire::WireError> {
