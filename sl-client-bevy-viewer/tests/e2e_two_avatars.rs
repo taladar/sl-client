@@ -193,6 +193,69 @@ mod test {
         }
     }
 
+    // ---- An object's inventory offer -----------------------------------------
+
+    /// The template an inventory offer's card reports as.
+    const INVENTORY_OFFER: &str = "UserGiveItem";
+
+    /// An object's offer of a notecard to viewer `label`, as both grids send
+    /// one (`book/src/gridspec/inventory.md` § Giving): from the object's
+    /// owner, under the object's name, with the asset type alone in the
+    /// bucket — nothing is in the recipient's inventory to name yet.
+    fn object_offer(stage: &Stage, label: &str, id: Uuid) -> Result<InstantMessage, BodyError> {
+        let owner = AgentKey::from(Uuid::from_u128(STRANGER));
+        Ok(InstantMessage {
+            dialog: ImDialog::TaskInventoryOffered,
+            id,
+            binary_bucket: vec![7],
+            ..im_from(stage, label, owner, "Gift Box", "'A Notecard'")?
+        })
+    }
+
+    /// **An object's offer**: its card shows, and Accept and Decline reach
+    /// the grid as the task dialogs the reference answers an object with
+    /// (`IM_TASK_INVENTORY_ACCEPTED` / `_DECLINED`), naming the offer's id.
+    /// The client used to read an offer only with an id in its bucket, so an
+    /// object's raised no card at all.
+    #[test]
+    fn an_objects_offer_raises_a_card_and_is_answered_as_an_objects() -> Result<(), TestError> {
+        stage("object_offer_card", &["Alpha"])
+            .needs(Need::GridControl)
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let owner = AgentKey::from(Uuid::from_u128(STRANGER));
+                let mut heard = stage.agent("Alpha").await?.events();
+                for (id, button, dialog) in [
+                    (
+                        Uuid::from_u128(0x0bec_7001),
+                        "Accept",
+                        ImDialog::TaskInventoryAccepted,
+                    ),
+                    (
+                        Uuid::from_u128(0x0bec_7002),
+                        "Decline",
+                        ImDialog::TaskInventoryDeclined,
+                    ),
+                ] {
+                    deliver(stage, "Alpha", &object_offer(stage, "Alpha", id)?).await?;
+                    let _shown = alpha
+                        .expect_notification()
+                        .timeout(WAIT)
+                        .to_show(INVENTORY_OFFER)
+                        .await?;
+                    answer_offer(alpha, button).await?;
+                    let _answered =
+                        grid_hears(&mut heard, "answer to the object's offer", |event| {
+                            matches!(event, ServerEvent::InstantMessage(im)
+                            if im.dialog == dialog && im.to_agent_id == owner && im.id == id)
+                        })
+                        .await?;
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
     // ---- Teleport offers and requests --------------------------------------
 
     /// The template a teleport offer's card reports as.

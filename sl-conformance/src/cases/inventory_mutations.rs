@@ -148,8 +148,9 @@ const fn each(second_life: Answer, opensim: Answer) -> Measured<Answer> {
 /// under — generated from the last two runs on each live grid (aditi and the
 /// local OpenSim, 2026-10-22), every key of which held still between them.
 /// Second Life's `control_` and `nocopy_` keys are `Any`: the primary test
-/// account files no accepted gift on aditi, which is
-/// `gridspec-inventory-offers`' to explain.
+/// account's notecard gifts are filed in a folder Second Life no longer has
+/// (`inventory-offers`, `book/src/gridspec/inventory.md` § Giving), which is
+/// the account's, not the grid's.
 const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "ais_copy_library_answer",
@@ -1486,7 +1487,7 @@ impl Run<'_, '_> {
 
 /// Saves a short body into the notecard `item` through the client's
 /// `UpdateInventoryAsset`; `saved`, or why not.
-async fn save_text(session: &mut Session, item: Uuid) -> Result<String, TestFailure> {
+pub(crate) async fn save_text(session: &mut Session, item: Uuid) -> Result<String, TestFailure> {
     let text = "sl-conformance inventory-mutations\n";
     let body = format!(
         "Linden text version 2\n{{\nLLEmbeddedItems version 1\n{{\ncount 0\n}}\nText length {}\n{}}}\n",

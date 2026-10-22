@@ -231,7 +231,10 @@ forms:
 - **Giving** — hand an item or folder to another avatar
   (`GiveInventory` / `GiveInventoryFolder`); incoming offers arrive as
   [instant messages](chat.md#instant-messages) and are accepted/declined with
-  `AcceptInventoryOffer` / `DeclineInventoryOffer`.
+  `AcceptInventoryOffer` / `DeclineInventoryOffer`. An agent's gift is filed
+  when the offer is made and its offer names it; an object's offer names only
+  the asset type and is answered with the task dialogs
+  ([Grid Behaviour](../gridspec/inventory.md#giving)).
 - **Links** — `LinkInventoryItem` creates a *link* item that points at an
   existing item **or** folder (the wire `OldItemID`), filed in a destination
   folder. The payload is a `NewInventoryLink`; the simulator allocates the link

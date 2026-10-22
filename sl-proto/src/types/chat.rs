@@ -311,6 +311,10 @@ pub enum ImDialog {
     InventoryDeclined,
     /// An inventory item offered by a task/object (`IM_TASK_INVENTORY_OFFERED`).
     TaskInventoryOffered,
+    /// An object's inventory offer was accepted (`IM_TASK_INVENTORY_ACCEPTED`).
+    TaskInventoryAccepted,
+    /// An object's inventory offer was declined (`IM_TASK_INVENTORY_DECLINED`).
+    TaskInventoryDeclined,
     /// A participant was added to a group/conference session
     /// (`IM_SESSION_INVITE` / OpenMetaverse `SessionAdd`).
     SessionAdd,
@@ -384,6 +388,8 @@ impl ImDialog {
             5 => Self::InventoryAccepted,
             6 => Self::InventoryDeclined,
             9 => Self::TaskInventoryOffered,
+            10 => Self::TaskInventoryAccepted,
+            11 => Self::TaskInventoryDeclined,
             13 => Self::SessionAdd,
             14 => Self::SessionOfflineAdd,
             15 => Self::SessionGroupStart,
@@ -421,6 +427,8 @@ impl ImDialog {
             Self::InventoryAccepted => 5,
             Self::InventoryDeclined => 6,
             Self::TaskInventoryOffered => 9,
+            Self::TaskInventoryAccepted => 10,
+            Self::TaskInventoryDeclined => 11,
             Self::SessionAdd => 13,
             Self::SessionOfflineAdd => 14,
             Self::SessionGroupStart => 15,
@@ -488,34 +496,44 @@ pub struct InstantMessage {
 impl InstantMessage {
     /// Decodes the inventory-offer descriptor from this message's binary bucket,
     /// for an [`ImDialog::InventoryOffered`] or [`ImDialog::TaskInventoryOffered`]
-    /// message. The bucket is `[asset-type byte] ++ [16-byte item/folder id]`
-    /// (a folder offer leads with [`AssetType::Folder`]); only the first entry is
-    /// returned. Returns `None` for any other dialog or a malformed bucket.
+    /// message.
+    ///
+    /// An agent's offer's bucket is `[asset-type byte] ++ [16-byte item/folder
+    /// id]` (a folder offer leads with [`AssetType::Folder`]). An object's
+    /// (`TaskInventoryOffered`) is the asset-type byte alone — both grids send
+    /// it so, and the reference (`llimprocessing.cpp`) reads it so: nothing is
+    /// in the recipient's inventory until the offer is accepted, so there is
+    /// no id to name. Returns `None` for any other dialog or a malformed
+    /// bucket.
     #[must_use]
     pub fn inventory_offer(&self) -> Option<InventoryOffer> {
-        if !matches!(
-            self.dialog,
-            ImDialog::InventoryOffered | ImDialog::TaskInventoryOffered
-        ) {
-            return None;
-        }
+        let from_task = match self.dialog {
+            ImDialog::InventoryOffered => false,
+            ImDialog::TaskInventoryOffered => true,
+            _ => return None,
+        };
         let type_byte = *self.binary_bucket.first()?;
-        let id_bytes: [u8; 16] = self.binary_bucket.get(1..17)?.try_into().ok()?;
         let asset_type = AssetType::from_code(i32::from(type_byte));
-        let id = Uuid::from_bytes(id_bytes);
-        // A whole-folder offer leads with `AssetType::Folder`; otherwise the id
-        // is a single inventory item.
-        let item_id = if matches!(asset_type, AssetType::Folder) {
-            InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(id))
-        } else {
-            InventoryItemOrFolderKey::Item(InventoryKey::from(id))
+        let item_id = match self.binary_bucket.get(1..17) {
+            Some(id_bytes) => {
+                let id = Uuid::from_bytes(id_bytes.try_into().ok()?);
+                // A whole-folder offer leads with `AssetType::Folder`;
+                // otherwise the id is a single inventory item.
+                Some(if matches!(asset_type, AssetType::Folder) {
+                    InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(id))
+                } else {
+                    InventoryItemOrFolderKey::Item(InventoryKey::from(id))
+                })
+            }
+            None if from_task && self.binary_bucket.len() == 1 => None,
+            None => return None,
         };
         Some(InventoryOffer {
             asset_type,
             item_id,
             transaction_id: self.id,
             from_agent_id: self.from_agent_id,
-            from_task: matches!(self.dialog, ImDialog::TaskInventoryOffered),
+            from_task,
         })
     }
 
@@ -863,8 +881,9 @@ pub struct InventoryOffer {
     /// The offered asset's class ([`AssetType::Folder`] for a whole folder).
     pub asset_type: AssetType,
     /// The offered item's id, or — for a folder offer ([`AssetType::Folder`]) —
-    /// the offered folder's id, typed accordingly.
-    pub item_id: InventoryItemOrFolderKey,
+    /// the offered folder's id, typed accordingly; `None` for an object's offer,
+    /// which names no id (its bucket is the asset type alone).
+    pub item_id: Option<InventoryItemOrFolderKey>,
     /// The offer's transaction id (the IM's `id`), echoed back when replying.
     pub transaction_id: Uuid,
     /// The agent (or, for a task offer, the object owner) that made the offer.
@@ -874,16 +893,52 @@ pub struct InventoryOffer {
 }
 
 impl InventoryOffer {
-    /// The binary bucket of the [`ImDialog::InventoryOffered`] instant message
-    /// that makes this offer — `[asset-type byte] ++ [16-byte id]` — the
-    /// inverse of [`InstantMessage::inventory_offer`].
+    /// The binary bucket of the instant message that makes this offer —
+    /// `[asset-type byte] ++ [16-byte id]` for an agent's, the asset-type byte
+    /// alone for an object's that names no id — the inverse of
+    /// [`InstantMessage::inventory_offer`].
     ///
     /// # Errors
     ///
     /// [`sl_wire::WireError::ValueOutOfRange`] for an asset type with no
     /// one-byte code.
     pub fn binary_bucket(&self) -> Result<Vec<u8>, sl_wire::WireError> {
-        crate::session::conversions::inventory_offer_bucket(self.asset_type, self.item_id.uuid())
+        match self.item_id {
+            Some(id) => {
+                crate::session::conversions::inventory_offer_bucket(self.asset_type, id.uuid())
+            }
+            None => {
+                crate::session::conversions::inventory_offer_bucket(self.asset_type, Uuid::nil())
+                    .map(|mut bucket| {
+                        bucket.truncate(1);
+                        bucket
+                    })
+            }
+        }
+    }
+
+    /// The dialog that accepts this offer: [`ImDialog::TaskInventoryAccepted`]
+    /// for an object's, [`ImDialog::InventoryAccepted`] for an agent's — the
+    /// offer's dialog plus one, as the reference's `sendReceiveResponse` sends.
+    #[must_use]
+    pub const fn accept_dialog(&self) -> ImDialog {
+        if self.from_task {
+            ImDialog::TaskInventoryAccepted
+        } else {
+            ImDialog::InventoryAccepted
+        }
+    }
+
+    /// The dialog that declines this offer: [`ImDialog::TaskInventoryDeclined`]
+    /// for an object's, [`ImDialog::InventoryDeclined`] for an agent's — the
+    /// offer's dialog plus two.
+    #[must_use]
+    pub const fn decline_dialog(&self) -> ImDialog {
+        if self.from_task {
+            ImDialog::TaskInventoryDeclined
+        } else {
+            ImDialog::InventoryDeclined
+        }
     }
 }
 
@@ -1067,7 +1122,7 @@ mod tests {
         ] {
             let offer = super::InventoryOffer {
                 asset_type,
-                item_id,
+                item_id: Some(item_id),
                 transaction_id: Uuid::from_u128(0x7a),
                 from_agent_id: AgentKey::from(Uuid::from_u128(0x6009)),
                 from_task: false,
@@ -1338,7 +1393,7 @@ mod tests {
         // The bucket leads with `7` (`Notecard`), so the id is typed as an item.
         assert_eq!(
             offer.item_id,
-            InventoryItemOrFolderKey::Item(InventoryKey::from(item))
+            Some(InventoryItemOrFolderKey::Item(InventoryKey::from(item)))
         );
         assert_eq!(offer.asset_type, AssetType::Notecard);
         Ok(())
@@ -1373,7 +1428,9 @@ mod tests {
         assert_eq!(offer.asset_type, AssetType::Folder);
         assert_eq!(
             offer.item_id,
-            InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(folder))
+            Some(InventoryItemOrFolderKey::Folder(InventoryFolderKey::from(
+                folder
+            )))
         );
         Ok(())
     }

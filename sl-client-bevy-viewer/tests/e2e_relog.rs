@@ -658,8 +658,8 @@ mod test {
         let giver = AgentKey::from(Uuid::from_u128(GIVER));
         let offer = InventoryOffer {
             asset_type: AssetType::Notecard,
-            item_id: InventoryItemOrFolderKey::Item(InventoryKey::from(Uuid::from_u128(
-                GIVER ^ 0x17E,
+            item_id: Some(InventoryItemOrFolderKey::Item(InventoryKey::from(
+                Uuid::from_u128(GIVER ^ 0x17E),
             ))),
             transaction_id: Uuid::from_u128(GIVER ^ 0x7A),
             from_agent_id: giver,

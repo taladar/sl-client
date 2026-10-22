@@ -253,5 +253,92 @@ the first gift never arrived (below).
 The aditi failure is the primary test account's, not the census's:
 `give-inventory` with its roles swapped (`--avatar secondary --secondary
 primary`) fails the same way, while the same case as written (the primary
-giving) passes. Why that account files no accepted gift is
-`gridspec-inventory-offers`' to find out.
+giving) passes. [Giving](#giving) found why: Second Life files that account's
+notecard gifts in a folder it no longer has.
+
+## Giving
+
+Measured on 2026-10-22 on aditi (the Mauve sandbox) and the local OpenSim by
+the census `inventory-offers` (two avatars), run seven times on each grid
+while it grew and held to the tables below on the last two runs of each and a
+third with the table in place. A is the primary test account, B the
+secondary. Each give is answered as the reference viewer's legacy accept does
+(`FSUseLegacyInventoryAcceptMessages`): an accept names the folder of the
+gift's type, a decline names the Trash. Where the gift is is read through the
+item fetch (by the id the offer names) and through the folder fetch of every
+system folder (by its name), when the offer arrives and after the answer, and
+what each avatar was sent is recorded for a window after each step. The
+census holds both grids to these answers as `Measured` constants
+(`sl-conformance/src/cases/inventory_offers.rs`). The fake grid relays no
+inventory offer yet (`server-fake-grid-inventory-offers`).
+
+### An agent's gift
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| when the gift is filed | **when the offer is made**, in the recipient's folder of its type (Notecards, Objects; a folder under the root) | the same |
+| the offer's bucket | the asset type and the **recipient's copy's** id (17 bytes) | the same |
+| the offer's id | the giver's transaction | the recipient's copy's id |
+| what else the recipient is sent | nothing: the offer is the only word of the new item (a folder's offer comes after a `BulkUpdateInventory` naming the new folder) | a `BulkUpdateInventory` naming the copy, before the offer |
+| the giver's original | stays, for a copyable item and a no-copy one alike | the same |
+| an accept (`InventoryAccepted`, the folder in the bucket) | changes nothing; nobody is sent anything | changes nothing; the giver is sent `InventoryAccepted` |
+| a decline (`InventoryDeclined`, the Trash in the bucket) | **changes nothing**: the copy stays where it was filed; nobody is sent anything | the copy is moved to the Trash and announced (`UpdateCreateInventoryItem`); the giver is sent `InventoryDeclined` |
+| no answer at all | the copy stays where it was filed | the same |
+| a no-copy notecard, declined | as any decline: the copy stays, the giver keeps its original | as any decline |
+| an offer to an avatar that is offline | the copy is filed at once; the giver is told nothing; **no offer is kept**: none comes at the next login, nor when the offline messages are asked for | the copy is filed at once; the giver is alerted "User not online. Inventory has been saved"; the offer is kept and comes when the offline messages are asked for |
+
+So on both grids an agent's gift is already in the inventory when its offer
+arrives, and on Second Life nothing the recipient answers changes that: the
+reference viewer's Discard moves the copy to the Trash itself
+(`LLDiscardAgentOffer`), and its default accept sends nothing at all. Our
+viewer fetches the gift's folder when the offer arrives (Second Life sends no
+announcement of the copy) and moves a declined gift to the Trash after the
+decline.
+
+The primary test account is the exception that hid this: on Second Life its
+notecard gifts are filed in a folder that does not exist — the item fetch
+names its parent, AIS3 answers that folder `404` "Category not found", and
+the folder fetch answers it at version 0 — so they show nowhere. Its object
+gifts land in its Objects folder as anybody's. The census holds the rows of
+that give as anything on Second Life; it is the account's, not the grid's.
+
+### An object's gift
+
+A probe script in a cube of A's gives a notecard it holds with
+`llGiveInventory`, and a folder of it with `llGiveInventoryList`, to whom A
+names on a channel.
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| the offer | `TaskInventoryOffered` from the object's owner under the object's name, its bucket **the asset type alone** (1 byte), marked kept for an item (`Offline` 1) | the same |
+| the offer's text | the item's name in quotes and a SLurl of where the object stands | the item's name in quotes and "(Object is located at *region* *position*)"; a folder's name alone |
+| the offer's id | an id of its own | the recipient's copy's id |
+| when the gift is filed | **on the accept**, in the folder the accept names, announced (`UpdateCreateInventoryItem`) | **when the offer is made**, in the folder of its type, announced |
+| a decline | nothing is filed | the copy is moved to the Trash and announced |
+| an offer to the object's owner | an offer as to anybody | the same |
+| `llGiveInventoryList` | a `TaskInventoryOffered` of type 8; on the accept, the folder under the root, announced with a `BulkUpdateInventory` | the folder filed under the root at once; on the accept, a `BulkUpdateInventory` naming the folder and the item in it |
+| what the object's owner is told | nothing but the probe's own chat | the same |
+
+The reference reads an object's offer with a one-byte bucket and answers it
+with the task dialogs, `TaskInventoryAccepted` (the folder in the bucket) and
+`TaskInventoryDeclined`. Our client read an offer only with an id in its
+bucket, so an object's raised no card at all, and answered every offer with
+the agent dialogs; it now does as the reference does.
+
+### A no-copy object that has changed hands
+
+B rezzes a cube, takes it and gives the item to A (a new prim's next owner may
+move and transfer it, not copy it); A accepts, rezzes it, takes it back and
+restores it to its last position (`RezRestoreToWorld`).
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| A's item | owner may not copy | the same |
+| A rezzes it | the object stands; the item leaves A's inventory | the same |
+| A takes it back | a new item in A's Objects, still not copyable | the same |
+| A restores it | **the object stands again and the item leaves A's inventory** (a `RemoveInventoryObjects` over the event queue) — as a rez | nothing: OpenSim reads the message and nothing listens for it |
+
+Second Life restored the object here, where it may build. The reference
+refuses a no-copy item's restore on Second Life (`CantRestoreToWorldNoCopy`),
+because the item goes whether or not the object comes back; our viewer's
+guard (`restore_refused`) keeps that refusal.

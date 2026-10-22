@@ -2119,7 +2119,7 @@ fn build_inventory_offer(args: &Args, ctx: &dyn ReplContext) -> Result<Inventory
     };
     Ok(InventoryOffer {
         asset_type,
-        item_id,
+        item_id: Some(item_id),
         transaction_id: args.uuid_or_nil(ctx, "transaction_id", 2)?,
         from_agent_id: AgentKey::from(args.uuid_or_nil(ctx, "from_agent_id", 3)?),
         from_task: args.bool_or(ctx, "from_task", 4, false)?,

@@ -21755,7 +21755,7 @@ mod test {
         assert_eq!(offer.asset_type, AssetType::Notecard);
         assert_eq!(
             offer.item_id,
-            InventoryItemOrFolderKey::Item(InventoryKey::from(item))
+            Some(InventoryItemOrFolderKey::Item(InventoryKey::from(item)))
         );
         assert_eq!(offer.transaction_id, tx);
         assert_eq!(offer.from_agent_id, AgentKey::from(from));
@@ -21778,6 +21778,48 @@ mod test {
         let block = first_im(&decline)?;
         assert_eq!(block.dialog, 6); // IM_INVENTORY_DECLINED
         assert_eq!(block.binary_bucket, trash.as_bytes());
+        Ok(())
+    }
+
+    /// An object's offer carries the asset type alone (both grids, and the
+    /// reference's reading of it): it decodes with no id, and is answered with
+    /// the task dialogs, not the agent ones.
+    #[test]
+    fn task_inventory_offer_decodes_and_answers_with_task_dialogs() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let owner = uuid::Uuid::from_u128(0x55);
+        let tx = uuid::Uuid::from_u128(0xABD);
+        let im = inbound_offer_im(9, owner, tx, vec![7u8]); // AT_NOTECARD
+        let datagram = server_message(&im, 9, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        let offer = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InstantMessageReceived(im) => im.inventory_offer(),
+                _ => None,
+            })
+            .ok_or("expected a decoded task inventory offer")?;
+        assert_eq!(offer.asset_type, AssetType::Notecard);
+        assert_eq!(offer.item_id, None);
+        assert!(offer.from_task);
+
+        let folder = uuid::Uuid::from_u128(0xF1);
+        session.accept_inventory_offer(&offer, InventoryFolderKey::from(folder), now)?;
+        let accept = drain(&mut session)?;
+        let block = first_im(&accept)?;
+        assert_eq!(block.dialog, 10); // IM_TASK_INVENTORY_ACCEPTED
+        assert_eq!(block.id, tx);
+        assert_eq!(block.to_agent_id, owner);
+        assert_eq!(block.binary_bucket, folder.as_bytes());
+
+        let trash = uuid::Uuid::from_u128(0x7B);
+        session.decline_inventory_offer(&offer, InventoryFolderKey::from(trash), now)?;
+        let decline = drain(&mut session)?;
+        let block = first_im(&decline)?;
+        assert_eq!(block.dialog, 11); // IM_TASK_INVENTORY_DECLINED
         Ok(())
     }
 

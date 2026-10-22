@@ -9259,8 +9259,9 @@ impl Session {
         Ok(())
     }
 
-    /// Accepts an inventory offer received over IM (`IM_INVENTORY_ACCEPTED`),
-    /// filing the offered item/folder into `folder_id`. The `offer` is the
+    /// Accepts an inventory offer received over IM (`IM_INVENTORY_ACCEPTED`,
+    /// or `IM_TASK_INVENTORY_ACCEPTED` for an object's offer), filing the
+    /// offered item/folder into `folder_id`. The `offer` is the
     /// decoded [`InventoryOffer`] from the incoming
     /// [`InstantMessage::inventory_offer`](crate::InstantMessage::inventory_offer).
     ///
@@ -9280,7 +9281,7 @@ impl Session {
             &OutgoingIm {
                 to_agent_id: offer.from_agent_id.uuid(),
                 from_group: false,
-                dialog: ImDialog::InventoryAccepted,
+                dialog: offer.accept_dialog(),
                 id: offer.transaction_id,
                 message: "",
                 from_name: &from_name,
@@ -9291,8 +9292,8 @@ impl Session {
         Ok(())
     }
 
-    /// Declines an inventory offer received over IM (`IM_INVENTORY_DECLINED`);
-    /// the simulator routes the offered item/folder into `trash_folder_id`.
+    /// Declines an inventory offer received over IM (`IM_INVENTORY_DECLINED`,
+    /// or `IM_TASK_INVENTORY_DECLINED` for an object's offer); the simulator routes the offered item/folder into `trash_folder_id`.
     ///
     /// # Errors
     ///
@@ -9310,7 +9311,7 @@ impl Session {
             &OutgoingIm {
                 to_agent_id: offer.from_agent_id.uuid(),
                 from_group: false,
-                dialog: ImDialog::InventoryDeclined,
+                dialog: offer.decline_dialog(),
                 id: offer.transaction_id,
                 message: "",
                 from_name: &from_name,

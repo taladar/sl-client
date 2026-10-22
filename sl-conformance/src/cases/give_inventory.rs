@@ -361,10 +361,15 @@ impl GridTest for GiveInventory {
             check_eq("offer asset_type", &offer.asset_type, &AssetType::Notecard)?;
             check_eq("offer from_task", &offer.from_task, &false)?;
             match offer.item_id {
-                InventoryItemOrFolderKey::Item(_) => {}
-                InventoryItemOrFolderKey::Folder(_) => {
+                Some(InventoryItemOrFolderKey::Item(_)) => {}
+                Some(InventoryItemOrFolderKey::Folder(_)) => {
                     return Err(TestFailure::Assertion(
                         "inventory offer carried a folder, expected a single item".to_owned(),
+                    ));
+                }
+                None => {
+                    return Err(TestFailure::Assertion(
+                        "an agent's inventory offer named no id".to_owned(),
                     ));
                 }
             }

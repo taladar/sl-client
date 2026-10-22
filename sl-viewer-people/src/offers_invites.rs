@@ -77,8 +77,8 @@ use bevy_flair::style::components::ClassList;
 
 use sl_client_bevy::{
     AgentKey, AssetType, Command, FolderType, FriendKey, ImDialog, InstantMessage,
-    InventoryFolderKey, InventoryOffer, LureId, Maturity, MuteList, MuteType, SlCommand, SlEvent,
-    SlSessionEvent, TransactionId,
+    InventoryFolderKey, InventoryItemOrFolderKey, InventoryOffer, LureId, Maturity, MuteList,
+    MuteType, SlCommand, SlEvent, SlSessionEvent, TransactionId,
 };
 
 use crate::i18n::{TransArgs, Translator};
@@ -388,6 +388,15 @@ fn ingest_offers_invites(
         }
         match im.dialog {
             ImDialog::InventoryOffered | ImDialog::TaskInventoryOffered => {
+                // An agent's gift is in the inventory already, and Second
+                // Life says so with nothing but the offer: fetch the folder
+                // it was filed in, as the reference fetches the item.
+                if let Some(fetch) = im
+                    .inventory_offer()
+                    .and_then(|offer| gift_fetch(&facts.inventory, &offer))
+                {
+                    sl.write(SlCommand(fetch));
+                }
                 // The alerts-tab auto-accept (the reference
                 // `AutoAcceptNewInventory`): file the item silently instead of
                 // raising the card. An unresolvable destination (inventory
@@ -942,9 +951,33 @@ fn inventory_destination(
     typed.or_else(|| inventory.folder_by_type(FolderType::RootInventory))
 }
 
+/// The fetch that brings an agent's gift into the model: its type's folder
+/// (the root for a folder), where both grids file it when the offer is made
+/// (`book/src/gridspec/inventory.md` § Giving). `None` for an object's offer,
+/// which files nothing until it is accepted, and when the folder is unknown.
+fn gift_fetch(inventory: &InventoryModel, offer: &InventoryOffer) -> Option<Command> {
+    if offer.from_task {
+        return None;
+    }
+    let folder = match offer.item_id? {
+        InventoryItemOrFolderKey::Item(_) => inventory_destination(inventory, offer.asset_type)?,
+        InventoryItemOrFolderKey::Folder(_) => {
+            inventory.folder_by_type(FolderType::RootInventory)?
+        }
+    };
+    Some(Command::FetchInventoryFolders(vec![folder]))
+}
+
 /// Write the decline reply for an inventory offer, routing the item to Trash (the
 /// agent root when Trash has not loaded). A missing destination drops the reply
 /// rather than sending a nil folder.
+///
+/// An agent's gift is already in the inventory when its offer arrives, on both
+/// grids, and Second Life does nothing with the decline
+/// (`book/src/gridspec/inventory.md` § Giving): so the gift the offer names is
+/// moved to the Trash here as well, as the reference's `LLDiscardAgentOffer`
+/// does. OpenSim moves it there on the decline itself, and the second move
+/// finds it there. An object's offer names nothing filed yet.
 fn decline_inventory(
     inventory: &InventoryModel,
     offer: &InventoryOffer,
@@ -958,7 +991,29 @@ fn decline_inventory(
             offer: *offer,
             trash_folder_id,
         }));
+        if let Some(discard) = discard_command(offer, trash_folder_id) {
+            sl.write(SlCommand(discard));
+        }
     }
+}
+
+/// The move that discards a declined agent's gift into `trash`, or `None`
+/// for an offer that names nothing filed (an object's).
+fn discard_command(offer: &InventoryOffer, trash: InventoryFolderKey) -> Option<Command> {
+    if offer.from_task {
+        return None;
+    }
+    Some(match offer.item_id? {
+        InventoryItemOrFolderKey::Item(item_id) => Command::MoveInventoryItem {
+            item_id,
+            folder_id: trash,
+            new_name: String::new(),
+        },
+        InventoryItemOrFolderKey::Folder(folder_id) => Command::MoveInventoryFolder {
+            folder_id,
+            parent_id: trash,
+        },
+    })
 }
 
 /// Build and wire a **teleport-offer / lure** card. Teleport accepts the lure
@@ -1548,7 +1603,7 @@ fn wire_specimen_actions(commands: &mut Commands, card: &OfferCard, element: &'s
 #[cfg(test)]
 mod tests {
     use super::{
-        MutedOffer, decline_command, lure_rating_key, muted_offer, offer_class,
+        MutedOffer, decline_command, discard_command, lure_rating_key, muted_offer, offer_class,
         teleport_request_answer,
     };
     use crate::auto_reject::{OfferClass, RejectKind};
@@ -1577,6 +1632,39 @@ mod tests {
             message: "come over".to_owned(),
             binary_bucket: Vec::new(),
         }
+    }
+
+    /// A declined agent's gift is moved to the Trash by the id its offer
+    /// names, item or folder; an object's offer names nothing to move.
+    #[test]
+    fn a_declined_agents_gift_is_discarded_into_the_trash() {
+        use sl_client_bevy::{
+            AssetType, InventoryFolderKey, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
+        };
+        let trash = InventoryFolderKey::from(Uuid::from_u128(0x7a));
+        let item = InventoryKey::from(Uuid::from_u128(0x17e));
+        let folder = InventoryFolderKey::from(Uuid::from_u128(0xf0));
+        let offer = |item_id, from_task| InventoryOffer {
+            asset_type: AssetType::Notecard,
+            item_id,
+            transaction_id: Uuid::from_u128(0x7b),
+            from_agent_id: AgentKey::from(Uuid::from_u128(0x6009)),
+            from_task,
+        };
+        assert!(matches!(
+            discard_command(&offer(Some(InventoryItemOrFolderKey::Item(item)), false), trash),
+            Some(Command::MoveInventoryItem { item_id, folder_id, ref new_name })
+                if item_id == item && folder_id == trash && new_name.is_empty()
+        ));
+        assert!(matches!(
+            discard_command(
+                &offer(Some(InventoryItemOrFolderKey::Folder(folder)), false),
+                trash
+            ),
+            Some(Command::MoveInventoryFolder { folder_id, parent_id })
+                if folder_id == folder && parent_id == trash
+        ));
+        assert!(discard_command(&offer(None, true), trash).is_none());
     }
 
     /// A muted sender's inventory and friendship offers are declined, its
