@@ -3017,6 +3017,72 @@ mod test {
         Ok(())
     }
 
+    /// A slam naming one target twice, an entry that is no link, or links
+    /// wrapped in a map is refused `400` as Second Life refuses it, and the
+    /// folder keeps its version.
+    #[test]
+    fn ais3_slam_refusals_match_second_life() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        let cap_path = granted_cap_path(&caps, "InventoryAPIv3")?;
+        let folder = folder_key(AGENT_CLOTHING);
+        let version = sim
+            .agent_inventory()
+            .folder(folder)
+            .map(|folder| folder.version);
+        let linked = uuid::Uuid::from_u128(0x117c);
+        let entry = |kind: i32| {
+            format!(
+                "<map><key>name</key><string>L</string><key>desc</key><string />\
+                 <key>linked_id</key><uuid>{linked}</uuid><key>type</key>\
+                 <integer>{kind}</integer></map>"
+            )
+        };
+        let suffix = format!(
+            "/category/{}/links?tid={}",
+            folder.uuid(),
+            uuid::Uuid::nil()
+        );
+        for (body, code, description) in [
+            (
+                format!("<llsd><array>{}{}</array></llsd>", entry(24), entry(24)),
+                0,
+                "Duplicate links or invalid link type.",
+            ),
+            (
+                format!("<llsd><array>{}</array></llsd>", entry(7)),
+                0,
+                "Duplicate links or invalid link type.",
+            ),
+            (
+                format!(
+                    "<llsd><map><key>links</key><array>{}</array></map></llsd>",
+                    entry(24)
+                ),
+                1,
+                "List of links required.",
+            ),
+        ] {
+            let (status, reply) =
+                respond_ais(&mut caps, &mut sim, "PUT", &cap_path, &suffix, &body)?;
+            assert_eq!(status, 400);
+            let tree = parse_llsd_xml(&reply)?;
+            assert_eq!(tree.get("error_code"), Some(&Llsd::Integer(code)));
+            assert_eq!(
+                tree.get("error_description").and_then(Llsd::as_str),
+                Some(description)
+            );
+            assert_eq!(
+                sim.agent_inventory()
+                    .folder(folder)
+                    .map(|folder| folder.version),
+                version
+            );
+        }
+        Ok(())
+    }
+
     /// The AIS3 children fetch honours the depth parameter, nesting each
     /// opened folder's contents inside its own `_embedded` block.
     ///

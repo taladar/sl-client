@@ -117,6 +117,9 @@ const FLAGS_SET: u32 = 1;
 /// The asset type of an item link (`AT_LINK`).
 const AT_LINK: i8 = 24;
 
+/// The asset type of a notecard (`AT_NOTECARD`), no link type.
+const AT_NOTECARD: i8 = 7;
+
 /// The inventory type of a notecard (`IT_NOTECARD`).
 const IT_NOTECARD: i8 = 7;
 
@@ -424,6 +427,90 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "ais_slam_result",
         each(
             Answer::Text("2 items: a slammed link, another"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "ais_slam_duplicate_answer",
+        each(
+            Answer::Text(
+                "400: error_code,error_description,error_filename,error_function,error_line_number; error_code=0; error_description=Duplicate links or invalid link type.; error_filename=categories.py; error_function=CategoryAPI._get_links; error_line_number=<n>; says Duplicate links or invalid link type.",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "ais_slam_duplicate_effects",
+        each(Answer::Text("no _ keys"), Answer::Text("no capability")),
+    ),
+    (
+        "ais_slam_duplicate_push",
+        each(Answer::Text("nothing"), Answer::Text("no capability")),
+    ),
+    (
+        "ais_slam_duplicate_push_detail",
+        each(Answer::Text("nothing"), Answer::Text("no capability")),
+    ),
+    (
+        "ais_slam_duplicate_result",
+        each(
+            Answer::Text("2 items: a slammed link, another; version kept"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "ais_slam_map_answer",
+        each(
+            Answer::Text(
+                "400: error_code,error_description,error_filename,error_function,error_line_number; error_code=1; error_description=List of links required.; error_filename=category.py; error_function=Category.put; error_line_number=686; says List of links required.",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "ais_slam_map_effects",
+        each(Answer::Text("no _ keys"), Answer::Text("no capability")),
+    ),
+    (
+        "ais_slam_map_push",
+        each(Answer::Text("nothing"), Answer::Text("no capability")),
+    ),
+    (
+        "ais_slam_map_push_detail",
+        each(Answer::Text("nothing"), Answer::Text("no capability")),
+    ),
+    (
+        "ais_slam_map_result",
+        each(
+            Answer::Text("2 items: a slammed link, another; version kept"),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "ais_slam_not_link_answer",
+        each(
+            Answer::Text(
+                "400: error_code,error_description,error_filename,error_function,error_line_number; error_code=0; error_description=Duplicate links or invalid link type.; error_filename=categories.py; error_function=CategoryAPI._get_links; error_line_number=<n>; says Duplicate links or invalid link type.",
+            ),
+            Answer::Text("no capability"),
+        ),
+    ),
+    (
+        "ais_slam_not_link_effects",
+        each(Answer::Text("no _ keys"), Answer::Text("no capability")),
+    ),
+    (
+        "ais_slam_not_link_push",
+        each(Answer::Text("nothing"), Answer::Text("no capability")),
+    ),
+    (
+        "ais_slam_not_link_push_detail",
+        each(Answer::Text("nothing"), Answer::Text("no capability")),
+    ),
+    (
+        "ais_slam_not_link_result",
+        each(
+            Answer::Text("2 items: a slammed link, another; version kept"),
             Answer::Text("no capability"),
         ),
     ),
@@ -2174,6 +2261,9 @@ async fn ais(
         "ais_create_own_id",
         "ais_link",
         "ais_slam",
+        "ais_slam_duplicate",
+        "ais_slam_not_link",
+        "ais_slam_map",
         "ais_delete_item",
         "ais_purge",
         "ais_delete_folder",
@@ -2535,9 +2625,46 @@ async fn ais(
                     names.into_iter().collect::<Vec<_>>().join(", ")
                 ),
             );
+
+            // The slams the reference never sends: two links to one item,
+            // a link whose type is no link type, and the links wrapped in a
+            // map rather than the bare array.
+            let entry = |name: &str, kind: i8| {
+                format!(
+                    "<map><key>name</key><string>{name}</string><key>desc</key><string />\
+                     <key>linked_id</key><uuid>{note}</uuid><key>type</key>\
+                     <integer>{kind}</integer></map>"
+                )
+            };
+            let twice = format!(
+                "<llsd><array>{}{}</array></llsd>",
+                entry(&run.census.name("slam-twice"), AT_LINK),
+                entry(&run.census.name("slam-twice"), AT_LINK),
+            );
+            let untyped = format!(
+                "<llsd><array>{}</array></llsd>",
+                entry(&run.census.name("slam-untyped"), AT_NOTECARD),
+            );
+            let wrapped = format!(
+                "<llsd><map><key>links</key><array>{}</array></map></llsd>",
+                entry(&run.census.name("slam-wrapped"), AT_LINK),
+            );
+            for (leg, body) in [
+                ("ais_slam_duplicate", twice),
+                ("ais_slam_not_link", untyped),
+                ("ais_slam_map", wrapped),
+            ] {
+                ais_slam_refusal(run, metrics, leg, made, &body, &slam_names, &link_name).await;
+            }
         }
         None => {
-            for leg in ["ais_link", "ais_slam"] {
+            for leg in [
+                "ais_link",
+                "ais_slam",
+                "ais_slam_duplicate",
+                "ais_slam_not_link",
+                "ais_slam_map",
+            ] {
                 for part in ["answer", "effects", "push", "push_detail", "result"] {
                     metrics.set(&format!("{leg}_{part}"), "no folder");
                 }
@@ -2682,6 +2809,62 @@ fn ais_record(
         ais_effects(raw, &run.roles, before),
     );
     run.record_push(metrics, leg, heard);
+}
+
+/// A slam the reference never sends, put to the AIS3 folder after the real
+/// one: its answer, effects and pushes, and what the folder then lists.
+async fn ais_slam_refusal(
+    run: &mut Run<'_, '_>,
+    metrics: &mut Metrics,
+    leg: &str,
+    made: Uuid,
+    body: &str,
+    slam_names: &[String],
+    link_name: &str,
+) {
+    let before = run.versions(&[made]).await;
+    let mark = run.begin().await;
+    let raw = run
+        .census
+        .send_llsd(
+            AIS,
+            reqwest::Method::PUT,
+            &format!("/category/{made}/links?tid={}", Uuid::new_v4()),
+            body,
+        )
+        .await;
+    let mut heard = run.listen(mark, PUSH_WINDOW).await;
+    let listed = run.named_items(made).await;
+    heard.extend(run.listen(run.now(), LATE_WINDOW).await);
+    ais_record(run, metrics, leg, &raw, &before, &heard);
+    let names: BTreeSet<String> = listed
+        .iter()
+        .map(|(name, _id)| {
+            if slam_names.contains(name) {
+                "a slammed link".to_owned()
+            } else if name == link_name {
+                "the AIS3 link".to_owned()
+            } else if name.contains("slam-") {
+                "this leg's link".to_owned()
+            } else {
+                "another".to_owned()
+            }
+        })
+        .collect();
+    let after = run.versions(&[made]).await;
+    let stepped = if after.get(&made) == before.get(&made) {
+        "version kept"
+    } else {
+        "version stepped"
+    };
+    metrics.set(
+        &format!("{leg}_result"),
+        format!(
+            "{} items: {}; {stepped}",
+            listed.len(),
+            names.into_iter().collect::<Vec<_>>().join(", ")
+        ),
+    );
 }
 
 /// The `COPY` leg: the smallest Library folder holding items and no

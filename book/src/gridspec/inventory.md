@@ -221,14 +221,19 @@ is pushed over UDP or the event queue after any of them.
 | `COPY` (`LibraryAPIv3`) of a Library folder, `Destination` `F`, `?tid=…,depth=0` | `201`; a copy of the folder and its two items in `F` | `_created_categories` [the copy], `_created_items` [two], `_moved_items` [], `_removed_items` [], `_top_category_id`, `_updated_category_versions` {`F` +1} | the same |
 
 AIS3 removes and empties **outside the Trash**, where the UDP messages refuse.
-A slam with two links to one item is refused `400` "Duplicate links or invalid
-link type."; a map `{ links: [...] }` instead of the bare array, `400` "List of
-links required.".
+Three slams the reference never sends are refused whole, the folder's links and
+version untouched and nothing pushed:
+
+| slam | answer |
+| --- | --- |
+| two links to one item | `400`, `error_code` 0, "Duplicate links or invalid link type." (`CategoryAPI._get_links`) |
+| one entry of a type that is no link (a notecard's 7) | the same |
+| a map `{ links: [...] }` instead of the bare array | `400`, `error_code` 1, "List of links required." (`Category.put`) |
 
 The fake grid answers a slam as Second Life did here — an existing link to the
-same item kept and renamed, a new target linked, a link no entry names removed
-— but refuses neither of those two; its Library holds one small folder for the
-`COPY`.
+same item kept and renamed, a new target linked, a link no entry names removed,
+the three above refused with the same errors — and its Library holds one small
+folder for the `COPY`.
 
 ### Gives
 

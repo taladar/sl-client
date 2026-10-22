@@ -24,7 +24,7 @@
 //! hold an empty `EventQueueGet` poll (~30 s in the reference stack) before
 //! answering [`SimCaps::event_queue_timeout`].
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use sl_types::key::{AgentKey, ExperienceKey, GroupKey, InventoryKey, ObjectKey};
 use sl_wire::{
@@ -3256,9 +3256,40 @@ impl SimCaps {
                 let Ok(text) = std::str::from_utf8(request.body) else {
                     return CapsResponse::bad_request();
                 };
-                let Ok(links) = parse_ais_slam_body(text) else {
-                    return CapsResponse::bad_request();
+                let links = match parse_ais_slam_body(text) {
+                    Ok(Some(links)) => links,
+                    // A `{ links: [...] }` map, as measured on Second Life.
+                    Ok(None) => {
+                        return ais_error(
+                            400,
+                            1,
+                            "List of links required.",
+                            ("category.py", "Category.put", 686),
+                            Vec::new(),
+                        );
+                    }
+                    Err(_) => return CapsResponse::bad_request(),
                 };
+                // Two links to one target, or an entry whose type is neither
+                // an item nor a folder link, refuse the whole slam with the
+                // folder untouched (`inventory-mutations`' refused slams).
+                let mut targets = HashSet::new();
+                if links.iter().any(|link| {
+                    !matches!(
+                        link.link_type,
+                        crate::ASSET_CODE_LINK | crate::ASSET_CODE_LINK_FOLDER
+                    ) || !targets.insert(link.linked_id)
+                }) {
+                    return ais_error(
+                        400,
+                        0,
+                        "Duplicate links or invalid link type.",
+                        // Second Life's line is a four-digit one the census
+                        // records only as `<n>`.
+                        ("categories.py", "CategoryAPI._get_links", 1000),
+                        Vec::new(),
+                    );
+                }
                 match sim.ais_slam_links(folder_id, &links) {
                     Ok((update, updated, result)) => {
                         let embedded = match ais_embedded(&[], &result, &["links"]) {

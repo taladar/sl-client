@@ -543,21 +543,19 @@ pub fn parse_ais_create_link_body(xml: &str) -> Result<Vec<AisLinkCreate>, WireE
 /// type }` maps a `PUT /category/<id>/links` replaces a folder's links with
 /// (the reference's `slamCategoryLinks` → `AISAPI::SlamFolder`) — into its
 /// records, leniently as [`parse_ais_create_link_body`] reads its array.
+/// Well-formed LLSD that is not an array (Second Life refuses a `{ links:
+/// [...] }` map with "List of links required.") parses to `None`.
 ///
 /// # Errors
 ///
-/// Returns [`LlsdError::MalformedField`] if the body is not well-formed XML
-/// or not an array, or if a present field has the wrong LLSD kind.
-pub fn parse_ais_slam_body(xml: &str) -> Result<Vec<AisLinkCreate>, WireError> {
+/// Returns [`LlsdError::MalformedField`] if the body is not well-formed XML,
+/// or if a present field has the wrong LLSD kind.
+pub fn parse_ais_slam_body(xml: &str) -> Result<Option<Vec<AisLinkCreate>>, WireError> {
     let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
         field: "AisSlam",
         value: error.to_string(),
     })?;
-    let links = root.as_array().ok_or_else(|| LlsdError::MalformedField {
-        field: "AisSlam",
-        value: "not an array".to_owned(),
-    })?;
-    link_records(links)
+    root.as_array().map(link_records).transpose()
 }
 
 /// The link records of an AIS3 links array; non-map entries are skipped.
@@ -951,13 +949,24 @@ mod test {
         );
         assert_eq!(
             parse_ais_slam_body(&body).map_err(|error| format!("{error:?}"))?,
-            vec![AisLinkCreate {
+            Some(vec![AisLinkCreate {
                 linked_id: linked,
                 link_type: 24,
                 inv_type: -1,
                 name: "Shirt".to_owned(),
                 description: String::new(),
-            }]
+            }])
+        );
+        Ok(())
+    }
+
+    /// A slam whose links come wrapped in a map is no list of links.
+    #[test]
+    fn slam_body_in_a_map_is_no_list() -> Result<(), String> {
+        let body = "<llsd><map><key>links</key><array /></map></llsd>";
+        assert_eq!(
+            parse_ais_slam_body(body).map_err(|error| format!("{error:?}"))?,
+            None
         );
         Ok(())
     }
