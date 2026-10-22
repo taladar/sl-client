@@ -26,7 +26,13 @@
 //! | how the `AttachmentResources` answer is labelled ([`attachment_resources_label`](ImitatedGrid::attachment_resources_label)) | `application/llsd+xml` | `text/html;charset=UTF-8`: the handler states none, and the HTTP server's default stands |
 //! | an `AgentWearablesRequest` ([`wearables_reply`](ImitatedGrid::wearables_reply)) | four fixed placeholder items, wearable types 1 to 4, each naming a fixed asset, whatever is worn: the outfit is the Current Outfit Folder's | the outfit the simulator holds, which the last `AgentIsNowWearing` set |
 //! | how an AIS3 answer states a link's target | `linked_id`, with no `asset_id` | no AIS3 |
-//! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` | served out of the session's inventory tree |
+//! | the shape of a folder or item fetch answer ([`inventory_dialect`](ImitatedGrid::inventory_dialect)) | the entry names the asking agent as a string; a sub-folder adds `agent_id` and states its ids as strings; an item states every id as a string, adds `agent_id` and an empty `metadata` and has no `is_owner_group` | the entry names the agent as a UUID; ids typed as UUIDs; an item has no `last_owner_id` |
+//! | a folder the agent's folder fetch does not hold ([`inventory_dialect`](ImitatedGrid::inventory_dialect)) | an empty entry at version 0 the agent owns, a Library folder included | the same, but a Library folder is listed |
+//! | what a UDP `RemoveInventoryFolder` does to the parent's version ([`inventory_dialect`](ImitatedGrid::inventory_dialect)) | steps it | leaves it |
+//! | a UDP `FetchInventory` ([`inventory_dialect`](ImitatedGrid::inventory_dialect)) | not answered | a `FetchInventoryReply` |
+//! | an AIS3 move: a `PATCH` of `parent_id`, or the `MOVE` method | refused (`400` "Cannot change parent_id.  Use MOVE method.", `405` "Method Not Allowed"), nothing moves | no AIS3 |
+//! | how an AIS3 `GET` answer is dressed | `_base_uri` (`slcap://` and the capability), `_links` on every folder and item, the agent as `agent_id`, ids as strings, no `is_owner_group`; an unknown folder is a `404` with the service's error map | no AIS3 |
+//! | the deprecated UDP inventory fetch ([`LegacyUdpInventory`]) | refused with a `FeatureDisabled` — aditi stays silent (`inventory-fetch`, 2026-10-21); see below | served out of the session's inventory tree |
 //! | how a **taken** item is announced ([`InventoryAnnouncement`]) | the legacy UDP `UpdateCreateInventoryItem` | the same |
 //! | how an item a capability upload **rewrote** is announced ([`UploadAnnouncements::saved`]) | the legacy UDP `UpdateCreateInventoryItem` | nothing: the capability's HTTP response is the whole answer |
 //! | how an item a capability upload **created** is announced ([`UploadAnnouncements::created`]) | nothing | nothing |
@@ -1079,6 +1085,19 @@ impl ImitatedGrid {
         match self {
             Self::SecondLife => VoiceBackend::WebRtc,
             Self::OpenSim => VoiceBackend::Silent,
+        }
+    }
+
+    /// Which grid's inventory answers a session gives where the two differ
+    /// — the shape of a folder or item fetch, what a UDP folder removal does
+    /// to the parent's version, whether a UDP `FetchInventory` is answered
+    /// (`book/src/gridspec/inventory.md` § Fetching, measured by the
+    /// `inventory-fetch` census).
+    #[must_use]
+    pub const fn inventory_dialect(self) -> sl_proto::InventoryDialect {
+        match self {
+            Self::SecondLife => sl_proto::InventoryDialect::SecondLife,
+            Self::OpenSim => sl_proto::InventoryDialect::OpenSim,
         }
     }
 

@@ -2918,26 +2918,59 @@ impl SimCaps {
         let Ok(folders) = parse_fetch_inventory_request(text) else {
             return CapsResponse::bad_request();
         };
-        let tree = if name == CAP_FETCH_LIBRARY {
-            sim.library_inventory()
-        } else {
-            sim.agent_inventory()
-        };
-        let events: Vec<Event> = folders
+        let library = name == CAP_FETCH_LIBRARY;
+        let agent = sim.agent_id().map_or_else(Uuid::nil, |agent| agent.uuid());
+        let dialect = sim.inventory_dialect();
+        // Each answered folder with the owner its entry names
+        // (`book/src/gridspec/inventory.md` § Fetching). Through the agent's
+        // own capability a folder the agent does not hold is still answered,
+        // on both grids, with an empty entry the agent owns at version 0 —
+        // except that OpenSim lists a Library folder there.
+        let (events, owners): (Vec<Event>, Vec<Uuid>) = folders
             .iter()
             .filter_map(|folder| {
-                tree.descendents(
-                    folder.folder_id,
-                    folder.fetch_folders,
-                    folder.fetch_items,
-                    folder.sort_order,
-                )
+                let read = |tree: &crate::sim_inventory::SimInventoryTree| {
+                    tree.descendents(
+                        folder.folder_id,
+                        folder.fetch_folders,
+                        folder.fetch_items,
+                        folder.sort_order,
+                    )
+                };
+                if library {
+                    return read(sim.library_inventory()).map(|event| (event, folder.owner_id));
+                }
+                if let Some(event) = read(sim.agent_inventory()) {
+                    return Some((event, folder.owner_id));
+                }
+                if dialect == crate::InventoryDialect::OpenSim
+                    && let Some(event) = read(sim.library_inventory())
+                {
+                    return Some((event, folder.owner_id));
+                }
+                Some((
+                    Event::InventoryDescendents {
+                        folder_id: folder.folder_id,
+                        version: 0,
+                        descendents: 0,
+                        folders: Vec::new(),
+                        items: Vec::new(),
+                    },
+                    agent,
+                ))
             })
-            .collect();
-        match inventory_descendents_to_llsd(&events) {
-            Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
-            Err(_) => CapsResponse::internal_error(),
+            .unzip();
+        let Ok(mut body) = inventory_descendents_to_llsd(&events) else {
+            return CapsResponse::internal_error();
+        };
+        if let Llsd::Map(map) = &mut body
+            && let Some(Llsd::Array(entries)) = map.get_mut("folders")
+        {
+            for (entry, owner) in entries.iter_mut().zip(owners) {
+                dialect.descendents_folder(entry, agent, owner);
+            }
         }
+        CapsResponse::llsd_xml(body.to_llsd_xml())
     }
 
     /// Serves one `FetchInventory2` / `FetchLib2` per-item fetch POST:
@@ -2971,10 +3004,18 @@ impl SimCaps {
             .filter_map(|reference| tree.item(reference.item_id).cloned())
             .collect();
         let agent_id = sim.agent_id().map_or(fetch.agent_id, |agent| agent.uuid());
-        match fetch_inventory_items_to_llsd(agent_id, &items) {
-            Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
-            Err(_) => CapsResponse::internal_error(),
+        let Ok(mut body) = fetch_inventory_items_to_llsd(agent_id, &items) else {
+            return CapsResponse::internal_error();
+        };
+        let dialect = sim.inventory_dialect();
+        if let Llsd::Map(map) = &mut body
+            && let Some(Llsd::Array(entries)) = map.get_mut("items")
+        {
+            for entry in entries {
+                dialect.fetched_item(entry, agent_id);
+            }
         }
+        CapsResponse::llsd_xml(body.to_llsd_xml())
     }
 
     /// Serves one plain `CreateInventoryCategory` POST (client-chosen folder
@@ -3027,6 +3068,7 @@ impl SimCaps {
     fn dispatch_ais3(sim: &mut SimSession, request: &CapsRequest<'_>, name: &str) -> CapsResponse {
         let suffix = ais_suffix(request);
         let read_only = name == CAP_LIBRARY_API_V3;
+        let agent = sim.agent_id().map_or_else(Uuid::nil, |agent| agent.uuid());
         match request.method {
             "GET" => {
                 let tree = if read_only {
@@ -3046,10 +3088,13 @@ impl SimCaps {
                     let subset = parse_ais_category_children_subset(&suffix);
                     let Some(listing) = tree.listing_to_depth(folder_id, depth, subset.as_deref())
                     else {
-                        return CapsResponse::not_found();
+                        return category_not_found(folder_id);
                     };
                     return match ais_category_children_reply_to_llsd(&listing) {
-                        Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+                        Ok(mut body) => {
+                            decorate_ais(&mut body, name, agent, AisTop::Children);
+                            CapsResponse::llsd_xml(body.to_llsd_xml())
+                        }
                         Err(_) => CapsResponse::internal_error(),
                     };
                 }
@@ -3080,12 +3125,30 @@ impl SimCaps {
                         Err(_) => CapsResponse::internal_error(),
                     };
                 }
+                // The folder alone, as Second Life answers `GET /category/<id>`.
+                if let Some(folder_id) = parse_ais_category_url(&suffix) {
+                    let Some(folder) = tree.folder(folder_id).cloned() else {
+                        return category_not_found(folder_id);
+                    };
+                    return match ais_category_children_reply_to_llsd(&InventoryListing::unlisted(
+                        folder,
+                    )) {
+                        Ok(mut body) => {
+                            decorate_ais(&mut body, name, agent, AisTop::Folder);
+                            CapsResponse::llsd_xml(body.to_llsd_xml())
+                        }
+                        Err(_) => CapsResponse::internal_error(),
+                    };
+                }
                 if let Some(item_id) = parse_ais_item_url(&suffix) {
                     let Some(item) = tree.item(item_id) else {
                         return CapsResponse::not_found();
                     };
                     return match ais_item_reply_to_llsd(item) {
-                        Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+                        Ok(mut body) => {
+                            decorate_ais(&mut body, name, agent, AisTop::Item);
+                            CapsResponse::llsd_xml(body.to_llsd_xml())
+                        }
                         Err(_) => CapsResponse::internal_error(),
                     };
                 }
@@ -3140,18 +3203,31 @@ impl SimCaps {
                 let Some(body) = parse_llsd_body(request.body) else {
                     return CapsResponse::bad_request();
                 };
-                let is_move = body.get("parent_id").is_some();
+                // Second Life's AIS3 moves nothing: a `parent_id` in a
+                // `PATCH` is refused, folder or item, and the object stays
+                // (`book/src/gridspec/inventory.md` § Fetching).
+                let new_parent = body
+                    .get("parent_id")
+                    .is_some()
+                    .then(|| parse_ais_move_body(text));
                 if let Some(folder_id) = parse_ais_category_url(&suffix) {
-                    let result = if is_move {
-                        match parse_ais_move_body(text) {
-                            Ok(parent) => sim.ais_move_category(folder_id, parent),
-                            Err(_) => return CapsResponse::bad_request(),
-                        }
-                    } else {
-                        match parse_ais_rename_category_body(text) {
-                            Ok(new_name) => sim.ais_rename_category(folder_id, new_name),
-                            Err(_) => return CapsResponse::bad_request(),
-                        }
+                    if let Some(parent) = new_parent {
+                        let Ok(parent) = parent else {
+                            return CapsResponse::bad_request();
+                        };
+                        return ais_error(
+                            400,
+                            0,
+                            &format!(
+                                "Cannot change parent_id.  Use MOVE method.  {folder_id}, {parent} "
+                            ),
+                            ("categories.py", "Category.mergeUntrusted", 306),
+                            Vec::new(),
+                        );
+                    }
+                    let result = match parse_ais_rename_category_body(text) {
+                        Ok(new_name) => sim.ais_rename_category(folder_id, new_name),
+                        Err(_) => return CapsResponse::bad_request(),
                     };
                     return match result {
                         Ok(update) => {
@@ -3171,16 +3247,23 @@ impl SimCaps {
                     };
                 }
                 if let Some(item_id) = parse_ais_item_url(&suffix) {
-                    let result = if is_move {
-                        match parse_ais_move_body(text) {
-                            Ok(parent) => sim.ais_move_item(item_id, parent),
-                            Err(_) => return CapsResponse::bad_request(),
-                        }
-                    } else {
-                        match parse_ais_update_item_body(text) {
-                            Ok(update_fields) => sim.ais_update_item(item_id, &update_fields),
-                            Err(_) => return CapsResponse::bad_request(),
-                        }
+                    if let Some(parent) = new_parent {
+                        let Ok(parent) = parent else {
+                            return CapsResponse::bad_request();
+                        };
+                        return ais_error(
+                            400,
+                            0,
+                            &format!(
+                                "Cannot change parent_id.  Use MOVE method. {item_id} {parent}"
+                            ),
+                            ("items.py", "Item.mergeUntrusted", 732),
+                            Vec::new(),
+                        );
+                    }
+                    let result = match parse_ais_update_item_body(text) {
+                        Ok(update_fields) => sim.ais_update_item(item_id, &update_fields),
+                        Err(_) => return CapsResponse::bad_request(),
                     };
                     return match result {
                         Ok(update) => {
@@ -3211,6 +3294,30 @@ impl SimCaps {
                     return Self::ais_mutation_response(result);
                 }
                 CapsResponse::bad_request()
+            }
+            // The method Second Life's own refusal of a move names, which its
+            // service then refuses in turn.
+            "MOVE" if parse_ais_category_url(&suffix).is_some() => {
+                let path = suffix.split('?').next().unwrap_or_default().to_owned();
+                ais_error(
+                    405,
+                    7,
+                    "Method Not Allowed",
+                    ("access.py", "Category._not_allowed", 61),
+                    vec![
+                        (
+                            "allowed_methods",
+                            Llsd::Array(
+                                ["DELETE", "GET", "PATCH", "POST", "PUT", "HEAD", "OPTIONS"]
+                                    .into_iter()
+                                    .map(|method| Llsd::String(method.to_owned()))
+                                    .collect(),
+                            ),
+                        ),
+                        ("method", Llsd::String("MOVE".to_owned())),
+                        ("url", Llsd::String(path)),
+                    ],
+                )
             }
             _ => CapsResponse::method_not_allowed(),
         }
@@ -3990,6 +4097,154 @@ fn ais_suffix(request: &CapsRequest<'_>) -> String {
         Some(query) => format!("/{sub_path}?{query}"),
         None => format!("/{sub_path}"),
     }
+}
+
+/// Which object an AIS3 `GET` answers at its top level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AisTop {
+    /// `GET /category/<id>`: the folder alone.
+    Folder,
+    /// `GET /category/<id>/children`: the folder and its listing.
+    Children,
+    /// `GET /item/<id>`: one item.
+    Item,
+}
+
+/// Dresses an AIS3 `GET` answer as Second Life's inventory service states
+/// it (`book/src/gridspec/inventory.md` § Fetching): `_base_uri` at the top
+/// (`slcap://` and the capability's name), `_links` on every folder and item
+/// (`self` and `parent`, and on the top folder its `categories`, `children`,
+/// `items` and `links` — a children listing adds a `category` link to the
+/// folder itself, and its `self` is the listing), the asking agent as
+/// `agent_id`, and every id stated as a string; an item carries no
+/// `is_owner_group`.
+fn decorate_ais(body: &mut Llsd, cap: &str, agent: Uuid, top: AisTop) {
+    /// An href, as the service types one.
+    fn href(path: String) -> Llsd {
+        Llsd::Map([("href".to_owned(), Llsd::Uri(path))].into_iter().collect())
+    }
+    /// A UUID-valued field as text.
+    fn text_of(map: &HashMap<String, Llsd>, key: &str) -> String {
+        match map.get(key) {
+            Some(Llsd::Uuid(id)) => id.to_string(),
+            Some(Llsd::String(text)) => text.clone(),
+            _ => Uuid::nil().to_string(),
+        }
+    }
+    /// States each of `keys` held as a UUID as a string.
+    fn stringify(map: &mut HashMap<String, Llsd>, keys: &[&str]) {
+        for key in keys {
+            if let Some(value) = map.get_mut(*key)
+                && let Llsd::Uuid(id) = value
+            {
+                *value = Llsd::String(id.to_string());
+            }
+        }
+    }
+    /// Dresses one folder or item map, and what it embeds.
+    fn dress(map: &mut HashMap<String, Llsd>, agent: Uuid, top: Option<AisTop>) {
+        let is_item = map.contains_key("item_id");
+        let parent = text_of(map, "parent_id");
+        let mut links: Vec<(&str, Llsd)> = vec![("parent", href(format!("/category/{parent}")))];
+        if is_item {
+            links.push(("self", href(format!("/item/{}", text_of(map, "item_id")))));
+            stringify(map, &["item_id", "parent_id", "asset_id", "linked_id"]);
+            if let Some(Llsd::Map(permissions)) = map.get_mut("permissions") {
+                let _group = permissions.remove("is_owner_group");
+                stringify(
+                    permissions,
+                    &["creator_id", "group_id", "last_owner_id", "owner_id"],
+                );
+            }
+        } else {
+            let id = text_of(map, "category_id");
+            if let Some(top) = top {
+                for part in ["categories", "children", "items", "links"] {
+                    links.push((part, href(format!("/category/{id}/{part}"))));
+                }
+                if top == AisTop::Children {
+                    let mut category = href(format!("/category/{id}"));
+                    if let Llsd::Map(fields) = &mut category {
+                        let _name =
+                            fields.insert("name".to_owned(), Llsd::String("self".to_owned()));
+                    }
+                    links.push(("category", category));
+                    links.push(("self", href(format!("/category/{id}/children"))));
+                } else {
+                    links.push(("self", href(format!("/category/{id}"))));
+                }
+            } else {
+                links.push(("self", href(format!("/category/{id}"))));
+            }
+            stringify(map, &["category_id", "parent_id"]);
+        }
+        let _links = map.insert(
+            "_links".to_owned(),
+            Llsd::Map(
+                links
+                    .into_iter()
+                    .map(|(key, value)| (key.to_owned(), value))
+                    .collect(),
+            ),
+        );
+        let _agent = map.insert("agent_id".to_owned(), Llsd::String(agent.to_string()));
+        if let Some(Llsd::Map(embedded)) = map.get_mut("_embedded") {
+            for kind in ["categories", "items", "links"] {
+                if let Some(Llsd::Map(entries)) = embedded.get_mut(kind) {
+                    for entry in entries.values_mut() {
+                        if let Llsd::Map(entry) = entry {
+                            dress(entry, agent, None);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let Llsd::Map(map) = body else {
+        return;
+    };
+    dress(map, agent, Some(top));
+    let _base = map.insert("_base_uri".to_owned(), Llsd::Uri(format!("slcap://{cap}")));
+}
+
+/// An AIS3 error as Second Life's inventory service states one: the status,
+/// and an LLSD map of `error_code`, `error_description` and where in the
+/// service it was raised (`error_filename`, `error_function`,
+/// `error_line_number`), plus any `extra` fields — the values measured by
+/// the `inventory-fetch` census (`book/src/gridspec/inventory.md` § Fetching).
+fn ais_error(
+    status: u16,
+    code: i32,
+    description: &str,
+    (file, function, line): (&str, &str, i32),
+    extra: Vec<(&str, Llsd)>,
+) -> CapsResponse {
+    let mut fields = vec![
+        ("error_code", Llsd::Integer(code)),
+        ("error_description", Llsd::String(description.to_owned())),
+        ("error_filename", Llsd::String(file.to_owned())),
+        ("error_function", Llsd::String(function.to_owned())),
+        ("error_line_number", Llsd::Integer(line)),
+    ];
+    fields.extend(extra);
+    let body = Llsd::Map(
+        fields
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    );
+    CapsResponse::llsd_xml_status(status, body.to_llsd_xml())
+}
+
+/// Second Life's AIS3 answer for a folder it does not hold.
+fn category_not_found(folder_id: sl_types::key::InventoryFolderKey) -> CapsResponse {
+    ais_error(
+        404,
+        4,
+        "Category not found.",
+        ("category.py", "Category._get", 427),
+        vec![("category_id", Llsd::String(folder_id.to_string()))],
+    )
 }
 
 #[cfg(test)]

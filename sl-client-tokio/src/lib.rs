@@ -43,11 +43,10 @@ use sl_proto::{
     ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
-    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_avatar_render_report_request, build_create_inventory_category_request,
-    build_dispatch_region_info_request, build_environment_update_request,
-    build_god_kick_user_untrusted, build_home_location_request, build_interest_list_request,
-    build_modify_material_params_request, build_modify_region_request,
+    build_ais_rename_category_body, build_ais_update_item_body, build_avatar_render_report_request,
+    build_create_inventory_category_request, build_dispatch_region_info_request,
+    build_environment_update_request, build_god_kick_user_untrusted, build_home_location_request,
+    build_interest_list_request, build_modify_material_params_request, build_modify_region_request,
     build_new_file_agent_inventory_request, build_object_media_navigate_request,
     build_object_media_update_request, build_parcel_properties_update_request,
     build_parcel_voice_info_request, build_postcard_request, build_provision_voice_account_request,
@@ -260,8 +259,8 @@ const MAX_LOGIN_REDIRECTS: u32 = 5;
 enum Ais3Verb {
     /// `POST` — create (a folder, a link).
     Post,
-    /// `PATCH` — mutate an existing folder / item (rename, move).
-    Patch,
+    // No `PATCH`: the only mutation it carried here was a move, which
+    // Second Life's AIS3 refuses ("Use MOVE method"); moves go UDP.
     /// `DELETE` — remove a folder / item / a folder's children.
     Delete,
 }
@@ -346,15 +345,6 @@ fn route_ais3(
     match verb {
         Ais3Verb::Post => {
             tokio::spawn(post_voice_cap(
-                url,
-                body.unwrap_or_default(),
-                CAP_INVENTORY_API_V3,
-                http,
-                caps_tx,
-            ));
-        }
-        Ais3Verb::Patch => {
-            tokio::spawn(patch_caps_llsd(
                 url,
                 body.unwrap_or_default(),
                 CAP_INVENTORY_API_V3,
@@ -1456,17 +1446,11 @@ impl Client {
                             self.session.update_inventory_folder(folder_id, parent_id, folder_type, &name, Instant::now())?;
                         }
                         Some(Command::MoveInventoryFolder { folder_id, parent_id }) => {
-                            // Second Life routes through AIS3 (`PATCH /category/<id>`); OpenSim keeps UDP.
-                            // The cache moves first either way: the AIS3 reply names the moved folder
-                            // but not the parent it left, and a refused move is not sent.
-                            if has_ais3(&caps) {
-                                self.session.move_inventory_folders_local(&[(folder_id, parent_id)])?;
-                                let suffix = ais_category_url(folder_id);
-                                let body = build_ais_move_body(parent_id);
-                                route_ais3(&caps, &http, &caps_tx, &suffix, Ais3Verb::Patch, Some(body));
-                            } else {
-                                self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
-                            }
+                            // UDP on every grid, as the reference moves a folder
+                            // (`updateParentOnServer`): Second Life's AIS3 refuses a
+                            // `PATCH` of `parent_id` ("Use MOVE method") and takes the
+                            // UDP message (`book/src/gridspec/inventory.md` § Fetching).
+                            self.session.move_inventory_folder(folder_id, parent_id, Instant::now())?;
                         }
                         Some(Command::RemoveInventoryFolders(folder_ids)) => {
                             // Second Life deletes each folder via AIS3 (`DELETE /category/<id>`); OpenSim keeps the UDP batch.
@@ -1509,16 +1493,11 @@ impl Client {
                             self.session.save_inventory_asset(&item, asset_type, data, transaction_id, Instant::now())?;
                         }
                         Some(Command::MoveInventoryItem { item_id, folder_id, new_name }) => {
-                            // Second Life re-parents via AIS3 (`PATCH /item/<id>`), but only a pure
-                            // move: the AIS3 move body carries no name, so a move that also renames
-                            // stays on UDP rather than dropping the rename. OpenSim keeps UDP.
-                            if new_name.is_empty() && has_ais3(&caps) {
-                                // The cache moves first, as the UDP path's does.
-                                self.session.move_inventory_items_local(&[(item_id, folder_id, String::new())]);
-                                route_ais3(&caps, &http, &caps_tx, &ais_item_url(item_id), Ais3Verb::Patch, Some(build_ais_move_body(folder_id)));
-                            } else {
-                                self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
-                            }
+                            // UDP on every grid, as the reference moves an item: Second
+                            // Life's AIS3 refuses a `PATCH` of `parent_id` ("Use MOVE
+                            // method") and takes the UDP message
+                            // (`book/src/gridspec/inventory.md` § Fetching).
+                            self.session.move_inventory_item(item_id, folder_id, &new_name, Instant::now())?;
                         }
                         Some(Command::CopyInventoryItem { old_agent_id, old_item_id, new_folder_id, new_name }) => {
                             self.session.copy_inventory_item(old_agent_id, old_item_id, new_folder_id, &new_name, Instant::now())?;
@@ -1571,12 +1550,9 @@ impl Client {
                                 tokio::spawn(patch_caps_llsd(url, build_ais_rename_category_body(&name), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
                             }
                         }
-                        Some(Command::Ais3MoveFolder { folder_id, parent_id }) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
-                                let url = format!("{base}{}", ais_category_url(folder_id));
-                                tokio::spawn(patch_caps_llsd(url, build_ais_move_body(parent_id), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
-                            }
-                        }
+                        // No AIS3 move commands: Second Life refuses AIS3's `PATCH` of a
+                        // `parent_id` and its `MOVE`; moves go UDP (see the note on
+                        // `Command::Ais3RemoveFolder` in `sl-proto`'s `command.rs`).
                         Some(Command::Ais3RemoveFolder(folder_id)) => {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_category_url(folder_id));
@@ -1606,12 +1582,6 @@ impl Client {
                             if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
                                 let url = format!("{base}{}", ais_item_url(item_id));
                                 tokio::spawn(patch_caps_llsd(url, build_ais_update_item_body(&name, &description), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
-                            }
-                        }
-                        Some(Command::Ais3MoveItem { item_id, parent_id }) => {
-                            if let Some(base) = caps.get(CAP_INVENTORY_API_V3).cloned() {
-                                let url = format!("{base}{}", ais_item_url(item_id));
-                                tokio::spawn(patch_caps_llsd(url, build_ais_move_body(parent_id), CAP_INVENTORY_API_V3, http.clone(), caps_tx.clone()));
                             }
                         }
                         Some(Command::Ais3RemoveItem(item_id)) => {

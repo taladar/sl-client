@@ -744,7 +744,9 @@ fn parse_success_members(map: &HashMap<String, Llsd>) -> Result<LoginSuccess, Wi
     success.library_owner =
         section_uuid(map, "inventory-lib-owner", "agent_id").map(AgentKey::from);
     success.inventory_skeleton = skeleton_from_llsd(map.get("inventory-skeleton"));
+    success.inventory_skeleton_fields = skeleton_fields_from_llsd(map.get("inventory-skeleton"));
     success.library_skeleton = skeleton_from_llsd(map.get("inventory-skel-lib"));
+    success.library_skeleton_fields = skeleton_fields_from_llsd(map.get("inventory-skel-lib"));
     success.buddy_list = array_maps(map.get("buddy-list"))
         .filter_map(|entry| {
             Some(BuddyListEntry {
@@ -946,6 +948,17 @@ fn skeleton_from_llsd(value: Option<&Llsd>) -> Vec<SkeletonFolder> {
             })
         })
         .collect()
+}
+
+/// The keys the entries of a skeleton's LLSD array carried, sorted and each
+/// named once.
+fn skeleton_fields_from_llsd(value: Option<&Llsd>) -> Vec<String> {
+    let mut names: Vec<String> = array_maps(value)
+        .flat_map(|entry| entry.keys().cloned())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 /// Encodes an event/classified category list as its LLSD array.

@@ -11892,21 +11892,14 @@ impl Session {
             .map(|(folder_id, parent_id)| (folder_id.uuid(), parent_id.uuid()))
             .collect();
         circuit.send_move_inventory_folders(&wire, stamp, now)?;
-        for &(folder_id, parent_id) in moves {
-            self.inventory.reparent_folder(folder_id, parent_id);
-        }
-        Ok(())
+        self.move_inventory_folders_local(moves)
     }
 
     /// Re-parents folders in the local inventory cache **without** any wire
-    /// message — the local half of a move whose server side is an AIS3
-    /// `PATCH /category/<id>` (Second Life). Checked exactly as
-    /// [`Self::move_inventory_folders`] checks, so a move that one would refuse
-    /// is refused here too, and the caller must not send it.
-    ///
-    /// Without it a Second Life move changed nothing locally until something
-    /// re-fetched both folders: the AIS3 reply names the moved folder but not
-    /// the parent it left, so the old parent kept listing it.
+    /// message — the local half of [`Self::move_inventory_folders`], which
+    /// sends the UDP move on every grid (Second Life's AIS3 refuses one,
+    /// `book/src/gridspec/inventory.md` § Fetching). Checked exactly as that
+    /// checks, so a move it would refuse is refused here too.
     ///
     /// # Errors
     ///

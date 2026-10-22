@@ -4109,6 +4109,110 @@ mod test {
         Ok(())
     }
 
+    /// The UDP folder messages are applied to the serving tree with the
+    /// version steps both grids were measured giving: a create steps the
+    /// parent, a rename in place steps the **parent** and not the folder, a
+    /// move steps both parents, and a removal steps the Trash on Second Life
+    /// and leaves it on OpenSim (`book/src/gridspec/inventory.md` § Fetching).
+    #[test]
+    fn client_udp_folder_messages_are_applied_to_the_tree() -> Result<(), TestError> {
+        for (dialect, removal_step) in [
+            (sl_proto::InventoryDialect::SecondLife, 1),
+            (sl_proto::InventoryDialect::OpenSim, 0),
+        ] {
+            let now = Instant::now();
+            let (mut client, mut sim) = setup(now)?;
+            sim.set_inventory_dialect(dialect);
+            drain_server(&mut sim);
+            let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x7001));
+            sim.agent_inventory_mut().insert_folder(InventoryFolder {
+                folder_id: root,
+                parent_id: None,
+                name: "My Inventory".to_owned(),
+                folder_type: 8,
+                version: 1,
+            });
+            let version = |sim: &SimSession, folder| {
+                sim.agent_inventory()
+                    .folder(folder)
+                    .map(|folder: &InventoryFolder| folder.version)
+            };
+            let made = InventoryFolderKey::from(uuid::Uuid::from_u128(0x7003));
+
+            // The second folder stands in for the Trash: the client moves
+            // only into a folder its own model holds.
+            let trash = InventoryFolderKey::from(uuid::Uuid::from_u128(0x7002));
+            client.create_inventory_folder(
+                trash,
+                root,
+                sl_proto::FolderType::Trash,
+                "Trash",
+                now,
+            )?;
+            pump(&mut client, &mut sim, now)?;
+            client.create_inventory_folder(made, root, sl_proto::FolderType::None, "Made", now)?;
+            pump(&mut client, &mut sim, now)?;
+            assert_eq!(
+                version(&sim, root),
+                Some(3),
+                "{dialect:?}: a create steps the parent"
+            );
+            assert_eq!(version(&sim, made), Some(1));
+
+            client.update_inventory_folder(
+                made,
+                root,
+                sl_proto::FolderType::None,
+                "Renamed",
+                now,
+            )?;
+            pump(&mut client, &mut sim, now)?;
+            let held = sim
+                .agent_inventory()
+                .folder(made)
+                .ok_or("the folder is held")?;
+            assert_eq!(held.name, "Renamed");
+            assert_eq!(
+                version(&sim, root),
+                Some(4),
+                "{dialect:?}: a rename steps the parent"
+            );
+            assert_eq!(
+                version(&sim, made),
+                Some(1),
+                "{dialect:?}: and not the folder"
+            );
+
+            client.move_inventory_folders(&[(made, trash)], false, now)?;
+            pump(&mut client, &mut sim, now)?;
+            let held = sim
+                .agent_inventory()
+                .folder(made)
+                .ok_or("the folder is held")?;
+            assert_eq!(held.parent_id, Some(trash));
+            assert_eq!(
+                version(&sim, root),
+                Some(5),
+                "{dialect:?}: a move steps the old parent"
+            );
+            assert_eq!(
+                version(&sim, trash),
+                Some(2),
+                "{dialect:?}: and the new one"
+            );
+
+            client.remove_inventory_folders(&[made], now)?;
+            pump(&mut client, &mut sim, now)?;
+            assert_eq!(version(&sim, made), None, "{dialect:?}: removed");
+            assert_eq!(
+                version(&sim, trash),
+                Some(2_i32.saturating_add(removal_step)),
+                "{dialect:?}: the Trash's version after a removal"
+            );
+        }
+        Ok(())
+    }
+
     /// A UDP `MoveInventoryItem` — how a rename travels, the AIS3 move having
     /// no name — moves and renames the item in the serving tree, so the next
     /// fetch answers with what the client changed; a block naming an item the

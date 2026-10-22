@@ -449,6 +449,11 @@ pub struct LoginSuccess {
     /// type, and version), from the `inventory-skeleton` response field. Empty if
     /// not requested/provided.
     pub inventory_skeleton: Vec<SkeletonFolder>,
+    /// The field names the `inventory-skeleton` entries carried, sorted and
+    /// each named once across every entry — what a grid states about a folder
+    /// at login, beyond the five [`SkeletonFolder`] keeps. Empty if the section
+    /// was not provided.
+    pub inventory_skeleton_fields: Vec<String>,
     /// The agent's friends (the buddy list), each with the rights the agent
     /// grants them and the rights they grant the agent, from the `buddy-list`
     /// response field. Empty if not requested/provided or the agent has no
@@ -505,6 +510,9 @@ pub struct LoginSuccess {
     /// The shared Library inventory's folder skeleton, from the
     /// `inventory-skel-lib` response field. Empty if not requested/provided.
     pub library_skeleton: Vec<SkeletonFolder>,
+    /// The field names the `inventory-skel-lib` entries carried, as
+    /// [`inventory_skeleton_fields`](Self::inventory_skeleton_fields).
+    pub library_skeleton_fields: Vec<String>,
     /// The base URL of the agent-appearance (server-side "Sunshine" bake)
     /// service, from the `agent_appearance_service` response field. Server-baked
     /// avatar textures are fetched from here as
@@ -761,6 +769,7 @@ impl LoginSuccess {
             mfa_hash: None,
             inventory_root: None,
             inventory_skeleton: Vec::new(),
+            inventory_skeleton_fields: Vec::new(),
             buddy_list: Vec::new(),
             home: None,
             look_at: None,
@@ -772,6 +781,7 @@ impl LoginSuccess {
             library_root: None,
             library_owner: None,
             library_skeleton: Vec::new(),
+            library_skeleton_fields: Vec::new(),
             agent_appearance_service: None,
             map_server_url: None,
             openid_url: None,
@@ -848,6 +858,7 @@ impl LoginSuccess {
         }
         if !wants(options, "inventory-skeleton") {
             self.inventory_skeleton.clear();
+            self.inventory_skeleton_fields.clear();
         }
         if !wants(options, "inventory-lib-root") {
             self.library_root = None;
@@ -857,6 +868,7 @@ impl LoginSuccess {
         }
         if !wants(options, "inventory-skel-lib") {
             self.library_skeleton.clear();
+            self.library_skeleton_fields.clear();
         }
         if !wants(options, "buddy-list") {
             self.buddy_list.clear();
@@ -1313,6 +1325,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, WireError> {
         inventory_root: parse_array_struct_uuid(response_struct, "inventory-root", "folder_id")
             .map(InventoryFolderKey::from),
         inventory_skeleton: parse_skeleton(response_struct, "inventory-skeleton"),
+        inventory_skeleton_fields: skeleton_fields(response_struct, "inventory-skeleton"),
         buddy_list: parse_buddy_list(response_struct),
         home: members.get("home").and_then(|h| parse_home(h)),
         look_at: members.get("look_at").and_then(|l| parse_direction(l)),
@@ -1331,6 +1344,7 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, WireError> {
         library_owner: parse_array_struct_uuid(response_struct, "inventory-lib-owner", "agent_id")
             .map(AgentKey::from),
         library_skeleton: parse_skeleton(response_struct, "inventory-skel-lib"),
+        library_skeleton_fields: skeleton_fields(response_struct, "inventory-skel-lib"),
         agent_appearance_service: parse_appearance_service(&members),
         map_server_url: members
             .get("map-server-url")
@@ -1602,6 +1616,18 @@ fn parse_skeleton(response_struct: roxmltree::Node<'_, '_>, member: &str) -> Vec
             })
         })
         .collect()
+}
+
+/// The field names the entries of the named skeleton member carried, sorted
+/// and each named once.
+fn skeleton_fields(response_struct: roxmltree::Node<'_, '_>, member: &str) -> Vec<String> {
+    let Some(value) = member_value_node(response_struct, member) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = array_structs(value).flat_map(member_names).collect();
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 /// Extracts the friend/buddy list from the `buddy-list` member: an array of

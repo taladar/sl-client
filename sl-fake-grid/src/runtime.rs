@@ -592,6 +592,9 @@ pub(crate) struct GridCore {
     /// Whether an update capability's completion names the item it rewrote
     /// ([`UpdateCompletionItem`]).
     pub(crate) update_completion_item: UpdateCompletionItem,
+    /// Which grid's inventory answers each session gives
+    /// ([`ImitatedGrid::inventory_dialect`]).
+    pub(crate) inventory_dialect: sl_proto::InventoryDialect,
     /// Who composites this grid's avatars ([`BakePolicy`]): the appearance
     /// service, the central-bake protocol bit, the `AppearanceData` block and
     /// the `UpdateAvatarAppearance` capability all follow it.
@@ -868,6 +871,7 @@ impl GridCore {
         sim.set_update_completion_names_item(self.update_completion_item.names_item());
         sim.set_money_balance(self.upload_funds);
         sim.set_parcel_dialect(self.parcel_policy.wire_types);
+        sim.set_inventory_dialect(self.inventory_dialect);
         sim.set_withholds_logout_reply(matches!(
             self.logout_reply,
             crate::imitates::LogoutReply::Withheld
@@ -2350,6 +2354,7 @@ impl FakeGridBuilder {
             update_completion_item: self
                 .update_completion_item
                 .unwrap_or_else(|| self.imitates.update_completion_item()),
+            inventory_dialect: self.imitates.inventory_dialect(),
             inventory_announcement: self
                 .inventory_announcement
                 .unwrap_or_else(|| self.imitates.inventory_announcement()),

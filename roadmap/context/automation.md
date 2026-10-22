@@ -708,9 +708,9 @@ replaces that person.
   flags (OpenSim's `GetDefaultAsset`), a script as the starter script,
   anything else an empty asset or the transaction's upload; the reply is the
   `UpdateCreateInventoryItem` echoing the callback id. A UDP
-  `MoveInventoryItem` (how a rename travels; the AIS3 move has no name) is
-  applied to the serving tree by `SimSession` itself. A test reads what a save
-  stored with `FakeAgent::stored_asset`.
+  `MoveInventoryItem` (every move and rename; Second Life's AIS3 moves
+  nothing) is applied to the serving tree by `SimSession` itself. A test
+  reads what a save stored with `FakeAgent::stored_asset`.
 - **The environment readout** carries the sky's haze density and sun
   (azimuth, elevation in radians) beside its ambient, the drawn water (name,
   fog density), `transition` — how far a manual change's cross-fade has got —

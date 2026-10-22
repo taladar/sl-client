@@ -4251,4 +4251,77 @@ mod tests {
         }
         Ok(())
     }
+
+    /// A delete — the viewer's move into the Trash — moves the folder and the
+    /// item on the grid, on both flavours: the moves go over UDP on every
+    /// grid, because Second Life's AIS3 refuses one
+    /// (`book/src/gridspec/inventory.md` § Fetching). A folder the viewer
+    /// makes over UDP is on the grid first.
+    #[test]
+    fn a_delete_moves_the_folder_and_the_item_into_the_trash_on_the_grid() -> Result<(), TestError>
+    {
+        for grid in [
+            sl_fake_grid::ImitatedGrid::SecondLife,
+            sl_fake_grid::ImitatedGrid::OpenSim,
+        ] {
+            let mut harness = ViewerHarness::start_imitating(stock_fixture(), grid)?;
+            harness.login()?;
+            let agent = harness.agent()?;
+            let (root, trash, item) = harness.grid(agent.with_sim(|sim| {
+                let tree = sim.agent_inventory();
+                let of_type = |folder_type: sl_proto::FolderType| {
+                    tree.folders()
+                        .find(|folder| folder.folder_type == folder_type.to_code())
+                        .map(|folder| folder.folder_id)
+                };
+                let trash = of_type(sl_proto::FolderType::Trash);
+                let outfit = of_type(sl_proto::FolderType::CurrentOutfit);
+                // An item nothing wears: no link, body part or clothing.
+                let item = tree
+                    .items()
+                    .find(|item| {
+                        !matches!(item.item_type, 5 | 13 | 24 | 25)
+                            && Some(item.folder_id) != trash
+                            && Some(item.folder_id) != outfit
+                    })
+                    .map(|item| item.item_id);
+                (of_type(sl_proto::FolderType::RootInventory), trash, item)
+            }));
+            let root = root.ok_or("the fixture has no inventory root")?;
+            let trash = trash.ok_or("the fixture has no Trash")?;
+            let item = item.ok_or("the fixture has no item to delete")?;
+
+            let folder = sl_proto::InventoryFolderKey::from(sl_proto::Uuid::new_v4());
+            harness.command(sl_client_bevy::Command::CreateInventoryFolder {
+                folder_id: folder,
+                parent_id: root,
+                folder_type: sl_proto::FolderType::None,
+                name: "Deleted".to_owned(),
+            });
+            harness.run_until(&format!("the made folder on {grid:?}"), |harness| {
+                harness.grid(
+                    agent.with_sim(|sim| sim.agent_inventory().folder(folder).map(|_folder| ())),
+                )
+            })?;
+            harness.command(sl_client_bevy::Command::MoveInventoryFolder {
+                folder_id: folder,
+                parent_id: trash,
+            });
+            harness.command(sl_client_bevy::Command::MoveInventoryItem {
+                item_id: item,
+                folder_id: trash,
+                new_name: String::new(),
+            });
+            harness.run_until(&format!("both in the Trash on {grid:?}"), |harness| {
+                harness.grid(agent.with_sim(|sim| {
+                    let tree = sim.agent_inventory();
+                    (tree.folder(folder)?.parent_id == Some(trash)
+                        && tree.item(item)?.folder_id == trash)
+                        .then_some(())
+                }))
+            })?;
+            harness.logout()?;
+        }
+        Ok(())
+    }
 }

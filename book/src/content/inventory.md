@@ -218,7 +218,11 @@ forms:
 - **Folders** — create, rename/update, move, remove
   (`CreateInventoryFolder` / `UpdateInventoryFolder` / `MoveInventoryFolder` /
   `RemoveInventoryFolders`, and the `Ais3CreateFolder` / `Ais3RenameFolder` /
-  `Ais3MoveFolder` / `Ais3RemoveFolder` / `Ais3PurgeFolder` equivalents).
+  `Ais3RemoveFolder` / `Ais3PurgeFolder` equivalents). A move has no AIS3
+  form: Second Life refuses AIS3's `PATCH` of a `parent_id` and its `MOVE`
+  method alike, so both runtimes move folders and items with the UDP messages
+  on every grid, as the reference does
+  ([Grid Behaviour](../gridspec/inventory.md#fetching)).
 - **Items** — create, update, move, copy, remove, change flags, purge a folder's
   descendants (`CreateInventoryItem`, `UpdateInventoryItem`,
   `MoveInventoryItem`, `CopyInventoryItem`, `RemoveInventoryItems`,
@@ -234,16 +238,19 @@ forms:
   item's real id, so `link_inventory_item` returns an `InventoryCallbackId` to
   correlate the confirming `Event::InventoryItemCreated`.
 
-On Second Life the runtimes route a move, a folder or item removal and an
-emptying (`MoveInventoryItem`, `MoveInventoryFolder`, `RemoveInventoryFolders`,
-`RemoveInventoryItems`, `PurgeInventoryDescendents`) over AIS3 and keep the UDP
-message for OpenSim. **Both paths change the held cache when the command is
-sent**: the UDP methods do it themselves, and the AIS3 branch calls their
-wire-free halves (`move_inventory_items_local`,
-`move_inventory_folders_local`, `remove_inventory_folders_local`,
-`remove_inventory_items_local`, `purge_inventory_descendents_local`). An AIS3
-reply names what it moved but never the folder it left, and carries no payload
-for what it removed, so a cache left for the reply to fix kept a deleted item
+On Second Life the runtimes route a folder or item removal and an emptying
+(`RemoveInventoryFolders`, `RemoveInventoryItems`, `PurgeInventoryDescendents`)
+over AIS3 and keep the UDP message for OpenSim. A **move**
+(`MoveInventoryItem`, `MoveInventoryFolder`) is the UDP message on every grid,
+as the reference sends it: Second Life's AIS3 refuses to change a
+`parent_id` ([Grid Behaviour](../gridspec/inventory.md#fetching)), so until
+2026-10-21, when the runtimes sent moves there, every move and every
+delete-to-Trash on Second Life changed only the viewer's own cache. **Every
+path changes the held cache when the command is sent**: the UDP methods do it
+themselves, and the AIS3 branch calls their wire-free halves
+(`remove_inventory_folders_local`, `remove_inventory_items_local`,
+`purge_inventory_descendents_local`). An AIS3 reply carries no payload for
+what it removed, so a cache left for the reply to fix kept a deleted item
 listed where it was.
 
 When the simulator creates an item, it allocates the real id and confirms via

@@ -2710,16 +2710,10 @@ fn all_specs() -> Vec<CommandSpec> {
                 })
             },
         },
-        CommandSpec {
-            name: "ais3_move_folder",
-            usage: "<folder_id> <parent_id>",
-            build: |args, ctx| {
-                Ok(Command::Ais3MoveFolder {
-                    folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 0)?),
-                    parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 1)?),
-                })
-            },
-        },
+        // No `ais3_move_folder` / `ais3_move_item`: Second Life's AIS3 refuses
+        // a move (`PATCH` of `parent_id`, and `MOVE`), so they moved nothing;
+        // `move_inventory_folder` / `move_inventory_item` send the UDP move
+        // the reference uses (`book/src/gridspec/inventory.md` § Fetching).
         CommandSpec {
             name: "ais3_remove_folder",
             usage: "<folder_id>",
@@ -2756,16 +2750,6 @@ fn all_specs() -> Vec<CommandSpec> {
                     item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
                     name: args.req_str(ctx, "name", 1)?,
                     description: args.str_or(ctx, "description", 2, "")?,
-                })
-            },
-        },
-        CommandSpec {
-            name: "ais3_move_item",
-            usage: "<item_id> <parent_id>",
-            build: |args, ctx| {
-                Ok(Command::Ais3MoveItem {
-                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
-                    parent_id: InventoryFolderKey::from(args.req_uuid(ctx, "parent_id", 1)?),
                 })
             },
         },

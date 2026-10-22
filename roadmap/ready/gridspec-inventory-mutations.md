@@ -14,6 +14,15 @@ Context: [context/gridspec.md](../context/gridspec.md).
 Purge / remove are Trash-gated; OpenSim UDP mutations get no reply; SL rejects
 UDP links into the COF; the fake grid drops about eight UDP mutation messages.
 
+Since `gridspec-inventory-fetch` (2026-10-21, `book/src/gridspec/inventory.md`
+§ Fetching): Second Life's AIS3 refuses every move (`PATCH` of `parent_id`,
+folder or item, `400`; `MOVE`, `405`) and the client now moves over UDP on
+every grid; UDP folder create, rename, move and removal work on both grids
+(the version steps are in the chapter) and the fake grid serves them; an AIS3
+`DELETE` of a folder outside the Trash removes it on Second Life. Still
+unmeasured: the pushes after each mutation, the Trash gating of a UDP remove
+or purge, and the AIS3 mutation replies' own shapes.
+
 ## Discover
 
 `ais3-folder-lifecycle`, `inventory-item-ops` on aditi, recording the reply /

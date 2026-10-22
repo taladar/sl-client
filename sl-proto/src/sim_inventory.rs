@@ -79,6 +79,11 @@ impl SimInventoryTree {
         self.folders.values()
     }
 
+    /// Every item in the tree, in id order.
+    pub fn items(&self) -> impl Iterator<Item = &InventoryItem> {
+        self.items.values()
+    }
+
     /// Gives every folder the id `rename` maps its id to, and every item and
     /// folder that names one the new id — e.g. a fixture tree, seeded with
     /// the same ids for every agent, made the agent's own, as a grid's
@@ -416,6 +421,49 @@ impl SimInventoryTree {
         Ok(update)
     }
 
+    /// Applies a UDP `UpdateInventoryFolder` block: folder `id` takes `name`
+    /// and `folder_type` and, where `parent` differs from its own, moves
+    /// under it ([`move_category`](Self::move_category)). A rename in place
+    /// steps the **parent's** version and leaves the folder's own, as both
+    /// grids do (`book/src/gridspec/inventory.md` § Fetching).
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist;
+    /// [`SimInventoryError::InvalidParent`] for a move
+    /// [`move_category`](Self::move_category) refuses.
+    pub(crate) fn update_category(
+        &mut self,
+        id: InventoryFolderKey,
+        parent: InventoryFolderKey,
+        folder_type: i8,
+        name: String,
+    ) -> Result<AisUpdate, SimInventoryError> {
+        let held_parent = self
+            .folders
+            .get(&id)
+            .ok_or(SimInventoryError::UnknownTarget)?
+            .parent_id;
+        if held_parent != Some(parent) {
+            let update = self.move_category(id, parent)?;
+            if let Some(folder) = self.folders.get_mut(&id) {
+                folder.name = name;
+                folder.folder_type = folder_type;
+            }
+            return Ok(update);
+        }
+        if let Some(folder) = self.folders.get_mut(&id) {
+            folder.name = name;
+            folder.folder_type = folder_type;
+        }
+        let mut update = AisUpdate {
+            updated_categories: vec![id],
+            ..AisUpdate::default()
+        };
+        self.bump_version(parent, &mut update);
+        Ok(update)
+    }
+
     /// Re-parents folder `id` under `new_parent` (an AIS3 `PATCH
     /// /category/<id>` with `{ parent_id }`), bumping both the old and the
     /// new parent's versions.
@@ -570,6 +618,30 @@ impl SimInventoryTree {
             self.bump_version(parent_id, &mut update);
         }
         Ok(update)
+    }
+
+    /// Removes folder `id` and its whole subtree as
+    /// [`remove_category`](Self::remove_category) does, but leaves the
+    /// parent's version where it was — what OpenSim does with a UDP
+    /// `RemoveInventoryFolder` (`book/src/gridspec/inventory.md` § Fetching).
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist.
+    pub(crate) fn remove_category_keeping_parent_version(
+        &mut self,
+        id: InventoryFolderKey,
+    ) -> Result<AisUpdate, SimInventoryError> {
+        if !self.folders.contains_key(&id) {
+            return Err(SimInventoryError::UnknownTarget);
+        }
+        let removed_folders = self.subtree_folder_ids(id);
+        let removed_items = self.remove_folders_and_contents(&removed_folders);
+        Ok(AisUpdate {
+            categories_removed: removed_folders,
+            category_items_removed: removed_items,
+            ..AisUpdate::default()
+        })
     }
 
     /// Empties folder `id` (an AIS3 `DELETE /category/<id>/children`): every

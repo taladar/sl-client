@@ -23,3 +23,16 @@ Implement the behaviour the discovery task measured and the book's
 `sl-fake-grid/src/imitates.rs` for every divergence), and hold it to the
 measurement with the discovery task's conformance cases run against
 `FakeSl` and `FakeOpensim`. See `roadmap/context/gridspec.md`.
+
+## Since done (2026-10-21)
+
+`gridspec-inventory-fetch` serves the four UDP folder messages —
+`CreateInventoryFolder`, `UpdateInventoryFolder`, `MoveInventoryFolder`,
+`RemoveInventoryFolder` — with the version steps both grids were measured
+giving, per `InventoryDialect` (a removal steps the Trash on Second Life and
+not on OpenSim), because the client now moves folders and items over UDP on
+every grid: Second Life's AIS3 refuses a move (`book/src/gridspec/inventory.md`
+§ Fetching). Still dropped: `CopyInventoryItem`, `ChangeInventoryItemFlags`,
+`RemoveInventoryItem`, `RemoveInventoryObjects`, `PurgeInventoryDescendents`.
+The `inventory-fetch` census's item legs need the copy (its `FAKE_EXEMPT`
+rows name this task). Trash gating and pushes are unmeasured.

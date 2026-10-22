@@ -2512,7 +2512,7 @@ mod test {
     }
 
     /// The `folders` batch fetch round-trips through the real client: known
-    /// folders answer their direct children, unknown folders are skipped.
+    /// folders answer their direct children, unknown folders an empty entry.
     #[test]
     fn fetch_inventory_descendents2_round_trips_through_the_real_client() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -2538,8 +2538,9 @@ mod test {
             .into_iter()
             .filter(|event| matches!(event, Event::InventoryDescendents { .. }))
             .collect();
-        // The unknown folder is skipped tolerantly, so two entries come back.
-        assert_eq!(descendents.len(), 2);
+        // Both grids answer a folder nobody has with an empty entry at version
+        // 0 rather than refusing it (gridspec § Fetching), so three come back.
+        assert_eq!(descendents.len(), 3);
         match descendents.first() {
             Some(Event::InventoryDescendents {
                 folder_id,
@@ -2580,6 +2581,22 @@ mod test {
                 );
             }
             other => return Err(format!("unexpected second event: {other:?}").into()),
+        }
+        match descendents.get(2) {
+            Some(Event::InventoryDescendents {
+                folder_id,
+                version,
+                descendents,
+                folders,
+                items,
+            }) => {
+                assert_eq!(*folder_id, folder_key(0xdead));
+                assert_eq!(*version, 0);
+                assert_eq!(*descendents, 0);
+                assert!(folders.is_empty());
+                assert!(items.is_empty());
+            }
+            other => return Err(format!("unexpected third event: {other:?}").into()),
         }
         Ok(())
     }
@@ -2746,9 +2763,10 @@ mod test {
         Ok(())
     }
 
-    /// The AIS3 category lifecycle — create, rename, move, delete — mutates
-    /// the serving tree, reports `_updated_category_versions` at every step,
-    /// and folds through the real client.
+    /// The AIS3 category lifecycle — create, rename, delete — mutates the
+    /// serving tree, reports `_updated_category_versions` at every step, and
+    /// folds through the real client; a move is refused with Second Life's
+    /// `400` and moves nothing (`book/src/gridspec/inventory.md` § Fetching).
     #[test]
     fn ais3_category_lifecycle_round_trips() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -2821,31 +2839,26 @@ mod test {
             Some("Renamed".to_owned())
         );
 
-        // Move under Clothing bumps both parents.
+        // A move is refused, as Second Life refuses it, and moves nothing.
         let body = build_ais_move_body(folder_key(AGENT_CLOTHING));
         let (status, reply) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &body)?;
-        assert_eq!(status, 200);
+        assert_eq!(status, 400);
         let tree = parse_llsd_xml(&reply)?;
-        let versions = tree
-            .get("_updated_category_versions")
-            .ok_or("no versions on move")?;
         assert_eq!(
-            versions
-                .get(&folder_key(AGENT_ROOT).to_string())
-                .and_then(Llsd::as_i32),
-            Some(7)
-        );
-        assert_eq!(
-            versions
-                .get(&folder_key(AGENT_CLOTHING).to_string())
-                .and_then(Llsd::as_i32),
-            Some(4)
+            tree.get("error_description").and_then(Llsd::as_str),
+            Some(
+                format!(
+                    "Cannot change parent_id.  Use MOVE method.  {created}, {} ",
+                    folder_key(AGENT_CLOTHING)
+                )
+                .as_str()
+            )
         );
         assert_eq!(
             sim.agent_inventory()
                 .folder(created)
                 .and_then(|folder| folder.parent_id),
-            Some(folder_key(AGENT_CLOTHING))
+            Some(folder_key(AGENT_ROOT))
         );
 
         // Delete removes the subtree and reports it.
@@ -2863,8 +2876,9 @@ mod test {
         Ok(())
     }
 
-    /// The AIS3 item verbs: update embeds the new item state, move re-parents
-    /// it, delete removes it and reports `_removed_items`.
+    /// The AIS3 item verbs: update embeds the new item state, a move is
+    /// refused with Second Life's `400`, delete removes it and reports
+    /// `_removed_items`.
     #[test]
     fn ais3_item_update_move_remove_round_trips() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -2893,15 +2907,15 @@ mod test {
             Some(4)
         );
 
-        // Move into the root bumps both folders.
+        // A move into the root is refused and leaves the item where it was.
         let body = build_ais_move_body(folder_key(AGENT_ROOT));
         let (status, _) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &body)?;
-        assert_eq!(status, 200);
+        assert_eq!(status, 400);
         assert_eq!(
             sim.agent_inventory()
                 .item(item_key(AGENT_HAT))
                 .map(|item| item.folder_id),
-            Some(folder_key(AGENT_ROOT))
+            Some(folder_key(AGENT_CLOTHING))
         );
 
         // A GET fetches the item at the top level.
@@ -3026,9 +3040,10 @@ mod test {
         let (status, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
         assert_eq!(status, 200);
         let tree = parse_llsd_xml(&reply)?;
+        // Second Life states AIS3 ids as strings, not UUIDs.
         assert_eq!(
-            tree.get("category_id").and_then(Llsd::as_uuid),
-            Some(folder_key(AGENT_ROOT).uuid())
+            tree.get("category_id").and_then(Llsd::as_str),
+            Some(folder_key(AGENT_ROOT).to_string().as_str())
         );
         assert_eq!(embedded_counts(&reply)?, (1, 0));
         for key in ["categories", "items", "links"] {

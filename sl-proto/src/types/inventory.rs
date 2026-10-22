@@ -1012,3 +1012,106 @@ mod tests {
         );
     }
 }
+
+/// Which grid's inventory a simulator imitates where the two differ: the
+/// shape of a folder or item fetch answer, what a UDP removal does to the
+/// parent's version, and whether a UDP `FetchInventory` is answered — each
+/// measured by the `inventory-fetch` census (`book/src/gridspec/inventory.md`
+/// § Fetching).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InventoryDialect {
+    /// Second Life's (the default).
+    #[default]
+    SecondLife,
+    /// OpenSim's.
+    OpenSim,
+}
+
+impl InventoryDialect {
+    /// Rewrites one `FetchInventoryDescendents2` folder entry — and the
+    /// sub-folders and items it lists — into this grid's shape: both grids
+    /// name the asking agent and the folder's owner; Second Life states the
+    /// agent, and every id of a sub-folder or item, as a string.
+    pub fn descendents_folder(self, entry: &mut sl_wire::Llsd, agent: Uuid, owner: Uuid) {
+        let sl_wire::Llsd::Map(map) = entry else {
+            return;
+        };
+        let _agent = map.insert("agent_id".to_owned(), self.id(agent));
+        let _owner = map.insert("owner_id".to_owned(), sl_wire::Llsd::Uuid(owner));
+        if let Some(sl_wire::Llsd::Array(categories)) = map.get_mut("categories") {
+            for category in categories {
+                self.descendents_category(category, agent);
+            }
+        }
+        if let Some(sl_wire::Llsd::Array(items)) = map.get_mut("items") {
+            for item in items {
+                self.fetched_item(item, agent);
+            }
+        }
+    }
+
+    /// Rewrites one sub-folder of a folder-fetch listing: Second Life adds
+    /// the asking agent and states the ids as strings.
+    fn descendents_category(self, category: &mut sl_wire::Llsd, agent: Uuid) {
+        if self == Self::OpenSim {
+            return;
+        }
+        let sl_wire::Llsd::Map(map) = category else {
+            return;
+        };
+        let _agent = map.insert("agent_id".to_owned(), self.id(agent));
+        stringify_ids(map, &["category_id", "parent_id"]);
+    }
+
+    /// Rewrites one item of a folder or item fetch into this grid's shape:
+    /// Second Life adds the asking agent and an empty `metadata`, states
+    /// every id as a string and drops `is_owner_group`; OpenSim drops
+    /// `last_owner_id`.
+    pub fn fetched_item(self, item: &mut sl_wire::Llsd, agent: Uuid) {
+        let sl_wire::Llsd::Map(map) = item else {
+            return;
+        };
+        match self {
+            Self::SecondLife => {
+                let _agent = map.insert("agent_id".to_owned(), self.id(agent));
+                let _metadata = map.insert(
+                    "metadata".to_owned(),
+                    sl_wire::Llsd::Map(std::collections::HashMap::new()),
+                );
+                stringify_ids(map, &["asset_id", "item_id", "parent_id"]);
+                if let Some(sl_wire::Llsd::Map(permissions)) = map.get_mut("permissions") {
+                    let _group = permissions.remove("is_owner_group");
+                    stringify_ids(
+                        permissions,
+                        &["creator_id", "group_id", "last_owner_id", "owner_id"],
+                    );
+                }
+            }
+            Self::OpenSim => {
+                if let Some(sl_wire::Llsd::Map(permissions)) = map.get_mut("permissions") {
+                    let _last_owner = permissions.remove("last_owner_id");
+                }
+            }
+        }
+    }
+
+    /// An id as this grid states the asking agent: a string on Second Life,
+    /// a UUID on OpenSim.
+    fn id(self, id: Uuid) -> sl_wire::Llsd {
+        match self {
+            Self::SecondLife => sl_wire::Llsd::String(id.to_string()),
+            Self::OpenSim => sl_wire::Llsd::Uuid(id),
+        }
+    }
+}
+
+/// States each of `keys` that `map` holds as a UUID as a string instead.
+fn stringify_ids(map: &mut std::collections::HashMap<String, sl_wire::Llsd>, keys: &[&str]) {
+    for key in keys {
+        if let Some(value) = map.get_mut(*key)
+            && let sl_wire::Llsd::Uuid(id) = value
+        {
+            *value = sl_wire::Llsd::String(id.to_string());
+        }
+    }
+}

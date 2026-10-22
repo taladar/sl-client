@@ -9,7 +9,12 @@
 //! **AIS3** (`InventoryAPIv3`) CAPS REST endpoint, while OpenSim has no AIS3 and
 //! uses the legacy UDP messages (`CreateInventoryFolder`,
 //! `UpdateInventoryFolder`, `MoveInventoryFolder`, `PurgeInventoryDescendents`,
-//! `RemoveInventoryFolder`). The UDP mutations are fire-and-forget (OpenSim sends
+//! `RemoveInventoryFolder`). The **move** is the exception: it is the UDP
+//! `MoveInventoryFolder` on Second Life too, as the reference sends it, because
+//! Second Life's AIS3 refuses a `PATCH` of `parent_id` ("Use MOVE method") and
+//! its `MOVE` method alike (`book/src/gridspec/inventory.md` § Fetching). The
+//! case failed on aditi at its first move until 2026-10-21, when the client
+//! still sent the `PATCH`. The UDP mutations are fire-and-forget (OpenSim sends
 //! no reply and the client caches optimistically), so the *only* trustworthy
 //! confirmation is to re-fetch the parent over
 //! [`Command::RequestFolderContents`] and inspect the server's authoritative
@@ -179,29 +184,20 @@ async fn rename_folder(
     }
 }
 
-/// Re-parent `folder` under `new_parent`. UDP `MoveInventoryFolder` on OpenSim;
-/// AIS3 `PATCH /category` with a new `parent_id` on Second Life.
+/// Re-parent `folder` under `new_parent`: UDP `MoveInventoryFolder` on both
+/// grids, as the reference moves a folder — Second Life's AIS3 refuses a
+/// `PATCH` of `parent_id` (`book/src/gridspec/inventory.md` § Fetching).
 async fn move_folder(
     session: &Session,
-    grid: Grid,
     folder: InventoryFolderKey,
     new_parent: InventoryFolderKey,
 ) -> Result<(), TestFailure> {
-    if is_opensim(grid) {
-        session
-            .send(Command::MoveInventoryFolder {
-                folder_id: folder,
-                parent_id: new_parent,
-            })
-            .await
-    } else {
-        session
-            .send(Command::Ais3MoveFolder {
-                folder_id: folder,
-                parent_id: new_parent,
-            })
-            .await
-    }
+    session
+        .send(Command::MoveInventoryFolder {
+            folder_id: folder,
+            parent_id: new_parent,
+        })
+        .await
 }
 
 /// Empty `folder` of its contents. UDP `PurgeInventoryDescendents` on OpenSim;
@@ -370,7 +366,7 @@ impl GridTest for Ais3FolderLifecycle {
             // destination. Both edges are asserted — present under the new parent,
             // gone from the old.
             let move_start = Instant::now();
-            move_folder(session, grid, subject, dest).await?;
+            move_folder(session, subject, dest).await?;
             poll_subfolders(
                 session,
                 dest,
@@ -391,7 +387,7 @@ impl GridTest for Ais3FolderLifecycle {
             // the standard "delete folder" step a viewer performs before a folder
             // can be emptied or destroyed. Asserted as another re-parent: present
             // under Trash, gone from the destination.
-            move_folder(session, grid, subject, trash).await?;
+            move_folder(session, subject, trash).await?;
             poll_subfolders(
                 session,
                 trash,
@@ -444,7 +440,7 @@ impl GridTest for Ais3FolderLifecycle {
             // Clean up the now-empty destination so back-to-back runs start from a
             // clean inventory: send it to Trash, then remove it (the same
             // to-trash-then-remove path the subject took).
-            move_folder(session, grid, dest, trash).await?;
+            move_folder(session, dest, trash).await?;
             poll_subfolders(
                 session,
                 trash,

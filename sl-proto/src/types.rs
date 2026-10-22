@@ -520,9 +520,9 @@ pub use group::{
     GroupVoteHistoryItem, ProposalCandidateId, ProposalVoteId, UpdateGroupInfoParams, group_powers,
 };
 pub use inventory::{
-    Child, FolderInfo, FolderType, GestureActivation, InventoryCursor, InventoryFolder,
-    InventoryItem, InventoryItemMove, InventoryListing, InventoryListingChildren, ItemInfo,
-    NewInventoryItem, NewInventoryLink, SaleInfo, global_to_handle, grid_to_handle,
+    Child, FolderInfo, FolderType, GestureActivation, InventoryCursor, InventoryDialect,
+    InventoryFolder, InventoryItem, InventoryItemMove, InventoryListing, InventoryListingChildren,
+    ItemInfo, NewInventoryItem, NewInventoryLink, SaleInfo, global_to_handle, grid_to_handle,
     handle_to_global, handle_to_grid, saved_item_rebinding, uploaded_inventory_item,
 };
 pub use land::{LandBrushAction, LandBrushRadius, LandBrushSize, LandEdit, TerraformArea};

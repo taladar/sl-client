@@ -227,6 +227,10 @@ mod test {
             ))
         );
         assert_eq!(success.inventory_skeleton.len(), 2);
+        assert_eq!(
+            success.inventory_skeleton_fields,
+            ["folder_id", "name", "parent_id", "type_default", "version"]
+        );
         let root = success.inventory_skeleton.first().ok_or("root folder")?;
         assert_eq!(root.name, "My Inventory");
         assert_eq!(root.type_default, 8);
@@ -659,6 +663,7 @@ mod test {
                     2,
                 )?,
             ],
+            inventory_skeleton_fields: Vec::new(),
             buddy_list: vec![BuddyListEntry {
                 buddy_id: "cccccccc-0000-0000-0000-000000000000".parse()?,
                 rights_granted: 3,
@@ -688,6 +693,7 @@ mod test {
                 8,
                 1,
             )?],
+            library_skeleton_fields: Vec::new(),
             agent_appearance_service: Some(url::Url::parse("https://appearance.example/")?),
             map_server_url: Some(url::Url::parse("http://127.0.0.1:9000/")?),
             openid_url: Some(url::Url::parse("https://id.secondlife.com/openid/webkit")?),

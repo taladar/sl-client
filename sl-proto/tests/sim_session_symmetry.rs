@@ -47,8 +47,8 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
         AgentKey, AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind,
-        ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags, Event, FolderType,
-        FriendKey, GridCoordinates, GroupKey, InterestsUpdate, InventoryFolderKey, InventoryKey,
+        ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags, Event, FriendKey,
+        GridCoordinates, GroupKey, InterestsUpdate, InventoryFolderKey, InventoryKey,
         LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LindenAmount,
         LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType,
         ObjectExtraParams, ObjectKey, OwnerKey, ParcelObjectOwner, ParcelObjectOwnersPart, PickKey,
@@ -444,10 +444,6 @@ mod test {
     /// the typed event in `tests/sim_session.rs` instead.
     const RAW_FORWARDED: &[&str] = &[
         // inventory (legacy UDP mutation; AISv3 is the modern path)
-        "CreateInventoryFolder",
-        "UpdateInventoryFolder",
-        "MoveInventoryFolder",
-        "RemoveInventoryFolder",
         "CopyInventoryItem",
         "ChangeInventoryItemFlags",
         "RemoveInventoryItem",
@@ -492,11 +488,6 @@ mod test {
 
     /// The raw-forwarded messages the matching family test sends, in order.
     const INVENTORY_FAMILY: &[&str] = &[
-        "CreateInventoryFolder",
-        "CreateInventoryFolder",
-        "UpdateInventoryFolder",
-        "MoveInventoryFolder",
-        "RemoveInventoryFolder",
         "CopyInventoryItem",
         "ChangeInventoryItemFlags",
         "RemoveInventoryItem",
@@ -576,16 +567,13 @@ mod test {
         let now = Instant::now();
         let (mut client, mut sim) = setup(now)?;
 
-        let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x10));
         let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x11));
         let other = InventoryFolderKey::from(uuid::Uuid::from_u128(0x12));
         let item = InventoryKey::from(uuid::Uuid::from_u128(0x21));
 
-        client.create_inventory_folder(folder, root, FolderType::None, "Stuff", now)?;
-        client.create_inventory_folder(other, root, FolderType::None, "Other", now)?;
-        client.update_inventory_folder(folder, root, FolderType::None, "Things", now)?;
-        client.move_inventory_folders(&[(folder, other)], true, now)?;
-        client.remove_inventory_folders(&[other], now)?;
+        // The four UDP folder messages are **not** sent here: they are typed
+        // since `gridspec-inventory-fetch` (the serving tree applies them),
+        // and `tests/sim_session.rs` asserts their effect.
         // `create_inventory_item` and `move_inventory_items` are **not** sent
         // here: both are typed since `test-e2e-sweep-environment` (the fake
         // grid answers a create and applies a rename), and `tests/sim_session.rs`

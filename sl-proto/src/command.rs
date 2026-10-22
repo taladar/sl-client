@@ -442,14 +442,13 @@ pub enum Command {
         /// The new name.
         name: String,
     },
-    /// Move a folder over AIS3 (`PATCH /category/<id>` with `{ parent_id }`).
-    /// Second-Life only.
-    Ais3MoveFolder {
-        /// The folder to move.
-        folder_id: InventoryFolderKey,
-        /// The new parent folder.
-        parent_id: InventoryFolderKey,
-    },
+    // There is no `Ais3MoveFolder` (removed in `gridspec-inventory-fetch`,
+    // 2026-10-21). Second Life's AIS3 refuses a `PATCH /category/<id>` of
+    // `parent_id` with `400` "Cannot change parent_id. Use MOVE method." and
+    // a `MOVE` with `405` "Method Not Allowed", so the command moved nothing
+    // on any grid (OpenSim has no AIS3). A folder moves with
+    // `Command::MoveInventoryFolder`, the UDP message the reference sends, on
+    // every grid (`book/src/gridspec/inventory.md` § Fetching).
     /// Delete a folder over AIS3 (`DELETE /category/<id>`). Second-Life only.
     Ais3RemoveFolder(InventoryFolderKey),
     /// Empty a folder over AIS3 (`DELETE /category/<id>/children`). Second-Life
@@ -476,14 +475,9 @@ pub enum Command {
         /// The new description.
         description: String,
     },
-    /// Move an item over AIS3 (`PATCH /item/<id>` with `{ parent_id }`).
-    /// Second-Life only.
-    Ais3MoveItem {
-        /// The item to move.
-        item_id: InventoryKey,
-        /// The new parent folder.
-        parent_id: InventoryFolderKey,
-    },
+    // There is no `Ais3MoveItem` either, for the same reason: AIS3 answers a
+    // `PATCH /item/<id>` of `parent_id` with the same `400`. An item moves
+    // with `Command::MoveInventoryItem` (UDP) on every grid.
     /// Delete an item over AIS3 (`DELETE /item/<id>`). Second-Life only.
     Ais3RemoveItem(InventoryKey),
     /// Fetch a single item over AIS3 (`GET /item/<id>`). Second-Life only; the
@@ -3229,12 +3223,10 @@ impl Command {
             Self::CreateInventoryCategory { .. } => "CreateInventoryCategory",
             Self::Ais3CreateFolder { .. } => "Ais3CreateFolder",
             Self::Ais3RenameFolder { .. } => "Ais3RenameFolder",
-            Self::Ais3MoveFolder { .. } => "Ais3MoveFolder",
             Self::Ais3RemoveFolder(..) => "Ais3RemoveFolder",
             Self::Ais3PurgeFolder(..) => "Ais3PurgeFolder",
             Self::Ais3FetchFolderChildren { .. } => "Ais3FetchFolderChildren",
             Self::Ais3UpdateItem { .. } => "Ais3UpdateItem",
-            Self::Ais3MoveItem { .. } => "Ais3MoveItem",
             Self::Ais3RemoveItem(..) => "Ais3RemoveItem",
             Self::Ais3FetchItem(..) => "Ais3FetchItem",
             Self::GrantUserRights { .. } => "GrantUserRights",

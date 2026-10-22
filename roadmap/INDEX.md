@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 80 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1409 |
+| done | 1410 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2071** |
+| **total** | **2072** |
 
 ## ideas (134)
 
@@ -1098,6 +1098,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-im-relay`](ready/server-fake-grid-im-relay.md) — Fake grid
   — relay IMs and offers between its sessions (blocked by
   `gridspec-teleport-lures` (done), `gridspec-instant-messages` (done))
+- [`server-fake-grid-inventory-persists-across-logins`](ready/server-fake-grid-inventory-persists-across-logins.md)
+  — Fake grid — keep an account's inventory, versions included, from one login
+  to the next (blocked by `gridspec-inventory-fetch` (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
@@ -1145,8 +1148,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-inventory-fetch`](ready/gridspec-inventory-fetch.md) — Inventory
-  skeleton, fetch caps, AIS3, the library and cache versions on each grid
 - [`gridspec-inventory-mutations`](ready/gridspec-inventory-mutations.md) —
   Inventory item and folder operations and their pushes on each grid
 - [`gridspec-inventory-offers`](ready/gridspec-inventory-offers.md) — Giving
@@ -1572,7 +1573,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1409)
+## done (1410)
 
 ### protocol
 
@@ -4622,6 +4623,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grids
 - [`gridspec-instant-messages`](done/gridspec-instant-messages.md) — Instant
   messages, typing, busy replies and offline storage on each grid
+- [`gridspec-inventory-fetch`](done/gridspec-inventory-fetch.md) — Inventory
+  skeleton, fetch caps, AIS3, the library and cache versions on each grid
 - [`gridspec-land-transactions`](done/gridspec-land-transactions.md) — Buying,
   selling, deeding, abandoning land and passes on each grid
 - [`gridspec-landmarks-home`](done/gridspec-landmarks-home.md) — Landmarks and

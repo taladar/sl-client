@@ -113,6 +113,9 @@ use sl_wire::messages::{
     KickUserTargetBlockBlock, KickUserUserInfoBlock,
 };
 use sl_wire::messages::{
+    FetchInventoryReply, FetchInventoryReplyAgentDataBlock, FetchInventoryReplyInventoryDataBlock,
+};
+use sl_wire::messages::{
     GenericMessage as GenericMessageWire, GenericMessageAgentDataBlock,
     GenericMessageMethodDataBlock, GenericMessageParamListBlock,
     GenericStreamingMessage as GenericStreamingMessageWire, GenericStreamingMessageDataBlockBlock,
@@ -1964,7 +1967,8 @@ pub enum ServerEvent {
         fetch_items: bool,
     },
     /// The client created an inventory folder over the `InventoryAPIv3`
-    /// create verb or the `CreateInventoryCategory` capability. The folder is
+    /// create verb, the `CreateInventoryCategory` capability or the UDP
+    /// `CreateInventoryFolder`. The folder is
     /// already applied to the session's serving tree
     /// ([`SimSession::agent_inventory`]); fire-and-forget for a driver
     /// persisting inventory.
@@ -1980,16 +1984,18 @@ pub enum ServerEvent {
         links: Vec<InventoryItem>,
     },
     /// The client renamed an inventory folder (`InventoryAPIv3`
-    /// `PATCH /category/<id>` with `{ name }`). Applied to the serving tree.
+    /// `PATCH /category/<id>` with `{ name }`, or a UDP
+    /// `UpdateInventoryFolder`). Applied to the serving tree.
     InventoryCategoryRenamed {
         /// The renamed folder.
         folder_id: InventoryFolderKey,
         /// Its new name.
         name: String,
     },
-    /// The client moved an inventory folder (`InventoryAPIv3`
-    /// `PATCH /category/<id>` with `{ parent_id }`). Applied to the serving
-    /// tree.
+    /// The client moved an inventory folder — the UDP `MoveInventoryFolder`,
+    /// or an `UpdateInventoryFolder` naming another parent. Applied to the
+    /// serving tree. (Second Life's AIS3 moves nothing: its `PATCH` of
+    /// `parent_id` is refused.)
     InventoryCategoryMoved {
         /// The moved folder.
         folder_id: InventoryFolderKey,
@@ -2006,18 +2012,10 @@ pub enum ServerEvent {
         /// Its new description.
         description: String,
     },
-    /// The client moved an inventory item (`InventoryAPIv3` `PATCH
-    /// /item/<id>` with `{ parent_id }`). Applied to the serving tree.
-    InventoryItemMoved {
-        /// The moved item.
-        item_id: InventoryKey,
-        /// The folder it now sits in.
-        folder_id: InventoryFolderKey,
-    },
     /// The client moved, renamed or moved-and-renamed inventory items over
     /// the legacy UDP `MoveInventoryItem` — how a rename travels on every
-    /// grid, since the AIS3 move carries no name. Applied to the serving tree,
-    /// as the AIS3 move is; a block naming an item or folder the tree does
+    /// grid; Second Life's AIS3 refuses a move. Applied to the serving tree;
+    /// a block naming an item or folder the tree does
     /// not hold is left out. Nothing is sent back: the client moved its own
     /// copy first.
     InventoryItemsMovedUdp {
@@ -2025,8 +2023,8 @@ pub enum ServerEvent {
         moves: Vec<InventoryItemMove>,
     },
     /// The client deleted an inventory folder (`InventoryAPIv3`
-    /// `DELETE /category/<id>`). The whole subtree is already removed from
-    /// the serving tree.
+    /// `DELETE /category/<id>`, or a UDP `RemoveInventoryFolder`). The whole
+    /// subtree is already removed from the serving tree.
     InventoryCategoryRemoved {
         /// The deleted folder.
         folder_id: InventoryFolderKey,
@@ -3364,6 +3362,9 @@ pub struct SimSession {
     /// Which grid's wire types the event-queue `ParcelProperties` uses; see
     /// [`SimSession::set_parcel_dialect`].
     parcel_dialect: crate::ParcelLlsdDialect,
+    /// Which grid's inventory answers this session gives; see
+    /// [`SimSession::set_inventory_dialect`].
+    inventory_dialect: crate::InventoryDialect,
     /// Whether an `ExtEnvironment` PUT or DELETE is answered with a bare
     /// verdict in place of the settings now in force; see
     /// [`SimSession::set_bare_environment_replies`].
@@ -3795,6 +3796,7 @@ impl SimSession {
             state: SimState::AwaitingCircuit,
             update_completion_names_item: false,
             parcel_dialect: crate::ParcelLlsdDialect::SecondLife,
+            inventory_dialect: crate::InventoryDialect::SecondLife,
             bare_environment_replies: false,
             withholds_logout_reply: false,
             timeout_kick: None,
@@ -4469,6 +4471,20 @@ impl SimSession {
     /// types, so a grid imitating one of them sends its types.
     pub const fn set_parcel_dialect(&mut self, dialect: crate::ParcelLlsdDialect) {
         self.parcel_dialect = dialect;
+    }
+
+    /// Sets which grid's inventory answers this session gives (default
+    /// Second Life's): the shape of a folder or item fetch, what a UDP
+    /// folder removal does to the parent's version, and whether a UDP
+    /// `FetchInventory` is answered.
+    pub const fn set_inventory_dialect(&mut self, dialect: crate::InventoryDialect) {
+        self.inventory_dialect = dialect;
+    }
+
+    /// Which grid's inventory answers this session gives.
+    #[must_use]
+    pub const fn inventory_dialect(&self) -> crate::InventoryDialect {
+        self.inventory_dialect
     }
 
     /// Registers (or replaces) a material in the store the `RenderMaterials`
@@ -5277,47 +5293,6 @@ impl SimSession {
                 folder_id: id,
                 name,
             });
-        Ok(update)
-    }
-
-    /// Moves an inventory folder for an AIS3 `PATCH /category/<id>` with
-    /// `{ parent_id }`, surfacing [`ServerEvent::InventoryCategoryMoved`].
-    ///
-    /// # Errors
-    ///
-    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist;
-    /// [`SimInventoryError::InvalidParent`] on an unknown new parent or a
-    /// cycle-creating move.
-    pub(crate) fn ais_move_category(
-        &mut self,
-        id: InventoryFolderKey,
-        parent: InventoryFolderKey,
-    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
-        let update = self.agent_inventory.move_category(id, parent)?;
-        self.events.push_back(ServerEvent::InventoryCategoryMoved {
-            folder_id: id,
-            parent_id: parent,
-        });
-        Ok(update)
-    }
-
-    /// Moves an inventory item for an AIS3 `PATCH /item/<id>` with
-    /// `{ parent_id }`, surfacing [`ServerEvent::InventoryItemMoved`].
-    ///
-    /// # Errors
-    ///
-    /// [`SimInventoryError::UnknownTarget`] when the item does not exist;
-    /// [`SimInventoryError::InvalidParent`] on an unknown destination folder.
-    pub(crate) fn ais_move_item(
-        &mut self,
-        id: InventoryKey,
-        parent: InventoryFolderKey,
-    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
-        let update = self.agent_inventory.move_item(id, parent)?;
-        self.events.push_back(ServerEvent::InventoryItemMoved {
-            item_id: id,
-            folder_id: parent,
-        });
         Ok(update)
     }
 
@@ -9346,6 +9321,62 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `FetchInventoryReply` stating `items` — OpenSim's answer to a
+    /// deprecated UDP `FetchInventory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_fetch_inventory_reply(
+        &mut self,
+        items: &[InventoryItem],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let mut inventory_data = Vec::with_capacity(items.len());
+        for item in items {
+            let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+            inventory_data.push(FetchInventoryReplyInventoryDataBlock {
+                item_id: item.item_id.uuid(),
+                folder_id: item.folder_id.uuid(),
+                creator_id: item.creator_id.uuid(),
+                owner_id,
+                group_id,
+                base_mask: item.permissions.base.bits(),
+                owner_mask: item.permissions.owner.bits(),
+                group_mask: item.permissions.group.bits(),
+                everyone_mask: item.permissions.everyone.bits(),
+                next_owner_mask: item.permissions.next_owner.bits(),
+                group_owned: item.owner.is_group(),
+                asset_id: item.asset_id,
+                r#type: item.item_type,
+                inv_type: item.inv_type,
+                flags: item.flags,
+                sale_type: item.sale_type,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    item.sale_price.as_ref(),
+                )?,
+                name: with_nul(&item.name),
+                description: with_nul(&item.description),
+                creation_date: item.creation_date,
+                // As in `send_inventory_items_created`: the client discards it.
+                crc: 0,
+            });
+        }
+        let message = AnyMessage::FetchInventoryReply(FetchInventoryReply {
+            agent_data: FetchInventoryReplyAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+            },
+            inventory_data,
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends the `InventoryDescendents` reply to a deprecated UDP
     /// [`ServerEvent::RequestInventoryDescendents`]: `folder_id`'s direct
     /// children, read out of whichever serving tree holds the folder (the
@@ -12815,6 +12846,124 @@ impl SimSession {
                     local_id: RegionLocalParcelId(set.parcel_data.local_id),
                     clean_time: std::time::Duration::from_secs(minutes.saturating_mul(60)),
                 });
+            }
+            AnyMessage::CreateInventoryFolder(create) => {
+                let block = &create.folder_data;
+                let folder = InventoryFolder {
+                    folder_id: InventoryFolderKey::from(block.folder_id),
+                    parent_id: Some(InventoryFolderKey::from(block.parent_id)),
+                    name: trimmed_string(&block.name),
+                    folder_type: block.r#type,
+                    version: 1,
+                };
+                match self.agent_inventory.create_category(folder.clone()) {
+                    Ok(_update) => self
+                        .events
+                        .push_back(ServerEvent::InventoryCategoryCreated {
+                            folder: Box::new(folder),
+                        }),
+                    Err(error) => tracing::debug!(
+                        "a UDP folder create under {} failed: {error:?}",
+                        block.parent_id
+                    ),
+                }
+            }
+            AnyMessage::UpdateInventoryFolder(update) => {
+                for block in &update.folder_data {
+                    let folder_id = InventoryFolderKey::from(block.folder_id);
+                    let parent_id = InventoryFolderKey::from(block.parent_id);
+                    let name = trimmed_string(&block.name);
+                    let moved = self
+                        .agent_inventory
+                        .folder(folder_id)
+                        .is_some_and(|folder| folder.parent_id != Some(parent_id));
+                    match self.agent_inventory.update_category(
+                        folder_id,
+                        parent_id,
+                        block.r#type,
+                        name.clone(),
+                    ) {
+                        Ok(_update) => {
+                            self.events
+                                .push_back(ServerEvent::InventoryCategoryRenamed {
+                                    folder_id,
+                                    name,
+                                });
+                            if moved {
+                                self.events.push_back(ServerEvent::InventoryCategoryMoved {
+                                    folder_id,
+                                    parent_id,
+                                });
+                            }
+                        }
+                        Err(error) => {
+                            tracing::debug!("a UDP folder update of {folder_id} failed: {error:?}");
+                        }
+                    }
+                }
+            }
+            AnyMessage::MoveInventoryFolder(moved) => {
+                for block in &moved.inventory_data {
+                    let folder_id = InventoryFolderKey::from(block.folder_id);
+                    let parent_id = InventoryFolderKey::from(block.parent_id);
+                    match self.agent_inventory.move_category(folder_id, parent_id) {
+                        Ok(_update) => self.events.push_back(ServerEvent::InventoryCategoryMoved {
+                            folder_id,
+                            parent_id,
+                        }),
+                        Err(error) => tracing::debug!(
+                            "a UDP move of folder {folder_id} into {parent_id} failed: {error:?}"
+                        ),
+                    }
+                }
+            }
+            AnyMessage::RemoveInventoryFolder(removed) => {
+                for block in &removed.folder_data {
+                    let folder = InventoryFolderKey::from(block.folder_id);
+                    let outcome = match self.inventory_dialect {
+                        crate::InventoryDialect::SecondLife => {
+                            self.agent_inventory.remove_category(folder)
+                        }
+                        crate::InventoryDialect::OpenSim => self
+                            .agent_inventory
+                            .remove_category_keeping_parent_version(folder),
+                    };
+                    match outcome {
+                        Ok(update) => {
+                            self.events
+                                .push_back(ServerEvent::InventoryCategoryRemoved {
+                                    folder_id: folder,
+                                    removed_folders: update.categories_removed,
+                                    removed_items: update.category_items_removed,
+                                });
+                        }
+                        Err(error) => {
+                            tracing::debug!("a UDP removal of folder {folder} failed: {error:?}");
+                        }
+                    }
+                }
+            }
+            AnyMessage::FetchInventory(fetch) => {
+                // OpenSim answers the deprecated per-item fetch with a
+                // `FetchInventoryReply`; Second Life says nothing.
+                if self.inventory_dialect == crate::InventoryDialect::OpenSim {
+                    let items: Vec<InventoryItem> = fetch
+                        .inventory_data
+                        .iter()
+                        .filter_map(|block| {
+                            let item = InventoryKey::from(block.item_id);
+                            self.agent_inventory
+                                .item(item)
+                                .or_else(|| self.library_inventory.item(item))
+                                .cloned()
+                        })
+                        .collect();
+                    if !items.is_empty()
+                        && let Err(error) = self.send_fetch_inventory_reply(&items, now)
+                    {
+                        tracing::debug!("answering a UDP item fetch failed: {error:?}");
+                    }
+                }
             }
             AnyMessage::MoveInventoryItem(moved) => {
                 let mut moves = Vec::new();
