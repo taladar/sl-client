@@ -43,8 +43,11 @@
 //! (OpenSim's `IEnvironmentModule.GetDefaultAsset`), with the subtype in its
 //! flags so a viewer can tell the three kinds apart before it fetches one; a
 //! script the starter script; a landmark the place the agent stands, in the
-//! grid's words and with its masks ([`HomePolicy`](crate::HomePolicy)); anything
-//! else an empty asset of its type.
+//! grid's words and with its masks ([`HomePolicy`](crate::HomePolicy)); a
+//! notecard on Second Life no asset at all, which it names only once it is
+//! first saved; anything else an empty asset of its type. The item's folder steps,
+//! and its base and owner masks are the grid's
+//! ([`InventoryDialect::created_item_mask`](sl_proto::InventoryDialect::created_item_mask)).
 //!
 //! # Who is told, and how
 //!
@@ -60,11 +63,12 @@
 //! grid there is on the creation path, and against half of them on the save.
 //!
 //! The third path does not read the policy. `UpdateInventoryItem` is a UDP
-//! request, and its `UpdateCreateInventoryItem` is that request's **reply**,
-//! echoing the transaction and callback ids the client sent; a wearable save
-//! has nothing else to complete on, and OpenSim sends it there
-//! (`AssetXferUploader`) exactly where it stays quiet after a capability
-//! upload.
+//! request, and where it binds an upload its `UpdateCreateInventoryItem` is
+//! that request's **reply**, echoing the transaction and callback ids the
+//! client sent; a wearable save has nothing else to complete on, and OpenSim
+//! sends it there (`AssetXferUploader`) exactly where it stays quiet after a
+//! capability upload. An update that binds nothing — a rename, a new
+//! description — is answered by neither grid.
 //!
 //! # Ordering
 //!
@@ -364,6 +368,12 @@ fn create_item(
         key
     } else if let Some(bound) = bound_asset {
         bound
+    } else if request.asset_type == AssetType::Notecard
+        && sim.inventory_dialect() == sl_proto::InventoryDialect::SecondLife
+    {
+        // Second Life makes a notecard naming no asset; its first save gives
+        // it one (`book/src/gridspec/inventory.md` § Changing inventory).
+        AssetKey::from(uuid::Uuid::nil())
     } else {
         let key = AssetKey::from(mint());
         let body = if request.asset_type == AssetType::ScriptText {
@@ -402,9 +412,10 @@ fn create_item(
         last_owner_id: uuid::Uuid::nil(),
         creator_id: agent,
         group: None,
-        // OpenSim: base and owner `AllAndExport`, everyone and group nothing,
-        // next owner what the client asked for — but a landmark the grid's
-        // own masks, group and everyone included.
+        // Base and owner the grid's (`InventoryDialect::created_item_mask`:
+        // every bit on Second Life, OpenSim's `AllAndExport`), everyone and
+        // group nothing, next owner what the client asked for — but a
+        // landmark the grid's own masks, group and everyone included.
         permissions: if landmark {
             let [base, owner, group, everyone] = landmarks.masks;
             Permissions5 {
@@ -415,16 +426,19 @@ fn create_item(
                 next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
             }
         } else {
+            let made =
+                sl_proto::Permissions::from_bits(sim.inventory_dialect().created_item_mask());
             Permissions5 {
-                base: sl_proto::Permissions::ALL,
-                owner: sl_proto::Permissions::ALL,
+                base: made,
+                owner: made,
                 group: sl_proto::Permissions::from_bits(0),
                 everyone: sl_proto::Permissions::from_bits(0),
                 next_owner: sl_proto::Permissions::from_bits(request.next_owner_mask),
             }
         },
     };
-    sim.agent_inventory_mut().insert_item(item.clone());
+    // Filed with its folder stepped, as both grids step it.
+    let _update = sim.agent_inventory_mut().add_item(item.clone());
     if let Err(error) = sim.send_inventory_items_created(
         &[(item, callback_id)],
         TransactionId::from(request.transaction_id),
@@ -648,11 +662,20 @@ fn apply_item_updates(
         item.flags = update.item.flags;
         item.sale_type = update.item.sale_type.to_code();
         item.sale_price.clone_from(&update.item.sale_price);
+        let bound = update.bound_asset.is_some();
         if let Some(bound) = update.bound_asset {
             item.asset_id = bound.uuid();
         }
+        let folder = item.folder_id;
         sim.agent_inventory_mut().insert_item(item.clone());
-        written.push((item, update.callback_id));
+        // The item's folder steps on both grids.
+        sim.agent_inventory_mut().step_version(folder);
+        // Only a save is answered: an update binding no upload — a rename, a
+        // new description, new masks — hears nothing back on either grid
+        // (`book/src/gridspec/inventory.md` § Changing inventory).
+        if bound {
+            written.push((item, update.callback_id));
+        }
     }
     if written.is_empty() {
         return;

@@ -149,8 +149,8 @@ pub use inventory::{
     parse_ais_category_children_subset, parse_ais_category_children_url,
     parse_ais_category_links_url, parse_ais_category_url, parse_ais_create_category_body,
     parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
-    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
-    parse_create_inventory_category_request,
+    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_slam_body,
+    parse_ais_update_item_body, parse_create_inventory_category_request,
 };
 pub use landmark::{LandmarkAsset, landmark_to_wire, parse_landmark};
 pub use llsd::{

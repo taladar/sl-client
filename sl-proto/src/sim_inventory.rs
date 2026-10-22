@@ -217,6 +217,19 @@ impl SimInventoryTree {
         )
     }
 
+    /// The items the item links among `items` name, in the order of the
+    /// links: a target this tree does not hold, and one that is itself a
+    /// link, are left out (OpenSim's `FetchInvDescHandler.ProcessLinks`).
+    pub(crate) fn link_targets(&self, items: &[InventoryItem]) -> Vec<InventoryItem> {
+        items
+            .iter()
+            .filter(|item| i32::from(item.item_type) == ASSET_CODE_LINK)
+            .filter_map(|link| self.items.get(&InventoryKey::from(link.asset_id)))
+            .filter(|target| i32::from(target.item_type) != ASSET_CODE_LINK)
+            .cloned()
+            .collect()
+    }
+
     /// Serves one `FetchInventoryDescendents2` folder entry: the direct
     /// children of `folder_id` as an
     /// [`Event::InventoryDescendents`], honouring the request's
@@ -345,6 +358,114 @@ impl SimInventoryTree {
         }
     }
 
+    /// Steps `folder_id`'s version by one — what both grids do to an item's
+    /// folder when the item is made, copied, linked or rewritten, and what
+    /// Second Life does when an item's flags are set
+    /// (`book/src/gridspec/inventory.md` § Changing inventory). An unknown
+    /// folder is left alone.
+    pub fn step_version(&mut self, folder_id: InventoryFolderKey) {
+        let mut discarded = AisUpdate::default();
+        self.bump_version(folder_id, &mut discarded);
+    }
+
+    /// Files `item` in its folder and steps that folder's version: a grid
+    /// making an item — a create, a copy, a link — as both grids step it
+    /// (`book/src/gridspec/inventory.md` § Changing inventory). The change-set
+    /// names the item created and the folder stepped.
+    pub fn add_item(&mut self, item: InventoryItem) -> AisUpdate {
+        let folder_id = item.folder_id;
+        let mut update = AisUpdate {
+            created_items: vec![item.item_id],
+            ..AisUpdate::default()
+        };
+        self.items.insert(item.item_id, item);
+        self.bump_version(folder_id, &mut update);
+        update
+    }
+
+    /// Whether a removal may delete folder `folder_id` or empty it: the Trash
+    /// or the Lost and Found itself, or a folder anywhere under the Trash.
+    /// Both grids confine `RemoveInventoryFolder`, `PurgeInventoryDescendents`
+    /// and the folders of `RemoveInventoryObjects` to these and ignore the
+    /// request anywhere else (`book/src/gridspec/inventory.md` § Changing
+    /// inventory; OpenSim's `XInventoryService.ParentIsTrashOrLost`, whose
+    /// walk up the tree only ever finds the Trash).
+    pub(crate) fn is_removable(&self, folder_id: InventoryFolderKey) -> bool {
+        let trash = crate::FolderType::Trash.to_code();
+        if self
+            .folders
+            .get(&folder_id)
+            .is_some_and(|folder| folder.folder_type == crate::FolderType::LostAndFound.to_code())
+        {
+            return true;
+        }
+        let mut cursor = Some(folder_id);
+        while let Some(id) = cursor {
+            let Some(folder) = self.folders.get(&id) else {
+                return false;
+            };
+            if folder.folder_type == trash {
+                return true;
+            }
+            cursor = folder.parent_id;
+        }
+        false
+    }
+
+    /// Replaces the links in `folder_id` with `links` (an AIS3 `PUT
+    /// /category/<id>/links`, the reference's `SlamFolder`), as Second Life
+    /// does it: a link already in the folder naming the same target is kept
+    /// under its own id and takes the new name and description, a target the
+    /// folder has no link to gets the new link as given, and every link no
+    /// entry names is removed. Items that are not links stay. The folder's
+    /// version steps once.
+    ///
+    /// Returns the change-set (`created_items`, `category_items_removed`), the
+    /// ids of the links kept and rewritten, and the folder's links as the slam
+    /// left them.
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist.
+    pub(crate) fn slam_links(
+        &mut self,
+        folder_id: InventoryFolderKey,
+        links: Vec<InventoryItem>,
+    ) -> Result<(AisUpdate, Vec<InventoryKey>, Vec<InventoryItem>), SimInventoryError> {
+        let mut held = self
+            .child_links(folder_id)
+            .ok_or(SimInventoryError::UnknownTarget)?;
+        let mut update = AisUpdate::default();
+        let mut updated = Vec::new();
+        let mut result = Vec::with_capacity(links.len());
+        for link in links {
+            let kept = held
+                .iter()
+                .position(|existing| existing.asset_id == link.asset_id)
+                .map(|index| held.swap_remove(index));
+            let stored = match kept {
+                Some(mut existing) => {
+                    existing.name = link.name;
+                    existing.description = link.description;
+                    updated.push(existing.item_id);
+                    existing
+                }
+                None => {
+                    update.created_items.push(link.item_id);
+                    link
+                }
+            };
+            self.items.insert(stored.item_id, stored.clone());
+            result.push(stored);
+        }
+        for stale in held {
+            self.items.remove(&stale.item_id);
+            update.category_items_removed.push(stale.item_id);
+        }
+        self.bump_version(folder_id, &mut update);
+        Ok((update, updated, result))
+    }
+
     /// Creates `folder` (an AIS3 `POST /category/<parent>` — the caller has
     /// already minted its id and set its `parent_id`), bumping the parent's
     /// version.
@@ -398,7 +519,9 @@ impl SimInventoryTree {
     }
 
     /// Renames folder `id` (an AIS3 `PATCH /category/<id>` with `{ name }`),
-    /// bumping its own version.
+    /// stepping its **parent's** version and leaving its own, as Second
+    /// Life's AIS3 does — and as both grids' UDP rename does
+    /// (`book/src/gridspec/inventory.md` § Changing inventory).
     ///
     /// # Errors
     ///
@@ -413,11 +536,14 @@ impl SimInventoryTree {
             .get_mut(&id)
             .ok_or(SimInventoryError::UnknownTarget)?;
         folder.name = name;
+        let parent = folder.parent_id;
         let mut update = AisUpdate {
             updated_categories: vec![id],
             ..AisUpdate::default()
         };
-        self.bump_version(id, &mut update);
+        if let Some(parent) = parent {
+            self.bump_version(parent, &mut update);
+        }
         Ok(update)
     }
 
@@ -552,6 +678,16 @@ impl SimInventoryTree {
         let mut update = AisUpdate::default();
         self.bump_version(folder_id, &mut update);
         Ok(update)
+    }
+
+    /// Sets item `id`'s next-owner mask — what a whole item sent to AIS3's
+    /// `PATCH /item/<id>` changes beside its name and description. `false`
+    /// when the tree holds no such item.
+    pub(crate) fn set_next_owner_mask(&mut self, id: InventoryKey, mask: u32) -> bool {
+        self.items
+            .get_mut(&id)
+            .map(|item| item.permissions.next_owner = crate::Permissions::from_bits(mask))
+            .is_some()
     }
 
     /// Collects the folder ids of the subtree rooted at `id` (including `id`

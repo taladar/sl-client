@@ -48,14 +48,15 @@ use sl_wire::{
     parse_ais_category_children_subset, parse_ais_category_children_url,
     parse_ais_category_links_url, parse_ais_category_url, parse_ais_create_category_body,
     parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
-    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
-    parse_avatar_picker_search_query, parse_create_inventory_category_request,
-    parse_display_names_query, parse_event_queue_request, parse_experience_id_query,
-    parse_experience_info_query, parse_experience_query, parse_fetch_inventory_items_request,
-    parse_fetch_inventory_request, parse_find_experience_query, parse_forget_experience_query,
-    parse_get_object_cost_request, parse_get_object_physics_data_request,
-    parse_group_experiences_query, parse_interest_list_request, parse_land_resources_request,
-    parse_llsd_xml, parse_modify_material_params_request, parse_new_file_agent_inventory_request,
+    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_slam_body,
+    parse_ais_update_item_body, parse_avatar_picker_search_query,
+    parse_create_inventory_category_request, parse_display_names_query, parse_event_queue_request,
+    parse_experience_id_query, parse_experience_info_query, parse_experience_query,
+    parse_fetch_inventory_items_request, parse_fetch_inventory_request,
+    parse_find_experience_query, parse_forget_experience_query, parse_get_object_cost_request,
+    parse_get_object_physics_data_request, parse_group_experiences_query,
+    parse_interest_list_request, parse_land_resources_request, parse_llsd_xml,
+    parse_modify_material_params_request, parse_new_file_agent_inventory_request,
     parse_object_media_navigate_request, parse_object_media_request,
     parse_provision_voice_account_request, parse_region_experiences_request,
     parse_remote_parcel_request, parse_render_materials_put_request,
@@ -73,11 +74,11 @@ use crate::asset_caps::AssetCaps;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::session::{
     ais_category_children_reply_to_llsd, ais_category_links_reply_to_llsd,
-    ais_inventory_update_to_llsd, ais_item_reply_to_llsd, ais_mutation_reply_to_llsd,
-    chat_session_agent_params_from_llsd, chat_session_request_from_llsd,
-    chat_session_roster_to_llsd, cof_version_increment_to_llsd, environment_to_llsd,
-    environment_update_from_llsd, fetch_inventory_items_to_llsd, inventory_descendents_to_llsd,
-    llsd_map, parse_copy_inventory_from_notecard, session_history_to_llsd,
+    ais_inventory_update_to_llsd, ais_item_reply_to_llsd, chat_session_agent_params_from_llsd,
+    chat_session_request_from_llsd, chat_session_roster_to_llsd, cof_version_increment_to_llsd,
+    environment_to_llsd, environment_update_from_llsd, fetch_inventory_items_to_llsd,
+    inventory_descendents_to_llsd, llsd_map, parse_copy_inventory_from_notecard,
+    session_history_to_llsd,
 };
 use crate::sim_inventory::SimInventoryError;
 use crate::sim_new_file::{self, FirstStep, NewFilePolicy, SideUpload};
@@ -117,8 +118,7 @@ use crate::{
     CAP_UPLOAD_AGENT_PROFILE_IMAGE, CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING,
     CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, Event,
-    InventoryFolder, InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal,
-    offline_messages_to_llsd,
+    InventoryItem, InventoryListing, ServerEvent, VoiceProvisionRefusal, offline_messages_to_llsd,
 };
 use sl_wire::{
     AvatarRenderInfo, AvatarRenderReport, EstateAccessLists, EstateAccessStyle,
@@ -522,6 +522,9 @@ pub struct CapsRequest<'a> {
     /// Consumed only by the asset-delivery caps, where the policy has them
     /// state a date to send back.
     pub if_modified_since: Option<&'a str>,
+    /// The raw `Destination` header value, if the client sent one: the folder
+    /// an AIS3 `COPY` copies into.
+    pub destination: Option<&'a str>,
     /// The request body (LLSD-XML for seed and event-queue requests).
     pub body: &'a [u8],
 }
@@ -2940,7 +2943,17 @@ impl SimCaps {
                 if library {
                     return read(sim.library_inventory()).map(|event| (event, folder.owner_id));
                 }
-                if let Some(event) = read(sim.agent_inventory()) {
+                if let Some(mut event) = read(sim.agent_inventory()) {
+                    // Each item link's target, ahead of the folder's own items
+                    // and outside its count — OpenSim's `ProcessLinks`, and what
+                    // Second Life's listing of a folder of links names too
+                    // (`book/src/gridspec/appearance.md`, `inventory.md`
+                    // § Changing inventory).
+                    if let Event::InventoryDescendents { items, .. } = &mut event {
+                        let mut listed = sim.agent_inventory().link_targets(items);
+                        listed.append(items);
+                        *items = listed;
+                    }
                     return Some((event, folder.owner_id));
                 }
                 if dialect == crate::InventoryDialect::OpenSim
@@ -3179,7 +3192,23 @@ impl SimCaps {
                         return CapsResponse::bad_request();
                     };
                     return match sim.ais_create_links(parent, &links) {
-                        Ok((update, items)) => Self::ais_reply(&update, &[], &items),
+                        Ok((update, items)) => {
+                            let embedded = match ais_embedded(&[], &items, &["links"]) {
+                                Ok(embedded) => embedded,
+                                Err(response) => return response,
+                            };
+                            ais_answer(
+                                AisAnswer::new(201, name, agent).folder(sim, parent),
+                                vec![
+                                    (
+                                        "_created_items",
+                                        ais_ids(update.created_items.iter().map(|id| id.uuid())),
+                                    ),
+                                    ("_embedded", embedded),
+                                    ("_updated_category_versions", ais_versions(&update)),
+                                ],
+                            )
+                        }
                         Err(error) => Self::inventory_error(error),
                     };
                 }
@@ -3191,7 +3220,81 @@ impl SimCaps {
                     // saying so is what lets a viewer record its version
                     // instead of holding it unknown until something fetches it.
                     Ok((update, folder)) => {
-                        Self::ais_reply(&update, &[InventoryListing::empty(folder)], &[])
+                        let embedded = match ais_embedded(
+                            &[InventoryListing::empty(folder)],
+                            &[],
+                            &["categories", "items", "links"],
+                        ) {
+                            Ok(embedded) => embedded,
+                            Err(response) => return response,
+                        };
+                        ais_answer(
+                            AisAnswer::new(201, name, agent).folder(sim, parent),
+                            vec![
+                                (
+                                    "_created_categories",
+                                    ais_ids(update.created_categories.iter().map(|id| id.uuid())),
+                                ),
+                                (
+                                    "_created_items",
+                                    ais_ids(update.created_items.iter().map(|id| id.uuid())),
+                                ),
+                                ("_embedded", embedded),
+                                ("_updated_category_versions", ais_versions(&update)),
+                            ],
+                        )
+                    }
+                    Err(error) => Self::inventory_error(error),
+                }
+            }
+            // A slam: the folder's links replaced by the ones the bare array
+            // names (the reference's `SlamFolder`).
+            "PUT" if !read_only => {
+                let Some(folder_id) = parse_ais_category_links_url(&suffix) else {
+                    return CapsResponse::method_not_allowed();
+                };
+                let Ok(text) = std::str::from_utf8(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let Ok(links) = parse_ais_slam_body(text) else {
+                    return CapsResponse::bad_request();
+                };
+                match sim.ais_slam_links(folder_id, &links) {
+                    Ok((update, updated, result)) => {
+                        let embedded = match ais_embedded(&[], &result, &["links"]) {
+                            Ok(embedded) => embedded,
+                            Err(response) => return response,
+                        };
+                        let linked = Llsd::Map(
+                            result
+                                .iter()
+                                .map(|link| {
+                                    (link.asset_id.to_string(), Llsd::Uuid(link.item_id.uuid()))
+                                })
+                                .collect(),
+                        );
+                        ais_answer(
+                            AisAnswer::new(201, name, agent).folder(sim, folder_id),
+                            vec![
+                                (
+                                    "_category_items_removed",
+                                    ais_ids(
+                                        update.category_items_removed.iter().map(|id| id.uuid()),
+                                    ),
+                                ),
+                                (
+                                    "_created_items",
+                                    ais_ids(update.created_items.iter().map(|id| id.uuid())),
+                                ),
+                                ("_embedded", embedded),
+                                ("_linked_ids", linked),
+                                ("_updated_category_versions", ais_versions(&update)),
+                                (
+                                    "_updated_items",
+                                    ais_ids(updated.iter().map(|id| id.uuid())),
+                                ),
+                            ],
+                        )
                     }
                     Err(error) => Self::inventory_error(error),
                 }
@@ -3239,19 +3342,16 @@ impl SimCaps {
                         Err(_) => return CapsResponse::bad_request(),
                     };
                     return match result {
-                        Ok(update) => {
-                            let folders: Vec<InventoryFolder> = sim
-                                .agent_inventory()
-                                .folder(folder_id)
-                                .cloned()
-                                .into_iter()
-                                .collect();
-                            let listings: Vec<InventoryListing> = folders
-                                .into_iter()
-                                .map(InventoryListing::unlisted)
-                                .collect();
-                            Self::ais_reply(&update, &listings, &[])
-                        }
+                        Ok(update) => ais_answer(
+                            AisAnswer::new(200, name, agent).folder(sim, folder_id),
+                            vec![
+                                (
+                                    "_updated_categories",
+                                    ais_ids(update.updated_categories.iter().map(|id| id.uuid())),
+                                ),
+                                ("_updated_category_versions", ais_versions(&update)),
+                            ],
+                        ),
                         Err(error) => Self::inventory_error(error),
                     };
                 }
@@ -3281,34 +3381,126 @@ impl SimCaps {
                         Err(_) => return CapsResponse::bad_request(),
                     };
                     return match result {
-                        Ok(update) => {
-                            let items: Vec<InventoryItem> = sim
-                                .agent_inventory()
-                                .item(item_id)
-                                .cloned()
-                                .into_iter()
-                                .collect();
-                            Self::ais_reply(&update, &[], &items)
-                        }
+                        Ok(update) => ais_answer(
+                            AisAnswer::new(200, name, agent).item(sim, item_id),
+                            vec![
+                                ("_updated_category_versions", ais_versions(&update)),
+                                ("_updated_items", ais_ids([item_id.uuid()])),
+                            ],
+                        ),
                         Err(error) => Self::inventory_error(error),
                     };
                 }
                 CapsResponse::bad_request()
             }
             "DELETE" if !read_only => {
-                if let Some(folder_id) = parse_ais_category_children_url(&suffix) {
-                    let result = sim.ais_purge_category(folder_id);
-                    return Self::ais_mutation_response(result);
+                let (result, folders_removed) =
+                    if let Some(folder_id) = parse_ais_category_children_url(&suffix) {
+                        (sim.ais_purge_category(folder_id), true)
+                    } else if let Some(folder_id) = parse_ais_category_url(&suffix) {
+                        (sim.ais_remove_category(folder_id), true)
+                    } else if let Some(item_id) = parse_ais_item_url(&suffix) {
+                        (sim.ais_remove_item(item_id), false)
+                    } else {
+                        return CapsResponse::bad_request();
+                    };
+                match result {
+                    Ok(update) => {
+                        // An item deleted on its own is named where an
+                        // emptied folder's items are.
+                        let items: Vec<InventoryKey> = update
+                            .category_items_removed
+                            .iter()
+                            .chain(&update.removed_items)
+                            .copied()
+                            .collect();
+                        let mut keys = vec![
+                            ("_active_gestures_removed", Llsd::Array(Vec::new())),
+                            ("_attachments_removed", Llsd::Map(HashMap::new())),
+                            (
+                                "_broken_links_removed",
+                                ais_ids(update.broken_links_removed.iter().map(|id| id.uuid())),
+                            ),
+                            (
+                                "_category_items_removed",
+                                ais_ids(items.iter().map(|id| id.uuid())),
+                            ),
+                            ("_updated_category_versions", ais_versions(&update)),
+                            ("_wearables_removed", Llsd::Map(HashMap::new())),
+                        ];
+                        if folders_removed {
+                            keys.push((
+                                "_categories_removed",
+                                ais_ids(update.categories_removed.iter().map(|id| id.uuid())),
+                            ));
+                            keys.push((
+                                "_total_items_removed",
+                                Llsd::Integer(i32::try_from(items.len()).unwrap_or(i32::MAX)),
+                            ));
+                        }
+                        ais_answer(AisAnswer::new(200, name, agent), keys)
+                    }
+                    Err(error) => Self::inventory_error(error),
                 }
-                if let Some(folder_id) = parse_ais_category_url(&suffix) {
-                    let result = sim.ais_remove_category(folder_id);
-                    return Self::ais_mutation_response(result);
+            }
+            // A Library folder copied into the agent's inventory, the
+            // destination named by a `Destination` header (the reference's
+            // `CopyLibraryCategory`).
+            "COPY" if read_only => {
+                let Some(source) = parse_ais_category_url(&suffix) else {
+                    return CapsResponse::bad_request();
+                };
+                let Some(destination) = request
+                    .destination
+                    .and_then(|header| Uuid::parse_str(header.trim()).ok())
+                    .map(sl_types::key::InventoryFolderKey::from)
+                else {
+                    return CapsResponse::bad_request();
+                };
+                match sim.ais_copy_library_category(source, destination) {
+                    Ok((update, listing)) => {
+                        let items = listing
+                            .children
+                            .as_ref()
+                            .map(|children| children.items.clone())
+                            .unwrap_or_default();
+                        let embedded =
+                            match ais_embedded(&[], &items, &["categories", "items", "links"]) {
+                                Ok(embedded) => embedded,
+                                Err(response) => return response,
+                            };
+                        // Only the destination's step: the copy itself is new.
+                        let stepped = AisUpdate {
+                            updated_category_versions: update
+                                .updated_category_versions
+                                .iter()
+                                .filter(|(folder, _version)| *folder == destination)
+                                .copied()
+                                .collect(),
+                            ..AisUpdate::default()
+                        };
+                        let top = listing.folder.folder_id;
+                        ais_answer(
+                            AisAnswer::new(201, name, agent).folder(sim, top),
+                            vec![
+                                (
+                                    "_created_categories",
+                                    ais_ids(update.created_categories.iter().map(|id| id.uuid())),
+                                ),
+                                (
+                                    "_created_items",
+                                    ais_ids(update.created_items.iter().map(|id| id.uuid())),
+                                ),
+                                ("_embedded", embedded),
+                                ("_moved_items", Llsd::Array(Vec::new())),
+                                ("_removed_items", Llsd::Array(Vec::new())),
+                                ("_top_category_id", Llsd::String(top.to_string())),
+                                ("_updated_category_versions", ais_versions(&stepped)),
+                            ],
+                        )
+                    }
+                    Err(error) => Self::inventory_error(error),
                 }
-                if let Some(item_id) = parse_ais_item_url(&suffix) {
-                    let result = sim.ais_remove_item(item_id);
-                    return Self::ais_mutation_response(result);
-                }
-                CapsResponse::bad_request()
             }
             // The method Second Life's own refusal of a move names, which its
             // service then refuses in turn.
@@ -3335,30 +3527,6 @@ impl SimCaps {
                 )
             }
             _ => CapsResponse::method_not_allowed(),
-        }
-    }
-
-    /// Serializes an AIS3 mutation outcome that embeds nothing (the delete
-    /// verbs): the change-set meta on success, the mapped error status
-    /// otherwise.
-    fn ais_mutation_response(result: Result<AisUpdate, SimInventoryError>) -> CapsResponse {
-        match result {
-            Ok(update) => Self::ais_reply(&update, &[], &[]),
-            Err(error) => Self::inventory_error(error),
-        }
-    }
-
-    /// Builds a `200` AIS3 reply from a change-set and the affected objects
-    /// (embedded under `_embedded`), or `500` when the fixture holds an
-    /// unserializable item (an out-of-range sale price).
-    fn ais_reply(
-        update: &AisUpdate,
-        folders: &[InventoryListing],
-        items: &[InventoryItem],
-    ) -> CapsResponse {
-        match ais_mutation_reply_to_llsd(update, folders, items) {
-            Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
-            Err(_) => CapsResponse::internal_error(),
         }
     }
 
@@ -4220,6 +4388,119 @@ fn decorate_ais(body: &mut Llsd, cap: &str, agent: Uuid, top: AisTop) {
     };
     dress(map, agent, Some(top));
     let _base = map.insert("_base_uri".to_owned(), Llsd::Uri(format!("slcap://{cap}")));
+}
+
+/// One AIS3 mutation answer as Second Life's inventory service states it
+/// (`book/src/gridspec/inventory.md` § Changing inventory): its status, and
+/// the folder or item the request named at the top level — dressed as a
+/// `GET` of it is ([`decorate_ais`]) — where the answer carries one.
+struct AisAnswer<'a> {
+    /// The status: `201` for what makes something, `200` otherwise.
+    status: u16,
+    /// The capability's name, for `_base_uri`.
+    cap: &'a str,
+    /// The asking agent.
+    agent: Uuid,
+    /// The object at the top level, undressed.
+    top: Option<(Llsd, AisTop)>,
+}
+
+impl<'a> AisAnswer<'a> {
+    /// An answer of `status` with nothing at the top level.
+    const fn new(status: u16, cap: &'a str, agent: Uuid) -> Self {
+        Self {
+            status,
+            cap,
+            agent,
+            top: None,
+        }
+    }
+
+    /// The answer with the agent's folder `folder_id` at the top level, as
+    /// the operation left it.
+    fn folder(mut self, sim: &SimSession, folder_id: sl_types::key::InventoryFolderKey) -> Self {
+        self.top = sim
+            .agent_inventory()
+            .folder(folder_id)
+            .cloned()
+            .and_then(|folder| {
+                ais_category_children_reply_to_llsd(&InventoryListing::unlisted(folder)).ok()
+            })
+            .map(|body| (body, AisTop::Folder));
+        self
+    }
+
+    /// The answer with the agent's item `item_id` at the top level, as the
+    /// operation left it.
+    fn item(mut self, sim: &SimSession, item_id: sl_types::key::InventoryKey) -> Self {
+        self.top = sim
+            .agent_inventory()
+            .item(item_id)
+            .and_then(|item| ais_item_reply_to_llsd(item).ok())
+            .map(|body| (body, AisTop::Item));
+        self
+    }
+}
+
+/// Builds the AIS3 answer `answer` with the `_` keys `keys` — every key
+/// stated even when it names nothing, as Second Life states them.
+fn ais_answer(answer: AisAnswer<'_>, keys: Vec<(&str, Llsd)>) -> CapsResponse {
+    let AisAnswer {
+        status,
+        cap,
+        agent,
+        top,
+    } = answer;
+    let (mut body, top) = top.map_or_else(
+        || (Llsd::Map(HashMap::new()), None),
+        |(body, top)| (body, Some(top)),
+    );
+    if let Llsd::Map(map) = &mut body {
+        for (key, value) in keys {
+            let _previous = map.insert(key.to_owned(), value);
+        }
+    }
+    if let Some(top) = top {
+        decorate_ais(&mut body, cap, agent, top);
+    }
+    CapsResponse::llsd_xml_status(status, body.to_llsd_xml())
+}
+
+/// Ids as an AIS3 answer lists them.
+fn ais_ids(ids: impl IntoIterator<Item = Uuid>) -> Llsd {
+    Llsd::Array(ids.into_iter().map(Llsd::Uuid).collect())
+}
+
+/// The `_updated_category_versions` of `update`: each folder's version as
+/// the operation left it.
+fn ais_versions(update: &AisUpdate) -> Llsd {
+    Llsd::Map(
+        update
+            .updated_category_versions
+            .iter()
+            .map(|(folder, version)| (folder.to_string(), Llsd::Integer(*version)))
+            .collect(),
+    )
+}
+
+/// The `_embedded` block of `folders` and `items`, keeping only the kinds
+/// `kinds` names — an answer about links embeds only `links`.
+fn ais_embedded(
+    folders: &[InventoryListing],
+    items: &[InventoryItem],
+    kinds: &[&str],
+) -> Result<Llsd, CapsResponse> {
+    let Ok(update) = ais_inventory_update_to_llsd(folders, items) else {
+        return Err(CapsResponse::internal_error());
+    };
+    let mut embedded = update
+        .get("_embedded")
+        .cloned()
+        .unwrap_or_else(|| Llsd::Map(HashMap::new()));
+    if let Llsd::Map(map) = &mut embedded {
+        map.retain(|kind, _entries| kinds.contains(&kind.as_str()));
+    }
+    Ok(embedded)
 }
 
 /// An AIS3 error as Second Life's inventory service states one: the status,

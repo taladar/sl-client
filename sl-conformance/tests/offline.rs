@@ -148,6 +148,7 @@ mod test {
         experience_admin_contributor => "experience-admin-contributor" [fake_sl, fake_opensim],
         marketplace_direct_delivery => "marketplace-direct-delivery" [fake_sl, fake_opensim],
         inventory_fetch => "inventory-fetch" [fake_sl, fake_opensim],
+        inventory_mutations => "inventory-mutations" [fake_sl, fake_opensim],
         avatar_render_info => "avatar-render-info" [fake_sl, fake_opensim],
         landmarks_home => "landmarks-home" [fake_sl, fake_opensim],
     }

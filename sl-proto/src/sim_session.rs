@@ -230,7 +230,7 @@ use crate::types::{
     UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
     WearableType,
 };
-use crate::types::{Event, EventId};
+use crate::types::{Event, EventId, InventoryListing};
 use sl_wire::AbuseReport;
 use sl_wire::RegionFlags;
 use sl_wire::combine_uuids;
@@ -5247,8 +5247,218 @@ impl SimSession {
         parent: InventoryFolderKey,
         links: &[sl_wire::AisLinkCreate],
     ) -> Result<(sl_wire::AisUpdate, Vec<InventoryItem>), SimInventoryError> {
+        let items = self.link_items(parent, links);
+        let update = self.agent_inventory.create_links(parent, items.clone())?;
+        self.events.push_back(ServerEvent::InventoryLinksCreated {
+            links: items.clone(),
+        });
+        Ok((update, items))
+    }
+
+    /// Applies a UDP `RemoveInventoryFolder` (or a folder of a
+    /// `RemoveInventoryObjects`): ignored outside the Trash, as on both grids
+    /// ([`SimInventoryTree::is_removable`]); inside it the folder goes with
+    /// everything in it, stepping its parent on Second Life and not on OpenSim
+    /// (`book/src/gridspec/inventory.md` § Fetching).
+    fn remove_folder_udp(&mut self, folder: InventoryFolderKey) {
+        if !self.agent_inventory.is_removable(folder) {
+            tracing::debug!("a UDP removal of folder {folder}, outside the Trash, is ignored");
+            return;
+        }
+        let outcome = match self.inventory_dialect {
+            crate::InventoryDialect::SecondLife => self.agent_inventory.remove_category(folder),
+            crate::InventoryDialect::OpenSim => self
+                .agent_inventory
+                .remove_category_keeping_parent_version(folder),
+        };
+        match outcome {
+            Ok(update) => {
+                self.events
+                    .push_back(ServerEvent::InventoryCategoryRemoved {
+                        folder_id: folder,
+                        removed_folders: update.categories_removed,
+                        removed_items: update.category_items_removed,
+                    });
+            }
+            Err(error) => {
+                tracing::debug!("a UDP removal of folder {folder} failed: {error:?}");
+            }
+        }
+    }
+
+    /// Applies a UDP `RemoveInventoryItem` (or an item of a
+    /// `RemoveInventoryObjects`): the item goes wherever it is, and its folder
+    /// steps.
+    fn remove_item_udp(&mut self, item: InventoryKey) {
+        match self.agent_inventory.remove_item(item) {
+            Ok(_update) => self
+                .events
+                .push_back(ServerEvent::InventoryItemRemoved { item_id: item }),
+            Err(error) => tracing::debug!("a UDP removal of item {item} failed: {error:?}"),
+        }
+    }
+
+    /// Answers a UDP `CopyInventoryItem`: a copy of `source` (the agent's, or
+    /// the Library's) under a fresh id in `folder`, named `name` or as the
+    /// original, owned by the agent; the folder steps. OpenSim hands the copy
+    /// over with an `UpdateCreateInventoryItem` echoing `callback`, Second
+    /// Life with a `BulkUpdateInventory` over the event queue
+    /// (`book/src/gridspec/inventory.md` § Changing inventory).
+    fn copy_item_udp(
+        &mut self,
+        source: InventoryKey,
+        folder: InventoryFolderKey,
+        name: Option<String>,
+        callback: InventoryCallbackId,
+        now: Instant,
+    ) {
+        let Some(original) = self
+            .agent_inventory
+            .item(source)
+            .or_else(|| self.library_inventory.item(source))
+            .cloned()
+        else {
+            tracing::debug!("a UDP copy named item {source}, which nobody holds");
+            return;
+        };
+        if self.agent_inventory.folder(folder).is_none() {
+            tracing::debug!("a UDP copy of {source} named the unknown folder {folder}");
+            return;
+        }
+        let owner = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
+        let copy = InventoryItem {
+            item_id: InventoryKey::from(Uuid::from_u128(self.next_serial())),
+            folder_id: folder,
+            name: name.unwrap_or_else(|| original.name.clone()),
+            owner: OwnerKey::Agent(owner),
+            ..original
+        };
+        let _update = self.agent_inventory.add_item(copy.clone());
+        let answered = match self.inventory_dialect {
+            crate::InventoryDialect::OpenSim => self
+                .send_inventory_items_created(
+                    &[(copy, callback)],
+                    TransactionId::from(Uuid::nil()),
+                    true,
+                    now,
+                )
+                .map_err(|error| format!("{error:?}")),
+            crate::InventoryDialect::SecondLife => self
+                .enqueue_bulk_update_inventory(TransactionId::from(Uuid::nil()), &[], &[copy])
+                .map_err(|error| format!("{error:?}")),
+        };
+        if let Err(error) = answered {
+            tracing::debug!("answering a UDP item copy failed: {error}");
+        }
+    }
+
+    /// Answers a UDP `LinkInventoryItem`. Second Life refuses it in every
+    /// folder with the `AlertMessage` "Cannot create requested inventory.";
+    /// OpenSim makes the link in any folder, the Current Outfit Folder
+    /// included, steps the folder and hands it over with an
+    /// `UpdateCreateInventoryItem` echoing `callback`
+    /// (`book/src/gridspec/inventory.md` § Changing inventory). The link
+    /// takes the block's asset and inventory type as sent.
+    fn link_item_udp(
+        &mut self,
+        link: &NewInventoryLink,
+        target: Uuid,
+        (item_type, inv_type): (i8, i8),
+        callback: InventoryCallbackId,
+        now: Instant,
+    ) {
+        if self.inventory_dialect == crate::InventoryDialect::SecondLife {
+            if let Err(error) =
+                self.send_alert_message("Cannot create requested inventory.", &[], &[], now)
+            {
+                tracing::debug!("refusing a UDP link failed: {error:?}");
+            }
+            return;
+        }
+        if self.agent_inventory.folder(link.folder_id).is_none() {
+            tracing::debug!("a UDP link named the unknown folder {}", link.folder_id);
+            return;
+        }
+        let owner = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
+        // OpenSim's `HandleLinkInventoryItem` masks: everything and export,
+        // the everyone mask without export.
+        let all_and_export = crate::Permissions::from_bits(0x0009_e000);
+        let item = InventoryItem {
+            item_id: InventoryKey::from(Uuid::from_u128(self.next_serial())),
+            folder_id: link.folder_id,
+            name: link.name.clone(),
+            description: link.description.clone(),
+            asset_id: target,
+            item_type,
+            inv_type,
+            flags: 0,
+            sale_type: 0,
+            sale_price: None,
+            creation_date: 0,
+            owner: OwnerKey::Agent(owner),
+            last_owner_id: Uuid::nil(),
+            creator_id: owner,
+            group: None,
+            permissions: Permissions5 {
+                base: all_and_export,
+                owner: all_and_export,
+                group: all_and_export,
+                everyone: crate::Permissions::from_bits(0x0008_e000),
+                next_owner: all_and_export,
+            },
+        };
+        let _update = self.agent_inventory.add_item(item.clone());
+        if let Err(error) = self.send_inventory_items_created(
+            &[(item, callback)],
+            TransactionId::from(Uuid::nil()),
+            true,
+            now,
+        ) {
+            tracing::debug!("answering a UDP link failed: {error:?}");
+        }
+    }
+
+    /// Replaces a folder's links for an AIS3 `PUT /category/<id>/links` (the
+    /// reference's `SlamFolder`): mints an id for each link the folder has no
+    /// link to the target of, keeps and renames the ones it has
+    /// ([`SimInventoryTree::slam_links`]), and surfaces
+    /// [`ServerEvent::InventoryLinksCreated`] for the new ones. Returns the
+    /// change-set, the ids of the links kept, and the folder's links as the
+    /// slam left them.
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist.
+    pub(crate) fn ais_slam_links(
+        &mut self,
+        folder: InventoryFolderKey,
+        links: &[sl_wire::AisLinkCreate],
+    ) -> Result<(sl_wire::AisUpdate, Vec<InventoryKey>, Vec<InventoryItem>), SimInventoryError>
+    {
+        let items = self.link_items(folder, links);
+        let (update, updated, result) = self.agent_inventory.slam_links(folder, items)?;
+        let created: Vec<InventoryItem> = result
+            .iter()
+            .filter(|link| update.created_items.contains(&link.item_id))
+            .cloned()
+            .collect();
+        if !created.is_empty() {
+            self.events
+                .push_back(ServerEvent::InventoryLinksCreated { links: created });
+        }
+        Ok((update, updated, result))
+    }
+
+    /// The link items `links` asks for in `parent`, each under a freshly
+    /// minted id and owned by the agent (a link's `asset_id` is the linked
+    /// object's id, per the link convention).
+    fn link_items(
+        &mut self,
+        parent: InventoryFolderKey,
+        links: &[sl_wire::AisLinkCreate],
+    ) -> Vec<InventoryItem> {
         let owner_id = self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid());
-        let items: Vec<InventoryItem> = links
+        links
             .iter()
             .map(|link| InventoryItem {
                 item_id: InventoryKey::from(Uuid::from_u128(self.next_serial())),
@@ -5268,12 +5478,76 @@ impl SimSession {
                 group: None,
                 permissions: Permissions5::default(),
             })
-            .collect();
-        let update = self.agent_inventory.create_links(parent, items.clone())?;
-        self.events.push_back(ServerEvent::InventoryLinksCreated {
-            links: items.clone(),
-        });
-        Ok((update, items))
+            .collect()
+    }
+
+    /// Copies the Library folder `source` and its items into the agent's
+    /// folder `destination`, for a `LibraryAPIv3` `COPY /category/<source>`
+    /// naming `destination` (the reference's `CopyLibraryCategory`): the copy
+    /// and every item in it get fresh ids and belong to the agent, and
+    /// `destination` steps once. Surfaces
+    /// [`ServerEvent::InventoryCategoryCreated`]. Returns the change-set and
+    /// the new folder, listed.
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the Library holds no folder
+    /// `source` or the agent no folder `destination`.
+    pub(crate) fn ais_copy_library_category(
+        &mut self,
+        source: InventoryFolderKey,
+        destination: InventoryFolderKey,
+    ) -> Result<(sl_wire::AisUpdate, InventoryListing), SimInventoryError> {
+        let original = self
+            .library_inventory
+            .listing_to_depth(source, 0, None)
+            .ok_or(SimInventoryError::UnknownTarget)?;
+        let owner = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
+        let folder = InventoryFolder {
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(self.next_serial())),
+            parent_id: Some(destination),
+            name: original.folder.name.clone(),
+            folder_type: original.folder.folder_type,
+            version: 1,
+        };
+        let mut update = self.agent_inventory.create_category(folder.clone())?;
+        let mut items = Vec::new();
+        for held in original
+            .children
+            .map(|children| children.items)
+            .unwrap_or_default()
+        {
+            let item = InventoryItem {
+                item_id: InventoryKey::from(Uuid::from_u128(self.next_serial())),
+                folder_id: folder.folder_id,
+                owner: OwnerKey::Agent(owner),
+                last_owner_id: held.owner.uuid(),
+                ..held
+            };
+            update
+                .created_items
+                .extend(self.agent_inventory.add_item(item.clone()).created_items);
+            items.push(item);
+        }
+        let folder = self
+            .agent_inventory
+            .folder(folder.folder_id)
+            .cloned()
+            .unwrap_or(folder);
+        self.events
+            .push_back(ServerEvent::InventoryCategoryCreated {
+                folder: Box::new(folder.clone()),
+            });
+        Ok((
+            update,
+            InventoryListing {
+                folder,
+                children: Some(crate::types::InventoryListingChildren {
+                    folders: Vec::new(),
+                    items,
+                }),
+            },
+        ))
     }
 
     /// Renames an inventory folder for an AIS3 `PATCH /category/<id>`,
@@ -5312,6 +5586,9 @@ impl SimSession {
             update_fields.name.clone(),
             update_fields.description.clone(),
         )?;
+        if let Some(mask) = update_fields.next_owner_mask {
+            let _set = self.agent_inventory.set_next_owner_mask(id, mask);
+        }
         self.events.push_back(ServerEvent::InventoryItemUpdated {
             item_id: id,
             name: update_fields.name.clone(),
@@ -12919,26 +13196,66 @@ impl SimSession {
             }
             AnyMessage::RemoveInventoryFolder(removed) => {
                 for block in &removed.folder_data {
-                    let folder = InventoryFolderKey::from(block.folder_id);
-                    let outcome = match self.inventory_dialect {
-                        crate::InventoryDialect::SecondLife => {
-                            self.agent_inventory.remove_category(folder)
-                        }
-                        crate::InventoryDialect::OpenSim => self
-                            .agent_inventory
-                            .remove_category_keeping_parent_version(folder),
-                    };
-                    match outcome {
+                    self.remove_folder_udp(InventoryFolderKey::from(block.folder_id));
+                }
+            }
+            AnyMessage::RemoveInventoryItem(removed) => {
+                // Anywhere, the Trash or not, on both grids; nothing is
+                // pushed (`book/src/gridspec/inventory.md` § Changing
+                // inventory).
+                for block in &removed.inventory_data {
+                    self.remove_item_udp(InventoryKey::from(block.item_id));
+                }
+            }
+            AnyMessage::RemoveInventoryObjects(removed) => {
+                // The items anywhere, the folders only in the Trash.
+                for block in &removed.folder_data {
+                    self.remove_folder_udp(InventoryFolderKey::from(block.folder_id));
+                }
+                for block in &removed.item_data {
+                    self.remove_item_udp(InventoryKey::from(block.item_id));
+                }
+            }
+            AnyMessage::PurgeInventoryDescendents(purge) => {
+                let folder = InventoryFolderKey::from(purge.inventory_data.folder_id);
+                if !self.agent_inventory.is_removable(folder) {
+                    tracing::debug!("a UDP purge of {folder}, outside the Trash, is ignored");
+                } else {
+                    match self.agent_inventory.purge_category(folder) {
                         Ok(update) => {
-                            self.events
-                                .push_back(ServerEvent::InventoryCategoryRemoved {
-                                    folder_id: folder,
-                                    removed_folders: update.categories_removed,
-                                    removed_items: update.category_items_removed,
-                                });
+                            self.events.push_back(ServerEvent::InventoryCategoryPurged {
+                                folder_id: folder,
+                                removed_folders: update.categories_removed,
+                                removed_items: update.category_items_removed,
+                            });
                         }
                         Err(error) => {
-                            tracing::debug!("a UDP removal of folder {folder} failed: {error:?}");
+                            tracing::debug!("a UDP purge of {folder} failed: {error:?}");
+                        }
+                    }
+                }
+            }
+            AnyMessage::CopyInventoryItem(copy) => {
+                for block in &copy.inventory_data {
+                    let name = trimmed_string(&block.new_name);
+                    self.copy_item_udp(
+                        InventoryKey::from(block.old_item_id),
+                        InventoryFolderKey::from(block.new_folder_id),
+                        (!name.is_empty()).then_some(name),
+                        InventoryCallbackId::new(block.callback_id),
+                        now,
+                    );
+                }
+            }
+            AnyMessage::ChangeInventoryItemFlags(change) => {
+                // OpenSim has no handler; Second Life steps the item's folder
+                // and leaves the flags as they were — the `inventory-mutations`
+                // census never read a flag back changed.
+                if self.inventory_dialect == crate::InventoryDialect::SecondLife {
+                    for block in &change.inventory_data {
+                        let item = InventoryKey::from(block.item_id);
+                        if let Some(folder) = self.agent_inventory.item(item).map(|i| i.folder_id) {
+                            self.agent_inventory.step_version(folder);
                         }
                     }
                 }
@@ -12997,6 +13314,21 @@ impl SimSession {
                         new_name,
                     });
                 }
+                // Both grids push the moved items back over the event queue
+                // (`book/src/gridspec/inventory.md` § Changing inventory).
+                let moved: Vec<InventoryItem> = moves
+                    .iter()
+                    .filter_map(|moved| self.agent_inventory.item(moved.item).cloned())
+                    .collect();
+                if !moved.is_empty()
+                    && let Err(error) = self.enqueue_bulk_update_inventory(
+                        TransactionId::from(Uuid::nil()),
+                        &[],
+                        &moved,
+                    )
+                {
+                    tracing::debug!("pushing a UDP item move failed: {error:?}");
+                }
                 self.events
                     .push_back(ServerEvent::InventoryItemsMovedUdp { moves });
             }
@@ -13036,15 +13368,23 @@ impl SimSession {
                 } else {
                     InventoryItemOrFolderKey::Item(InventoryKey::from(block.old_item_id))
                 };
+                let link = NewInventoryLink {
+                    folder_id: InventoryFolderKey::from(block.folder_id),
+                    linked_id,
+                    link_type: AssetType::from_code(i32::from(block.r#type)),
+                    inv_type: InventoryType::from_code(i32::from(block.inv_type)),
+                    name: trimmed_string(&block.name),
+                    description: trimmed_string(&block.description),
+                };
+                self.link_item_udp(
+                    &link,
+                    block.old_item_id,
+                    (block.r#type, block.inv_type),
+                    InventoryCallbackId::new(block.callback_id),
+                    now,
+                );
                 self.events.push_back(ServerEvent::LinkInventoryItem {
-                    link: NewInventoryLink {
-                        folder_id: InventoryFolderKey::from(block.folder_id),
-                        linked_id,
-                        link_type: AssetType::from_code(i32::from(block.r#type)),
-                        inv_type: InventoryType::from_code(i32::from(block.inv_type)),
-                        name: trimmed_string(&block.name),
-                        description: trimmed_string(&block.description),
-                    },
+                    link,
                     callback_id: block.callback_id,
                 });
             }

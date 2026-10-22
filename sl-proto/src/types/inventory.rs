@@ -1017,7 +1017,9 @@ mod tests {
 /// shape of a folder or item fetch answer, what a UDP removal does to the
 /// parent's version, and whether a UDP `FetchInventory` is answered — each
 /// measured by the `inventory-fetch` census (`book/src/gridspec/inventory.md`
-/// § Fetching).
+/// § Fetching) — and how the UDP item mutations are answered: a copy, a link,
+/// a flags change, the masks of a made item (the `inventory-mutations` census,
+/// § Changing inventory).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InventoryDialect {
     /// Second Life's (the default).
@@ -1092,6 +1094,18 @@ impl InventoryDialect {
                     let _last_owner = permissions.remove("last_owner_id");
                 }
             }
+        }
+    }
+
+    /// The base and owner masks this grid gives an item it makes for a
+    /// `CreateInventoryItem`: every bit on Second Life, OpenSim's
+    /// `PermissionMask.All | Export` (`book/src/gridspec/inventory.md`
+    /// § Changing inventory).
+    #[must_use]
+    pub const fn created_item_mask(self) -> u32 {
+        match self {
+            Self::SecondLife => 0x7fff_ffff,
+            Self::OpenSim => 0x0009_e000,
         }
     }
 

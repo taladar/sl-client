@@ -130,6 +130,7 @@ mod test {
             query: None,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: body.as_bytes(),
         }
     }
@@ -319,6 +320,7 @@ mod test {
             query,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: b"",
         }
     }
@@ -479,6 +481,7 @@ mod test {
             query: None,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: b"",
         };
         let (status, _) = respond(&mut caps, &mut sim, &get)?;
@@ -1037,6 +1040,7 @@ mod test {
             query,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: &[],
         };
         let url = sl_proto::task_inventory_cap_url("http://sim/cap", task, Some(4));
@@ -1047,6 +1051,7 @@ mod test {
             query: query.as_deref(),
             range: None,
             if_modified_since: None,
+            destination: None,
             body: &[],
         };
         let CapsDispatch::TaskInventory(query) = caps.dispatch(&mut sim, &asked) else {
@@ -1209,6 +1214,7 @@ mod test {
             query: None,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: b"jp2 bytes",
         };
         let (status, _) = respond(&mut caps, &mut sim, &premature)?;
@@ -1230,6 +1236,7 @@ mod test {
             query: None,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: b"jp2 bytes",
         };
         let (status, reply) = respond(&mut caps, &mut sim, &screenshot)?;
@@ -1261,6 +1268,7 @@ mod test {
             query: None,
             range: None,
             if_modified_since: None,
+            destination: None,
             body,
         }
     }
@@ -1553,6 +1561,7 @@ mod test {
             query: Some(query),
             range,
             if_modified_since: None,
+            destination: None,
             body: b"",
         }
     }
@@ -1658,6 +1667,7 @@ mod test {
             query: None,
             range: None,
             if_modified_since: None,
+            destination: None,
             body,
         }
     }
@@ -2215,6 +2225,7 @@ mod test {
             query: None,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: put_body.as_bytes(),
         };
         let (status, _) = respond(&mut caps, &mut sim, &put)?;
@@ -2506,6 +2517,7 @@ mod test {
             query,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: body.as_bytes(),
         };
         respond(caps, sim, &request)
@@ -2780,7 +2792,8 @@ mod test {
         let suffix = ais_create_category_url(folder_key(AGENT_ROOT), uuid::Uuid::from_u128(0x71d));
         let body = build_ais_create_category_body(folder_key(AGENT_ROOT), 5, "Sub");
         let (status, reply) = respond_ais(&mut caps, &mut sim, "POST", &cap_path, &suffix, &body)?;
-        assert_eq!(status, 200);
+        // `201`, the parent at the top level, as Second Life answers a create.
+        assert_eq!(status, 201);
         let tree = parse_llsd_xml(&reply)?;
         let created = tree
             .get("_created_categories")
@@ -2796,6 +2809,10 @@ mod test {
                 .and_then(Llsd::as_i32),
             Some(6)
         );
+        assert_eq!(
+            tree.get("category_id").and_then(Llsd::as_str),
+            Some(folder_key(AGENT_ROOT).to_string().as_str())
+        );
         // The reply folds through the real client as a bulk update carrying
         // the embedded folder.
         client.handle_caps_event("InventoryAPIv3", &tree, now)?;
@@ -2806,12 +2823,9 @@ mod test {
                 _ => None,
             })
             .ok_or("no bulk update from the AIS create")?;
-        assert_eq!(
-            folders
-                .iter()
-                .map(|folder| folder.folder_id)
-                .collect::<Vec<_>>(),
-            vec![created]
+        assert!(
+            folders.iter().any(|folder| folder.folder_id == created),
+            "the made folder is among {folders:?}"
         );
         match sim.poll_event() {
             Some(ServerEvent::InventoryCategoryCreated { folder }) => {
@@ -2820,7 +2834,8 @@ mod test {
             other => return Err(format!("unexpected server event: {other:?}").into()),
         }
 
-        // Rename bumps the folder's own version.
+        // Rename bumps the parent's version, not the folder's own, as Second
+        // Life's does (`book/src/gridspec/inventory.md` § Changing inventory).
         let suffix = ais_category_url(created);
         let body = build_ais_rename_category_body("Renamed");
         let (status, reply) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &body)?;
@@ -2828,9 +2843,15 @@ mod test {
         let tree = parse_llsd_xml(&reply)?;
         assert_eq!(
             tree.get("_updated_category_versions")
-                .and_then(|versions| versions.get(&created.to_string()))
+                .and_then(|versions| versions.get(&folder_key(AGENT_ROOT).to_string()))
                 .and_then(Llsd::as_i32),
-            Some(2)
+            Some(7)
+        );
+        assert_eq!(
+            sim.agent_inventory()
+                .folder(created)
+                .map(|folder| folder.version),
+            Some(1)
         );
         assert_eq!(
             sim.agent_inventory()
@@ -2876,9 +2897,10 @@ mod test {
         Ok(())
     }
 
-    /// The AIS3 item verbs: update embeds the new item state, a move is
-    /// refused with Second Life's `400`, delete removes it and reports
-    /// `_removed_items`.
+    /// The AIS3 item verbs: update answers the new item state at the top
+    /// level and names it in `_updated_items`, a move is refused with Second
+    /// Life's `400`, delete removes it and reports it in
+    /// `_category_items_removed`, as Second Life does.
     #[test]
     fn ais3_item_update_move_remove_round_trips() -> Result<(), TestError> {
         let mut caps = new_caps()?;
@@ -2887,19 +2909,19 @@ mod test {
         let cap_path = granted_cap_path(&caps, "InventoryAPIv3")?;
         let suffix = ais_item_url(item_key(AGENT_HAT));
 
-        // Update name/description; the updated item comes back embedded.
+        // Update name/description; the updated item comes back at the top.
         let body = build_ais_update_item_body("Fedora", "a fancy hat");
         let (status, reply) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &body)?;
         assert_eq!(status, 200);
         let tree = parse_llsd_xml(&reply)?;
-        let embedded_name = tree
-            .get("_embedded")
-            .and_then(|embedded| embedded.get("items"))
-            .and_then(|items| items.get(&item_key(AGENT_HAT).to_string()))
-            .and_then(|item| item.get("name"))
-            .and_then(Llsd::as_str)
-            .map(str::to_owned);
-        assert_eq!(embedded_name, Some("Fedora".to_owned()));
+        assert_eq!(tree.get("name").and_then(Llsd::as_str), Some("Fedora"));
+        assert_eq!(
+            tree.get("_updated_items")
+                .and_then(Llsd::as_array)
+                .and_then(<[Llsd]>::first)
+                .and_then(Llsd::as_uuid),
+            Some(item_key(AGENT_HAT).uuid())
+        );
         assert_eq!(
             tree.get("_updated_category_versions")
                 .and_then(|versions| versions.get(&folder_key(AGENT_CLOTHING).to_string()))
@@ -2924,12 +2946,12 @@ mod test {
         let tree = parse_llsd_xml(&reply)?;
         assert_eq!(tree.get("name").and_then(Llsd::as_str), Some("Fedora"));
 
-        // Delete removes it and reports `_removed_items`.
+        // Delete removes it and reports `_category_items_removed`.
         let (status, reply) = respond_ais(&mut caps, &mut sim, "DELETE", &cap_path, &suffix, "")?;
         assert_eq!(status, 200);
         let tree = parse_llsd_xml(&reply)?;
         assert_eq!(
-            tree.get("_removed_items")
+            tree.get("_category_items_removed")
                 .and_then(Llsd::as_array)
                 .and_then(<[Llsd]>::first)
                 .and_then(Llsd::as_uuid),
@@ -2957,7 +2979,7 @@ mod test {
             ais_create_category_url(folder_key(AGENT_CLOTHING), uuid::Uuid::from_u128(0x71d));
         let body = build_ais_create_link_body(linked, 24, 18, "Hat Link", "worn");
         let (status, reply) = respond_ais(&mut caps, &mut sim, "POST", &cap_path, &suffix, &body)?;
-        assert_eq!(status, 200);
+        assert_eq!(status, 201);
         let tree = parse_llsd_xml(&reply)?;
         let created = tree
             .get("_created_items")
@@ -2970,8 +2992,9 @@ mod test {
             .and_then(|embedded| embedded.get("links"))
             .and_then(|links| links.get(&created.to_string()))
             .and_then(|link| link.get("linked_id"))
-            .and_then(Llsd::as_uuid);
-        assert_eq!(embedded_asset, Some(linked));
+            .and_then(Llsd::as_str);
+        // A string, as Second Life states every id of an embedded object.
+        assert_eq!(embedded_asset, Some(linked.to_string().as_str()));
         // And it is filed there *instead of* under `items`, not as well as.
         assert!(
             tree.get("_embedded")
@@ -3256,6 +3279,7 @@ mod test {
             query,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: body.as_bytes(),
         }
     }
@@ -4244,6 +4268,7 @@ mod test {
             query,
             range: None,
             if_modified_since: None,
+            destination: None,
             body: b"",
         }
     }

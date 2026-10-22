@@ -2,7 +2,7 @@
 id: server-fake-grid-inventory-udp-mutations
 title: Fake grid — the UDP inventory mutations, Trash gating and pushes
 topic: server
-status: ready
+status: done
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, gridspec-inventory-mutations]
 blocked_by: [gridspec-inventory-mutations]
@@ -83,3 +83,39 @@ against the census on 2026-10-22 differed from its live grid in:
   /category/<id>/links`, a bare array) is `201` — the fake answers `405`; a
   `COPY` of a Library folder is served. A `POST` naming a `category_id`
   gets another id.
+
+## Done (2026-10-22)
+
+Both fake flavours now pass the `inventory-mutations` census, which runs
+offline on `FakeSl` and `FakeOpensim` and holds every metric but the gives
+(`FAKE_EXEMPT`: the fake relays no inventory offer between two of its
+accounts, `server-fake-grid-inventory-offers`). A run of each flavour differs
+from its live grid's last run in nothing else.
+
+- **`SimSession`** serves `CopyInventoryItem` (an `UpdateCreateInventoryItem`
+  with the callback id on OpenSim, a `BulkUpdateInventory` over the event
+  queue on Second Life), `LinkInventoryItem` (made on OpenSim, refused with
+  the alert on Second Life), `ChangeInventoryItemFlags` (the folder steps on
+  Second Life only), `RemoveInventoryItem` anywhere, and
+  `RemoveInventoryFolder`, `PurgeInventoryDescendents` and the folders of
+  `RemoveInventoryObjects` only in the Trash or the Lost and Found
+  (`SimInventoryTree::is_removable`, OpenSim's `ParentIsTrashOrLost`). A
+  `MoveInventoryItem` pushes the moved items over the event queue on both.
+  The five messages are typed now, out of the raw-forward ledger.
+- **Item creation and update**: a made, copied or linked item steps its
+  folder (`SimInventoryTree::add_item`); a made item's masks are the grid's
+  (`InventoryDialect::created_item_mask`); a notecard made on Second Life
+  names no asset; an `UpdateInventoryItem` that binds no upload steps the
+  folder and is not answered.
+- **AIS3** answers in Second Life's shape: `201` for a create, a link, a slam
+  and a copy, the folder or item at the top level, every `_` key stated; a
+  rename steps the parent; a whole-item `PATCH` sets the next-owner mask
+  (`AisItemUpdate::next_owner_mask`); `PUT /category/<id>/links` slams
+  (`parse_ais_slam_body`, `SimInventoryTree::slam_links`); `COPY` on
+  `LibraryAPIv3` copies a Library folder into the `Destination`
+  (`CapsRequest::destination`). The fixture Library gained a small
+  sub-folder for it, which also closed the `inventory-fetch` census's
+  `library_crawl_category_keys` exemption; its three copy exemptions went
+  with this task.
+- **The folder fetch** lists each item link's target ahead of the folder's
+  items, as both grids do.

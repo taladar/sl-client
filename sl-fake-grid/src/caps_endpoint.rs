@@ -12,13 +12,16 @@ use sl_proto::{
 use crate::driver::{SharedSim, SimState, sleep_until_opt};
 use crate::runtime::GridCore;
 
-/// The request headers a capability reads: only the asset-delivery ones do.
+/// The request headers a capability reads: the asset-delivery ones, and the
+/// `Destination` of an AIS3 `COPY`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct AssetHeaders<'a> {
+pub(crate) struct CapsHeaders<'a> {
     /// The `Range` header.
     pub(crate) range: Option<&'a str>,
     /// The `If-Modified-Since` header.
     pub(crate) if_modified_since: Option<&'a str>,
+    /// The `Destination` header.
+    pub(crate) destination: Option<&'a str>,
 }
 
 /// Dispatches one CAPS request against a session, holding an empty
@@ -37,7 +40,7 @@ pub(crate) async fn dispatch_caps(
     method: &str,
     path: &str,
     query: Option<&str>,
-    headers: AssetHeaders<'_>,
+    headers: CapsHeaders<'_>,
     body: &[u8],
 ) -> CapsResponse {
     // The hold deadline covers the whole poll, not each re-dispatch.
@@ -50,6 +53,7 @@ pub(crate) async fn dispatch_caps(
             query,
             range: headers.range,
             if_modified_since: headers.if_modified_since,
+            destination: headers.destination,
             body,
         };
         let dispatch = {

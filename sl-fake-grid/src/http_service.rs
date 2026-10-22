@@ -162,6 +162,10 @@ async fn handle_request(
     let content_type = header_string(&request, CONTENT_TYPE);
     let range = header_string(&request, http::header::RANGE);
     let if_modified_since = header_string(&request, http::header::IF_MODIFIED_SINCE);
+    let destination = header_string(
+        &request,
+        http::header::HeaderName::from_static("destination"),
+    );
 
     let body = match collect_body(request).await {
         Ok(body) => body,
@@ -182,6 +186,7 @@ async fn handle_request(
                 query: query.as_deref(),
                 range: range.as_deref(),
                 if_modified_since: if_modified_since.as_deref(),
+                destination: destination.as_deref(),
                 body: &body,
             },
         );
@@ -278,9 +283,10 @@ async fn handle_request(
             &method,
             &path,
             query.as_deref(),
-            crate::caps_endpoint::AssetHeaders {
+            crate::caps_endpoint::CapsHeaders {
                 range: range.as_deref(),
                 if_modified_since: if_modified_since.as_deref(),
+                destination: destination.as_deref(),
             },
             &body,
         )

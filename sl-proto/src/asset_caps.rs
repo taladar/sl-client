@@ -610,6 +610,7 @@ mod tests {
             query,
             range,
             if_modified_since: None,
+            destination: None,
             body: b"",
         }
     }

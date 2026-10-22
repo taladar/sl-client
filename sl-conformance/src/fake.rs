@@ -222,6 +222,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "experience-admin-contributor",
     "marketplace-direct-delivery",
     "inventory-fetch",
+    "inventory-mutations",
     "avatar-render-info",
     "landmarks-home",
 ];

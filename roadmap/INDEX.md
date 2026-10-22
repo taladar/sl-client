@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 339 |
+| ready | 338 |
 | blocked | 79 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1411 |
+| done | 1412 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2072** |
@@ -351,7 +351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (339)
+## ready (338)
 
 ### protocol
 
@@ -1101,9 +1101,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-inventory-persists-across-logins`](ready/server-fake-grid-inventory-persists-across-logins.md)
   — Fake grid — keep an account's inventory, versions included, from one login
   to the next (blocked by `gridspec-inventory-fetch` (done))
-- [`server-fake-grid-inventory-udp-mutations`](ready/server-fake-grid-inventory-udp-mutations.md)
-  — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
-  `gridspec-inventory-mutations` (done))
 - [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
@@ -1571,7 +1568,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1411)
+## done (1412)
 
 ### protocol
 
@@ -4553,6 +4550,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-groups`](done/server-fake-grid-groups.md) — Fake grid — a
   group store: membership, roles, notices, invitations and group sessions
   (blocked by `gridspec-groups` (done))
+- [`server-fake-grid-inventory-udp-mutations`](done/server-fake-grid-inventory-udp-mutations.md)
+  — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
+  `gridspec-inventory-mutations` (done))
 - [`server-fake-grid-login-response-sections`](done/server-fake-grid-login-response-sections.md)
   — The fake grid's login response lacks the sections and scalars the live grids
   send

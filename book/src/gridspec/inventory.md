@@ -49,6 +49,7 @@ every cached folder against it without a fetch.
 | a sub-folder entry | `agent_id` (string), `category_id`, `name`, `parent_id`, `type_default`, `version`; ids as **strings** | no `agent_id`; ids as UUIDs | each flavour as its grid |
 | an item | every id a string, `agent_id`, an empty `metadata` map, `permissions` with `last_owner_id` and no `is_owner_group` | ids as UUIDs, no `agent_id` or `metadata`, `permissions` with `is_owner_group` and no `last_owner_id` | each flavour as its grid |
 | `descendents` | the sub-folders plus the items listed | the same | the same |
+| an item link in the folder | its target item listed too (`inventory-mutations`' slam leg) | the same, ahead of the folder's own items and outside `descendents` (`FetchInvDescHandler.ProcessLinks`; [Appearance](appearance.md)) | as OpenSim, both flavours |
 | a folder nobody has | **not refused**: an empty entry, version 0, descendents 0, owned by the agent (no `bad_folders`) | the same | the same |
 | a Library folder through the agent's capability | that same empty entry | **listed** | each flavour as its grid |
 | the Library is crawled through | `FetchLibDescendents2` | `FetchInventoryDescendents2`, the Library owner as owner | each flavour as its grid |
@@ -114,8 +115,8 @@ AIS3 too, which agreed every time).
 | an AIS3 `PATCH /category/<id>` of `parent_id` | **refused**: `400`, `error_code` 0, "Cannot change parent_id.  Use MOVE method.  *folder*, *parent* " (`categories.py`, `Category.mergeUntrusted`, line 306); nothing moves | no AIS3 | Second Life flavour: the same |
 | an AIS3 `MOVE /category/<id>`, `Destination` absolute or relative | **refused**: `405` "Method Not Allowed", `error_code` 7, `allowed_methods` `DELETE, GET, PATCH, POST, PUT, HEAD, OPTIONS`, `method`, `url` (`access.py`, `Category._not_allowed`, line 61) | no AIS3 | Second Life flavour: the same |
 | an AIS3 `DELETE /category/<id>` of a folder **outside** the Trash | removed where it stands; its parent +1 | no AIS3 | Second Life flavour: removed |
-| an AIS3 `PATCH /item/<id>` of `parent_id` | refused: `400`, "Cannot change parent_id.  Use MOVE method. *item* *parent*" (`items.py`, `Item.mergeUntrusted`, line 732) | no AIS3 | not measured: the fake does not yet copy the item the leg moves |
-| a UDP `MoveInventoryItem` | moved | moved | not measured (as above) |
+| an AIS3 `PATCH /item/<id>` of `parent_id` | refused: `400`, "Cannot change parent_id.  Use MOVE method. *item* *parent*" (`items.py`, `Item.mergeUntrusted`, line 732) | no AIS3 | Second Life flavour: the same |
+| a UDP `MoveInventoryItem` | moved | moved | moved |
 | the next login's skeleton | states the versions the last session read, root and Trash | the same | **falls back**: each login is seeded afresh |
 
 **AIS3 cannot move anything on Second Life**, folder or item. The reference
@@ -129,9 +130,7 @@ grid, the `Ais3MoveFolder` / `Ais3MoveItem` commands are gone, and
 `ais3-folder-lifecycle` passes on aditi for the first time.
 
 The fake grid keeping a session's inventory for the next login is
-`server-fake-grid-inventory-persists-across-logins`; its serving the UDP
-`CopyInventoryItem` (which the item legs need) is
-`server-fake-grid-inventory-udp-mutations`.
+`server-fake-grid-inventory-persists-across-logins`.
 
 ### The cache across a login
 
@@ -160,23 +159,24 @@ and road. The census makes two run folders, `F` and `G`, a notecard in `F`, and
 copies of it for the removal legs, and takes them all away again; a run costs
 nothing.
 
-The census holds both live grids to these answers as `Measured` constants
-(`sl-conformance/src/cases/inventory_mutations.rs`). The fake grid is not held
-to it yet: its serving the item mutations, the Trash gating and the gives is
-`server-fake-grid-inventory-udp-mutations`.
+The census holds both live grids and both fake flavours to these answers as
+`Measured` constants (`sl-conformance/src/cases/inventory_mutations.rs`); the
+fake grid's column says what each flavour does. Its one gap is the gives: it
+relays no inventory offer between two of its accounts
+(`server-fake-grid-inventory-offers`).
 
 ### Items over UDP
 
-| operation | Second Life | OpenSim |
-| --- | --- | --- |
-| `CreateInventoryItem`, a notecard in `F` | answered with `UpdateCreateInventoryItem` (UDP, the callback id echoed); `F` +1; base and owner mask `0x7fffffff`; **no asset** (nil) | the same answer; `F` +1; base and owner mask `0x0009e000`; an asset |
-| `CopyInventoryItem` into `F` | copied; answered with `BulkUpdateInventory` over the **event queue**; `F` +1 | copied; answered with `UpdateCreateInventoryItem` (UDP, the callback id echoed); `F` +1 |
-| `UpdateInventoryItem`, a new name and description | applied; nothing pushed; `F` +1 | the same |
-| `ChangeInventoryItemFlags` (flags 1) | the flags read back 0; nothing pushed; `F` **+1** | the flags read back 0; nothing pushed; `F` unchanged — OpenSim has no handler for the message |
-| `MoveInventoryItem` from `F` to `G` | moved; `BulkUpdateInventory` over the event queue; `F` and `G` +1 each | the same |
-| `LinkInventoryItem` to the notecard, into `G` | **refused**: an `AlertMessage` "Cannot create requested inventory." (UDP); nothing made | made, type 24 naming the notecard; `UpdateCreateInventoryItem` (UDP, no callback id); `G` +1 |
-| `LinkInventoryItem` into the Current Outfit Folder | refused the same way | made, as into `G` |
-| a notecard body saved with `UpdateNotecardAgentInventory` | saved | saved |
+| operation | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `CreateInventoryItem`, a notecard in `F` | answered with `UpdateCreateInventoryItem` (UDP, the callback id echoed); `F` +1; base and owner mask `0x7fffffff`; **no asset** (nil) | the same answer; `F` +1; base and owner mask `0x0009e000`; an asset | each flavour as its grid |
+| `CopyInventoryItem` into `F` | copied; answered with `BulkUpdateInventory` over the **event queue**; `F` +1 | copied; answered with `UpdateCreateInventoryItem` (UDP, the callback id echoed); `F` +1 | each flavour as its grid |
+| `UpdateInventoryItem`, a new name and description | applied; nothing pushed; `F` +1 | the same | each flavour as its grid |
+| `ChangeInventoryItemFlags` (flags 1) | the flags read back 0; nothing pushed; `F` **+1** | the flags read back 0; nothing pushed; `F` unchanged — OpenSim has no handler for the message | each flavour as its grid |
+| `MoveInventoryItem` from `F` to `G` | moved; `BulkUpdateInventory` over the event queue; `F` and `G` +1 each | the same | each flavour as its grid |
+| `LinkInventoryItem` to the notecard, into `G` | **refused**: an `AlertMessage` "Cannot create requested inventory." (UDP); nothing made | made, type 24 naming the notecard; `UpdateCreateInventoryItem` (UDP, no callback id); `G` +1 | each flavour as its grid |
+| `LinkInventoryItem` into the Current Outfit Folder | refused the same way | made, as into `G` | each flavour as its grid |
+| a notecard body saved with `UpdateNotecardAgentInventory` | saved | saved | each flavour as its grid |
 
 Second Life refuses the UDP link in every folder, not only the Current Outfit
 Folder; the client links through AIS3 there. A notecard made on Second Life
@@ -186,15 +186,15 @@ census saves a body before its link legs.
 
 ### Removals and the Trash
 
-| operation | Second Life | OpenSim |
-| --- | --- | --- |
-| `RemoveInventoryItem` of an item outside the Trash | **removed**; its folder +1, the Trash unchanged; nothing pushed | the same |
-| `RemoveInventoryItem` of an item in the Trash | removed; the Trash +1; nothing pushed | the same |
-| `RemoveInventoryFolder` of a folder outside the Trash | **refused silently**: still under the root, no version moves | the same |
-| `PurgeInventoryDescendents` of a folder outside the Trash | **refused silently**: every item left, the folder's version unchanged | the same |
-| `PurgeInventoryDescendents` of a folder in the Trash | emptied; the folder +1; nothing pushed | the same |
-| `RemoveInventoryObjects`, a folder and an item, outside the Trash | the **item removed, the folder left** | the same |
-| `RemoveInventoryObjects` in the Trash | both removed | the same |
+| operation | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `RemoveInventoryItem` of an item outside the Trash | **removed**; its folder +1, the Trash unchanged; nothing pushed | the same | the same |
+| `RemoveInventoryItem` of an item in the Trash | removed; the Trash +1; nothing pushed | the same | the same |
+| `RemoveInventoryFolder` of a folder outside the Trash | **refused silently**: still under the root, no version moves | the same | the same |
+| `PurgeInventoryDescendents` of a folder outside the Trash | **refused silently**: every item left, the folder's version unchanged | the same | the same |
+| `PurgeInventoryDescendents` of a folder in the Trash | emptied; the folder +1; nothing pushed | the same | the same |
+| `RemoveInventoryObjects`, a folder and an item, outside the Trash | the **item removed, the folder left** | the same | the same |
+| `RemoveInventoryObjects` in the Trash | both removed | the same | the same |
 
 So the Trash gates a folder's removal and an emptying on both grids, and an
 item's removal on neither. No grid pushes anything after a removal: a viewer
@@ -206,24 +206,29 @@ Every answer carries the item or folder itself at the top level (with
 `_base_uri` and `_links`) beside the keys that say what changed, and nothing
 is pushed over UDP or the event queue after any of them.
 
-| request | answer | what its keys say |
-| --- | --- | --- |
-| `POST /category/<root>` with `categories` | `201` | `_created_categories` [the folder], `_created_items` [], `_embedded` the new folder, `_updated_category_versions` {root +1} |
-| the same, naming a `category_id` | `201`, the folder made under **another id** | as above: AIS3 mints a folder's id and ignores one the request names |
-| `PATCH /category/<id>` with `name` | `200` | `_updated_categories` [the folder], `_updated_category_versions` {**the parent** +1} |
-| `PATCH /item/<id>` with `name`, `desc` | `200`, the item | `_updated_items` [the item], `_updated_category_versions` {its folder +1} |
-| `PATCH /item/<id>` with the **whole item** (the reference's `asLLSD` without `asset_id`, the unchanged `parent_id` included) | `200`; name, description and next-owner mask all applied | as above |
-| `POST /category/<id>` with `links` | `201` | `_created_items` [the link], `_embedded` {links}, `_updated_category_versions` {the folder +1} |
-| `PUT /category/<id>/links`, a bare array of one link | `201` | `_updated_items` [the folder's existing link to the same item], `_linked_ids`, `_category_items_removed` [], `_created_items` [] — it rewrote the existing link rather than making one |
-| `DELETE /item/<id>` outside the Trash | `200`, **removed** | `_category_items_removed` [the item], `_active_gestures_removed`, `_attachments_removed`, `_broken_links_removed`, `_wearables_removed`, `_updated_category_versions` {its folder +1} |
-| `DELETE /category/<id>/children` outside the Trash | `200`, **emptied** | `_category_items_removed` [each item], `_categories_removed` [], `_total_items_removed`, and the four above |
-| `DELETE /category/<id>` outside the Trash | `200`, removed | `_categories_removed` [the folder], `_updated_category_versions` {the parent +1}, and the rest above |
-| `COPY` (`LibraryAPIv3`) of a Library folder, `Destination` `F`, `?tid=…,depth=0` | `201`; a copy of the folder and its two items in `F` | `_created_categories` [the copy], `_created_items` [two], `_moved_items` [], `_removed_items` [], `_top_category_id`, `_updated_category_versions` {`F` +1} |
+| request | answer | what its keys say | fake grid (Second Life flavour) |
+| --- | --- | --- | --- |
+| `POST /category/<root>` with `categories` | `201` | `_created_categories` [the folder], `_created_items` [], `_embedded` the new folder, `_updated_category_versions` {root +1} | the same |
+| the same, naming a `category_id` | `201`, the folder made under **another id** | as above: AIS3 mints a folder's id and ignores one the request names | the same |
+| `PATCH /category/<id>` with `name` | `200` | `_updated_categories` [the folder], `_updated_category_versions` {**the parent** +1} | the same |
+| `PATCH /item/<id>` with `name`, `desc` | `200`, the item | `_updated_items` [the item], `_updated_category_versions` {its folder +1} | the same |
+| `PATCH /item/<id>` with the **whole item** (the reference's `asLLSD` without `asset_id`, the unchanged `parent_id` included) | `200`; name, description and next-owner mask all applied | as above | the same |
+| `POST /category/<id>` with `links` | `201` | `_created_items` [the link], `_embedded` {links}, `_updated_category_versions` {the folder +1} | the same |
+| `PUT /category/<id>/links`, a bare array of one link | `201` | `_updated_items` [the folder's existing link to the same item], `_linked_ids`, `_category_items_removed` [], `_created_items` [] — it rewrote the existing link rather than making one | the same |
+| `DELETE /item/<id>` outside the Trash | `200`, **removed** | `_category_items_removed` [the item], `_active_gestures_removed`, `_attachments_removed`, `_broken_links_removed`, `_wearables_removed`, `_updated_category_versions` {its folder +1} | the same |
+| `DELETE /category/<id>/children` outside the Trash | `200`, **emptied** | `_category_items_removed` [each item], `_categories_removed` [], `_total_items_removed`, and the four above | the same |
+| `DELETE /category/<id>` outside the Trash | `200`, removed | `_categories_removed` [the folder], `_updated_category_versions` {the parent +1}, and the rest above | the same |
+| `COPY` (`LibraryAPIv3`) of a Library folder, `Destination` `F`, `?tid=…,depth=0` | `201`; a copy of the folder and its two items in `F` | `_created_categories` [the copy], `_created_items` [two], `_moved_items` [], `_removed_items` [], `_top_category_id`, `_updated_category_versions` {`F` +1} | the same |
 
 AIS3 removes and empties **outside the Trash**, where the UDP messages refuse.
 A slam with two links to one item is refused `400` "Duplicate links or invalid
 link type."; a map `{ links: [...] }` instead of the bare array, `400` "List of
 links required.".
+
+The fake grid answers a slam as Second Life did here — an existing link to the
+same item kept and renamed, a new target linked, a link no entry names removed
+— but refuses neither of those two; its Library holds one small folder for the
+`COPY`.
 
 ### Gives
 

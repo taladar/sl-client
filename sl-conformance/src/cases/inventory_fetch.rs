@@ -751,27 +751,6 @@ const FAKE_EXEMPT: &[(&str, Option<sl_fake_grid::ImitatedGrid>, &str)] = &[
          (server-fake-grid-inventory-persists-across-logins)",
     ),
     (
-        "item_copy_made",
-        None,
-        "the fake grid does not serve a UDP CopyInventoryItem \
-         (server-fake-grid-inventory-udp-mutations)",
-    ),
-    (
-        "ais_item_move_",
-        None,
-        "needs the copy the fake grid does not make (server-fake-grid-inventory-udp-mutations)",
-    ),
-    (
-        "udp_item_move_moved",
-        None,
-        "needs the copy the fake grid does not make (server-fake-grid-inventory-udp-mutations)",
-    ),
-    (
-        "library_crawl_category_keys",
-        None,
-        "the fixture Library has no sub-folder to state keys for",
-    ),
-    (
         "udp_descendents",
         Some(sl_fake_grid::ImitatedGrid::SecondLife),
         "the Second Life flavour refuses the deprecated fetch out loud (LegacyUdpInventory)",

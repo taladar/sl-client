@@ -4213,6 +4213,162 @@ mod test {
         Ok(())
     }
 
+    /// The UDP item mutations as each grid answers them
+    /// (`book/src/gridspec/inventory.md` § Changing inventory): a copy is
+    /// made and handed over — over UDP on OpenSim, over the event queue on
+    /// Second Life — and steps its folder; a link is made on OpenSim and
+    /// refused on Second Life; a flags change steps the folder on Second Life
+    /// only and sets nothing; an item is removed anywhere, but a folder only
+    /// in the Trash, and a purge outside it is ignored.
+    #[test]
+    fn client_udp_item_mutations_are_answered_per_grid() -> Result<(), TestError> {
+        for dialect in [
+            sl_proto::InventoryDialect::SecondLife,
+            sl_proto::InventoryDialect::OpenSim,
+        ] {
+            let second_life = dialect == sl_proto::InventoryDialect::SecondLife;
+            let now = Instant::now();
+            let (mut client, mut sim) = setup(now)?;
+            sim.set_inventory_dialect(dialect);
+            drain_server(&mut sim);
+            drain_client(&mut client);
+            let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x8001));
+            let trash = InventoryFolderKey::from(uuid::Uuid::from_u128(0x8002));
+            let kept = InventoryFolderKey::from(uuid::Uuid::from_u128(0x8003));
+            let binned = InventoryFolderKey::from(uuid::Uuid::from_u128(0x8004));
+            for (folder_id, parent_id, folder_type) in [
+                (root, None, 8),
+                (trash, Some(root), 14),
+                (kept, Some(root), -1),
+                (binned, Some(trash), -1),
+            ] {
+                sim.agent_inventory_mut().insert_folder(InventoryFolder {
+                    folder_id,
+                    parent_id,
+                    name: format!("{folder_id}"),
+                    folder_type,
+                    version: 1,
+                });
+            }
+            let item_id = InventoryKey::from(uuid::Uuid::from_u128(0x8005));
+            sim.agent_inventory_mut().insert_item(InventoryItem {
+                item_id,
+                folder_id: kept,
+                ..wearable_item()
+            });
+            let version = |sim: &SimSession, folder| {
+                sim.agent_inventory()
+                    .folder(folder)
+                    .map(|folder: &InventoryFolder| folder.version)
+            };
+
+            // A copy: made, its folder stepped, and handed over.
+            client.copy_inventory_item(
+                AgentKey::from(uuid::Uuid::from_u128(1)),
+                item_id,
+                kept,
+                "Copy",
+                now,
+            )?;
+            pump(&mut client, &mut sim, now)?;
+            let copies: Vec<InventoryKey> = sim
+                .agent_inventory()
+                .items()
+                .filter(|item| item.name == "Copy" && item.folder_id == kept)
+                .map(|item| item.item_id)
+                .collect();
+            assert_eq!(copies.len(), 1, "{dialect:?}: one copy made");
+            assert_eq!(version(&sim, kept), Some(2), "{dialect:?}: a copy steps");
+            let over_udp = drain_client(&mut client).iter().any(|event| {
+                matches!(event, Event::InventoryItemCreated { item, .. } if item.name == "Copy")
+            });
+            // `deliver_caps` refuses an empty queue: nothing queued is no copy
+            // over it.
+            let over_queue = deliver_caps(&mut client, &mut sim, now).is_ok_and(|events| {
+                events.iter().any(|event| {
+                    matches!(event, Event::InventoryBulkUpdate { items, .. }
+                        if items.iter().any(|item| item.name == "Copy"))
+                })
+            });
+            assert_eq!(
+                (over_udp, over_queue),
+                (!second_life, second_life),
+                "{dialect:?}: the road the copy is handed over on"
+            );
+
+            // A link: made on OpenSim, refused on Second Life.
+            let _callback = client.link_inventory_item(
+                &sl_proto::NewInventoryLink {
+                    folder_id: kept,
+                    linked_id: sl_proto::InventoryItemOrFolderKey::Item(item_id),
+                    // `AT_LINK`.
+                    link_type: AssetType::from_code(24),
+                    inv_type: InventoryType::Wearable,
+                    name: "Link".to_owned(),
+                    description: String::new(),
+                },
+                now,
+            )?;
+            pump(&mut client, &mut sim, now)?;
+            let linked = sim
+                .agent_inventory()
+                .items()
+                .any(|item| item.name == "Link" && item.asset_id == item_id.uuid());
+            let refused = drain_client(&mut client).iter().any(|event| {
+                matches!(event, Event::AlertMessage { message, .. }
+                    if message == "Cannot create requested inventory.")
+            });
+            assert_eq!(
+                (linked, refused),
+                (!second_life, second_life),
+                "{dialect:?}: a UDP link"
+            );
+            let before = version(&sim, kept);
+
+            // A flags change: nothing set; the folder steps on Second Life.
+            client.change_inventory_item_flags(item_id, 1, now)?;
+            pump(&mut client, &mut sim, now)?;
+            assert_eq!(
+                sim.agent_inventory().item(item_id).map(|item| item.flags),
+                Some(wearable_item().flags),
+                "{dialect:?}: no flag set"
+            );
+            assert_eq!(
+                version(&sim, kept),
+                before.map(|was| was.saturating_add(i32::from(second_life))),
+                "{dialect:?}: the folder after a flags change"
+            );
+
+            // The Trash gates the folders, not the items.
+            client.purge_inventory_descendents(kept, now)?;
+            client.remove_inventory_folders(&[kept], now)?;
+            pump(&mut client, &mut sim, now)?;
+            assert!(
+                sim.agent_inventory().item(item_id).is_some(),
+                "{dialect:?}: a purge outside the Trash is ignored"
+            );
+            assert!(
+                version(&sim, kept).is_some(),
+                "{dialect:?}: so is a folder removal"
+            );
+            client.remove_inventory_objects(&[kept, binned], &[item_id], now)?;
+            pump(&mut client, &mut sim, now)?;
+            assert!(
+                sim.agent_inventory().item(item_id).is_none(),
+                "{dialect:?}: the item goes"
+            );
+            assert!(
+                version(&sim, kept).is_some(),
+                "{dialect:?}: the folder outside the Trash stays"
+            );
+            assert!(
+                version(&sim, binned).is_none(),
+                "{dialect:?}: the one in it goes"
+            );
+        }
+        Ok(())
+    }
+
     /// A UDP `MoveInventoryItem` — how a rename travels, the AIS3 move having
     /// no name — moves and renames the item in the serving tree, so the next
     /// fetch answers with what the client changed; a block naming an item the

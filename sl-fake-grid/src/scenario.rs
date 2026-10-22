@@ -399,6 +399,11 @@ const LIB_ROOT: u128 = 0xFB01;
 /// The stock library item inside the library root — one of the library body
 /// parts the account wears, under Linden's own id, which the grid also serves.
 const LIB_TEXTURE: u128 = 0xFB11;
+/// The stock library's sub-folder: a small folder of library body parts, as
+/// both grids' libraries hold folders of a few items a viewer copies whole.
+const LIB_BODY_PARTS: u128 = 0xFB02;
+/// The first of the items in [`LIB_BODY_PARTS`].
+const LIB_BODY_PART_BASE: u128 = 0xFB21;
 /// The stock region-wide parcel id.
 const PARCEL: u128 = 0xFC01;
 /// The stock creator/owner agent id used for fixture items.
@@ -735,6 +740,32 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
     if let Some(&(wearable_type, name, asset)) = sl_test_assets::builtin::DEFAULT_BODY_PARTS.first()
     {
         let mut item = stock_item(LIB_TEXTURE, folder_key(LIB_ROOT), name);
+        item.asset_id = asset;
+        item.item_type = ASSET_TYPE_BODYPART;
+        item.inv_type = ASSET_TYPE_BODYPART;
+        item.flags = u32::from(wearable_type.to_code());
+        sim.library_inventory_mut().insert_item(item);
+    }
+    // A folder of two more of them: what a Library folder copy (`COPY` on
+    // `LibraryAPIv3`) copies.
+    sim.library_inventory_mut().insert_folder(InventoryFolder {
+        folder_id: folder_key(LIB_BODY_PARTS),
+        parent_id: Some(folder_key(LIB_ROOT)),
+        name: "Body Parts".to_owned(),
+        folder_type: FOLDER_TYPE_BODY_PARTS,
+        version: 1,
+    });
+    for (offset, &(wearable_type, name, asset)) in (0_u128..).zip(
+        sl_test_assets::builtin::DEFAULT_BODY_PARTS
+            .iter()
+            .skip(1)
+            .take(2),
+    ) {
+        let mut item = stock_item(
+            LIB_BODY_PART_BASE.saturating_add(offset),
+            folder_key(LIB_BODY_PARTS),
+            name,
+        );
         item.asset_id = asset;
         item.item_type = ASSET_TYPE_BODYPART;
         item.inv_type = ASSET_TYPE_BODYPART;

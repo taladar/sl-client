@@ -96,6 +96,7 @@ mod test {
                 query: Some(&query),
                 range: range.as_deref(),
                 if_modified_since: None,
+                destination: None,
                 body: b"",
             };
             let response: CapsResponse = self.caps.dispatch(&self.source, &request);

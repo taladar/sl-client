@@ -48,13 +48,13 @@ mod test {
     use sl_proto::{
         AgentKey, AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind,
         ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags, Event, FriendKey,
-        GridCoordinates, GroupKey, InterestsUpdate, InventoryFolderKey, InventoryKey,
-        LandStatExtended, LandStatItem, LandStatReportType, LandStatScore, LindenAmount,
-        LoginParams, LureId, Maturity, MoneyTransactionType, MuteFlags, MuteType,
-        ObjectExtraParams, ObjectKey, OwnerKey, ParcelObjectOwner, ParcelObjectOwnersPart, PickKey,
-        PickUpdate, PrimShapeParams, ProductType, ProfileUpdate, QueryId, RegionHandle,
-        RegionIdentity, RegionLocalObjectId, RegionTerrainComposition, RezAttachment,
-        ScopedObjectId, ServerEvent, Session, SimSession, TextureKey, parse_event_queue_response,
+        GridCoordinates, GroupKey, InterestsUpdate, InventoryKey, LandStatExtended, LandStatItem,
+        LandStatReportType, LandStatScore, LindenAmount, LoginParams, LureId, Maturity,
+        MoneyTransactionType, MuteFlags, MuteType, ObjectExtraParams, ObjectKey, OwnerKey,
+        ParcelObjectOwner, ParcelObjectOwnersPart, PickKey, PickUpdate, PrimShapeParams,
+        ProductType, ProfileUpdate, QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId,
+        RegionTerrainComposition, RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession,
+        TextureKey, parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_types::map::RegionCoordinates;
@@ -443,12 +443,6 @@ mod test {
     /// no longer arrives as `ClientMessage`) — remove the row here and assert
     /// the typed event in `tests/sim_session.rs` instead.
     const RAW_FORWARDED: &[&str] = &[
-        // inventory (legacy UDP mutation; AISv3 is the modern path)
-        "CopyInventoryItem",
-        "ChangeInventoryItemFlags",
-        "RemoveInventoryItem",
-        "RemoveInventoryObjects",
-        "PurgeInventoryDescendents",
         // groups
         "SetGroupContribution",
         // object handling (the edits themselves are typed since
@@ -486,14 +480,6 @@ mod test {
         "GenericMessage",
     ];
 
-    /// The raw-forwarded messages the matching family test sends, in order.
-    const INVENTORY_FAMILY: &[&str] = &[
-        "CopyInventoryItem",
-        "ChangeInventoryItemFlags",
-        "RemoveInventoryItem",
-        "RemoveInventoryObjects",
-        "PurgeInventoryDescendents",
-    ];
     /// The raw-forwarded messages the matching family test sends, in order.
     const GROUP_FAMILY: &[&str] = &["SetGroupContribution"];
     /// The raw-forwarded messages the matching family test sends, in order.
@@ -541,7 +527,6 @@ mod test {
         // the ledger lists each message once.
         let mut families_unique = Vec::new();
         let families: Vec<&str> = [
-            INVENTORY_FAMILY,
             GROUP_FAMILY,
             OBJECT_FAMILY,
             PROFILE_FAMILY,
@@ -561,36 +546,6 @@ mod test {
     }
 
     // ----- client → simulator, raw-forwarded families -----------------------
-
-    #[test]
-    fn inventory_mutations_forward_verbatim() -> Result<(), TestError> {
-        let now = Instant::now();
-        let (mut client, mut sim) = setup(now)?;
-
-        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x11));
-        let other = InventoryFolderKey::from(uuid::Uuid::from_u128(0x12));
-        let item = InventoryKey::from(uuid::Uuid::from_u128(0x21));
-
-        // The four UDP folder messages are **not** sent here: they are typed
-        // since `gridspec-inventory-fetch` (the serving tree applies them),
-        // and `tests/sim_session.rs` asserts their effect.
-        // `create_inventory_item` and `move_inventory_items` are **not** sent
-        // here: both are typed since `test-e2e-sweep-environment` (the fake
-        // grid answers a create and applies a rename), and `tests/sim_session.rs`
-        // asserts the typed events.
-        client.copy_inventory_item(AgentKey::from(own_agent()), item, other, "Copy", now)?;
-        client.change_inventory_item_flags(item, 0x100, now)?;
-        client.remove_inventory_items(&[item], now)?;
-        client.remove_inventory_objects(&[other], &[item], now)?;
-        client.purge_inventory_descendents(folder, now)?;
-        // `request_folder_contents` is **not** sent here: the deprecated UDP
-        // fetch is typed since `test-fake-grid-imitates-inventory-api` (an
-        // OpenSim-flavoured grid answers it), and `tests/sim_session.rs`
-        // asserts the typed event and its reply.
-
-        let _relayed = assert_family(&mut client, &mut sim, now, INVENTORY_FAMILY)?;
-        Ok(())
-    }
 
     #[test]
     fn group_edits_and_queries_forward_verbatim() -> Result<(), TestError> {
