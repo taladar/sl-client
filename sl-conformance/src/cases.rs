@@ -85,6 +85,7 @@ pub mod login_options;
 pub mod login_refusals;
 pub mod logout_clean;
 pub mod logout_seated;
+pub mod lsl_probes;
 pub mod map_blocks_items;
 pub mod marketplace_direct_delivery;
 pub mod materials;

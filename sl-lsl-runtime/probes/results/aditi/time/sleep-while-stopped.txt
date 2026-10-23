@@ -1,0 +1,17 @@
+grid: aditi
+date: 2026-10-23
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE time/sleep-while-stopped rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE time/sleep-while-stopped rec=sleeping run=late seconds=5.0
+PROBE time/sleep-while-stopped rec=control run=late stopped_at=1.044130
+PROBE time/sleep-while-stopped rec=woke run=late after=8.000011
+PROBE time/sleep-while-stopped rec=control run=late restarted_at=8.000061
+PROBE time/sleep-while-stopped rec=sleeping run=early seconds=5.0
+PROBE time/sleep-while-stopped rec=control run=early stopped_at=0.999943
+PROBE time/sleep-while-stopped rec=control run=early restarted_at=3.000173
+PROBE time/sleep-while-stopped rec=woke run=early after=5.000080
+PROBE time/sleep-while-stopped rec=end

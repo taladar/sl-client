@@ -44,3 +44,11 @@ Acceptance: each size-dependent function implemented by then has a charge that
 reproduces its aditi rate at every measured size within a few per cent, and
 `REGION_SCRIPT_SHARES` is either the measured count or documented as still a
 decision with the measurement that failed to find one.
+
+## From gridspec-lsl-probe-corpus (2026-10-23)
+
+The throughput probe is committed (`sl-lsl-runtime/probes/vm/throughput.lsl`)
+and its aditi run is a result file. On 2026-10-23 it measured 511 000/s
+empty, 500 000/s with three operations and 228 000/s calling `llAbs`, the
+rates the flat costs were fitted to. A size probe belongs beside it in
+`probes/vm/`, run with `sl-conformance run --grid aditi lsl-probes`.

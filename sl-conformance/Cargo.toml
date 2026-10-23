@@ -41,6 +41,10 @@ serde_json = { workspace = true }
 sl-anim = { workspace = true }
 sl-client-tokio = { workspace = true }
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
+# The `lsl-probes` cases read the probe corpus and write its result files in
+# the runtime's probe format; the touch census's test compiles its probe
+# script the way a grid would before a live run finds out it does not.
+sl-lsl-runtime = { workspace = true }
 # The materials case sends the overrides the viewer's own encoder writes and
 # reads a grid's answer with its decoder.
 sl-material = { workspace = true }
@@ -73,9 +77,6 @@ tracing-journald = "0.3.2"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
-# The touch census plants a probe script; its test compiles the source the
-# way a grid would before a live run finds out it does not.
-sl-lsl-runtime = { workspace = true }
 # `test-util` for the paused clock the case-isolation timeout test runs on.
 tokio = { workspace = true, features = ["test-util"] }
 

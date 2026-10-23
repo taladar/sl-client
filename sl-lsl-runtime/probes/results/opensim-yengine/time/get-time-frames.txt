@@ -1,0 +1,11 @@
+grid: opensim-yengine
+date: 2026-10-23
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+PROBE time/get-time-frames rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE time/get-time-frames rec=steps samples=7834161 distinct=1000 smallest=0.001000 largest=0.001000 first="0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000, 0.001000"
+PROBE time/get-time-frames rec=clocks timestamp="2026-10-23T21:43:26.7278380Z" unix=1792791806 gmt=78206.727831 wall=85406.727825 time_of_day=13406.727808
+PROBE time/get-time-frames rec=end

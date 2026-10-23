@@ -32,3 +32,16 @@ acceptance contradicts aditi; fix it).
 ## Viewer
 
 None.
+
+## From gridspec-lsl-probe-corpus (2026-10-23)
+
+Measured by the corpus (`time/*`, `events/timer-no-stack`):
+
+- `llGetTime` moves in 1 ms steps on both OpenSim engines, against Second
+  Life's 0.0219–0.0227 s frames.
+- XEngine's timer floor is 0.5 s (no `MinTimerInterval` in its section);
+  YEngine's is OpenSimDefaults' 0.1 s.
+- A stopped script's sleep counts on while stopped on Second Life and
+  YEngine alike. On XEngine, stopping a sleeping script ends that event:
+  it never wakes. So the "YEngine differs" above is not borne out by
+  `time/sleep-while-stopped`.

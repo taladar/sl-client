@@ -1275,6 +1275,13 @@ impl TestContext {
         self.fixtures.postcard_to()
     }
 
+    /// The script engine settings the `lsl-probes` cases state in a result
+    /// file's header, if the operator named them.
+    #[must_use]
+    pub fn lsl_settings(&self) -> Option<&str> {
+        self.fixtures.lsl_settings()
+    }
+
     /// The primary session.
     pub const fn primary(&mut self) -> &mut Session {
         &mut self.primary

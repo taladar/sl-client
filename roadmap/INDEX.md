@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 335 |
-| blocked | 78 |
+| blocked | 77 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1416 |
+| done | 1417 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2073** |
@@ -1145,8 +1145,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
-  committed LSL probe corpus and per-grid result files
+- [`gridspec-lsl-live-differential-runner`](ready/gridspec-lsl-live-differential-runner.md)
+  — Run one probe on OpenSim YEngine, XEngine and aditi and collect the
+  transcripts (blocked by `gridspec-lsl-probe-corpus` (done))
 - [`gridspec-seated-crossing`](ready/gridspec-seated-crossing.md) — A seated
   crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
@@ -1154,7 +1155,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (78)
+## blocked (77)
 
 ### viewer
 
@@ -1368,9 +1369,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-land-region-env`](blocked/gridspec-lsl-land-region-env.md) —
   LSL library behaviour on each grid — parcel, region, estate and environment
   queries (blocked by `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-live-differential-runner`](blocked/gridspec-lsl-live-differential-runner.md)
-  — Run one probe on OpenSim YEngine, XEngine and aditi and collect the
-  transcripts (blocked by `gridspec-lsl-probe-corpus`)
 - [`gridspec-lsl-memory-limits`](blocked/gridspec-lsl-memory-limits.md) — LSL
   memory and limits on OpenSim and the remaining SL unknowns (blocked by
   `gridspec-lsl-live-differential-runner`)
@@ -1560,7 +1558,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1416)
+## done (1417)
 
 ### protocol
 
@@ -4637,6 +4635,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-logout`](done/gridspec-logout.md) — Logout reply, timing and what
   logout does to seats and child circuits
+- [`gridspec-lsl-probe-corpus`](done/gridspec-lsl-probe-corpus.md) — A committed
+  LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct
   delivery on each grid
 - [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material

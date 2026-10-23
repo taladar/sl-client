@@ -199,6 +199,8 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::script_dialog::ScriptDialog),
         Box::new(crate::cases::script_permissions::ScriptPermissionsCase),
         Box::new(crate::cases::script_running::ScriptRunning),
+        Box::new(crate::cases::lsl_probes::LslProbes),
+        Box::new(crate::cases::lsl_probes::XEngineProbes),
         Box::new(crate::cases::script_upload::ScriptUpload),
         Box::new(crate::cases::parcel_properties::ParcelProperties),
         Box::new(crate::cases::parcel_info_dwell::ParcelInfoDwell),

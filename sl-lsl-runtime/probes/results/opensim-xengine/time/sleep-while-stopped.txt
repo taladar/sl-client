@@ -1,0 +1,15 @@
+grid: opensim-xengine
+date: 2026-10-23
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+PROBE time/sleep-while-stopped rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE time/sleep-while-stopped rec=sleeping run=late seconds=5.0
+PROBE time/sleep-while-stopped rec=control run=late stopped_at=1.002000
+PROBE time/sleep-while-stopped rec=control run=late restarted_at=8.008000
+PROBE time/sleep-while-stopped rec=sleeping run=early seconds=5.0
+PROBE time/sleep-while-stopped rec=control run=early stopped_at=1.001000
+PROBE time/sleep-while-stopped rec=control run=early restarted_at=3.003000
+PROBE time/sleep-while-stopped rec=end

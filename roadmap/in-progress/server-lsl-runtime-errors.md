@@ -244,3 +244,18 @@ default
     }
 }
 ```
+
+## From gridspec-lsl-probe-corpus (2026-10-23)
+
+The aditi probe above is committed as
+`sl-lsl-runtime/probes/errors/runtime-errors/`
+and was run by our own client (`sl-conformance run --grid aditi lsl-probes`),
+so the open text is measured. A fault sends **two** `DEBUG_CHANNEL`
+messages, `Object [script:Div int] Script run-time error` and then `Math
+Error` (or `Stack-Heap Collision`). The speaker is the prim (its name,
+`Object`), and a script 10 m away hears them while one 50 m away does not.
+A missing name in `llGetScriptState` sends `Could not find script 'Nope'.`
+the same way. The faulted script reports stopped, a link message to it goes
+nowhere, and `llSetScriptState(name, TRUE)` does **not** start it again —
+which this task's "restarts" assumption should be checked against. The
+Script Debug window's text was not captured (no viewer in the run).

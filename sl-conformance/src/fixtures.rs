@@ -83,6 +83,12 @@
 //! # avatar that owns the land founded. Absent, the census founds one and
 //! # prints its id to be named here.
 //! land_group = "77777777-7777-7777-7777-777777777777"
+//!
+//! # The script engine settings the `lsl-probes` cases write into each result
+//! # file's header, as the operator configured them (OpenSim's
+//! # `MinTimerInterval`, `ScriptDelayFactor`, sensor limits). Absent, the
+//! # header says the runner was not told.
+//! lsl_settings = "MinTimerInterval=0.1 ScriptDelayFactor=1.0"
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -134,6 +140,9 @@ pub struct Fixtures {
     /// The group the `land-transactions` census deeds to; absent, it founds
     /// one.
     land_group: Option<GroupKey>,
+    /// The script engine settings the `lsl-probes` cases state in a result
+    /// file's header.
+    lsl_settings: Option<String>,
 }
 
 /// The region-local position a login `start` string names
@@ -192,6 +201,9 @@ struct RawFixtures {
     /// [`Fixtures::land_group`].
     #[serde(default)]
     land_group: Option<String>,
+    /// The script engine settings, verbatim ([`Fixtures::lsl_settings`]).
+    #[serde(default)]
+    lsl_settings: Option<String>,
 }
 
 /// Why a fixtures file could not be turned into [`Fixtures`].
@@ -403,6 +415,7 @@ impl Fixtures {
             census_group,
             land_parcel,
             land_group,
+            lsl_settings: raw.lsl_settings,
         })
     }
 
@@ -436,6 +449,13 @@ impl Fixtures {
     #[must_use]
     pub fn postcard_to(&self) -> Option<&str> {
         self.postcard_to.as_deref()
+    }
+
+    /// The script engine settings the `lsl-probes` cases state in a result
+    /// file's header, if the operator named them.
+    #[must_use]
+    pub fn lsl_settings(&self) -> Option<&str> {
+        self.lsl_settings.as_deref()
     }
 
     /// The region-local position named by [`build_location`](Self::build_location)
@@ -574,6 +594,7 @@ mod tests {
             census_group: None,
             land_parcel: None,
             land_group: None,
+            lsl_settings: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.premade_group(0).is_some());
@@ -603,6 +624,7 @@ mod tests {
             census_group: None,
             land_parcel: None,
             land_group: None,
+            lsl_settings: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.other_avatar().is_some());
@@ -625,6 +647,7 @@ mod tests {
             census_group: None,
             land_parcel: None,
             land_group: None,
+            lsl_settings: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.mesh_asset().is_some());
@@ -647,6 +670,7 @@ mod tests {
             census_group: None,
             land_parcel: None,
             land_group: None,
+            lsl_settings: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -672,6 +696,7 @@ mod tests {
             census_group: None,
             land_parcel: None,
             land_group: None,
+            lsl_settings: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -698,6 +723,7 @@ mod tests {
             census_group: None,
             land_parcel: None,
             land_group: None,
+            lsl_settings: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -724,6 +750,7 @@ mod tests {
             census_group: None,
             land_parcel: None,
             land_group: None,
+            lsl_settings: None,
         };
         let fixtures = Fixtures::from_raw(raw)?;
         assert!(fixtures.experience().is_some());
@@ -746,6 +773,7 @@ mod tests {
             census_group: None,
             land_parcel: None,
             land_group: None,
+            lsl_settings: None,
         };
         assert!(matches!(
             Fixtures::from_raw(raw),
@@ -773,6 +801,7 @@ mod tests {
                 census_group: None,
                 land_parcel: None,
                 land_group: None,
+                lsl_settings: None,
             })
         };
         let position = with("uri:Mauve&48&64&30")?.build_position();

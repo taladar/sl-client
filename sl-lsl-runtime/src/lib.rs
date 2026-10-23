@@ -30,6 +30,10 @@
 //! in instructions, each suspendable between any two of them, with every
 //! library call going through the [`Host`](vm::Host) the grid implements.
 //!
+//! And the **probe format** — [`probe`]: the headers, the `PROBE` lines and
+//! the result files of the corpus under `probes/`, which measures each live
+//! grid's behaviour for the rest to be held to.
+//!
 //! Every rule is pinned by a table-driven test quoting its oracle: LSL
 //! PyOptimizer's `lslbasefuncs.py` and its `unit_tests/expr.suite`
 //! expectations, which were measured against Second Life.
@@ -43,6 +47,7 @@ pub mod library;
 mod num;
 pub mod ops;
 pub mod parse;
+pub mod probe;
 pub mod value;
 pub mod vm;
 

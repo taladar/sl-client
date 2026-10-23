@@ -86,6 +86,7 @@
 ## Tools
 
 - [The REPL test client](tools/sl-repl.md)
+- [The LSL probe corpus](tools/lsl-probes.md)
 - [Profiling the viewer](tools/profiling.md)
 - [Build performance & memory](tools/build-performance.md)
 - [Avatar state capture & replay](tools/avatar-replay.md)

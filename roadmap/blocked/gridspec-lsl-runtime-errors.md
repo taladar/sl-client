@@ -36,3 +36,22 @@ Within [[server-lsl-runtime-errors]] per flavour.
 
 Merge the two script error window tasks; route the debug channel into that
 window; live check with a division by zero.
+
+## From gridspec-lsl-probe-corpus (2026-10-23)
+
+`errors/runtime-errors` is committed and run on all three engines (table in
+`book/src/tools/lsl-probes.md`):
+
+- **Second Life** sends two `DEBUG_CHANNEL` messages from the prim:
+  `Object [script:<name>] Script run-time error`, then `Math Error` (integer
+  or float division, modulo) or `Stack-Heap Collision`. A listening script
+  10 m away hears both; one 50 m away hears neither.
+- **OpenSim** sends one message to the owner that no script hears.
+  YEngine's reads `YEngine: Division by Zero (script: … primID: … at:
+  <…>) Script must be Reset to re-enable.`, XEngine's `Integer division by
+  Zero(script: …)` / `Float division by zero(…)`. A library function's own
+  error (`llGetScriptState: Can't find script 'Nope'`) is heard at 50 m.
+- **The faulted script**: stopped for good on Second Life
+  (`llSetScriptState(…, TRUE)` does not restart it); reported running but
+  deaf on YEngine; running on, in the state it faulted in, on XEngine.
+- **Unbounded recursion under XEngine aborts the OpenSim process.**

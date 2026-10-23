@@ -1,0 +1,10 @@
+grid: aditi
+date: 2026-10-23
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE events/queue-limit rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE events/queue-limit rec=received sent=100 got=64 lowest=0 highest=63
+PROBE events/queue-limit rec=end
