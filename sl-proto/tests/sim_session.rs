@@ -10333,6 +10333,76 @@ mod test {
         Ok(())
     }
 
+    /// The **OpenSim** shape of a gift's announcement: the same
+    /// `BulkUpdateInventory`, over UDP, reaching the client's model alike.
+    #[test]
+    fn session_bulk_update_inventory_reaches_client_over_udp() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x2_1000));
+        let item = InventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x2_1002)),
+            folder_id: folder,
+            name: "A Gift".to_owned(),
+            item_type: 7,
+            inv_type: 7,
+            ..wearable_item()
+        };
+        let given_folder = InventoryFolder {
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x2_1003)),
+            parent_id: Some(folder),
+            name: "A Given Folder".to_owned(),
+            folder_type: -1,
+            version: 0,
+        };
+        sim.send_bulk_update_inventory(
+            TransactionId::from(uuid::Uuid::nil()),
+            std::slice::from_ref(&given_folder),
+            std::slice::from_ref(&item),
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let (folders, items) = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryBulkUpdate { folders, items, .. } => Some((folders, items)),
+                _ => None,
+            })
+            .ok_or("expected an InventoryBulkUpdate client event")?;
+        assert_eq!(folders, vec![given_folder]);
+        assert_eq!(items, vec![item.clone()]);
+        assert_eq!(
+            client
+                .inventory_item(item.item_id)
+                .map(|held| held.name.clone()),
+            Some("A Gift".to_owned())
+        );
+        Ok(())
+    }
+
+    /// Second Life's word that a restore took a no-copy item away: a
+    /// `RemoveInventoryObjects` over the event queue. It reaches the client,
+    /// which does not read it yet
+    /// (`roadmap/bugs/protocol-remove-inventory-objects-over-event-queue-unread.md`):
+    /// when it does, this test is where that shows.
+    #[test]
+    fn remove_inventory_objects_over_the_event_queue_reaches_the_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        client.set_diagnostics(true);
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x2_2000));
+        sim.enqueue_remove_inventory_objects(&[], &[item]);
+        let _events = deliver_caps(&mut client, &mut sim, now)?;
+        let unread: Vec<String> = std::iter::from_fn(|| client.poll_diagnostic())
+            .filter_map(|diagnostic| match diagnostic {
+                sl_proto::Diagnostic::UnknownCapsEvent { message } => Some(message),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(unread, vec!["RemoveInventoryObjects".to_owned()]);
+        Ok(())
+    }
+
     /// Every edit the build floater makes to an object arrives at the simulator
     /// as a typed event naming the object and the new value — the read side of
     /// `test-fake-grid-edit-surfaces`, and what took the object family off the

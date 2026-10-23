@@ -61,3 +61,11 @@ returns early on a fake grid before its scripted legs (`grid.is_fake()` in
 legs of `object-touch-grab`, and `script-dialog`, `script-permissions`,
 `script-running`, `script-upload` and `money-transfer`, none of which is
 listed yet.
+
+Two censuses that run offline skip their scripted legs on a fake grid and
+exempt the metrics (their `FAKE_EXEMPT` lists): `instant-messages` (a
+script's messages: `script_im_`, `muted_script_im_`, `away_script_`,
+`udp_script`, `cap_script`, `client_script`) and `inventory-offers` (an
+object's gifts, `object_`: `llGiveInventory` and `llGiveInventoryList`, which
+also need the fake grid to file a `TaskInventoryOffered` gift on the accept as
+Second Life does and at the offer as OpenSim does). Lift both exemptions here.

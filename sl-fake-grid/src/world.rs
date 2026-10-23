@@ -3018,7 +3018,12 @@ fn rez_from_inventory(
     }
     if !item.permissions.owner.contains(sl_wire::Permissions::COPY) {
         let _consumed = sim.agent_inventory_mut().take_item(item_id);
-        if let Err(error) = sim.send_remove_inventory_item(&[item_id], now) {
+        if request.at.is_none() {
+            // A restore says so over the event queue, as Second Life does: the
+            // only grid that restores at all (`book/src/gridspec/inventory.md`
+            // § Giving).
+            sim.enqueue_remove_inventory_objects(&[], &[item_id]);
+        } else if let Err(error) = sim.send_remove_inventory_item(&[item_id], now) {
             tracing::warn!("retiring a no-copy item a rez consumed failed: {error}");
         }
     }

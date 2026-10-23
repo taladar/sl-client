@@ -439,6 +439,10 @@ pub(crate) struct GridCore {
     pub(crate) messages: parking_lot::Mutex<crate::messages::Messages>,
     /// How instant messages are passed on ([`ImitatedGrid::im_policy`]).
     pub(crate) im_policy: crate::messages::ImPolicy,
+    /// The gifts held for avatars that were away ([`crate::gifts`]).
+    pub(crate) gifts: parking_lot::Mutex<crate::gifts::Gifts>,
+    /// How gifts are handed over ([`ImitatedGrid::gift_policy`]).
+    pub(crate) gift_policy: crate::gifts::GiftPolicy,
     /// The groups and what is pending in them ([`crate::groups`]).
     pub(crate) groups: parking_lot::Mutex<crate::groups::GroupStore>,
     /// Each account's home, once it has set one
@@ -802,6 +806,9 @@ impl GridCore {
                     .agent_inventory_mut()
                     .set_current_outfit_version(version);
             }
+            // What was given while the avatar was away, filed when it was
+            // given as far as the giver could tell.
+            crate::gifts::file_held(self, account.agent_id, &mut state.sim);
             enrich_success(
                 &mut success,
                 account,
@@ -2296,6 +2303,8 @@ impl FakeGridBuilder {
             friends_policy: self.imitates.friends_policy(),
             messages: parking_lot::Mutex::new(crate::messages::Messages::default()),
             im_policy: self.imitates.im_policy(),
+            gifts: parking_lot::Mutex::new(crate::gifts::Gifts::default()),
+            gift_policy: self.imitates.gift_policy(),
             groups: parking_lot::Mutex::new(groups),
             homes: crate::agent_requests::Homes::default(),
             outfit_versions: crate::bakes::OutfitVersions::default(),

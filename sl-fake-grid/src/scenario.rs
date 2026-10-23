@@ -314,8 +314,13 @@ fn is_stock_folder(folder: InventoryFolderKey) -> bool {
 /// stock folder ([`class_folder`]) follows it. Without it two avatars logged
 /// in together have one Calling Cards folder between them, and nothing that
 /// names a folder can say whose it is.
+///
+/// The agent's id is turned half way round before it is mixed in: the stock
+/// ids and a fake grid's agent ids are both small numbers, and mixed in as
+/// they are one agent's root could come out as another agent's Clothing.
+/// Turned, the agent's half and the folder's half do not overlap.
 pub(crate) fn own_stock_folders(sim: &mut SimSession, agent: sl_types::key::AgentKey) {
-    let salt = agent.uuid().as_u128();
+    let salt = agent.uuid().as_u128().rotate_left(64);
     sim.agent_inventory_mut().rename_folders(|folder| {
         if is_stock_folder(folder) {
             InventoryFolderKey::from(uuid::Uuid::from_u128(folder.uuid().as_u128() ^ salt))
@@ -826,6 +831,29 @@ mod test {
 
     /// What a test here returns when a fixture it needs could not be written.
     type TestError = Box<dyn core::error::Error>;
+
+    /// Two agents with neighbouring ids, as a fake grid's are, share no stock
+    /// folder id: one's root is never the other's Clothing.
+    #[test]
+    fn two_agents_stock_folders_share_no_id() {
+        let folders_of = |agent: u128| {
+            let mut sim =
+                SimSession::new(sl_wire::RegionHandle::from_grid(1000, 1000), Instant::now());
+            default_setup(&mut sim, Instant::now());
+            own_stock_folders(&mut sim, AgentKey::from(uuid::Uuid::from_u128(agent)));
+            sim.agent_inventory()
+                .folders()
+                .map(|folder| folder.folder_id)
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        for (one, other) in [(1, 2), (0x1, 0x5), (0xa1, 0xa4)] {
+            let shared: Vec<_> = folders_of(one)
+                .intersection(&folders_of(other))
+                .copied()
+                .collect();
+            assert_eq!(shared, Vec::new(), "agents {one:#x} and {other:#x}");
+        }
+    }
 
     #[test]
     fn the_stock_assets_hold_every_default_detail_texture() {

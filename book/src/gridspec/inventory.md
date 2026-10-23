@@ -161,9 +161,9 @@ nothing.
 
 The census holds both live grids and both fake flavours to these answers as
 `Measured` constants (`sl-conformance/src/cases/inventory_mutations.rs`); the
-fake grid's column says what each flavour does. Its one gap is the gives: it
-relays no inventory offer between two of its accounts
-(`server-fake-grid-inventory-offers`).
+fake grid's column says what each flavour does. The gives below are the fake
+grid's too: each flavour hands an offer over as [Giving](#giving) records, and
+takes a no-copy original out of its giver's inventory as OpenSim does.
 
 ### Items over UDP
 
@@ -269,8 +269,14 @@ item fetch (by the id the offer names) and through the folder fetch of every
 system folder (by its name), when the offer arrives and after the answer, and
 what each avatar was sent is recorded for a window after each step. The
 census holds both grids to these answers as `Measured` constants
-(`sl-conformance/src/cases/inventory_offers.rs`). The fake grid relays no
-inventory offer yet (`server-fake-grid-inventory-offers`).
+(`sl-conformance/src/cases/inventory_offers.rs`), and holds both fake
+flavours to them as well, but for an object's gift: the fake grid runs no
+scripts. Each fake flavour files a gift at the offer as its grid does, offers it
+under the id its grid names, answers an accept and a decline as its grid does,
+and holds a gift to an avatar that is away for its next login (the fake grid
+keeps no inventory between sessions); a gift of an object it took carries the
+object along, with the next owner's masks, so the recipient can rez it, and the
+Second Life flavour takes a restored no-copy item away over the event queue.
 
 ### An agent's gift
 

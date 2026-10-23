@@ -7235,6 +7235,34 @@ pub fn bulk_update_inventory_to_llsd(
     ]))
 }
 
+/// The body of an event-queue `RemoveInventoryObjects`: the UDP message's
+/// blocks as LLSD arrays of maps, as Second Life sends a template message over
+/// the event queue.
+pub(crate) fn remove_inventory_objects_to_llsd(
+    agent_id: Uuid,
+    session_id: Uuid,
+    folders: &[InventoryFolderKey],
+    items: &[InventoryKey],
+) -> Llsd {
+    let agent = llsd_map(vec![
+        ("AgentID", Llsd::Uuid(agent_id)),
+        ("SessionID", Llsd::Uuid(session_id)),
+    ]);
+    let folder_data = folders
+        .iter()
+        .map(|folder| llsd_map(vec![("FolderID", Llsd::Uuid(folder.uuid()))]))
+        .collect();
+    let item_data = items
+        .iter()
+        .map(|item| llsd_map(vec![("ItemID", Llsd::Uuid(item.uuid()))]))
+        .collect();
+    llsd_map(vec![
+        ("AgentData", Llsd::Array(vec![agent])),
+        ("FolderData", Llsd::Array(folder_data)),
+        ("ItemData", Llsd::Array(item_data)),
+    ])
+}
+
 /// Serializes an [`InventoryItem`] as a flat `BulkUpdateInventory` `ItemData`
 /// entry (inverse of [`bulk_update_item_from_llsd`]). `last_owner_id` has no
 /// place in this wire form (the parser leaves it nil), so it is not emitted.

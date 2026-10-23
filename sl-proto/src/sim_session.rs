@@ -89,6 +89,10 @@ use sl_wire::messages::{
     ImprovedTerseObjectUpdateObjectDataBlock, ImprovedTerseObjectUpdateRegionDataBlock,
 };
 use sl_wire::messages::{
+    BulkUpdateInventory, BulkUpdateInventoryAgentDataBlock, BulkUpdateInventoryFolderDataBlock,
+    BulkUpdateInventoryItemDataBlock,
+};
+use sl_wire::messages::{
     ClearFollowCamProperties, ClearFollowCamPropertiesObjectDataBlock, ScriptControlChange,
     ScriptControlChangeDataBlock, SetFollowCamProperties,
     SetFollowCamPropertiesCameraPropertyBlock, SetFollowCamPropertiesObjectDataBlock,
@@ -9840,6 +9844,99 @@ impl SimSession {
         let body = crate::bulk_update_inventory_to_llsd(transaction.get(), folders, items)?;
         self.enqueue_caps_event("BulkUpdateInventory", body);
         Ok(())
+    }
+
+    /// Sends a `BulkUpdateInventory` over UDP: the folders and items the
+    /// simulator just filed for the agent — what OpenSim announces an agent's
+    /// gift with before its offer. The event-queue form is
+    /// [`enqueue_bulk_update_inventory`](Self::enqueue_bulk_update_inventory);
+    /// the client reads both. Nothing here writes the serving tree. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if an item's L$ sale price exceeds the signed 32-bit range.
+    pub fn send_bulk_update_inventory(
+        &mut self,
+        transaction: TransactionId,
+        folders: &[InventoryFolder],
+        items: &[InventoryItem],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let folder_data = folders
+            .iter()
+            .map(|folder| BulkUpdateInventoryFolderDataBlock {
+                folder_id: folder.folder_id.uuid(),
+                parent_id: folder
+                    .parent_id
+                    .map_or_else(Uuid::nil, |parent| parent.uuid()),
+                r#type: folder.folder_type,
+                name: with_nul(&folder.name),
+            })
+            .collect();
+        let mut item_data = Vec::with_capacity(items.len());
+        for item in items {
+            let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+            item_data.push(BulkUpdateInventoryItemDataBlock {
+                item_id: item.item_id.uuid(),
+                callback_id: 0,
+                folder_id: item.folder_id.uuid(),
+                creator_id: item.creator_id.uuid(),
+                owner_id,
+                group_id,
+                base_mask: item.permissions.base.bits(),
+                owner_mask: item.permissions.owner.bits(),
+                group_mask: item.permissions.group.bits(),
+                everyone_mask: item.permissions.everyone.bits(),
+                next_owner_mask: item.permissions.next_owner.bits(),
+                group_owned: item.owner.is_group(),
+                asset_id: item.asset_id,
+                r#type: item.item_type,
+                inv_type: item.inv_type,
+                flags: item.flags,
+                sale_type: item.sale_type,
+                sale_price: crate::types::linden_price_to_wire(
+                    "SalePrice",
+                    item.sale_price.as_ref(),
+                )?,
+                name: with_nul(&item.name),
+                description: with_nul(&item.description),
+                creation_date: item.creation_date,
+                crc: 0,
+            });
+        }
+        let message = AnyMessage::BulkUpdateInventory(BulkUpdateInventory {
+            agent_data: BulkUpdateInventoryAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                transaction_id: transaction.get(),
+            },
+            folder_data,
+            item_data,
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Enqueues a CAPS `RemoveInventoryObjects`: the event-queue form of
+    /// [`send_remove_inventory_objects`](Self::send_remove_inventory_objects),
+    /// which is how Second Life tells a client that restoring a no-copy object
+    /// to the world took its item away. Nothing here writes the serving tree.
+    pub fn enqueue_remove_inventory_objects(
+        &mut self,
+        folders: &[InventoryFolderKey],
+        items: &[InventoryKey],
+    ) {
+        let body = crate::session::conversions::remove_inventory_objects_to_llsd(
+            self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+            self.session_id.unwrap_or_else(Uuid::nil),
+            folders,
+            items,
+        );
+        self.enqueue_caps_event("RemoveInventoryObjects", body);
     }
 
     /// Sends a `RemoveInventoryItem` — tells the client the simulator deleted one

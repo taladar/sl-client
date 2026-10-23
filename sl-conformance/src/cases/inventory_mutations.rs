@@ -805,36 +805,6 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ("update_renamed", both(Answer::Flag(true))),
 ];
 
-/// The metrics a fake flavour is not held to yet, by prefix, each with why:
-/// the gives, which need an offer relayed between two of the grid's own
-/// accounts.
-const FAKE_EXEMPT: &[(&str, &str)] = &[
-    (
-        "control_",
-        "the fake grid relays no inventory offer (server-fake-grid-inventory-offers)",
-    ),
-    (
-        "nocopy_",
-        "the fake grid relays no inventory offer (server-fake-grid-inventory-offers)",
-    ),
-    (
-        "reverse_",
-        "the fake grid relays no inventory offer (server-fake-grid-inventory-offers)",
-    ),
-];
-
-/// Why `grid` is not held to the metric `key`, if it is a fake flavour and
-/// [`FAKE_EXEMPT`] names the metric.
-fn fake_exemption(grid: Grid, key: &str) -> Option<&'static str> {
-    if !grid.is_fake() {
-        return None;
-    }
-    FAKE_EXEMPT
-        .iter()
-        .find(|(prefix, _why)| key.starts_with(prefix))
-        .map(|(_prefix, why)| *why)
-}
-
 /// The census of inventory mutations.
 #[derive(Debug)]
 pub struct InventoryMutations;
@@ -868,12 +838,7 @@ impl GridTest for InventoryMutations {
                 )),
             };
             ctx.metrics().merge(metrics.clone());
-            let held: Vec<(&str, Measured<Answer>)> = MEASURED
-                .iter()
-                .filter(|(key, _measured)| fake_exemption(grid, key).is_none())
-                .copied()
-                .collect();
-            outcome.and_then(|()| hold_to_measured(grid, &metrics, &held, SOURCE))
+            outcome.and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
         })
     }
 }

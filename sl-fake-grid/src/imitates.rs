@@ -107,6 +107,7 @@
 //! | the flags beside a home or a landmark teleport's kind ([`TeleportPolicy::kind_flags`]) | none — and within a region no `WITHIN_REGION`, and the kind line all the same | `SET_LAST_TO_TARGET` |
 //! | how an instant message is passed on ([`im_policy`](ImitatedGrid::im_policy)) | stated by the grid but for the viewer's time; a script's dialog from a viewer dropped; fourteen a second; what the grid says signed "Second Life"; an automatic reply to an avatar that is away kept | as the viewer wrote it, the time now; a script's dialog passed on; no limit; signed "System"; an automatic reply to an avatar that is away refused |
 //! | a teleport offer's lure ([`ImPolicy::lures`](crate::ImPolicy::lures)) | an id the grid holds until its first use or a decline, its bucket naming the place and its rating | the place packed into the id, good for ever |
+//! | an agent's gift ([`gift_policy`](ImitatedGrid::gift_policy)) | filed at the offer; offered under the giver's transaction; a folder's copy announced over the event queue; an answer does nothing; nothing said or kept for an avatar that is away | filed at the offer; offered under the copy's id after a UDP announcement; an answer passed on, a declined copy moved to the Trash; the giver alerted and the offer kept for an avatar that is away |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
 //! | the kill a derez sends ([`RezPolicy::derez_kill`]) | one `KillObject` naming every prim of the linkset | two, each naming the root alone |
@@ -116,7 +117,7 @@
 //! | the transaction a filed item's announcement states ([`RezPolicy::announcement_states_a_transaction`]) | one of the grid's own | nil |
 //! | the instant message a return of the agent's own object is followed by ([`RezPolicy::return_notice`]) | from `Second Life`, under the agent's own id, naming the parcel | from `Server`, under no id, naming the spot and "parcel owner return" |
 //! | a rez on land that does not let the agent build ([`RezPolicy::no_build_add`], [`RezPolicy::no_build_rez_told`]) | an alert for an `ObjectAdd` and another for a rez out of the inventory | an alert for an `ObjectAdd`; a rez out of the inventory fails without a word |
-//! | a `RezRestoreToWorld` ([`RezPolicy::restore_to_world`]) | the object back where it stood, the item kept | nothing |
+//! | a `RezRestoreToWorld` ([`RezPolicy::restore_to_world`]) | the object back where it stood; the item kept, a no-copy one taken away with an event-queue `RemoveInventoryObjects` | nothing |
 //! | a click action and the search flag ([`EditPolicy::quiet_edits_resend`]) | answered with a full update | stored, and nobody told |
 //! | a move, a turn and a resize in one message ([`EditPolicy::takes_whole_transform`]) | taken | dropped |
 //! | a prim's smallest and largest side ([`EditPolicy::smallest_prim_m`], [`EditPolicy::largest_prim_m`]) | 0.01 m and 64 m | 0.001 m and 256 m |
@@ -1465,6 +1466,36 @@ impl ImitatedGrid {
                 kept_text: OPENSIM_KEPT_TEXT,
                 away_auto_response: AwayAutoResponse::Refused,
                 lures: Lures::Places,
+            },
+        }
+    }
+
+    /// How this grid hands over what one avatar gives another — measured by
+    /// the `inventory-offers` conformance case on aditi and the local OpenSim
+    /// (2026-10-22, `book/src/gridspec/inventory.md` § Giving), and tabulated
+    /// in [`crate::gifts`].
+    ///
+    /// Both file the copy when the offer is made. Second Life offers it under
+    /// the giver's transaction, announces only a folder's copy, and does
+    /// nothing with an answer or for an avatar that is away. OpenSim offers it
+    /// under the copy's id after announcing it, passes an answer on and moves
+    /// a declined copy to the Trash, and alerts the giver of a gift to an
+    /// avatar that is away and keeps the offer.
+    #[must_use]
+    pub const fn gift_policy(self) -> crate::gifts::GiftPolicy {
+        use crate::gifts::{AwayGift, GiftAnnouncement, GiftAnswers, GiftPolicy, OfferId};
+        match self {
+            Self::SecondLife => GiftPolicy {
+                offer_id: OfferId::Transaction,
+                announcement: GiftAnnouncement::FoldersOverEventQueue,
+                answers: GiftAnswers::Ignored,
+                away: AwayGift::Silent,
+            },
+            Self::OpenSim => GiftPolicy {
+                offer_id: OfferId::Copy,
+                announcement: GiftAnnouncement::EveryCopyOverUdp,
+                answers: GiftAnswers::Relayed,
+                away: AwayGift::AlertedAndKept,
             },
         }
     }
@@ -3289,7 +3320,9 @@ pub enum ObjectDelete {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RestoreToWorld {
     /// The item is rezzed where the object it was made from stood, and
-    /// stays: Second Life.
+    /// stays — unless its owner may not copy it, when it is taken away and
+    /// the client told over the event queue (`RemoveInventoryObjects`):
+    /// Second Life.
     Rezzes,
     /// Nothing: OpenSim reads the message and nobody listens for it.
     Ignored,

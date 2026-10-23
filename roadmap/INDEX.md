@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 337 |
+| ready | 336 |
 | blocked | 78 |
 | in-progress | 19 |
-| bugs | 37 |
-| done | 1414 |
+| bugs | 38 |
+| done | 1415 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2072** |
+| **total** | **2073** |
 
 ## ideas (134)
 
@@ -351,7 +351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (337)
+## ready (336)
 
 ### protocol
 
@@ -1095,9 +1095,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-group-chat`](ready/server-fake-grid-group-chat.md) — Fake
   grid — group chat sessions and conferences (blocked by
   `gridspec-group-chat-and-conference` (done))
-- [`server-fake-grid-inventory-offers`](ready/server-fake-grid-inventory-offers.md)
-  — Fake grid — inventory offers, filing and object gives (blocked by
-  `gridspec-inventory-offers` (done), `server-fake-grid-im-relay` (done))
 - [`server-fake-grid-inventory-persists-across-logins`](ready/server-fake-grid-inventory-persists-across-logins.md)
   — Fake grid — keep an account's inventory, versions included, from one login
   to the next (blocked by `gridspec-inventory-fetch` (done))
@@ -1469,7 +1466,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (37)
+## bugs (38)
 
 ### protocol
 
@@ -1477,6 +1474,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reading the agent preferences gets no answer on Second Life
 - [`protocol-im-states-no-position`](bugs/protocol-im-states-no-position.md) —
   Every instant message the session sends states position zero
+- [`protocol-remove-inventory-objects-over-event-queue-unread`](bugs/protocol-remove-inventory-objects-over-event-queue-unread.md)
+  — The client does not read RemoveInventoryObjects over the event queue
 - [`protocol-teleport-start-after-failure-rearms`](bugs/protocol-teleport-start-after-failure-rearms.md)
   — A TeleportStart that arrives after its own failure starts a teleport that
   never ends
@@ -1563,7 +1562,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1414)
+## done (1415)
 
 ### protocol
 
@@ -4548,6 +4547,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-im-relay`](done/server-fake-grid-im-relay.md) — Fake grid —
   relay IMs and offers between its sessions (blocked by
   `gridspec-teleport-lures` (done), `gridspec-instant-messages` (done))
+- [`server-fake-grid-inventory-offers`](done/server-fake-grid-inventory-offers.md)
+  — Fake grid — inventory offers, filing and object gives (blocked by
+  `gridspec-inventory-offers` (done), `server-fake-grid-im-relay` (done))
 - [`server-fake-grid-inventory-udp-mutations`](done/server-fake-grid-inventory-udp-mutations.md)
   — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
   `gridspec-inventory-mutations` (done))

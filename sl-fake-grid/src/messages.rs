@@ -34,6 +34,9 @@
 //! avatar's session when it comes back, and handed over by
 //! `RetrieveInstantMessages` and Second Life's `ReadOfflineMsgs`.
 //!
+//! An inventory offer and its answers ride the same road and are handed to
+//! [`crate::gifts`].
+//!
 //! Not modelled: a script's message (the fake grid runs no scripts), how long
 //! Second Life's suspension after a burst lasts (it is not measured; the fake
 //! grid's lasts [`SECOND_LIFE_SUSPENSION`]), messages forwarded as mail, and
@@ -285,7 +288,7 @@ const fn nowhere() -> RegionCoordinates {
 
 impl ImPolicy {
     /// `im` of `from`'s as this grid passes it on to the avatar it names.
-    fn passed_on(&self, from: &Whereabouts, im: &InstantMessage) -> InstantMessage {
+    pub(crate) fn passed_on(&self, from: &Whereabouts, im: &InstantMessage) -> InstantMessage {
         let to = im.to_agent_id;
         let passed = InstantMessage {
             from_agent_id: from.agent,
@@ -450,6 +453,15 @@ async fn answer(core: &Arc<GridCore>, shared: &SharedSim, event: ServerEvent) {
                     }
                 }
                 ImDialog::TeleportRequest => request(core, shared, &im).await,
+                ImDialog::InventoryOffered => crate::gifts::offered(core, shared, &im).await,
+                ImDialog::InventoryAccepted | ImDialog::InventoryDeclined
+                    if core.gift_policy.answers == crate::gifts::GiftAnswers::Relayed =>
+                {
+                    pass_on(core, shared, &im).await;
+                    if im.dialog == ImDialog::InventoryDeclined {
+                        crate::gifts::discard(shared, &im).await;
+                    }
+                }
                 ImDialog::LureDeclined => {
                     // A decline goes nowhere; on a grid that holds its lures
                     // it spends the one it names.

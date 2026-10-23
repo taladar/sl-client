@@ -229,6 +229,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "teleport-lure-rated",
     "inventory-fetch",
     "inventory-mutations",
+    "inventory-offers",
     "avatar-render-info",
     "landmarks-home",
 ];

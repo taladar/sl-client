@@ -17,6 +17,7 @@ pub mod error;
 pub mod estate;
 pub mod experiences;
 pub mod fixtures;
+pub mod gifts;
 pub mod god_powers;
 mod grabs;
 pub mod groups;
@@ -63,6 +64,7 @@ pub use fixtures::{
     CatalogueEntry, FaceStyle, Landmark, NamedScenario, NpcAppearance, NpcBake, NpcFixture,
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
+pub use gifts::{AwayGift, GiftAnnouncement, GiftAnswers, GiftPolicy, OfferId};
 pub use groups::{GroupConfig, GroupsPolicy, InvitationForm, StockRoles};
 pub use imitates::{
     AbsentTile, ChildSale, ContentsAudience, ContentsPolicy, CopiedSerial, DerezKill, DotName,

@@ -44,9 +44,11 @@
 //! a decline the Trash. The default reference sends nothing for an agent's
 //! offer, which the unanswered leg measures. What each live grid answered is
 //! stated as a [`Measured`] and written up in `book/src/gridspec/inventory.md`
-//! § Giving; every run is held to it.
+//! § Giving; every run is held to it. The fake grid's two flavours are held to
+//! it too but for the object gives, which they skip: the fake grid runs no
+//! scripts (`FAKE_EXEMPT`).
 //!
-//! `2av`, live grids.
+//! `2av`, live and fake grids.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -84,6 +86,9 @@ const SOURCE: &str = "book/src/gridspec/inventory.md § Giving (inventory-offers
 /// How long both avatars are listened to after a step.
 const WINDOW: Duration = Duration::from_secs(6);
 
+/// [`WINDOW`] on a fake grid, which answers at once.
+const FAKE_WINDOW: Duration = Duration::from_secs(2);
+
 /// How long an offer may take to reach the recipient.
 const OFFER_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -93,6 +98,9 @@ const STEP: Duration = Duration::from_secs(30);
 /// How long what was kept for an offline avatar is listened for after it
 /// comes back, before it is asked for.
 const UNASKED_WINDOW: Duration = Duration::from_secs(10);
+
+/// [`UNASKED_WINDOW`] on a fake grid.
+const FAKE_UNASKED_WINDOW: Duration = Duration::from_secs(3);
 
 /// How far apart the census's cubes stand, in metres.
 const SPACING_M: f32 = 1.5;
@@ -838,6 +846,21 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     ("reverse_told_b", both(Answer::Text("nothing"))),
 ];
 
+/// The metrics a fake flavour is not held to, by prefix, each with why.
+const FAKE_EXEMPT: &[(&str, &str)] = &[("object_", "the fake grid runs no scripts")];
+
+/// Why `grid` is not held to the metric `key`, if it is a fake flavour and
+/// [`FAKE_EXEMPT`] names the metric.
+fn fake_exemption(grid: Grid, key: &str) -> Option<&'static str> {
+    if !grid.is_fake() {
+        return None;
+    }
+    FAKE_EXEMPT
+        .iter()
+        .find(|(prefix, _why)| key.starts_with(prefix))
+        .map(|(_prefix, why)| *why)
+}
+
 /// The probe: gives what its owner names on [`PROBE_CHANNEL`] — `give|<key>`
 /// the notecard it holds, `list|<key>|<folder>` the notecard in a folder —
 /// and says each request back.
@@ -885,7 +908,7 @@ impl GridTest for InventoryOffers {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {
@@ -914,7 +937,12 @@ impl GridTest for InventoryOffers {
             let mut metrics = Metrics::new();
             let outcome = census(ctx, &mut metrics).await;
             ctx.metrics().merge(metrics.clone());
-            outcome.and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
+            let held: Vec<(&str, Measured<Answer>)> = MEASURED
+                .iter()
+                .filter(|(key, _measured)| fake_exemption(grid, key).is_none())
+                .copied()
+                .collect();
+            outcome.and_then(|()| hold_to_measured(grid, &metrics, &held, SOURCE))
         })
     }
 }
@@ -1295,6 +1323,11 @@ struct Offers<'s> {
     grid: Grid,
     /// Where the fixtures say to build.
     build_point: Option<Vector>,
+    /// How long both avatars are listened to after a step.
+    window: Duration,
+    /// How long what was kept for an offline avatar is listened for before
+    /// it is asked for.
+    unasked: Duration,
 }
 
 impl Offers<'_> {
@@ -1382,9 +1415,10 @@ impl Offers<'_> {
     /// Lets both avatars hear out what the grid still had to say.
     async fn settle(&mut self) -> Result<(), TestFailure> {
         let scene = self.scene.clone();
+        let window = self.window;
         let (got_a, got_b) = tokio::join!(
-            watch(&scene, self.a, WINDOW, |_got| false),
-            watch(&scene, self.b, WINDOW, |_got| false)
+            watch(&scene, self.a, window, |_got| false),
+            watch(&scene, self.b, window, |_got| false)
         );
         let (_got_a, _got_b) = (got_a?, got_b?);
         let (_unread, seen_a) = unread_since(self.a, self.seen.0);
@@ -1655,7 +1689,7 @@ impl Offers<'_> {
             })
             .await?;
         // What follows the offer belongs to the give too.
-        let (late_a, late_b) = self.hear(WINDOW, who, |_got| false).await?;
+        let (late_a, late_b) = self.hear(self.window, who, |_got| false).await?;
         got_a.merge(late_a);
         got_b.merge(late_b);
         let offer = Self::offer_in(if who == Who::A { &got_a } else { &got_b }, name);
@@ -1782,7 +1816,7 @@ impl Offers<'_> {
             }
             None => metrics.set(&format!("{key}_readable"), false),
         }
-        let (got_a, got_b) = self.hear(WINDOW, receiver, |_got| false).await?;
+        let (got_a, got_b) = self.hear(self.window, receiver, |_got| false).await?;
         self.name_copies(receiver, name).await?;
         metrics.set(
             &format!("{key}_reply_told_a"),
@@ -2073,7 +2107,7 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
         name_folders(&mut scene, session, who)?;
     }
     metrics.set("system_folders_doubled", scene.doubled.join("; "));
-    if !is_opensim(grid) {
+    if !is_opensim(grid) && !grid.is_fake() {
         let (region, point) = somewhere.ok_or_else(|| {
             TestFailure::State("inventory-offers needs a build_location in the fixtures".to_owned())
         })?;
@@ -2131,6 +2165,12 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
         standing: Vec::new(),
         grid,
         build_point,
+        window: if grid.is_fake() { FAKE_WINDOW } else { WINDOW },
+        unasked: if grid.is_fake() {
+            FAKE_UNASKED_WINDOW
+        } else {
+            UNASKED_WINDOW
+        },
     };
     offers.settle().await?;
     let outcome = legs(&mut offers, metrics).await;
@@ -2142,7 +2182,9 @@ async fn census(ctx: &mut TestContext, metrics: &mut Metrics) -> Result<(), Test
 async fn legs(offers: &mut Offers<'_>, metrics: &mut Metrics) -> Result<(), TestFailure> {
     agent_gives(offers, metrics).await?;
     offline(offers, metrics).await?;
-    object_gives(offers, metrics).await?;
+    if !offers.grid.is_fake() {
+        object_gives(offers, metrics).await?;
+    }
     no_copy_object(offers, metrics).await
 }
 
@@ -2239,7 +2281,7 @@ async fn offline(offers: &mut Offers<'_>, metrics: &mut Metrics) -> Result<(), T
         })
         .await?;
     let scene = offers.scene.clone();
-    let mut got_a = watch(&scene, offers.a, WINDOW, |_got| false).await?;
+    let mut got_a = watch(&scene, offers.a, offers.window, |_got| false).await?;
     let (unread_a, seen_a) = unread_since(offers.a, offers.seen.0);
     offers.seen.0 = seen_a;
     got_a.unread = unread_a;
@@ -2272,7 +2314,7 @@ async fn offline(offers: &mut Offers<'_>, metrics: &mut Metrics) -> Result<(), T
     let wanted = name.clone();
     if Offers::offer_in(&unasked, &name).is_none() {
         unasked.merge(
-            watch(&scene, offers.b, UNASKED_WINDOW, move |got| {
+            watch(&scene, offers.b, offers.unasked, move |got| {
                 Offers::offer_in(got, &wanted).is_some()
             })
             .await?,
@@ -2504,7 +2546,7 @@ async fn object_give(
             Offers::offer_in(got, &wanted).is_some()
         })
         .await?;
-    let (late_a, late_b) = offers.hear(WINDOW, receiver, |_got| false).await?;
+    let (late_a, late_b) = offers.hear(offers.window, receiver, |_got| false).await?;
     got_a.merge(late_a);
     got_b.merge(late_b);
     offers.name_copies(receiver, looked_for).await?;
@@ -2673,9 +2715,9 @@ async fn no_copy_object(offers: &mut Offers<'_>, metrics: &mut Metrics) -> Resul
             item: rez_params(&back, &spot).item,
         })
         .await?;
-    let restored = wait_for_own_new_object(offers.a, &offers.objects_seen.0, WINDOW).await?;
+    let restored = wait_for_own_new_object(offers.a, &offers.objects_seen.0, offers.window).await?;
     let scene = offers.scene.clone();
-    let mut got = watch(&scene, offers.a, WINDOW, |_got| false).await?;
+    let mut got = watch(&scene, offers.a, offers.window, |_got| false).await?;
     let (unread_a, seen_a) = unread_since(offers.a, offers.seen.0);
     offers.seen.0 = seen_a;
     got.unread = unread_a;
