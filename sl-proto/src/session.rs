@@ -1302,9 +1302,26 @@ enum TransferPurpose {
         /// The task-inventory item whose asset was requested.
         item: InventoryKey,
     },
+    /// An item of the agent's own inventory (a notecard body, the road the
+    /// reference reads one by): surface as
+    /// [`Event::InventoryItemAssetReceived`](crate::Event::InventoryItemAssetReceived).
+    InventoryItem {
+        /// The inventory item whose asset was requested.
+        item: InventoryKey,
+    },
     /// The estate covenant notecard: surface as
     /// [`Event::EstateCovenantAssetReceived`](crate::Event::EstateCovenantAssetReceived).
     EstateCovenant,
+}
+
+impl TransferPurpose {
+    /// The inventory item a transfer for this purpose reads, if any.
+    const fn item(&self) -> Option<InventoryKey> {
+        match self {
+            Self::TaskInventoryItem { item, .. } | Self::InventoryItem { item } => Some(*item),
+            Self::EstateCovenant => None,
+        }
+    }
 }
 
 /// An in-flight legacy UDP asset Transfer download: the buffered packets and

@@ -256,6 +256,8 @@ fn on_events(
             | SlSessionEvent::XferAborted { .. }
             | SlSessionEvent::XferDecodeFailed { .. }
             | SlSessionEvent::TaskItemAssetReceived { .. }
+            | SlSessionEvent::InventoryItemAssetReceived { .. }
+            | SlSessionEvent::ActiveGestures(_)
             | SlSessionEvent::EstateCovenantAssetReceived { .. }
             | SlSessionEvent::TransferFailed { .. }
             | SlSessionEvent::UserInfo(..)

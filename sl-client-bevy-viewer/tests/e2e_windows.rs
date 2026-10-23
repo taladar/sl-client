@@ -477,6 +477,39 @@ mod test {
         Ok(())
     }
 
+    /// **A notecard reads on each grid** (`gridspec-notecards-gestures`): the
+    /// viewer reads a notecard through its item over the UDP transfer, the
+    /// reference's road — Second Life refuses every notecard over
+    /// `ViewerAsset`, and the Second Life flavour does too — so its body
+    /// arrives on both.
+    #[test]
+    fn a_notecard_reads_on_each_grid() -> Result<(), TestError> {
+        for (name, flavour) in [
+            ("notecard_reads_second_life", ImitatedGrid::SecondLife),
+            ("notecard_reads_opensim", ImitatedGrid::OpenSim),
+        ] {
+            stage(name)
+                .region(home())
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| {
+                    let alpha = &stage.viewer("Alpha")?;
+                    let (id, item) = NOTECARD;
+                    inventory_item_menu(alpha, "Notecards", item, "menu-inv-open").await?;
+                    let window = alpha
+                        .ui()
+                        .window(&format!("notecard-editor#{}", Uuid::from_u128(id)));
+                    let _read = alpha
+                        .expect(&window.test_id("notecard-body:field"))
+                        .timeout(WAIT)
+                        .to_contain_text("The fake grid's seeded notecard.")
+                        .await?;
+                    close_window(alpha, &window).await?;
+                    Ok(())
+                })?;
+        }
+        Ok(())
+    }
+
     // ---- The Build window's material gate ---------------------------------
 
     /// The Build window's floater id.

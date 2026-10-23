@@ -2427,6 +2427,23 @@ impl Session {
                     }
                     self.events.push_back(Event::InventorySkeleton(folders));
                 }
+                if !success.gestures.is_empty() {
+                    // The gestures the account left active: the one place
+                    // either grid states them to a viewer that did not toggle
+                    // them this session (Second Life keeps no item flag for
+                    // it), and the list the reference starts its gesture
+                    // manager from (`llstartup.cpp`).
+                    self.events.push_back(Event::ActiveGestures(
+                        success
+                            .gestures
+                            .iter()
+                            .map(|gesture| GestureActivation {
+                                item_id: gesture.item_id,
+                                asset_id: gesture.asset_id,
+                            })
+                            .collect(),
+                    ));
+                }
                 if !success.buddy_list.is_empty() {
                     let friends: Vec<Friend> = success.buddy_list.iter().map(friend).collect();
                     // Seed the buddy-list cache from the same `friend()`-mapped
@@ -5034,9 +5051,10 @@ impl Session {
                             download.last_progress = now;
                         }
                     } else {
-                        let _download = self.transfers.transfer_downloads.remove(&transfer_id);
+                        let download = self.transfers.transfer_downloads.remove(&transfer_id);
                         self.events.push_back(Event::TransferFailed {
                             transfer_id,
+                            item: download.and_then(|download| download.purpose.item()),
                             status,
                         });
                     }
@@ -5080,6 +5098,14 @@ impl Session {
                                         data,
                                     });
                                 }
+                                TransferPurpose::InventoryItem { item } => {
+                                    self.events.push_back(Event::InventoryItemAssetReceived {
+                                        transfer_id,
+                                        item,
+                                        asset_type: download.asset_type,
+                                        data,
+                                    });
+                                }
                                 TransferPurpose::EstateCovenant => {
                                     self.events.push_back(Event::EstateCovenantAssetReceived {
                                         transfer_id,
@@ -5094,13 +5120,14 @@ impl Session {
                         // fetch rather than hand a caller a corrupt one — and
                         // tell the simulator to stop serving it, as the
                         // reference does when it gives up on a transfer.
-                        let _download = self.transfers.transfer_downloads.remove(&transfer_id);
+                        let download = self.transfers.transfer_downloads.remove(&transfer_id);
                         tracing::warn!(%transfer_id, "abandoning a UDP asset transfer: {reason}");
                         if let Some(circuit) = self.circuit.as_mut() {
                             let _ignored = circuit.send_transfer_abort(transfer_id, now);
                         }
                         self.events.push_back(Event::TransferFailed {
                             transfer_id,
+                            item: download.and_then(|download| download.purpose.item()),
                             status: TransferStatus::Error,
                         });
                     }
@@ -6585,7 +6612,7 @@ impl Session {
             .map(|(transfer_id, _)| *transfer_id)
             .collect();
         for transfer_id in expired {
-            let _download = self.transfers.transfer_downloads.remove(&transfer_id);
+            let download = self.transfers.transfer_downloads.remove(&transfer_id);
             // Best-effort, like every other send on the timer loop.
             if let Some(circuit) = self.circuit.as_mut() {
                 let _ignored = circuit.send_transfer_abort(transfer_id, now);
@@ -6597,6 +6624,7 @@ impl Session {
             });
             self.events.push_back(Event::TransferFailed {
                 transfer_id,
+                item: download.and_then(|download| download.purpose.item()),
                 status: TransferStatus::Abort,
             });
         }
@@ -9895,6 +9923,51 @@ impl Session {
                 task,
                 item: item_id,
             },
+            asset_type,
+            sl_wire::TRANSFER_SOURCE_SIM_INV_ITEM,
+            params,
+            now,
+        )
+    }
+
+    /// Fetches an item of the agent's own inventory's asset over the legacy
+    /// UDP Transfer path (`TransferRequest`, source `SimInvItem` with no
+    /// task) — the road the reference reads a notecard by
+    /// (`LLAssetStorage::getInvItemAsset`), and on Second Life the only one:
+    /// its `ViewerAsset` capability refuses a notecard `503`
+    /// (`book/src/gridspec/inventory.md` § Notecards and gestures). The
+    /// simulator checks the agent may read the item, so the item's id, not
+    /// only its asset's, is what is asked for. The assembled bytes surface as
+    /// [`Event::InventoryItemAssetReceived`]; a refusal as
+    /// [`Event::TransferFailed`] naming the item.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn fetch_inventory_item_asset(
+        &mut self,
+        item_id: InventoryKey,
+        asset_id: AssetKey,
+        asset_type: AssetType,
+        now: Instant,
+    ) -> Result<TransferId, Error> {
+        if self.circuit.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let agent_id = self.agent_id().map_or_else(Uuid::nil, |a| a.uuid());
+        let params = sl_wire::TransferSourceParamsInvItem {
+            agent_id,
+            session_id: self.session_id().unwrap_or_else(Uuid::nil),
+            owner_id: agent_id,
+            task_id: Uuid::nil(),
+            item_id: item_id.uuid(),
+            asset_id: asset_id.uuid(),
+            asset_type: asset_type.to_code(),
+        }
+        .encode();
+        self.start_transfer_download(
+            TransferPurpose::InventoryItem { item: item_id },
             asset_type,
             sl_wire::TRANSFER_SOURCE_SIM_INV_ITEM,
             params,

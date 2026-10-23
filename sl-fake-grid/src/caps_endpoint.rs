@@ -95,6 +95,37 @@ pub(crate) async fn dispatch_caps(
                 let script = world.lock().script_experience(task, item);
                 return SimCaps::script_metadata_response(script);
             }
+            // A notecard and what it embeds are the session's inventory and
+            // the grid's store; what is filed, and the answer, the grid's.
+            CapsDispatch::CopyFromNotecard {
+                notecard_id,
+                object_id,
+                item_id,
+                folder_id,
+            } => {
+                let mut guard = shared.state.lock().await;
+                let now = shared.now();
+                let answer = {
+                    let state = &mut *guard;
+                    let minter = state.minter.clone();
+                    crate::notecards::copy_from_notecard(
+                        &mut state.sim,
+                        &state.assets,
+                        crate::notecards::CopyRequest {
+                            notecard: notecard_id,
+                            object: object_id,
+                            item: item_id,
+                            folder: folder_id,
+                        },
+                        &move || minter.uuid(),
+                        now,
+                    )
+                };
+                let outcome = shared.flush_locked(&mut guard);
+                drop(guard);
+                shared.finish_flush(outcome).await;
+                return SimCaps::copy_from_notecard_response(answer);
+            }
             // The groups are the grid's.
             CapsDispatch::GroupMembers { group_id } => {
                 let members = crate::groups::roster_for_capability(core, group_id).await;

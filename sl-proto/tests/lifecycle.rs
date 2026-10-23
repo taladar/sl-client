@@ -7688,7 +7688,7 @@ mod test {
         assert_eq!(aborted, transfer_id.get());
         assert!(drain_events(&mut session).iter().any(|e| matches!(
             e,
-            Event::TransferFailed { transfer_id: got, status: TransferStatus::Abort }
+            Event::TransferFailed { transfer_id: got, status: TransferStatus::Abort, .. }
                 if *got == transfer_id
         )));
         Ok(())

@@ -715,6 +715,7 @@ async fn fetch_task_item(
             Event::TransferFailed {
                 transfer_id,
                 status,
+                ..
             } => Some(Err((*transfer_id, *status))),
             _other => None,
         })

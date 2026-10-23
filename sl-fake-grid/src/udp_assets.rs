@@ -133,6 +133,29 @@ pub(crate) fn task_item_asset(
     assets.read().get(asset_id).map(<[u8]>::to_vec)
 }
 
+/// The bytes behind an item of the agent's own inventory: the asset the item
+/// names in the session's serving tree, or `None` where it names none (a
+/// notecard Second Life has not had saved) or the store holds nothing — both
+/// grids refuse those `UnknownSource` (`notecards-gestures`, 2026-10-23).
+#[must_use]
+pub(crate) fn agent_item_asset(
+    sim: &SimSession,
+    assets: &crate::assets::GridAssets,
+    params: &TransferSourceParamsInvItem,
+) -> Option<Vec<u8>> {
+    let asset_id = sim
+        .agent_inventory()
+        .item(InventoryKey::from(params.item_id))?
+        .asset_id;
+    if asset_id.is_nil() {
+        return None;
+    }
+    assets
+        .read()
+        .get(sl_proto::AssetKey::from(asset_id))
+        .map(<[u8]>::to_vec)
+}
+
 /// The side length of a legacy-sized region's heightmap, in samples.
 pub const TERRAIN_RAW_SIDE: usize = 256;
 
@@ -205,6 +228,11 @@ pub(crate) fn answer_from_fixtures(
             ..
         } => {
             let data = match source {
+                // No task: an item of the agent's own (the road a viewer reads
+                // a notecard by), through the asset the item names.
+                TransferRequestSource::TaskInventoryItem(params) if params.task_id.is_nil() => {
+                    agent_item_asset(sim, assets, params)
+                }
                 TransferRequestSource::TaskInventoryItem(params) => {
                     task_item_asset(world, assets, params)
                 }

@@ -348,3 +348,93 @@ Second Life restored the object here, where it may build. The reference
 refuses a no-copy item's restore on Second Life (`CantRestoreToWorldNoCopy`),
 because the item goes whether or not the object comes back; our viewer's
 guard (`restore_refused`) keeps that refusal.
+
+## Notecards and gestures
+
+Measured on 2026-10-23 on aditi (the Mauve sandbox) and the local OpenSim by
+the census `notecards-gestures` (one avatar), run four times on each grid
+while it grew and held to the tables below on the last two of each, every
+metric of which held still between them. The census makes a run folder `F`,
+and in it notecards and gestures it takes away again; a run costs nothing.
+Every body is read back both ways a viewer has: the `ViewerAsset` capability,
+and the UDP `TransferRequest` of an inventory item (the reference's road for
+a notecard, `LLAssetStorage::getInvItemAsset`). A copy out of a notecard is
+POSTed raw. The census holds both grids and both fake flavours to these
+answers as `Measured` constants
+(`sl-conformance/src/cases/notecards_gestures.rs`), except the rows read
+after the relogin on the fake grid, which keeps no inventory from one login
+to the next (`server-fake-grid-inventory-persists-across-logins`).
+
+### A notecard's body
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a notecard made with `CreateInventoryItem` | names **no asset** (nil); the transfer is refused `UnknownSource` | an asset of **one zero byte**, read both ways | each flavour as its grid |
+| a body saved over `UpdateNotecardAgentInventory` | saved; the item names the new asset | the same | the same |
+| the saved body over `ViewerAsset` | **`503`** | the bytes written | each flavour as its grid |
+| the saved body over the UDP transfer | the bytes written | the bytes written | the same |
+
+Second Life serves no notecard over `ViewerAsset`: a gesture saved in the
+same run reads back `200` there, so this is the asset class, not a body not
+yet propagated — although aditi's asset host answers `503` for much it has
+not in hand (§ [Assets](assets.md)), and only the main grid could say
+whether it is the beta grid's. The reference never asks: it reads a notecard
+through its item. Our viewer read a notecard by its asset over `ViewerAsset`,
+so no notecard opened on Second Life; it now reads one through its item, an
+agent item's or a task item's (`Command::FetchInventoryItemAsset`,
+`Command::FetchTaskItemAsset`), and opens one that names no asset empty, as
+the reference does.
+
+### An embedded item
+
+The census embeds the saved notecard (full permission, its own) in a second
+notecard's body, reads the body back and compares the embedded item field by
+field; then embeds an item nobody has (an item and an asset id the run made
+up).
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the embedded item as read back | **rewritten**: a new item id; group mask `0x7fffffff`, everyone `0x7fffbfff`, next owner `0x7fffffff` (written as `0`, `0`, `0x0008e000`) | as written | each flavour as its grid |
+| a body embedding an item nobody has | **refused**: "Internal error from verifier." | saved | each flavour as its grid |
+
+So the item id a viewer wrote is not the id to copy by on Second Life: a copy
+names the embedded item as the saved notecard states it, which is what a
+viewer that read the notecard has.
+
+### `CopyInventoryFromNotecard`
+
+| copy | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| of the embedded item, into `F` | `200` and an undefined body; the copy filed in `F` and announced with a `BulkUpdateInventory` over the **event queue** (no callback id) | `200` and **no body**; the same | each flavour as its grid |
+| the copy | the embedded asset, its name; base and owner `0x7fffffff`, next owner `0x7fffffff` | the embedded asset, its name; base and owner `0x0009e000`, next owner `0x0008e000` | each flavour as its grid |
+| with no folder named | filed in Notecards | the same | the same |
+| of an id the notecard does not hold | `200` and an undefined body; nothing | **`400`** and no body; an alert "Failed to retrieve item" (UDP) | each flavour as its grid |
+| out of the notecard that embeds an item nobody has | `200`, nothing (the notecard holds nothing: its save was refused) | `400` and the alert: the embedded item's asset is not there | each flavour as its grid |
+
+OpenSim copies an item of the copier's own under the id asked for as itself,
+whatever the notecard holds (`BunchOfCaps.CopyInventoryFromNotecard`); here
+that is the embedded notecard, which is why its copy has the masks of the
+original.
+
+### Gestures
+
+Three gestures are made and saved over `UpdateGestureAgentInventory`; all
+three are activated, one is deactivated, one is removed while active; then
+the avatar logs in again, once without asking for `gestures` and once asking.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a new gesture's body | the **"/hey" default** gesture (122 bytes: a wave and a sound), read both ways | one zero byte | each flavour as its grid |
+| a saved gesture's body | the bytes written, both ways | the same | the same |
+| `ActivateGestures` / `DeactivateGestures` | nothing pushed; the item's flags stay `0` | nothing pushed; the item's flags **`0x1`** while active | each flavour as its grid |
+| a gesture removed while active | removed; nothing pushed | the same | the same |
+| the next login's `gestures`, not asked for | **absent** | sent (a list, empty when none) | each flavour as its grid |
+| the next login's `gestures`, asked for | the active gesture alone, under its saved asset | the same | the same |
+
+So the login array is the one statement of the active set either grid makes
+— Second Life keeps no item flag for it, and neither restates it later in the
+session — and Second Life sends it only to a viewer that asks. Our client did
+not ask, and our viewer took a gesture activated in an earlier session for
+inactive; the client now asks for `gestures` as the reference does and hands
+the array over as `Event::ActiveGestures`, which the inventory's active set
+starts from.

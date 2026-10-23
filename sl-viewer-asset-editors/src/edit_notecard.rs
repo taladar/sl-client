@@ -175,8 +175,9 @@ struct NotecardEditorState {
     source: NotecardSource,
     /// Whether this window's notecard is editable, fixed for its life.
     editable: bool,
-    /// The asset id awaited (`FetchAsset` sent), matched on `AssetReceived`.
-    pending_load: Option<Uuid>,
+    /// Where the body is in its load: the transfer [`fetch_command`] sent for
+    /// this window's source is matched on the item it names.
+    pending_load: PendingLoad,
     /// The save in flight, matched on the upload result; `None` when none is.
     pending_save: Option<NotecardSaveInFlight>,
     /// The editable body field, when the notecard is modifiable.
@@ -265,11 +266,72 @@ fn open_notecard(
             continue;
         };
         build_notecard_window(&mut commands, handle, &open);
-        sl_commands.write(SlCommand(Command::FetchAsset {
-            asset_id: AssetKey::from(open.asset_id),
+        if let Some(fetch) = fetch_command(open.source, open.asset_id) {
+            sl_commands.write(SlCommand(fetch));
+        }
+    }
+}
+
+/// The fetch that reads the notecard at `source` whose asset is `asset_id`,
+/// or `None` for one that names no asset yet.
+///
+/// A notecard is read through its **item**, over the UDP transfer — an agent
+/// item's or a task item's — never by its asset id over `ViewerAsset`: that is
+/// the road the reference takes (`LLPreviewNotecard::loadAsset`, through
+/// `getInvItemAsset`), and on Second Life the only one there is, since its
+/// `ViewerAsset` refuses every notecard `503` (`book/src/gridspec/inventory.md`
+/// § Notecards and gestures). A notecard Second Life has just made names no
+/// asset until its first save; there is nothing to read, and the reference
+/// opens it empty.
+fn fetch_command(source: NotecardSource, asset_id: Uuid) -> Option<Command> {
+    if asset_id.is_nil() {
+        return None;
+    }
+    let asset_id = AssetKey::from(asset_id);
+    Some(match source {
+        NotecardSource::Agent { item_id } => Command::FetchInventoryItemAsset {
+            item_id,
+            asset_id,
             asset_type: AssetType::Notecard,
-            byte_range: None,
-        }));
+        },
+        NotecardSource::Task { task_id, item_id } => Command::FetchTaskItemAsset {
+            task: task_id,
+            item_id,
+            asset_id,
+            asset_type: AssetType::Notecard,
+        },
+    })
+}
+
+/// What one event says about the body awaited at `source`: its bytes, its
+/// refusal, or nothing.
+enum Load<'a> {
+    /// The body arrived.
+    Body(&'a [u8]),
+    /// The grid refused it, or the transfer was given up on.
+    Refused,
+}
+
+/// What `event` says about the notecard at `source`.
+fn load_of(event: &SlSessionEvent, source: NotecardSource) -> Option<Load<'_>> {
+    match (event, source) {
+        (
+            SlSessionEvent::InventoryItemAssetReceived { item, data, .. },
+            NotecardSource::Agent { item_id },
+        ) if *item == item_id => Some(Load::Body(data)),
+        (
+            SlSessionEvent::TaskItemAssetReceived {
+                task, item, data, ..
+            },
+            NotecardSource::Task { task_id, item_id },
+        ) if *task == task_id && *item == item_id => Some(Load::Body(data)),
+        (
+            SlSessionEvent::TransferFailed {
+                item: Some(item), ..
+            },
+            source,
+        ) if *item == source.item_id() => Some(Load::Refused),
+        _ => None,
     }
 }
 
@@ -299,7 +361,11 @@ fn build_notecard_window(commands: &mut Commands, handle: FloaterHandle, open: &
             content: handle.content,
             source: open.source,
             editable: open.editable,
-            pending_load: Some(open.asset_id),
+            pending_load: if open.asset_id.is_nil() {
+                PendingLoad::Empty
+            } else {
+                PendingLoad::Awaiting
+            },
             pending_save: None,
             body_field: None,
             status: Some(status),
@@ -312,7 +378,9 @@ fn build_notecard_window(commands: &mut Commands, handle: FloaterHandle, open: &
 // ---------------------------------------------------------------------------
 
 /// Fold the fetched notecard asset into the editor once it arrives: decode it,
-/// then build the read-only or editable body and the embedded-item list.
+/// then build the read-only or editable body and the embedded-item list. A
+/// notecard that names no asset yet ([`fetch_command`]) is built empty at once,
+/// and one the grid refused shows the unreadable status.
 fn ingest_notecard_asset(
     mut events: MessageReader<SlEvent>,
     mut windows: Query<(Entity, &mut NotecardEditorState)>,
@@ -322,60 +390,84 @@ fn ingest_notecard_asset(
     // Collected once and replayed per window: a reader is consumed by the first
     // pass over it, so with two notecards open the second would see nothing.
     let frame: Vec<&SlEvent> = events.read().collect();
-    if frame.is_empty() {
-        return;
-    }
     for (window, mut state) in &mut windows {
-        for event in &frame {
-            let SlSessionEvent::AssetReceived(asset) = &event.0 else {
-                continue;
-            };
-            if state.pending_load != Some(asset.id) {
-                continue;
-            }
-            state.pending_load = None;
-            let (content, source) = (state.content, state.source);
-
-            let notecard = match decode_notecard_asset(&asset.data) {
-                Ok(notecard) => notecard,
-                Err(error) => {
-                    warn!("failed to decode notecard {}: {error}", asset.id);
-                    tear_down(&mut commands, &children, content);
-                    let status = spawn_status(
-                        &mut commands,
-                        content,
-                        "notecard-status-decode-failed",
-                        ERROR_COLOR,
-                    );
-                    state.status = Some(status);
-                    state.body_field = None;
-                    continue;
-                }
-            };
-
-            let editable = state.editable;
-            tear_down(&mut commands, &children, content);
-            let built = populate_editor(
+        if state.pending_load == PendingLoad::Empty {
+            state.pending_load = PendingLoad::Done;
+            show_body(
                 &mut commands,
-                content,
-                &notecard,
-                editable,
-                source,
-                FONT_SIZE,
+                &children,
+                window,
+                &mut state,
+                Load::Body(&[]),
             );
-            state.body_field = built.body_field;
-            state.status = built.status;
-            // The text as it arrived is the baseline the unsaved-work guard
-            // measures against; a read-only window has no buffer to lose and so
-            // never gets one.
-            if let Some(field) = built.body_field {
-                commands.entity(window).insert(EditedText {
-                    field,
-                    saved: notecard.text.clone(),
-                });
-            }
+            continue;
         }
+        if state.pending_load != PendingLoad::Awaiting {
+            continue;
+        }
+        let source = state.source;
+        let Some(load) = frame.iter().find_map(|event| load_of(&event.0, source)) else {
+            continue;
+        };
+        state.pending_load = PendingLoad::Done;
+        show_body(&mut commands, &children, window, &mut state, load);
     }
+}
+
+/// Builds `window`'s body from what `load` brought.
+fn show_body(
+    commands: &mut Commands,
+    children: &Query<&Children>,
+    window: Entity,
+    state: &mut NotecardEditorState,
+    load: Load<'_>,
+) {
+    let (content, source) = (state.content, state.source);
+    let decoded = match load {
+        Load::Body(data) => decode_notecard_asset(data).map_err(|error| error.to_string()),
+        Load::Refused => Err("the grid refused the transfer".to_owned()),
+    };
+    let notecard = match decoded {
+        Ok(notecard) => notecard,
+        Err(error) => {
+            warn!("failed to read notecard {:?}: {error}", source.item_id());
+            tear_down(commands, children, content);
+            let status = spawn_status(
+                commands,
+                content,
+                "notecard-status-decode-failed",
+                ERROR_COLOR,
+            );
+            state.status = Some(status);
+            state.body_field = None;
+            return;
+        }
+    };
+    let editable = state.editable;
+    tear_down(commands, children, content);
+    let built = populate_editor(commands, content, &notecard, editable, source, FONT_SIZE);
+    state.body_field = built.body_field;
+    state.status = built.status;
+    // The text as it arrived is the baseline the unsaved-work guard
+    // measures against; a read-only window has no buffer to lose and so
+    // never gets one.
+    if let Some(field) = built.body_field {
+        commands.entity(window).insert(EditedText {
+            field,
+            saved: notecard.text.clone(),
+        });
+    }
+}
+
+/// Where a window's body is in its load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingLoad {
+    /// The transfer is out; the body is awaited.
+    Awaiting,
+    /// The notecard names no asset: it is built empty on the next pass.
+    Empty,
+    /// The body is built (or refused).
+    Done,
 }
 
 /// Decode a fetched notecard asset, reading an **empty** payload as an empty
@@ -1527,7 +1619,13 @@ mod tests {
             app.world()
                 .resource::<Messages<SlCommand>>()
                 .iter_current_update_messages()
-                .filter(|command| matches!(command.0, Command::FetchAsset { .. }))
+                .filter(|command| {
+                    matches!(
+                        command.0,
+                        Command::FetchInventoryItemAsset { .. }
+                            | Command::FetchTaskItemAsset { .. }
+                    )
+                })
                 .count()
         }
 
@@ -1642,8 +1740,9 @@ mod tests {
     /// occur here: there is one buffer, and the boxes are placed against it.
     mod body {
         use super::super::{
-            NotecardBody, NotecardEditorState, ingest_added_items, ingest_notecard_asset,
-            open_notecard, rebuild_notecard_body, report_notecard_save, save_notecard,
+            NotecardBody, NotecardEditorState, PendingLoad, ingest_added_items,
+            ingest_notecard_asset, open_notecard, rebuild_notecard_body, report_notecard_save,
+            save_notecard,
         };
         use crate::asset_editor::SaveEditorWindow;
         use crate::floater::FloaterPlugin;
@@ -1656,9 +1755,9 @@ mod tests {
         use bevy::text::{EditableText, FontCx, LayoutCx};
         use pretty_assertions::assert_eq;
         use sl_client_bevy::{
-            AgentKey, Asset, AssetType, InventoryFolderKey, InventoryKey, InventoryType, ItemInfo,
-            OwnerKey, Permissions, Permissions5, SaleInfo, SlCommand, SlEvent, SlSessionEvent,
-            Uuid,
+            AgentKey, AssetType, Command, InventoryFolderKey, InventoryKey, InventoryType,
+            ItemInfo, OwnerKey, Permissions, Permissions5, SaleInfo, SlCommand, SlEvent,
+            SlSessionEvent, Uuid,
         };
         use sl_viewer_ui_widgets::ui_rich_text::{RichTextContent, RichTextStyle};
 
@@ -1733,11 +1832,12 @@ mod tests {
             }
             .encode();
             app.world_mut()
-                .write_message(SlEvent(SlSessionEvent::AssetReceived(Box::new(Asset {
-                    id: Uuid::from_u128(NOTECARD_ASSET),
+                .write_message(SlEvent(SlSessionEvent::InventoryItemAssetReceived {
+                    transfer_id: sl_client_bevy::TransferId::from_u128(1),
+                    item: InventoryKey::from(Uuid::from_u128(NOTECARD_ITEM)),
                     asset_type: AssetType::Notecard,
                     data,
-                }))));
+                }));
             app.update();
             // One more pass: the body is spawned by the ingest's commands, so
             // its first model is built on the frame after.
@@ -1849,6 +1949,129 @@ mod tests {
                     next_owner,
                 },
             }
+        }
+
+        /// The fetch every open sent, if any.
+        fn fetch_sent(app: &App) -> Vec<Command> {
+            app.world()
+                .resource::<Messages<SlCommand>>()
+                .iter_current_update_messages()
+                .map(|command| command.0.clone())
+                .filter(|command| {
+                    matches!(
+                        command,
+                        Command::FetchAsset { .. }
+                            | Command::FetchInventoryItemAsset { .. }
+                            | Command::FetchTaskItemAsset { .. }
+                    )
+                })
+                .collect()
+        }
+
+        /// A notecard is read through its item over the UDP transfer, an agent
+        /// item's or a task item's, never by its asset over `ViewerAsset`, which
+        /// Second Life refuses every notecard (`notecards-gestures`).
+        #[test]
+        fn a_notecard_is_read_through_its_item() -> Result<(), TestError> {
+            let item = InventoryKey::from(Uuid::from_u128(NOTECARD_ITEM));
+            let task = sl_client_bevy::ObjectKey::from(Uuid::from_u128(0x7A));
+            let asset = sl_client_bevy::AssetKey::from(Uuid::from_u128(NOTECARD_ASSET));
+            for (source, expected) in [
+                (
+                    NotecardSource::Agent { item_id: item },
+                    Command::FetchInventoryItemAsset {
+                        item_id: item,
+                        asset_id: asset,
+                        asset_type: AssetType::Notecard,
+                    },
+                ),
+                (
+                    NotecardSource::Task {
+                        task_id: task,
+                        item_id: item,
+                    },
+                    Command::FetchTaskItemAsset {
+                        task,
+                        item_id: item,
+                        asset_id: asset,
+                        asset_type: AssetType::Notecard,
+                    },
+                ),
+            ] {
+                let mut app = editor_app();
+                app.world_mut().write_message(OpenNotecard {
+                    name: "A notecard".to_owned(),
+                    asset_id: asset.uuid(),
+                    editable: true,
+                    source,
+                });
+                app.update();
+                assert_eq!(
+                    format!("{:?}", fetch_sent(&app)),
+                    format!("{:?}", vec![expected])
+                );
+            }
+            Ok(())
+        }
+
+        /// A notecard Second Life has just made names no asset: nothing is
+        /// fetched, and it opens empty and editable, as the reference opens it.
+        #[test]
+        fn a_notecard_with_no_asset_opens_empty() -> Result<(), TestError> {
+            let mut app = editor_app();
+            app.world_mut().write_message(OpenNotecard {
+                name: "A notecard".to_owned(),
+                asset_id: Uuid::nil(),
+                editable: true,
+                source: NotecardSource::Agent {
+                    item_id: InventoryKey::from(Uuid::from_u128(NOTECARD_ITEM)),
+                },
+            });
+            app.update();
+            assert!(fetch_sent(&app).is_empty(), "a fetch went out for no asset");
+            app.update();
+            app.update();
+            let field = body_field(&mut app)?;
+            let text = app
+                .world()
+                .get::<EditableText>(field)
+                .map(|editable| editable.value().to_string())
+                .ok_or("the body is not editable")?;
+            assert_eq!(text, "");
+            Ok(())
+        }
+
+        /// A transfer the grid refuses leaves the window with the unreadable
+        /// status, not loading forever.
+        #[test]
+        fn a_refused_transfer_shows_the_unreadable_status() -> Result<(), TestError> {
+            let mut app = editor_app();
+            app.world_mut().write_message(OpenNotecard {
+                name: "A notecard".to_owned(),
+                asset_id: Uuid::from_u128(NOTECARD_ASSET),
+                editable: true,
+                source: NotecardSource::Agent {
+                    item_id: InventoryKey::from(Uuid::from_u128(NOTECARD_ITEM)),
+                },
+            });
+            app.update();
+            app.world_mut()
+                .write_message(SlEvent(SlSessionEvent::TransferFailed {
+                    transfer_id: sl_client_bevy::TransferId::from_u128(1),
+                    item: Some(InventoryKey::from(Uuid::from_u128(NOTECARD_ITEM))),
+                    status: sl_client_bevy::TransferStatus::UnknownSource,
+                }));
+            app.update();
+            app.update();
+            let window = window(&mut app)?;
+            let state = app
+                .world()
+                .get::<NotecardEditorState>(window)
+                .ok_or("the window lost its state")?;
+            assert_eq!(state.pending_load, PendingLoad::Done);
+            assert!(state.body_field.is_none(), "a refused notecard drew a body");
+            assert!(state.status.is_some(), "a refused notecard shows no status");
+            Ok(())
         }
 
         /// An embedded item is a box at its marker's byte offset, and the marker

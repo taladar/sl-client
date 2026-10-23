@@ -26,7 +26,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use sl_types::key::{AgentKey, ExperienceKey, GroupKey, InventoryKey, ObjectKey};
+use sl_types::key::{
+    AgentKey, ExperienceKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
+};
 use sl_wire::{
     AisUpdate, AssetUploadResponse, DisplayName, ExperiencePermission, InterestListReply,
     LandResourcesUrls, Llsd, ObjectMediaRequest, ObjectMediaResponse, Permissions,
@@ -699,6 +701,19 @@ impl CapsResponse {
     }
 }
 
+/// How a grid answers a `CopyInventoryFromNotecard`
+/// ([`SimCaps::copy_from_notecard_response`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyFromNotecardAnswer {
+    /// `200` and an undefined LLSD body: Second Life's answer, whether or not
+    /// it copied anything.
+    Undefined,
+    /// `200` and no body: OpenSim's answer to a copy it made.
+    Empty,
+    /// `400` and no body: OpenSim's answer where it found nothing to copy.
+    Refused,
+}
+
 /// The outcome of dispatching one CAPS request.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CapsDispatch {
@@ -740,6 +755,21 @@ pub enum CapsDispatch {
     /// An `EstateAccess` GET: the estate and who may read it are the driver's
     /// to know. It answers with [`SimCaps::estate_access_response`].
     EstateAccess,
+    /// A `CopyInventoryFromNotecard` POST: the notecard and what is embedded
+    /// in it are the driver's to read. It copies what it finds and answers
+    /// with [`SimCaps::copy_from_notecard_response`].
+    CopyFromNotecard {
+        /// The notecard holding the embedded item.
+        notecard_id: InventoryKey,
+        /// The in-world object holding the notecard, or `None` for an
+        /// agent-inventory notecard.
+        object_id: Option<ObjectKey>,
+        /// The embedded item to copy.
+        item_id: InventoryKey,
+        /// The destination folder, or `None` to let the grid pick the system
+        /// folder for the item's type.
+        folder_id: Option<InventoryFolderKey>,
+    },
     /// An `AvatarRenderInfo` GET: the region's statement is made of every
     /// viewer's reports, which are the driver's to hold. It answers with
     /// [`SimCaps::avatar_render_info_response`].
@@ -1312,9 +1342,9 @@ impl SimCaps {
                     Some(CapHandler::IncrementCofVersion) => {
                         CapsDispatch::Response(Self::dispatch_increment_cof_version(sim, request))
                     }
-                    Some(CapHandler::CopyInventoryFromNotecard) => CapsDispatch::Response(
-                        Self::dispatch_copy_inventory_from_notecard(sim, request),
-                    ),
+                    Some(CapHandler::CopyInventoryFromNotecard) => {
+                        Self::dispatch_copy_inventory_from_notecard(request)
+                    }
                     Some(CapHandler::RenderMaterials) => {
                         CapsDispatch::Response(Self::dispatch_render_materials(sim, request))
                     }
@@ -2346,8 +2376,19 @@ impl SimCaps {
                     }
                     _other => None,
                 };
-                let (new_asset, new_inventory_item) =
-                    sim.complete_caps_upload(metadata, request.body.to_vec());
+                let mut data = request.body.to_vec();
+                if matches!(
+                    &metadata,
+                    CapsUploadMetadata::UpdateAgentItem { cap, .. }
+                        if cap == crate::UpdatableAssetType::Notecard.cap()
+                ) && sim.inventory_dialect() == crate::InventoryDialect::SecondLife
+                {
+                    data = match crate::sim_notecard::second_life_body(sim, data) {
+                        Ok(kept) => kept,
+                        Err(refusal) => return refusal,
+                    };
+                }
+                let (new_asset, new_inventory_item) = sim.complete_caps_upload(metadata, data);
                 CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
                     state: "complete".to_owned(),
                     new_asset: Some(new_asset.uuid()),
@@ -2756,30 +2797,39 @@ impl SimCaps {
         }
     }
 
-    /// Serves one `CopyInventoryFromNotecard` POST: surfaces the copy request
-    /// as
-    /// [`ServerEvent::CopyInventoryFromNotecardRequested`](crate::ServerEvent::CopyInventoryFromNotecardRequested)
-    /// and acks with an undefined body (the copied item is delivered over the
-    /// normal inventory-update stream, so there is no reply payload). Wrong
-    /// method → `405`, a non-LLSD body → `400`.
-    fn dispatch_copy_inventory_from_notecard(
-        sim: &mut SimSession,
-        request: &CapsRequest<'_>,
-    ) -> CapsResponse {
+    /// Reads one `CopyInventoryFromNotecard` POST into a
+    /// [`CapsDispatch::CopyFromNotecard`]: the notecard, the item embedded in
+    /// it and where it is to go are the driver's to resolve, and how the grid
+    /// answers — and what it files — is the imitated grid's (Second Life
+    /// answers `200` and an undefined body whether or not it copied anything,
+    /// OpenSim `200` and no body, or `400` and an alert where it found no
+    /// item). Wrong method → `405`, a non-LLSD body → `400`.
+    fn dispatch_copy_inventory_from_notecard(request: &CapsRequest<'_>) -> CapsDispatch {
         if request.method != "POST" {
-            return CapsResponse::method_not_allowed();
+            return CapsDispatch::Response(CapsResponse::method_not_allowed());
         }
         let Some(body) = parse_llsd_body(request.body) else {
-            return CapsResponse::bad_request();
+            return CapsDispatch::Response(CapsResponse::bad_request());
         };
         let copy = parse_copy_inventory_from_notecard(&body);
-        sim.push_content_event(ServerEvent::CopyInventoryFromNotecardRequested {
+        CapsDispatch::CopyFromNotecard {
             notecard_id: copy.notecard,
             object_id: copy.object,
             item_id: copy.item,
             folder_id: copy.folder,
-        });
-        CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
+        }
+    }
+
+    /// The answer to a [`CapsDispatch::CopyFromNotecard`]: an undefined body
+    /// (Second Life's, copied or not), no body (OpenSim's copy), or OpenSim's
+    /// refusal, `400` and no body.
+    #[must_use]
+    pub fn copy_from_notecard_response(answer: CopyFromNotecardAnswer) -> CapsResponse {
+        match answer {
+            CopyFromNotecardAnswer::Undefined => CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned()),
+            CopyFromNotecardAnswer::Empty => CapsResponse::status(200),
+            CopyFromNotecardAnswer::Refused => CapsResponse::status(400),
+        }
     }
 
     /// Serves the legacy `RenderMaterials` surface, routed on HTTP method:

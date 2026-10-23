@@ -17,9 +17,9 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use serde_json::json;
-    use sl_automation_proto::{Bounds, Locator, NodeValue, Probe, Role};
+    use sl_automation_proto::{Bounds, InventoryRoot, Locator, NodeValue, Probe, Role};
     use sl_e2e::{BodyError, FIRST_NAME, Need, Stage, StageBuilder};
-    use sl_fake_grid::{AccountConfig, RegionConfig};
+    use sl_fake_grid::{AccountConfig, ImitatedGrid, RegionConfig};
     use sl_proto::{
         AgentKey, AssetType, FriendKey, GroupKey, GroupNoticeReceived, ImDialog, InstantMessage,
         InventoryItemOrFolderKey, InventoryKey, InventoryOffer, ObjectKey, RegionCoordinates,
@@ -605,6 +605,89 @@ mod test {
                 );
                 Ok(())
             })?;
+        Ok(())
+    }
+
+    // ---- Active gestures --------------------------------------------------
+
+    /// The gesture every fake account is seeded with, and its folder.
+    const GESTURE: (&str, &str) = ("Gestures", "Fixture Gesture");
+
+    /// Open the gesture's context menu in the inventory window.
+    async fn gesture_menu(alpha: &Viewer) -> Result<(), BodyError> {
+        let (folder, name) = GESTURE;
+        let inventory = alpha.ui().window("inventory");
+        if !inventory.is_visible().await? {
+            alpha.press("Ctrl+I").await?;
+            let _shown = alpha.expect(&inventory).to_be_visible().await?;
+        }
+        let _searched = inventory
+            .test_id("inventory:search")
+            .role(Role::Textbox)
+            .fill(name)
+            .await?;
+        let _listed = alpha
+            .expect_state(Probe::Inventory {
+                root: InventoryRoot::Agent,
+                path: vec![folder.to_owned()],
+            })
+            .at("/items")
+            .timeout(WAIT)
+            .to_include(json!([{ "name": name }]))
+            .await?;
+        let _menu = inventory
+            .get(Locator::role(Role::TreeItem).named(name))
+            .timeout(WAIT)
+            .right_click()
+            .await?;
+        Ok(())
+    }
+
+    /// The gesture menu's entry whose caption is `key`.
+    fn gesture_entry(alpha: &Viewer, key: &str) -> UiLocator {
+        alpha
+            .ui()
+            .locator(Locator::role(Role::MenuItem).name_key(key))
+    }
+
+    /// **An active gesture is active after a relog, on each grid**
+    /// (`gridspec-notecards-gestures`): the viewer asks for the login's
+    /// `gestures` array — the one place Second Life states the set, which it
+    /// sends only when asked — and starts its active set from it, so the
+    /// gesture it activated offers Deactivate rather than Activate.
+    #[test]
+    fn an_active_gesture_is_active_after_a_relog() -> Result<(), TestError> {
+        for (name, flavour) in [
+            ("gesture_relog_second_life", ImitatedGrid::SecondLife),
+            ("gesture_relog_opensim", ImitatedGrid::OpenSim),
+        ] {
+            stage(name, &["Alpha"])
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| {
+                    let alpha = stage.viewer("Alpha")?;
+                    let mut heard = stage.agent("Alpha").await?.events();
+                    gesture_menu(&alpha).await?;
+                    let _picked = gesture_entry(&alpha, "menu-inv-activate").click().await?;
+                    grid_hears(&mut heard, "activation", |event| {
+                        matches!(event, ServerEvent::ActivateGestures { .. })
+                    })
+                    .await?;
+
+                    let alpha = stage.relog("Alpha").await?;
+                    gesture_menu(&alpha).await?;
+                    let _active = alpha
+                        .expect(&gesture_entry(&alpha, "menu-inv-deactivate"))
+                        .timeout(WAIT)
+                        .to_be_enabled()
+                        .await?;
+                    let _not_inactive = alpha
+                        .expect(&gesture_entry(&alpha, "menu-inv-activate"))
+                        .to_be_disabled()
+                        .await?;
+                    alpha.press("Escape").await?;
+                    Ok(())
+                })?;
+        }
         Ok(())
     }
 

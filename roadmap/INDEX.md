@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 336 |
+| ready | 335 |
 | blocked | 78 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1415 |
+| done | 1416 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2073** |
@@ -351,7 +351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (336)
+## ready (335)
 
 ### protocol
 
@@ -1147,8 +1147,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   measurements
 - [`gridspec-lsl-probe-corpus`](ready/gridspec-lsl-probe-corpus.md) — A
   committed LSL probe corpus and per-grid result files
-- [`gridspec-notecards-gestures`](ready/gridspec-notecards-gestures.md) —
-  Notecards, embedded items and gestures on each grid
 - [`gridspec-seated-crossing`](ready/gridspec-seated-crossing.md) — A seated
   crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
@@ -1562,7 +1560,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1415)
+## done (1416)
 
 ### protocol
 
@@ -4649,6 +4647,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   and enforcement on each grid
 - [`gridspec-neighbours-crossing`](done/gridspec-neighbours-crossing.md) — Child
   agents, EnableSimulator and region crossing on each grid
+- [`gridspec-notecards-gestures`](done/gridspec-notecards-gestures.md) —
+  Notecards, embedded items and gestures on each grid
 - [`gridspec-object-edit`](done/gridspec-object-edit.md) — Object edits on each
   grid: transforms, shape, flags, admin fields, undo, duplicate
 - [`gridspec-object-link-delink`](done/gridspec-object-link-delink.md) — Link

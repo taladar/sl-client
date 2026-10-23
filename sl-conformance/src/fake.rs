@@ -230,6 +230,7 @@ pub const OFFLINE_CASES: &[&str] = &[
     "inventory-fetch",
     "inventory-mutations",
     "inventory-offers",
+    "notecards-gestures",
     "avatar-render-info",
     "landmarks-home",
 ];

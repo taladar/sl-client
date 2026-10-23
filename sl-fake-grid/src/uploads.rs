@@ -44,8 +44,8 @@
 //! flags so a viewer can tell the three kinds apart before it fetches one; a
 //! script the starter script; a landmark the place the agent stands, in the
 //! grid's words and with its masks ([`HomePolicy`](crate::HomePolicy)); a
-//! notecard on Second Life no asset at all, which it names only once it is
-//! first saved; anything else an empty asset of its type. The item's folder steps,
+//! notecard and a gesture as [`crate::notecards`] says each grid makes them;
+//! anything else an empty asset of its type. The item's folder steps,
 //! and its base and owner masks are the grid's
 //! ([`InventoryDialect::created_item_mask`](sl_proto::InventoryDialect::created_item_mask)).
 //!
@@ -368,12 +368,21 @@ fn create_item(
         key
     } else if let Some(bound) = bound_asset {
         bound
-    } else if request.asset_type == AssetType::Notecard
-        && sim.inventory_dialect() == sl_proto::InventoryDialect::SecondLife
+    } else if let Some(body) =
+        crate::notecards::new_item_body(sim.inventory_dialect(), request.asset_type)
     {
-        // Second Life makes a notecard naming no asset; its first save gives
-        // it one (`book/src/gridspec/inventory.md` § Changing inventory).
-        AssetKey::from(uuid::Uuid::nil())
+        // A notecard or a gesture starts as its grid makes it: on Second
+        // Life a notecard names no asset until its first save and a gesture
+        // is the "/hey" default; on OpenSim either is one zero byte
+        // (`book/src/gridspec/inventory.md` § Notecards and gestures).
+        match body {
+            crate::notecards::NewBody::NoAsset => AssetKey::from(uuid::Uuid::nil()),
+            crate::notecards::NewBody::Bytes(body) => {
+                let key = AssetKey::from(mint());
+                store(assets, key, body.to_vec());
+                key
+            }
+        }
     } else {
         let key = AssetKey::from(mint());
         let body = if request.asset_type == AssetType::ScriptText {

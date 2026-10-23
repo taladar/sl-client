@@ -99,7 +99,7 @@ outsider.
 
 | behaviour | Second Life | OpenSim |
 | --- | --- | --- |
-| the invitation as B is sent it (**held**) | dialog 3 from the group, **A's user name**, its own id, no region, "… has invited you to join a group.\nThere is no cost to join this group.\nGroup:\n…: <charter>", a bucket of 20 bytes: fee 0, the Everyone role | dialog 3 from the group, A's name, its own id, a region, "… has invited you to join a group called …. There is no cost to join this group.", the same bucket |
+| the invitation as B is sent it (**held**) | dialog 3 from the group, **A's user name**, its own id, no region, "… has invited you to join a group.\nThere is no cost to join this group.\nGroup:\n…: &lt;charter&gt;", a bucket of 20 bytes: fee 0, the Everyone role | dialog 3 from the group, A's name, its own id, a region, "… has invited you to join a group called …. There is no cost to join this group.", the same bucket |
 | … A is told (**held**) | nothing | nothing |
 | B declines: who is told (**held**) | nobody | nobody |
 | B accepts: B is told (**held**) | alert "You have been added to the group."; the join taken; the group made active; a membership list | a message box from "Groups", "You have been added to the group."; the group made active; a membership list |

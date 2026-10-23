@@ -1019,7 +1019,8 @@ mod tests {
 /// measured by the `inventory-fetch` census (`book/src/gridspec/inventory.md`
 /// § Fetching) — and how the UDP item mutations are answered: a copy, a link,
 /// a flags change, the masks of a made item (the `inventory-mutations` census,
-/// § Changing inventory).
+/// § Changing inventory) — and what a saved notecard's embedded items become
+/// (the `notecards-gestures` census, § Notecards and gestures).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InventoryDialect {
     /// Second Life's (the default).

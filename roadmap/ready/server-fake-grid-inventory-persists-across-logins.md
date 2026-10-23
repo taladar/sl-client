@@ -34,3 +34,14 @@ than live in one region.
 Then drop the `relogin_` row of `FAKE_EXEMPT` in
 `sl-conformance/src/cases/inventory_fetch.rs`, so both flavours are held to the
 live answer.
+
+## From gridspec-notecards-gestures (2026-10-23)
+
+The `notecards-gestures` census reads its gestures back through the item
+fetch after a relogin (`relogged_active_*`, `relogged_deactivated_*`); on the
+fake grid they are gone, so `FAKE_EXEMPT` in
+`sl-conformance/src/cases/notecards_gestures.rs` exempts the `relogged_` rows.
+Drop that row too. The account's active gestures are kept on the grid
+already (`crate::notecards::ActiveGestures`, like `OutfitVersions`); once the
+tree persists they could live in the items' own state, as OpenSim's flag
+does.

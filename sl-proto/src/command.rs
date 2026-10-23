@@ -2014,6 +2014,20 @@ pub enum Command {
         /// The item's asset type, from the task-inventory listing.
         asset_type: AssetType,
     },
+    /// Fetch an item of the agent's own inventory's asset over the legacy UDP
+    /// Transfer path (`TransferRequest`) — how a notecard is read: Second
+    /// Life serves no notecard over `ViewerAsset`. The bytes arrive as
+    /// [`Event::InventoryItemAssetReceived`](crate::Event::InventoryItemAssetReceived);
+    /// a refusal as [`Event::TransferFailed`](crate::Event::TransferFailed)
+    /// naming the item.
+    FetchInventoryItemAsset {
+        /// The inventory item whose asset is fetched.
+        item_id: InventoryKey,
+        /// The item's asset id (nil where the item names none).
+        asset_id: AssetKey,
+        /// The item's asset type.
+        asset_type: AssetType,
+    },
     /// Fetch the estate covenant notecard's asset over the legacy UDP
     /// Transfer path (`TransferRequest`, the only path for estate assets on
     /// both grids). Request the covenant metadata first via
@@ -3414,6 +3428,7 @@ impl Command {
             Self::RequestScriptExperience { .. } => "RequestScriptExperience",
             Self::RequestXfer { .. } => "RequestXfer",
             Self::FetchTaskItemAsset { .. } => "FetchTaskItemAsset",
+            Self::FetchInventoryItemAsset { .. } => "FetchInventoryItemAsset",
             Self::FetchEstateCovenantAsset => "FetchEstateCovenantAsset",
             Self::UpdateTaskInventory { .. } => "UpdateTaskInventory",
             Self::MoveTaskInventory { .. } => "MoveTaskInventory",

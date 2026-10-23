@@ -49,23 +49,24 @@ mod test {
         CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
         CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
         CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, CapsDispatch, CapsRequest,
-        CapsUploadMetadata, ChatSessionKind, DayCycle, DisplayName, EnvironmentSettings,
-        EnvironmentUpdate, Event, ExperienceInfo, ExperienceKey, ExperiencePermission,
-        ExperienceProperties, ExperienceUpdate, FaceMaterialPut, GroupKey, ImDialog, ImSessionId,
-        InMemoryAssetSource, InstantMessage, InventoryFolder, InventoryFolderKey, InventoryItem,
-        InventoryKey, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE,
-        LegacyMaterial, LoginParams, LslKeyword, LslSyntax, MaterialOverrideUpdate, MediaEntry,
-        ObjectCost, ObjectKey, ObjectMediaState, ObjectPhysicsData, OwnerKey, ParcelKey,
-        ParcelScriptResources, Permissions5, PhysicsShapeType, REQUESTED_CAPABILITIES,
-        RegionCoordinates, RegionHandle, RegionLocalParcelId, RemoteParcelRequest, ResourceAmount,
-        ResourceSummary, ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind,
-        SelectedResourceCost, ServerEvent, ServerHistoryMessage, Session, SimCaps,
-        SimChatSessionKind, SimParcel, SimSession, SimulatorFeatures, StartLocation, TextureKey,
-        VoiceChannel, VoiceProvisionOutcome, VoiceProvisionRefusal, WebRtcStub,
-        avatar_picker_search_query, build_environment_update_request, build_event_queue_request,
-        build_get_object_cost_request, build_get_object_physics_data_request,
-        build_land_resources_request, build_region_experiences_request,
-        build_remote_parcel_request, build_resource_cost_selected_request, build_seed_request,
+        CapsUploadMetadata, ChatSessionKind, CopyFromNotecardAnswer, DayCycle, DisplayName,
+        EnvironmentSettings, EnvironmentUpdate, Event, ExperienceInfo, ExperienceKey,
+        ExperiencePermission, ExperienceProperties, ExperienceUpdate, FaceMaterialPut, GroupKey,
+        ImDialog, ImSessionId, InMemoryAssetSource, InstantMessage, InventoryFolder,
+        InventoryFolderKey, InventoryItem, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
+        LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE, LegacyMaterial, LoginParams, LslKeyword,
+        LslSyntax, MaterialOverrideUpdate, MediaEntry, ObjectCost, ObjectKey, ObjectMediaState,
+        ObjectPhysicsData, OwnerKey, ParcelKey, ParcelScriptResources, Permissions5,
+        PhysicsShapeType, REQUESTED_CAPABILITIES, RegionCoordinates, RegionHandle,
+        RegionLocalParcelId, RemoteParcelRequest, ResourceAmount, ResourceSummary,
+        ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind, SelectedResourceCost,
+        ServerEvent, ServerHistoryMessage, Session, SimCaps, SimChatSessionKind, SimParcel,
+        SimSession, SimulatorFeatures, StartLocation, TextureKey, VoiceChannel,
+        VoiceProvisionOutcome, VoiceProvisionRefusal, WebRtcStub, avatar_picker_search_query,
+        build_environment_update_request, build_event_queue_request, build_get_object_cost_request,
+        build_get_object_physics_data_request, build_land_resources_request,
+        build_region_experiences_request, build_remote_parcel_request,
+        build_resource_cost_selected_request, build_seed_request,
         build_set_experience_permission_request, build_update_experience_request,
         chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
         enable_simulator_to_caps_llsd, experience_id_query, experience_info_query,
@@ -2151,10 +2152,11 @@ mod test {
         Ok(())
     }
 
-    /// `CopyInventoryFromNotecard`: the one-way POST acks with an undefined body
-    /// and surfaces the copy request (nil object/folder ids fold to `None`).
+    /// `CopyInventoryFromNotecard`: the POST is handed to the driver, which
+    /// reads the notecard (nil object/folder ids fold to `None`), and each
+    /// answer has its shape.
     #[test]
-    fn copy_inventory_from_notecard_round_trips() -> Result<(), TestError> {
+    fn copy_inventory_from_notecard_is_the_drivers() -> Result<(), TestError> {
         let mut caps = new_caps()?;
         let mut sim = new_sim();
         let notecard = InventoryKey::from(uuid::Uuid::from_u128(0x0ca1));
@@ -2162,26 +2164,22 @@ mod test {
         let item = InventoryKey::from(uuid::Uuid::from_u128(0x0ca3));
         let body = copy_inventory_from_notecard_body(notecard, Some(object), item, None);
         let path = granted_cap_path(&caps, CAP_COPY_INVENTORY_FROM_NOTECARD)?;
-        let (status, _) = respond(&mut caps, &mut sim, &post(&path, &body))?;
-        assert_eq!(status, 200);
-        match sim.poll_event() {
-            Some(ServerEvent::CopyInventoryFromNotecardRequested {
-                notecard_id,
-                object_id,
-                item_id,
-                folder_id,
-            }) => {
-                assert_eq!(notecard_id, notecard);
-                assert_eq!(object_id, Some(object));
-                assert_eq!(item_id, item);
-                assert_eq!(folder_id, None);
+        assert_eq!(
+            caps.dispatch(&mut sim, &post(&path, &body)),
+            CapsDispatch::CopyFromNotecard {
+                notecard_id: notecard,
+                object_id: Some(object),
+                item_id: item,
+                folder_id: None,
             }
-            other => {
-                return Err(
-                    format!("expected CopyInventoryFromNotecardRequested, got {other:?}").into(),
-                );
-            }
-        }
+        );
+        let undefined = SimCaps::copy_from_notecard_response(CopyFromNotecardAnswer::Undefined);
+        assert_eq!(
+            (undefined.status, String::from_utf8(undefined.body)?),
+            (200, "<llsd><undef /></llsd>".to_owned())
+        );
+        let refused = SimCaps::copy_from_notecard_response(CopyFromNotecardAnswer::Refused);
+        assert_eq!((refused.status, refused.body.len()), (400, 0));
         Ok(())
     }
 

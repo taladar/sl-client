@@ -7615,6 +7615,7 @@ mod test {
                 e,
                 Event::TransferFailed {
                     transfer_id: got,
+                    item: Some(_),
                     status: TransferStatus::UnknownSource,
                 } if *got == refused
             )),

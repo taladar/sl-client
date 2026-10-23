@@ -33,6 +33,7 @@ mod map_tiles;
 pub mod marker;
 pub mod messages;
 pub mod neighbours;
+mod notecards;
 mod object_edits;
 mod parcel_edits;
 pub mod relays;

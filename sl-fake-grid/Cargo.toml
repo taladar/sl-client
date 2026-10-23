@@ -30,6 +30,8 @@ parking_lot = { workspace = true }
 sl-avatar = { workspace = true }
 # The central bake service composites with the client's own baker.
 sl-bake = { path = "../sl-bake", version = "0.1.0" }
+# Reading the item a copy out of a notecard is made of.
+sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
 sl-object-asset = { workspace = true }
 sl-proto = { workspace = true }
 sl-test-assets = { workspace = true }

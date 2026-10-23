@@ -151,7 +151,7 @@ byte for byte as a viewer would, apart from the line below.
 | behaviour | Second Life | OpenSim |
 | --- | --- | --- |
 | a resident, by id under the user name (**held**) | kept as sent: agent, the id, the name, flags 0 | the same |
-| a by-name entry (nil id) (**held**) | kept, **written `0 <nil> <name>|` — the flags field empty** | kept, written `…|0` |
+| a by-name entry (nil id) (**held**) | kept, **written `0 <nil> <name>\|` — the flags field empty** | kept, written `…\|0` |
 | an agent id that is nobody, an object, a group, an external entry (**held**) | each kept as sent | the same |
 | the order of the file (**held**) | the order the entries were added | the same |
 | a second mute of the same resident with other flags (**held**) | the entry's flags change; one entry | the same |

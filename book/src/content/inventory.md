@@ -235,6 +235,12 @@ forms:
   when the offer is made and its offer names it; an object's offer names only
   the asset type and is answered with the task dialogs
   ([Grid Behaviour](../gridspec/inventory.md#giving)).
+- **Notecards** — a notecard's body is read through its *item* over the UDP
+  transfer (`FetchInventoryItemAsset`, or `FetchTaskItemAsset` for one in an
+  object's contents): Second Life serves no notecard over `ViewerAsset`. An
+  item embedded in one is copied out with `CopyInventoryFromNotecard`, by the
+  id the saved notecard states — Second Life rewrites an embedded item's id on
+  save ([Grid Behaviour](../gridspec/inventory.md#notecards-and-gestures)).
 - **Links** — `LinkInventoryItem` creates a *link* item that points at an
   existing item **or** folder (the wire `OldItemID`), filed in a destination
   folder. The payload is a `NewInventoryLink`; the simulator allocates the link

@@ -845,20 +845,20 @@ impl GridTest for InventoryMutations {
 
 /// The run's names for the ids its metrics mention.
 #[derive(Debug, Default, Clone)]
-struct Roles {
+pub(crate) struct Roles {
     /// Every id the run has named.
     names: BTreeMap<Uuid, String>,
 }
 
 impl Roles {
     /// Names `id` as `role`.
-    fn name(&mut self, id: Uuid, role: &str) {
+    pub(crate) fn name(&mut self, id: Uuid, role: &str) {
         let _previous = self.names.insert(id, role.to_owned());
     }
 
     /// The role of `id`: its name, `nil`, or `another` for an id the run
     /// never named.
-    fn of(&self, id: Uuid) -> String {
+    pub(crate) fn of(&self, id: Uuid) -> String {
         if id.is_nil() {
             return "nil".to_owned();
         }
@@ -868,8 +868,13 @@ impl Roles {
             .unwrap_or_else(|| "another".to_owned())
     }
 
+    /// Every id the run has named.
+    pub(crate) fn ids(&self) -> Vec<Uuid> {
+        self.names.keys().copied().collect()
+    }
+
     /// The roles of `ids`, sorted and `,`-joined.
-    fn list(&self, ids: impl IntoIterator<Item = Uuid>) -> String {
+    pub(crate) fn list(&self, ids: impl IntoIterator<Item = Uuid>) -> String {
         let mut roles: Vec<String> = ids.into_iter().map(|id| self.of(id)).collect();
         roles.sort_unstable();
         roles.join(",")
@@ -878,9 +883,9 @@ impl Roles {
 
 /// What one window of listening saw.
 #[derive(Debug, Default)]
-struct Heard {
+pub(crate) struct Heard {
     /// The events, in arrival order.
-    events: Vec<Event>,
+    pub(crate) events: Vec<Event>,
     /// The inventory datagrams that arrived on the root circuit, by name.
     datagrams: BTreeSet<&'static str>,
     /// The event-queue events the client does not read.
@@ -889,14 +894,14 @@ struct Heard {
 
 impl Heard {
     /// Adds what `other` saw.
-    fn extend(&mut self, other: Self) {
+    pub(crate) fn extend(&mut self, other: Self) {
         self.events.extend(other.events);
         self.datagrams.extend(other.datagrams);
         self.unhandled.extend(other.unhandled);
     }
 
     /// The messages that arrived, by name and road; `nothing` for none.
-    fn push(&self) -> String {
+    pub(crate) fn push(&self) -> String {
         let mut seen: BTreeSet<String> = self
             .datagrams
             .iter()
@@ -923,7 +928,7 @@ impl Heard {
 
     /// What each inventory message said, ids named by `roles`, sorted and
     /// `; `-joined; `nothing` for none.
-    fn detail(&self, roles: &Roles) -> String {
+    pub(crate) fn detail(&self, roles: &Roles) -> String {
         let mut lines: Vec<String> = self
             .events
             .iter()
@@ -940,7 +945,7 @@ impl Heard {
 
     /// The items the window's creation and bulk-update messages named, with
     /// their names.
-    fn items(&self) -> Vec<InventoryItem> {
+    pub(crate) fn items(&self) -> Vec<InventoryItem> {
         self.events
             .iter()
             .flat_map(|event| match event {
@@ -1045,29 +1050,29 @@ fn describe(event: &Event, roles: &Roles) -> Option<String> {
 
 /// One item as the item fetch states it.
 #[derive(Debug, Clone)]
-struct ItemState {
+pub(crate) struct ItemState {
     /// The folder it is in.
-    parent: Option<Uuid>,
+    pub(crate) parent: Option<Uuid>,
     /// Its name.
-    name: String,
+    pub(crate) name: String,
     /// Its description.
-    description: String,
+    pub(crate) description: String,
     /// Its flags.
-    flags: Option<i64>,
+    pub(crate) flags: Option<i64>,
     /// Its base and owner permission masks.
-    masks: (Option<i64>, Option<i64>),
+    pub(crate) masks: (Option<i64>, Option<i64>),
     /// Its next-owner permission mask.
-    next_mask: Option<i64>,
+    pub(crate) next_mask: Option<i64>,
     /// Its asset id, where it names one.
-    asset: Option<Uuid>,
+    pub(crate) asset: Option<Uuid>,
     /// Its asset type.
-    kind: Option<i64>,
+    pub(crate) kind: Option<i64>,
     /// What a link names as its target.
-    linked: Option<Uuid>,
+    pub(crate) linked: Option<Uuid>,
 }
 
 /// An integer an LLSD value states, as an integer or a string of one.
-fn int_of(value: &Llsd) -> Option<i64> {
+pub(crate) fn int_of(value: &Llsd) -> Option<i64> {
     match value {
         Llsd::Integer(number) => Some(i64::from(*number)),
         Llsd::String(text) => text.trim().parse().ok(),
@@ -1081,7 +1086,7 @@ fn int_of(value: &Llsd) -> Option<i64> {
 }
 
 /// An item entry as an [`ItemState`].
-fn item_state(item: &Llsd) -> ItemState {
+pub(crate) fn item_state(item: &Llsd) -> ItemState {
     let permissions = item.get("permissions");
     let mask = |key: &str| permissions.and_then(|map| map.get(key)).and_then(int_of);
     ItemState {
@@ -1109,7 +1114,7 @@ fn item_state(item: &Llsd) -> ItemState {
 }
 
 /// A permission mask as a metric.
-fn mask_text(mask: Option<i64>) -> String {
+pub(crate) fn mask_text(mask: Option<i64>) -> String {
     mask.map_or_else(|| "none".to_owned(), |mask| format!("{mask:#010x}"))
 }
 
@@ -1487,7 +1492,7 @@ pub(crate) async fn save_text(session: &mut Session, item: Uuid) -> Result<Strin
 }
 
 /// `text` as a NUL-terminated wire string, as the reference packs one.
-fn with_nul(text: &str) -> Vec<u8> {
+pub(crate) fn with_nul(text: &str) -> Vec<u8> {
     let mut bytes = text.as_bytes().to_vec();
     bytes.push(0);
     bytes
@@ -1495,7 +1500,7 @@ fn with_nul(text: &str) -> Vec<u8> {
 
 /// Listens to `session` for `window`, then reads what the circuit probe saw
 /// since `mark`.
-async fn listen_on(session: &mut Session, mark: usize, window: Duration) -> Heard {
+pub(crate) async fn listen_on(session: &mut Session, mark: usize, window: Duration) -> Heard {
     let mut events = Vec::new();
     let _idle = session
         .wait_for(window, |event| {

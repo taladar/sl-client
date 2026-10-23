@@ -91,6 +91,9 @@ pub(crate) struct SimState {
     /// Every account's Current Outfit Folder version, which an
     /// `IncrementCOFVersion` moves ([`crate::bakes::OutfitVersions`]).
     pub(crate) outfit_versions: crate::bakes::OutfitVersions,
+    /// Every account's active gestures, which an `ActivateGestures` and a
+    /// `DeactivateGestures` move ([`crate::notecards::ActiveGestures`]).
+    pub(crate) active_gestures: crate::notecards::ActiveGestures,
     /// What the session knows of its agent's groups: the active one an
     /// `AgentDataUpdate` names, and the powers a deed and a move of a
     /// group's object are checked against ([`crate::groups`]).
@@ -484,6 +487,11 @@ impl SharedSim {
                     hook(&mut state.sim, now);
                 }
             }
+            let _gestures = crate::notecards::answer(
+                (&state.active_gestures, state.avatar.agent_id),
+                &mut state.sim,
+                &event,
+            );
             let _baked = crate::bakes::answer(
                 &mut state.published_bakes,
                 (&state.outfit_versions, state.avatar.agent_id),

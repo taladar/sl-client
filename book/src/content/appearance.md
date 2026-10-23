@@ -93,6 +93,12 @@ pairs the gesture's inventory item id with its asset id) and
 `Command::DeactivateGestures` (by item id). Both are fire-and-forget — there is
 no reply.
 
+Neither grid states the active set later in the session; the next login's
+`gestures` array is where it comes back (Second Life sends it only when the
+login asks for `gestures`, which the client does). The session hands it over
+once as `Event::ActiveGestures`
+([Grid Behaviour](../gridspec/inventory.md#gestures)).
+
 ## Agent state and viewport
 
 Beyond appearance, the viewer keeps the simulator informed about the agent's

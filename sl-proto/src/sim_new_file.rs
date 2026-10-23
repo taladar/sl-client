@@ -209,7 +209,7 @@ fn text(value: &str) -> Llsd {
 
 /// A Second Life refusal: `{ error: { identifier, message, … }, message,
 /// state: "failure" }` under `status`.
-fn second_life_refusal(
+pub(crate) fn second_life_refusal(
     status: u16,
     identifier: &str,
     message: &str,

@@ -453,6 +453,10 @@ pub(crate) struct GridCore {
     /// ([`crate::bakes::OutfitVersions`]): shared with every session, which
     /// stores an `IncrementCOFVersion` into it, and read at each login.
     pub(crate) outfit_versions: crate::bakes::OutfitVersions,
+    /// Each account's active gestures ([`crate::notecards::ActiveGestures`]):
+    /// shared with every session, which files its activations into it, and
+    /// read at each login.
+    pub(crate) active_gestures: crate::notecards::ActiveGestures,
     /// How groups run ([`ImitatedGrid::groups_policy`]).
     pub(crate) groups_policy: crate::groups::GroupsPolicy,
     /// The agent every region reports as its owner: the first account
@@ -809,6 +813,9 @@ impl GridCore {
             // What was given while the avatar was away, filed when it was
             // given as far as the giver could tell.
             crate::gifts::file_held(self, account.agent_id, &mut state.sim);
+            // The gestures the account left active; a grid that honours the
+            // request's options drops them unless they were asked for.
+            success.gestures = self.active_gestures.entries(account.agent_id);
             enrich_success(
                 &mut success,
                 account,
@@ -1123,6 +1130,7 @@ impl GridCore {
             own_appearance_owed: false,
             published_bakes: crate::bakes::PublishedBakes::default(),
             outfit_versions: self.outfit_versions.clone(),
+            active_gestures: self.active_gestures.clone(),
             groups: self
                 .groups
                 .lock()
@@ -2308,6 +2316,7 @@ impl FakeGridBuilder {
             groups: parking_lot::Mutex::new(groups),
             homes: crate::agent_requests::Homes::default(),
             outfit_versions: crate::bakes::OutfitVersions::default(),
+            active_gestures: crate::notecards::ActiveGestures::default(),
             groups_policy,
             estate_owner,
             regions,

@@ -104,6 +104,12 @@ pub struct AssetHttpPolicy {
     /// `Last-Modified`, and a request whose `If-Modified-Since` is that date
     /// is answered `304`. An `If-None-Match` is not honoured either way.
     pub validators: bool,
+    /// The `ViewerAsset` query keys the grid refuses whatever the asset, and
+    /// the status it refuses them with: Second Life serves no notecard over
+    /// HTTP (`notecard_id`, `503` — `book/src/gridspec/inventory.md`
+    /// § Notecards and gestures); a viewer reads one through its item over
+    /// the UDP transfer instead.
+    pub refused_keys: (&'static [&'static str], u16),
 }
 
 impl Default for AssetHttpPolicy {
@@ -115,6 +121,7 @@ impl Default for AssetHttpPolicy {
             unreadable_status: 404,
             answers_post: false,
             validators: false,
+            refused_keys: (&[], 503),
         }
     }
 }
@@ -322,7 +329,15 @@ impl AssetCaps {
             Some(AssetCapHandler::GetMesh) => {
                 query_uuid(request.query, CAP_GET_MESH_KEY).map(|id| (id, MESH_CONTENT_TYPE))
             }
-            Some(AssetCapHandler::ViewerAsset) => viewer_asset_uuid(request.query),
+            Some(AssetCapHandler::ViewerAsset) => {
+                let (refused, status) = self.policy.refused_keys;
+                if request.query.is_some_and(|query| {
+                    query_pairs(query).any(|(key, _value)| refused.contains(&key))
+                }) {
+                    return CapsResponse::status(status);
+                }
+                viewer_asset_uuid(request.query)
+            }
             // Tokens are only minted for served capabilities, so a resolved
             // name always has a handler; answer 404 rather than panic if that
             // invariant is ever broken.
@@ -772,6 +787,7 @@ mod tests {
             unreadable_status: 400,
             answers_post: true,
             validators: false,
+            refused_keys: (&[], 503),
         };
         for (policy, unreadable, post) in
             [(AssetHttpPolicy::default(), 404, 405), (opensim, 400, 200)]
@@ -883,6 +899,30 @@ mod tests {
             body.contains("Content-Range: bytes 20-23/36\r\n\r\nklmn\r\n"),
             "{body}"
         );
+        Ok(())
+    }
+
+    /// A refused key is refused whatever the asset, held or not, while the
+    /// same asset under another key is served.
+    #[test]
+    fn a_refused_key_is_refused_whatever_the_asset() -> Result<(), TestError> {
+        let caps = caps()?.with_http_policy(AssetHttpPolicy {
+            refused_keys: (&["notecard_id"], 503),
+            ..AssetHttpPolicy::default()
+        });
+        let id = Uuid::from_u128(0xad);
+        let source = InMemoryAssetSource::new().with_asset(AssetKey::from(id), vec![1_u8; 4]);
+        let path = granted_path(&caps, CAP_VIEWER_ASSET)?;
+        let refused = caps.dispatch(
+            &source,
+            &get(&path, Some(&format!("notecard_id={id}")), None),
+        );
+        assert_eq!(refused.status, 503);
+        let served = caps.dispatch(
+            &source,
+            &get(&path, Some(&format!("gesture_id={id}")), None),
+        );
+        assert_eq!(served.status, 200);
         Ok(())
     }
 

@@ -984,13 +984,30 @@ fn ingest_region_grid_kind(mut events: MessageReader<SlEvent>, mut grid: ResMut<
     }
 }
 
-/// The gestures activated this session, by inventory item id. Viewer-tracked
-/// (the wire carries no "active gestures" read-back); a gesture activated in a
-/// previous session reads as inactive until toggled.
+/// The account's active gestures, by inventory item id: the login answer's
+/// `gestures` array ([`SlSessionEvent::ActiveGestures`]), then every toggle
+/// this session makes. The login array is the one statement of the set either
+/// grid makes — Second Life keeps no item flag for it, and neither grid
+/// restates it later in the session (`book/src/gridspec/inventory.md`
+/// § Notecards and gestures) — which is also where the reference starts its
+/// gesture manager from.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct ActiveGestures {
-    /// The inventory item ids of gestures activated this session.
+    /// The inventory item ids of the active gestures.
     pub(crate) items: HashSet<InventoryKey>,
+}
+
+/// Seeds [`ActiveGestures`] from the login answer's array. A new login states
+/// the whole set, so it replaces what the last session held.
+fn ingest_active_gestures(
+    mut events: MessageReader<SlEvent>,
+    mut gestures: ResMut<ActiveGestures>,
+) {
+    for event in events.read() {
+        if let SlSessionEvent::ActiveGestures(active) = &event.0 {
+            gestures.items = active.iter().map(|gesture| gesture.item_id).collect();
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3785,6 +3802,7 @@ impl Plugin for InventoryActionsPlugin {
                     // of this frame's objects.
                     sync_worn_attachments,
                     ingest_region_grid_kind,
+                    ingest_active_gestures,
                     // Ahead of the dispatchers: a create pressed on the same
                     // frame a region's caps arrive is answered against that
                     // region, not the one before it.
@@ -3902,6 +3920,58 @@ fn inventory_hotkeys(
         if trashed {
             query_folder_page(trash, &mut commands);
         }
+    }
+}
+
+#[cfg(test)]
+mod active_gesture_tests {
+    use super::{ActiveGestures, ingest_active_gestures};
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{GestureActivation, InventoryKey, SlEvent, SlSessionEvent, Uuid};
+
+    /// A gesture with item id `item`.
+    fn gesture(item: u128) -> GestureActivation {
+        GestureActivation {
+            item_id: InventoryKey::from(Uuid::from_u128(item)),
+            asset_id: Uuid::from_u128(item.wrapping_add(1)),
+        }
+    }
+
+    /// The login answer's array states the whole set: what it names is
+    /// active, and a gesture the last session left active and the new login
+    /// does not name is not.
+    #[test]
+    fn the_login_array_states_the_active_set() {
+        let mut app = App::new();
+        app.add_message::<SlEvent>()
+            .init_resource::<ActiveGestures>()
+            .add_systems(Update, ingest_active_gestures);
+        app.world_mut()
+            .resource_mut::<ActiveGestures>()
+            .items
+            .insert(InventoryKey::from(Uuid::from_u128(0x99)));
+        app.world_mut()
+            .write_message(SlEvent(SlSessionEvent::ActiveGestures(vec![
+                gesture(0x10),
+                gesture(0x20),
+            ])));
+        app.update();
+        let mut active: Vec<InventoryKey> = app
+            .world()
+            .resource::<ActiveGestures>()
+            .items
+            .iter()
+            .copied()
+            .collect();
+        active.sort_unstable();
+        assert_eq!(
+            active,
+            vec![
+                InventoryKey::from(Uuid::from_u128(0x10)),
+                InventoryKey::from(Uuid::from_u128(0x20)),
+            ]
+        );
     }
 }
 

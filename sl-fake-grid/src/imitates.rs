@@ -108,6 +108,11 @@
 //! | how an instant message is passed on ([`im_policy`](ImitatedGrid::im_policy)) | stated by the grid but for the viewer's time; a script's dialog from a viewer dropped; fourteen a second; what the grid says signed "Second Life"; an automatic reply to an avatar that is away kept | as the viewer wrote it, the time now; a script's dialog passed on; no limit; signed "System"; an automatic reply to an avatar that is away refused |
 //! | a teleport offer's lure ([`ImPolicy::lures`](crate::ImPolicy::lures)) | an id the grid holds until its first use or a decline, its bucket naming the place and its rating | the place packed into the id, good for ever |
 //! | an agent's gift ([`gift_policy`](ImitatedGrid::gift_policy)) | filed at the offer; offered under the giver's transaction; a folder's copy announced over the event queue; an answer does nothing; nothing said or kept for an avatar that is away | filed at the offer; offered under the copy's id after a UDP announcement; an answer passed on, a declined copy moved to the Trash; the giver alerted and the offer kept for an avatar that is away |
+//! | a new notecard's and gesture's body (the inventory dialect, `crate::notecards`) | a notecard names no asset until its first save; a gesture the "/hey" default | one zero byte either |
+//! | a notecard over `ViewerAsset` ([`asset_http_policy`](ImitatedGrid::asset_http_policy)) | `503` whatever the asset; read through the item over the UDP transfer | served |
+//! | a saved notecard's embedded items (the inventory dialect) | refused "Internal error from verifier." where the saver holds no item of an embedded asset; each kept item rewritten with a new id and group, everyone and next-owner masks `0x7fffffff`, `0x7fffbfff`, `0x7fffffff` | stored as sent |
+//! | `CopyInventoryFromNotecard` (the inventory dialect, `crate::notecards`) | `200` and an undefined body, copied or not; the copy announced over the event queue | `200` and no body; an item of the agent's under the same id copied as itself; `400` and an alert "Failed to retrieve item" for nothing to copy |
+//! | a gesture's active state (the inventory dialect, `crate::notecards`) | the next login's `gestures` array alone, when asked for | that array, always, and the item's flags bit 1 |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
 //! | the kill a derez sends ([`RezPolicy::derez_kill`]) | one `KillObject` naming every prim of the linkset | two, each naming the root alone |
@@ -1706,12 +1711,15 @@ impl ImitatedGrid {
                 unreadable_status: 404,
                 answers_post: false,
                 validators: true,
+                // No notecard over HTTP (`notecards-gestures`, 2026-10-23).
+                refused_keys: (&["notecard_id"], 503),
             },
             Self::OpenSim => sl_proto::AssetHttpPolicy {
                 ranges: sl_proto::RangeReading::OpenSim,
                 unreadable_status: 400,
                 answers_post: true,
                 validators: false,
+                refused_keys: (&[], 503),
             },
         }
     }

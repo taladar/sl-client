@@ -155,6 +155,7 @@ mod test {
         inventory_fetch => "inventory-fetch" [fake_sl, fake_opensim],
         inventory_mutations => "inventory-mutations" [fake_sl, fake_opensim],
         inventory_offers => "inventory-offers" [fake_sl, fake_opensim],
+        notecards_gestures => "notecards-gestures" [fake_sl, fake_opensim],
         avatar_render_info => "avatar-render-info" [fake_sl, fake_opensim],
         landmarks_home => "landmarks-home" [fake_sl, fake_opensim],
         instant_messages => "instant-messages" [fake_sl, fake_opensim],

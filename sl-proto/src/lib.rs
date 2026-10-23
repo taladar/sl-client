@@ -28,6 +28,7 @@ mod sim_experiences;
 mod sim_groups;
 mod sim_inventory;
 mod sim_new_file;
+mod sim_notecard;
 mod sim_session;
 mod sim_voice;
 mod task_caps;
@@ -160,9 +161,9 @@ pub use session::{
 };
 pub use sim_bake::{BakedItem, BakedOutfit, BakedSlot, WEARABLE_TYPE_COUNT};
 pub use sim_caps::{
-    CapHandler, CapsDispatch, CapsRequest, CapsResponse, DisplayNameStyle, HomeLocationOutcome,
-    HomeLocationStyle, LLSD_XML_CONTENT_TYPE, LlsdLabel, ModifyRegionOutcome, SimCaps,
-    UntrustedMessageOutcome, UntrustedMessageStyle,
+    CapHandler, CapsDispatch, CapsRequest, CapsResponse, CopyFromNotecardAnswer, DisplayNameStyle,
+    HomeLocationOutcome, HomeLocationStyle, LLSD_XML_CONTENT_TYPE, LlsdLabel, ModifyRegionOutcome,
+    SimCaps, UntrustedMessageOutcome, UntrustedMessageStyle,
 };
 pub use sim_experiences::SimExperiences;
 pub use sim_groups::{

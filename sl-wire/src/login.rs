@@ -248,6 +248,9 @@ impl LoginRequest {
                 "inventory-lib-owner".to_owned(),
                 "inventory-skel-lib".to_owned(),
                 "buddy-list".to_owned(),
+                // The account's active gestures, which a viewer cannot learn
+                // any other way on Second Life (`notecards-gestures`).
+                "gestures".to_owned(),
                 "map-server-url".to_owned(),
                 "max-agent-groups".to_owned(),
             ],

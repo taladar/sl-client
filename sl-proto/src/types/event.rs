@@ -12,23 +12,23 @@ use super::{
     DirPeopleResult, DirPlaceResult, DisconnectReason, DisplayNameUpdate, EconomyData,
     EnvironmentSettings, EstateAccessKind, EstateCovenant, EstateInfo, EventInfo, FeatureDisabled,
     FolderInfo, FollowCamPropertyValue, Friend, FriendRights, GenericMessage,
-    GenericStreamingMessage, GroupAccountDetails, GroupAccountSummary, GroupAccountTransactions,
-    GroupActiveProposalItem, GroupBan, GroupMember, GroupMembership, GroupName, GroupNotice,
-    GroupProfile, GroupRole, GroupRoleMember, GroupTitle, GroupVoteHistoryItem, ImDialog,
-    InstantMessage, InventoryCursor, InventoryFolder, InventoryItem, InventoryItemMove, ItemInfo,
-    Kick, LandProduct, LandStatItem, LandStatReportType, LoadUrlRequest, LoginAccount,
-    MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
-    MeanCollision, MeshUploadStatus, MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo,
-    NeighborRetirement, Object, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily,
-    ObjectStreamBatch, OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails,
-    ParcelInfo, ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner,
-    ParcelObjectOwnersPart, ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation,
-    ProfileImage, RegionIdentity, RegionLimits, RegionStats, RequiredVoiceVersion,
-    ScriptCompileError, ScriptControl, ScriptDialog, ScriptPermissionRequest,
-    ScriptPermissionState, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimulatorTime,
-    SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
-    TerrainLayerBatch, TerrainPatch, Texture, ThumbnailTarget, TransferStatus, UserInfo,
-    ViewerEffect, Wearable,
+    GenericStreamingMessage, GestureActivation, GroupAccountDetails, GroupAccountSummary,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupBan, GroupMember, GroupMembership,
+    GroupName, GroupNotice, GroupProfile, GroupRole, GroupRoleMember, GroupTitle,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryCursor, InventoryFolder,
+    InventoryItem, InventoryItemMove, ItemInfo, Kick, LandProduct, LandStatItem,
+    LandStatReportType, LoadUrlRequest, LoginAccount, MapBlockBatch, MapItem, MapItemType,
+    MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision, MeshUploadStatus,
+    MoneyBalance, MuteEntry, NavMeshStatus, NeighborInfo, NeighborRetirement, Object,
+    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ObjectStreamBatch,
+    OpenRegionInfo, ParcelAccessEntry, ParcelAccessScope, ParcelDetails, ParcelInfo,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelObjectOwnersPart,
+    ParcelOverlayInfo, PickInfo, PlacesResult, PlayingAnimation, ProfileImage, RegionIdentity,
+    RegionLimits, RegionStats, RequiredVoiceVersion, ScriptCompileError, ScriptControl,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissionState, ScriptTeleportRequest,
+    ServerError, SetDisplayNameReply, SimulatorTime, SoundFlags, SoundPreload, TaskInventoryItem,
+    TaskInventoryReply, TelehubInfo, TeleportFlags, TerrainLayerBatch, TerrainPatch, Texture,
+    ThumbnailTarget, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
 use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
@@ -1099,6 +1099,25 @@ pub enum Event {
         /// The complete asset bytes.
         data: Vec<u8>,
     },
+    /// An item of the agent's own inventory's asset arrived over the legacy UDP
+    /// Transfer path, in reply to a
+    /// [`Session::fetch_inventory_item_asset`](crate::Session::fetch_inventory_item_asset).
+    InventoryItemAssetReceived {
+        /// The transfer id the fetch returned.
+        transfer_id: TransferId,
+        /// The inventory item whose asset this is.
+        item: InventoryKey,
+        /// The asset type the request named.
+        asset_type: AssetType,
+        /// The complete asset bytes.
+        data: Vec<u8>,
+    },
+    /// The gestures the account left active, from the login answer's
+    /// `gestures` array (asked for with the `gestures` login option; Second
+    /// Life sends it only then). Sent once per login, and only when the
+    /// array names any. Both grids drop a gesture deactivated or removed
+    /// since; neither restates the set later in the session.
+    ActiveGestures(Vec<GestureActivation>),
     /// The estate covenant notecard's asset arrived over the legacy UDP
     /// Transfer path, in reply to a
     /// [`Session::fetch_estate_covenant_asset`](crate::Session::fetch_estate_covenant_asset)
@@ -1122,6 +1141,11 @@ pub enum Event {
     TransferFailed {
         /// The transfer id the fetch returned.
         transfer_id: TransferId,
+        /// The inventory item (the agent's, or a task's) the transfer read, or
+        /// `None` for one that reads no item (the estate covenant) — so a
+        /// consumer that did not keep the transfer id can still tell whose
+        /// fetch failed.
+        item: Option<InventoryKey>,
         /// The failure status the simulator reported.
         status: TransferStatus,
     },

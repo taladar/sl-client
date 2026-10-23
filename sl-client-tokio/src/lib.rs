@@ -2548,6 +2548,18 @@ impl Client {
                                 Instant::now(),
                             )?;
                         }
+                        Some(Command::FetchInventoryItemAsset {
+                            item_id,
+                            asset_id,
+                            asset_type,
+                        }) => {
+                            self.session.fetch_inventory_item_asset(
+                                item_id,
+                                asset_id,
+                                asset_type,
+                                Instant::now(),
+                            )?;
+                        }
                         Some(Command::FetchEstateCovenantAsset) => {
                             self.session.fetch_estate_covenant_asset(Instant::now())?;
                         }

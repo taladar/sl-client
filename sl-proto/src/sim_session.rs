@@ -1872,21 +1872,6 @@ pub enum ServerEvent {
         /// The folder's new version.
         version: i32,
     },
-    /// The client copied an item embedded in a notecard into inventory
-    /// (`CopyInventoryFromNotecard`). Fire-and-forget: the copied item is
-    /// delivered over the normal inventory-update stream, so there is no reply.
-    CopyInventoryFromNotecardRequested {
-        /// The notecard holding the embedded item.
-        notecard_id: InventoryKey,
-        /// The in-world object holding the notecard, or `None` for an
-        /// agent-inventory notecard.
-        object_id: Option<ObjectKey>,
-        /// The embedded item copied.
-        item_id: InventoryKey,
-        /// The destination folder, or `None` to let the simulator pick the
-        /// system folder for the item's type.
-        folder_id: Option<InventoryFolderKey>,
-    },
     /// The client set legacy (normal/specular) materials on object faces via
     /// the `RenderMaterials` PUT. A world mutation — the driver applies it and
     /// echoes the assigned material ids on the faces' texture entries.

@@ -5166,6 +5166,17 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "fetch_inventory_item_asset",
+            usage: "<item_id> <asset_id> <asset_type>",
+            build: |args, ctx| {
+                Ok(Command::FetchInventoryItemAsset {
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 0)?),
+                    asset_id: AssetKey::from(args.req_uuid(ctx, "asset_id", 1)?),
+                    asset_type: enum_arg(args, ctx, "asset_type", 2, parse_asset_type)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "fetch_estate_covenant_asset",
             usage: "",
             build: |_args, _ctx| Ok(Command::FetchEstateCovenantAsset),

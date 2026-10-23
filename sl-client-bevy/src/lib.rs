@@ -4113,6 +4113,13 @@ fn apply_command(
         } => {
             session.fetch_task_item_asset(*task, *item_id, *asset_id, *asset_type, now)?;
         }
+        Command::FetchInventoryItemAsset {
+            item_id,
+            asset_id,
+            asset_type,
+        } => {
+            session.fetch_inventory_item_asset(*item_id, *asset_id, *asset_type, now)?;
+        }
         Command::FetchEstateCovenantAsset => {
             session.fetch_estate_covenant_asset(now)?;
         }

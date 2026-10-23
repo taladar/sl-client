@@ -47,6 +47,9 @@ sl-material = { workspace = true }
 # The upload census sends a model with a physics shape of its own making and
 # a sound in two channels, which the fixture table has no reason to hold.
 sl-mesh = { workspace = true }
+# The notecard census writes and reads embedded items with the viewer's own
+# codec.
+sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
 sl-object-asset = { workspace = true }
 sl-repl = { workspace = true }
 sl-sound = { path = "../sl-sound", version = "0.1.0" }
@@ -54,6 +57,7 @@ sl-sound = { path = "../sl-sound", version = "0.1.0" }
 # asset-round-trip case asserts against the same bodies the grid serves, so
 # neither side can drift from the other.
 sl-test-assets = { workspace = true }
+sl-types = { workspace = true }
 sl-wire = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["formatting", "parsing"] }

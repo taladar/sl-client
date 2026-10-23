@@ -727,6 +727,8 @@ impl Survey {
             | Event::XferAborted { .. }
             | Event::XferDecodeFailed { .. }
             | Event::TaskItemAssetReceived { .. }
+            | Event::InventoryItemAssetReceived { .. }
+            | Event::ActiveGestures(_)
             | Event::EstateCovenantAssetReceived { .. }
             | Event::TransferFailed { .. }
             | Event::UserInfo(..)
