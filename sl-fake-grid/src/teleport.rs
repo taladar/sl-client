@@ -677,33 +677,28 @@ async fn resolve_request(
             lure_id,
             teleport_flags,
         } => {
-            // OpenSim packs the destination into the lure id (a "fake
-            // parcel id": handle + position); an opaque id is taken as
-            // the offering agent's id, landing next to them.
+            // A lure the grid holds (Second Life's, spent here) leads where
+            // its offerer stood; OpenSim packs the destination into the lure
+            // id itself (a "fake parcel id": handle + position), which the
+            // fake grid reads on either flavour, so that a test can name a
+            // destination without an offerer.
             let flags = *teleport_flags | TeleportFlags::VIA_LURE;
-            let place = FakeParcelId::parse(lure_id.get());
-            let target = match place {
-                Some(place) => core.region_by_handle(place.region_handle).map(|region| {
-                    (
-                        region,
-                        RegionCoordinates::new(
-                            f32::from(place.x),
-                            f32::from(place.y),
-                            f32::from(place.z),
-                        ),
-                    )
-                }),
-                None => {
-                    let lurer = sl_types::key::AgentKey::from(lure_id.get());
-                    match core.root_session_of(lurer).await {
-                        Some(shared) => {
-                            let region = shared.state.lock().await.region;
-                            Some((region, ArrivalPlacement::default().position))
-                        }
-                        None => None,
-                    }
-                }
-            };
+            let accepter = source.state.lock().await.avatar.agent_id;
+            let held = core.messages.lock().spend_lure(lure_id.get(), accepter);
+            let place = held.or_else(|| {
+                FakeParcelId::parse(lure_id.get()).map(|place| crate::messages::Place {
+                    region_handle: place.region_handle,
+                    position: RegionCoordinates::new(
+                        f32::from(place.x),
+                        f32::from(place.y),
+                        f32::from(place.z),
+                    ),
+                })
+            });
+            let target = place.and_then(|place| {
+                core.region_by_handle(place.region_handle)
+                    .map(|region| (region, place.position))
+            });
             // A lure the grid cannot honour: OpenSim refuses it as it refuses
             // any region that does not exist, and Second Life says nothing at
             // all — the client's own deadline is what ends that teleport.

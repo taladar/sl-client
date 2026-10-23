@@ -15,6 +15,7 @@ use sl_client_tokio::{AgentKey, Command, Event, ImDialog, InstantMessage, LureId
 use sl_wire::FakeParcelId;
 
 use crate::context::{Session, TestFailure};
+use crate::grid::Grid;
 use crate::metrics::Metrics;
 use crate::support::REPLY_TIMEOUT;
 
@@ -23,6 +24,20 @@ use crate::support::REPLY_TIMEOUT;
 /// when they answer at all; the rest of the window is what makes "nothing" a
 /// measurement.
 pub const NOTICE_WINDOW: Duration = Duration::from_secs(10);
+
+/// [`NOTICE_WINDOW`] on a fake grid, which answers at once when it answers at
+/// all.
+pub const FAKE_NOTICE_WINDOW: Duration = Duration::from_secs(2);
+
+/// How long a case watches an avatar for notices on `grid`.
+#[must_use]
+pub const fn notice_window(grid: Grid) -> Duration {
+    if grid.is_fake() {
+        FAKE_NOTICE_WINDOW
+    } else {
+        NOTICE_WINDOW
+    }
+}
 
 /// Something a grid said to an avatar while a case watched it: an instant
 /// message of any dialog, or an alert.

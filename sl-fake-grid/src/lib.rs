@@ -30,6 +30,7 @@ mod login_endpoint;
 pub mod login_sections;
 mod map_tiles;
 pub mod marker;
+pub mod messages;
 pub mod neighbours;
 mod object_edits;
 mod parcel_edits;
@@ -83,6 +84,7 @@ pub use marker::{
     MARKER_METHOD, NEIGHBOUR_MARKER_PREFIX, marker, marker_name, neighbour_marker,
     neighbour_marker_region,
 };
+pub use messages::{AwayAutoResponse, ImPolicy, Lures, Statement};
 pub use neighbours::NeighbourPolicy;
 pub use relays::{
     EffectsSent, EffectsVetting, OPENSIM_GAZE_RANGE_M, OPENSIM_SOUND_RANGE_M, RelayPolicy,

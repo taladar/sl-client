@@ -868,14 +868,11 @@ mod test {
             .ok_or("expected the offline IM on the client")?;
         assert_eq!(received, stored);
 
-        // Deliver-once: the fetch drained the store, and the answer is still
-        // Second Life's array holding one (now empty) array of records.
+        // Deliver-once: the fetch drained the store, and the answer is then
+        // Second Life's empty array.
         let (status, body) = respond(&mut caps, &mut sim, &get(&path, None))?;
         assert_eq!(status, 200);
-        assert_eq!(
-            parse_llsd_xml(&body)?,
-            Llsd::Array(vec![Llsd::Array(Vec::new())])
-        );
+        assert_eq!(parse_llsd_xml(&body)?, Llsd::Array(Vec::new()));
         Ok(())
     }
 

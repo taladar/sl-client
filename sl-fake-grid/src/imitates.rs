@@ -105,6 +105,8 @@
 //! | who may set home, and what is said ([`home_policy`](ImitatedGrid::home_policy)) | the land's owner; the `HomeLocation` answer echoes the position asked, stored or not, with a refusal keyed `HomeLocationLimits` beside it (`ListValidHomeLocations` over UDP), the same notice left unsaid for 10 s, and `undef` for a body naming no location | the land's owner and an estate manager, anywhere in the region; the answer names the position only when stored, as `text/html`, with plain alerts and "Home position set." keyed `HomePositionSet` |
 //! | a landmark's body and masks ([`HomePolicy::landmark_body`], [`HomePolicy::landmark_masks`]) | the position to two decimals, no handle; masks `0x7fffffff`, everyone `0x7fffbfff` | the position as its floats print, and the region's handle; masks `0x0009e000`, everyone `0x0009a000` |
 //! | the flags beside a home or a landmark teleport's kind ([`TeleportPolicy::kind_flags`]) | none — and within a region no `WITHIN_REGION`, and the kind line all the same | `SET_LAST_TO_TARGET` |
+//! | how an instant message is passed on ([`im_policy`](ImitatedGrid::im_policy)) | stated by the grid but for the viewer's time; a script's dialog from a viewer dropped; fourteen a second; what the grid says signed "Second Life"; an automatic reply to an avatar that is away kept | as the viewer wrote it, the time now; a script's dialog passed on; no limit; signed "System"; an automatic reply to an avatar that is away refused |
+//! | a teleport offer's lure ([`ImPolicy::lures`](crate::ImPolicy::lures)) | an id the grid holds until its first use or a decline, its bucket naming the place and its rating | the place packed into the id, good for ever |
 //!
 //! | an `ObjectDelete` ([`RezPolicy::object_delete`]) | deletes the object, leaving no item | ignored |
 //! | the kill a derez sends ([`RezPolicy::derez_kill`]) | one `KillObject` naming every prim of the linkset | two, each naming the root alone |
@@ -1419,6 +1421,50 @@ impl ImitatedGrid {
                 gaze_camera_range_m: Some(crate::relays::OPENSIM_GAZE_RANGE_M),
                 sound_range_m: Some(crate::relays::OPENSIM_SOUND_RANGE_M),
                 sound_names_a_parent: true,
+            },
+        }
+    }
+
+    /// How this grid passes instant messages, teleport offers and requests on
+    /// — measured by the `instant-messages` conformance case and the
+    /// `teleport-offer-*`, `teleport-request` and `teleport-lure-*` cases on
+    /// aditi and the local OpenSim (2026-10-07 and 2026-10-13,
+    /// `book/src/gridspec/chat.md`, `book/src/gridspec/teleport.md`), and
+    /// tabulated in [`crate::messages`].
+    ///
+    /// Second Life rewrites a message to state the sender, drops a viewer's
+    /// script dialog, suspends a sender after fourteen messages in a second,
+    /// signs what it says "Second Life", keeps an automatic reply to an avatar
+    /// that is away, and holds each lure it passes on until it is spent.
+    /// OpenSim passes on what the viewer wrote with the time now, passes a
+    /// viewer's script dialog on, signs what it says "System", refuses an
+    /// automatic reply to an avatar that is away, and packs the offerer's
+    /// place into the lure id.
+    #[must_use]
+    pub const fn im_policy(self) -> crate::messages::ImPolicy {
+        use crate::messages::{
+            AwayAutoResponse, ImPolicy, Lures, OPENSIM_KEPT_TEXT, OPENSIM_SIGNATURE,
+            SECOND_LIFE_BURST, SECOND_LIFE_KEPT_TEXT, SECOND_LIFE_SIGNATURE,
+            SECOND_LIFE_SUSPENSION, Statement,
+        };
+        match self {
+            Self::SecondLife => ImPolicy {
+                statement: Statement::Rewritten,
+                viewer_from_task_passed_on: false,
+                burst: Some((SECOND_LIFE_BURST, SECOND_LIFE_SUSPENSION)),
+                signature: SECOND_LIFE_SIGNATURE,
+                kept_text: SECOND_LIFE_KEPT_TEXT,
+                away_auto_response: AwayAutoResponse::Kept,
+                lures: Lures::Held,
+            },
+            Self::OpenSim => ImPolicy {
+                statement: Statement::Stamped,
+                viewer_from_task_passed_on: true,
+                burst: None,
+                signature: OPENSIM_SIGNATURE,
+                kept_text: OPENSIM_KEPT_TEXT,
+                away_auto_response: AwayAutoResponse::Refused,
+                lures: Lures::Places,
             },
         }
     }

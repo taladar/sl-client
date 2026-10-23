@@ -221,6 +221,12 @@ pub const OFFLINE_CASES: &[&str] = &[
     "experience-permissions",
     "experience-admin-contributor",
     "marketplace-direct-delivery",
+    "instant-messages",
+    "teleport-offer-accept",
+    "teleport-offer-decline",
+    "teleport-request",
+    "teleport-lure-offline",
+    "teleport-lure-rated",
     "inventory-fetch",
     "inventory-mutations",
     "avatar-render-info",
@@ -234,12 +240,20 @@ pub const OFFLINE_CASES: &[&str] = &[
 /// that it fails: a case that fails on one flavour is a fake grid that does not
 /// yet imitate its live grid, and the fix is the fake grid (or a
 /// [`Measured`](crate::measured::Measured) answer per grid), not a line here.
-pub const SINGLE_FLAVOUR: &[(&str, Grid, &str)] = &[(
-    "asset-round-trip",
-    Grid::FakeOpensim,
-    "its last leg reads back the asset a take authored, which only OpenSim \
-     lets a viewer do; a Second-Life-flavoured grid withholds it, as aditi does",
-)];
+pub const SINGLE_FLAVOUR: &[(&str, Grid, &str)] = &[
+    (
+        "asset-round-trip",
+        Grid::FakeOpensim,
+        "its last leg reads back the asset a take authored, which only OpenSim \
+         lets a viewer do; a Second-Life-flavoured grid withholds it, as aditi does",
+    ),
+    (
+        "teleport-lure-rated",
+        Grid::FakeSl,
+        "OpenSim checks no maturity preference for any teleport and rates no \
+         offer, so a lure into a rated region has nothing to refuse there",
+    ),
+];
 
 /// The grid-side half of a fake-grid run: the simulator a case may talk to as
 /// well as through.

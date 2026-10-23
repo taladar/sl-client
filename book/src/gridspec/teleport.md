@@ -163,6 +163,10 @@ Measured on 2026-10-07 with two avatars on each grid, by:
 - `teleport-lure-rated`, a lure into an Adult region accepted by an avatar
   whose maturity preference is General (aditi only).
 
+Every one of them is also held on the fake grid's flavours: both for all but
+`teleport-lure-rated`, which the Second Life flavour plays with its Moderate
+region.
+
 ### The offer as delivered
 
 | field | Second Life | OpenSim |
@@ -193,7 +197,7 @@ OpenSim's source sends an administrator's offer as dialog 25
 | --- | --- | --- | --- |
 | from within the offerer's region | `TeleportStart`, `TeleportProgress` `completing`, `TeleportLocal`, every one flagged `VIA_LURE` and `WITHIN_REGION` (`0x20004`); 0.18 s | `TeleportStart`, `TeleportLocal`, flagged `VIA_LURE` (`0x04`); a millisecond | each flavour's |
 | from another region | `TeleportStart`, then `completing`, `resolving`, `Sending to destination.`, then the `TeleportFinish`; every one flagged `VIA_LURE`; 0.54 s from a neighbour | `TeleportStart` (`VIA_LURE`), then the `TeleportFinish` (`VIA_LOCATION`), no line; 0.07 s | each flavour's |
-| where the accepter lands | at the position the offer's bucket states | at the position the lure id packs | at the position a lure id packs; an opaque id is read as its offerer's agent id and lands at the centre of the region they are in |
+| where the accepter lands | at the position the offer's bucket states | at the position the lure id packs | where the offerer stood, for a lure the Second Life flavour holds; at the position a lure id packs, on either flavour |
 | which way it faces | towards the region's origin, as after any local teleport there | east | each flavour's |
 | what the offerer is told | nothing: no `IM_LURE_ACCEPTED` (23), no alert, in ten seconds | nothing | nothing |
 
@@ -207,12 +211,12 @@ teleport.
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | whether the decline reaches the offerer | no: nothing arrives in ten seconds | no: only five dialogs of instant message are relayed, and this is not one (source: `InstantMessageModule.OnInstantMessage`) | not relayed |
-| accepting a lure after declining it | **no answer at all** — no start, no failure, no alert; the client's own thirty-second deadline ends it | carried out: the lure is a place and cannot be withdrawn | each flavour's for a lure it cannot resolve; neither holds lures to spend |
-| accepting a lure a second time | no answer at all: a lure is spent by its first use | carried out, every time | as above |
+| accepting a lure after declining it | **no answer at all** — no start, no failure, no alert; the client's own thirty-second deadline ends it | carried out: the lure is a place and cannot be withdrawn | each flavour's: the Second Life flavour's decline spends the lure it holds |
+| accepting a lure a second time | no answer at all: a lure is spent by its first use | carried out, every time | each flavour's |
 | accepting a lure nobody offered | no answer at all | read as a place all the same: `TeleportFailed` over UDP, `The region you tried to teleport to was not found`, sent instead of a start | each flavour's |
-| accepting a lure ten seconds after its offerer logged out | carried out, landing where the offerer stood | carried out | carried out for a place; an opaque id whose offerer is gone gets the flavour's answer to a lure nobody offered |
+| accepting a lure ten seconds after its offerer logged out | carried out, landing where the offerer stood | carried out | carried out |
 | accepting a lure into a region rated above the accepter's maturity preference | refused with a `TeleportFailed` **alone** — no start and no line, unlike a location teleport to the same region — the same sentence and the alert `RegionTPAccessBlocked` with `_region_access` 42; the accepter stays where it was | not provoked (the local regions are all General); the source sends a lure down the path a location teleport takes, which has no such check | each flavour's |
-| an offer to an avatar that is logged out | the offerer is told nothing, and the offer was not there when the avatar logged in twenty seconds of watching later, nor after asking for stored messages | the offerer is told nothing and the offer is not stored (the offline-message module keeps five dialogs, and a lure is not one) | not relayed |
+| an offer to an avatar that is logged out | the offerer is told nothing, and the offer was not there when the avatar logged in twenty seconds of watching later, nor after asking for stored messages | the offerer is told nothing and the offer is not stored (the offline-message module keeps five dialogs, and a lure is not one) | nothing stored, nobody told |
 
 Second Life answering a dead lure with *nothing* is why the client has to
 keep a deadline of its own: a viewer whose Teleport button is pressed on an
@@ -243,10 +247,12 @@ There is no accept or decline for a request, on either grid. A viewer says
 yes by sending an ordinary offer back, which arrives as any offer does, and
 no by sending nothing; the reference's No button is silent.
 
-The fake grid relays no instant message between its sessions yet, so offers,
-declines and requests reach nobody there; a test plays the other avatar
-through the session's own grid-side handle (the roadmap's
-`server-fake-grid-im-relay`).
+The fake grid passes offers and requests on between its sessions as each
+flavour's live grid does, and drops a decline. Its Second Life flavour mints
+a lure id per offer and holds it until its first use or a decline, landing
+the accepter where the offerer stood; its OpenSim flavour packs the
+offerer's place into the id. Both read a packed place on either flavour, so
+a test can name a destination without an avatar to offer it.
 
 ## Neighbours and crossings
 

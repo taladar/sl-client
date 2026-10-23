@@ -6972,10 +6972,14 @@ pub fn parcel_info_to_llsd(info: &ParcelInfo) -> Result<Llsd, sl_wire::WireError
 }
 
 /// Serializes offline IMs as a `ReadOfflineMsgs` capability reply body, as
-/// Second Life answers it: an array holding one array of records (inverse of
-/// `offline_messages_from_llsd`).
+/// Second Life answers it: an array holding one array of records, and an
+/// empty array where nothing is kept (measured on aditi, 2026-10-13 —
+/// `book/src/gridspec/chat.md`). The inverse of `offline_messages_from_llsd`.
 #[must_use]
 pub fn offline_messages_to_llsd(messages: &[InstantMessage]) -> Llsd {
+    if messages.is_empty() {
+        return Llsd::Array(Vec::new());
+    }
     Llsd::Array(vec![Llsd::Array(
         messages.iter().map(offline_message_to_record).collect(),
     )])
@@ -9754,6 +9758,12 @@ mod caps_serializer_tests {
         assert_eq!(
             offline_messages_from_llsd(&offline_messages_to_llsd(&messages)),
             messages
+        );
+        // Nothing kept is an empty array, not an array holding an empty one.
+        assert_eq!(offline_messages_to_llsd(&[]), Llsd::Array(Vec::new()));
+        assert_eq!(
+            offline_messages_from_llsd(&Llsd::Array(Vec::new())),
+            Vec::new()
         );
     }
 

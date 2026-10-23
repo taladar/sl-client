@@ -2,7 +2,7 @@
 id: server-fake-grid-im-relay
 title: Fake grid — relay IMs and offers between its sessions
 topic: server
-status: ready
+status: done
 origin: test-e2e-live-verify-sweep (2026-09-30)
 refs: [test-e2e-sweep-two-avatars, server-message-routing]
 blocked_by: [gridspec-teleport-lures, gridspec-instant-messages]
@@ -99,21 +99,8 @@ it as the friendship offer and the group invitation are kept.
 
 ## From gridspec-group-chat-and-conference (2026-10-15)
 
-Conferences ride the same relay (`book/src/gridspec/chat.md` § A conference;
-the `group-chat` census states both grids' answers). On Second Life's flavour:
-`start conference` over `ChatSessionRequest` answered with a start reply
-moving the client's id onto one the grid mints, named "*starter's name*
-Conference", with voice, and a roster push; the invitees told nothing until
-the first line, which reaches each one who has not accepted as a
-`ChatterBoxInvitation` (dialog 17, `from_group` clear, the conference's name
-as the bucket); after `accept invitation` (`200` `{}`) the lines go over UDP,
-back to the sender too. A decline or a leave ends the lines to that avatar;
-`invite` tells the invitee nothing until it accepts; the conference outlives
-its starter, and a lone speaker is told it is the only participant. A
-conference's `fetch history` answers `403` "You cannot join chat". On
-OpenSim's flavour there are no conferences: nobody is invited, the start gets
-no reply, and each line comes back to its sender alone, as a group line under
-the viewer's id.
+Conferences ride the same road; their measured behaviour moved to
+[[server-fake-grid-group-chat]] on 2026-10-23 (see below).
 
 ## Audit 2026-10-15
 
@@ -122,3 +109,44 @@ specified. Still not built — `ServerEvent::InstantMessage` reaches
 `sl-fake-grid` only in `social.rs` (friendship offers) and `groups.rs`
 (group dialogs); an ordinary message, a lure, a teleport request and typing
 go nowhere. [[server-fake-grid-inventory-offers]] is blocked on this.
+
+## Done (2026-10-23)
+
+`sl-fake-grid/src/messages.rs`: a responder on every session passes a
+viewer's ordinary message, typing, automatic reply, script dialog (OpenSim's
+flavour) and teleport request on to the root session of the avatar it names,
+stated per flavour (`ImPolicy`, `ImitatedGrid::im_policy`): Second Life's
+rewrites name, id, place and bucket and keeps the viewer's time, OpenSim's
+passes them on and stamps the time. Text is cut at 1023 bytes; a message to
+oneself carries the avatar's own id; Second Life's flavour passes fourteen
+messages a second and then suspends the sender for a second (the length is
+not measured) with its notice. A message to an avatar that is away, or to an
+id nobody has, tells the sender as each grid does and is kept (for an
+account) through the friendship store's `keep`, as the message and as
+Second Life's record; an automatic reply to an avatar that is away is kept on
+Second Life's flavour and refused on OpenSim's. The account's
+`UserInfoRequest` is answered (no mail, shown in search) and
+`UpdateUserInfo` stored.
+
+Teleport offers: `SimSession` decodes a `StartLure` as
+`ServerEvent::LureOffered`. Second Life's flavour mints a lure per target,
+holds it (`Messages::spend_lure`) until its first use or a decline, and
+states the place and its rating in the bucket; OpenSim's packs the
+offerer's place into the id. The store replaced the old reading of an
+opaque lure id as its offerer's agent id; a packed place is still read on
+either flavour so a single-client test can name a destination.
+
+`ReadOfflineMsgs` answers an empty array, not an array holding one, where
+nothing is kept, as Second Life does (`cap_asked_again`).
+
+`instant-messages` (both flavours; the script legs and the mute list are
+exempt on the fake grid, which runs no scripts and keeps no mute list),
+`teleport-offer-accept`, `-decline`, `teleport-request`,
+`teleport-lure-offline` (both flavours) and `teleport-lure-rated` (Second
+Life's flavour, with its Moderate region) joined the offline list.
+
+**Not done here, moved:** conferences. They share their machinery —
+`ChatSessionRequest`, `ChatterBoxInvitation`, rosters, accept and leave — with
+group sessions, and the only census that holds them is `group-chat`, which
+needs group sessions on the fake grid before it can run there. Their
+measured behaviour is now part of [[server-fake-grid-group-chat]].

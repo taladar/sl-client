@@ -1,10 +1,10 @@
 ---
 id: server-fake-grid-group-chat
-title: Fake grid — group chat sessions
+title: Fake grid — group chat sessions and conferences
 topic: server
 status: ready
 origin: server-fake-grid-groups (2026-10-15)
-refs: [server-fake-grid-groups, gridspec-group-chat-and-conference]
+refs: [server-fake-grid-groups, gridspec-group-chat-and-conference, server-fake-grid-im-relay]
 blocked_by: [gridspec-group-chat-and-conference]
 ---
 
@@ -58,3 +58,29 @@ exist. The divergences that need a `GroupsPolicy` field:
   from_id, message, num, time }`, the live session's lines in order (not a
   refused one, not an earlier session's); the census also records it empty
   after a burst — imitate that only once what empties it is known.
+
+## Conferences (moved from server-fake-grid-im-relay, 2026-10-23)
+
+The instant-message relay is in (`sl-fake-grid/src/messages.rs`); the
+conferences that ride it were left for this task, which builds the session
+machinery they share with group sessions. As measured by
+gridspec-group-chat-and-conference (2026-10-15):
+
+Conferences ride the same relay (`book/src/gridspec/chat.md` § A conference;
+the `group-chat` census states both grids' answers). On Second Life's flavour:
+`start conference` over `ChatSessionRequest` answered with a start reply
+moving the client's id onto one the grid mints, named "*starter's name*
+Conference", with voice, and a roster push; the invitees told nothing until
+the first line, which reaches each one who has not accepted as a
+`ChatterBoxInvitation` (dialog 17, `from_group` clear, the conference's name
+as the bucket); after `accept invitation` (`200` `{}`) the lines go over UDP,
+back to the sender too. A decline or a leave ends the lines to that avatar;
+`invite` tells the invitee nothing until it accepts; the conference outlives
+its starter, and a lone speaker is told it is the only participant. A
+conference's `fetch history` answers `403` "You cannot join chat". On
+OpenSim's flavour there are no conferences: nobody is invited, the start gets
+no reply, and each line comes back to its sender alone, as a group line under
+the viewer's id.
+
+The `group-chat` census holds both; once it runs on the fake flavours, its
+conference legs are held there too.

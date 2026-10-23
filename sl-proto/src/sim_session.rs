@@ -3123,6 +3123,18 @@ pub enum ServerEvent {
         /// The teleport flags the client echoed (`via lure`, godlike variants).
         teleport_flags: u32,
     },
+    /// The client offered a teleport to each of `targets` (`StartLure`). The
+    /// inverse of the client's
+    /// [`Session::offer_teleport`](crate::Session::offer_teleport). The grid
+    /// passes each target an `IM_LURE_USER` instant message naming a lure.
+    LureOffered {
+        /// The lure type the viewer stated (it sends 0; the grid decides).
+        lure_type: u8,
+        /// The text the offer carries.
+        message: String,
+        /// The avatars offered the teleport.
+        targets: Vec<AgentKey>,
+    },
     /// The client cancelled an in-progress teleport (`TeleportCancel`). The
     /// inverse of the client's
     /// [`Session::cancel_teleport`](crate::Session::cancel_teleport).
@@ -13579,6 +13591,17 @@ impl SimSession {
                 self.events.push_back(ServerEvent::TeleportViaLure {
                     lure_id: LureId::new(request.info.lure_id),
                     teleport_flags: request.info.teleport_flags,
+                });
+            }
+            AnyMessage::StartLure(lure) => {
+                self.events.push_back(ServerEvent::LureOffered {
+                    lure_type: lure.info.lure_type,
+                    message: trimmed_string(&lure.info.message),
+                    targets: lure
+                        .target_data
+                        .iter()
+                        .map(|target| AgentKey::from(target.target_id))
+                        .collect(),
                 });
             }
             AnyMessage::TeleportCancel(_) => {

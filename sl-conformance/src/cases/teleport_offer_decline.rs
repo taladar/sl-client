@@ -7,7 +7,7 @@ use sl_client_tokio::{Command, ImDialog};
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::lure::{
-    NOTICE_WINDOW, offer_and_receive, offered_id, record_im, record_notices, watch_notices,
+    notice_window, offer_and_receive, offered_id, record_im, record_notices, watch_notices,
 };
 use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
@@ -40,7 +40,8 @@ const REUSED_LURE: Measured<&str> = Measured {
 /// A viewer declines an offer with an `ImprovedInstantMessage` of dialog
 /// `IM_LURE_DECLINED` to the offerer, its id the lure id. Whether the grid
 /// passes that on is the first thing measured: the case watches the offerer
-/// for [`NOTICE_WINDOW`] after the decline. Neither grid does.
+/// for [`NOTICE_WINDOW`](crate::lure::NOTICE_WINDOW) after the decline.
+/// Neither grid does.
 ///
 /// The second is what a decline does to the lure itself, and the third whether
 /// a lure can be used more than once. Nothing a viewer does asks either
@@ -52,7 +53,7 @@ const REUSED_LURE: Measured<&str> = Measured {
 /// Both avatars stand in one region, so each acceptance that works is a local
 /// teleport.
 ///
-/// `2av`.
+/// `2av`, and both fake flavours.
 #[derive(Debug)]
 pub struct TeleportOfferDecline;
 
@@ -66,7 +67,7 @@ impl GridTest for TeleportOfferDecline {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {
@@ -87,11 +88,12 @@ impl GridTest for TeleportOfferDecline {
             secondary.wait_for_region(REGION_TIMEOUT).await?;
             let primary_id = crate::lure::agent_id(primary, "offerer")?;
             let secondary_id = crate::lure::agent_id(secondary, "accepter")?;
+            let window = notice_window(grid);
 
             let message = format!("sl-conformance teleport-offer-decline {primary_id}");
             let offer = offer_and_receive(primary, secondary, &message).await?;
             // Anything the offer itself provoked is not the decline's.
-            let before_decline = watch_notices(primary, NOTICE_WINDOW).await?;
+            let before_decline = watch_notices(primary, window).await?;
 
             secondary
                 .send(Command::DeclineTeleportLure {
@@ -99,8 +101,8 @@ impl GridTest for TeleportOfferDecline {
                     lure_id: offered_id(&offer),
                 })
                 .await?;
-            let offerer_after_decline = watch_notices(primary, NOTICE_WINDOW).await?;
-            let decliner_after_decline = watch_notices(secondary, NOTICE_WINDOW).await?;
+            let offerer_after_decline = watch_notices(primary, window).await?;
+            let decliner_after_decline = watch_notices(secondary, window).await?;
             let decline_reached = offerer_after_decline
                 .iter()
                 .any(|notice| notice.is_im(ImDialog::LureDeclined, secondary_id));
@@ -112,7 +114,7 @@ impl GridTest for TeleportOfferDecline {
                 })
                 .await?;
             let declined = watch_teleport(secondary, REGION_TIMEOUT).await?;
-            let offerer_after_accept = watch_notices(primary, NOTICE_WINDOW).await?;
+            let offerer_after_accept = watch_notices(primary, window).await?;
 
             // A second offer, accepted, and then accepted again.
             let message = format!("sl-conformance teleport-offer-decline again {primary_id}");

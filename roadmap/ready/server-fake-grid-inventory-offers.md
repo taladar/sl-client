@@ -2,7 +2,7 @@
 id: server-fake-grid-inventory-offers
 title: Fake grid — inventory offers, filing and object gives
 topic: server
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey]
 blocked_by: [gridspec-inventory-offers, server-fake-grid-im-relay]

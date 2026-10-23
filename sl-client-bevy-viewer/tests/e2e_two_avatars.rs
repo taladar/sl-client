@@ -414,11 +414,8 @@ mod test {
                         .await?;
                     answer_offer(alpha, "Accept").await?;
                     let _offered = grid_hears(&mut heard, "answering offer", |event| {
-                        matches!(event, ServerEvent::ClientMessage(message)
-                            if matches!(&**message, AnyMessage::StartLure(offer)
-                                if offer.target_data.len() == 1
-                                    && offer.target_data.iter().all(|target|
-                                        target.target_id == stranger.uuid())))
+                        matches!(event, ServerEvent::LureOffered { targets, .. }
+                            if targets.as_slice() == [stranger])
                     })
                     .await?;
 
@@ -1929,11 +1926,12 @@ mod test {
 
     // ---- Live grids -------------------------------------------------------
 
-    /// What only a live grid does yet: two viewers seeing each other and
-    /// their messages reaching each other.
+    /// What only a live grid does yet: two viewers seeing each other. Their
+    /// messages reach each other on the fake grid too since
+    /// `server-fake-grid-im-relay`; their avatars do not.
     const RELAYED: Need = Need::LiveGrid(
         "two viewers that see each other's avatars and reach each other \
-         (server-fake-grid-agent-avatars-shared, server-fake-grid-im-relay)",
+         (server-fake-grid-agent-avatars-shared)",
     );
 
     /// How long a live grid may take to tell one viewer what another did.

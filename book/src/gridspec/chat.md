@@ -158,9 +158,14 @@ Measured on 2026-10-13 by the conformance case `instant-messages`: three
 runs on aditi (Mauve) and four on the local OpenSim, the last of each held
 to 95 answers. Avatar **A** writes and owns a probe prim; avatar **B** is
 written to, mutes A for a while, and logs out three times to be written to
-while away. No answer changed between two runs. The fake grid passes no
-instant message on yet (`server-fake-grid-im-relay`), so the table has no
-column for it.
+while away. No answer changed between two runs.
+
+The fake grid passes instant messages on as each flavour's live grid does
+(`sl-fake-grid`'s `messages` module), and both fake flavours are held to the
+census on every test run — but for a script's messages, since the fake grid
+runs no scripts, and the mute list, which it does not keep
+(`server-fake-grid-mute-list`). How long Second Life's suspension after a
+burst lasts is not measured; the fake grid's lasts a second.
 
 ### What a message says of itself
 

@@ -10,7 +10,7 @@ use sl_client_tokio::{Command, GridCoordinates, RegionHandle, TeleportFlags};
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::lure::{
-    NOTICE_WINDOW, id_kind, offer_and_receive, offered_id, record_im, record_notices, watch_notices,
+    id_kind, notice_window, offer_and_receive, offered_id, record_im, record_notices, watch_notices,
 };
 use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
@@ -113,10 +113,11 @@ const OFFER_HAS_BUCKET: Measured<bool> = Measured {
 /// The offerer (the primary) stays put; the accepter (the secondary) accepts
 /// once standing beside it, teleports to a neighbouring region, and accepts a
 /// second offer from there. After each acceptance the case watches the offerer
-/// for [`NOTICE_WINDOW`], since what a grid tells the *offerer* about an
-/// accepted lure is one of the things being measured.
+/// for [`NOTICE_WINDOW`](crate::lure::NOTICE_WINDOW), since what a grid
+/// tells the *offerer* about an accepted lure is one of the things being
+/// measured.
 ///
-/// `2av`.
+/// `2av`, and both fake flavours.
 #[derive(Debug)]
 pub struct TeleportOfferAccept;
 
@@ -130,7 +131,7 @@ impl GridTest for TeleportOfferAccept {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {
@@ -158,13 +159,14 @@ impl GridTest for TeleportOfferAccept {
             })?;
             let started_together = secondary.region_handle() == Some(offerer_region);
             let primary_id = crate::lure::agent_id(primary, "offerer")?;
+            let window = notice_window(grid);
 
             // --- The first offer, as the avatars stand.
             let message = format!("sl-conformance teleport-offer-accept first {primary_id}");
             let offered_at = Instant::now();
             let first_offer = offer_and_receive(primary, secondary, &message).await?;
             let offer_rtt = offered_at.elapsed();
-            let offerer_after_offer = watch_notices(primary, NOTICE_WINDOW).await?;
+            let offerer_after_offer = watch_notices(primary, window).await?;
 
             let accepted_at = Instant::now();
             secondary
@@ -175,8 +177,8 @@ impl GridTest for TeleportOfferAccept {
             let first = watch_teleport(secondary, REGION_TIMEOUT).await?;
             let first_rtt = accepted_at.elapsed();
             let after_first = secondary.region_handle();
-            let offerer_after_accept = watch_notices(primary, NOTICE_WINDOW).await?;
-            let accepter_after_accept = watch_notices(secondary, NOTICE_WINDOW).await?;
+            let offerer_after_accept = watch_notices(primary, window).await?;
+            let accepter_after_accept = watch_notices(secondary, window).await?;
 
             // --- The accepter steps into the region next door, and is offered
             // a teleport back.
@@ -190,7 +192,7 @@ impl GridTest for TeleportOfferAccept {
             // waiting to see the agent settle in the new one, finds it gone
             // again, and fails the *first* teleport twenty-five seconds later
             // while the second hangs.
-            let settling = watch_notices(secondary, NOTICE_WINDOW).await?;
+            let settling = watch_notices(secondary, window).await?;
 
             let message = format!("sl-conformance teleport-offer-accept second {primary_id}");
             let second_offer = offer_and_receive(primary, secondary, &message).await?;
@@ -203,7 +205,7 @@ impl GridTest for TeleportOfferAccept {
             let second = watch_teleport(secondary, REGION_TIMEOUT).await?;
             let second_rtt = accepted_at.elapsed();
             let after_second = secondary.region_handle();
-            let offerer_after_second = watch_notices(primary, NOTICE_WINDOW).await?;
+            let offerer_after_second = watch_notices(primary, window).await?;
 
             let metrics = ctx.metrics();
             metrics.set("started_together", started_together);

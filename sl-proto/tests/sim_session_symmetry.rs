@@ -474,7 +474,6 @@ mod test {
         "RequestImage",
         "RetrieveInstantMessages",
         "ScriptDialogReply",
-        "StartLure",
         "GodKickUser",
         "GodlikeMessage",
         "GenericMessage",
@@ -511,7 +510,6 @@ mod test {
         "RequestImage",
         "RetrieveInstantMessages",
         "ScriptDialogReply",
-        "StartLure",
         "GodKickUser",
         "GodlikeMessage",
         "GenericMessage",
@@ -724,11 +722,6 @@ mod test {
             ChatChannel(-1234),
             1,
             "No",
-            now,
-        )?;
-        client.offer_teleport(
-            &[AgentKey::from(uuid::Uuid::from_u128(0xA2))],
-            "come over",
             now,
         )?;
         client.god_kick_user(
@@ -1068,6 +1061,33 @@ mod test {
             .ok_or("expected a TeleportViaLure server event")?;
         assert_eq!(lure_id, LureId::from(lure));
         assert_ne!(flags & sl_proto::TeleportFlags::VIA_LURE, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn offering_a_teleport_surfaces_lure_offered() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let targets = [
+            AgentKey::from(uuid::Uuid::from_u128(0xA2)),
+            AgentKey::from(uuid::Uuid::from_u128(0xA3)),
+        ];
+
+        client.offer_teleport(&targets, "come over", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_server(&mut sim);
+        let offered = events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::LureOffered {
+                    lure_type,
+                    message,
+                    targets,
+                } => Some((*lure_type, message.clone(), targets.clone())),
+                _ => None,
+            })
+            .ok_or("expected a LureOffered server event")?;
+        assert_eq!(offered, (0, "come over".to_owned(), targets.to_vec()));
         Ok(())
     }
 

@@ -5,10 +5,10 @@ use sl_client_tokio::{Command, RegionHandle};
 use super::teleport_access_refused::{
     ADITI_RATED_REGION, REFUSAL_ALERT, set_preference, stated_preference,
 };
-use crate::context::{TestContext, TestFailure};
+use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::lure::{
-    NOTICE_WINDOW, bucket_text, offer_and_receive, offered_id, record_im, record_notices,
+    bucket_text, notice_window, offer_and_receive, offered_id, record_im, record_notices,
     watch_notices,
 };
 use crate::registry::{GridTest, TestFuture};
@@ -21,6 +21,10 @@ const GENERAL_REGION: &str = "Ahern";
 
 /// Where the accepter asks to land there.
 const GENERAL_SPOT: (f32, f32, f32) = (128.0, 128.0, 40.0);
+
+/// Where the offerer asks to land in the rated region on a fake grid, whose
+/// avatars all log in at its General start region.
+const RATED_SPOT: (f32, f32, f32) = (128.0, 128.0, 30.0);
 
 /// Offers a teleport from a region rated Adult to an avatar whose maturity
 /// preference is General, and has it accept.
@@ -38,7 +42,8 @@ const GENERAL_SPOT: (f32, f32, f32) = (128.0, 128.0, 40.0);
 ///
 /// `2av`. Second Life only: OpenSim does not check the preference for any
 /// kind of teleport (`teleport-access-refused`), and its offers carry no
-/// rating.
+/// rating. The Second Life fake flavour plays it with its regions: the offerer
+/// teleports to its Moderate one, and the accepter waits where both logged in.
 #[derive(Debug)]
 pub struct TeleportLureRated;
 
@@ -52,26 +57,37 @@ impl GridTest for TeleportLureRated {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Aditi]
+        &[Grid::Aditi, Grid::FakeSl]
     }
 
     fn accounts(&self) -> u8 {
         2
     }
 
-    fn start_location(&self, _grid: Grid) -> &'static str {
-        "uri:Mauve&128&128&30"
+    fn start_location(&self, grid: Grid) -> &'static str {
+        if grid.is_fake() {
+            "last"
+        } else {
+            "uri:Mauve&128&128&30"
+        }
     }
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
+            let grid = ctx.grid();
+            let (rated_region, general_region) = if grid.is_fake() {
+                (crate::fake::FAR_REGION, crate::fake::START_REGION)
+            } else {
+                (ADITI_RATED_REGION, GENERAL_REGION)
+            };
             let (primary, secondary) = ctx.primary_and_secondary().ok_or_else(|| {
                 TestFailure::Assertion("two-account test ran without a secondary".to_owned())
             })?;
             primary.wait_for_region(REGION_TIMEOUT).await?;
             secondary.wait_for_region(REGION_TIMEOUT).await?;
-            let rated = region_named(primary, ADITI_RATED_REGION).await?;
+            let rated = region_named(primary, rated_region).await?;
             let rated_handle = RegionHandle::from(rated.grid_coordinates);
+            go_to(primary, rated_handle, RATED_SPOT, "the offerer").await?;
             check_eq(
                 "the offerer's region",
                 &primary.region_handle(),
@@ -81,14 +97,9 @@ impl GridTest for TeleportLureRated {
 
             // The accepter leaves for a General region and lowers its
             // preference there.
-            let general = region_named(secondary, GENERAL_REGION).await?;
+            let general = region_named(secondary, general_region).await?;
             let general_handle = RegionHandle::from(general.grid_coordinates);
-            request_teleport(secondary, general_handle, GENERAL_SPOT, (1.0, 0.0, 0.0)).await?;
-            let away = watch_teleport(secondary, REGION_TIMEOUT).await?;
-            check(
-                away.arrival.is_some(),
-                "the accepter did not reach the General region",
-            )?;
+            go_to(secondary, general_handle, GENERAL_SPOT, "the accepter").await?;
             let before = stated_preference(secondary);
             let lowered = set_preference(secondary, "PG").await?;
             check_eq("lowered_preference", &lowered.as_deref(), &Some("PG"))?;
@@ -106,7 +117,7 @@ impl GridTest for TeleportLureRated {
                 }
                 Err(_unoffered) => None,
             };
-            let accepter_after = watch_notices(secondary, NOTICE_WINDOW).await;
+            let accepter_after = watch_notices(secondary, notice_window(grid)).await;
 
             // The preference goes back whatever happened.
             let restore_to = before.as_deref().unwrap_or("M");
@@ -130,9 +141,10 @@ impl GridTest for TeleportLureRated {
 
             // The offer names its destination's rating.
             let bucket = bucket_text(&offer);
+            let rating = rated.maturity.to_login_access().unwrap_or("none");
             check(
-                bucket.trim_end().ends_with("|A"),
-                &format!("the offer's bucket does not rate its destination Adult: {bucket:?}"),
+                bucket.trim_end().ends_with(&format!("|{rating}")),
+                &format!("the offer's bucket does not rate its destination {rating}: {bucket:?}"),
             )?;
             // And the grid refuses the accepter as it refuses a teleport to the
             // same place asked for by location.
@@ -158,4 +170,23 @@ impl GridTest for TeleportLureRated {
             check_eq("region after the refusal", &now_in, &Some(general_handle))
         })
     }
+}
+
+/// Teleports `session` to `spot` in the region `handle`, unless it stands in
+/// that region already.
+async fn go_to(
+    session: &mut Session,
+    handle: RegionHandle,
+    spot: (f32, f32, f32),
+    who: &str,
+) -> Result<(), TestFailure> {
+    if session.region_handle() == Some(handle) {
+        return Ok(());
+    }
+    request_teleport(session, handle, spot, (1.0, 0.0, 0.0)).await?;
+    let trace = watch_teleport(session, REGION_TIMEOUT).await?;
+    check(
+        trace.arrival.is_some(),
+        &format!("{who} did not reach the region it was sent to"),
+    )
 }

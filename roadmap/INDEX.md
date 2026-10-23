@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 337 |
-| blocked | 79 |
+| blocked | 78 |
 | in-progress | 19 |
 | bugs | 37 |
-| done | 1413 |
+| done | 1414 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2072** |
@@ -1093,11 +1093,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid — god tools as OpenSim answers them (blocked by `gridspec-god-tools`
   (done))
 - [`server-fake-grid-group-chat`](ready/server-fake-grid-group-chat.md) — Fake
-  grid — group chat sessions (blocked by `gridspec-group-chat-and-conference`
-  (done))
-- [`server-fake-grid-im-relay`](ready/server-fake-grid-im-relay.md) — Fake grid
-  — relay IMs and offers between its sessions (blocked by
-  `gridspec-teleport-lures` (done), `gridspec-instant-messages` (done))
+  grid — group chat sessions and conferences (blocked by
+  `gridspec-group-chat-and-conference` (done))
+- [`server-fake-grid-inventory-offers`](ready/server-fake-grid-inventory-offers.md)
+  — Fake grid — inventory offers, filing and object gives (blocked by
+  `gridspec-inventory-offers` (done), `server-fake-grid-im-relay` (done))
 - [`server-fake-grid-inventory-persists-across-logins`](ready/server-fake-grid-inventory-persists-across-logins.md)
   — Fake grid — keep an account's inventory, versions included, from one login
   to the next (blocked by `gridspec-inventory-fetch` (done))
@@ -1159,7 +1159,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (79)
+## blocked (78)
 
 ### viewer
 
@@ -1293,9 +1293,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### server
 
-- [`server-fake-grid-inventory-offers`](blocked/server-fake-grid-inventory-offers.md)
-  — Fake grid — inventory offers, filing and object gives (blocked by
-  `gridspec-inventory-offers` (done), `server-fake-grid-im-relay`)
 - [`server-fake-grid-parcel-access-enforcement`](blocked/server-fake-grid-parcel-access-enforcement.md)
   — Fake grid — enforce parcel access and push ban lines (blocked by
   `gridspec-parcel-access-and-ban-lines` (done),
@@ -1566,7 +1563,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1413)
+## done (1414)
 
 ### protocol
 
@@ -4548,6 +4545,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-groups`](done/server-fake-grid-groups.md) — Fake grid — a
   group store: membership, roles, notices, invitations and group sessions
   (blocked by `gridspec-groups` (done))
+- [`server-fake-grid-im-relay`](done/server-fake-grid-im-relay.md) — Fake grid —
+  relay IMs and offers between its sessions (blocked by
+  `gridspec-teleport-lures` (done), `gridspec-instant-messages` (done))
 - [`server-fake-grid-inventory-udp-mutations`](done/server-fake-grid-inventory-udp-mutations.md)
   — Fake grid — the UDP inventory mutations, Trash gating and pushes (blocked by
   `gridspec-inventory-mutations` (done))

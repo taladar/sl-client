@@ -25,8 +25,10 @@
 //! a friend went when its last session closes, a logout or the circuit's
 //! timeout alike.
 //!
-//! Not modelled: a friendship across grids, the edit right in use, and every
-//! kept message but a friendship offer (`server-fake-grid-im-relay`).
+//! The store of what is kept for an avatar that is away is the one every kept
+//! message goes into: [`crate::messages`] keeps the instant messages there.
+//!
+//! Not modelled: a friendship across grids and the edit right in use.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
@@ -243,7 +245,7 @@ impl Social {
 
 /// The session of two avatars: the exclusive-or of their ids, which both live
 /// grids state as the id of what passes between them.
-fn session_of(one: AgentKey, other: AgentKey) -> Uuid {
+pub(crate) fn session_of(one: AgentKey, other: AgentKey) -> Uuid {
     let mut session = [0_u8; 16];
     for ((byte, left), right) in session
         .iter_mut()

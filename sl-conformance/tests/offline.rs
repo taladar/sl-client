@@ -98,6 +98,11 @@ mod test {
         teleport_cancel => "teleport-cancel" [fake_sl, fake_opensim],
         teleport_access_refused => "teleport-access-refused" [fake_sl, fake_opensim],
         teleport_lure_unknown => "teleport-lure-unknown" [fake_sl, fake_opensim],
+        teleport_offer_accept => "teleport-offer-accept" [fake_sl, fake_opensim],
+        teleport_offer_decline => "teleport-offer-decline" [fake_sl, fake_opensim],
+        teleport_request => "teleport-request" [fake_sl, fake_opensim],
+        teleport_lure_offline => "teleport-lure-offline" [fake_sl, fake_opensim],
+        teleport_lure_rated => "teleport-lure-rated" [fake_sl],
         region_crossing => "region-crossing" [fake_sl, fake_opensim],
         neighbour_child_circuits => "neighbour-child-circuits" [fake_sl, fake_opensim],
         draw_distance => "draw-distance" [fake_sl, fake_opensim],
@@ -151,6 +156,7 @@ mod test {
         inventory_mutations => "inventory-mutations" [fake_sl, fake_opensim],
         avatar_render_info => "avatar-render-info" [fake_sl, fake_opensim],
         landmarks_home => "landmarks-home" [fake_sl, fake_opensim],
+        instant_messages => "instant-messages" [fake_sl, fake_opensim],
     }
 
     /// The tests declared above are exactly the offline cases, each on exactly

@@ -8,7 +8,7 @@ use sl_client_tokio::{Command, Event, ImDialog};
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::lure::{
-    NOTICE_WINDOW, Notice, offer_and_receive, offered_id, record_im, record_notices, watch_notices,
+    Notice, notice_window, offer_and_receive, offered_id, record_im, record_notices, watch_notices,
 };
 use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
@@ -22,9 +22,15 @@ const SOURCE: &str = "book/src/gridspec/teleport.md (teleport-lure-offline, 2026
 /// for a grid to have noticed.
 const GONE_FOR: Duration = Duration::from_secs(10);
 
+/// [`GONE_FOR`] on a fake grid, which notices at once.
+const FAKE_GONE_FOR: Duration = Duration::from_secs(1);
+
 /// How long the returning avatar is watched for a stored offer after each
 /// thing that might bring one: arriving, and asking for stored messages.
 const STORED_WINDOW: Duration = Duration::from_secs(20);
+
+/// [`STORED_WINDOW`] on a fake grid, which answers at once when it answers.
+const FAKE_STORED_WINDOW: Duration = Duration::from_secs(3);
 
 /// The whole case, which on Second Life waits out a login cooldown in the
 /// middle.
@@ -55,12 +61,13 @@ const STORED_OFFER_DELIVERED: Measured<bool> = Measured {
 ///    Life's outlives the session that made it too, and lands the accepter
 ///    where the offerer stood.
 /// 3. The secondary offers the absent primary a teleport and is watched for
-///    [`NOTICE_WINDOW`]: an instant message to somebody offline is answered
-///    with a line saying it was stored, and an offer may or may not be.
+///    [`NOTICE_WINDOW`](crate::lure::NOTICE_WINDOW): an instant message to
+///    somebody offline is answered with a line saying it was stored, and an
+///    offer may or may not be.
 /// 4. The primary logs back in and is watched for the offer — first for what
 ///    the grid delivers on its own, then after asking for stored messages.
 ///
-/// `2av`.
+/// `2av`, and both fake flavours.
 #[derive(Debug)]
 pub struct TeleportLureOffline;
 
@@ -74,7 +81,7 @@ impl GridTest for TeleportLureOffline {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {
@@ -99,12 +106,17 @@ impl GridTest for TeleportLureOffline {
             secondary.wait_for_region(REGION_TIMEOUT).await?;
             let primary_id = crate::lure::agent_id(primary, "offerer")?;
             let secondary_id = crate::lure::agent_id(secondary, "accepter")?;
+            let (gone_for, stored_window) = if grid.is_fake() {
+                (FAKE_GONE_FOR, FAKE_STORED_WINDOW)
+            } else {
+                (GONE_FOR, STORED_WINDOW)
+            };
 
             // --- A lure whose offerer has gone.
             let message = format!("sl-conformance teleport-lure-offline {primary_id}");
             let offer = offer_and_receive(primary, secondary, &message).await?;
             primary.disconnect().await?;
-            tokio::time::sleep(GONE_FOR).await;
+            tokio::time::sleep(gone_for).await;
             secondary
                 .send(Command::AcceptTeleportLure {
                     lure_id: offered_id(&offer),
@@ -121,7 +133,7 @@ impl GridTest for TeleportLureOffline {
                     message: stored_message.clone(),
                 })
                 .await?;
-            let offerer_of_absent = watch_notices(secondary, NOTICE_WINDOW).await?;
+            let offerer_of_absent = watch_notices(secondary, notice_window(grid)).await?;
 
             // --- The absent one returns.
             primary.relogin().await?;
@@ -129,13 +141,13 @@ impl GridTest for TeleportLureOffline {
                 primary.is_connected(),
                 "the offerer should be connected after its relogin",
             )?;
-            let mut on_return = watch_notices(primary, STORED_WINDOW).await?;
+            let mut on_return = watch_notices(primary, stored_window).await?;
             let delivered_unasked = holds_offer(&on_return, secondary_id, &stored_message);
             // Both ways of asking: the capability where the grid grants it, and
             // the UDP trigger the client falls back to where it does not.
             primary.send(Command::RequestOfflineMessages).await?;
             primary.send(Command::RetrieveInstantMessages).await?;
-            let after_asking = watch_notices(primary, STORED_WINDOW).await?;
+            let after_asking = watch_notices(primary, stored_window).await?;
             let delivered_asked = holds_offer(&after_asking, secondary_id, &stored_message);
             on_return.extend(after_asking);
             // Leave the region as it was found: nothing waits on this.

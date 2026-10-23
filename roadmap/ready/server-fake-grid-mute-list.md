@@ -38,3 +38,9 @@ Implement the behaviour the discovery task measured and the book's
 `sl-fake-grid/src/imitates.rs` for every divergence), and hold it to the
 measurement with the discovery task's conformance cases run against
 `FakeSl` and `FakeOpensim`. See `roadmap/context/gridspec.md`.
+
+## From server-fake-grid-im-relay (2026-10-23)
+
+`instant-messages` runs on both fake flavours with
+`mute_list_after_the_mute` exempt (its `FAKE_EXEMPT`, naming this task):
+take it out of that list once the store answers `MuteListRequest`.

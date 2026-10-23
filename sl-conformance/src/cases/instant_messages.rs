@@ -41,9 +41,10 @@
 //! What each live grid answered is stated as a [`Measured`] and written up in
 //! `book/src/gridspec/chat.md` § Instant messages; every run is held to it.
 //!
-//! `2av`, `[both]`. The fake grid passes no instant message on yet
-//! (`server-fake-grid-im-relay`). The cube is derezzed to the Trash, also
-//! when a leg fails, and B's mute of A is taken back.
+//! `2av`, `[both]`, and both fake flavours, which run no script: there the
+//! cube is not rezzed, the script's legs are not asked, and the metrics in
+//! `FAKE_EXEMPT` are not held. The cube is derezzed to the Trash, also when
+//! a leg fails, and B's mute of A is taken back.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -94,6 +95,28 @@ const LONG_SCRIPT_BYTES: usize = 1500;
 /// How long the long message is that is sent to an avatar that is away, in
 /// bytes.
 const LONG_AWAY_BYTES: usize = 2000;
+
+/// How long a fake grid is given to drop an avatar that logged out: it does
+/// at once.
+const FAKE_AWAY_SETTLE: Duration = Duration::from_secs(1);
+
+/// How long an avatar that came back to a fake grid is left alone.
+const FAKE_UNASKED_WINDOW: Duration = Duration::from_secs(3);
+
+/// How long an avatar waits on a fake grid for what it asked for.
+const FAKE_FETCH_WINDOW: Duration = Duration::from_secs(3);
+
+/// How long after the last kept message a fetch from a fake grid is still
+/// listened to.
+const FAKE_FETCH_QUIET: Duration = Duration::from_secs(1);
+
+/// How long a fake grid is given to act on a mute, and to answer for the mute
+/// list.
+const FAKE_MUTE_SETTLE: Duration = Duration::from_millis(500);
+
+/// How long the capability map may take to arrive after a login on a fake
+/// grid.
+const FAKE_CAP_WAIT: Duration = Duration::from_secs(3);
 
 /// The pause between two commands of one leg.
 const BETWEEN: Duration = Duration::from_millis(150);
@@ -708,6 +731,80 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         ),
     ),
 ];
+
+/// The metrics a fake flavour is not held to, by prefix or whole name, each
+/// with why.
+const FAKE_EXEMPT: &[(&str, &str)] = &[
+    ("script_im_", "the fake grid runs no scripts"),
+    ("muted_script_im_", "the fake grid runs no scripts"),
+    ("away_script_", "the fake grid runs no scripts"),
+    ("udp_script", "the fake grid runs no scripts"),
+    ("cap_script", "the fake grid runs no scripts"),
+    ("client_script", "the fake grid runs no scripts"),
+    (
+        "mute_list_after_the_mute",
+        "the fake grid keeps no mute list (server-fake-grid-mute-list)",
+    ),
+];
+
+/// Why `grid` is not held to the metric `key`, if it is a fake flavour and
+/// [`FAKE_EXEMPT`] names the metric.
+fn fake_exemption(grid: Grid, key: &str) -> Option<&'static str> {
+    if !grid.is_fake() {
+        return None;
+    }
+    FAKE_EXEMPT
+        .iter()
+        .find(|(prefix, _why)| key.starts_with(prefix))
+        .map(|(_prefix, why)| *why)
+}
+
+/// How long the census waits for each thing it waits for: the live grids'
+/// windows, or a fake grid's, which answers at once.
+#[derive(Debug, Clone, Copy)]
+struct Windows {
+    /// How long a grid is given to drop an avatar that logged out.
+    away_settle: Duration,
+    /// How long an avatar that came back is left alone.
+    unasked: Duration,
+    /// How long an avatar waits for what it asked for.
+    fetch: Duration,
+    /// How long after the last kept message a fetch is still listened to.
+    fetch_quiet: Duration,
+    /// How long a grid is given to act on a mute or on its removal.
+    mute_settle: Duration,
+    /// How long a mute list may take to arrive.
+    mute_list: Duration,
+    /// How long the capability map may take to arrive after a login.
+    cap_wait: Duration,
+}
+
+impl Windows {
+    /// The windows of a run on `grid`.
+    const fn of(grid: Grid) -> Self {
+        if grid.is_fake() {
+            Self {
+                away_settle: FAKE_AWAY_SETTLE,
+                unasked: FAKE_UNASKED_WINDOW,
+                fetch: FAKE_FETCH_WINDOW,
+                fetch_quiet: FAKE_FETCH_QUIET,
+                mute_settle: FAKE_MUTE_SETTLE,
+                mute_list: FAKE_MUTE_SETTLE,
+                cap_wait: FAKE_CAP_WAIT,
+            }
+        } else {
+            Self {
+                away_settle: AWAY_SETTLE,
+                unasked: UNASKED_WINDOW,
+                fetch: FETCH_WINDOW,
+                fetch_quiet: FETCH_QUIET,
+                mute_settle: MUTE_SETTLE,
+                mute_list: MUTE_LIST_WINDOW,
+                cap_wait: CAP_WAIT,
+            }
+        }
+    }
+}
 
 /// The dialogs no viewer sends to an avatar, each with the word its metrics
 /// carry: a message box, a script's message and a number that is no dialog.
@@ -1360,6 +1457,8 @@ struct Census<'a> {
     said: u32,
     /// Whether B is logged in.
     b_is_here: bool,
+    /// How long each wait is.
+    windows: Windows,
 }
 
 impl Census<'_> {
@@ -1637,7 +1736,7 @@ impl Census<'_> {
                     directory_visibility: info.directory_visibility,
                 })
                 .await?;
-            watch(self.b, MUTE_SETTLE).await?;
+            watch(self.b, self.windows.mute_settle).await?;
         }
         Ok(())
     }
@@ -1658,7 +1757,8 @@ impl Census<'_> {
     /// was.
     async fn empty_the_store(&mut self, metrics: &mut Metrics) -> Result<(), TestFailure> {
         self.b.send(Command::RetrieveInstantMessages).await?;
-        let got = watch_for(self.b, FETCH_WINDOW, FETCH_QUIET, Got::any_kept).await?;
+        let windows = self.windows;
+        let got = watch_for(self.b, windows.fetch, windows.fetch_quiet, Got::any_kept).await?;
         let by_capability = self
             .read_capability()
             .await?
@@ -1936,7 +2036,7 @@ impl Census<'_> {
             })
             .await;
         outcome.and(unmuted)?;
-        watch(self.b, MUTE_SETTLE).await?;
+        watch(self.b, self.windows.mute_settle).await?;
         let sent = self.sent("unmuted");
         self.leg(metrics, "unmuted_im", self.to_b(&sent), &sent)
             .await?;
@@ -1945,12 +2045,12 @@ impl Census<'_> {
 
     /// What a grid passes on while B mutes A.
     async fn muted(&mut self, metrics: &mut Metrics, scripted: bool) -> Result<(), TestFailure> {
-        watch(self.b, MUTE_SETTLE).await?;
+        watch(self.b, self.windows.mute_settle).await?;
         self.b.send(Command::RequestMuteList).await?;
         let a = self.scene.a;
         let listed = match self
             .b
-            .wait_for(MUTE_LIST_WINDOW, |event| match event {
+            .wait_for(self.windows.mute_list, |event| match event {
                 Event::MuteList(entries) => Some(if entries.iter().any(|entry| entry.id == a) {
                     "names avatar A"
                 } else {
@@ -1990,6 +2090,8 @@ impl Census<'_> {
                 typing: false,
             })
             .await?;
+        // The stop is not what the next leg asks about.
+        watch(self.b, self.drain).await?;
 
         if scripted {
             let sent = self.sent("muted-script");
@@ -2038,7 +2140,7 @@ impl Census<'_> {
         let b = AgentKey::from(self.scene.b);
         self.b.disconnect().await?;
         self.b_is_here = false;
-        tokio::time::sleep(AWAY_SETTLE).await;
+        tokio::time::sleep(self.windows.away_settle).await;
 
         // What A sends, and what it is told of each.
         let mut sent: Vec<(&str, Sent)> = Vec::new();
@@ -2094,13 +2196,14 @@ impl Census<'_> {
         // here: that wait would throw away what the arrival brings.
         self.b.relogin().await?;
         self.b_is_here = true;
-        let unasked = watch(self.b, UNASKED_WINDOW).await?;
+        let windows = self.windows;
+        let unasked = watch(self.b, windows.unasked).await?;
         metrics.set(
             &format!("{round}_unasked"),
             self.delivered_words(&unasked, &sent),
         );
         let waited = Instant::now();
-        while self.b.cap(READ_OFFLINE_MSGS).is_none() && waited.elapsed() < CAP_WAIT {
+        while self.b.cap(READ_OFFLINE_MSGS).is_none() && waited.elapsed() < windows.cap_wait {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
         let fetched = SystemTime::now();
@@ -2113,7 +2216,8 @@ impl Census<'_> {
                         Command::RequestOfflineMessages
                     })
                     .await?;
-                let mut got = watch_for(self.b, FETCH_WINDOW, FETCH_QUIET, Got::any_kept).await?;
+                let mut got =
+                    watch_for(self.b, windows.fetch, windows.fetch_quiet, Got::any_kept).await?;
                 // What came unasked is the round's too.
                 let mut all = unasked;
                 all.ims.append(&mut got.ims);
@@ -2121,7 +2225,9 @@ impl Census<'_> {
                 self.record_delivery(metrics, round, &all, &sent, fetched);
                 if fetch == Fetch::Udp {
                     self.b.send(Command::RetrieveInstantMessages).await?;
-                    let again = watch_for(self.b, FETCH_WINDOW, FETCH_QUIET, Got::any_kept).await?;
+                    let again =
+                        watch_for(self.b, windows.fetch, windows.fetch_quiet, Got::any_kept)
+                            .await?;
                     metrics.set("udp_asked_again", self.delivered_words(&again, &sent));
                     let by_capability = self.read_capability().await?;
                     metrics.set(
@@ -2238,7 +2344,8 @@ impl Census<'_> {
                 metrics.set(key, NO_CAPABILITY);
             }
             self.b.send(Command::RetrieveInstantMessages).await?;
-            watch_for(self.b, FETCH_WINDOW, FETCH_QUIET, Got::any_kept).await?;
+            let windows = self.windows;
+            watch_for(self.b, windows.fetch, windows.fetch_quiet, Got::any_kept).await?;
             return Ok(());
         };
         metrics.set("cap_answer", format!("{status}, {held}"));
@@ -2288,7 +2395,8 @@ impl Census<'_> {
             ),
         );
         self.b.send(Command::RetrieveInstantMessages).await?;
-        let got = watch_for(self.b, FETCH_WINDOW, FETCH_QUIET, Got::any_kept).await?;
+        let windows = self.windows;
+        let got = watch_for(self.b, windows.fetch, windows.fetch_quiet, Got::any_kept).await?;
         metrics.set("cap_then_udp", self.delivered_words(&got, sent));
         Ok(())
     }
@@ -2311,7 +2419,7 @@ impl GridTest for InstantMessages {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {
@@ -2344,9 +2452,14 @@ impl GridTest for InstantMessages {
             ctx.metrics().merge(metrics.clone());
             // Take the cube away whatever became of the census.
             let cleanup = clean_up(ctx.primary(), &residue, folders.trash).await;
+            let held: Vec<(&str, Measured<Answer>)> = MEASURED
+                .iter()
+                .filter(|(key, _measured)| fake_exemption(grid, key).is_none())
+                .copied()
+                .collect();
             outcome
                 .and(cleanup)
-                .and_then(|()| hold_to_measured(grid, &metrics, MEASURED, SOURCE))
+                .and_then(|()| hold_to_measured(grid, &metrics, &held, SOURCE))
         })
     }
 }
@@ -2407,6 +2520,7 @@ async fn census(
         drain: DRAIN,
         said: 0,
         b_is_here: true,
+        windows: Windows::of(grid),
     };
     watch(census.b, census.drain).await?;
     census.mail(metrics).await?;
@@ -2414,7 +2528,32 @@ async fn census(
 
     census.viewer_legs(metrics).await?;
 
-    let cube = rez_cube(census.a, &mut run, residue, 0).await?;
+    // A grid that runs no script is asked the rest without one.
+    let scripted = !grid.is_fake();
+    if scripted {
+        census_scripted(&mut census, &mut run, residue, metrics).await?;
+    }
+    census.mute_legs(metrics, scripted).await?;
+    census
+        .away_round(metrics, Fetch::Udp, scripted, true)
+        .await?;
+    census
+        .away_round(metrics, Fetch::Capability, scripted, false)
+        .await?;
+    census
+        .away_round(metrics, Fetch::Client, scripted, false)
+        .await
+}
+
+/// Rezzes the cube beside A, puts the probe into it and asks the script's
+/// legs.
+async fn census_scripted(
+    census: &mut Census<'_>,
+    run: &mut Run,
+    residue: &mut Residue,
+    metrics: &mut Metrics,
+) -> Result<(), TestFailure> {
+    let cube = rez_cube(census.a, run, residue, 0).await?;
     census.scene.prim = Some((
         cube.full_id.uuid(),
         cube.motion.position.clone(),
@@ -2424,14 +2563,7 @@ async fn census(
     if let Some((_prim, _at, prim_name)) = &mut census.scene.prim {
         *prim_name = name;
     }
-    census.script_legs(metrics).await?;
-    census.mute_legs(metrics, true).await?;
-
-    census.away_round(metrics, Fetch::Udp, true, true).await?;
-    census
-        .away_round(metrics, Fetch::Capability, true, false)
-        .await?;
-    census.away_round(metrics, Fetch::Client, true, false).await
+    census.script_legs(metrics).await
 }
 
 #[cfg(test)]

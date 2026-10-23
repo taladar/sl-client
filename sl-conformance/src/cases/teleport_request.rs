@@ -5,7 +5,7 @@ use sl_client_tokio::{AgentKey, Command, ImDialog, InstantMessage, Uuid};
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::lure::{
-    NOTICE_WINDOW, offer_and_receive, record_im, record_notices, wait_for_dialog, watch_notices,
+    notice_window, offer_and_receive, record_im, record_notices, wait_for_dialog, watch_notices,
 };
 use crate::measured::Measured;
 use crate::registry::{GridTest, TestFuture};
@@ -45,11 +45,11 @@ fn request_id_kind(request: &InstantMessage, asked: AgentKey, requester: AgentKe
 ///
 /// The requester is the secondary and the one asked the primary. The case
 /// records the request as it was delivered, watches the requester for
-/// [`NOTICE_WINDOW`] for anything the grid says about a request nobody has
-/// answered yet, and then has the primary answer with an offer, which must
-/// arrive as any other offer does.
+/// [`NOTICE_WINDOW`](crate::lure::NOTICE_WINDOW) for anything the grid says
+/// about a request nobody has answered yet, and then has the primary answer
+/// with an offer, which must arrive as any other offer does.
 ///
-/// `2av`.
+/// `2av`, and both fake flavours.
 #[derive(Debug)]
 pub struct TeleportRequest;
 
@@ -63,7 +63,7 @@ impl GridTest for TeleportRequest {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim, Grid::Aditi]
+        &[Grid::Opensim, Grid::Aditi, Grid::FakeSl, Grid::FakeOpensim]
     }
 
     fn accounts(&self) -> u8 {
@@ -94,7 +94,7 @@ impl GridTest for TeleportRequest {
                 .await?;
             let request =
                 wait_for_dialog(primary, secondary_id, ImDialog::TeleportRequest, &message).await?;
-            let requester_unanswered = watch_notices(secondary, NOTICE_WINDOW).await?;
+            let requester_unanswered = watch_notices(secondary, notice_window(grid)).await?;
 
             // The answer is an offer like any other.
             let answer = format!("sl-conformance teleport-request answer {primary_id}");

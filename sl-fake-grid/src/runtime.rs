@@ -434,6 +434,11 @@ pub(crate) struct GridCore {
     pub(crate) social: parking_lot::Mutex<crate::social::Social>,
     /// How friendship runs ([`ImitatedGrid::friends_policy`]).
     pub(crate) friends_policy: crate::social::FriendsPolicy,
+    /// The lures the grid holds and what it counts of each sender
+    /// ([`crate::messages`]).
+    pub(crate) messages: parking_lot::Mutex<crate::messages::Messages>,
+    /// How instant messages are passed on ([`ImitatedGrid::im_policy`]).
+    pub(crate) im_policy: crate::messages::ImPolicy,
     /// The groups and what is pending in them ([`crate::groups`]).
     pub(crate) groups: parking_lot::Mutex<crate::groups::GroupStore>,
     /// Each account's home, once it has set one
@@ -1187,6 +1192,10 @@ impl GridCore {
             prepared.shared.clone(),
         ));
         tokio::spawn(crate::social::run_social_responder(
+            Arc::clone(self),
+            prepared.shared.clone(),
+        ));
+        tokio::spawn(crate::messages::run_im_responder(
             Arc::clone(self),
             prepared.shared.clone(),
         ));
@@ -2285,6 +2294,8 @@ impl FakeGridBuilder {
             accounts,
             social: parking_lot::Mutex::new(crate::social::Social::with_friendships(&friendships)),
             friends_policy: self.imitates.friends_policy(),
+            messages: parking_lot::Mutex::new(crate::messages::Messages::default()),
+            im_policy: self.imitates.im_policy(),
             groups: parking_lot::Mutex::new(groups),
             homes: crate::agent_requests::Homes::default(),
             outfit_versions: crate::bakes::OutfitVersions::default(),

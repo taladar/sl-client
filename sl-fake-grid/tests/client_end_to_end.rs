@@ -4402,8 +4402,9 @@ mod test {
     const VIA_LURE: u32 = sl_client_tokio::TeleportFlags::VIA_LURE;
 
     /// A lure id naming `position` in the region `handle`, packed the OpenSim
-    /// way. The fake grid reads it on either flavour: it holds no lures of its
-    /// own to look an opaque one up in.
+    /// way. The fake grid reads it on either flavour, so that a test can name
+    /// a destination without an avatar to offer it; the lures it holds are
+    /// only those of the offers it passed on.
     fn lure_to(handle: sl_client_tokio::RegionHandle, x: u16, y: u16, z: u16) -> Command {
         let place = sl_proto::FakeParcelId {
             region_handle: handle,
