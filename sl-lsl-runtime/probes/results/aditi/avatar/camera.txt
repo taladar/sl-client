@@ -1,0 +1,38 @@
+grid: aditi
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE avatar/camera rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE avatar/camera rec=waiting drive=answer grant=3072
+PROBE avatar/camera rec=asked step=1 seated=0 mask=3072
+# debug-channel: from="Object" text="Camera control currently only supported for attachments and objects on which you are sitting."
+# animations avatar=owner playing="stand@other-object"
+# animations avatar=owner playing=""
+# answer grant=3072 question=none
+PROBE avatar/camera rec=timeout step=1
+PROBE avatar/camera rec=held step=1 why=no-answer answer=-1 perms=0
+PROBE avatar/camera rec=waiting drive=sit
+# sit sit_position=<0.000, 0.000, 0.850> sit_rotation=<0.000, 0.000, 0.000, 1.000> camera_eye=<0.000, 0.000, 0.000> camera_at=<0.000, 0.000, 0.000> force_mouselook=0 autopilot=1
+# animations avatar=owner playing="sit@other-object"
+PROBE avatar/camera rec=seat step=2 seated=1
+PROBE avatar/camera rec=asked step=3 seated=1 mask=3072
+PROBE avatar/camera rec=held step=3 why=answer answer=3072 perms=3072
+# follow-cam object=probe 12=1 7=5 0=20 8=30 9=0.5 2=0 3=0 4=1 21=1 18=52 19=62 20=36.606415
+PROBE avatar/camera rec=set step=4 which=in-range
+# follow-cam object=probe 7=100 0=-200 8=400 6=9 10=-1
+PROBE avatar/camera rec=set step=5 which=out-of-range
+# follow-cam-clear object=probe
+PROBE avatar/camera rec=cleared step=6
+PROBE avatar/camera rec=track step=7 pos_zero=0 rot_identity=0
+PROBE avatar/camera rec=waiting drive=stand
+# stand
+PROBE avatar/camera rec=seat step=7 seated=0
+PROBE avatar/camera rec=held step=7 why=after-stand answer=-1 perms=1024
+# animations avatar=owner playing=""
+PROBE avatar/camera rec=end
+# animations avatar=owner playing="walk@other-object"
+# animations avatar=owner playing=""

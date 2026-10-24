@@ -1,0 +1,54 @@
+grid: aditi
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE avatar/permissions rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE avatar/permissions rec=held step=0 why=fresh answer=-1 perms=0 granter=none
+# debug-channel: from="Object" text="Script trying to take controls from owner but PERMISSION_TAKE_CONTROLS permission not set!"
+PROBE avatar/permissions rec=unpermitted call=llTakeControls
+# debug-channel: from="Object" text="Script trying to trigger animations but PERMISSION_TRIGGER_ANIMATION permission not set"
+PROBE avatar/permissions rec=unpermitted call=llStartAnimation
+# debug-channel: from="Object" text="Script trying to set camera parameters but PERMISSION_CONTROL_CAMERA permission not set!"
+PROBE avatar/permissions rec=unpermitted call=llSetCameraParams
+PROBE avatar/permissions rec=unpermitted call=llGetCameraPos zero=1
+PROBE avatar/permissions rec=waiting drive=answer grant=1044
+PROBE avatar/permissions rec=asked step=1 of=owner mask=1044
+# question permissions=1044 object="Object" owner="<first> <last>" experience=none
+# answer grant=1044
+PROBE avatar/permissions rec=held step=1 why=answer answer=1044 perms=1044 granter=owner
+PROBE avatar/permissions rec=waiting drive=answer grant=16
+PROBE avatar/permissions rec=asked step=2 of=owner mask=1044
+# question permissions=1044 object="Object" owner="<first> <last>" experience=none
+# answer grant=16
+PROBE avatar/permissions rec=held step=2 why=answer answer=16 perms=16 granter=owner
+PROBE avatar/permissions rec=waiting drive=answer grant=0
+PROBE avatar/permissions rec=asked step=3 of=owner mask=1044
+# question permissions=1044 object="Object" owner="<first> <last>" experience=none
+# answer grant=0
+PROBE avatar/permissions rec=held step=3 why=answer answer=0 perms=0 granter=owner
+PROBE avatar/permissions rec=waiting drive=answer grant=1044
+PROBE avatar/permissions rec=asked step=4 of=owner mask=16
+# question permissions=16 object="Object" owner="<first> <last>" experience=none
+# answer grant=1044
+PROBE avatar/permissions rec=held step=4 why=answer answer=1044 perms=1044 granter=owner
+PROBE avatar/permissions rec=asked step=5 of=owner mask=0
+PROBE avatar/permissions rec=held step=5 why=no-answer answer=-1 perms=1044 granter=owner
+PROBE avatar/permissions rec=waiting drive=answer grant=2048
+PROBE avatar/permissions rec=asked step=6 of=owner mask=2048
+# debug-channel: from="Object" text="Camera control currently only supported for attachments and objects on which you are sitting."
+# answer grant=2048 question=none
+PROBE avatar/permissions rec=held step=6 why=no-answer answer=-1 perms=1044 granter=owner
+PROBE avatar/permissions rec=waiting drive=touch by=other
+# touch by=other active_group=none
+PROBE avatar/permissions rec=touch step=7 by=other
+PROBE avatar/permissions rec=waiting drive=answer by=other grant=1044
+# question by=other permissions=1044 object="Object" owner="<first> <last>" experience=none
+PROBE avatar/permissions rec=asked step=8 of=other mask=1044
+# answer by=other grant=1044
+PROBE avatar/permissions rec=held step=8 why=answer answer=1044 perms=1044 granter=other
+PROBE avatar/permissions rec=end

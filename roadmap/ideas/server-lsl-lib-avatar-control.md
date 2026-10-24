@@ -61,3 +61,27 @@ it and reports the sitter; `llTakeControls` after a granted permission
 routes the viewer's movement keys to the script's `control` event
 (checked live in the Bevy viewer); and a scripted teleport moves the
 agent through the ordinary teleport phases.
+
+## Measured (gridspec-lsl-avatar-control, 2026-10-24)
+
+Build to `book/src/gridspec/lsl.md` § Animations, sitting, controls and
+camera, from the `avatar/*` probes' results on aditi, YEngine and XEngine
+(which agree with each other everywhere). The rows a flavour must split on:
+
+- `llRequestPermissions(agent, 0)`: Second Life does nothing, OpenSim
+  releases and fires `run_time_permissions(0)`.
+- `CONTROL_CAMERA` from an object the avatar neither wears nor sits on:
+  Second Life refuses unasked (a `DEBUG_CHANNEL` complaint, no question, no
+  event); OpenSim asks.
+- A call made without its permission: Second Life complains on
+  `DEBUG_CHANNEL`, OpenSim is silent; likewise `llStartAnimation` of a
+  missing animation.
+- The `ScriptControlChange` shapes (Second Life's release-all and nudge bit,
+  accept-off as the complement), the follow-camera rule order, the
+  sit-target response offset (0.35 m), `llGetLinkKey` past a lone prim
+  (`NULL_KEY` against the prim's key) and `llGetAnimationOverride` after a
+  reset (`stand` against `Standing`).
+
+Both grids honour an answer's mask as it came, more than was asked
+included, and drop `TAKE_CONTROLS` and `CONTROL_CAMERA` when a sitter
+stands.

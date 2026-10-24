@@ -53,3 +53,19 @@ a per-frame `Distance` change would recompute the eye from a laggy base and
 bring back precisely the camera-distance jitter this work removed. The `*Lag`
 parameters are the script's intentional smoothing of the offset within the seat
 frame, not world-space position lag.
+
+## From gridspec-lsl-avatar-control (2026-10-24)
+
+Measured by the `avatar/camera` probe (`book/src/gridspec/lsl.md` § Camera):
+
+- **Second Life grants `CONTROL_CAMERA` only to an attachment or the object
+  the avatar sits on**; asked by anything else it complains on
+  `DEBUG_CHANNEL` and puts no question. A seated avatar is granted it with no
+  question on both grids, and loses it on standing up.
+- `SetFollowCamProperties` names the scripted prim and carries **every rule
+  the script set, unclamped** (distance 100, pitch −200, behindness 400 all
+  arrive as given), each vector rule split into its X/Y/Z codes — in the
+  script's order on Second Life, sorted by code on OpenSim. So the viewer
+  clamps, as the reference's `LLFollowCamParams` setters do.
+- OpenSim also sends a `ClearFollowCamProperties` for the seat whenever a
+  sitter stands, whether a camera was set or not; Second Life sends nothing.

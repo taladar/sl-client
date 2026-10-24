@@ -11,8 +11,9 @@
 //!   `PROBE <id> rec=<name> key=value…`: one `start`, from the script that
 //!   leads it, and one `end`, last. In a probe of several scripts the ones
 //!   saved before the leader may print first.
-//! - A probe asks the runner for a touch or a line of chat with a
-//!   `waiting` record, read as a [`Stimulus`].
+//! - A probe asks the runner for a stimulus — a touch, a line of chat, an
+//!   answer to its permission question, a sit, a stand, held controls — with
+//!   a `waiting` record, read as a [`Stimulus`].
 //! - A run's transcript is a [`ResultFile`]: a header of `key: value` lines,
 //!   a blank line, then the `PROBE` lines with `#` notes between.
 //! - Two runs are set side by side by [`compare`](compare::compare), under
@@ -31,6 +32,14 @@ pub enum Drive {
     Touch,
     /// A line of chat on a channel.
     Chat,
+    /// An answer to the permission question the probe's script puts.
+    Answer,
+    /// Sitting on the probe's prim A.
+    Sit,
+    /// Standing up.
+    Stand,
+    /// Holding movement controls down for a moment.
+    Control,
 }
 
 impl Drive {
@@ -39,6 +48,10 @@ impl Drive {
         match name {
             "touch" => Some(Self::Touch),
             "chat" => Some(Self::Chat),
+            "answer" => Some(Self::Answer),
+            "sit" => Some(Self::Sit),
+            "stand" => Some(Self::Stand),
+            "control" => Some(Self::Control),
             _ => None,
         }
     }
@@ -308,6 +321,23 @@ pub enum Action {
         /// What is said.
         text: String,
     },
+    /// Answer the permission question a probe's script puts to the avatar
+    /// with the mask `grant`, as it is — `0` denies, and a mask beyond what
+    /// was asked is sent too.
+    Answer {
+        /// The permissions granted.
+        grant: i32,
+    },
+    /// Sit on prim A.
+    Sit,
+    /// Stand up.
+    Stand,
+    /// Hold the movement controls `keys` (the `CONTROL_*` bits, which are
+    /// the agent's own control flags) for a moment, then let go.
+    Control {
+        /// The controls held.
+        keys: u32,
+    },
 }
 
 impl Action {
@@ -317,13 +347,18 @@ impl Action {
         match self {
             Self::Touch => Drive::Touch,
             Self::Chat { .. } => Drive::Chat,
+            Self::Answer { .. } => Drive::Answer,
+            Self::Sit => Drive::Sit,
+            Self::Stand => Drive::Stand,
+            Self::Control { .. } => Drive::Control,
         }
     }
 }
 
 /// What a `waiting` record asks the runner for:
-/// `rec=waiting drive=touch|chat [by=owner|other]`, and for chat
-/// `channel=<n> text="…"`. Without `by` it is the owner.
+/// `rec=waiting drive=touch|chat|answer|sit|stand|control [by=owner|other]`,
+/// and for chat `channel=<n> text="…"`, for an answer `grant=<mask>`, for
+/// controls `keys=<mask>`. Without `by` it is the owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stimulus {
     /// Who gives it.
@@ -362,6 +397,20 @@ impl Stimulus {
                     .field("text")
                     .ok_or("a chat drive without `text`")?
                     .to_owned(),
+            },
+            Some(Drive::Answer) => Action::Answer {
+                grant: line
+                    .field("grant")
+                    .and_then(|grant| grant.parse().ok())
+                    .ok_or("an answer drive without an integer `grant`")?,
+            },
+            Some(Drive::Sit) => Action::Sit,
+            Some(Drive::Stand) => Action::Stand,
+            Some(Drive::Control) => Action::Control {
+                keys: line
+                    .field("keys")
+                    .and_then(|keys| keys.parse().ok())
+                    .ok_or("a control drive without an unsigned integer `keys`")?,
             },
             None => return Err(format!("`drive={drive}` is not a drive")),
         };
@@ -566,10 +615,20 @@ mod tests {
     #[test]
     fn a_header_lists_its_drives_and_its_tolerances() -> Result<(), HeaderError> {
         let header = Header::parse(
-            "// probe: a/b\n// drive: chat, touch\n// vary: seconds, rate\n\
-             // unordered: heard\n",
+            "// probe: a/b\n// drive: chat, touch, answer, sit, stand, control\n\
+             // vary: seconds, rate\n// unordered: heard\n",
         )?;
-        assert_eq!(header.drives, vec![Drive::Chat, Drive::Touch]);
+        assert_eq!(
+            header.drives,
+            vec![
+                Drive::Chat,
+                Drive::Touch,
+                Drive::Answer,
+                Drive::Sit,
+                Drive::Stand,
+                Drive::Control
+            ]
+        );
         assert_eq!(header.vary, vec!["seconds".to_owned(), "rate".to_owned()]);
         assert_eq!(header.unordered, vec!["heard".to_owned()]);
         Ok(())
@@ -599,7 +658,32 @@ mod tests {
                 }
             }
         );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=answer by=other grant=3092")?,
+            Stimulus {
+                by: By::Other,
+                action: Action::Answer { grant: 3092 }
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=control keys=257")?,
+            Stimulus {
+                by: By::Owner,
+                action: Action::Control { keys: 257 }
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=sit by=other")?.action,
+            Action::Sit
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=stand")?.action,
+            Action::Stand
+        );
         for refused in [
+            "PROBE a/b rec=waiting drive=answer",
+            "PROBE a/b rec=waiting drive=answer grant=all",
+            "PROBE a/b rec=waiting drive=control keys=-1",
             "PROBE a/b rec=start",
             "PROBE a/b rec=waiting",
             "PROBE a/b rec=waiting drive=wave",

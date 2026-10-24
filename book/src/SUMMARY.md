@@ -73,6 +73,7 @@
 - [Estate](gridspec/estate.md)
 - [Money](gridspec/economy.md)
 - [Environment](gridspec/environment.md)
+- [LSL scripts](gridspec/lsl.md)
 
 ## Simulator
 

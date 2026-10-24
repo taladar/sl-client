@@ -1,0 +1,49 @@
+grid: opensim-xengine
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+PROBE avatar/permissions rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE avatar/permissions rec=held step=0 why=fresh answer=-1 perms=0 granter=none
+PROBE avatar/permissions rec=unpermitted call=llTakeControls
+PROBE avatar/permissions rec=unpermitted call=llStartAnimation
+PROBE avatar/permissions rec=unpermitted call=llSetCameraParams
+PROBE avatar/permissions rec=unpermitted call=llGetCameraPos zero=1
+PROBE avatar/permissions rec=waiting drive=answer grant=1044
+PROBE avatar/permissions rec=asked step=1 of=owner mask=1044
+# question permissions=1044 object="Object" owner="<first> <last>" experience=none
+# answer grant=1044
+PROBE avatar/permissions rec=held step=1 why=answer answer=1044 perms=1044 granter=owner
+PROBE avatar/permissions rec=waiting drive=answer grant=16
+PROBE avatar/permissions rec=asked step=2 of=owner mask=1044
+# question permissions=1044 object="Object" owner="<first> <last>" experience=none
+# answer grant=16
+PROBE avatar/permissions rec=held step=2 why=answer answer=16 perms=16 granter=owner
+PROBE avatar/permissions rec=waiting drive=answer grant=0
+PROBE avatar/permissions rec=asked step=3 of=owner mask=1044
+# question permissions=1044 object="Object" owner="<first> <last>" experience=none
+# answer grant=0
+PROBE avatar/permissions rec=held step=3 why=answer answer=0 perms=0 granter=owner
+PROBE avatar/permissions rec=waiting drive=answer grant=1044
+PROBE avatar/permissions rec=asked step=4 of=owner mask=16
+# question permissions=16 object="Object" owner="<first> <last>" experience=none
+# answer grant=1044
+PROBE avatar/permissions rec=held step=4 why=answer answer=1044 perms=1044 granter=owner
+PROBE avatar/permissions rec=asked step=5 of=owner mask=0
+PROBE avatar/permissions rec=held step=5 why=answer answer=0 perms=0 granter=none
+PROBE avatar/permissions rec=waiting drive=answer grant=2048
+PROBE avatar/permissions rec=asked step=6 of=owner mask=2048
+# question permissions=2048 object="Object" owner="<first> <last>" experience=none
+# answer grant=2048
+PROBE avatar/permissions rec=held step=6 why=answer answer=2048 perms=2048 granter=owner
+PROBE avatar/permissions rec=waiting drive=touch by=other
+# touch by=other active_group=set
+PROBE avatar/permissions rec=touch step=7 by=other
+PROBE avatar/permissions rec=waiting drive=answer by=other grant=1044
+# question by=other permissions=1044 object="Object" owner="<first> <last>" experience=none
+PROBE avatar/permissions rec=asked step=8 of=other mask=1044
+# answer by=other grant=1044
+PROBE avatar/permissions rec=held step=8 why=answer answer=1044 perms=1044 granter=other
+PROBE avatar/permissions rec=end

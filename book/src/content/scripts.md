@@ -102,6 +102,10 @@ ready to answer:
   script wants (take controls, animate the agent, attach, debit, …). The viewer
   grants a subset with `ScriptAnswer` (`Command::AnswerScriptPermissions`).
 
+How each grid puts the question, takes the answer, and what a script can do
+with the grant — sitting, controls, the camera, animations — is measured in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#animations-sitting-controls-and-camera).
+
 ## Uploading & compiling a script
 
 Editing a script's source is **not** a plain asset upload: the viewer never

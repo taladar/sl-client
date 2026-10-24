@@ -1,0 +1,41 @@
+grid: opensim-yengine
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+PROBE avatar/animation rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE avatar/animation rec=playing step=0 of=owner why=before state="Standing" has_dance=0
+PROBE avatar/animation rec=waiting drive=answer grant=32784
+# question permissions=32784 object="Object" owner="<first> <last>" experience=none
+# answer grant=32784
+PROBE avatar/animation rec=held step=0 answer=32784 perms=32784
+PROBE avatar/animation rec=did step=1 call=llStartAnimation anim=dance1
+# animations avatar=owner playing="dance1@probe,stand"
+PROBE avatar/animation rec=playing step=2 of=owner why=started state="Standing" has_dance=1
+PROBE avatar/animation rec=did step=2 call=llStopAnimation anim=dance1
+# animations avatar=owner playing="stand"
+PROBE avatar/animation rec=playing step=3 of=owner why=stopped state="Standing" has_dance=0
+PROBE avatar/animation rec=did step=3 call=llStartAnimation anim=missing
+PROBE avatar/animation rec=playing step=4 of=owner why=missing state="Standing" has_dance=0
+PROBE avatar/animation rec=did step=4 call=llSetAnimationOverride state=Standing anim=dance1 override="dance1"
+# animations avatar=owner playing="dance1"
+PROBE avatar/animation rec=playing step=5 of=owner why=overridden state="Standing" has_dance=1
+PROBE avatar/animation rec=did step=5 call=llResetAnimationOverride state=ALL override="Standing"
+# animations avatar=owner playing="stand"
+PROBE avatar/animation rec=playing step=6 of=owner why=reset state="Standing" has_dance=0
+PROBE avatar/animation rec=waiting drive=touch by=other
+# touch by=other active_group=set
+PROBE avatar/animation rec=touch step=6 key_is_owner=0
+PROBE avatar/animation rec=waiting drive=answer by=other grant=16
+# question by=other permissions=16 object="Object" owner="<first> <last>" experience=none
+# answer by=other grant=16
+PROBE avatar/animation rec=held step=7 answer=16 perms=16
+PROBE avatar/animation rec=did step=8 call=llStartAnimation anim=dance1
+# animations avatar=other playing="dance1,stand"
+PROBE avatar/animation rec=playing step=9 of=other why=started state="Standing" has_dance=1
+PROBE avatar/animation rec=did step=9 call=llStopAnimation anim=dance1
+# animations avatar=other playing="stand"
+PROBE avatar/animation rec=playing step=10 of=other why=stopped state="Standing" has_dance=0
+PROBE avatar/animation rec=end

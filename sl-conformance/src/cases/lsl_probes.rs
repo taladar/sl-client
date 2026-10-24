@@ -13,13 +13,18 @@
 //!    the first line that picks the engine (`//YEngine:` or `//XEngine:`).
 //!    A script whose `skip-on` names this grid is left out, with a note;
 //! 3. answers each `waiting` record the probe prints with the stimulus it
-//!    names ([`Stimulus`]): a touch of prim A or a line of chat on a
-//!    channel, from the owner or from a second avatar — one the probe's
-//!    header declares among its `drive`s;
+//!    names ([`Stimulus`]): a touch of prim A, a line of chat on a channel,
+//!    an answer to the permission question the probe's script puts, a sit
+//!    on prim A, a stand, or movement controls held down for a moment, from
+//!    the owner or from a second avatar — one the probe's header declares
+//!    among its `drive`s;
 //! 4. keeps every owner-say line of the probe's (`PROBE <id> …`) from its
 //!    prims, and every `DEBUG_CHANNEL` message they shout as a `#` note,
 //!    until the probe prints `end` — and a little longer, for a second
-//!    prim's late lines — or [`PROBE_DEADLINE`] passes;
+//!    prim's late lines — or [`PROBE_DEADLINE`] passes. What the grid sends
+//!    the two viewers about the avatars meanwhile is noted too: permission
+//!    questions, sit responses, control changes, follow cameras, animation
+//!    lists and alerts, with both avatars' names put as placeholders;
 //! 5. derezzes its prims and writes the transcript as a
 //!    [`ResultFile`] to
 //!    `sl-lsl-runtime/probes/results/<grid>/<id>.txt`.
@@ -35,14 +40,15 @@
 //! `--probe <id>` runs only the probes it names. On Second Life the case
 //! needs the fixtures' build location, as every case that rezzes does.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    ChatChannel, ChatSource, ChatType, Command, DeRezDestination, Event, FolderType,
-    InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, Object, ObjectKey, PrimShape,
-    RestoreItem, RezScriptParams, ScopedObjectId, ScriptTarget, ScriptUploadLocation,
-    TaskInventoryItem, TransactionId, Uuid, Vector, XferListing,
+    AgentKey, ChatChannel, ChatSource, ChatType, Command, ControlFlags, DeRezDestination, Event,
+    FolderType, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, Object,
+    ObjectKey, PrimShape, RestoreItem, RezScriptParams, ScopedObjectId, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTarget, ScriptUploadLocation, TaskInventoryItem, TransactionId, Uuid,
+    Vector, XferListing,
 };
 use sl_lsl_runtime::probe::{Action, By, Line, PREFIX, ResultFile, Stimulus};
 
@@ -233,6 +239,85 @@ const fn start_location(grid: Grid) -> &'static str {
     }
 }
 
+/// Who the two avatars are, so that a note can say which one a thing is
+/// about, and never name either: results are committed.
+#[derive(Debug, Clone, Default)]
+struct Cast {
+    /// The owner's agent id.
+    owner: Option<AgentKey>,
+    /// The other avatar's agent id.
+    other: Option<AgentKey>,
+    /// The owner's first and last name.
+    owner_name: (String, String),
+    /// The other avatar's first and last name.
+    other_name: (String, String),
+}
+
+impl Cast {
+    /// Which avatar `agent` is, as a note says it.
+    fn role(&self, agent: AgentKey) -> &'static str {
+        if Some(agent) == self.owner {
+            "owner"
+        } else if Some(agent) == self.other {
+            "other"
+        } else {
+            "someone"
+        }
+    }
+
+    /// `text` with both avatars' names put as placeholders (`<first>`,
+    /// `<last>` for the owner's, `<other-first>`, `<other-last>` for the
+    /// other's), matched without regard to case: what a note may hold of
+    /// something a grid wrote.
+    fn scrub(&self, text: &str) -> String {
+        let mut scrubbed = text.to_owned();
+        for (name, placeholder) in [
+            (&self.owner_name.0, "<first>"),
+            (&self.owner_name.1, "<last>"),
+            (&self.other_name.0, "<other-first>"),
+            (&self.other_name.1, "<other-last>"),
+        ] {
+            scrubbed = replace_ignoring_case(&scrubbed, name, placeholder);
+        }
+        scrubbed
+    }
+}
+
+/// `text` with every occurrence of `name` as a whole word, in any ASCII
+/// case, replaced by `placeholder`; `text` itself for an empty `name`.
+fn replace_ignoring_case(text: &str, name: &str, placeholder: &str) -> String {
+    if name.is_empty() {
+        return text.to_owned();
+    }
+    let lower_text = text.to_ascii_lowercase();
+    let lower_name = name.to_ascii_lowercase();
+    let is_word = |c: char| c.is_alphanumeric();
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0_usize;
+    let mut from = 0_usize;
+    while let Some(found) = lower_text
+        .get(from..)
+        .and_then(|rest| rest.find(&lower_name))
+    {
+        let at = from.saturating_add(found);
+        let end = at.saturating_add(lower_name.len());
+        let before = lower_text
+            .get(..at)
+            .and_then(|head| head.chars().next_back());
+        let after = lower_text.get(end..).and_then(|tail| tail.chars().next());
+        if before.is_some_and(is_word) || after.is_some_and(is_word) {
+            from = at.saturating_add(lower_name.chars().next().map_or(1, char::len_utf8));
+            continue;
+        }
+        out.push_str(text.get(copied..at).unwrap_or_default());
+        out.push_str(placeholder);
+        copied = end;
+        from = end;
+    }
+    out.push_str(text.get(copied..).unwrap_or_default());
+    out
+}
+
 /// What one probe's run produced.
 #[derive(Debug, Default)]
 struct Transcript {
@@ -244,12 +329,155 @@ struct Transcript {
     region: Option<String>,
     /// Its `waiting` records, in order.
     waits: Vec<Line>,
+    /// Who the avatars are.
+    cast: Cast,
+    /// The permission questions the probe's scripts put to the owner, not
+    /// yet answered, oldest first.
+    questions: VecDeque<ScriptPermissionRequest>,
+    /// The permission questions they put to the other avatar, likewise.
+    other_questions: VecDeque<ScriptPermissionRequest>,
+    /// The animation list last noted for each avatar.
+    animations: HashMap<AgentKey, String>,
 }
 
 impl Transcript {
-    /// Takes one event: a probe line or `DEBUG_CHANNEL` message from one of
-    /// the probe's prims. Returns the record name of a probe line it kept.
+    /// An empty transcript for the avatars `cast`.
+    fn new(cast: Cast) -> Self {
+        Self {
+            cast,
+            ..Self::default()
+        }
+    }
+
+    /// Notes a permission question from one of the probe's prims, put to
+    /// the avatar `by` names (`""` for the owner, `" by=other"`), and keeps
+    /// it for the answer.
+    fn question(&mut self, by: &str, request: &ScriptPermissionRequest) {
+        let experience = if request.experience_id.is_some() {
+            "set"
+        } else {
+            "none"
+        };
+        self.body.push(format!(
+            "# question{by} permissions={} object={} owner={} experience={experience}",
+            request.permissions.0,
+            quote(&self.cast.scrub(&request.object_name)),
+            quote(&self.cast.scrub(&request.object_owner)),
+        ));
+        if by.is_empty() {
+            self.questions.push_back(request.clone());
+        } else {
+            self.other_questions.push_back(request.clone());
+        }
+    }
+
+    /// Notes an alert the grid sent the avatar `by` names.
+    fn alert(&mut self, by: &str, event: &Event) {
+        match event {
+            Event::AlertMessage { message, .. } => self.body.push(format!(
+                "# alert{by} text={}",
+                quote(&self.cast.scrub(message))
+            )),
+            Event::AgentAlertMessage { modal, message, .. } => self.body.push(format!(
+                "# agent-alert{by} modal={} text={}",
+                u8::from(*modal),
+                quote(&self.cast.scrub(message))
+            )),
+            _ => {}
+        }
+    }
+
+    /// Takes one event of the owner's session: a probe line, a
+    /// `DEBUG_CHANNEL` message or another owner-say line from one of the
+    /// probe's prims, or what the grid sent the owner's viewer about the
+    /// avatars meanwhile — a permission question from the prims, a control
+    /// change, a follow camera, an animation list that changed, an alert —
+    /// which it notes. Returns the record name of a probe line it kept.
     fn take(&mut self, id: &str, prims: &HashSet<ObjectKey>, event: &Event) -> Option<String> {
+        match event {
+            Event::ScriptPermissionRequest(request) if prims.contains(&request.task_id) => {
+                self.question("", request);
+                return None;
+            }
+            Event::ScriptControlChange(changes) => {
+                for change in changes {
+                    self.body.push(format!(
+                        "# script-control-change action={} controls={} pass_to_agent={}",
+                        if change.action.takes_controls() {
+                            "take"
+                        } else {
+                            "release"
+                        },
+                        change.controls.bits(),
+                        u8::from(change.pass_to_agent)
+                    ));
+                }
+                return None;
+            }
+            Event::SetFollowCamProperties {
+                object_id,
+                properties,
+            } => {
+                let values: Vec<String> = properties
+                    .iter()
+                    .map(|value| format!("{}={}", value.property.to_i32(), value.value))
+                    .collect();
+                self.body.push(format!(
+                    "# follow-cam object={} {}",
+                    object_role(prims, *object_id),
+                    values.join(" ")
+                ));
+                return None;
+            }
+            Event::ClearFollowCamProperties { object_id } => {
+                self.body.push(format!(
+                    "# follow-cam-clear object={}",
+                    object_role(prims, *object_id)
+                ));
+                return None;
+            }
+            Event::AvatarAnimation {
+                avatar_id,
+                animations,
+                ..
+            } => {
+                let role = self.cast.role(*avatar_id);
+                if role == "someone" {
+                    return None;
+                }
+                // Only the built-in animations: an uploaded one is what the
+                // account wears (an animation overrider), which changes by
+                // itself and is no grid's behaviour. A source that is the
+                // avatar itself is no object's.
+                let mut playing: Vec<String> = animations
+                    .iter()
+                    .filter_map(|animation| {
+                        let name = sl_anim::builtin_animation(animation.anim_id)?.name;
+                        Some(match animation.source_id {
+                            Some(source) if source.0 != avatar_id.0 => {
+                                format!("{name}@{}", object_role(prims, source))
+                            }
+                            Some(_) | None => name.to_owned(),
+                        })
+                    })
+                    .collect();
+                playing.sort();
+                let playing = playing.join(",");
+                if self.animations.get(avatar_id) != Some(&playing) {
+                    self.body.push(format!(
+                        "# animations avatar={role} playing={}",
+                        quote(&playing)
+                    ));
+                    let _previous = self.animations.insert(*avatar_id, playing);
+                }
+                return None;
+            }
+            Event::AlertMessage { .. } | Event::AgentAlertMessage { .. } => {
+                self.alert("", event);
+                return None;
+            }
+            _ => {}
+        }
         let Event::ChatReceived(chat) = event else {
             return None;
         };
@@ -263,12 +491,19 @@ impl Transcript {
             self.body.push(format!(
                 "# debug-channel: from={} text={}",
                 quote(&chat.from_name),
-                quote(&chat.message)
+                quote(&self.cast.scrub(&chat.message))
             ));
             return None;
         }
         let line = chat.message.trim_end();
         if !line.starts_with(&format!("{PREFIX}{id} ")) {
+            if chat.chat_type == ChatType::Owner {
+                self.body.push(format!(
+                    "# owner-say: from={} text={}",
+                    quote(&chat.from_name),
+                    quote(&self.cast.scrub(&chat.message))
+                ));
+            }
             return None;
         }
         self.body.push(line.to_owned());
@@ -285,6 +520,21 @@ impl Transcript {
         }
         Some(rec)
     }
+}
+
+/// What `object` is to a note: one of the probe's prims (`probe`), or
+/// another object.
+fn object_role(prims: &HashSet<ObjectKey>, object: ObjectKey) -> &'static str {
+    if prims.contains(&object) {
+        "probe"
+    } else {
+        "other-object"
+    }
+}
+
+/// A vector as a note puts it.
+fn vector_note(vector: &Vector) -> String {
+    format!("<{:.3}, {:.3}, {:.3}>", vector.x, vector.y, vector.z)
 }
 
 /// A note value in the probe lines' quoting.
@@ -367,6 +617,17 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
         z: reference.z + LIFT_M,
     };
     let date = now_rfc3339()?.chars().take(10).collect::<String>();
+    let cast = {
+        let (session, other) = ctx.primary_and_secondary().ok_or_else(|| {
+            TestFailure::State("the case runs with a secondary avatar".to_owned())
+        })?;
+        Cast {
+            owner: session.agent_id(),
+            other: other.agent_id(),
+            owner_name: split_name(&session.avatar_legacy_name()),
+            other_name: split_name(&other.avatar_legacy_name()),
+        }
+    };
 
     let mut incomplete = Vec::new();
     for probe in &probes {
@@ -379,6 +640,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
                 session,
                 other,
                 other_active_group,
+                cast: cast.clone(),
             },
             probe,
             engine,
@@ -480,6 +742,15 @@ struct Avatars<'a> {
     /// script's `llDetectedGroup` says of its touch; `None` when the grid
     /// did not say.
     other_active_group: Option<bool>,
+    /// Who the two avatars are.
+    cast: Cast,
+}
+
+/// A legacy name's first and last name (the last empty for a name of one
+/// word).
+fn split_name(legacy: &str) -> (String, String) {
+    let (first, last) = legacy.split_once(' ').unwrap_or((legacy, ""));
+    (first.to_owned(), last.to_owned())
 }
 
 /// Whether `session`'s avatar has an active group, as the grid answers an
@@ -538,7 +809,7 @@ async fn run_probe(
         prims.insert(label, object);
     }
     let keys: HashSet<ObjectKey> = prims.values().map(|object| object.full_id).collect();
-    let mut transcript = Transcript::default();
+    let mut transcript = Transcript::new(avatars.cast.clone());
 
     let mut planted = true;
     for script in &probe.scripts {
@@ -631,6 +902,7 @@ async fn run_probe(
             answered = answered.saturating_add(1);
             let stimulus = Stimulus::from_waiting(&wait)
                 .map_err(|reason| TestFailure::Assertion(format!("{}: {reason}", probe.id)))?;
+            drain_other(avatars.other, &keys, &mut transcript).await?;
             stimulate(avatars, probe, &prims, &keys, &mut transcript, &stimulus).await?;
         }
         if transcript.ended {
@@ -645,6 +917,7 @@ async fn run_probe(
             )
             .await?;
         }
+        drain_other(avatars.other, &keys, &mut transcript).await?;
     }
 
     let session = &mut *avatars.session;
@@ -749,11 +1022,52 @@ async fn stimulate(
         Until::Deadline,
     )
     .await?;
-    let (actor, by) = match stimulus.by {
-        By::Owner => (&mut *avatars.session, String::new()),
-        By::Other => (&mut *avatars.other, " by=other".to_owned()),
+    let by = match stimulus.by {
+        By::Owner => "",
+        By::Other => " by=other",
     };
     match &stimulus.action {
+        Action::Answer { grant } => {
+            return answer(avatars, stimulus.by, probe, keys, transcript, *grant).await;
+        }
+        Action::Sit => return sit(avatars, stimulus.by, probe, prims, keys, transcript).await,
+        Action::Control { keys: held } => {
+            transcript.body.push(format!(
+                "# control{by} keys={held} held={}s",
+                CONTROL_HOLD.as_secs()
+            ));
+            let controls = ControlFlags::from_bits(*held);
+            match stimulus.by {
+                By::Owner => avatars.session.send(Command::SetControls(controls)).await?,
+                By::Other => avatars.other.send(Command::SetControls(controls)).await?,
+            }
+            collect(
+                avatars.session,
+                probe,
+                keys,
+                transcript,
+                after(CONTROL_HOLD),
+                Until::Deadline,
+            )
+            .await?;
+            let released = Command::SetControls(ControlFlags::empty());
+            return match stimulus.by {
+                By::Owner => avatars.session.send(released).await,
+                By::Other => avatars.other.send(released).await,
+            };
+        }
+        Action::Touch | Action::Chat { .. } | Action::Stand => {}
+    }
+    let actor = match stimulus.by {
+        By::Owner => &mut *avatars.session,
+        By::Other => &mut *avatars.other,
+    };
+    match &stimulus.action {
+        Action::Stand => {
+            transcript.body.push(format!("# stand{by}"));
+            actor.send(Command::Stand).await
+        }
+        Action::Answer { .. } | Action::Sit | Action::Control { .. } => Ok(()),
         Action::Touch => {
             let prim = prims
                 .get("A")
@@ -801,6 +1115,188 @@ async fn stimulate(
 /// How long the case waits after a probe asks for a stimulus before it
 /// gives it.
 const STIMULUS_SETTLE: Duration = Duration::from_secs(1);
+
+/// How long a `control` stimulus holds its keys down.
+const CONTROL_HOLD: Duration = Duration::from_secs(1);
+
+/// How long an `answer` stimulus waits for the question it answers, and a
+/// `sit` for the grid's sit response.
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a look at the other avatar's events waits for more.
+const DRAIN_WINDOW: Duration = Duration::from_millis(200);
+
+/// Notes what the grid sent the other avatar's viewer since the last look:
+/// the permission questions from the probe's prims (kept for an answer by
+/// that avatar) and alerts. Its other events are dropped.
+async fn drain_other(
+    other: &mut Session,
+    prims: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+) -> Result<(), TestFailure> {
+    let outcome = other
+        .wait_for(DRAIN_WINDOW, |event| {
+            match event {
+                Event::ScriptPermissionRequest(request) if prims.contains(&request.task_id) => {
+                    transcript.question(" by=other", request);
+                }
+                Event::AlertMessage { .. } | Event::AgentAlertMessage { .. } => {
+                    transcript.alert(" by=other", event);
+                }
+                _ => {}
+            }
+            None::<()>
+        })
+        .await;
+    match outcome {
+        Ok(()) | Err(TestFailure::Timeout(_)) => Ok(()),
+        Err(other) => Err(other),
+    }
+}
+
+/// Answers the permission question the probe's script put to the avatar
+/// `by` names with `grant`, as it is, and notes it — or notes that no
+/// question came within [`ANSWER_TIMEOUT`].
+async fn answer(
+    avatars: &mut Avatars<'_>,
+    by: By,
+    probe: &Probe,
+    prims: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    grant: i32,
+) -> Result<(), TestFailure> {
+    let deadline = after(ANSWER_TIMEOUT);
+    let request = match by {
+        By::Owner => {
+            if transcript.questions.is_empty() {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let outcome = avatars
+                    .session
+                    .wait_for(remaining, |event| {
+                        let _kept = transcript.take(&probe.id, prims, event);
+                        (!transcript.questions.is_empty()).then_some(())
+                    })
+                    .await;
+                match outcome {
+                    Ok(()) | Err(TestFailure::Timeout(_)) => {}
+                    Err(other) => return Err(other),
+                }
+            }
+            transcript.questions.pop_front()
+        }
+        By::Other => {
+            while transcript.other_questions.is_empty() && Instant::now() < deadline {
+                drain_other(avatars.other, prims, transcript).await?;
+            }
+            transcript.other_questions.pop_front()
+        }
+    };
+    let label = match by {
+        By::Owner => "",
+        By::Other => " by=other",
+    };
+    let Some(request) = request else {
+        transcript
+            .body
+            .push(format!("# answer{label} grant={grant} question=none"));
+        return Ok(());
+    };
+    transcript
+        .body
+        .push(format!("# answer{label} grant={grant}"));
+    let command = Command::AnswerScriptPermissions {
+        task_id: request.task_id,
+        item_id: request.item_id,
+        permissions: ScriptPermissions(grant),
+        experience_id: request.experience_id,
+    };
+    match by {
+        By::Owner => avatars.session.send(command).await,
+        By::Other => avatars.other.send(command).await,
+    }
+}
+
+/// Sits the avatar `by` names on prim A and notes the grid's sit response,
+/// or that none came within [`ANSWER_TIMEOUT`].
+async fn sit(
+    avatars: &mut Avatars<'_>,
+    by: By,
+    probe: &Probe,
+    prims: &BTreeMap<String, Object>,
+    keys: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+) -> Result<(), TestFailure> {
+    let target = prims
+        .get("A")
+        .ok_or_else(|| TestFailure::State(format!("{}: no prim A", probe.id)))?
+        .full_id;
+    let (actor, label) = match by {
+        By::Owner => (&mut *avatars.session, ""),
+        By::Other => (&mut *avatars.other, " by=other"),
+    };
+    actor
+        .send(Command::Sit {
+            target,
+            offset: Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        })
+        .await?;
+    let outcome = actor
+        .wait_for(ANSWER_TIMEOUT, |event| match event {
+            Event::SitResult {
+                sit_object,
+                autopilot,
+                sit_position,
+                sit_rotation,
+                camera_eye_offset,
+                camera_at_offset,
+                force_mouselook,
+            } if *sit_object == target => Some(format!(
+                "# sit{label} sit_position={} sit_rotation=<{:.3}, {:.3}, {:.3}, {:.3}> \
+                 camera_eye={} camera_at={} force_mouselook={} autopilot={}",
+                vector_note(sit_position),
+                sit_rotation.x,
+                sit_rotation.y,
+                sit_rotation.z,
+                sit_rotation.s,
+                vector_note(camera_eye_offset),
+                vector_note(camera_at_offset),
+                u8::from(*force_mouselook),
+                u8::from(*autopilot)
+            )),
+            _ => {
+                match by {
+                    By::Owner => {
+                        let _kept = transcript.take(&probe.id, keys, event);
+                    }
+                    By::Other => match event {
+                        Event::ScriptPermissionRequest(request)
+                            if keys.contains(&request.task_id) =>
+                        {
+                            transcript.question(label, request);
+                        }
+                        Event::AlertMessage { .. } | Event::AgentAlertMessage { .. } => {
+                            transcript.alert(label, event);
+                        }
+                        _ => {}
+                    },
+                }
+                None
+            }
+        })
+        .await;
+    match outcome {
+        Ok(note) => transcript.body.push(note),
+        Err(TestFailure::Timeout(_)) => {
+            transcript.body.push(format!("# sit{label} response=none"));
+        }
+        Err(other) => return Err(other),
+    }
+    Ok(())
+}
 
 /// Waits for `prim`'s task inventory listing, keeping the probe's lines
 /// that arrive meanwhile.
@@ -897,4 +1393,38 @@ fn trash_folder(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
         .find(|folder| folder.folder_type == FolderType::Trash.to_code())
         .or_else(|| folders.iter().find(|folder| folder.parent_id.is_none()))
         .map(|folder| folder.folder_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::{Cast, replace_ignoring_case, split_name};
+
+    #[test]
+    fn a_name_is_replaced_as_a_whole_word_in_any_case() {
+        assert_eq!(
+            replace_ignoring_case("Knob Label, knob label: KNOB", "Knob", "<first>"),
+            "<first> Label, <first> label: <first>"
+        );
+        assert_eq!(
+            replace_ignoring_case("Knobs knobby aknob knob", "knob", "<first>"),
+            "Knobs knobby aknob <first>"
+        );
+        assert_eq!(replace_ignoring_case("anything", "", "<first>"), "anything");
+    }
+
+    #[test]
+    fn both_avatars_names_become_placeholders() {
+        let cast = Cast {
+            owner_name: split_name("Knob Label"),
+            other_name: split_name("Lever Dial"),
+            ..Cast::default()
+        };
+        assert_eq!(
+            cast.scrub("Knob Label offered Lever Dial a seat"),
+            "<first> <last> offered <other-first> <other-last> a seat"
+        );
+        assert_eq!(split_name("Single"), ("Single".to_owned(), String::new()));
+    }
 }

@@ -1,0 +1,53 @@
+grid: aditi
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+PROBE avatar/sit rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# animations avatar=other playing=""
+PROBE avatar/sit rec=seat step=0 why=before on_target=none prims=1 last_link=none objects=1
+PROBE avatar/sit rec=waiting drive=touch by=other
+# touch by=other active_group=none
+PROBE avatar/sit rec=touch step=1 by=other
+PROBE avatar/sit rec=waiting drive=sit
+# sit sit_position=<0.000, 0.000, 0.850> sit_rotation=<0.000, 0.000, 0.707, 0.707> camera_eye=<-2.000, 0.000, 1.000> camera_at=<0.000, 0.000, 0.500> force_mouselook=0 autopilot=1
+# animations avatar=owner playing="sit@other-object"
+PROBE avatar/sit rec=seat step=2 why=changed on_target=owner sitter_size_zero=0 prims=2 last_link=owner objects=1
+PROBE avatar/sit rec=asked step=3 of=owner mask=3092
+PROBE avatar/sit rec=held step=3 why=answer answer=3092 perms=3092 granter=owner
+PROBE avatar/sit rec=unsit step=4 of=owner
+PROBE avatar/sit rec=seat step=4 why=changed on_target=none prims=1 last_link=none objects=1
+PROBE avatar/sit rec=held step=4 why=after-unsit answer=-1 perms=1040 granter=owner
+PROBE avatar/sit rec=waiting drive=sit by=other
+# animations avatar=owner playing=""
+# sit by=other sit_position=<0.000, 0.000, 0.850> sit_rotation=<0.000, 0.000, 0.707, 0.707> camera_eye=<-2.000, 0.000, 1.000> camera_at=<0.000, 0.000, 0.500> force_mouselook=0 autopilot=1
+PROBE avatar/sit rec=seat step=5 why=changed on_target=other sitter_size_zero=0 prims=2 last_link=other objects=1
+PROBE avatar/sit rec=asked step=6 of=other mask=3092
+PROBE avatar/sit rec=held step=6 why=answer answer=3092 perms=3092 granter=other
+PROBE avatar/sit rec=waiting drive=stand by=other
+# animations avatar=owner playing="walk@other-object"
+# stand by=other
+# animations avatar=owner playing=""
+# animations avatar=other playing="stride@other-object"
+PROBE avatar/sit rec=seat step=7 why=changed on_target=none prims=1 last_link=none objects=1
+PROBE avatar/sit rec=held step=7 why=after-stand answer=-1 perms=1040 granter=other
+PROBE avatar/sit rec=target-cleared on_target=none
+PROBE avatar/sit rec=waiting drive=sit
+# animations avatar=other playing=""
+# sit sit_position=<-0.340, 0.000, 0.550> sit_rotation=<0.000, 0.000, 1.000, 0.000> camera_eye=<-2.000, 0.000, 1.000> camera_at=<0.000, 0.000, 0.500> force_mouselook=0 autopilot=1
+# animations avatar=owner playing="sit@other-object"
+PROBE avatar/sit rec=seat step=8 why=changed on_target=none prims=2 last_link=owner objects=1
+PROBE avatar/sit rec=waiting drive=stand
+# stand
+PROBE avatar/sit rec=seat step=9 why=changed on_target=none prims=1 last_link=none objects=1
+PROBE avatar/sit rec=held step=9 why=after-stand answer=-1 perms=1040 granter=other
+PROBE avatar/sit rec=end
+# animations avatar=owner playing="stride@other-object"
+# animations avatar=owner playing="walk@other-object"
+# animations avatar=owner playing="falldown@other-object"
+# animations avatar=owner playing="land@other-object"
+# animations avatar=owner playing="walk@other-object"
+# animations avatar=owner playing=""

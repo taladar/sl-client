@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 354 |
+| ready | 353 |
 | blocked | 57 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1418 |
+| done | 1419 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2073** |
@@ -275,7 +275,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-avatar-control`](ideas/server-lsl-lib-avatar-control.md) —
   Library tranche — avatars, animation, sitting, controls and camera (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
-  `server-world-sit-and-attach`, `gridspec-lsl-avatar-control`)
+  `server-world-sit-and-attach`, `gridspec-lsl-avatar-control` (done))
 - [`server-lsl-lib-comms`](ideas/server-lsl-lib-comms.md) — Library tranche —
   chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
   (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`,
@@ -351,7 +351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (354)
+## ready (353)
 
 ### protocol
 
@@ -1145,9 +1145,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-avatar-control`](ready/gridspec-lsl-avatar-control.md) — LSL
-  library behaviour on each grid — animations, sitting, controls and camera
-  (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-comms`](ready/gridspec-lsl-comms.md) — LSL library behaviour on
   each grid — chat, listens, dialogs and link messages (blocked by
   `gridspec-lsl-live-differential-runner` (done))
@@ -1555,7 +1552,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1418)
+## done (1419)
 
 ### protocol
 
@@ -4632,6 +4629,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-logout`](done/gridspec-logout.md) — Logout reply, timing and what
   logout does to seats and child circuits
+- [`gridspec-lsl-avatar-control`](done/gridspec-lsl-avatar-control.md) — LSL
+  library behaviour on each grid — animations, sitting, controls and camera
+  (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-live-differential-runner`](done/gridspec-lsl-live-differential-runner.md)
   — Run one probe on OpenSim YEngine, XEngine and aditi and collect the
   transcripts (blocked by `gridspec-lsl-probe-corpus` (done))

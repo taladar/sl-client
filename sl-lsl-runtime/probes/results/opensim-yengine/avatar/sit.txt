@@ -1,0 +1,56 @@
+grid: opensim-yengine
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+PROBE avatar/sit rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE avatar/sit rec=seat step=0 why=before on_target=none prims=1 last_link=prim objects=1
+PROBE avatar/sit rec=waiting drive=touch by=other
+# touch by=other active_group=set
+PROBE avatar/sit rec=touch step=1 by=other
+PROBE avatar/sit rec=waiting drive=sit
+PROBE avatar/sit rec=seat step=2 why=changed on_target=owner sitter_size_zero=0 prims=2 last_link=owner objects=1
+PROBE avatar/sit rec=asked step=3 of=owner mask=3092
+PROBE avatar/sit rec=held step=3 why=answer answer=3092 perms=3092 granter=owner
+PROBE avatar/sit rec=unsit step=4 of=owner
+PROBE avatar/sit rec=seat step=4 why=changed on_target=none prims=1 last_link=prim objects=1
+PROBE avatar/sit rec=held step=4 why=after-unsit answer=-1 perms=1040 granter=owner
+PROBE avatar/sit rec=waiting drive=sit by=other
+# sit sit_position=<0.000, 0.000, 0.500> sit_rotation=<0.000, 0.000, 0.707, 0.707> camera_eye=<-2.000, 0.000, 1.000> camera_at=<0.000, 0.000, 0.500> force_mouselook=0 autopilot=1
+# animations avatar=owner playing="sit"
+# follow-cam-clear object=probe
+# animations avatar=owner playing="stand"
+# animations avatar=owner playing="falldown"
+# sit by=other sit_position=<0.000, 0.000, 0.500> sit_rotation=<0.000, 0.000, 0.707, 0.707> camera_eye=<-2.000, 0.000, 1.000> camera_at=<0.000, 0.000, 0.500> force_mouselook=0 autopilot=1
+PROBE avatar/sit rec=seat step=5 why=changed on_target=other sitter_size_zero=0 prims=2 last_link=other objects=1
+PROBE avatar/sit rec=asked step=6 of=other mask=3092
+PROBE avatar/sit rec=held step=6 why=answer answer=3092 perms=3092 granter=other
+PROBE avatar/sit rec=waiting drive=stand by=other
+# animations avatar=other playing="sit"
+# animations avatar=owner playing="land"
+# animations avatar=owner playing="stand"
+# stand by=other
+PROBE avatar/sit rec=seat step=7 why=changed on_target=none prims=1 last_link=prim objects=1
+PROBE avatar/sit rec=held step=7 why=after-stand answer=-1 perms=1040 granter=other
+PROBE avatar/sit rec=target-cleared on_target=none
+PROBE avatar/sit rec=waiting drive=sit
+# animations avatar=other playing="stand"
+# animations avatar=other playing="falldown"
+PROBE avatar/sit rec=seat step=8 why=changed on_target=none prims=2 last_link=owner objects=1
+PROBE avatar/sit rec=waiting drive=stand
+# sit sit_position=<0.415, 0.000, 0.900> sit_rotation=<0.000, 0.000, 0.000, 1.000> camera_eye=<-2.000, 0.000, 1.000> camera_at=<0.000, 0.000, 0.500> force_mouselook=0 autopilot=1
+# animations avatar=owner playing="sit"
+# animations avatar=other playing="land"
+# animations avatar=other playing="stand"
+# stand
+PROBE avatar/sit rec=seat step=9 why=changed on_target=none prims=1 last_link=prim objects=1
+PROBE avatar/sit rec=held step=9 why=after-stand answer=-1 perms=1040 granter=other
+PROBE avatar/sit rec=end
+# follow-cam-clear object=probe
+# animations avatar=owner playing="stand"
+# animations avatar=owner playing="falldown"
+# animations avatar=owner playing="land"
+# animations avatar=owner playing="stand"
+# animations avatar=owner playing="falldown"

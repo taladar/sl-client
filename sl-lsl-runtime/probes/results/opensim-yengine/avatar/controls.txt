@@ -1,0 +1,47 @@
+grid: opensim-yengine
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+PROBE avatar/controls rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE avatar/controls rec=waiting drive=answer grant=4
+# question permissions=4 object="Object" owner="<first> <last>" experience=none
+# answer grant=4
+PROBE avatar/controls rec=held answer=4 perms=4
+PROBE avatar/controls rec=took step=1 controls=257 accept=1 pass_on=0
+PROBE avatar/controls rec=waiting drive=control keys=1
+# script-control-change action=release controls=257 pass_to_agent=0
+# script-control-change action=release controls=257 pass_to_agent=1
+# script-control-change action=take controls=257 pass_to_agent=0
+# control keys=1 held=1s
+PROBE avatar/controls rec=control step=1 key_is_owner=1 level=1 edge=1 pressed=1 released=0 repeats=0
+PROBE avatar/controls rec=control step=1 key_is_owner=1 level=0 edge=1 pressed=0 released=1 repeats=1
+PROBE avatar/controls rec=hold-over step=1 repeats=0
+PROBE avatar/controls rec=waiting drive=control keys=256
+# control keys=256 held=1s
+PROBE avatar/controls rec=control step=2 key_is_owner=1 level=256 edge=256 pressed=256 released=0 repeats=0
+PROBE avatar/controls rec=control step=2 key_is_owner=1 level=0 edge=256 pressed=0 released=256 repeats=1
+PROBE avatar/controls rec=hold-over step=2 repeats=0
+PROBE avatar/controls rec=waiting drive=control keys=2
+# control keys=2 held=1s
+# animations avatar=owner playing="walk"
+# animations avatar=owner playing="stand"
+PROBE avatar/controls rec=hold-over step=3 repeats=0
+PROBE avatar/controls rec=took step=4 controls=256 accept=0 pass_on=1
+PROBE avatar/controls rec=waiting drive=control keys=256
+# script-control-change action=release controls=256 pass_to_agent=0
+# script-control-change action=release controls=256 pass_to_agent=1
+# script-control-change action=take controls=256 pass_to_agent=1
+# control keys=256 held=1s
+PROBE avatar/controls rec=hold-over step=4 repeats=0
+PROBE avatar/controls rec=released step=5 perms=0
+PROBE avatar/controls rec=waiting drive=control keys=256
+# control keys=256 held=1s
+PROBE avatar/controls rec=hold-over step=5 repeats=0
+PROBE avatar/controls rec=took step=6 controls=256 accept=1 pass_on=1 perms=0
+PROBE avatar/controls rec=waiting drive=control keys=256
+# control keys=256 held=1s
+PROBE avatar/controls rec=hold-over step=6 repeats=0
+PROBE avatar/controls rec=end

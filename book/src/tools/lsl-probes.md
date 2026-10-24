@@ -34,7 +34,7 @@ A probe's id is its path below `probes/` without the extension
 | key | meaning |
 | --- | --- |
 | `probe` | the id; required |
-| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`; required |
+| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`; required |
 | `script` | the inventory name, which the probe's scripts find each other by; required in a probe of several |
 | `order` | where the script comes in the save order; required in a probe of several |
 | `prim` | the object that holds it, `A` (the default), `B`, … |
@@ -53,9 +53,22 @@ PROBE events/other-avatar rec=waiting drive=touch by=other
 ```
 
 `drive=touch` touches prim A; `drive=chat` says `text` on `channel` at
-normal range (20 m). `by=other` has the runner's second avatar do it, which
-owns nothing of the probe's; without `by` it is the owner. A probe asks only
-for the drives its header declares, and the run fails if it asks for another.
+normal range (20 m). `drive=answer grant=<mask>` answers the permission
+question the probe's script puts next (`llRequestPermissions`) with that
+mask as it is — `0` denies, and a mask beyond the question is sent too —
+or notes that no question came within ten seconds. `drive=sit` sits on
+prim A and `drive=stand` stands up. `drive=control keys=<mask>` holds the
+movement controls `keys` (the `CONTROL_*` bits, which are the agent's own
+control flags) down for a second, then lets go. `by=other` has the runner's
+second avatar do it, which owns nothing of the probe's; without `by` it is
+the owner. A probe asks only for the drives its header declares, and the
+run fails if it asks for another.
+
+```text
+PROBE avatar/permissions rec=waiting drive=answer grant=1044
+PROBE avatar/sit rec=waiting drive=sit by=other
+PROBE avatar/controls rec=waiting drive=control keys=256
+```
 
 What a probe prints is one `llOwnerSay` line per observation:
 
@@ -130,9 +143,21 @@ channel=7 text="…"`; a touch by the other avatar also says whether that
 avatar has an active group, `active_group=set|none`, which decides what
 `llDetectedGroup` answers and no script can read). It keeps the probe's
 owner-say lines from its prims, and every `DEBUG_CHANNEL` message they send
-as a `# debug-channel:` note, until `end` or two minutes, then derezzes the
-prims to the Trash. Every wait inside a run keeps what arrives during it, so
-a line printed while the case waits for a compile or a listing is not lost.
+as a `# debug-channel:` note (an owner-say line that is not a probe line as
+`# owner-say:`), until `end` or two minutes, then derezzes the prims to the
+Trash. It also notes what the grid sent the two viewers meanwhile, about
+the avatars: a permission question from the probe's prims (`# question`, the
+mask, the object's name, how the owner's name was put), the sit response
+(`# sit`, seat position and rotation, camera offsets), a
+`ScriptControlChange` (`# script-control-change`), a follow camera
+(`# follow-cam`, the parameters by code, or `# follow-cam-clear`), an
+avatar's animation list when it changes (`# animations`, the built-in ones
+by name, each with `@probe` when the probe's prim is its source; an uploaded
+one is the account's own and left out) and alerts. Names are never written:
+both avatars' names in anything a grid wrote become `<first>`, `<last>`,
+`<other-first>`, `<other-last>`. Every wait inside a run keeps what arrives
+during it, so a line printed while the case waits for a compile or a
+listing is not lost.
 
 A result file's header says where and how the run was made:
 
@@ -233,6 +258,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | — a library function's error | `Could not find script 'Nope'.`, heard at 10 m, not at 50 m | `llGetScriptState: Can't find script 'Nope'`, heard at 50 m | the same |
 | — the faulted script | stopped: `llGetScriptState` 0, a link message goes nowhere, and `llSetScriptState(…, TRUE)` does not start it again | reported running, yet answers nothing, restarted or not | runs on: answers in the state it faulted in, globals intact |
 | — unbounded recursion | `Stack-Heap Collision` | a `StackOverflowException` the engine catches (logged; no message) | the simulator process aborts — `skip-on` |
+| `avatar/*`, 2026-10-24: permissions, sitting, controls, camera and animations | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#animations-sitting-controls-and-camera) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

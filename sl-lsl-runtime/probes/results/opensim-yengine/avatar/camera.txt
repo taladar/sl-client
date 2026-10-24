@@ -1,0 +1,36 @@
+grid: opensim-yengine
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+PROBE avatar/camera rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE avatar/camera rec=waiting drive=answer grant=3072
+PROBE avatar/camera rec=asked step=1 seated=0 mask=3072
+# question permissions=3072 object="Object" owner="<first> <last>" experience=none
+# answer grant=3072
+PROBE avatar/camera rec=held step=1 why=answer answer=3072 perms=3072
+PROBE avatar/camera rec=waiting drive=sit
+PROBE avatar/camera rec=seat step=2 seated=1
+PROBE avatar/camera rec=asked step=3 seated=1 mask=3072
+PROBE avatar/camera rec=held step=3 why=answer answer=3072 perms=3072
+PROBE avatar/camera rec=set step=4 which=in-range
+# sit sit_position=<0.000, 0.000, 0.500> sit_rotation=<0.000, 0.000, 0.000, 1.000> camera_eye=<0.000, 0.000, 0.000> camera_at=<0.000, 0.000, 0.000> force_mouselook=0 autopilot=1
+# animations avatar=owner playing="sit"
+# follow-cam object=probe 0=20 2=0 3=0 4=1 7=5 8=30 9=0.5 12=1 18=120 19=128 20=29.5 21=1
+PROBE avatar/camera rec=set step=5 which=out-of-range
+# follow-cam object=probe 0=-200 6=9 7=100 8=400 10=-1
+PROBE avatar/camera rec=cleared step=6
+# follow-cam-clear object=probe
+PROBE avatar/camera rec=track step=7 pos_zero=0 rot_identity=1
+PROBE avatar/camera rec=waiting drive=stand
+# stand
+PROBE avatar/camera rec=seat step=7 seated=0
+PROBE avatar/camera rec=held step=7 why=after-stand answer=-1 perms=1024
+PROBE avatar/camera rec=end
+# follow-cam-clear object=probe
+# animations avatar=owner playing="stand"
+# animations avatar=owner playing="falldown"
+# animations avatar=owner playing="land"
+# animations avatar=owner playing="stand"

@@ -38,3 +38,24 @@ binding rows in `key_bindings.xml`) the left mouse button must feed
 ML_LBUTTON_DOWN/UP control bits to a controls-grabbing script instead
 of performing a world click. This needs mouse buttons as binding
 sources, so it pairs with [[viewer-input-mouse-button-bindings]].
+
+## From gridspec-lsl-avatar-control (2026-10-24)
+
+What each grid sends, measured by the `avatar/controls` probe
+(`book/src/gridspec/lsl.md` § Controls) — the capture has to take both as
+they come:
+
+- **Second Life** opens a script's first `llTakeControls` with a
+  `ScriptControlChange` releasing **every** control (`0xFFFFFFFF`; a later
+  take releases what the last one took), then takes the keys plus the
+  nudge-forward bit for `CONTROL_FWD` (it arrives as `0x80001`). With accept off
+  (`llTakeControls(keys, FALSE, TRUE)`) it takes the **complement** of the
+  keys (`0xFFFFFEFF` for turn-left), passed to the agent. `llReleaseControls`
+  sends the release of what was taken.
+- **OpenSim** releases just the named keys (passed and not), takes exactly
+  the keys, takes the keys themselves for accept off, and sends **no**
+  `ScriptControlChange` on `llReleaseControls`.
+- Both drop `TAKE_CONTROLS` from the script's permissions on
+  `llReleaseControls` and when a sitter stands up, and both deliver a held
+  key as a press, repeats and a release (Second Life about 21 repeats a
+  second, OpenSim one) from the plain `AgentUpdate` control flags.
