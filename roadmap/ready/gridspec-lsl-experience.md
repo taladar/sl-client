@@ -2,7 +2,7 @@
 id: gridspec-lsl-experience
 title: LSL library behaviour on each grid — experiences and the key-value store
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-experience]
 blocked_by: [gridspec-lsl-live-differential-runner]

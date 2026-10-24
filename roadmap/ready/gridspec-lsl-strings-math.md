@@ -2,7 +2,7 @@
 id: gridspec-lsl-strings-math
 title: LSL library behaviour on each grid — strings, lists, maths and rotations
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-strings-lists,
   server-lsl-lib-math-rotations, server-lsl-call-cost-sizes]

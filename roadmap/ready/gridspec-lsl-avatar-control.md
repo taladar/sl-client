@@ -2,7 +2,7 @@
 id: gridspec-lsl-avatar-control
 title: LSL library behaviour on each grid — animations, sitting, controls and camera
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-avatar-control]
 blocked_by: [gridspec-lsl-live-differential-runner]

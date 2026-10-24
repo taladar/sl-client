@@ -88,6 +88,13 @@ pub trait GridTest: Send + Sync {
         false
     }
 
+    /// Whether the case runs a selection of the LSL probe corpus, which the
+    /// runner's `--probe` narrows ([`TestContext::probe_selection`]). The
+    /// runner refuses `--probe` for any other case. Defaults to `false`.
+    fn selects_probes(&self) -> bool {
+        false
+    }
+
     /// The overall wall-clock budget the runner gives this case's body before
     /// cancelling it as hung ([`crate::isolate::run_isolated`]).
     ///

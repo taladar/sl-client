@@ -29,6 +29,9 @@
 //!   looked like from the client, shared by the neighbour cases.
 //! - [`support`] — shared scaffolding (timeouts, combinators, assertion and
 //!   metric-name helpers, well-known id fixtures) the cases build on.
+//! - [`probe_corpus`] — the LSL probe corpus on disk, read for the
+//!   `lsl-probes` cases and its committed result files compared grid
+//!   against grid.
 //! - [`isolate`] — runs a case body under a caught unwind and an overall
 //!   timeout, so a panicking or hung case fails only itself.
 //! - [`cases`] — the concrete test implementations.
@@ -46,6 +49,7 @@ pub mod lure;
 pub mod measured;
 pub mod metrics;
 pub mod object_stream;
+pub mod probe_corpus;
 pub mod record;
 pub mod registry;
 pub mod report;

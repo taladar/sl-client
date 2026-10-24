@@ -1138,6 +1138,10 @@ pub struct TestContext {
     /// a grid-initiated teleport — are decided by a simulator, so on a grid that
     /// simulates no movement the case has to make the decision itself.
     fake: Option<crate::fake::FakeControl>,
+    /// The probe ids the runner's `--probe` named, for a case that
+    /// [selects probes](crate::registry::GridTest::selects_probes); empty
+    /// is every probe.
+    probe_selection: Vec<String>,
 }
 
 impl TestContext {
@@ -1160,7 +1164,21 @@ impl TestContext {
             completeness: Completeness::Complete,
             completeness_note: None,
             fake: None,
+            probe_selection: Vec::new(),
         }
+    }
+
+    /// Narrow a probe-running case to these probe ids.
+    #[must_use]
+    pub fn with_probe_selection(mut self, probes: Vec<String>) -> Self {
+        self.probe_selection = probes;
+        self
+    }
+
+    /// The probe ids the run is narrowed to; empty is every probe.
+    #[must_use]
+    pub fn probe_selection(&self) -> &[String] {
+        &self.probe_selection
     }
 
     /// Attach the grid-side handle a [`Grid::FakeSl`] run drives the simulator

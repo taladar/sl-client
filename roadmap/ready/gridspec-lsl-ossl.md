@@ -2,7 +2,7 @@
 id: gridspec-lsl-ossl
 title: OSSL availability and denial on OpenSim
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey]
 blocked_by: [gridspec-lsl-live-differential-runner]

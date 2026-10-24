@@ -2,7 +2,7 @@
 id: gridspec-lsl-throttles
 title: Forced delays and throttles on each grid
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-call-cost-sizes]
 blocked_by: [gridspec-lsl-live-differential-runner]

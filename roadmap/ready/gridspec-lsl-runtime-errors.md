@@ -2,7 +2,7 @@
 id: gridspec-lsl-runtime-errors
 title: LSL run-time errors on OpenSim and the debug channel in our viewer
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-runtime-errors,
   viewer-script-warning-window]

@@ -64,6 +64,7 @@ async fn dispatch(options: Options) -> Result<(), Error> {
     match options.command {
         Subcommand::Run(args) => run(args).await,
         Subcommand::RunOffline(args) => run_offline(args.grid).await,
+        Subcommand::CompareProbes(args) => compare_probes(&args),
         Subcommand::List(args) => {
             list(args.grid);
             Ok(())
@@ -73,6 +74,26 @@ async fn dispatch(options: Options) -> Result<(), Error> {
             generate_completion(&output_file, shell)
         }
     }
+}
+
+/// Compare the committed LSL probe results grid against grid and print the
+/// report.
+///
+/// # Errors
+///
+/// Returns [`Error::Test`] when the corpus or a result file cannot be read,
+/// or a probe or grid is unknown.
+fn compare_probes(args: &CompareProbesArgs) -> Result<(), Error> {
+    let lines = sl_conformance::probe_corpus::compare_results(
+        &sl_conformance::probe_corpus::corpus_root(),
+        &args.probes,
+        &args.grid,
+    )
+    .map_err(|error| Error::Test(error.to_string()))?;
+    for line in lines {
+        print_line(&line);
+    }
+    Ok(())
 }
 
 /// List the registered tests, optionally filtered to one grid.
@@ -191,6 +212,12 @@ async fn run(args: RunArgs) -> Result<(), Error> {
             test: test.name().to_owned(),
             grid: args.grid,
         });
+    }
+    if !args.probe.is_empty() && !test.selects_probes() {
+        return Err(Error::Test(format!(
+            "test `{}` runs no probes; `--probe` is for the lsl-probes cases",
+            test.name()
+        )));
     }
 
     // The fake grid comes up here, before anything else needs it: it registers
@@ -391,7 +418,8 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         secondary_session,
         tertiary_session,
         fixtures,
-    );
+    )
+    .with_probe_selection(args.probe.clone());
     // On the fake grid the case may also drive the simulator; hand it the
     // grid-side handle onto the primary's session, now that it exists.
     if let Some(harness) = &fake {
@@ -671,6 +699,11 @@ enum Subcommand {
     /// Run every offline case on the fake grid — both flavours, or the one
     /// `--grid` names — and record each result.
     RunOffline(RunOfflineArgs),
+    /// Compare the committed LSL probe results grid against grid: what
+    /// differs beyond the tolerance model (minted ids, a float's last digit,
+    /// the fields a probe marks as measurements, the order of unordered
+    /// records). No login.
+    CompareProbes(CompareProbesArgs),
     /// List the registered tests.
     List(ListArgs),
     /// Generate the man page.
@@ -721,6 +754,10 @@ struct RunArgs {
     /// running when it elapses is cancelled and recorded as a timeout failure.
     #[clap(long, value_name = "SECONDS")]
     timeout: Option<u64>,
+    /// Run only this probe of the LSL probe corpus (repeatable), for the
+    /// `lsl-probes` cases; without it they run every probe.
+    #[clap(long, value_name = "PROBE_ID")]
+    probe: Vec<String>,
     /// The single test to run.
     test: String,
 }
@@ -731,6 +768,17 @@ struct RunOfflineArgs {
     /// Restrict the sweep to one fake flavour (`fake-sl` or `fake-opensim`).
     #[clap(long, value_enum)]
     grid: Option<Grid>,
+}
+
+/// Arguments for the `compare-probes` subcommand.
+#[derive(clap::Args, Debug)]
+struct CompareProbesArgs {
+    /// A results grid to compare (repeatable, in order: the first that has
+    /// a result is the baseline); without it, every results grid.
+    #[clap(long, value_name = "RESULTS_GRID")]
+    grid: Vec<String>,
+    /// The probe ids to compare; without any, every probe.
+    probes: Vec<String>,
 }
 
 /// Arguments for the `list` subcommand.

@@ -2,7 +2,7 @@
 id: gridspec-lsl-prim-state
 title: LSL library behaviour on each grid — reading and writing the prim
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-prim-state]
 blocked_by: [gridspec-lsl-live-differential-runner]

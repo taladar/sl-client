@@ -2,7 +2,7 @@
 id: gridspec-lsl-events
 title: The LSL event model on OpenSim, beside what aditi already showed
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey]
 blocked_by: [gridspec-lsl-live-differential-runner]

@@ -2,7 +2,7 @@
 id: gridspec-lsl-json-linkset-data
 title: LSL library behaviour on each grid — llJson* and the linkset data store
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-json-linkset-data]
 blocked_by: [gridspec-lsl-live-differential-runner]

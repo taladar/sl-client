@@ -1,4 +1,5 @@
 // probe: vm/throughput
+// vary: seconds, per_second
 // drive: none
 //
 // How fast a script runs: one million iterations of an empty loop, of a loop

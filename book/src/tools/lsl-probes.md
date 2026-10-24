@@ -34,12 +34,28 @@ A probe's id is its path below `probes/` without the extension
 | key | meaning |
 | --- | --- |
 | `probe` | the id; required |
-| `drive` | `none` (runs from `state_entry`) or `touch` (prints a `waiting` record, then waits for one touch of prim A); required |
+| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`; required |
 | `script` | the inventory name, which the probe's scripts find each other by; required in a probe of several |
 | `order` | where the script comes in the save order; required in a probe of several |
 | `prim` | the object that holds it, `A` (the default), `B`, … |
 | `distance` | how far east of prim A its prim stands, in metres |
 | `skip-on` | the grids it is left out on, comma-separated, where it would take the region down instead of measuring anything — the comment says why |
+| `vary` | the fields that are measurements (a duration, a rate, a clock), comma-separated: a comparison sets them side by side and never counts them as a difference |
+| `unordered` | the records whose order among a run of their own kind is not defined, comma-separated: a comparison takes such a run as a set |
+
+A probe that needs something done to it prints a `waiting` record and
+waits; the runner answers each one, a second after it arrives, in order:
+
+```text
+PROBE events/other-avatar rec=waiting drive=chat channel=7 text="from the owner"
+PROBE events/other-avatar rec=waiting drive=chat by=other channel=8 text="hi"
+PROBE events/other-avatar rec=waiting drive=touch by=other
+```
+
+`drive=touch` touches prim A; `drive=chat` says `text` on `channel` at
+normal range (20 m). `by=other` has the runner's second avatar do it, which
+owns nothing of the probe's; without `by` it is the owner. A probe asks only
+for the drives its header declares, and the run fails if it asks for another.
 
 What a probe prints is one `llOwnerSay` line per observation:
 
@@ -91,15 +107,32 @@ sl-conformance run --grid opensim lsl-probes
 sl-conformance run --grid opensim lsl-probes-xengine
 ```
 
+`--probe <id>` (repeatable) runs only the probes it names and writes only
+their files:
+
+```sh
+sl-conformance run --grid opensim --probe events/other-avatar lsl-probes
+```
+
+The cases log in two avatars: the primary owns and runs the probes, the
+secondary is the other avatar a `by=other` stimulus comes from and does
+nothing else. On Second Life both walk from wherever the login put them
+(Mauve's telehub) to the build location, so the second stands within chat
+range of the prims.
+
 For each probe, in id order, the case rezzes a cube per prim against the
 region's reference primitive (prim A 1 m above it, the others `distance`
 east). It makes each script in its prim under its name with `RezScript`,
 in save order, and uploads the source running, prefixed on OpenSim with
-the line that picks the engine (`//YEngine:` or `//XEngine:`). It touches
-prim A a second after a `touch` probe says it is waiting. It keeps the
-probe's owner-say lines from its prims, and every `DEBUG_CHANNEL` message
-they send as a `# debug-channel:` note, until `end` or two minutes, then
-derezzes the prims to the Trash.
+the line that picks the engine (`//YEngine:` or `//XEngine:`). It answers
+each `waiting` record and notes what it did (`# touch`, `# chat by=other
+channel=7 text="…"`; a touch by the other avatar also says whether that
+avatar has an active group, `active_group=set|none`, which decides what
+`llDetectedGroup` answers and no script can read). It keeps the probe's
+owner-say lines from its prims, and every `DEBUG_CHANNEL` message they send
+as a `# debug-channel:` note, until `end` or two minutes, then derezzes the
+prims to the Trash. Every wait inside a run keeps what arrives during it, so
+a line printed while the case waits for a compile or a listing is not lost.
 
 A result file's header says where and how the run was made:
 
@@ -123,9 +156,54 @@ that never printed `end` says `complete: no`, and the conformance record
 is `partial`. On Second Life the case needs the fixtures' build location,
 as every case that rezzes does.
 
-The case collects; it never compares. Telling what may legitimately
-differ — minted ids, timestamps, a float's last digit — from a finding is
-the live differential runner's job (`gridspec-lsl-live-differential-runner`).
+The case collects; it never compares.
+
+## Comparing
+
+`sl-conformance compare-probes` sets the committed result files side by
+side, grid against grid, with no login:
+
+```sh
+# every probe, aditi against each OpenSim engine
+sl-conformance compare-probes
+# one probe, two grids, the first the baseline
+sl-conformance compare-probes --grid opensim-yengine --grid opensim-xengine \
+  events/queue-limit
+```
+
+For each probe the first grid that has a result is the baseline, compared
+with each other grid that has one. The comparison
+(`sl_lsl_runtime::probe::compare`) knows what may legitimately differ:
+
+- **minted ids**: any key but `NULL_KEY`, anywhere in a value, reads as one
+  placeholder;
+- **a float's last digit**: two decimals agree within one unit of the last
+  place the coarser prints (`5.0` and `5.000000`, `0.123456` and
+  `0.123457`); an integer has to match; vectors and rotations component by
+  component;
+- **measurements**: the header's `vary` fields are reported as `measured`,
+  never as a difference;
+- **context**: the `start` record's region, channel and version;
+- **order**: the lines before `start`, and a run of an `unordered` record,
+  are compared as sets.
+
+Records are matched by the longest common sequence of records that agree;
+between two matched ones, a left and a right record of the same name are
+one record whose fields differ, and the rest were printed by one run only.
+The `#` notes are not compared. What is left is a finding:
+
+```text
+== events/queue-limit: aditi | opensim-xengine — 2 difference(s)
+  differs     received sent=100 lowest=0: got 64 | 100
+  differs     received sent=100 lowest=0: highest 63 | 99
+== vm/throughput: aditi | opensim-yengine — agree
+  measured    loop loop=empty run=0 iterations=1000000: per_second 505586 | 27777779
+```
+
+Each row names the record with the fields both runs agree on, then the
+field and the two values. Nothing yet needs a tolerance for merging (a
+grid coalescing what another sends apart): that is the frame timing no
+probe should depend on (above).
 
 A probe can also be run by hand: drop its scripts into prims in `order`,
 under their `script` names (prefixed on OpenSim with the engine line), and
@@ -155,3 +233,6 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | — a library function's error | `Could not find script 'Nope'.`, heard at 10 m, not at 50 m | `llGetScriptState: Can't find script 'Nope'`, heard at 50 m | the same |
 | — the faulted script | stopped: `llGetScriptState` 0, a link message goes nowhere, and `llSetScriptState(…, TRUE)` does not start it again | reported running, yet answers nothing, restarted or not | runs on: answers in the state it faulted in, globals intact |
 | — unbounded recursion | `Stack-Heap Collision` | a `StackOverflowException` the engine catches (logged; no message) | the simulator process aborts — `skip-on` |
+| `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
+| — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
+| — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

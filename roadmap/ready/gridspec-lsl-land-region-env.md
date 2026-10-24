@@ -2,7 +2,7 @@
 id: gridspec-lsl-land-region-env
 title: LSL library behaviour on each grid — parcel, region, estate and environment queries
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-land-region-env]
 blocked_by: [gridspec-lsl-live-differential-runner]

@@ -1,4 +1,5 @@
 // probe: errors/runtime-errors
+// unordered: heard
 // script: Listener near
 // prim: C
 // order: 6

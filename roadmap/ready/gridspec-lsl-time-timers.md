@@ -2,7 +2,7 @@
 id: gridspec-lsl-time-timers
 title: LSL time, timers and sleep on each grid
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey]
 blocked_by: [gridspec-lsl-live-differential-runner]

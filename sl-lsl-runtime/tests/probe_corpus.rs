@@ -14,12 +14,12 @@
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
 
     use pretty_assertions::assert_eq;
     use sl_lsl_runtime::compile;
-    use sl_lsl_runtime::probe::{GRIDS, Header, ResultFile};
+    use sl_lsl_runtime::probe::{Drive, GRIDS, Header, Line, ResultFile, Stimulus};
 
     /// The corpus root.
     fn probes_root() -> PathBuf {
@@ -164,6 +164,24 @@ mod tests {
         Ok(problems)
     }
 
+    /// What is wrong with the `waiting` records of a run: one that is not a
+    /// stimulus, or asks for a drive the probe's headers do not declare.
+    fn stimulus_problems(file: &ResultFile, drives: &BTreeSet<Drive>) -> Vec<String> {
+        file.body
+            .iter()
+            .filter_map(|text| Line::parse(text).ok())
+            .filter(|line| line.rec == "waiting")
+            .filter_map(|line| match Stimulus::from_waiting(&line) {
+                Ok(stimulus) if drives.contains(&stimulus.action.drive()) => None,
+                Ok(stimulus) => Some(format!(
+                    "asks for {:?}, which no header declares",
+                    stimulus.action.drive()
+                )),
+                Err(reason) => Some(reason),
+            })
+            .collect()
+    }
+
     /// Every result file under a grid's directory, with the probe id its
     /// path names.
     fn result_files(grid_dir: &Path) -> Result<Vec<(PathBuf, String)>, String> {
@@ -207,7 +225,16 @@ mod tests {
 
     #[test]
     fn every_result_file_is_a_well_formed_run_of_a_known_probe() -> Result<(), String> {
-        let known: BTreeSet<String> = probes()?.into_iter().map(|probe| probe.id).collect();
+        let mut known: BTreeMap<String, BTreeSet<Drive>> = BTreeMap::new();
+        for probe in probes()? {
+            let mut drives = BTreeSet::new();
+            for script in &probe.scripts {
+                let source = fs_err::read_to_string(script).map_err(|error| error.to_string())?;
+                let header = Header::parse(&source).map_err(|error| error.to_string())?;
+                drives.extend(header.drives);
+            }
+            known.insert(probe.id, drives);
+        }
         let mut problems = Vec::new();
         for grid_dir in entries(&probes_root().join("results"))? {
             if !grid_dir.is_dir() {
@@ -220,17 +247,24 @@ mod tests {
             }
             for (path, id) in result_files(&grid_dir)? {
                 let shown = format!("results/{grid}/{id}.txt");
-                if !known.contains(&id) {
+                let Some(drives) = known.get(&id) else {
                     problems.push(format!("{shown}: no such probe"));
                     continue;
-                }
+                };
                 let text = fs_err::read_to_string(&path).map_err(|error| error.to_string())?;
                 match ResultFile::parse(&text) {
-                    Ok(file) => problems.extend(
-                        file.problems(&grid, &id)
-                            .into_iter()
-                            .map(|problem| format!("{shown}: {problem}")),
-                    ),
+                    Ok(file) => {
+                        problems.extend(
+                            file.problems(&grid, &id)
+                                .into_iter()
+                                .map(|problem| format!("{shown}: {problem}")),
+                        );
+                        problems.extend(
+                            stimulus_problems(&file, drives)
+                                .into_iter()
+                                .map(|problem| format!("{shown}: {problem}")),
+                        );
+                    }
                     Err(error) => problems.push(format!("{shown}: {error}")),
                 }
             }

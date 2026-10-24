@@ -1,0 +1,20 @@
+grid: aditi
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE events/other-avatar rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE events/other-avatar rec=waiting drive=chat channel=7 text="from the owner"
+# chat channel=7 text="from the owner"
+PROBE events/other-avatar rec=heard step=1 on=7 key_is_owner=1 is_agent=1 name_is_key2name=1 dist=4 message="from the owner"
+PROBE events/other-avatar rec=waiting drive=chat by=other channel=8 text="to the owner's listener"
+# chat by=other channel=8 text="to the owner's listener"
+PROBE events/other-avatar rec=waiting drive=chat by=other channel=7 text="from another avatar"
+# chat by=other channel=7 text="from another avatar"
+PROBE events/other-avatar rec=heard step=3 on=7 key_is_owner=0 is_agent=1 name_is_key2name=1 dist=5 message="from another avatar"
+PROBE events/other-avatar rec=waiting drive=touch by=other
+# touch by=other active_group=none
+PROBE events/other-avatar rec=touch step=4 count=1 key_is_owner=0 is_agent=1 name_is_key2name=1 dist=5 type=3 group=1 object_group_null=1
+PROBE events/other-avatar rec=end

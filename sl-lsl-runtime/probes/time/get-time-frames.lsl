@@ -1,4 +1,5 @@
 // probe: time/get-time-frames
+// vary: samples, distinct, smallest, largest, first, timestamp, unix, gmt, wall, time_of_day
 // drive: none
 //
 // How llGetTime moves: sample it in a tight loop for about a second and

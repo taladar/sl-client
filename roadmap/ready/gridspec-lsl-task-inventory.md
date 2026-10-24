@@ -2,7 +2,7 @@
 id: gridspec-lsl-task-inventory
 title: LSL library behaviour on each grid — task inventory, giving, rezzing and notecards
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-task-inventory]
 blocked_by: [gridspec-lsl-live-differential-runner]

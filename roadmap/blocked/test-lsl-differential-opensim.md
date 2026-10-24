@@ -57,3 +57,13 @@ Acceptance: one command runs a named script on both grids and prints a
 diff of the two transcripts; at least one real divergence found and
 either fixed or recorded as a deliberate difference; the suite runnable
 unattended against the local grid.
+
+## From gridspec-lsl-live-differential-runner (2026-10-24)
+
+The live half and the comparison exist: `sl-conformance run --probe <id>
+lsl-probes` plants and drives one probe (touch, chat, a second avatar), and
+`sl-conformance compare-probes` diffs result files under the tolerance
+model in `sl_lsl_runtime::probe::compare` (ids, a float's last digit, `vary`
+measurements, `unordered` records). Left here: the fake flavours' runs into
+`probes/results/fake-sl|fake-opensim/`, and recording a divergence as a
+deliberate difference.

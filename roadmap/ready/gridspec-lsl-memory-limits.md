@@ -2,7 +2,7 @@
 id: gridspec-lsl-memory-limits
 title: LSL memory and limits on OpenSim and the remaining SL unknowns
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-memory-sizes, viewer-script-limits]
 blocked_by: [gridspec-lsl-live-differential-runner]

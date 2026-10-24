@@ -2,7 +2,7 @@
 id: gridspec-lsl-physics-vehicles
 title: LSL library behaviour on each grid — status flags, forces, targets and vehicles
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-physics-vehicles]
 blocked_by: [gridspec-lsl-live-differential-runner]

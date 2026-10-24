@@ -2,7 +2,7 @@
 id: gridspec-lsl-money-permissions
 title: LSL library behaviour on each grid — script permissions, money and payment
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-money-permissions]
 blocked_by: [gridspec-lsl-live-differential-runner]

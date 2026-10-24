@@ -1,0 +1,20 @@
+grid: opensim-xengine
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+PROBE events/other-avatar rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE events/other-avatar rec=waiting drive=chat channel=7 text="from the owner"
+# chat channel=7 text="from the owner"
+PROBE events/other-avatar rec=heard step=1 on=7 key_is_owner=1 is_agent=1 name_is_key2name=1 dist=10 message="from the owner"
+PROBE events/other-avatar rec=waiting drive=chat by=other channel=8 text="to the owner's listener"
+# chat by=other channel=8 text="to the owner's listener"
+PROBE events/other-avatar rec=waiting drive=chat by=other channel=7 text="from another avatar"
+# chat by=other channel=7 text="from another avatar"
+PROBE events/other-avatar rec=heard step=3 on=7 key_is_owner=0 is_agent=1 name_is_key2name=1 dist=10 message="from another avatar"
+PROBE events/other-avatar rec=waiting drive=touch by=other
+# touch by=other active_group=set
+PROBE events/other-avatar rec=touch step=4 count=1 key_is_owner=0 is_agent=1 name_is_key2name=1 dist=10 type=1 group=0 object_group_null=1
+PROBE events/other-avatar rec=end

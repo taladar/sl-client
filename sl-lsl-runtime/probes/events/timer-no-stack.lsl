@@ -1,4 +1,5 @@
 // probe: events/timer-no-stack
+// vary: slept_until, first_after_wake, gaps
 // drive: none
 //
 // Whether a timer that falls due while the script is busy stacks: a 0.1 s

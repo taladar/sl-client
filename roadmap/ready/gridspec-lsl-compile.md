@@ -2,7 +2,7 @@
 id: gridspec-lsl-compile
 title: Script compilation and compile errors on each grid
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, viewer-script-compile-error-positions-zero-based,
   viewer-lsl-editor-save-compile]

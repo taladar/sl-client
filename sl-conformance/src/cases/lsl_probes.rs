@@ -12,8 +12,10 @@
 //!    header's save order, and uploads the source running — on OpenSim with
 //!    the first line that picks the engine (`//YEngine:` or `//XEngine:`).
 //!    A script whose `skip-on` names this grid is left out, with a note;
-//! 3. touches prim A once the probe says it is waiting, when its `drive` is
-//!    `touch`;
+//! 3. answers each `waiting` record the probe prints with the stimulus it
+//!    names ([`Stimulus`]): a touch of prim A or a line of chat on a
+//!    channel, from the owner or from a second avatar — one the probe's
+//!    header declares among its `drive`s;
 //! 4. keeps every owner-say line of the probe's (`PROBE <id> …`) from its
 //!    prims, and every `DEBUG_CHANNEL` message they shout as a `#` note,
 //!    until the probe prints `end` — and a little longer, for a second
@@ -28,23 +30,25 @@
 //! `complete: no`, and a script that does not compile is noted in its file.
 //!
 //! Two cases, one body: `lsl-probes` (Second Life's Mono, OpenSim's YEngine)
-//! and `lsl-probes-xengine` (OpenSim's XEngine). `1av`. On Second Life the
-//! case needs the fixtures' build location, as every case that rezzes does.
+//! and `lsl-probes-xengine` (OpenSim's XEngine). `2av`: the secondary is
+//! the other avatar a probe can ask to touch or speak, and is only that.
+//! `--probe <id>` runs only the probes it names. On Second Life the case
+//! needs the fixtures' build location, as every case that rezzes does.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    ChatSource, ChatType, Command, DeRezDestination, Event, FolderType, InventoryFolder,
-    InventoryFolderKey, InventoryKey, InventoryType, Object, ObjectKey, PrimShape, RestoreItem,
-    RezScriptParams, ScopedObjectId, ScriptTarget, ScriptUploadLocation, TaskInventoryItem,
-    TransactionId, Uuid, Vector, XferListing,
+    ChatChannel, ChatSource, ChatType, Command, DeRezDestination, Event, FolderType,
+    InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, Object, ObjectKey, PrimShape,
+    RestoreItem, RezScriptParams, ScopedObjectId, ScriptTarget, ScriptUploadLocation,
+    TaskInventoryItem, TransactionId, Uuid, Vector, XferListing,
 };
-use sl_lsl_runtime::probe::{Drive, Header, Line, PREFIX, ResultFile};
+use sl_lsl_runtime::probe::{Action, By, Line, PREFIX, ResultFile, Stimulus};
 
 use crate::context::{Session, TestContext, TestFailure, now_rfc3339};
 use crate::grid::Grid;
+use crate::probe_corpus::{Probe, corpus_root, load_corpus, result_path, select};
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
     REGION_TIMEOUT, REPLY_TIMEOUT, is_opensim, settle_scene, wait_for_own_new_object,
@@ -75,9 +79,6 @@ const LINGER: Duration = Duration::from_secs(3);
 
 /// How far above the reference primitive prim A is rezzed, in metres.
 const LIFT_M: f32 = 1.0;
-
-/// The inventory name of a single-script probe's script.
-const SINGLE_SCRIPT_NAME: &str = "Probe";
 
 /// The script engine (virtual machine) a run is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +146,14 @@ impl GridTest for LslProbes {
         &[Grid::Opensim, Grid::Aditi]
     }
 
+    fn accounts(&self) -> u8 {
+        2
+    }
+
+    fn selects_probes(&self) -> bool {
+        true
+    }
+
     fn rezzes_objects(&self) -> bool {
         true
     }
@@ -177,6 +186,14 @@ impl GridTest for XEngineProbes {
 
     fn grids(&self) -> &'static [Grid] {
         &[Grid::Opensim]
+    }
+
+    fn accounts(&self) -> u8 {
+        2
+    }
+
+    fn selects_probes(&self) -> bool {
+        true
     }
 
     fn rezzes_objects(&self) -> bool {
@@ -216,137 +233,6 @@ const fn start_location(grid: Grid) -> &'static str {
     }
 }
 
-/// One script of a probe, read from the corpus.
-#[derive(Debug)]
-struct ProbeScript {
-    /// Its header.
-    header: Header,
-    /// The inventory name it gets.
-    name: String,
-    /// Its source.
-    source: String,
-}
-
-/// One probe, read from the corpus, its scripts in save order.
-#[derive(Debug)]
-struct Probe {
-    /// Its id.
-    id: String,
-    /// Its scripts, in the order they are saved.
-    scripts: Vec<ProbeScript>,
-}
-
-impl Probe {
-    /// How it is set going: by touch when any script says so.
-    fn drive(&self) -> Drive {
-        if self
-            .scripts
-            .iter()
-            .any(|script| script.header.drive == Drive::Touch)
-        {
-            Drive::Touch
-        } else {
-            Drive::None
-        }
-    }
-
-    /// Its prims, in the order a script first names each, with the distance
-    /// east of prim A each stands.
-    fn prims(&self) -> Vec<(String, f32)> {
-        let mut prims: Vec<(String, f32)> = vec![("A".to_owned(), 0.0)];
-        for script in &self.scripts {
-            if !prims.iter().any(|(label, _)| *label == script.header.prim) {
-                prims.push((
-                    script.header.prim.clone(),
-                    script.header.distance.unwrap_or(0.0),
-                ));
-            }
-        }
-        prims
-    }
-}
-
-/// The corpus directory.
-fn corpus_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../sl-lsl-runtime/probes")
-}
-
-/// The entries of a directory, sorted.
-fn entries(dir: &Path) -> Result<Vec<PathBuf>, TestFailure> {
-    let mut paths = fs_err::read_dir(dir)
-        .map_err(|error| TestFailure::State(error.to_string()))?
-        .map(|entry| entry.map(|entry| entry.path()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| TestFailure::State(error.to_string()))?;
-    paths.sort();
-    Ok(paths)
-}
-
-/// Whether a path is an `.lsl` file.
-fn is_lsl(path: &Path) -> bool {
-    path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("lsl")
-}
-
-/// A path's final component, or its stem, as text.
-fn name_of(path: &Path, stem: bool) -> String {
-    let part = if stem {
-        path.file_stem()
-    } else {
-        path.file_name()
-    };
-    part.map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
-/// Reads one script and its header.
-fn read_script(path: &Path, multi: bool) -> Result<ProbeScript, TestFailure> {
-    let source =
-        fs_err::read_to_string(path).map_err(|error| TestFailure::State(error.to_string()))?;
-    let header = Header::parse(&source)
-        .map_err(|error| TestFailure::State(format!("{}: {error}", path.display())))?;
-    let name = if multi {
-        header.script.clone().ok_or_else(|| {
-            TestFailure::State(format!("{}: header `script` is missing", path.display()))
-        })?
-    } else {
-        SINGLE_SCRIPT_NAME.to_owned()
-    };
-    Ok(ProbeScript {
-        header,
-        name,
-        source,
-    })
-}
-
-/// Every probe in the corpus, in id order.
-fn load_corpus(root: &Path) -> Result<Vec<Probe>, TestFailure> {
-    let mut probes = Vec::new();
-    for area in entries(root)? {
-        if !area.is_dir() || name_of(&area, false) == "results" {
-            continue;
-        }
-        let area_name = name_of(&area, false);
-        for entry in entries(&area)? {
-            let id = format!("{area_name}/{}", name_of(&entry, true));
-            let mut scripts = if entry.is_dir() {
-                entries(&entry)?
-                    .iter()
-                    .filter(|path| is_lsl(path))
-                    .map(|path| read_script(path, true))
-                    .collect::<Result<Vec<_>, _>>()?
-            } else if is_lsl(&entry) {
-                vec![read_script(&entry, false)?]
-            } else {
-                continue;
-            };
-            scripts.sort_by_key(|script| script.header.order);
-            probes.push(Probe { id, scripts });
-        }
-    }
-    probes.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(probes)
-}
-
 /// What one probe's run produced.
 #[derive(Debug, Default)]
 struct Transcript {
@@ -356,8 +242,8 @@ struct Transcript {
     ended: bool,
     /// The region its `start` record named.
     region: Option<String>,
-    /// The records it printed, in order.
-    records: Vec<String>,
+    /// Its `waiting` records, in order.
+    waits: Vec<Line>,
 }
 
 impl Transcript {
@@ -393,8 +279,11 @@ impl Transcript {
         if parsed.rec == "end" {
             self.ended = true;
         }
-        self.records.push(parsed.rec.clone());
-        Some(parsed.rec)
+        let rec = parsed.rec.clone();
+        if rec == "waiting" {
+            self.waits.push(parsed);
+        }
+        Some(rec)
     }
 }
 
@@ -420,7 +309,10 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
     } else {
         "Linden Lab's; a resident cannot set them".to_owned()
     };
-    let probes = load_corpus(&corpus_root())?;
+    let root = corpus_root();
+    let probes = load_corpus(&root)
+        .and_then(|probes| select(probes, ctx.probe_selection()))
+        .map_err(|error| TestFailure::State(error.to_string()))?;
 
     let trash = {
         let session = ctx.primary();
@@ -437,7 +329,28 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
     let (mut seen, reference) = {
         let session = ctx.primary();
         session.wait_for_region(REGION_TIMEOUT).await?;
-        settle_scene(session, grid, build_position, SETTLE_WINDOW, SETTLE_IDLE).await?
+        settle_scene(
+            session,
+            grid,
+            build_position.clone(),
+            SETTLE_WINDOW,
+            SETTLE_IDLE,
+        )
+        .await?
+    };
+    let other_active_group = {
+        let other = ctx.secondary().ok_or_else(|| {
+            TestFailure::State("the case runs with a secondary avatar".to_owned())
+        })?;
+        other.wait_for_region(REGION_TIMEOUT).await?;
+        // The other avatar stands where the owner does, within chat range of
+        // the prims: a login that a telehub redirected (Mauve's) leaves it at
+        // the hub.
+        if build_position.is_some() {
+            let _settled =
+                settle_scene(other, grid, build_position, SETTLE_WINDOW, SETTLE_IDLE).await?;
+        }
+        active_group(other).await?
     };
     let Some(reference) = reference else {
         if is_opensim(grid) {
@@ -454,13 +367,26 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
         z: reference.z + LIFT_M,
     };
     let date = now_rfc3339()?.chars().take(10).collect::<String>();
-    let results = corpus_root().join("results").join(engine.results_grid());
 
     let mut incomplete = Vec::new();
     for probe in &probes {
-        let session = ctx.primary();
+        let (session, other) = ctx.primary_and_secondary().ok_or_else(|| {
+            TestFailure::State("the case runs with a secondary avatar".to_owned())
+        })?;
         let started = Instant::now();
-        let transcript = run_probe(session, probe, engine, &base, &mut seen, trash).await?;
+        let transcript = run_probe(
+            &mut Avatars {
+                session,
+                other,
+                other_active_group,
+            },
+            probe,
+            engine,
+            &base,
+            &mut seen,
+            trash,
+        )
+        .await?;
         let ended = transcript.ended;
         let file = ResultFile {
             header: result_header(&ResultHeader {
@@ -473,7 +399,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
             }),
             body: transcript.body,
         };
-        let path = results.join(format!("{}.txt", probe.id));
+        let path = result_path(&root, engine.results_grid(), &probe.id);
         if let Some(parent) = path.parent() {
             fs_err::create_dir_all(parent)
                 .map_err(|error| TestFailure::State(error.to_string()))?;
@@ -543,16 +469,50 @@ fn result_header(header: &ResultHeader<'_>) -> Vec<(String, String)> {
     lines
 }
 
+/// The two avatars a probe's run has: the owner, which rezzes, plants and
+/// listens, and another, which only touches or speaks when asked to.
+struct Avatars<'a> {
+    /// The owner's session.
+    session: &'a mut Session,
+    /// The other avatar's session.
+    other: &'a mut Session,
+    /// Whether the other avatar has an active group, which decides what a
+    /// script's `llDetectedGroup` says of its touch; `None` when the grid
+    /// did not say.
+    other_active_group: Option<bool>,
+}
+
+/// Whether `session`'s avatar has an active group, as the grid answers an
+/// `AgentDataUpdateRequest`; `None`, with a warning, when it does not answer.
+async fn active_group(session: &mut Session) -> Result<Option<bool>, TestFailure> {
+    session.send(Command::RequestAgentDataUpdate).await?;
+    let answer = session
+        .wait_for(REPLY_TIMEOUT, |event| match event {
+            Event::ActiveGroupChanged(active) => Some(active.active_group_id.is_some()),
+            _ => None,
+        })
+        .await;
+    match answer {
+        Ok(set) => Ok(Some(set)),
+        Err(TestFailure::Timeout(_)) => {
+            tracing::warn!("the grid did not say whether the other avatar has an active group");
+            Ok(None)
+        }
+        Err(other) => Err(other),
+    }
+}
+
 /// Runs one probe: rezzes its prims, plants its scripts, drives it, keeps
 /// what it printed and clears its prims away.
 async fn run_probe(
-    session: &mut Session,
+    avatars: &mut Avatars<'_>,
     probe: &Probe,
     engine: Vm,
     base: &Vector,
     seen: &mut HashSet<ScopedObjectId>,
     trash: InventoryFolderKey,
 ) -> Result<Transcript, TestFailure> {
+    let session = &mut *avatars.session;
     let mut prims: BTreeMap<String, Object> = BTreeMap::new();
     for (label, distance) in probe.prims() {
         let position = Vector {
@@ -654,35 +614,29 @@ async fn run_probe(
 
     if planted {
         let deadline = after(PROBE_DEADLINE);
-        if probe.drive() == Drive::Touch
-            && collect(
-                session,
-                probe,
-                &keys,
-                &mut transcript,
-                deadline,
-                Until::Record("waiting"),
-            )
-            .await?
-            && let Some(prim) = prims.get("A")
+        let mut answered = 0_usize;
+        while collect(
+            avatars.session,
+            probe,
+            &keys,
+            &mut transcript,
+            deadline,
+            Until::Stimulus(answered),
+        )
+        .await?
         {
-            touch(session, probe, prim, &keys, &mut transcript).await?;
-        }
-        if !transcript.ended {
-            collect(
-                session,
-                probe,
-                &keys,
-                &mut transcript,
-                deadline,
-                Until::Record("end"),
-            )
-            .await?;
+            let Some(wait) = transcript.waits.get(answered).cloned() else {
+                break;
+            };
+            answered = answered.saturating_add(1);
+            let stimulus = Stimulus::from_waiting(&wait)
+                .map_err(|reason| TestFailure::Assertion(format!("{}: {reason}", probe.id)))?;
+            stimulate(avatars, probe, &prims, &keys, &mut transcript, &stimulus).await?;
         }
         if transcript.ended {
             let linger = after(LINGER);
             collect(
-                session,
+                avatars.session,
                 probe,
                 &keys,
                 &mut transcript,
@@ -693,6 +647,7 @@ async fn run_probe(
         }
     }
 
+    let session = &mut *avatars.session;
     let local_ids: Vec<ScopedObjectId> = prims.values().map(Object::scoped_id).collect();
     session
         .send(Command::DerezObjects {
@@ -719,11 +674,22 @@ async fn run_probe(
 
 /// What ends a [`collect`].
 #[derive(Debug, Clone, Copy)]
-enum Until<'a> {
-    /// The probe printing this record.
-    Record(&'a str),
+enum Until {
+    /// The probe printing its `end`, or a `waiting` record beyond the first
+    /// this many, which have been answered.
+    Stimulus(usize),
     /// Only the deadline.
     Deadline,
+}
+
+impl Until {
+    /// Whether `transcript` has come this far.
+    const fn reached(self, transcript: &Transcript) -> bool {
+        match self {
+            Self::Stimulus(answered) => transcript.ended || transcript.waits.len() > answered,
+            Self::Deadline => false,
+        }
+    }
 }
 
 /// Keeps the probe's lines until `until` or `deadline`, whichever is first;
@@ -736,65 +702,105 @@ async fn collect(
     prims: &HashSet<ObjectKey>,
     transcript: &mut Transcript,
     deadline: Instant,
-    until: Until<'_>,
+    until: Until,
 ) -> Result<bool, TestFailure> {
-    if let Until::Record(wanted) = until
-        && transcript.records.iter().any(|rec| rec == wanted)
-    {
+    if until.reached(transcript) {
         return Ok(true);
     }
     let remaining = deadline.saturating_duration_since(Instant::now());
     let outcome = session
         .wait_for(remaining, |event| {
-            transcript
-                .take(&probe.id, prims, event)
-                .filter(|rec| match until {
-                    Until::Record(wanted) => rec == wanted,
-                    Until::Deadline => false,
-                })
+            let _kept = transcript.take(&probe.id, prims, event);
+            until.reached(transcript).then_some(())
         })
         .await;
     match outcome {
-        Ok(_) => Ok(true),
+        Ok(()) => Ok(true),
         Err(TestFailure::Timeout(_)) => Ok(false),
         Err(other) => Err(other),
     }
 }
 
-/// Touches prim A for a probe that waits for it, [`TOUCH_SETTLE`] after it
-/// says so, and notes the touch in the transcript.
-async fn touch(
-    session: &mut Session,
+/// Gives the stimulus a probe asked for, [`STIMULUS_SETTLE`] after it asked,
+/// and notes it in the transcript: a touch of prim A or a line of chat, from
+/// the owner or the other avatar.
+async fn stimulate(
+    avatars: &mut Avatars<'_>,
     probe: &Probe,
-    prim: &Object,
+    prims: &BTreeMap<String, Object>,
     keys: &HashSet<ObjectKey>,
     transcript: &mut Transcript,
+    stimulus: &Stimulus,
 ) -> Result<(), TestFailure> {
-    let settle = after(TOUCH_SETTLE);
-    collect(session, probe, keys, transcript, settle, Until::Deadline).await?;
-    transcript.body.push("# touch".to_owned());
-    session
-        .send(Command::GrabObject {
-            local_id: prim.scoped_id(),
-            grab_offset: Vector {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            surface: None,
-        })
-        .await?;
-    session
-        .send(Command::DegrabObject {
-            local_id: prim.scoped_id(),
-            surface: None,
-        })
-        .await
+    let drive = stimulus.action.drive();
+    if !probe.drives().contains(&drive) {
+        return Err(TestFailure::Assertion(format!(
+            "{}: asked for {drive:?}, which its header's `drive` does not declare",
+            probe.id
+        )));
+    }
+    let settle = after(STIMULUS_SETTLE);
+    collect(
+        avatars.session,
+        probe,
+        keys,
+        transcript,
+        settle,
+        Until::Deadline,
+    )
+    .await?;
+    let (actor, by) = match stimulus.by {
+        By::Owner => (&mut *avatars.session, String::new()),
+        By::Other => (&mut *avatars.other, " by=other".to_owned()),
+    };
+    match &stimulus.action {
+        Action::Touch => {
+            let prim = prims
+                .get("A")
+                .ok_or_else(|| TestFailure::State(format!("{}: no prim A", probe.id)))?;
+            let group = match (stimulus.by, avatars.other_active_group) {
+                (By::Owner, _) => "",
+                (By::Other, Some(true)) => " active_group=set",
+                (By::Other, Some(false)) => " active_group=none",
+                (By::Other, None) => " active_group=unknown",
+            };
+            transcript.body.push(format!("# touch{by}{group}"));
+            actor
+                .send(Command::GrabObject {
+                    local_id: prim.scoped_id(),
+                    grab_offset: Vector {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    surface: None,
+                })
+                .await?;
+            actor
+                .send(Command::DegrabObject {
+                    local_id: prim.scoped_id(),
+                    surface: None,
+                })
+                .await
+        }
+        Action::Chat { channel, text } => {
+            transcript
+                .body
+                .push(format!("# chat{by} channel={channel} text={}", quote(text)));
+            actor
+                .send(Command::Chat {
+                    message: text.clone(),
+                    chat_type: ChatType::Normal,
+                    channel: ChatChannel(*channel),
+                })
+                .await
+        }
+    }
 }
 
-/// How long the case waits after a probe says it is waiting before it
-/// touches.
-const TOUCH_SETTLE: Duration = Duration::from_secs(1);
+/// How long the case waits after a probe asks for a stimulus before it
+/// gives it.
+const STIMULUS_SETTLE: Duration = Duration::from_secs(1);
 
 /// Waits for `prim`'s task inventory listing, keeping the probe's lines
 /// that arrive meanwhile.
@@ -891,45 +897,4 @@ fn trash_folder(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
         .find(|folder| folder.folder_type == FolderType::Trash.to_code())
         .or_else(|| folders.iter().find(|folder| folder.parent_id.is_none()))
         .map(|folder| folder.folder_id)
-}
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::{corpus_root, load_corpus};
-
-    #[test]
-    fn the_corpus_loads_with_every_probe_in_save_order() -> Result<(), String> {
-        let probes = load_corpus(&corpus_root()).map_err(|error| error.to_string())?;
-        let errors = probes
-            .iter()
-            .find(|probe| probe.id == "errors/runtime-errors")
-            .ok_or("no errors/runtime-errors probe")?;
-        assert_eq!(
-            errors
-                .scripts
-                .iter()
-                .map(|script| script.name.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "Div int",
-                "Mod int",
-                "Div float",
-                "Recurse",
-                "Listener far",
-                "Listener near",
-                "Controller"
-            ]
-        );
-        assert_eq!(
-            errors.prims(),
-            vec![
-                ("A".to_owned(), 0.0),
-                ("B".to_owned(), 50.0),
-                ("C".to_owned(), 10.0)
-            ]
-        );
-        Ok(())
-    }
 }

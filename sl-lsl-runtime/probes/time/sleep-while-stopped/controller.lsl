@@ -1,4 +1,5 @@
 // probe: time/sleep-while-stopped
+// vary: stopped_at, after, restarted_at
 // script: Controller
 // prim: A
 // order: 2

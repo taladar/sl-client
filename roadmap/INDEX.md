@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 335 |
-| blocked | 77 |
+| ready | 354 |
+| blocked | 57 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1417 |
+| done | 1418 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2073** |
@@ -351,7 +351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (335)
+## ready (354)
 
 ### protocol
 
@@ -1145,9 +1145,65 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-live-differential-runner`](ready/gridspec-lsl-live-differential-runner.md)
-  — Run one probe on OpenSim YEngine, XEngine and aditi and collect the
-  transcripts (blocked by `gridspec-lsl-probe-corpus` (done))
+- [`gridspec-lsl-avatar-control`](ready/gridspec-lsl-avatar-control.md) — LSL
+  library behaviour on each grid — animations, sitting, controls and camera
+  (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-comms`](ready/gridspec-lsl-comms.md) — LSL library behaviour on
+  each grid — chat, listens, dialogs and link messages (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-compile`](ready/gridspec-lsl-compile.md) — Script compilation
+  and compile errors on each grid (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-detection-sensors`](ready/gridspec-lsl-detection-sensors.md) —
+  LSL library behaviour on each grid — sensors and raycasts (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-events`](ready/gridspec-lsl-events.md) — The LSL event model on
+  OpenSim, beside what aditi already showed (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-experience`](ready/gridspec-lsl-experience.md) — LSL library
+  behaviour on each grid — experiences and the key-value store (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-http-url`](ready/gridspec-lsl-http-url.md) — LSL library
+  behaviour on each grid — outbound HTTP and in-world URLs (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-json-linkset-data`](ready/gridspec-lsl-json-linkset-data.md) —
+  LSL library behaviour on each grid — llJson* and the linkset data store
+  (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-land-region-env`](ready/gridspec-lsl-land-region-env.md) — LSL
+  library behaviour on each grid — parcel, region, estate and environment
+  queries (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-memory-limits`](ready/gridspec-lsl-memory-limits.md) — LSL
+  memory and limits on OpenSim and the remaining SL unknowns (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-money-permissions`](ready/gridspec-lsl-money-permissions.md) —
+  LSL library behaviour on each grid — script permissions, money and payment
+  (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-ossl`](ready/gridspec-lsl-ossl.md) — OSSL availability and
+  denial on OpenSim (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-persistence`](ready/gridspec-lsl-persistence.md) — Script state
+  across take, rez and region restart on each grid (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-physics-vehicles`](ready/gridspec-lsl-physics-vehicles.md) —
+  LSL library behaviour on each grid — status flags, forces, targets and
+  vehicles (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-prim-state`](ready/gridspec-lsl-prim-state.md) — LSL library
+  behaviour on each grid — reading and writing the prim (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-runtime-errors`](ready/gridspec-lsl-runtime-errors.md) — LSL
+  run-time errors on OpenSim and the debug channel in our viewer (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-strings-math`](ready/gridspec-lsl-strings-math.md) — LSL
+  library behaviour on each grid — strings, lists, maths and rotations (blocked
+  by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-task-inventory`](ready/gridspec-lsl-task-inventory.md) — LSL
+  library behaviour on each grid — task inventory, giving, rezzing and notecards
+  (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-throttles`](ready/gridspec-lsl-throttles.md) — Forced delays
+  and throttles on each grid (blocked by `gridspec-lsl-live-differential-runner`
+  (done))
+- [`gridspec-lsl-time-timers`](ready/gridspec-lsl-time-timers.md) — LSL time,
+  timers and sleep on each grid (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-seated-crossing`](ready/gridspec-seated-crossing.md) — A seated
   crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
@@ -1155,7 +1211,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (77)
+## blocked (57)
 
 ### viewer
 
@@ -1275,7 +1331,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-lsl-differential-opensim`](blocked/test-lsl-differential-opensim.md) —
   Run one script on both grids and diff what it did (blocked by
   `server-fake-grid-script-engine-wiring`,
-  `gridspec-lsl-live-differential-runner`)
+  `gridspec-lsl-live-differential-runner` (done))
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1342,65 +1398,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### gridspec
 
-- [`gridspec-lsl-avatar-control`](blocked/gridspec-lsl-avatar-control.md) — LSL
-  library behaviour on each grid — animations, sitting, controls and camera
-  (blocked by `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-comms`](blocked/gridspec-lsl-comms.md) — LSL library behaviour
-  on each grid — chat, listens, dialogs and link messages (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-compile`](blocked/gridspec-lsl-compile.md) — Script compilation
-  and compile errors on each grid (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-detection-sensors`](blocked/gridspec-lsl-detection-sensors.md)
-  — LSL library behaviour on each grid — sensors and raycasts (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-events`](blocked/gridspec-lsl-events.md) — The LSL event model
-  on OpenSim, beside what aditi already showed (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-experience`](blocked/gridspec-lsl-experience.md) — LSL library
-  behaviour on each grid — experiences and the key-value store (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-http-url`](blocked/gridspec-lsl-http-url.md) — LSL library
-  behaviour on each grid — outbound HTTP and in-world URLs (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-json-linkset-data`](blocked/gridspec-lsl-json-linkset-data.md)
-  — LSL library behaviour on each grid — llJson* and the linkset data store
-  (blocked by `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-land-region-env`](blocked/gridspec-lsl-land-region-env.md) —
-  LSL library behaviour on each grid — parcel, region, estate and environment
-  queries (blocked by `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-memory-limits`](blocked/gridspec-lsl-memory-limits.md) — LSL
-  memory and limits on OpenSim and the remaining SL unknowns (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-money-permissions`](blocked/gridspec-lsl-money-permissions.md)
-  — LSL library behaviour on each grid — script permissions, money and payment
-  (blocked by `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-ossl`](blocked/gridspec-lsl-ossl.md) — OSSL availability and
-  denial on OpenSim (blocked by `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-persistence`](blocked/gridspec-lsl-persistence.md) — Script
-  state across take, rez and region restart on each grid (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-physics-vehicles`](blocked/gridspec-lsl-physics-vehicles.md) —
-  LSL library behaviour on each grid — status flags, forces, targets and
-  vehicles (blocked by `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-prim-state`](blocked/gridspec-lsl-prim-state.md) — LSL library
-  behaviour on each grid — reading and writing the prim (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-runtime-errors`](blocked/gridspec-lsl-runtime-errors.md) — LSL
-  run-time errors on OpenSim and the debug channel in our viewer (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-strings-math`](blocked/gridspec-lsl-strings-math.md) — LSL
-  library behaviour on each grid — strings, lists, maths and rotations (blocked
-  by `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-task-inventory`](blocked/gridspec-lsl-task-inventory.md) — LSL
-  library behaviour on each grid — task inventory, giving, rezzing and notecards
-  (blocked by `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-throttles`](blocked/gridspec-lsl-throttles.md) — Forced delays
-  and throttles on each grid (blocked by
-  `gridspec-lsl-live-differential-runner`)
-- [`gridspec-lsl-time-timers`](blocked/gridspec-lsl-time-timers.md) — LSL time,
-  timers and sleep on each grid (blocked by
-  `gridspec-lsl-live-differential-runner`)
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
@@ -1558,7 +1555,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1417)
+## done (1418)
 
 ### protocol
 
@@ -4635,6 +4632,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   codes and texts, MFA, TOS/critical and presence on each grid
 - [`gridspec-logout`](done/gridspec-logout.md) — Logout reply, timing and what
   logout does to seats and child circuits
+- [`gridspec-lsl-live-differential-runner`](done/gridspec-lsl-live-differential-runner.md)
+  — Run one probe on OpenSim YEngine, XEngine and aditi and collect the
+  transcripts (blocked by `gridspec-lsl-probe-corpus` (done))
 - [`gridspec-lsl-probe-corpus`](done/gridspec-lsl-probe-corpus.md) — A committed
   LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct

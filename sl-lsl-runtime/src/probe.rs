@@ -11,20 +11,37 @@
 //!   `PROBE <id> rec=<name> key=value…`: one `start`, from the script that
 //!   leads it, and one `end`, last. In a probe of several scripts the ones
 //!   saved before the leader may print first.
+//! - A probe asks the runner for a touch or a line of chat with a
+//!   `waiting` record, read as a [`Stimulus`].
 //! - A run's transcript is a [`ResultFile`]: a header of `key: value` lines,
 //!   a blank line, then the `PROBE` lines with `#` notes between.
+//! - Two runs are set side by side by [`compare`](compare::compare), under
+//!   the tolerance its module describes.
 //!
 //! Like the rest of the crate this is I/O-free: callers read the files.
 
 use std::collections::BTreeMap;
 
-/// How a probe is set going once its scripts are in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub mod compare;
+
+/// A stimulus a probe may ask the runner for, with a `waiting` record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Drive {
-    /// It runs from `state_entry`.
-    None,
-    /// It waits for one touch of its prim A.
+    /// A touch of the probe's prim A.
     Touch,
+    /// A line of chat on a channel.
+    Chat,
+}
+
+impl Drive {
+    /// The drive a header or `waiting` record names.
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "touch" => Some(Self::Touch),
+            "chat" => Some(Self::Chat),
+            _ => None,
+        }
+    }
 }
 
 /// The `// key: value` lines that open a probe script.
@@ -32,8 +49,8 @@ pub enum Drive {
 pub struct Header {
     /// `probe`: the probe's id.
     pub probe: String,
-    /// `drive`: `none` or `touch`.
-    pub drive: Drive,
+    /// `drive`: `none`, or the [`Drive`]s the probe asks for, comma-separated.
+    pub drives: Vec<Drive>,
     /// `script`: the inventory name the script must have — required in a
     /// probe of several scripts, which find each other by name.
     pub script: Option<String>,
@@ -49,6 +66,12 @@ pub struct Header {
     /// — where running it would take the region down rather than measure
     /// anything (the script's comment says why).
     pub skip_on: Vec<String>,
+    /// `vary`: the fields that are measurements — a duration, a rate, a
+    /// clock — which two runs need not agree on, comma-separated.
+    pub vary: Vec<String>,
+    /// `unordered`: the records whose order among a run of their own kind is
+    /// not defined, comma-separated.
+    pub unordered: Vec<String>,
 }
 
 /// Why a script's header was refused.
@@ -88,7 +111,15 @@ impl Header {
             .collect();
         for key in pairs.keys() {
             if ![
-                "probe", "drive", "script", "prim", "order", "distance", "skip-on",
+                "probe",
+                "drive",
+                "script",
+                "prim",
+                "order",
+                "distance",
+                "skip-on",
+                "vary",
+                "unordered",
             ]
             .contains(key)
             {
@@ -100,10 +131,15 @@ impl Header {
             value: value.to_owned(),
         };
         let probe = (*pairs.get("probe").ok_or(HeaderError::Missing("probe"))?).to_owned();
-        let drive = match *pairs.get("drive").ok_or(HeaderError::Missing("drive"))? {
-            "none" => Drive::None,
-            "touch" => Drive::Touch,
-            other => return Err(invalid("drive", other)),
+        let drive = *pairs.get("drive").ok_or(HeaderError::Missing("drive"))?;
+        let drives = if drive == "none" {
+            Vec::new()
+        } else {
+            list(drive)
+                .iter()
+                .map(|name| Drive::parse(name))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| invalid("drive", drive))?
         };
         let order = pairs
             .get("order")
@@ -122,10 +158,7 @@ impl Header {
         let skip_on = match pairs.get("skip-on") {
             None => Vec::new(),
             Some(value) => {
-                let grids: Vec<String> = value
-                    .split(',')
-                    .map(|grid| grid.trim().to_owned())
-                    .collect();
+                let grids = list(value);
                 if !grids.iter().all(|grid| GRIDS.contains(&grid.as_str())) {
                     return Err(invalid("skip-on", value));
                 }
@@ -134,12 +167,20 @@ impl Header {
         };
         Ok(Self {
             probe,
-            drive,
+            drives,
             script: pairs.get("script").map(|name| (*name).to_owned()),
             prim: pairs.get("prim").map_or("A", |prim| *prim).to_owned(),
             order,
             distance,
             skip_on,
+            vary: pairs
+                .get("vary")
+                .map(|value| list(value))
+                .unwrap_or_default(),
+            unordered: pairs
+                .get("unordered")
+                .map(|value| list(value))
+                .unwrap_or_default(),
         })
     }
 
@@ -148,6 +189,14 @@ impl Header {
     pub fn skipped_on(&self, grid: &str) -> bool {
         self.skip_on.iter().any(|skipped| skipped == grid)
     }
+}
+
+/// A header value's comma-separated items, trimmed.
+fn list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|item| item.trim().to_owned())
+        .collect()
 }
 
 /// One line a probe printed: `PROBE <id> rec=<name> key=value…`.
@@ -235,6 +284,88 @@ impl Line {
             .iter()
             .find(|(name, _)| name == key)
             .map(|(_, value)| value.as_str())
+    }
+}
+
+/// Which avatar gives a [`Stimulus`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum By {
+    /// The probe's owner, the runner's own avatar.
+    Owner,
+    /// A second avatar, which owns nothing of the probe's.
+    Other,
+}
+
+/// What a stimulus is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    /// Touch prim A.
+    Touch,
+    /// Say `text` on `channel`, at normal range.
+    Chat {
+        /// The channel.
+        channel: i32,
+        /// What is said.
+        text: String,
+    },
+}
+
+impl Action {
+    /// Its [`Drive`].
+    #[must_use]
+    pub const fn drive(&self) -> Drive {
+        match self {
+            Self::Touch => Drive::Touch,
+            Self::Chat { .. } => Drive::Chat,
+        }
+    }
+}
+
+/// What a `waiting` record asks the runner for:
+/// `rec=waiting drive=touch|chat [by=owner|other]`, and for chat
+/// `channel=<n> text="…"`. Without `by` it is the owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stimulus {
+    /// Who gives it.
+    pub by: By,
+    /// What it is.
+    pub action: Action,
+}
+
+impl Stimulus {
+    /// Reads a `waiting` record.
+    ///
+    /// # Errors
+    ///
+    /// What is wrong with it: not a `waiting` record, an unknown drive or
+    /// avatar, or a chat without its channel or text.
+    pub fn from_waiting(line: &Line) -> Result<Self, String> {
+        if line.rec != "waiting" {
+            return Err(format!("`{}` is not a `waiting` record", line.rec));
+        }
+        let by = match line.field("by") {
+            None | Some("owner") => By::Owner,
+            Some("other") => By::Other,
+            Some(other) => return Err(format!("`by={other}` is neither owner nor other")),
+        };
+        let drive = line
+            .field("drive")
+            .ok_or("a `waiting` record without `drive`")?;
+        let action = match Drive::parse(drive) {
+            Some(Drive::Touch) => Action::Touch,
+            Some(Drive::Chat) => Action::Chat {
+                channel: line
+                    .field("channel")
+                    .and_then(|channel| channel.parse().ok())
+                    .ok_or("a chat drive without an integer `channel`")?,
+                text: line
+                    .field("text")
+                    .ok_or("a chat drive without `text`")?
+                    .to_owned(),
+            },
+            None => return Err(format!("`drive={drive}` is not a drive")),
+        };
+        Ok(Self { by, action })
     }
 }
 
@@ -404,7 +535,7 @@ fn is_date(text: &str) -> bool {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{Drive, Header, HeaderError, Line, ResultFile};
+    use super::{Action, By, Drive, Header, HeaderError, Line, ResultFile, Stimulus};
 
     #[test]
     fn a_header_reads_up_to_the_first_other_line() -> Result<(), HeaderError> {
@@ -417,16 +548,67 @@ mod tests {
             header,
             Header {
                 probe: "errors/runtime-errors".to_owned(),
-                drive: Drive::None,
+                drives: Vec::new(),
                 script: Some("Div int".to_owned()),
                 prim: "B".to_owned(),
                 order: Some(3),
                 distance: Some(50.0),
                 skip_on: vec!["opensim-xengine".to_owned(), "fake-sl".to_owned()],
+                vary: Vec::new(),
+                unordered: Vec::new(),
             }
         );
         assert!(header.skipped_on("fake-sl"));
         assert!(!header.skipped_on("aditi"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_header_lists_its_drives_and_its_tolerances() -> Result<(), HeaderError> {
+        let header = Header::parse(
+            "// probe: a/b\n// drive: chat, touch\n// vary: seconds, rate\n\
+             // unordered: heard\n",
+        )?;
+        assert_eq!(header.drives, vec![Drive::Chat, Drive::Touch]);
+        assert_eq!(header.vary, vec!["seconds".to_owned(), "rate".to_owned()]);
+        assert_eq!(header.unordered, vec!["heard".to_owned()]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_waiting_record_names_its_stimulus() -> Result<(), String> {
+        let read = |line: &str| {
+            Line::parse(line)
+                .map_err(|error| error.to_string())
+                .and_then(|line| Stimulus::from_waiting(&line))
+        };
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=touch")?,
+            Stimulus {
+                by: By::Owner,
+                action: Action::Touch
+            }
+        );
+        assert_eq!(
+            read(r#"PROBE a/b rec=waiting drive=chat by=other channel=-7 text="hi there""#)?,
+            Stimulus {
+                by: By::Other,
+                action: Action::Chat {
+                    channel: -7,
+                    text: "hi there".to_owned()
+                }
+            }
+        );
+        for refused in [
+            "PROBE a/b rec=start",
+            "PROBE a/b rec=waiting",
+            "PROBE a/b rec=waiting drive=wave",
+            "PROBE a/b rec=waiting drive=touch by=everyone",
+            "PROBE a/b rec=waiting drive=chat text=hi",
+            "PROBE a/b rec=waiting drive=chat channel=7",
+        ] {
+            assert!(read(refused).is_err(), "{refused}");
+        }
         Ok(())
     }
 

@@ -2,7 +2,7 @@
 id: gridspec-lsl-http-url
 title: LSL library behaviour on each grid — outbound HTTP and in-world URLs
 topic: gridspec
-status: blocked
+status: ready
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey, server-lsl-lib-http-url]
 blocked_by: [gridspec-lsl-live-differential-runner]

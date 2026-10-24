@@ -49,3 +49,12 @@ Acceptance: a `.lsl` file goes from the filesystem into a prim on the
 local grid and starts, in one `sl-repl --script` run; a syntax error
 prints a readable caret diagnostic; `script watch` shows a
 `DEBUG_CHANNEL` run-time error with its line.
+
+## From gridspec-lsl-live-differential-runner (2026-10-24)
+
+The `lsl-probes` case (`sl-conformance/src/cases/lsl_probes.rs`) has the
+live sequence these verbs need: `RezScript` then a listing poll until the
+item shows under its name, `UploadScript` into the task item and the
+`ScriptUploaded` compile result, and a watch that keeps owner-say and
+`DEBUG_CHANNEL` lines from given prims. The live verbs need nothing from
+the fake grid; only their fake-grid acceptance does.
