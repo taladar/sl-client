@@ -294,7 +294,8 @@ fn build_script_dialog_card(
                 &TextInputSpec {
                     tab_index: 1,
                     width_glyphs: 28.0,
-                    // `llTextBox` caps the reply at 254 characters.
+                    // `llTextBox` caps the reply at 254 characters; the session
+                    // cuts a wider one to the 254 bytes the reply carries.
                     max_characters: Some(254),
                     // No caption sits beside the reply field, so it is named outright.
                     name_key: Some("script-dialog-textbox-name"),

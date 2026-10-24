@@ -1,0 +1,29 @@
+grid: aditi
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE comms/listen-limit rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE comms/listen-limit rec=duplicate same=1 first_positive=1 second_positive=1
+PROBE comms/listen-limit rec=opening n=60
+PROBE comms/listen-limit rec=opened n=60 handle_positive=1
+PROBE comms/listen-limit rec=opening n=61
+PROBE comms/listen-limit rec=opened n=61 handle_positive=1
+PROBE comms/listen-limit rec=opening n=62
+PROBE comms/listen-limit rec=opened n=62 handle_positive=1
+PROBE comms/listen-limit rec=opening n=63
+PROBE comms/listen-limit rec=opened n=63 handle_positive=1
+PROBE comms/listen-limit rec=opening n=64
+PROBE comms/listen-limit rec=opened n=64 handle_positive=1
+PROBE comms/listen-limit rec=opening n=65
+PROBE comms/listen-limit rec=opened n=65 handle_positive=1
+PROBE comms/listen-limit rec=opening n=66
+# debug-channel: from="Object" text="Object [script:Filler] Script run-time error"
+# debug-channel: from="Object" text="Too Many Listens"
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE comms/listen-limit rec=filler reported=0
+PROBE comms/listen-limit rec=filler running=0
+PROBE comms/listen-limit rec=end

@@ -46,15 +46,15 @@ mod test {
 
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{
-        AgentKey, AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind,
-        ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ControlFlags, Event, FriendKey,
-        GridCoordinates, GroupKey, InterestsUpdate, InventoryKey, LandStatExtended, LandStatItem,
-        LandStatReportType, LandStatScore, LindenAmount, LoginParams, LureId, Maturity,
-        MoneyTransactionType, MuteFlags, MuteType, ObjectExtraParams, ObjectKey, OwnerKey,
-        ParcelObjectOwner, ParcelObjectOwnersPart, PickKey, PickUpdate, PrimShapeParams,
-        ProductType, ProfileUpdate, QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId,
-        RegionTerrainComposition, RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession,
-        TextureKey, parse_event_queue_response,
+        AgentKey, AttachmentMode, AttachmentPoint, Camera, ChatSessionKind, ClassifiedCategory,
+        ClassifiedKey, ClassifiedUpdate, ControlFlags, Event, FriendKey, GridCoordinates, GroupKey,
+        InterestsUpdate, InventoryKey, LandStatExtended, LandStatItem, LandStatReportType,
+        LandStatScore, LindenAmount, LoginParams, LureId, Maturity, MoneyTransactionType,
+        MuteFlags, MuteType, ObjectExtraParams, ObjectKey, OwnerKey, ParcelObjectOwner,
+        ParcelObjectOwnersPart, PickKey, PickUpdate, PrimShapeParams, ProductType, ProfileUpdate,
+        QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionTerrainComposition,
+        RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession, TextureKey,
+        parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_types::map::RegionCoordinates;
@@ -473,7 +473,6 @@ mod test {
         // misc agent
         "RequestImage",
         "RetrieveInstantMessages",
-        "ScriptDialogReply",
         "GodKickUser",
         "GodlikeMessage",
         "GenericMessage",
@@ -509,7 +508,6 @@ mod test {
     const AGENT_FAMILY: &[&str] = &[
         "RequestImage",
         "RetrieveInstantMessages",
-        "ScriptDialogReply",
         "GodKickUser",
         "GodlikeMessage",
         "GenericMessage",
@@ -717,13 +715,6 @@ mod test {
 
         client.request_texture(texture, 0, 1.0e6, now)?;
         client.retrieve_instant_messages(now)?;
-        client.reply_script_dialog(
-            ObjectKey::from(uuid::Uuid::from_u128(0x0B2)),
-            ChatChannel(-1234),
-            1,
-            "No",
-            now,
-        )?;
         client.god_kick_user(
             sl_proto::GodKickTarget::Agent(AgentKey::from(uuid::Uuid::from_u128(9))),
             sl_proto::GodKickAction::Kick,
@@ -733,13 +724,7 @@ mod test {
         client.send_godlike_message("setregioninfo", &["1", "2"], now)?;
         client.autopilot_to(256_010.0, 256_020.0, 25.0, now)?;
 
-        let relayed = assert_family(&mut client, &mut sim, now, AGENT_FAMILY)?;
-        let AnyMessage::ScriptDialogReply(reply) = find(&relayed, "ScriptDialogReply")? else {
-            return Err("expected a ScriptDialogReply".into());
-        };
-        assert_eq!(reply.data.chat_channel, -1234);
-        assert_eq!(reply.data.button_index, 1);
-        assert_eq!(trimmed(&reply.data.button_label), b"No");
+        let _relayed = assert_family(&mut client, &mut sim, now, AGENT_FAMILY)?;
         Ok(())
     }
 

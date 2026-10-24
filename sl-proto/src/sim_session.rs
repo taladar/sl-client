@@ -227,12 +227,12 @@ use crate::types::{
     PlacesResult, PlayingAnimation, Postcard, PrimShape, PrimShapeParams, ProposalVoteId,
     RegionHandshakeReplyFlags, RegionIdentity, RegionLimits, RegionStats, Reliability,
     RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
-    SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-    TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus, Transmit,
-    UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
-    WearableType,
+    ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ServerError,
+    SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
+    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    Wearable, WearableType,
 };
 use crate::types::{Event, EventId, InventoryListing};
 use sl_wire::AbuseReport;
@@ -252,7 +252,9 @@ use sl_wire::messages::{
 };
 use sl_wire::messages::{
     AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
-    ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock,
+    ScriptDialog as ScriptDialogMessage, ScriptDialogButtonsBlock, ScriptDialogDataBlock,
+    ScriptDialogOwnerDataBlock, ScriptQuestion, ScriptQuestionDataBlock,
+    ScriptQuestionExperienceBlock,
 };
 use sl_wire::messages::{
     ChangeUserRights, ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock,
@@ -368,6 +370,24 @@ const MAX_DESCENDENT_ITEMS_PER_MESSAGE: usize = 5;
 /// The registry is keyed by (task, item) and only ever grows, so it is bounded
 /// here rather than by the client's willingness to answer questions.
 const MAX_SCRIPT_GRANTS: usize = 4096;
+
+/// The largest number of objects whose last dialog reply is recorded for one
+/// session ([`SimSession::script_dialog_reply`]); past it a new object's
+/// reply is surfaced but not recorded.
+const MAX_SCRIPT_DIALOG_REPLIES: usize = 4096;
+
+/// A client's reply to a scripted dialog (`ScriptDialogReply`), as the
+/// simulator has it: what [`SimSession::script_dialog_reply`] records and
+/// [`ServerEvent::ScriptDialogReply`] carries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ScriptDialogAnswer {
+    /// The dialog's hidden chat channel the reply is said on.
+    pub chat_channel: ChatChannel,
+    /// The index of the button pressed (0 for a text box).
+    pub button_index: i32,
+    /// The button's label, or the text typed into a text box.
+    pub button_label: String,
+}
 
 /// How long a `TransferRequest` waits for the driver to serve or refuse it
 /// before the simulator answers it itself and drops the parked request.
@@ -1324,6 +1344,17 @@ pub enum ServerEvent {
         item_id: InventoryKey,
         /// The granted permission subset (empty = explicit deny).
         permissions: ScriptPermissions,
+    },
+    /// The client replied to a dialog (`ScriptDialogReply`) from the object
+    /// `object_id` — a [`SimSession::send_script_dialog`]'s, or one it was
+    /// never sent; the simulator says the label on the dialog's channel as
+    /// the agent. Recorded as that object's last reply
+    /// ([`SimSession::script_dialog_reply`]).
+    ScriptDialogReply {
+        /// The object the dialog came from.
+        object_id: ObjectKey,
+        /// What the client replied.
+        answer: ScriptDialogAnswer,
     },
     /// The client asked to track an agent's position (`TrackAgent`); the
     /// simulator would stream the tracked agent's coarse location back via
@@ -3472,6 +3503,9 @@ pub struct SimSession {
     /// [`ScriptPermissions`] is an explicit deny, distinct from an absent
     /// (never-answered) holder.
     script_grants: BTreeMap<(ObjectKey, InventoryKey), ScriptPermissions>,
+    /// The last dialog reply the client sent each object
+    /// ([`SimSession::script_dialog_reply`]).
+    script_dialog_replies: BTreeMap<ObjectKey, ScriptDialogAnswer>,
     /// The live group/conference chat sessions, keyed by the wire session id
     /// (a group session's id **is** the group id) —
     /// [`SimSession::chat_session`].
@@ -3830,6 +3864,7 @@ impl SimSession {
             sit_expires: None,
             script_questions: BTreeMap::new(),
             script_grants: BTreeMap::new(),
+            script_dialog_replies: BTreeMap::new(),
             chat_sessions: BTreeMap::new(),
             offline_messages: Vec::new(),
             display_names: BTreeMap::new(),
@@ -3918,6 +3953,13 @@ impl SimSession {
         item_id: InventoryKey,
     ) -> Option<ScriptPermissions> {
         self.script_grants.get(&(task_id, item_id)).copied()
+    }
+
+    /// The last reply the client sent to a dialog from the object
+    /// `object_id` (`None` when it has sent none).
+    #[must_use]
+    pub fn script_dialog_reply(&self, object_id: ObjectKey) -> Option<&ScriptDialogAnswer> {
+        self.script_dialog_replies.get(&object_id)
     }
 
     /// The live chat session keyed by `session_id` (a group session's id is
@@ -6188,6 +6230,49 @@ impl SimSession {
         self.send(&message, Reliability::Reliable, now)?;
         self.script_questions
             .insert((question.task_id, question.item_id), question.permissions);
+        Ok(())
+    }
+
+    /// Sends a `ScriptDialog` putting `dialog` to the agent (`llDialog`, or
+    /// `llTextBox` with the one button [`ScriptDialog::TEXT_BOX_BUTTON`]):
+    /// the object, its owner's names, the message, the hidden channel, the
+    /// buttons in order, and an owner block when `owner_id` is set. Surfaces
+    /// on the client as [`Event::ScriptDialog`](crate::Event::ScriptDialog);
+    /// the client replies with `ScriptDialogReply`
+    /// ([`ServerEvent::ScriptDialogReply`]). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode (a field past its length).
+    pub fn send_script_dialog(&mut self, dialog: &ScriptDialog, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ScriptDialog(ScriptDialogMessage {
+            data: ScriptDialogDataBlock {
+                object_id: dialog.object_id.uuid(),
+                first_name: with_nul(&dialog.owner_first_name),
+                last_name: with_nul(&dialog.owner_last_name),
+                object_name: with_nul(&dialog.object_name),
+                message: with_nul(&dialog.message),
+                chat_channel: dialog.chat_channel.0,
+                image_id: dialog.image_id.uuid(),
+            },
+            buttons: dialog
+                .buttons
+                .iter()
+                .map(|label| ScriptDialogButtonsBlock {
+                    button_label: with_nul(label),
+                })
+                .collect(),
+            owner_data: dialog
+                .owner_id
+                .map(|owner_id| ScriptDialogOwnerDataBlock { owner_id })
+                .into_iter()
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
         Ok(())
     }
 
@@ -11789,6 +11874,23 @@ impl SimSession {
             AnyMessage::ForceScriptControlRelease(_release) => {
                 self.events
                     .push_back(ServerEvent::ForceScriptControlRelease);
+            }
+            AnyMessage::ScriptDialogReply(reply) => {
+                let object_id = ObjectKey::from(reply.data.object_id);
+                let answer = ScriptDialogAnswer {
+                    chat_channel: ChatChannel(reply.data.chat_channel),
+                    button_index: reply.data.button_index,
+                    button_label: trimmed_string(&reply.data.button_label),
+                };
+                if self.script_dialog_replies.len() >= MAX_SCRIPT_DIALOG_REPLIES
+                    && !self.script_dialog_replies.contains_key(&object_id)
+                {
+                    self.reject(message, RejectionReason::LimitExceeded);
+                } else {
+                    let _previous = self.script_dialog_replies.insert(object_id, answer.clone());
+                }
+                self.events
+                    .push_back(ServerEvent::ScriptDialogReply { object_id, answer });
             }
             AnyMessage::ScriptAnswerYes(answer) => {
                 let task_id = ObjectKey::from(answer.data.task_id);

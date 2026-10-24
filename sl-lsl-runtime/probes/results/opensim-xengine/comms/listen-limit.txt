@@ -1,0 +1,41 @@
+grid: opensim-xengine
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE comms/listen-limit rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE comms/listen-limit rec=duplicate same=1 first_positive=1 second_positive=1
+PROBE comms/listen-limit rec=opening n=60
+PROBE comms/listen-limit rec=opened n=60 handle_positive=1
+PROBE comms/listen-limit rec=opening n=61
+PROBE comms/listen-limit rec=opened n=61 handle_positive=1
+PROBE comms/listen-limit rec=opening n=62
+PROBE comms/listen-limit rec=opened n=62 handle_positive=1
+PROBE comms/listen-limit rec=opening n=63
+PROBE comms/listen-limit rec=opened n=63 handle_positive=1
+PROBE comms/listen-limit rec=opening n=64
+PROBE comms/listen-limit rec=opened n=64 handle_positive=1
+PROBE comms/listen-limit rec=opening n=65
+PROBE comms/listen-limit rec=opened n=65 handle_positive=0
+PROBE comms/listen-limit rec=opening n=66
+PROBE comms/listen-limit rec=opened n=66 handle_positive=0
+PROBE comms/listen-limit rec=opening n=67
+PROBE comms/listen-limit rec=opened n=67 handle_positive=0
+PROBE comms/listen-limit rec=opening n=68
+PROBE comms/listen-limit rec=opened n=68 handle_positive=0
+PROBE comms/listen-limit rec=opening n=69
+PROBE comms/listen-limit rec=opened n=69 handle_positive=0
+PROBE comms/listen-limit rec=opening n=70
+PROBE comms/listen-limit rec=opened n=70 handle_positive=0
+PROBE comms/listen-limit rec=reopened handle_positive=0
+PROBE comms/listen-limit rec=removed-unknown
+PROBE comms/listen-limit rec=filled held=70
+PROBE comms/listen-limit rec=filler running=1
+PROBE comms/listen-limit rec=pong text="held 70"
+PROBE comms/listen-limit rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

@@ -12,8 +12,9 @@
 //!   leads it, and one `end`, last. In a probe of several scripts the ones
 //!   saved before the leader may print first.
 //! - A probe asks the runner for a stimulus — a touch, a line of chat, an
-//!   answer to its permission question, a sit, a stand, held controls — with
-//!   a `waiting` record, read as a [`Stimulus`].
+//!   answer to its permission question or its dialog, a sit, a stand, held
+//!   controls, the owner leaving the region for a while — with a
+//!   `waiting` record, read as a [`Stimulus`].
 //! - A run's transcript is a [`ResultFile`]: a header of `key: value` lines,
 //!   a blank line, then the `PROBE` lines with `#` notes between.
 //! - Two runs are set side by side by [`compare`](compare::compare), under
@@ -40,6 +41,11 @@ pub enum Drive {
     Stand,
     /// Holding movement controls down for a moment.
     Control,
+    /// A reply to the dialog (`llDialog`, `llTextBox`) the probe's script
+    /// puts.
+    Dialog,
+    /// The owner leaving the probe's region for a while.
+    Away,
 }
 
 impl Drive {
@@ -52,6 +58,8 @@ impl Drive {
             "sit" => Some(Self::Sit),
             "stand" => Some(Self::Stand),
             "control" => Some(Self::Control),
+            "dialog" => Some(Self::Dialog),
+            "away" => Some(Self::Away),
             _ => None,
         }
     }
@@ -72,9 +80,13 @@ pub struct Header {
     /// `order`: where the script comes in the order the scripts are saved —
     /// required in a probe of several scripts.
     pub order: Option<u32>,
-    /// `distance`: how far from prim A, in metres, this script's prim
+    /// `distance`: how far east of prim A, in metres, this script's prim
     /// stands.
     pub distance: Option<f32>,
+    /// `height`: how far above prim A, in metres, this script's prim
+    /// stands — for a range no parcel is wide enough for, since a range is
+    /// a distance in three dimensions.
+    pub height: Option<f32>,
     /// `skip-on`: the [`GRIDS`] this script is left out on, comma-separated
     /// — where running it would take the region down rather than measure
     /// anything (the script's comment says why).
@@ -130,6 +142,7 @@ impl Header {
                 "prim",
                 "order",
                 "distance",
+                "height",
                 "skip-on",
                 "vary",
                 "unordered",
@@ -158,16 +171,20 @@ impl Header {
             .get("order")
             .map(|value| value.parse().map_err(|_error| invalid("order", value)))
             .transpose()?;
-        let distance = pairs
-            .get("distance")
-            .map(|value| {
-                value
-                    .parse::<f32>()
-                    .ok()
-                    .filter(|metres| metres.is_finite() && *metres >= 0.0)
-                    .ok_or_else(|| invalid("distance", value))
-            })
-            .transpose()?;
+        let metres = |key: &str| {
+            pairs
+                .get(key)
+                .map(|value| {
+                    value
+                        .parse::<f32>()
+                        .ok()
+                        .filter(|metres| metres.is_finite() && *metres >= 0.0)
+                        .ok_or_else(|| invalid(key, value))
+                })
+                .transpose()
+        };
+        let distance = metres("distance")?;
+        let height = metres("height")?;
         let skip_on = match pairs.get("skip-on") {
             None => Vec::new(),
             Some(value) => {
@@ -185,6 +202,7 @@ impl Header {
             prim: pairs.get("prim").map_or("A", |prim| *prim).to_owned(),
             order,
             distance,
+            height,
             skip_on,
             vary: pairs
                 .get("vary")
@@ -338,6 +356,19 @@ pub enum Action {
         /// The controls held.
         keys: u32,
     },
+    /// Reply `reply` to the dialog a probe's script puts to the avatar: the
+    /// label of the button pressed, which need not be one of the dialog's,
+    /// or the text typed into an `llTextBox`.
+    Dialog {
+        /// The label or text sent back.
+        reply: String,
+    },
+    /// Leave the probe's region for `seconds`: the owner teleports to
+    /// another, stays, and comes back to where it stood.
+    Away {
+        /// How long the owner stays away.
+        seconds: u32,
+    },
 }
 
 impl Action {
@@ -351,14 +382,18 @@ impl Action {
             Self::Sit => Drive::Sit,
             Self::Stand => Drive::Stand,
             Self::Control { .. } => Drive::Control,
+            Self::Dialog { .. } => Drive::Dialog,
+            Self::Away { .. } => Drive::Away,
         }
     }
 }
 
 /// What a `waiting` record asks the runner for:
-/// `rec=waiting drive=touch|chat|answer|sit|stand|control [by=owner|other]`,
-/// and for chat `channel=<n> text="…"`, for an answer `grant=<mask>`, for
-/// controls `keys=<mask>`. Without `by` it is the owner.
+/// `rec=waiting drive=touch|chat|answer|sit|stand|control|dialog|away
+/// [by=owner|other]`, and for chat `channel=<n> text="…"`, for an answer
+/// `grant=<mask>`, for controls `keys=<mask>`, for a dialog `reply="…"`, for
+/// away `seconds=<n>`. Without `by` it is the owner; only the owner goes
+/// `away`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stimulus {
     /// Who gives it.
@@ -373,7 +408,8 @@ impl Stimulus {
     /// # Errors
     ///
     /// What is wrong with it: not a `waiting` record, an unknown drive or
-    /// avatar, or a chat without its channel or text.
+    /// avatar, a chat without its channel or text, a dialog without its
+    /// reply, an away without its seconds, or the other avatar sent away.
     pub fn from_waiting(line: &Line) -> Result<Self, String> {
         if line.rec != "waiting" {
             return Err(format!("`{}` is not a `waiting` record", line.rec));
@@ -412,8 +448,23 @@ impl Stimulus {
                     .and_then(|keys| keys.parse().ok())
                     .ok_or("a control drive without an unsigned integer `keys`")?,
             },
+            Some(Drive::Dialog) => Action::Dialog {
+                reply: line
+                    .field("reply")
+                    .ok_or("a dialog drive without `reply`")?
+                    .to_owned(),
+            },
+            Some(Drive::Away) => Action::Away {
+                seconds: line
+                    .field("seconds")
+                    .and_then(|seconds| seconds.parse().ok())
+                    .ok_or("an away drive without an unsigned integer `seconds`")?,
+            },
             None => return Err(format!("`drive={drive}` is not a drive")),
         };
+        if by == By::Other && matches!(action, Action::Away { .. }) {
+            return Err(format!("`drive={drive}` is the owner's alone"));
+        }
         Ok(Self { by, action })
     }
 }
@@ -590,7 +641,7 @@ mod tests {
     fn a_header_reads_up_to_the_first_other_line() -> Result<(), HeaderError> {
         let header = Header::parse(
             "// probe: errors/runtime-errors\n// script: Div int\n// prim: B\n\
-             // order: 3\n// distance: 50\n// drive: none\n\
+             // order: 3\n// distance: 50\n// height: 99\n// drive: none\n\
              // skip-on: opensim-xengine, fake-sl\n//\n// probe: not/this\n",
         )?;
         assert_eq!(
@@ -602,6 +653,7 @@ mod tests {
                 prim: "B".to_owned(),
                 order: Some(3),
                 distance: Some(50.0),
+                height: Some(99.0),
                 skip_on: vec!["opensim-xengine".to_owned(), "fake-sl".to_owned()],
                 vary: Vec::new(),
                 unordered: Vec::new(),
@@ -615,7 +667,7 @@ mod tests {
     #[test]
     fn a_header_lists_its_drives_and_its_tolerances() -> Result<(), HeaderError> {
         let header = Header::parse(
-            "// probe: a/b\n// drive: chat, touch, answer, sit, stand, control\n\
+            "// probe: a/b\n// drive: chat, touch, answer, sit, stand, control, dialog, away\n\
              // vary: seconds, rate\n// unordered: heard\n",
         )?;
         assert_eq!(
@@ -626,7 +678,9 @@ mod tests {
                 Drive::Answer,
                 Drive::Sit,
                 Drive::Stand,
-                Drive::Control
+                Drive::Control,
+                Drive::Dialog,
+                Drive::Away
             ]
         );
         assert_eq!(header.vary, vec!["seconds".to_owned(), "rate".to_owned()]);
@@ -680,6 +734,19 @@ mod tests {
             read("PROBE a/b rec=waiting drive=stand")?.action,
             Action::Stand
         );
+        assert_eq!(
+            read(r#"PROBE a/b rec=waiting drive=dialog by=other reply="Not a button""#)?,
+            Stimulus {
+                by: By::Other,
+                action: Action::Dialog {
+                    reply: "Not a button".to_owned()
+                }
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=away by=owner seconds=20")?.action,
+            Action::Away { seconds: 20 }
+        );
         for refused in [
             "PROBE a/b rec=waiting drive=answer",
             "PROBE a/b rec=waiting drive=answer grant=all",
@@ -690,6 +757,9 @@ mod tests {
             "PROBE a/b rec=waiting drive=touch by=everyone",
             "PROBE a/b rec=waiting drive=chat text=hi",
             "PROBE a/b rec=waiting drive=chat channel=7",
+            "PROBE a/b rec=waiting drive=dialog",
+            "PROBE a/b rec=waiting drive=away",
+            "PROBE a/b rec=waiting drive=away by=other seconds=20",
         ] {
             assert!(read(refused).is_err(), "{refused}");
         }

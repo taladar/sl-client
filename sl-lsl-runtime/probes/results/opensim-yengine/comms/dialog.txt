@@ -1,0 +1,72 @@
+grid: opensim-yengine
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16 (defaults) on both
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE comms/dialog rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE comms/dialog rec=waiting drive=dialog reply="Two"
+# chat by=other type=say from="Object" length=14 text="Script running"
+PROBE comms/dialog rec=put step=1 to=owner how=answered buttons=3 message_length=8
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=8 message="Pick one" buttons="One|Two|Three" count=3
+# dialog-reply reply="Two" index=1 sent_length=3
+PROBE comms/dialog rec=heard step=1 from=owner name_is_key2name=1 message="Two"
+PROBE comms/dialog rec=waiting drive=dialog reply="OK"
+PROBE comms/dialog rec=put step=2 to=owner how=answered buttons=0 message_length=10
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=10 message="No buttons" buttons="Ok" count=1
+# dialog-reply reply="OK" index=0 sent_length=2
+PROBE comms/dialog rec=heard step=2 from=owner name_is_key2name=1 message="OK"
+PROBE comms/dialog rec=waiting drive=dialog reply="Not a button"
+PROBE comms/dialog rec=put step=3 to=owner how=answered buttons=2 message_length=11
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=11 message="Two buttons" buttons="One|Two" count=2
+# dialog-reply reply="Not a button" index=0 sent_length=12
+PROBE comms/dialog rec=heard step=3 from=owner name_is_key2name=1 message="Not a button"
+PROBE comms/dialog rec=waiting drive=dialog reply="B12"
+PROBE comms/dialog rec=put step=4 to=owner how=answered buttons=12 message_length=6
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=6 message="Twelve" buttons="B1|B2|B3|B4|B5|B6|B7|B8|B9|B10|B11|B12" count=12
+# dialog-reply reply="B12" index=11 sent_length=3
+PROBE comms/dialog rec=heard step=4 from=owner name_is_key2name=1 message="B12"
+PROBE comms/dialog rec=put step=5 to=owner how=unanswered buttons=13 message_length=8
+# debug-channel: from="Object" text="llDialog: No more than 12 buttons can be shown"
+PROBE comms/dialog rec=moved-on step=5
+PROBE comms/dialog rec=waiting drive=dialog reply="xxxxxxxxxxxxxxxxxxxxxxxx"
+PROBE comms/dialog rec=put step=6 to=owner how=answered buttons=1 message_length=10
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=10 message="Long label" buttons="xxxxxxxxxxxxxxxxxxxxxxx" count=1
+# dialog-reply reply="xxxxxxxxxxxxxxxxxxxxxxxx" index=0 sent_length=24
+PROBE comms/dialog rec=heard step=6 from=owner name_is_key2name=1 message="xxxxxxxxxxxxxxxxxxxxxxxx"
+PROBE comms/dialog rec=put step=7 to=owner how=unanswered buttons=1 message_length=16
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=16 message="Too long a label" buttons="yyyyyyyyyyyyyyyyyyyyyyy" count=1
+PROBE comms/dialog rec=moved-on step=7
+PROBE comms/dialog rec=put step=8 to=owner how=unanswered buttons=2 message_length=11
+# debug-channel: from="Object" text="llDialog: Button label cannot be blank"
+PROBE comms/dialog rec=moved-on step=8
+PROBE comms/dialog rec=put step=9 to=owner how=unanswered buttons=2 message_length=17
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=17 message="An integer button" buttons="One|2" count=2
+PROBE comms/dialog rec=moved-on step=9
+PROBE comms/dialog rec=put step=10 to=owner how=unanswered buttons=1 message_length=0
+# debug-channel: from="Object" text="llDialog: Empty message"
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=0 message="" buttons="One" count=1
+PROBE comms/dialog rec=moved-on step=10
+PROBE comms/dialog rec=put step=11 to=owner how=unanswered buttons=1 message_length=511
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=511 message="mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm…" buttons="One" count=1
+PROBE comms/dialog rec=moved-on step=11
+PROBE comms/dialog rec=put step=12 to=owner how=unanswered buttons=1 message_length=512
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=511 message="mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm…" buttons="One" count=1
+PROBE comms/dialog rec=moved-on step=12
+PROBE comms/dialog rec=put step=13 to=owner how=unanswered buttons=1 message_length=513
+# debug-channel: from="Object" text="llDialog: Message longer than 512 bytes"
+# dialog object="Object" owner="<first> <last>" channel=-731001 message_length=511 message="mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm…" buttons="One" count=1
+PROBE comms/dialog rec=moved-on step=13
+PROBE comms/dialog rec=put step=14 to=someone how=unanswered buttons=1 message_length=9
+PROBE comms/dialog rec=moved-on step=14
+PROBE comms/dialog rec=waiting drive=touch by=other
+# touch by=other active_group=set
+PROBE comms/dialog rec=touch step=15 by=other
+PROBE comms/dialog rec=waiting drive=dialog by=other reply="No"
+# dialog by=other object="Object" owner="<first> <last>" channel=-731001 message_length=13 message="For the other" buttons="Yes|No" count=2
+PROBE comms/dialog rec=put step=16 to=other how=answered buttons=2 message_length=13
+# dialog-reply by=other reply="No" index=1 sent_length=2
+PROBE comms/dialog rec=heard step=16 from=other name_is_key2name=1 message="No"
+PROBE comms/dialog rec=end

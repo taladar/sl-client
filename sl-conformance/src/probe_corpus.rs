@@ -70,15 +70,19 @@ impl Probe {
     }
 
     /// Its prims, in the order a script first names each, with the distance
-    /// east of prim A each stands.
+    /// east of prim A and the height above it each stands at.
     #[must_use]
-    pub fn prims(&self) -> Vec<(String, f32)> {
-        let mut prims: Vec<(String, f32)> = vec![("A".to_owned(), 0.0)];
+    pub fn prims(&self) -> Vec<(String, f32, f32)> {
+        let mut prims: Vec<(String, f32, f32)> = vec![("A".to_owned(), 0.0, 0.0)];
         for script in &self.scripts {
-            if !prims.iter().any(|(label, _)| *label == script.header.prim) {
+            if !prims
+                .iter()
+                .any(|(label, _, _)| *label == script.header.prim)
+            {
                 prims.push((
                     script.header.prim.clone(),
                     script.header.distance.unwrap_or(0.0),
+                    script.header.height.unwrap_or(0.0),
                 ));
             }
         }
@@ -307,10 +311,19 @@ mod tests {
         assert_eq!(
             errors.prims(),
             vec![
-                ("A".to_owned(), 0.0),
-                ("B".to_owned(), 50.0),
-                ("C".to_owned(), 10.0)
+                ("A".to_owned(), 0.0, 0.0),
+                ("B".to_owned(), 50.0, 0.0),
+                ("C".to_owned(), 10.0, 0.0)
             ]
+        );
+        let chat = probes
+            .iter()
+            .find(|probe| probe.id == "comms/object-chat")
+            .ok_or("no comms/object-chat")?;
+        assert_eq!(
+            chat.prims().last(),
+            Some(&("G".to_owned(), 0.0, 101.0)),
+            "the shout pair stands above prim A"
         );
         Ok(())
     }

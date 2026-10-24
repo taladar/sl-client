@@ -14,17 +14,19 @@
 //!    A script whose `skip-on` names this grid is left out, with a note;
 //! 3. answers each `waiting` record the probe prints with the stimulus it
 //!    names ([`Stimulus`]): a touch of prim A, a line of chat on a channel,
-//!    an answer to the permission question the probe's script puts, a sit
-//!    on prim A, a stand, or movement controls held down for a moment, from
-//!    the owner or from a second avatar — one the probe's header declares
-//!    among its `drive`s;
+//!    an answer to the permission question or the dialog the probe's script
+//!    puts, a sit on prim A, a stand, or movement controls held down for a
+//!    moment, from the owner or from a second avatar, or the owner leaving
+//!    the region for a while — one the probe's header declares among its
+//!    `drive`s;
 //! 4. keeps every owner-say line of the probe's (`PROBE <id> …`) from its
 //!    prims, and every `DEBUG_CHANNEL` message they shout as a `#` note,
 //!    until the probe prints `end` — and a little longer, for a second
 //!    prim's late lines — or [`PROBE_DEADLINE`] passes. What the grid sends
 //!    the two viewers about the avatars meanwhile is noted too: permission
-//!    questions, sit responses, control changes, follow cameras, animation
-//!    lists and alerts, with both avatars' names put as placeholders;
+//!    questions, dialogs, instant messages and chat from the probe's prims,
+//!    sit responses, control changes, follow cameras, animation lists and
+//!    alerts, with both avatars' names put as placeholders;
 //! 5. derezzes its prims and writes the transcript as a
 //!    [`ResultFile`] to
 //!    `sl-lsl-runtime/probes/results/<grid>/<id>.txt`.
@@ -44,21 +46,24 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    AgentKey, ChatChannel, ChatSource, ChatType, Command, ControlFlags, DeRezDestination, Event,
-    FolderType, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, Object,
-    ObjectKey, PrimShape, RestoreItem, RezScriptParams, ScopedObjectId, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptUploadLocation, TaskInventoryItem, TransactionId, Uuid,
-    Vector, XferListing,
+    AgentKey, ChatChannel, ChatMessage, ChatSource, ChatType, Command, ControlFlags,
+    DeRezDestination, Event, FolderType, InstantMessage, InventoryFolder, InventoryFolderKey,
+    InventoryKey, InventoryType, Object, ObjectKey, PrimShape, RegionHandle, RestoreItem,
+    RezScriptParams, ScopedObjectId, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTarget, ScriptUploadLocation, TaskInventoryItem, TransactionId, Uuid, Vector,
+    XferListing,
 };
-use sl_lsl_runtime::probe::{Action, By, Line, PREFIX, ResultFile, Stimulus};
+use sl_lsl_runtime::probe::{Action, By, Drive, Line, PREFIX, ResultFile, Stimulus};
 
 use crate::context::{Session, TestContext, TestFailure, now_rfc3339};
 use crate::grid::Grid;
 use crate::probe_corpus::{Probe, corpus_root, load_corpus, result_path, select};
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    REGION_TIMEOUT, REPLY_TIMEOUT, is_opensim, settle_scene, wait_for_own_new_object,
+    REGION_TIMEOUT, REPLY_TIMEOUT, is_opensim, settle_scene, settle_scene_observing,
+    settle_scene_with_avatar, wait_for_own_new_object,
 };
+use crate::teleport_trace::{other_region, request_teleport};
 
 /// The OpenSim start location: the "Default Region" (1000,1000), centred,
 /// whose test prim is the rez placement reference. On Second Life the avatar
@@ -336,6 +341,11 @@ struct Transcript {
     questions: VecDeque<ScriptPermissionRequest>,
     /// The permission questions they put to the other avatar, likewise.
     other_questions: VecDeque<ScriptPermissionRequest>,
+    /// The dialogs the probe's scripts put to the owner, not yet replied
+    /// to, oldest first.
+    dialogs: VecDeque<ScriptDialog>,
+    /// The dialogs they put to the other avatar, likewise.
+    other_dialogs: VecDeque<ScriptDialog>,
     /// The animation list last noted for each avatar.
     animations: HashMap<AgentKey, String>,
 }
@@ -387,16 +397,131 @@ impl Transcript {
         }
     }
 
+    /// Notes a dialog from one of the probe's prims, put to the avatar `by`
+    /// names, and keeps it for the reply.
+    fn dialog(&mut self, by: &str, dialog: &ScriptDialog) {
+        let owner = format!("{} {}", dialog.owner_first_name, dialog.owner_last_name);
+        self.body.push(format!(
+            "# dialog{by} object={} owner={} channel={} message_length={} message={} \
+             buttons={} count={}",
+            quote(&self.cast.scrub(&dialog.object_name)),
+            quote(&self.cast.scrub(owner.trim())),
+            dialog.chat_channel.0,
+            dialog.message.len(),
+            quote(&clip(&self.cast.scrub(&dialog.message))),
+            quote(&dialog.buttons.join("|")),
+            dialog.buttons.len()
+        ));
+        if by.is_empty() {
+            self.dialogs.push_back(dialog.clone());
+        } else {
+            self.other_dialogs.push_back(dialog.clone());
+        }
+    }
+
+    /// Notes an instant message an object sent the avatar `by` names
+    /// (`llInstantMessage`'s dialog 19), with who the grid says sent it and
+    /// what its id is, as roles.
+    fn instant_message(&mut self, by: &str, prims: &HashSet<ObjectKey>, im: &InstantMessage) {
+        let from_prim = prims.contains(&ObjectKey::from(im.from_agent_id.uuid()));
+        let id_prim = prims.contains(&ObjectKey::from(im.id));
+        let dialog = im.dialog.to_u8();
+        if dialog != MESSAGE_FROM_OBJECT && !from_prim && !id_prim {
+            return;
+        }
+        let role = |is_prim: bool, id: Uuid| {
+            if is_prim {
+                "probe"
+            } else if id.is_nil() {
+                "nil"
+            } else {
+                self.cast.role(AgentKey::from(id))
+            }
+        };
+        let note = format!(
+            "# im{by} dialog={dialog} from={} id={} name={} offline={} length={} message={} \
+             bucket={}",
+            role(from_prim, im.from_agent_id.uuid()),
+            role(id_prim, im.id),
+            quote(&self.cast.scrub(&im.from_agent_name)),
+            u8::from(im.offline),
+            im.message.len(),
+            quote(&clip(&self.cast.scrub(&im.message))),
+            im.binary_bucket.len()
+        );
+        self.body.push(note);
+    }
+
+    /// Notes a line of chat from one of the probe's prims that is no probe
+    /// line, heard by the avatar `by` names: what an avatar is sent of a
+    /// script's speech.
+    fn heard(&mut self, by: &str, chat: &ChatMessage) {
+        let note = if chat.chat_type == ChatType::Owner && by.is_empty() {
+            format!(
+                "# owner-say: from={} text={}",
+                quote(&chat.from_name),
+                quote(&self.cast.scrub(&chat.message))
+            )
+        } else {
+            format!(
+                "# chat{by} type={} from={} length={} text={}",
+                chat_type_name(chat.chat_type),
+                quote(&chat.from_name),
+                chat.message.len(),
+                quote(&clip(&self.cast.scrub(&chat.message)))
+            )
+        };
+        self.body.push(note);
+    }
+
+    /// Takes one event of the other avatar's session: the permission
+    /// questions and dialogs from the probe's prims (kept for an answer by
+    /// that avatar), what it hears of their chat and instant messages, and
+    /// alerts. Its other events are dropped.
+    fn take_other(&mut self, prims: &HashSet<ObjectKey>, event: &Event) {
+        const BY: &str = " by=other";
+        match event {
+            Event::ScriptPermissionRequest(request) if prims.contains(&request.task_id) => {
+                self.question(BY, request);
+            }
+            Event::ScriptDialog(dialog) if prims.contains(&dialog.object_id) => {
+                self.dialog(BY, dialog);
+            }
+            Event::InstantMessageReceived(im) => self.instant_message(BY, prims, im),
+            Event::ChatReceived(chat) => match chat.source {
+                ChatSource::Object(source)
+                    if prims.contains(&source) && chat.chat_type != ChatType::DebugChannel =>
+                {
+                    self.heard(BY, chat);
+                }
+                _ => {}
+            },
+            Event::AlertMessage { .. } | Event::AgentAlertMessage { .. } => {
+                self.alert(BY, event);
+            }
+            _ => {}
+        }
+    }
+
     /// Takes one event of the owner's session: a probe line, a
     /// `DEBUG_CHANNEL` message or another owner-say line from one of the
     /// probe's prims, or what the grid sent the owner's viewer about the
-    /// avatars meanwhile — a permission question from the prims, a control
-    /// change, a follow camera, an animation list that changed, an alert —
-    /// which it notes. Returns the record name of a probe line it kept.
+    /// avatars meanwhile — a permission question or a dialog from the prims,
+    /// an object's instant message, a control change, a follow camera, an
+    /// animation list that changed, an alert — which it notes. Returns the
+    /// record name of a probe line it kept.
     fn take(&mut self, id: &str, prims: &HashSet<ObjectKey>, event: &Event) -> Option<String> {
         match event {
             Event::ScriptPermissionRequest(request) if prims.contains(&request.task_id) => {
                 self.question("", request);
+                return None;
+            }
+            Event::ScriptDialog(dialog) if prims.contains(&dialog.object_id) => {
+                self.dialog("", dialog);
+                return None;
+            }
+            Event::InstantMessageReceived(im) => {
+                self.instant_message("", prims, im);
                 return None;
             }
             Event::ScriptControlChange(changes) => {
@@ -496,14 +621,8 @@ impl Transcript {
             return None;
         }
         let line = chat.message.trim_end();
-        if !line.starts_with(&format!("{PREFIX}{id} ")) {
-            if chat.chat_type == ChatType::Owner {
-                self.body.push(format!(
-                    "# owner-say: from={} text={}",
-                    quote(&chat.from_name),
-                    quote(&self.cast.scrub(&chat.message))
-                ));
-            }
+        if chat.chat_type != ChatType::Owner || !line.starts_with(&format!("{PREFIX}{id} ")) {
+            self.heard("", chat);
             return None;
         }
         self.body.push(line.to_owned());
@@ -522,6 +641,26 @@ impl Transcript {
     }
 }
 
+/// `ImprovedInstantMessage`'s dialog for a message from an object
+/// (`IM_FROM_TASK`), which `llInstantMessage` sends.
+const MESSAGE_FROM_OBJECT: u8 = 19;
+
+/// A chat type as a note names it.
+fn chat_type_name(chat_type: ChatType) -> String {
+    match chat_type {
+        ChatType::Whisper => "whisper".to_owned(),
+        ChatType::Normal => "say".to_owned(),
+        ChatType::Shout => "shout".to_owned(),
+        ChatType::StartTyping => "start-typing".to_owned(),
+        ChatType::StopTyping => "stop-typing".to_owned(),
+        ChatType::DebugChannel => "debug".to_owned(),
+        ChatType::Region => "region".to_owned(),
+        ChatType::Owner => "owner".to_owned(),
+        ChatType::Direct => "direct".to_owned(),
+        other => format!("type-{}", other.to_u8()),
+    }
+}
+
 /// What `object` is to a note: one of the probe's prims (`probe`), or
 /// another object.
 fn object_role(prims: &HashSet<ObjectKey>, object: ObjectKey) -> &'static str {
@@ -535,6 +674,19 @@ fn object_role(prims: &HashSet<ObjectKey>, object: ObjectKey) -> &'static str {
 /// A vector as a note puts it.
 fn vector_note(vector: &Vector) -> String {
     format!("<{:.3}, {:.3}, {:.3}>", vector.x, vector.y, vector.z)
+}
+
+/// The most characters of a long text a note quotes; its length is noted
+/// beside it.
+const CLIP_CHARS: usize = 60;
+
+/// `text`, or its first [`CLIP_CHARS`] characters and `…` when it is
+/// longer: what a note quotes of a long message.
+fn clip(text: &str) -> String {
+    match text.char_indices().nth(CLIP_CHARS) {
+        Some((at, _)) => format!("{}…", text.get(..at).unwrap_or_default()),
+        None => text.to_owned(),
+    }
 }
 
 /// A note value in the probe lines' quoting.
@@ -576,17 +728,40 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
             TestFailure::Assertion("inventory skeleton had neither a Trash nor a root".to_owned())
         })?
     };
-    let (mut seen, reference) = {
+    let elsewhere = ctx.ban_line_regions().to_vec();
+    let travels = probes
+        .iter()
+        .any(|probe| probe.drives().contains(&Drive::Away));
+    let (mut seen, reference, trip) = {
         let session = ctx.primary();
         session.wait_for_region(REGION_TIMEOUT).await?;
-        settle_scene(
+        let settled = settle_scene_with_avatar(
             session,
             grid,
             build_position.clone(),
             SETTLE_WINDOW,
             SETTLE_IDLE,
         )
-        .await?
+        .await?;
+        let trip = if travels {
+            let origin = session
+                .region_handle()
+                .ok_or_else(|| TestFailure::State("the owner is in no region".to_owned()))?;
+            Some(Trip {
+                origin,
+                home: settled.avatar.clone().unwrap_or(Vector {
+                    x: 128.0,
+                    y: 128.0,
+                    z: 30.0,
+                }),
+                destination: other_region(session, origin, &elsewhere).await?,
+                grid,
+                build_position: build_position.clone(),
+            })
+        } else {
+            None
+        };
+        (settled.seen, settled.anchor, trip)
     };
     let other_active_group = {
         let other = ctx.secondary().ok_or_else(|| {
@@ -641,6 +816,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
                 other,
                 other_active_group,
                 cast: cast.clone(),
+                trip: trip.clone(),
             },
             probe,
             engine,
@@ -744,6 +920,25 @@ struct Avatars<'a> {
     other_active_group: Option<bool>,
     /// Who the two avatars are.
     cast: Cast,
+    /// Where the owner goes when a probe sends it `away`, and comes back
+    /// to; `None` when no probe of the run asks.
+    trip: Option<Trip>,
+}
+
+/// The owner's way out of the probe's region and back.
+#[derive(Debug, Clone)]
+struct Trip {
+    /// The probe's region.
+    origin: RegionHandle,
+    /// Where the owner stood in it, which it comes back to.
+    home: Vector,
+    /// The region it goes to.
+    destination: RegionHandle,
+    /// The grid, for the settle on coming back.
+    grid: Grid,
+    /// The fixtures' build location, which the owner walks back to on a
+    /// grid whose arrival point is elsewhere.
+    build_position: Option<Vector>,
 }
 
 /// A legacy name's first and last name (the last empty for a name of one
@@ -785,11 +980,11 @@ async fn run_probe(
 ) -> Result<Transcript, TestFailure> {
     let session = &mut *avatars.session;
     let mut prims: BTreeMap<String, Object> = BTreeMap::new();
-    for (label, distance) in probe.prims() {
+    for (label, distance, height) in probe.prims() {
         let position = Vector {
             x: base.x + distance,
             y: base.y,
-            z: base.z,
+            z: base.z + height,
         };
         session
             .send(Command::RezObject {
@@ -797,14 +992,17 @@ async fn run_probe(
                 group_id: None,
             })
             .await?;
-        let object = wait_for_own_new_object(session, seen, STEP_TIMEOUT)
-            .await?
-            .map_err(|reason| {
-                TestFailure::Assertion(format!(
+        let object = match wait_for_own_new_object(session, seen, STEP_TIMEOUT).await? {
+            Ok(object) => object,
+            Err(reason) => {
+                // The prims already rezzed are not left behind.
+                clear_away(session, &prims, trash).await?;
+                return Err(TestFailure::Assertion(format!(
                     "{}: prim {label} was not rezzed at {:.0}/{:.0}/{:.0}: {reason}",
                     probe.id, position.x, position.y, position.z
-                ))
-            })?;
+                )));
+            }
+        };
         seen.insert(object.scoped_id());
         prims.insert(label, object);
     }
@@ -903,7 +1101,18 @@ async fn run_probe(
             let stimulus = Stimulus::from_waiting(&wait)
                 .map_err(|reason| TestFailure::Assertion(format!("{}: {reason}", probe.id)))?;
             drain_other(avatars.other, &keys, &mut transcript).await?;
-            stimulate(avatars, probe, &prims, &keys, &mut transcript, &stimulus).await?;
+            stimulate(
+                avatars,
+                probe,
+                &mut Scene {
+                    prims: &mut prims,
+                    seen: &mut *seen,
+                },
+                &keys,
+                &mut transcript,
+                &stimulus,
+            )
+            .await?;
         }
         if transcript.ended {
             let linger = after(LINGER);
@@ -920,7 +1129,20 @@ async fn run_probe(
         drain_other(avatars.other, &keys, &mut transcript).await?;
     }
 
-    let session = &mut *avatars.session;
+    clear_away(avatars.session, &prims, trash).await?;
+    Ok(transcript)
+}
+
+/// Derezzes `prims` to the Trash and waits until the region has removed
+/// every one.
+async fn clear_away(
+    session: &mut Session,
+    prims: &BTreeMap<String, Object>,
+    trash: InventoryFolderKey,
+) -> Result<(), TestFailure> {
+    if prims.is_empty() {
+        return Ok(());
+    }
     let local_ids: Vec<ScopedObjectId> = prims.values().map(Object::scoped_id).collect();
     session
         .send(Command::DerezObjects {
@@ -942,7 +1164,7 @@ async fn run_probe(
             .await?;
         gone.insert(removed);
     }
-    Ok(transcript)
+    Ok(())
 }
 
 /// What ends a [`collect`].
@@ -1000,7 +1222,7 @@ async fn collect(
 async fn stimulate(
     avatars: &mut Avatars<'_>,
     probe: &Probe,
-    prims: &BTreeMap<String, Object>,
+    scene: &mut Scene<'_>,
     keys: &HashSet<ObjectKey>,
     transcript: &mut Transcript,
     stimulus: &Stimulus,
@@ -1026,9 +1248,16 @@ async fn stimulate(
         By::Owner => "",
         By::Other => " by=other",
     };
+    let prims = &*scene.prims;
     match &stimulus.action {
         Action::Answer { grant } => {
             return answer(avatars, stimulus.by, probe, keys, transcript, *grant).await;
+        }
+        Action::Dialog { reply } => {
+            return reply_dialog(avatars, stimulus.by, probe, keys, transcript, reply).await;
+        }
+        Action::Away { seconds } => {
+            return away(avatars, probe, scene, keys, transcript, *seconds).await;
         }
         Action::Sit => return sit(avatars, stimulus.by, probe, prims, keys, transcript).await,
         Action::Control { keys: held } => {
@@ -1067,7 +1296,11 @@ async fn stimulate(
             transcript.body.push(format!("# stand{by}"));
             actor.send(Command::Stand).await
         }
-        Action::Answer { .. } | Action::Sit | Action::Control { .. } => Ok(()),
+        Action::Answer { .. }
+        | Action::Dialog { .. }
+        | Action::Away { .. }
+        | Action::Sit
+        | Action::Control { .. } => Ok(()),
         Action::Touch => {
             let prim = prims
                 .get("A")
@@ -1079,9 +1312,10 @@ async fn stimulate(
                 (By::Other, None) => " active_group=unknown",
             };
             transcript.body.push(format!("# touch{by}{group}"));
+            let local_id = scoped_for(actor, prim);
             actor
                 .send(Command::GrabObject {
-                    local_id: prim.scoped_id(),
+                    local_id,
                     grab_offset: Vector {
                         x: 0.0,
                         y: 0.0,
@@ -1092,7 +1326,7 @@ async fn stimulate(
                 .await?;
             actor
                 .send(Command::DegrabObject {
-                    local_id: prim.scoped_id(),
+                    local_id,
                     surface: None,
                 })
                 .await
@@ -1112,6 +1346,17 @@ async fn stimulate(
     }
 }
 
+/// `prim`'s id as `actor`'s session scopes it: its region-local id on that
+/// session's root circuit. The prim was seen by the owner's session, whose
+/// circuit ids are its own — the other avatar's session numbers its circuits
+/// apart, and the owner's change with every trip `away`.
+fn scoped_for(actor: &Session, prim: &Object) -> ScopedObjectId {
+    actor.circuit_id().map_or_else(
+        || prim.scoped_id(),
+        |circuit| ScopedObjectId::new(circuit, prim.local_id),
+    )
+}
+
 /// How long the case waits after a probe asks for a stimulus before it
 /// gives it.
 const STIMULUS_SETTLE: Duration = Duration::from_secs(1);
@@ -1126,9 +1371,8 @@ const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a look at the other avatar's events waits for more.
 const DRAIN_WINDOW: Duration = Duration::from_millis(200);
 
-/// Notes what the grid sent the other avatar's viewer since the last look:
-/// the permission questions from the probe's prims (kept for an answer by
-/// that avatar) and alerts. Its other events are dropped.
+/// Notes what the grid sent the other avatar's viewer since the last look
+/// ([`Transcript::take_other`]).
 async fn drain_other(
     other: &mut Session,
     prims: &HashSet<ObjectKey>,
@@ -1136,15 +1380,7 @@ async fn drain_other(
 ) -> Result<(), TestFailure> {
     let outcome = other
         .wait_for(DRAIN_WINDOW, |event| {
-            match event {
-                Event::ScriptPermissionRequest(request) if prims.contains(&request.task_id) => {
-                    transcript.question(" by=other", request);
-                }
-                Event::AlertMessage { .. } | Event::AgentAlertMessage { .. } => {
-                    transcript.alert(" by=other", event);
-                }
-                _ => {}
-            }
+            transcript.take_other(prims, event);
             None::<()>
         })
         .await;
@@ -1216,6 +1452,207 @@ async fn answer(
     }
 }
 
+/// The probe's prims, by label, and every object the run has sighted: what
+/// a stimulus that takes the owner out of the region renews on its return.
+struct Scene<'a> {
+    /// The probe's prims.
+    prims: &'a mut BTreeMap<String, Object>,
+    /// Every object the run has sighted.
+    seen: &'a mut HashSet<ScopedObjectId>,
+}
+
+/// The newest of `dialogs`, with the older ones dropped: a dialog a probe
+/// put without asking for a reply is left unanswered, as a resident would
+/// close it.
+fn newest(dialogs: &mut VecDeque<ScriptDialog>) -> Option<ScriptDialog> {
+    let last = dialogs.pop_back();
+    dialogs.clear();
+    last
+}
+
+/// Replies `reply` to the newest dialog the probe's script put to the
+/// avatar `by` names — the index of the button with that label, or 0 when the dialog
+/// has none (a text box, or a label it does not offer) — and notes it, or
+/// notes that no dialog came within [`ANSWER_TIMEOUT`].
+async fn reply_dialog(
+    avatars: &mut Avatars<'_>,
+    by: By,
+    probe: &Probe,
+    prims: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    reply: &str,
+) -> Result<(), TestFailure> {
+    let deadline = after(ANSWER_TIMEOUT);
+    let dialog = match by {
+        By::Owner => {
+            if transcript.dialogs.is_empty() {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let outcome = avatars
+                    .session
+                    .wait_for(remaining, |event| {
+                        let _kept = transcript.take(&probe.id, prims, event);
+                        (!transcript.dialogs.is_empty()).then_some(())
+                    })
+                    .await;
+                match outcome {
+                    Ok(()) | Err(TestFailure::Timeout(_)) => {}
+                    Err(other) => return Err(other),
+                }
+            }
+            newest(&mut transcript.dialogs)
+        }
+        By::Other => {
+            while transcript.other_dialogs.is_empty() && Instant::now() < deadline {
+                drain_other(avatars.other, prims, transcript).await?;
+            }
+            newest(&mut transcript.other_dialogs)
+        }
+    };
+    let label = match by {
+        By::Owner => "",
+        By::Other => " by=other",
+    };
+    let Some(dialog) = dialog else {
+        transcript.body.push(format!(
+            "# dialog-reply{label} reply={} dialog=none",
+            quote(reply)
+        ));
+        return Ok(());
+    };
+    let index = dialog
+        .buttons
+        .iter()
+        .position(|button| button == reply)
+        .and_then(|index| i32::try_from(index).ok())
+        .unwrap_or(0);
+    transcript.body.push(format!(
+        "# dialog-reply{label} reply={} index={index} sent_length={}",
+        quote(&clip(reply)),
+        ScriptDialog::fit_reply(reply).len()
+    ));
+    let command = Command::ReplyScriptDialog {
+        object_id: dialog.object_id,
+        chat_channel: dialog.chat_channel,
+        button_index: index,
+        button_label: reply.to_owned(),
+    };
+    match by {
+        By::Owner => avatars.session.send(command).await,
+        By::Other => avatars.other.send(command).await,
+    }
+}
+
+/// How long a teleport of the owner's may take to arrive or fail.
+const TRIP_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Teleports the owner to `destination` at `position`, keeping the probe's
+/// lines meanwhile, and says how it went: `arrived`, or why not.
+async fn teleport_owner(
+    session: &mut Session,
+    probe: &Probe,
+    prims: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    destination: RegionHandle,
+    position: &Vector,
+) -> Result<String, TestFailure> {
+    request_teleport(
+        session,
+        destination,
+        (position.x, position.y, position.z),
+        (position.x + 1.0, position.y, position.z),
+    )
+    .await?;
+    let outcome = session
+        .wait_for(TRIP_TIMEOUT, |event| match event {
+            Event::RegionChanged { .. } => Some("arrived".to_owned()),
+            Event::TeleportLocal { .. } => Some("local".to_owned()),
+            Event::TeleportFailed { reason, .. } => Some(format!("failed {}", quote(reason))),
+            _ => {
+                let _kept = transcript.take(&probe.id, prims, event);
+                None
+            }
+        })
+        .await;
+    match outcome {
+        Ok(how) => Ok(how),
+        Err(TestFailure::Timeout(_)) => Ok("timeout".to_owned()),
+        Err(other) => Err(other),
+    }
+}
+
+/// Sends the owner out of the probe's region, to the trip's destination,
+/// for `seconds`, keeping the probe's lines meanwhile; then brings it back
+/// where it stood, walks it to the build location where the arrival put it
+/// elsewhere, and renews the probe's prims as the region now streams them.
+/// Notes how each teleport went.
+async fn away(
+    avatars: &mut Avatars<'_>,
+    probe: &Probe,
+    scene: &mut Scene<'_>,
+    keys: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    seconds: u32,
+) -> Result<(), TestFailure> {
+    let trip = avatars.trip.clone().ok_or_else(|| {
+        TestFailure::State(format!(
+            "{}: asked for `away` with no trip planned",
+            probe.id
+        ))
+    })?;
+    let session = &mut *avatars.session;
+    let how = teleport_owner(
+        session,
+        probe,
+        keys,
+        transcript,
+        trip.destination,
+        &Vector {
+            x: 128.0,
+            y: 128.0,
+            z: 30.0,
+        },
+    )
+    .await?;
+    transcript
+        .body
+        .push(format!("# away {how} seconds={seconds}"));
+    collect(
+        session,
+        probe,
+        keys,
+        transcript,
+        after(Duration::from_secs(u64::from(seconds))),
+        Until::Deadline,
+    )
+    .await?;
+    let how = teleport_owner(session, probe, keys, transcript, trip.origin, &trip.home).await?;
+    transcript.body.push(format!("# back {how}"));
+    let mut renewed: HashMap<ObjectKey, Object> = HashMap::new();
+    let settled = settle_scene_observing(
+        session,
+        trip.grid,
+        trip.build_position.clone(),
+        SETTLE_WINDOW,
+        SETTLE_IDLE,
+        |event| {
+            if let Event::ObjectAdded(object) = event
+                && keys.contains(&object.full_id)
+            {
+                let _previous = renewed.insert(object.full_id, (**object).clone());
+            }
+            let _kept = transcript.take(&probe.id, keys, event);
+        },
+    )
+    .await?;
+    scene.seen.extend(settled.seen);
+    for prim in scene.prims.values_mut() {
+        if let Some(object) = renewed.remove(&prim.full_id) {
+            *prim = object;
+        }
+    }
+    Ok(())
+}
+
 /// Sits the avatar `by` names on prim A and notes the grid's sit response,
 /// or that none came within [`ANSWER_TIMEOUT`].
 async fn sit(
@@ -1272,17 +1709,7 @@ async fn sit(
                     By::Owner => {
                         let _kept = transcript.take(&probe.id, keys, event);
                     }
-                    By::Other => match event {
-                        Event::ScriptPermissionRequest(request)
-                            if keys.contains(&request.task_id) =>
-                        {
-                            transcript.question(label, request);
-                        }
-                        Event::AlertMessage { .. } | Event::AgentAlertMessage { .. } => {
-                            transcript.alert(label, event);
-                        }
-                        _ => {}
-                    },
+                    By::Other => transcript.take_other(keys, event),
                 }
                 None
             }
@@ -1399,7 +1826,7 @@ fn trash_folder(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{Cast, replace_ignoring_case, split_name};
+    use super::{Cast, clip, replace_ignoring_case, split_name};
 
     #[test]
     fn a_name_is_replaced_as_a_whole_word_in_any_case() {
@@ -1426,5 +1853,12 @@ mod tests {
             "<first> <last> offered <other-first> <other-last> a seat"
         );
         assert_eq!(split_name("Single"), ("Single".to_owned(), String::new()));
+    }
+
+    #[test]
+    fn a_long_text_is_clipped_at_a_character() {
+        assert_eq!(clip("short"), "short");
+        let long = "ä".repeat(70);
+        assert_eq!(clip(&long), format!("{}…", "ä".repeat(60)));
     }
 }

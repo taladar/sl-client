@@ -1,0 +1,60 @@
+grid: aditi
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE comms/object-chat rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# animations avatar=other playing=""
+PROBE comms/object-chat rec=ready message="ready At9" from_own_prim=0
+# animations avatar=owner playing=""
+PROBE comms/object-chat rec=ready message="ready At11" from_own_prim=0
+PROBE comms/object-chat rec=ready message="ready At19" from_own_prim=0
+PROBE comms/object-chat rec=ready message="ready At21" from_own_prim=0
+PROBE comms/object-chat rec=ready message="ready At99" from_own_prim=0
+PROBE comms/object-chat rec=ready message="ready At101" from_own_prim=0
+PROBE comms/object-chat rec=listeners ready=1
+PROBE comms/object-chat rec=said step=1 call=whisper channel=5 length=7
+PROBE comms/object-chat rec=heard listener=At9 on=5 from_own_prim=0 from_agent=0 length=7 message="whisper"
+PROBE comms/object-chat rec=said step=2 call=say channel=5 length=3
+PROBE comms/object-chat rec=heard listener=At9 on=5 from_own_prim=0 from_agent=0 length=3 message="say"
+PROBE comms/object-chat rec=heard listener=At19 on=5 from_own_prim=0 from_agent=0 length=3 message="say"
+PROBE comms/object-chat rec=heard listener=At11 on=5 from_own_prim=0 from_agent=0 length=3 message="say"
+PROBE comms/object-chat rec=said step=3 call=shout channel=5 length=5
+PROBE comms/object-chat rec=heard listener=At9 on=5 from_own_prim=0 from_agent=0 length=5 message="shout"
+PROBE comms/object-chat rec=heard listener=At19 on=5 from_own_prim=0 from_agent=0 length=5 message="shout"
+PROBE comms/object-chat rec=heard listener=At11 on=5 from_own_prim=0 from_agent=0 length=5 message="shout"
+PROBE comms/object-chat rec=heard listener=At21 on=5 from_own_prim=0 from_agent=0 length=5 message="shout"
+PROBE comms/object-chat rec=heard listener=At99 on=5 from_own_prim=0 from_agent=0 length=5 message="shout"
+PROBE comms/object-chat rec=said step=4 call=region-say channel=5 length=6
+PROBE comms/object-chat rec=heard listener=At9 on=5 from_own_prim=0 from_agent=0 length=6 message="region"
+PROBE comms/object-chat rec=heard listener=At21 on=5 from_own_prim=0 from_agent=0 length=6 message="region"
+PROBE comms/object-chat rec=heard listener=At19 on=5 from_own_prim=0 from_agent=0 length=6 message="region"
+PROBE comms/object-chat rec=heard listener=At11 on=5 from_own_prim=0 from_agent=0 length=6 message="region"
+PROBE comms/object-chat rec=heard listener=At99 on=5 from_own_prim=0 from_agent=0 length=6 message="region"
+PROBE comms/object-chat rec=heard listener=At101 on=5 from_own_prim=0 from_agent=0 length=6 message="region"
+PROBE comms/object-chat rec=said step=5 call=region-say-to-21 channel=5 length=5
+PROBE comms/object-chat rec=heard listener=At21 on=5 from_own_prim=0 from_agent=0 length=5 message="to 21"
+PROBE comms/object-chat rec=said step=6 call=region-say-to-101 channel=5 length=6
+PROBE comms/object-chat rec=heard listener=At101 on=5 from_own_prim=0 from_agent=0 length=6 message="to 101"
+PROBE comms/object-chat rec=said step=7 call=region-say-to-self channel=5 length=7
+PROBE comms/object-chat rec=said step=8 call=region-say-to-21 channel=0 length=10
+PROBE comms/object-chat rec=heard listener=At21 on=0 from_own_prim=0 from_agent=0 length=10 message="to 21 on 0"
+PROBE comms/object-chat rec=said step=9 call=region-say channel=0 length=11
+# debug-channel: from="Object" text="Cannot use llRegionSay() on channel 0."
+PROBE comms/object-chat rec=said step=10 call=say channel=0 length=8
+# chat type=say from="Object" length=8 text="say on 0"
+PROBE comms/object-chat rec=heard listener=At9 on=0 from_own_prim=0 from_agent=0 length=8 message="say on 0"
+PROBE comms/object-chat rec=heard listener=At19 on=0 from_own_prim=0 from_agent=0 length=8 message="say on 0"
+PROBE comms/object-chat rec=heard listener=At11 on=0 from_own_prim=0 from_agent=0 length=8 message="say on 0"
+PROBE comms/object-chat rec=said step=11 call=say channel=5 length=1100
+PROBE comms/object-chat rec=heard listener=At9 on=5 from_own_prim=0 from_agent=0 length=1024 message="llllllllllllllllllllllllllllllllllllllll"
+PROBE comms/object-chat rec=heard listener=At19 on=5 from_own_prim=0 from_agent=0 length=1024 message="llllllllllllllllllllllllllllllllllllllll"
+PROBE comms/object-chat rec=heard listener=At11 on=5 from_own_prim=0 from_agent=0 length=1024 message="llllllllllllllllllllllllllllllllllllllll"
+PROBE comms/object-chat rec=said step=12 call=region-say-to-null channel=5 length=7
+PROBE comms/object-chat rec=said step=13 call=say channel=9 length=5
+PROBE comms/object-chat rec=said step=13 call=say channel=9 length=7
+PROBE comms/object-chat rec=heard listener=At9 on=9 from_own_prim=0 from_agent=0 length=5 message="match"
+PROBE comms/object-chat rec=end
+# chat by=other type=say from="Object" length=8 text="say on 0"

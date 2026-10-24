@@ -9518,7 +9518,9 @@ impl Session {
     /// `button_index`/`button_label` (from the [`Event::ScriptDialog`]'s
     /// [`ScriptDialog::buttons`](crate::ScriptDialog::buttons)) is sent back to `object_id` on the dialog's
     /// hidden `chat_channel`. For an `llTextBox`, pass the typed text as
-    /// `button_label` with `button_index` `0`.
+    /// `button_label` with `button_index` `0`. A label longer than the field
+    /// carries is cut to it ([`ScriptDialog::fit_reply`](crate::ScriptDialog::fit_reply)),
+    /// as the reference viewer's message system cuts it.
     ///
     /// # Errors
     ///
@@ -9537,7 +9539,7 @@ impl Session {
             object_id,
             chat_channel,
             button_index,
-            button_label,
+            crate::ScriptDialog::fit_reply(button_label),
             now,
         )?;
         Ok(())

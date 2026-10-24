@@ -66,3 +66,15 @@ Acceptance: the three grab messages, `ScriptDialogReply` and
 full payloads; the three senders exist and round-trip through the client
 parser; and no existing `ClientMessage` consumer regresses (the
 catch-all stops seeing these, which is the point).
+
+## From gridspec-lsl-comms (2026-10-24)
+
+The dialog pair is done: `SimSession::send_script_dialog` puts a
+`ScriptDialog` (an `llTextBox` is its one `!!llTextBox!!` button, the owner
+block only when an owner id is given), and a `ScriptDialogReply` decodes to
+`ServerEvent::ScriptDialogReply`, recorded as the object's last reply
+(`SimSession::script_dialog_reply`), with the round-trip test
+`script_dialog_and_reply_round_trip`. `e2e_script_dialog` holds the viewer's
+card to both fake flavours with it. The rest of the list stands: the grabs,
+`MoneyTransferRequest`, the sensor pair, `send_load_url` and
+`send_script_teleport_request`.

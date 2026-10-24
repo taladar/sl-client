@@ -175,8 +175,8 @@ pub use sim_new_file::{NewFilePolicy, UploadPrices};
 pub use sim_session::{
     AgentPresence, AgentUpdateInfo, ArrivalPlacement, CapsUploadMetadata, CoarseRounding,
     FlowMirrorStatus, KeptMessage, ObjectMediaState, PARCEL_OVERLAY_CHUNK_BYTES, RegionTelemetry,
-    RejectionReason, SESSION_FLOW_COVERAGE, ServerEvent, SimChatSession, SimChatSessionKind,
-    SimParcel, SimSession, SitTransform, TerrainStream, TransferRequestSource,
+    RejectionReason, SESSION_FLOW_COVERAGE, ScriptDialogAnswer, ServerEvent, SimChatSession,
+    SimChatSessionKind, SimParcel, SimSession, SitTransform, TerrainStream, TransferRequestSource,
     UpdatedInventoryItem, UserRightsEntry, WindFeed, coarse_location, teleport_strings,
 };
 pub use sim_voice::{

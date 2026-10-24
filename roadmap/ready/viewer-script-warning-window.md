@@ -57,3 +57,15 @@ Acceptance: a script erroring on the local OpenSim shows its message,
 object and position in the viewer within one frame of the chat arriving;
 the preference silences it; and a `ChatType::DebugChannel` message
 routed to nearby chat is visibly distinguished from ordinary chat.
+
+## Measured (2026-10-24, [[gridspec-lsl-comms]])
+
+What this window will show, as each grid words it
+(`book/src/gridspec/lsl.md`): a run-time error on Second Life is two lines
+from the prim, `Object [script:<name>] Script run-time error` then the
+error (`Too Many Listens`, `Math Error`, …), while OpenSim sends the owner
+one line naming script, prim and place; a refused library call is one line
+on both, in each grid's words (`llDialog: button list too long, must be 12
+or fewer entries` against `llDialog: No more than 12 buttons can be shown`,
+`Invalid Key passed to instant message.` against `llInstantMessage: An
+invalid key  was passed to llInstantMessage`).

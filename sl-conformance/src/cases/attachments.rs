@@ -45,10 +45,10 @@ use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
     AgentKey, AssetType, AttachmentMode, AttachmentPoint, AvatarAppearance, ChatChannel, ChatType,
-    Command, DeRezDestination, DetachOrder, Event, GridCoordinates, InventoryItem, InventoryKey,
-    InventoryType, Object, ObjectKey, RegionHandle, RegionLocalObjectId, RestoreItem,
-    RezAttachment, RezScriptParams, Rotation, ScopedObjectId, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptUploadLocation, TransactionId, Uuid, Vector,
+    Command, DeRezDestination, DetachOrder, Event, InventoryItem, InventoryKey, InventoryType,
+    Object, ObjectKey, RegionLocalObjectId, RestoreItem, RezAttachment, RezScriptParams, Rotation,
+    ScopedObjectId, ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
+    TransactionId, Uuid, Vector,
 };
 
 use crate::cases::asset_http::without_ids;
@@ -63,7 +63,7 @@ use crate::measured::Measured;
 use crate::metrics::Metrics;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{ANNOUNCED_BULK, ANNOUNCED_LEGACY, REGION_TIMEOUT, is_opensim};
-use crate::teleport_trace::{neighbouring_region, region_named, request_teleport};
+use crate::teleport_trace::{other_region, request_teleport};
 
 /// Where the measurements below are written down.
 const SOURCE: &str = "book/src/gridspec/appearance.md § Attachments (attachments, 2026-10-20)";
@@ -2471,7 +2471,7 @@ async fn census(
         .a
         .region_handle()
         .ok_or_else(|| TestFailure::State("A is in no region".to_owned()))?;
-    let target = destination(census.a, origin, &elsewhere).await?;
+    let target = other_region(census.a, origin, &elsewhere).await?;
     let before = census.own.worn.get("cube1").cloned();
     let avatar_before = census.own.avatar;
     left.home = false;
@@ -2548,30 +2548,6 @@ fn is_hud(object: &Object) -> bool {
     object
         .attachment_point_id()
         .is_some_and(|id| (HUD_FIRST..=HUD_LAST).contains(&id))
-}
-
-/// Where the teleport leg goes: a region next to `origin` on the map, or
-/// where the map shows none (Mauve, on aditi), the first of the operator's
-/// nearby regions the map knows.
-async fn destination(
-    session: &mut Session,
-    origin: RegionHandle,
-    elsewhere: &[String],
-) -> Result<RegionHandle, TestFailure> {
-    let neighbour = neighbouring_region(session, GridCoordinates::from(origin)).await;
-    let failure = match neighbour {
-        Ok(target) => return Ok(RegionHandle::from(target.grid_coordinates)),
-        Err(failure) => failure,
-    };
-    for name in elsewhere {
-        if let Ok(target) = region_named(session, name).await {
-            let handle = RegionHandle::from(target.grid_coordinates);
-            if handle != origin {
-                return Ok(handle);
-            }
-        }
-    }
-    Err(failure)
 }
 
 /// How an object attached from the world came back: under its own id, or as

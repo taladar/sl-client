@@ -44,3 +44,16 @@ in one `KillObject`, and a set of 256 prims derezzed beside another object
 was never killed on the client (found by `object-link-delink`). The fake
 grid splits the list itself now (`MOST_KILLS_A_MESSAGE` in `world.rs`); the
 senders in `sim_session.rs` that take a caller's list still do not.
+
+## A second case: a long dialog reply (2026-10-24)
+
+[[gridspec-lsl-comms]] answered an `llTextBox` with 300 characters through
+`Command::ReplyScriptDialog`; `ScriptDialogReply`'s `ButtonLabel` is a
+one-byte-length field, the encode failed, and the tokio run loop ended the
+session — the error only showed at the logout. The reply itself is now cut
+to the 254 bytes the field carries at a character boundary
+(`ScriptDialog::fit_reply`, used by `Session::reply_script_dialog`), as the
+reference viewer's `LLMessageSystem::addString` cuts it (its text box also
+caps the input at 250 characters). The general question above — what a
+command that fails to encode should cost each driver — is still open, and
+every other caller-sized string field reaches it the same way.

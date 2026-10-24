@@ -34,11 +34,12 @@ A probe's id is its path below `probes/` without the extension
 | key | meaning |
 | --- | --- |
 | `probe` | the id; required |
-| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`; required |
+| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`; required |
 | `script` | the inventory name, which the probe's scripts find each other by; required in a probe of several |
 | `order` | where the script comes in the save order; required in a probe of several |
 | `prim` | the object that holds it, `A` (the default), `B`, … |
 | `distance` | how far east of prim A its prim stands, in metres |
+| `height` | how far above prim A its prim stands, in metres — for a range no parcel is wide enough for (a chat range is a distance in three dimensions) |
 | `skip-on` | the grids it is left out on, comma-separated, where it would take the region down instead of measuring anything — the comment says why |
 | `vary` | the fields that are measurements (a duration, a rate, a clock), comma-separated: a comparison sets them side by side and never counts them as a difference |
 | `unordered` | the records whose order among a run of their own kind is not defined, comma-separated: a comparison takes such a run as a set |
@@ -59,7 +60,20 @@ mask as it is — `0` denies, and a mask beyond the question is sent too —
 or notes that no question came within ten seconds. `drive=sit` sits on
 prim A and `drive=stand` stands up. `drive=control keys=<mask>` holds the
 movement controls `keys` (the `CONTROL_*` bits, which are the agent's own
-control flags) down for a second, then lets go. `by=other` has the runner's
+control flags) down for a second, then lets go. `drive=dialog reply="…"`
+replies to the newest dialog (`llDialog`, `llTextBox`) the probe put to
+that avatar — the button with that label, which need not be one of the
+dialog's (index 0 then), or the text typed into a text box — or notes that
+none came within ten seconds; an older dialog the probe put without asking
+for a reply is left unanswered. A reply is cut to the 254 bytes
+`ScriptDialogReply` carries, as the reference viewer cuts it.
+`drive=away seconds=<n>` teleports the owner out of the region (to a
+neighbour on OpenSim; on aditi, where Mauve has none on the map, to the
+first of the fixtures' `ban_line_regions` the map knows), keeps it there
+`n` seconds, brings it back where it stood and walks it to the build
+location again; it is the owner's alone, and the probe should hold back
+its own lines meanwhile, since `llOwnerSay` may not reach an owner away.
+`by=other` has the runner's
 second avatar do it, which owns nothing of the probe's; without `by` it is
 the owner. A probe asks only for the drives its header declares, and the
 run fails if it asks for another.
@@ -68,6 +82,8 @@ run fails if it asks for another.
 PROBE avatar/permissions rec=waiting drive=answer grant=1044
 PROBE avatar/sit rec=waiting drive=sit by=other
 PROBE avatar/controls rec=waiting drive=control keys=256
+PROBE comms/dialog rec=waiting drive=dialog by=other reply="No"
+PROBE comms/owner-away rec=waiting drive=away seconds=20
 ```
 
 What a probe prints is one `llOwnerSay` line per observation:
@@ -145,15 +161,25 @@ avatar has an active group, `active_group=set|none`, which decides what
 owner-say lines from its prims, and every `DEBUG_CHANNEL` message they send
 as a `# debug-channel:` note (an owner-say line that is not a probe line as
 `# owner-say:`), until `end` or two minutes, then derezzes the prims to the
-Trash. It also notes what the grid sent the two viewers meanwhile, about
-the avatars: a permission question from the probe's prims (`# question`, the
-mask, the object's name, how the owner's name was put), the sit response
+Trash — and so it does when the grid refuses one of a probe's rezzes, with
+the prims already rezzed, before the run fails. It also notes what the grid
+sent the two viewers meanwhile, about the avatars: a permission question
+from the probe's prims (`# question`, the mask, the object's name, how the
+owner's name was put), a dialog from them
+(`# dialog`, the message, the buttons in the order sent, the channel) and
+the reply (`# dialog-reply`, the index and how many bytes went), an
+instant message from an object (`# im`, the dialog, who the grid names as
+sender and what the message id is, as roles — `owner`, `other`, `probe`),
+any other line of the prims' chat an avatar hears (`# chat`, its type and
+length, `# owner-say:` for the owner's own), the sit response
 (`# sit`, seat position and rotation, camera offsets), a
 `ScriptControlChange` (`# script-control-change`), a follow camera
 (`# follow-cam`, the parameters by code, or `# follow-cam-clear`), an
 avatar's animation list when it changes (`# animations`, the built-in ones
 by name, each with `@probe` when the probe's prim is its source; an uploaded
-one is the account's own and left out) and alerts. Names are never written:
+one is the account's own and left out) and alerts. A long text is quoted to
+its first 60 characters, with its length beside it. A trip `away` is noted
+as `# away` and `# back`, with how each teleport went. Names are never written:
 both avatars' names in anything a grid wrote become `<first>`, `<last>`,
 `<other-first>`, `<other-last>`. Every wait inside a run keeps what arrives
 during it, so a line printed while the case waits for a compile or a
@@ -259,6 +285,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | — the faulted script | stopped: `llGetScriptState` 0, a link message goes nowhere, and `llSetScriptState(…, TRUE)` does not start it again | reported running, yet answers nothing, restarted or not | runs on: answers in the state it faulted in, globals intact |
 | — unbounded recursion | `Stack-Heap Collision` | a `StackOverflowException` the engine catches (logged; no message) | the simulator process aborts — `skip-on` |
 | `avatar/*`, 2026-10-24: permissions, sitting, controls, camera and animations | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#animations-sitting-controls-and-camera) | | |
+| `comms/*`, 2026-10-24: listens, object chat, dialogs, text boxes, instant messages, the owner elsewhere, link messages | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#chat-listens-dialogs-and-link-messages) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

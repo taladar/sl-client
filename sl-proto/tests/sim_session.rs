@@ -38,14 +38,15 @@ mod test {
         RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
         RegionStats, RegionTerrainComposition, RejectionReason, RequiredVoiceVersion, RestoreItem,
         RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptControl, ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus,
-        ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
-        SimStatId, SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot,
-        TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-        TerrainLayerType, TerrainPatch, TextureEntry, TextureFace, TextureKey, Throttle,
-        TransactionId, TransferId, TransferRequestSource, TransferStatus, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WearableType, XferId, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        ScriptControl, ScriptControlAction, ScriptDialog, ScriptDialogAnswer,
+        ScriptPermissionRequest, ScriptPermissionStatus, ScriptPermissions, ServerError,
+        ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId, SimWideDeleteFlags,
+        SimulatorTime, SitTransform, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
+        TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferId,
+        TransferRequestSource, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, WearableType, XferId,
+        enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{
         AgentPresence, FlowMirrorStatus, LinkTuning, RegionTelemetry, SESSION_FLOW_COVERAGE,
@@ -7946,6 +7947,86 @@ mod test {
             "expected ForceScriptControlRelease, got {server_events:?}"
         );
         assert_eq!(client.script_controls().taken, ControlFlags::empty());
+        Ok(())
+    }
+
+    /// A dialog round-trips: the sim's `send_script_dialog` surfaces on the
+    /// client as the dialog it built, buttons in order and the owner's id
+    /// kept; the client's reply surfaces as [`ServerEvent::ScriptDialogReply`]
+    /// and is recorded as the object's last; a text box's reply is the text,
+    /// cut to the 254 bytes the reply carries.
+    #[test]
+    fn script_dialog_and_reply_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let object = ObjectKey::from(uuid::Uuid::from_u128(0xD1A1));
+        let dialog = ScriptDialog {
+            object_id: object,
+            object_name: "Object".to_owned(),
+            owner_first_name: "Test".to_owned(),
+            owner_last_name: "User".to_owned(),
+            owner_id: Some(uuid::Uuid::from_u128(0x0E1)),
+            message: "Pick one".to_owned(),
+            chat_channel: ChatChannel(-731_001),
+            image_id: TextureKey::from(uuid::Uuid::nil()),
+            buttons: vec!["One".to_owned(), "Two".to_owned(), "Three".to_owned()],
+        };
+        sim.send_script_dialog(&dialog, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let received = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ScriptDialog(dialog) => Some(*dialog),
+                _ => None,
+            })
+            .ok_or("expected a ScriptDialog client event")?;
+        assert_eq!(received, dialog);
+
+        client.reply_script_dialog(object, dialog.chat_channel, 1, "Two", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let answer = ScriptDialogAnswer {
+            chat_channel: ChatChannel(-731_001),
+            button_index: 1,
+            button_label: "Two".to_owned(),
+        };
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::ScriptDialogReply { object_id, answer: got }
+                    if *object_id == object && *got == answer
+            )),
+            "expected ScriptDialogReply, got {server_events:?}"
+        );
+        assert_eq!(sim.script_dialog_reply(object), Some(&answer));
+
+        let text_box = ScriptDialog {
+            buttons: vec![ScriptDialog::TEXT_BOX_BUTTON.to_owned()],
+            owner_id: None,
+            ..dialog
+        };
+        sim.send_script_dialog(&text_box, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let received = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ScriptDialog(dialog) => Some(*dialog),
+                _ => None,
+            })
+            .ok_or("expected the text box")?;
+        assert!(received.is_text_box());
+        assert_eq!(received.owner_id, None);
+        client.reply_script_dialog(object, text_box.chat_channel, 0, &"x".repeat(300), now)?;
+        pump(&mut client, &mut sim, now)?;
+        assert_eq!(
+            sim.script_dialog_reply(object)
+                .map(|answer| answer.button_label.len()),
+            Some(254),
+            "the reply is cut to what its label field carries"
+        );
         Ok(())
     }
 

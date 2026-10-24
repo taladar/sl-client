@@ -39,6 +39,25 @@ impl ScriptDialog {
     /// requesting free-text input rather than a button choice.
     pub const TEXT_BOX_BUTTON: &'static str = "!!llTextBox!!";
 
+    /// The most bytes a reply's label (a button, or a text box's text) can
+    /// carry: `ScriptDialogReply`'s `ButtonLabel` is a one-byte-length
+    /// field, and the text goes out NUL-terminated.
+    pub const MAX_REPLY_BYTES: usize = 254;
+
+    /// `reply` cut to [`MAX_REPLY_BYTES`](Self::MAX_REPLY_BYTES) at a
+    /// character boundary: what a `ScriptDialogReply` can carry of it. The
+    /// reference viewer does the same, cutting the bytes in its message
+    /// system (`LLMessageSystem::addString`), so a longer text box reply
+    /// reaches the script shortened rather than not at all.
+    #[must_use]
+    pub fn fit_reply(reply: &str) -> &str {
+        let mut end = reply.len().min(Self::MAX_REPLY_BYTES);
+        while !reply.is_char_boundary(end) {
+            end = end.saturating_sub(1);
+        }
+        reply.get(..end).unwrap_or_default()
+    }
+
     /// Whether this dialog is an `llTextBox` free-text prompt (a single
     /// [`TEXT_BOX_BUTTON`](Self::TEXT_BOX_BUTTON) button).
     #[must_use]
@@ -837,9 +856,22 @@ pub const DEFAULT_LUAU_SCRIPT: &str = "-- SLua script\n";
 mod tests {
     use super::{
         AlertInfo, ChatChannel, PermissionRole, ScriptCompileError, ScriptControlAction,
-        ScriptLanguage, ScriptPermissions, ScriptTarget,
+        ScriptDialog, ScriptLanguage, ScriptPermissions, ScriptTarget,
     };
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn a_reply_is_cut_to_what_the_label_field_carries_at_a_character() {
+        assert_eq!(ScriptDialog::fit_reply("Two"), "Two");
+        let ascii = "x".repeat(300);
+        assert_eq!(ScriptDialog::fit_reply(&ascii).len(), 254);
+        // 'ä' is two bytes: 127 of them fill 254, a 128th does not fit.
+        let wide = "ä".repeat(200);
+        assert_eq!(ScriptDialog::fit_reply(&wide), "ä".repeat(127));
+        // '€' is three bytes: 84 fill 252, and a cut never splits one.
+        let euro = "€".repeat(100);
+        assert_eq!(ScriptDialog::fit_reply(&euro), "€".repeat(84));
+    }
 
     /// Second Life's `ExtraParams` is a serialized LLSD map, `<? LLSD/XML ?>`
     /// XML as its `LinkFailed` sends it (measured on aditi): read by name, in

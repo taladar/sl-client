@@ -77,6 +77,11 @@ earshot in the middle of a line does not stay typing.
 
 ## A script's lines
 
+What a *script* hears of another's lines, and what its dialogs and
+instant messages become, is [LSL scripts][lsl-comms].
+
+[lsl-comms]: lsl.md#chat-listens-dialogs-and-link-messages
+
 The probe prim stands beside B; its owner A is the one that moves away. Not
 asked of the fake grid, which runs no scripts.
 

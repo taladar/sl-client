@@ -1,0 +1,40 @@
+grid: aditi
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE comms/textbox rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE comms/textbox rec=waiting drive=dialog reply="a few typed words"
+PROBE comms/textbox rec=put step=1 to=owner how=answered message_length=14
+# dialog object="Object" owner="<first> <last>" channel=-731002 message_length=14 message="Type something" buttons="!!llTextBox!!" count=1
+# dialog-reply reply="a few typed words" index=0 sent_length=17
+PROBE comms/textbox rec=heard step=1 from=owner length=17 message="a few typed words"
+PROBE comms/textbox rec=waiting drive=dialog reply=""
+PROBE comms/textbox rec=put step=2 to=owner how=answered message_length=12
+# dialog object="Object" owner="<first> <last>" channel=-731002 message_length=12 message="Type nothing" buttons="!!llTextBox!!" count=1
+# dialog-reply reply="" index=0 sent_length=0
+PROBE comms/textbox rec=heard step=2 from=owner length=0 message=""
+PROBE comms/textbox rec=waiting drive=dialog reply="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+PROBE comms/textbox rec=put step=3 to=owner how=answered message_length=10
+# dialog object="Object" owner="<first> <last>" channel=-731002 message_length=10 message="Type a lot" buttons="!!llTextBox!!" count=1
+# dialog-reply reply="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…" index=0 sent_length=254
+PROBE comms/textbox rec=heard step=3 from=owner length=254 message="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+PROBE comms/textbox rec=put step=4 to=owner how=unanswered message_length=0
+# debug-channel: from="Object" text="llTextBox: must supply a message"
+PROBE comms/textbox rec=moved-on step=4
+PROBE comms/textbox rec=put step=5 to=owner how=unanswered message_length=513
+# debug-channel: from="Object" text="llTextBox: message too long, must be less than 512 characters"
+PROBE comms/textbox rec=moved-on step=5
+PROBE comms/textbox rec=waiting drive=touch by=other
+# touch by=other active_group=none
+PROBE comms/textbox rec=touch step=6 by=other
+PROBE comms/textbox rec=waiting drive=dialog by=other reply="typed by the other"
+# dialog by=other object="Object" owner="<first> <last>" channel=-731002 message_length=13 message="For the other" buttons="!!llTextBox!!" count=1
+PROBE comms/textbox rec=put step=7 to=other how=answered message_length=13
+# dialog-reply by=other reply="typed by the other" index=0 sent_length=18
+PROBE comms/textbox rec=heard step=7 from=other length=18 message="typed by the other"
+PROBE comms/textbox rec=end

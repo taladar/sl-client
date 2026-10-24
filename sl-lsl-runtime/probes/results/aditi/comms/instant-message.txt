@@ -1,0 +1,29 @@
+grid: aditi
+date: 2026-10-24
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+PROBE comms/instant-message rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE comms/instant-message rec=waiting drive=touch by=other
+# touch by=other active_group=none
+PROBE comms/instant-message rec=touch by_owner=0
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=12 message="to the owner" bucket=15
+# animations avatar=other playing=""
+PROBE comms/instant-message rec=sent call=im to=owner length=12 seconds=2.088671
+PROBE comms/instant-message rec=sent call=im to=other length=12 seconds=2.044740
+# debug-channel: from="Object" text="Invalid Key passed to instant message."
+PROBE comms/instant-message rec=sent call=im to=null length=9 seconds=2.022011
+PROBE comms/instant-message rec=sent call=im to=unknown length=25 seconds=2.000292
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=1023 message="iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii…" bucket=15
+PROBE comms/instant-message rec=sent call=im to=owner length=1100 seconds=2.037613
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=9 message="two\nlines" bucket=15
+PROBE comms/instant-message rec=sent call=im to=owner length=9 seconds=2.044408
+# owner-say: from="Object" text="owner-say beside it"
+PROBE comms/instant-message rec=sent call=owner-say to=owner length=19 seconds=0.000000
+# chat type=direct from="Object" length=23 text="region-say-to beside it"
+PROBE comms/instant-message rec=sent call=region-say-to to=owner length=23 seconds=0.000000
+PROBE comms/instant-message rec=end
+# im by=other dialog=19 from=owner id=probe name="Object" offline=0 length=12 message="to the other" bucket=15

@@ -62,3 +62,39 @@ hold a conversation over a non-zero channel with no viewer involved; a
 `llDialog` shown in the Bevy viewer answers back into the script's
 `listen`; and a listen registered in one state is gone after a state
 change.
+
+## Measured (2026-10-24, [[gridspec-lsl-comms]])
+
+`book/src/gridspec/lsl.md` § Chat, listens, dialogs and link messages has
+every row; the ones a flavour must split on:
+
+- **Listen limit**: Second Life 65 per script, the 66th a run-time error
+  (`Too Many Listens`) that stops the script; OpenSim 64, the 65th and every
+  later one a non-positive handle, silently, the script running on.
+- **Dialog refusals** (each a `DEBUG_CHANNEL` line, no dialog, unless
+  said): over 12 buttons (both refuse, different words); a label over 24
+  characters (Second Life refuses, OpenSim shows every label cut to 23); a
+  blank label (both refuse); a non-string button (Second Life refuses,
+  OpenSim shows it as text); an empty message (Second Life refuses, OpenSim
+  complains and shows it); a message of 512 or more (Second Life refuses;
+  OpenSim shows it cut to 511, complaining only past 512). The empty button
+  list is `OK` on Second Life, `Ok` on OpenSim. A reply is never checked
+  against the buttons.
+- **Text box refusals**: an empty message and one over 511 are refused on
+  both, in each grid's words.
+- **A long say** reaches a listener cut to 1024 on Second Life, 1023 on
+  OpenSim.
+- **`llInstantMessage`**: 2 s on both; `FromAgentID` the owner, the message
+  id the prim; cut to 1023; `NULL_KEY` complains on both.
+- **The owner in another region**: Second Life delivers only the instant
+  message; OpenSim (a neighbour, a child agent) the instant message and
+  `llRegionSayTo`, and still answers `OBJECT_POS` for the owner.
+- **Link messages in a lone prim**: `LINK_THIS`, `LINK_SET` and 0 reach
+  every script, the sender included, on both; `LINK_ROOT` (1) reaches them
+  on OpenSim and nobody on Second Life.
+- What is the same on both: the ranges (10 / 20 / 100 m, 3-D), a prim never
+  hearing itself, `llRegionSayTo` reaching a prim at any distance and
+  nothing for its own key or `NULL_KEY`, `llRegionSay` refused on 0.
+
+`SimSession::send_script_dialog` and the decoded `ScriptDialogReply` exist
+now, so the dialog leg of this task's acceptance needs no protocol work.

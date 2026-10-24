@@ -383,6 +383,35 @@ pub async fn neighbouring_region(
         })
 }
 
+/// Another region to teleport to: one next to `origin` on the map, or where
+/// the map shows none (Mauve, on aditi), the first of the operator's nearby
+/// regions, `elsewhere`, the map knows.
+///
+/// # Errors
+///
+/// [`neighbouring_region`]'s failure when neither finds a region, and
+/// whatever [`Session::wait_for`] raises.
+pub async fn other_region(
+    session: &mut Session,
+    origin: RegionHandle,
+    elsewhere: &[String],
+) -> Result<RegionHandle, TestFailure> {
+    let neighbour = neighbouring_region(session, GridCoordinates::from(origin)).await;
+    let failure = match neighbour {
+        Ok(target) => return Ok(RegionHandle::from(target.grid_coordinates)),
+        Err(failure) => failure,
+    };
+    for name in elsewhere {
+        if let Ok(target) = region_named(session, name).await {
+            let handle = RegionHandle::from(target.grid_coordinates);
+            if handle != origin {
+                return Ok(handle);
+            }
+        }
+    }
+    Err(failure)
+}
+
 /// Looks a region up on the world map by its exact name.
 ///
 /// # Errors

@@ -111,3 +111,119 @@ Taking the movement keys (`viewer-input-script-control-capture`) and
 applying a scripted follow camera
 (`viewer-scripted-followcam-llsetcameraparams`) are viewer tasks of their
 own, which carry the rows above that bear on them.
+
+## Chat, listens, dialogs and link messages
+
+Measured on 2026-10-24 by the probes `comms/listen-limit`, `comms/dialog`,
+`comms/textbox`, `comms/instant-message`, `comms/owner-away`,
+`comms/object-chat` and `comms/link-messages`, on the same grids, with the
+owner and the other avatar standing by the probe's prims. What an
+*avatar* is sent of each say function is [Chat](chat.md#a-scripts-lines);
+these are what a *script* hears and what a dialog becomes. YEngine and
+XEngine agree on every row (one instant message to `NULL_KEY` took 3 s
+under XEngine), so OpenSim is one column again.
+
+### Listens
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| two `llListen` with the same filter | one listen: the same handle | the same | no scripts |
+| how many one script may hold | 65 | 64 | no scripts |
+| the one too many | a run-time error, `Object [script:<name>] Script run-time error` then `Too Many Listens` on `DEBUG_CHANNEL`; the script is **stopped** (`llGetScriptState` 0, answers nothing) | **silently refused**: the handle is not positive, every later one too, and the script runs on | no scripts |
+| `llListenRemove` of a handle the script never had | nothing | the same | no scripts |
+| a listen filtered to a message (`"match"`) | hears that message alone | the same | no scripts |
+
+### What one object hears of another
+
+Listeners stand just inside and just outside each documented range: 9 m and
+11 m, 19 m and 21 m east of the speaker, and 99 m and 101 m straight above
+it (a range is a distance in three dimensions, and no parcel of the build
+location is 100 m wide).
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llWhisper`, `llSay`, `llShout` | heard within 10 m, 20 m and 100 m: at 9, 19 and 99 m, not at 11, 21 and 101 m | the same | no scripts |
+| `llRegionSay` on 5 | every listener, 101 m included | the same | no scripts |
+| a script's own prim (another script in it, listening on the channel) | hears nothing the prim says, by any function | the same | no scripts |
+| `llRegionSayTo` another prim, on 5 and on 0 | that prim alone, at any distance | the same | no scripts |
+| `llRegionSayTo` its own prim, or `NULL_KEY` | nothing, and no complaint | the same | no scripts |
+| `llRegionSay` on channel 0 | refused: `Cannot use llRegionSay() on channel 0.` on `DEBUG_CHANNEL` | refused: `llRegionSay: Cannot use on channel 0` | no scripts |
+| a say of 1100 characters | heard cut to **1024** | heard cut to **1023** | no scripts |
+
+### Dialogs
+
+What the viewer is sent (the runner's `# dialog` note) is the `ScriptDialog`:
+the object's name, its owner's first and last name, the message, the
+channel and the buttons in the script's order. A reply is said on the
+dialog's channel as the avatar; the listener hears it with that avatar's
+key and its `llKey2Name` as the name.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| three buttons, the second pressed | the buttons in order; the script hears `Two` from the owner | the same | `send_script_dialog` puts it as both grids do; the viewer's card replies with the index and label (`e2e_script_dialog`, both flavours) |
+| an empty button list | one button, **`OK`** | one button, **`Ok`** | each flavour's, as the test sends it |
+| a reply with a label the dialog does not have | heard as sent: the grid does not check a reply against the buttons | the same | — |
+| twelve buttons | shown | the same | — |
+| thirteen | refused, no dialog: `llDialog: button list too long, must be 12 or fewer entries` | refused, no dialog: `llDialog: No more than 12 buttons can be shown` | no scripts |
+| a label of 24 characters | shown as it is | shown **cut to 23**; the reply is still whatever the viewer sends | no scripts |
+| a label of 25 | refused, no dialog: `llDialog: button labels must be 24 or fewer characters long` | shown cut to 23, no complaint | no scripts |
+| an empty label | refused, no dialog: `llDialog: all buttons must have label strings` | refused, no dialog: `llDialog: Button label cannot be blank` | no scripts |
+| a button that is an integer (`["One", 2]`) | refused, no dialog: `llDialog: button list must contain only strings` | shown, the integer as `2` | no scripts |
+| an empty message | refused, no dialog: `llDialog: must supply a message` | `llDialog: Empty message` **and** the dialog shown, empty | no scripts |
+| a message of 511 characters | shown | the same | — |
+| of 512 | refused, no dialog: `llDialog: message too long, must be less than 512 characters` | shown cut to 511, no complaint | no scripts |
+| of 513 | refused likewise | `llDialog: Message longer than 512 bytes` and shown cut to 511 | no scripts |
+| a dialog to `NULL_KEY` | nothing, no complaint | the same | no scripts |
+| a dialog to the other avatar | put to that avatar's viewer, the owner's name on it; its reply heard from it | the same | — |
+
+### Text boxes
+
+An `llTextBox` is the same `ScriptDialog` with the one button
+`!!llTextBox!!`; the reply's label is the text typed.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a few words typed | heard as typed | the same | the card's Submit replies with the text on index 0 (`e2e_script_dialog`, both flavours) |
+| nothing typed | an empty line heard | the same | — |
+| 300 characters typed | 254 heard: the reply's field holds 254 bytes, and our client cuts it there, as the reference's message system does (its text box takes 250 characters) | the same | — |
+| an empty message | refused, nothing shown: `llTextBox: must supply a message` | refused, nothing shown: `llTextBox: Empty message` | no scripts |
+| a message of 513 characters | refused: `llTextBox: message too long, must be less than 512 characters` | refused: `llTextBox: Message longer than 512 bytes` | no scripts |
+| a text box to the other avatar | put to it; its text heard from it | the same | — |
+
+### Instant messages and the owner elsewhere
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| what `llInstantMessage` costs the script | a 2 s sleep (2.00–2.09 s measured) | 2 s | no scripts |
+| the message | an `ImprovedInstantMessage` of dialog 19 (`IM_FROM_TASK`), `FromAgentID` the **owner**, the message id the **prim's key**, the name the prim's, not offline | the same; its binary bucket 26 bytes against Second Life's 15 | no scripts |
+| to the other avatar | delivered to it the same way | the same | no scripts |
+| to `NULL_KEY` | `Invalid Key passed to instant message.` on `DEBUG_CHANNEL`, still 2 s | `llInstantMessage: An invalid key  was passed to llInstantMessage` | no scripts |
+| to a key that is nobody's | nothing, no complaint, 2 s | the same | no scripts |
+| 1100 characters | cut to 1023 | the same | no scripts |
+| a line break | kept | the same | no scripts |
+| `llOwnerSay`, `llRegionSayTo` the owner | no delay | the same | no scripts |
+| while the owner is in another region (on OpenSim a neighbour, where it keeps a child agent; on Second Life a region away) | only the **instant message** reaches the owner; `llOwnerSay` and `llRegionSayTo` are lost | the instant message **and `llRegionSayTo`** reach it; `llOwnerSay` is lost | no scripts |
+| what the script sees of the owner away | `llGetAgentSize` zero, `OBJECT_POS` an empty list | `llGetAgentSize` zero, but `OBJECT_POS` still answered (the child agent) | no scripts |
+
+### Link messages
+
+The probe's prim is linked to nothing (`llGetLinkNumber` 0, one prim) and
+holds two scripts; `LINK_ROOT` is the link number 1.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `LINK_THIS`, `LINK_SET`, link 0 | both scripts, **the sender included**, with sender 0 | the same | no scripts |
+| `LINK_ROOT` (1) | nobody: an unlinked prim is not link 1 | **both scripts**: OpenSim takes link 1 for the lone prim | no scripts |
+| `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN`, link 2 | nobody | the same | no scripts |
+| a 3000-character string and a key that is no key (`"not a key"`) | both arrive whole | the same | no scripts |
+
+### What the viewer does with it
+
+The dialog card shows a dialog as both grids put it, the empty list's one
+button included under either spelling, and replies with the pressed
+button's index and label; a text box replies with the text on index 0.
+`e2e_script_dialog` holds it to that on both fake flavours, and since
+2026-10-24 a reply longer than its field is cut to it in `sl-proto`
+rather than failing to encode. The refusals reach the viewer only as
+`DEBUG_CHANNEL` chat, which the roadmap task
+`viewer-script-warning-window` is to show.
