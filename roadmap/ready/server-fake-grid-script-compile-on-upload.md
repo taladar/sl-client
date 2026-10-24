@@ -2,7 +2,7 @@
 id: server-fake-grid-script-compile-on-upload
 title: A script upload is accepted and never compiled
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
 blocked_by: [server-lsl-compiler-ir, gridspec-lsl-compile]
@@ -54,3 +54,34 @@ Acceptance: uploading a script with a syntax error over
 naming the right line; the item still points at the previous asset; the
 Bevy viewer's editor shows the error list; and a clean upload restarts
 the running script.
+
+## From gridspec-lsl-compile (2026-10-25)
+
+Every answer each grid gives is in `book/src/gridspec/lsl.md` § Compiling and
+held by the `script-compile` census; once the fake grid compiles, add the case
+to the offline list for both flavours (its tables are per grid, keyed by
+backend: `mono_*`/`lsl2_*`/`luau_*` on Second Life, `yengine_*`/`xengine_*`/
+`luau_*` on OpenSim). What a flavour splits on, beyond the messages:
+
+- **The error strings.** Second Life: one error, `(L, C) : ERROR : <msg>\n`,
+  zero-based, a space after the comma, the column in bytes, pointing at the
+  token after the fault; names resolve before types, so of a type mismatch
+  and a later undeclared name only the name is reported. OpenSim YEngine:
+  every error, `(L,C) Error: <msg>`, zero-based characters. The fake grid
+  carries one compiler — `sl-lsl-runtime`'s `CompileError` already renders
+  Second Life's form; the OpenSim flavour wants YEngine's (its default
+  engine), and when to reject must follow each (YEngine compiles a function
+  without a return on every path; Second Life refuses it).
+- **What a failed compile does**: the broken source is stored and the
+  script stopped — on Second Life `GetScriptRunning` answers not running, on
+  OpenSim it is not answered (no instance).
+- **`new_asset`**: Second Life a fresh asset id; OpenSim the **item's own
+  id** for a task upload, the stored asset for an agent upload.
+- **Agent-inventory uploads**: Second Life compiles them like a task's;
+  OpenSim compiles none (`compiled` true whatever the source).
+- **The `luau` target**: Second Life runs a Luau compiler (`:L: <msg>`,
+  one-based, no column) and marks the item Luau; OpenSim ignores the target.
+- Second Life hides a script's asset id in task listings and inventory
+  fetches even to its owner; OpenSim lists it.
+- XEngine's never-answered upload over a running script is an OpenSim bug,
+  not a behaviour to imitate.

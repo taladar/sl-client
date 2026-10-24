@@ -124,6 +124,7 @@ script-status-saved = Zapisano.
 script-status-compile-failed = Kompilacja nie powiodła się.
 script-status-save-failed = Zapis nie powiódł się.
 script-error-at = Wiersz { $line }, kolumna { $column }: { $message }
+script-error-at-line = Wiersz { $line }: { $message }
 script-error-nopos = { $message }
 
 ## The inventory gallery (viewer-inventory-gallery).

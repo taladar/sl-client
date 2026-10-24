@@ -313,6 +313,14 @@ pub(crate) async fn run_postcard_upload(
     deliver(&events, event).await;
 }
 
+/// How long one step of an upload may take before it fails, as the bevy
+/// runtime's upload client allows (the reference's default request timeout is
+/// 30 s). Async reqwest has none by default, and a grid does leave an upload
+/// unanswered: OpenSim's XEngine never answers a script upload over a running
+/// script (`book/src/gridspec/lsl.md` § Compiling), so a save would wait for
+/// ever.
+const UPLOAD_STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// POSTs one step of a CAPS upload and parses the LLSD response, returning the
 /// parsed [`AssetUploadResponse`] or a human-readable failure reason.
 pub(crate) async fn caps_upload_step(
@@ -324,6 +332,7 @@ pub(crate) async fn caps_upload_step(
     let response = http
         .post(url)
         .header("Content-Type", content_type)
+        .timeout(UPLOAD_STEP_TIMEOUT)
         .body(body)
         .send()
         .await

@@ -740,26 +740,66 @@ pub struct ScriptCompileError {
     pub raw: String,
     /// The 1-based source line, if a position prefix was recognised.
     pub line: Option<u32>,
-    /// The source column, if a position prefix was recognised.
+    /// The 1-based source column, if the position prefix carried one (a
+    /// Luau error names its line only), counted in
+    /// [`column_unit`](Self::column_unit)s;
+    /// [`character_column`](Self::character_column) puts it in characters.
     pub column: Option<u32>,
+    /// What [`column`](Self::column) counts: Second Life's compiler counts
+    /// bytes, OpenSim's engines characters.
+    pub column_unit: ColumnUnit,
     /// The human-readable message (the diagnostic with any position prefix
     /// stripped, or the whole string when none was found).
     pub message: String,
 }
 
+/// What a compiler's error column counts along its line — measured by the
+/// `script-compile` census with three two-byte characters before a fault
+/// (`book/src/gridspec/lsl.md` § Compiling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ColumnUnit {
+    /// Bytes of the line's UTF-8 — Second Life's Mono, LSL2 and Luau
+    /// compilers.
+    Bytes,
+    /// Characters — OpenSim's YEngine and XEngine.
+    Characters,
+}
+
 impl ScriptCompileError {
     /// Parses one compiler-error string into a structured diagnostic, keeping the
-    /// original in [`raw`](Self::raw). Recognises a leading `(line, col)` prefix
-    /// (OpenSim / Mono) or a `line:col:` prefix, else leaves the position empty
-    /// and the whole string as the message.
+    /// original in [`raw`](Self::raw). Recognises a leading `(line, col)` prefix,
+    /// a Luau `:line:` prefix or a `line:col:` prefix, else leaves the position
+    /// empty and the whole string as the message.
+    ///
+    /// Every LSL compiler measured counts a `(line, col)` position **from zero**
+    /// — Second Life's Mono and LSL2 (`(4, 20) : ERROR : Syntax error` for a
+    /// fault on line 5, column 21), OpenSim's YEngine (`(4,20) Error: …`) and
+    /// XEngine, which subtracts one from its own positions for the reference
+    /// viewer, whose editor is zero-based — so both numbers are moved to one-based
+    /// here (`book/src/gridspec/lsl.md` § Compiling). Second Life's Luau compiler
+    /// names a one-based line and no column (`:2: Expected identifier …`).
+    ///
+    /// The format also tells the compilers' column units apart: Second Life
+    /// writes the position with a space after the comma (`(4, 41)`) and counts
+    /// bytes; OpenSim's engines write none (`(4,38)`) and count characters.
     #[must_use]
     pub fn parse(raw: &str) -> Self {
         let trimmed = raw.trim();
-        if let Some((line, column, message)) = parse_paren_position(trimmed) {
+        if let Some((line, column, column_unit, message)) = parse_paren_position(trimmed) {
+            return Self {
+                raw: raw.to_owned(),
+                line: Some(line.saturating_add(1)),
+                column: Some(column.saturating_add(1)),
+                column_unit,
+                message,
+            };
+        }
+        if let Some((line, message)) = parse_luau_position(trimmed) {
             return Self {
                 raw: raw.to_owned(),
                 line: Some(line),
-                column: Some(column),
+                column: None,
+                column_unit: ColumnUnit::Bytes,
                 message,
             };
         }
@@ -768,6 +808,7 @@ impl ScriptCompileError {
                 raw: raw.to_owned(),
                 line: Some(line),
                 column: Some(column),
+                column_unit: ColumnUnit::Characters,
                 message,
             };
         }
@@ -775,8 +816,37 @@ impl ScriptCompileError {
             raw: raw.to_owned(),
             line: None,
             column: None,
+            column_unit: ColumnUnit::Characters,
             message: trimmed.to_owned(),
         }
+    }
+
+    /// The one-based column in characters of [`line`](Self::line) of the
+    /// `source` the error is about, converted from a byte column (Second
+    /// Life's) — a column inside a character is that character's. A column of
+    /// a line `source` does not have is returned as it is.
+    #[must_use]
+    pub fn character_column(&self, source: &str) -> Option<u32> {
+        let column = self.column?;
+        if self.column_unit == ColumnUnit::Characters {
+            return Some(column);
+        }
+        let index = usize::try_from(self.line?.saturating_sub(1)).ok()?;
+        let Some(text) = source.split('\n').nth(index) else {
+            return Some(column);
+        };
+        let bytes = usize::try_from(column.saturating_sub(1)).unwrap_or(usize::MAX);
+        let characters = text
+            .char_indices()
+            .take_while(|(offset, _character)| *offset < bytes)
+            .count();
+        let characters = if bytes > text.len() {
+            // Past the line's end: the bytes beyond it count one each.
+            characters.saturating_add(bytes.saturating_sub(text.len()))
+        } else {
+            characters
+        };
+        u32::try_from(characters).ok()?.checked_add(1)
     }
 
     /// Renders this grid-side compiler error against the script `source` through
@@ -793,27 +863,50 @@ impl ScriptCompileError {
         sl_lsl::render_grid_error(
             source,
             self.line.unwrap_or(1),
-            self.column,
+            self.character_column(source),
             sl_lsl::Severity::Error,
             &self.message,
         )
     }
 }
 
-/// Parses a leading `(line, col)` position (e.g. `"(4, 20): message"`, as OpenSim
-/// XEngine and SL Mono emit), returning `(line, col, message)` with the prefix
-/// stripped. The message keeps whatever follows the closing paren (minus a
-/// leading `:`/whitespace).
-fn parse_paren_position(s: &str) -> Option<(u32, u32, String)> {
+/// Parses a leading `(line, col)` position (e.g. `"(4, 20) : ERROR : message"`,
+/// as Second Life and OpenSim emit), returning the zero-based `(line, col)`,
+/// the column's unit (bytes for Second Life's `(4, 20)`, characters for
+/// OpenSim's `(4,20)`) and the message with the prefix stripped. The message
+/// keeps whatever follows the closing paren (minus a leading `:`/whitespace).
+fn parse_paren_position(s: &str) -> Option<(u32, u32, ColumnUnit, String)> {
     let rest = s.strip_prefix('(')?;
     let (inside, after) = rest.split_once(')')?;
+    let unit = if inside.contains(", ") {
+        ColumnUnit::Bytes
+    } else {
+        ColumnUnit::Characters
+    };
     let mut nums = inside.split(',');
-    let line = nums.next()?.trim().parse::<u32>().ok()?;
-    let column = nums.next()?.trim().parse::<u32>().ok()?;
+    let line = zero_based(nums.next()?)?;
+    let column = zero_based(nums.next()?)?;
     let message = after
         .trim_start_matches(|c: char| c == ':' || c.is_whitespace())
         .to_owned();
-    Some((line, column, message))
+    Some((line, column, unit, message))
+}
+
+/// One number of a `(line, col)` position, a negative one (XEngine's
+/// `(2,-1) Unexpected EOF`) read as zero.
+fn zero_based(number: &str) -> Option<u32> {
+    let number = number.trim().parse::<i64>().ok()?;
+    u32::try_from(number.max(0)).ok()
+}
+
+/// Parses a leading Luau `:line:` position (e.g. `":2: Expected identifier"`, as
+/// Second Life's Luau compiler emits, the chunk name left empty), returning
+/// `(line, message)` with the prefix stripped.
+fn parse_luau_position(s: &str) -> Option<(u32, String)> {
+    let rest = s.strip_prefix(':')?;
+    let (line, message) = rest.split_once(':')?;
+    let line = line.trim().parse::<u32>().ok()?;
+    Some((line, message.trim_start().to_owned()))
 }
 
 /// Parses a leading `line:col:` position (e.g. `"12:3: message"`), returning
@@ -855,8 +948,8 @@ pub const DEFAULT_LUAU_SCRIPT: &str = "-- SLua script\n";
 #[cfg(test)]
 mod tests {
     use super::{
-        AlertInfo, ChatChannel, PermissionRole, ScriptCompileError, ScriptControlAction,
-        ScriptDialog, ScriptLanguage, ScriptPermissions, ScriptTarget,
+        AlertInfo, ChatChannel, ColumnUnit, PermissionRole, ScriptCompileError,
+        ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissions, ScriptTarget,
     };
     use pretty_assertions::assert_eq;
 
@@ -1006,12 +1099,47 @@ mod tests {
 
     #[test]
     fn script_compile_error_parses_opensim_and_mono_formats() {
-        // OpenSim / Mono parenthesised position.
-        let paren = ScriptCompileError::parse("(4, 20): ERROR: Syntax error");
-        assert_eq!(paren.line, Some(4));
-        assert_eq!(paren.column, Some(20));
-        assert_eq!(paren.message, "ERROR: Syntax error");
-        assert_eq!(paren.raw, "(4, 20): ERROR: Syntax error");
+        // Second Life's answer for a fault on line 5, column 21 (measured on
+        // aditi, script-compile 2026-10-24): zero-based on the wire.
+        let second_life = ScriptCompileError::parse("(4, 20) : ERROR : Syntax error\n");
+        assert_eq!(second_life.line, Some(5));
+        assert_eq!(second_life.column, Some(21));
+        assert_eq!(second_life.message, "ERROR : Syntax error");
+        assert_eq!(second_life.raw, "(4, 20) : ERROR : Syntax error\n");
+
+        // YEngine's form of the same, also zero-based.
+        let yengine = ScriptCompileError::parse("(4,20) Error: invalid operand token");
+        assert_eq!(yengine.line, Some(5));
+        assert_eq!(yengine.column, Some(21));
+        assert_eq!(yengine.message, "Error: invalid operand token");
+
+        // XEngine's C# compiler, and its end of file at column -1.
+        let xengine = ScriptCompileError::parse(
+            "(5,8): Error CS0103: The name `y' does not exist in the current context\n",
+        );
+        assert_eq!((xengine.line, xengine.column), (Some(6), Some(9)));
+        let eof = ScriptCompileError::parse("(2,-1) Unexpected EOF");
+        assert_eq!((eof.line, eof.column), (Some(3), Some(1)));
+        assert_eq!(eof.message, "Unexpected EOF");
+
+        // Units: Second Life's spaced form counts bytes, OpenSim's characters.
+        assert_eq!(second_life.column_unit, ColumnUnit::Bytes);
+        assert_eq!(yengine.column_unit, ColumnUnit::Characters);
+        assert_eq!(xengine.column_unit, ColumnUnit::Characters);
+
+        // An empty source: line and column zero, the first of the file.
+        let empty = ScriptCompileError::parse("(0, 0) : ERROR : Syntax error");
+        assert_eq!((empty.line, empty.column), (Some(1), Some(1)));
+
+        // Second Life's Luau compiler: a one-based line, no column.
+        let luau =
+            ScriptCompileError::parse(":2: Expected identifier when parsing expression, got <eof>");
+        assert_eq!(luau.line, Some(2));
+        assert_eq!(luau.column, None);
+        assert_eq!(
+            luau.message,
+            "Expected identifier when parsing expression, got <eof>"
+        );
 
         // `line:col:` position.
         let colon = ScriptCompileError::parse("12:3: unexpected token");
@@ -1028,12 +1156,40 @@ mod tests {
         assert_eq!(plain.raw, "  could not compile  ");
     }
 
+    /// Three two-byte characters before a fault (measured on both grids,
+    /// script-compile 2026-10-24): Second Life names byte 42 of the line,
+    /// OpenSim character 39, and both are the `;` at character 39.
+    #[test]
+    fn a_byte_column_is_put_in_characters() {
+        let source = "default\n{\n    state_entry()\n    {\n        \
+                      string s = \"äöü\"; integer x = ;\n    }\n}\n";
+        let second_life = ScriptCompileError::parse("(4, 41) : ERROR : Syntax error\n");
+        assert_eq!(second_life.column, Some(42));
+        assert_eq!(second_life.character_column(source), Some(39));
+        let opensim = ScriptCompileError::parse("(4,38) Error: invalid operand token");
+        assert_eq!(opensim.character_column(source), Some(39));
+        let line = source.lines().nth(4).unwrap_or_default();
+        assert_eq!(line.chars().nth(38), Some(';'));
+
+        // A column inside a character is that character's; one past the
+        // line's end counts on in bytes; a line the source lacks keeps it.
+        let inside = ScriptCompileError::parse("(0, 2) : ERROR : x");
+        assert_eq!(inside.character_column("äöü"), Some(2));
+        let past = ScriptCompileError::parse("(0, 8) : ERROR : x");
+        assert_eq!(past.character_column("äöü"), Some(6));
+        let elsewhere = ScriptCompileError::parse("(9, 3) : ERROR : x");
+        assert_eq!(elsewhere.character_column("äöü"), Some(4));
+        // The rendered caret sits under the `;`.
+        assert!(second_life.render(source).contains("--> 5:39"));
+    }
+
     #[test]
     fn script_compile_error_renders_against_source() {
-        // A grid error at line 3, column 5 renders through sl-lsl's renderer:
-        // the header, the `-->` locator, the real source line and a caret.
+        // A grid error at line 3, column 5 (`(2, 4)` on the wire) renders
+        // through sl-lsl's renderer: the header, the `-->` locator, the real
+        // source line and a caret.
         let source = "default\n{\n    bogus();\n}\n";
-        let error = ScriptCompileError::parse("(3, 5): ERROR: Syntax error");
+        let error = ScriptCompileError::parse("(2, 4): ERROR: Syntax error");
         let rendered = error.render(source);
         assert!(rendered.contains("error: ERROR: Syntax error"));
         assert!(rendered.contains("--> 3:5"));

@@ -227,3 +227,93 @@ button's index and label; a text box replies with the text on index 0.
 rather than failing to encode. The refusals reach the viewer only as
 `DEBUG_CHANNEL` chat, which the roadmap task
 `viewer-script-warning-window` is to show.
+
+## Compiling
+
+Measured on 2026-10-24 and 25 by the conformance case `script-compile`
+(`sl-conformance run --grid aditi|opensim script-compile`): it uploads a
+valid script to a prim, then sixteen broken sources over it, each with its
+fault at a known place, sources of growing size, and a broken and a valid
+one to a script in the agent's inventory; it records every answer verbatim
+and reads the stored source back over the UDP transfer. Second Life is
+aditi's Mauve under the `mono`, `lsl2` and `luau` targets; OpenSim is
+0.9.2.1 under YEngine and XEngine, picked by the source's first line
+(`//YEngine:`, `//XEngine:`), so OpenSim's positions count that line too: a
+fault on line 5 of the script is on line 6 of what was uploaded. The census
+holds both grids to every answer below.
+
+The fake grid compiles nothing yet: it answers every script upload
+`compiled` with no errors. Compiling on the way through, with these answers,
+is `server-fake-grid-script-compile-on-upload`.
+
+### The answer
+
+There is no dry run on any grid: the upload *is* the compile. The answer to
+the uploader's POST carries `compiled` and an `errors` array of strings.
+
+| behaviour | Second Life | OpenSim YEngine | OpenSim XEngine |
+| --- | --- | --- | --- |
+| a position | `(line, column)` **from zero**, a space after the comma: `(4, 20) : ERROR : Syntax error` for line 5, column 21 | from zero, no space: `(5,20) Error: invalid operand token` | from zero, no space: `(5,20) syntax error`; a C# compiler error `(5,8): Error CS0103: …`; an end of file at column **−1**: `(9,-1) Unexpected EOF` |
+| where it points | the token **after** the fault, where the parser stood: `x = ;` at the `;`, `y = 1` at the `=`, `llNope()` at the `)` | the fault | the fault |
+| what a column counts | **bytes**: three two-byte characters before the fault move it by six | characters | characters |
+| a tab | two tabs before the fault counted four columns | one each | one each |
+| CR LF line ends | read as LF | the same | the same |
+| how many errors | **one**, the first found | every one; a syntax error drags follow-on errors (three for one missing expression) | one entry; for C# errors, every error of the pass on its own line of that one string |
+| three faults (a type mismatch, then an undeclared name, then an unknown function) | only the undeclared name, the second fault: names are resolved before types | all three | all three, in one string |
+| a missing expression | `Syntax error` | `invalid operand token` | `syntax error` |
+| a type mismatch | `Type mismatch` | `must explicitly cast from string to integer` | `` Cannot implicitly convert type `string' to `integer'. An explicit conversion exists (are you missing a cast?) `` (CS0266) |
+| an undeclared name, an unknown function, label or state | `Name not defined within scope` | `undefined constant/function/variable y`, `… llNope()`, `undefined label nowhere`, `undefined state other` | `` The name `y' does not exist in the current context `` (CS0103), the same for `llNope`; `` The label `nowhere:' could not be found within the scope of the goto statement `` (CS0159); an unknown **state compiles** |
+| a global declared twice | `Name previously declared within scope` | `duplicate variable x` | `` The type `SecondLife.XEngineScript' already contains a definition for `x' `` (CS0102) |
+| a path without a return | `Not all code paths return a value`, at the function's closing brace | **compiles** | `` `SecondLife.XEngineScript.f()': not all code paths return a value `` (CS0161), at the function's first line |
+| no `default` state | `(0, 0) : ERROR : Syntax error` | `no default state defined` | **compiles** |
+| an empty source | `(0, 0) : ERROR : Syntax error` | `fetched source empty asset://<id>`, no position | `Unexpected EOF` |
+| a string that never ends | `Name not defined within scope`, inside the string | `invalid operator` at the end of the source | `Unexpected EOF` at the end |
+
+### What a failed compile does
+
+| behaviour | Second Life | OpenSim YEngine | OpenSim XEngine |
+| --- | --- | --- | --- |
+| the stored source | **replaced** by the broken one (read back) | replaced | replaced |
+| the script that ran before | **stopped**: `GetScriptRunning` answers not running, it answers no chat | gone: `GetScriptRunning` is not answered, no chat answered | gone, the same |
+| the answer to the upload | `compiled` false and the error | the same | **none**: XEngine answers no upload to a script that holds a running instance (below) |
+
+So a viewer's Save always stores the text; a failed compile leaves a
+stopped script with the broken source, which the next open shows.
+
+### `new_asset` and the item
+
+| behaviour | Second Life | OpenSim |
+| --- | --- | --- |
+| `new_asset` of a task upload | an id, fresh each time | **the item's own id** (`UpdateItemAsset.cs` writes `m_inventoryItemID`), not the asset's |
+| `new_asset` of an agent upload | an id | the asset the item is listed with afterwards |
+| a script's asset id in a task listing and in an inventory fetch, to its owner with full permissions | **hidden** (nil) | listed |
+| the item id after any upload | unchanged | unchanged |
+| `is_script_running` | echoed | echoed |
+
+### Running, re-uploading, sizes, targets
+
+| behaviour | Second Life | OpenSim YEngine | OpenSim XEngine |
+| --- | --- | --- | --- |
+| a valid upload with `is_script_running` false | compiled, stays stopped, `state_entry` does not run | the same | the same |
+| with true | starts: `state_entry` runs | the same | the same |
+| the same source again over the running script | answered; the script restarts (`state_entry` again) | the same | stored and restarted, but the upload is **never answered**, and each such upload keeps one of OpenSim's HTTP handlers — after a few, every later upload is refused (`error sending request`) |
+| sources of 65 000, 66 000, 262 200 bytes and 1 MiB (a comment) | all compile; no limit up to 1 MiB (the reference editor stops at 262 144 characters) | the same | the same |
+| 600 functions returning 100-character strings | Mono compiles, then `Stack-Heap Collision` at start (one run of two sent both `DEBUG_CHANNEL` lines empty); **LSL2 refuses** it with 1203 errors of no position (`Function Args: (null)`, `Local List: (null)`) | compiles | compiles |
+| an agent-inventory upload (`UpdateScriptAgent`) | compiled like a task's: the same errors | **not compiled**: `compiled` true for a broken source | the same as YEngine |
+| the `lsl2` target | the LSL2 (LSO) compiler, the same messages | ignored | ignored |
+| the `luau` target | the Luau compiler: `:2: Expected identifier when parsing expression, got '='`, a **one-based** line, no column; the item's subtype becomes Luau; LSL source under it compiles, since `default { state_entry() … }` happens to parse as Lua, and fails as it starts: `lua_script:3: attempt to call a nil value` | ignored: Luau source is read as LSL and refused, the subtype stays LSL | — |
+
+### What the viewer does with it
+
+Since 2026-10-25 `ScriptCompileError::parse` moves every `(line, column)`
+to one-based (it took Second Life's zero-based numbers as they came, and
+the editor named the line above the fault), reads Luau's `:line:` form
+and XEngine's `-1`, and keeps what the column counts — bytes for Second
+Life's spaced form, characters for OpenSim's — so the editor's error list
+and the rendered caret name the character the grid meant
+(`ScriptCompileError::character_column`). The census records where our
+parse puts each first error, so the parse is held to both grids. A Luau
+error is listed with its line alone. A save XEngine leaves unanswered
+fails after a minute as a save failure, in both runtimes (the reference
+gives up after 30 s), though the grid stored the source; reopening the
+script shows it.

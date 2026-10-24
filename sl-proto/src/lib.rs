@@ -202,7 +202,7 @@ pub use types::{
     ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitProbe,
     ClassifiedCategory, ClassifiedClickStats, ClassifiedInfo, ClassifiedQueryFlags,
     ClassifiedSearchClicks, ClassifiedUpdate, ClickAction, CloudPosDensity, CoarseLocation, Color,
-    ColorAlpha, CreateGroupParams, DEFAULT_BLOOM_TEXTURE, DEFAULT_CLOUD_TEXTURE,
+    ColorAlpha, ColumnUnit, CreateGroupParams, DEFAULT_BLOOM_TEXTURE, DEFAULT_CLOUD_TEXTURE,
     DEFAULT_GRIDS_PER_EDGE, DEFAULT_HALO_TEXTURE, DEFAULT_LSL_SCRIPT, DEFAULT_LUAU_SCRIPT,
     DEFAULT_MOON_TEXTURE, DEFAULT_PRIM_TEXTURE, DEFAULT_RAINBOW_TEXTURE, DEFAULT_SKY_FRAME,
     DEFAULT_SUN_TEXTURE, DEFAULT_TERRAIN_DETAIL_TEXTURES, DEFAULT_WATER_FRAME,

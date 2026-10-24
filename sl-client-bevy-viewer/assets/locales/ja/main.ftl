@@ -116,6 +116,7 @@ script-status-saved = 保存しました。
 script-status-compile-failed = コンパイルに失敗しました。
 script-status-save-failed = 保存に失敗しました。
 script-error-at = { $line } 行、{ $column } 列: { $message }
+script-error-at-line = { $line } 行: { $message }
 script-error-nopos = { $message }
 
 ## The inventory gallery (viewer-inventory-gallery).

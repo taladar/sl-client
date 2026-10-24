@@ -761,6 +761,10 @@ fn report_script_save(
                     // close. A *failed compile* still stored the source (the
                     // simulator saves and then compiles), so this is not gated
                     // on `compiled`.
+                    let rows: Vec<String> = errors
+                        .iter()
+                        .map(|error| error_line(&translator, error, &stored))
+                        .collect();
                     if let Some(edited) = edited.as_mut() {
                         edited.saved = stored;
                     }
@@ -784,13 +788,8 @@ fn report_script_save(
                     }
                     if let Some(container) = state.errors {
                         tear_down(&mut commands, &children, container);
-                        for error in errors {
-                            spawn_error_row(
-                                &mut commands,
-                                container,
-                                error_line(&translator, error),
-                                FONT_SIZE,
-                            );
+                        for row in rows {
+                            spawn_error_row(&mut commands, container, row, FONT_SIZE);
                         }
                     }
                 }
@@ -901,10 +900,12 @@ fn set_running_tick(commands: &mut Commands, checkbox: Option<Entity>, running: 
     }
 }
 
-/// One compile diagnostic's line: the position (when the grid gave one) plus
-/// the message, formatted for the active locale.
-fn error_line(translator: &Translator, error: &ScriptCompileError) -> String {
-    match (error.line, error.column) {
+/// One compile diagnostic's line: the position (when the grid gave one, a line
+/// alone for a Luau error) plus the message, formatted for the active locale.
+/// The column is put in characters of the `source` that was saved, whichever
+/// unit the grid counted it in.
+fn error_line(translator: &Translator, error: &ScriptCompileError, source: &str) -> String {
+    match (error.line, error.character_column(source)) {
         (Some(line), Some(column)) => translator.format(
             "script-error-at",
             &TransArgs::new()
@@ -912,7 +913,14 @@ fn error_line(translator: &Translator, error: &ScriptCompileError) -> String {
                 .int("column", i64::from(column))
                 .text("message", &error.message),
         ),
-        _ => translator.format(
+        // A Luau error names its line only.
+        (Some(line), None) => translator.format(
+            "script-error-at-line",
+            &TransArgs::new()
+                .int("line", i64::from(line))
+                .text("message", &error.message),
+        ),
+        (None, _) => translator.format(
             "script-error-nopos",
             &TransArgs::new().text("message", &error.message),
         ),

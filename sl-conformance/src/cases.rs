@@ -132,6 +132,7 @@ pub mod profiles;
 pub mod region_arrival;
 pub mod region_crossing;
 pub mod region_info;
+pub mod script_compile;
 pub mod script_dialog;
 pub mod script_permissions;
 pub mod script_running;

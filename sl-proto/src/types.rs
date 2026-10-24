@@ -565,11 +565,12 @@ pub use region::{
 };
 pub use report::Postcard;
 pub use script::{
-    AlertInfo, DEFAULT_LSL_SCRIPT, DEFAULT_LUAU_SCRIPT, FollowCamProperty, FollowCamPropertyValue,
-    LoadUrlRequest, MuteEntry, MuteFlags, MuteType, PermissionRole, ScriptCompileError,
-    ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptDialog, ScriptGrantInfo,
-    ScriptLanguage, ScriptPermissionRequest, ScriptPermissionState, ScriptPermissionStatus,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation,
+    AlertInfo, ColumnUnit, DEFAULT_LSL_SCRIPT, DEFAULT_LUAU_SCRIPT, FollowCamProperty,
+    FollowCamPropertyValue, LoadUrlRequest, MuteEntry, MuteFlags, MuteType, PermissionRole,
+    ScriptCompileError, ScriptControl, ScriptControlAction, ScriptControlsInfo, ScriptDialog,
+    ScriptGrantInfo, ScriptLanguage, ScriptPermissionRequest, ScriptPermissionState,
+    ScriptPermissionStatus, ScriptPermissions, ScriptTarget, ScriptTeleportRequest,
+    ScriptUploadLocation,
 };
 pub use server_error::{FeatureDisabled, Kick, ServerError};
 pub use session::{

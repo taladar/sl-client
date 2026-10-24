@@ -124,6 +124,7 @@ script-status-saved = تم الحفظ.
 script-status-compile-failed = فشلت الترجمة.
 script-status-save-failed = فشل الحفظ.
 script-error-at = السطر { $line }، العمود { $column }: { $message }
+script-error-at-line = السطر { $line }: { $message }
 script-error-nopos = { $message }
 
 ## The inventory gallery (viewer-inventory-gallery).

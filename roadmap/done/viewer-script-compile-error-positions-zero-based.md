@@ -2,7 +2,7 @@
 id: viewer-script-compile-error-positions-zero-based
 title: Grid compile-error positions are zero-based and shown as one-based
 topic: viewer
-status: bugs
+status: done
 origin: server-lsl-compiler-ir (2026-09-27)
 refs: [server-lsl-compiler-ir, viewer-lsl-editor-save-compile]
 ---
@@ -32,3 +32,15 @@ real Second Life error string; the editor then shows the right line. Verify
 live on aditi with a deliberate error on a known line. `sl-lsl-runtime`'s
 `CompileError` already renders the zero-based wire form, so the fake grid
 will send what Second Life sends.
+
+## Done (2026-10-25)
+
+Fixed in `ScriptCompileError::parse` with [[gridspec-lsl-compile]]: both
+numbers of a `(line, column)` position are moved to one-based, which every
+compiler measured needs — Second Life's Mono and LSL2, OpenSim's YEngine and
+XEngine all count from zero. Verified live on both grids: the
+`script-compile` census records where the parse puts each first error, and a
+fault on line 5, column 21 reads `line 5 column 21` on aditi (and line 6 on
+OpenSim, whose uploads carry the engine line first). The column's unit
+(bytes on Second Life, characters on OpenSim) is kept too, so the caret
+lands on the right character of a line with non-ASCII text.

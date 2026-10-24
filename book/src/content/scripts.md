@@ -134,7 +134,11 @@ the capability nothing is sent.
 The completion reply carries the simulator's compile outcome: a `compiled`
 boolean and an `errors` array of diagnostic strings. A script can upload
 successfully as an asset yet fail to compile — that is not a transport
-failure.
+failure, and the failed source is stored all the same. What each grid and
+engine answers (positions counted from zero, one error or every one, bytes
+or characters), what a failed compile does to the running script, and which
+uploads OpenSim does not compile at all is measured in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#compiling).
 
 Creating a brand-new script goes through `CreateInventoryItem` (carrying the
 language subtype): the **simulator fills a compilable default body** (the LSL
@@ -152,8 +156,10 @@ a follow-up upload.
 >   errors, running }`; a transport failure is `Event::AssetUploadFailed`
 >   instead.
 > - Compile diagnostics are parsed into `ScriptCompileError { raw, line, column,
->   message }` (the `raw` string is always preserved; the position is a
->   best-effort parse of the grid's format).
+>   column_unit, message }` (the `raw` string is always preserved): the
+>   grids' zero-based positions are moved to one-based, and `column_unit`
+>   says whether the column counts bytes (Second Life) or characters
+>   (OpenSim); `character_column(source)` gives it in characters.
 > - Create: `Command::CreateScript { folder_id, name, description,
 >   next_owner_mask, language }` (`ScriptLanguage::Lsl` / `Luau`), backed by
 >   `Session::create_script`; the reply is `Event::InventoryItemCreated`.

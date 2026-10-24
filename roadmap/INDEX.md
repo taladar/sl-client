@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 134 |
 | ready | 352 |
-| blocked | 57 |
+| blocked | 56 |
 | in-progress | 19 |
-| bugs | 38 |
-| done | 1420 |
+| bugs | 37 |
+| done | 1422 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2073** |
@@ -1126,6 +1126,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
   — Fake grid — push the parcel an agent walks onto, and serve parcel
   environments
+- [`server-fake-grid-script-compile-on-upload`](ready/server-fake-grid-script-compile-on-upload.md)
+  — A script upload is accepted and never compiled (blocked by
+  `server-lsl-compiler-ir` (done), `gridspec-lsl-compile` (done))
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
@@ -1145,9 +1148,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-compile`](ready/gridspec-lsl-compile.md) — Script compilation
-  and compile errors on each grid (blocked by
-  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-detection-sensors`](ready/gridspec-lsl-detection-sensors.md) —
   LSL library behaviour on each grid — sensors and raycasts (blocked by
   `gridspec-lsl-live-differential-runner` (done))
@@ -1205,7 +1205,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (57)
+## blocked (56)
 
 ### viewer
 
@@ -1346,9 +1346,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-profiles`](blocked/server-fake-grid-profiles.md) — Fake
   grid — profiles, picks, classifieds and notes with each grid's quirks (blocked
   by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
-- [`server-fake-grid-script-compile-on-upload`](blocked/server-fake-grid-script-compile-on-upload.md)
-  — A script upload is accepted and never compiled (blocked by
-  `server-lsl-compiler-ir` (done), `gridspec-lsl-compile`)
 - [`server-fake-grid-script-engine-wiring`](blocked/server-fake-grid-script-engine-wiring.md)
   — Wire the script engine into the fake grid (blocked by
   `server-lsl-vm-execution` (done), `server-world-heartbeat`,
@@ -1453,7 +1450,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (38)
+## bugs (37)
 
 ### protocol
 
@@ -1522,8 +1519,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-retired-neighbour-stays-drawn`](bugs/viewer-retired-neighbour-stays-drawn.md)
   — A neighbour the simulator retired stays drawn — its ground, water and map
   tile outlive its circuit
-- [`viewer-script-compile-error-positions-zero-based`](bugs/viewer-script-compile-error-positions-zero-based.md)
-  — Grid compile-error positions are zero-based and shown as one-based
 - [`viewer-session-invitation-accepted-at-once`](bugs/viewer-session-invitation-accepted-at-once.md)
   — A group or conference invitation waits for Accept / Decline; the reference
   joins at once
@@ -1549,7 +1544,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1420)
+## done (1422)
 
 ### protocol
 
@@ -3356,6 +3351,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Pin the capture resolution, so two viewers can be compared at all
 - [`viewer-screenshot-wait-for-quiescence`](done/viewer-screenshot-wait-for-quiescence.md)
   — Screenshot mode should wait for the scene to load, not for a fixed delay
+- [`viewer-script-compile-error-positions-zero-based`](done/viewer-script-compile-error-positions-zero-based.md)
+  — Grid compile-error positions are zero-based and shown as one-based
 - [`viewer-script-dialog-body-links`](done/viewer-script-dialog-body-links.md) —
   Script dialog body — clickable URLs / SLURLs (blocked by
   `viewer-url-linkification` (done))
@@ -4631,6 +4628,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-comms`](done/gridspec-lsl-comms.md) — LSL library behaviour on
   each grid — chat, listens, dialogs and link messages (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-compile`](done/gridspec-lsl-compile.md) — Script compilation
+  and compile errors on each grid (blocked by
   `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-live-differential-runner`](done/gridspec-lsl-live-differential-runner.md)
   — Run one probe on OpenSim YEngine, XEngine and aditi and collect the

@@ -1177,6 +1177,7 @@ script-status-saved = Saved.
 script-status-compile-failed = Compilation failed.
 script-status-save-failed = Save failed.
 script-error-at = Line { $line }, column { $column }: { $message }
+script-error-at-line = Line { $line }: { $message }
 script-error-nopos = { $message }
 
 ## The inventory gallery (viewer-inventory-gallery).
