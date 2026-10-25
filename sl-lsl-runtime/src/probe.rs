@@ -97,6 +97,41 @@ pub struct Header {
     /// `unordered`: the records whose order among a run of their own kind is
     /// not defined, comma-separated.
     pub unordered: Vec<String>,
+    /// `bare`: prims that hold no script, comma-separated as
+    /// `<label>@<east>` or `<label>@<east>/<up>` (metres from prim A) — the
+    /// targets a sensor or a ray is to find, which need no script of their
+    /// own. They are rezzed in the order listed, after the script's own
+    /// prim.
+    pub bare: Vec<BarePrim>,
+}
+
+/// A prim a [`Header`]'s `bare` key names: one that holds no script.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BarePrim {
+    /// Its label (`C`, `D`, …).
+    pub label: String,
+    /// How far east of prim A it stands, in metres.
+    pub distance: f32,
+    /// How far above prim A it stands, in metres.
+    pub height: f32,
+}
+
+impl BarePrim {
+    /// Reads one `<label>@<east>[/<up>]` item.
+    fn parse(item: &str) -> Option<Self> {
+        let (label, place) = item.split_once('@')?;
+        let (east, up) = place.split_once('/').unwrap_or((place, "0"));
+        let metres = |text: &str| {
+            text.parse::<f32>()
+                .ok()
+                .filter(|metres| metres.is_finite() && *metres >= 0.0)
+        };
+        (!label.is_empty() && !label.contains([' ', '@', '/'])).then_some(Self {
+            label: label.to_owned(),
+            distance: metres(east)?,
+            height: metres(up)?,
+        })
+    }
 }
 
 /// Why a script's header was refused.
@@ -146,6 +181,7 @@ impl Header {
                 "skip-on",
                 "vary",
                 "unordered",
+                "bare",
             ]
             .contains(key)
             {
@@ -195,6 +231,14 @@ impl Header {
                 grids
             }
         };
+        let bare = match pairs.get("bare") {
+            None => Vec::new(),
+            Some(value) => list(value)
+                .iter()
+                .map(|item| BarePrim::parse(item))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| invalid("bare", value))?,
+        };
         Ok(Self {
             probe,
             drives,
@@ -212,6 +256,7 @@ impl Header {
                 .get("unordered")
                 .map(|value| list(value))
                 .unwrap_or_default(),
+            bare,
         })
     }
 
@@ -327,11 +372,78 @@ pub enum By {
     Other,
 }
 
+/// Where on prim A a touch says it landed: the surface block a viewer sends
+/// with a grab (`ObjectGrab`'s and `ObjectDeGrab`'s `SurfaceInfo`), which a
+/// script reads with `llDetectedTouch*`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TouchSurface {
+    /// The face (`llDetectedTouchFace`).
+    pub face: i32,
+    /// The texture coordinate (`llDetectedTouchUV`).
+    pub uv: [f32; 2],
+    /// The surface coordinate (`llDetectedTouchST`).
+    pub st: [f32; 2],
+    /// The point touched, in metres from prim A's centre along the region's
+    /// axes (the runner adds prim A's position: `llDetectedTouchPos` is
+    /// region-local).
+    pub at: [f32; 3],
+    /// The surface normal (`llDetectedTouchNormal`).
+    pub normal: [f32; 3],
+    /// The surface binormal (`llDetectedTouchBinormal`).
+    pub binormal: [f32; 3],
+}
+
+impl TouchSurface {
+    /// Reads a touch's surface from a `waiting` record's `face`, `uv`, `st`,
+    /// `at`, `normal` and `binormal` fields: `None` when it has none of them.
+    ///
+    /// # Errors
+    ///
+    /// The field that is missing, given some of them, or does not parse:
+    /// `face` an integer, the rest comma-separated numbers, two or three.
+    fn from_waiting(line: &Line) -> Result<Option<Self>, String> {
+        const KEYS: [&str; 6] = ["face", "uv", "st", "at", "normal", "binormal"];
+        if KEYS.iter().all(|key| line.field(key).is_none()) {
+            return Ok(None);
+        }
+        let field = |key: &str| {
+            line.field(key)
+                .ok_or_else(|| format!("a touch with a surface without `{key}`"))
+        };
+        let numbers = |key: &str| -> Result<Vec<f32>, String> {
+            field(key)?
+                .split(',')
+                .map(|number| number.trim().parse::<f32>().ok().filter(|n| n.is_finite()))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| format!("a touch's `{key}` is not comma-separated numbers"))
+        };
+        let pair = |key: &str| -> Result<[f32; 2], String> {
+            <[f32; 2]>::try_from(numbers(key)?)
+                .map_err(|_numbers| format!("a touch's `{key}` is not two numbers"))
+        };
+        let triple = |key: &str| -> Result<[f32; 3], String> {
+            <[f32; 3]>::try_from(numbers(key)?)
+                .map_err(|_numbers| format!("a touch's `{key}` is not three numbers"))
+        };
+        Ok(Some(Self {
+            face: field("face")?
+                .parse()
+                .map_err(|_error| "a touch's `face` is not an integer".to_owned())?,
+            uv: pair("uv")?,
+            st: pair("st")?,
+            at: triple("at")?,
+            normal: triple("normal")?,
+            binormal: triple("binormal")?,
+        }))
+    }
+}
+
 /// What a stimulus is.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
-    /// Touch prim A.
-    Touch,
+    /// Touch prim A — with no surface, as a viewer that picked none (or an
+    /// old one) sends it, or with the one given.
+    Touch(Option<TouchSurface>),
     /// Say `text` on `channel`, at normal range.
     Chat {
         /// The channel.
@@ -376,7 +488,7 @@ impl Action {
     #[must_use]
     pub const fn drive(&self) -> Drive {
         match self {
-            Self::Touch => Drive::Touch,
+            Self::Touch(_) => Drive::Touch,
             Self::Chat { .. } => Drive::Chat,
             Self::Answer { .. } => Drive::Answer,
             Self::Sit => Drive::Sit,
@@ -390,11 +502,13 @@ impl Action {
 
 /// What a `waiting` record asks the runner for:
 /// `rec=waiting drive=touch|chat|answer|sit|stand|control|dialog|away
-/// [by=owner|other]`, and for chat `channel=<n> text="…"`, for an answer
+/// [by=owner|other]`, and for a touch optionally `face=<n> uv=<u>,<v>
+/// st=<s>,<t> at=<x>,<y>,<z> normal=<x>,<y>,<z> binormal=<x>,<y>,<z>` (all of
+/// them, or none), for chat `channel=<n> text="…"`, for an answer
 /// `grant=<mask>`, for controls `keys=<mask>`, for a dialog `reply="…"`, for
 /// away `seconds=<n>`. Without `by` it is the owner; only the owner goes
 /// `away`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Stimulus {
     /// Who gives it.
     pub by: By,
@@ -408,7 +522,8 @@ impl Stimulus {
     /// # Errors
     ///
     /// What is wrong with it: not a `waiting` record, an unknown drive or
-    /// avatar, a chat without its channel or text, a dialog without its
+    /// avatar, a touch with part of a surface, a chat without its channel or
+    /// text, a dialog without its
     /// reply, an away without its seconds, or the other avatar sent away.
     pub fn from_waiting(line: &Line) -> Result<Self, String> {
         if line.rec != "waiting" {
@@ -423,7 +538,7 @@ impl Stimulus {
             .field("drive")
             .ok_or("a `waiting` record without `drive`")?;
         let action = match Drive::parse(drive) {
-            Some(Drive::Touch) => Action::Touch,
+            Some(Drive::Touch) => Action::Touch(TouchSurface::from_waiting(line)?),
             Some(Drive::Chat) => Action::Chat {
                 channel: line
                     .field("channel")
@@ -635,7 +750,9 @@ fn is_date(text: &str) -> bool {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{Action, By, Drive, Header, HeaderError, Line, ResultFile, Stimulus};
+    use super::{
+        Action, BarePrim, By, Drive, Header, HeaderError, Line, ResultFile, Stimulus, TouchSurface,
+    };
 
     #[test]
     fn a_header_reads_up_to_the_first_other_line() -> Result<(), HeaderError> {
@@ -657,6 +774,7 @@ mod tests {
                 skip_on: vec!["opensim-xengine".to_owned(), "fake-sl".to_owned()],
                 vary: Vec::new(),
                 unordered: Vec::new(),
+                bare: Vec::new(),
             }
         );
         assert!(header.skipped_on("fake-sl"));
@@ -699,8 +817,23 @@ mod tests {
             read("PROBE a/b rec=waiting drive=touch")?,
             Stimulus {
                 by: By::Owner,
-                action: Action::Touch
+                action: Action::Touch(None)
             }
+        );
+        assert_eq!(
+            read(
+                "PROBE a/b rec=waiting drive=touch face=2 uv=0.25,0.75 st=0.3,-1 \
+                 at=0.25,0,0.1 normal=1,0,0 binormal=0,0,1"
+            )?
+            .action,
+            Action::Touch(Some(TouchSurface {
+                face: 2,
+                uv: [0.25, 0.75],
+                st: [0.3, -1.0],
+                at: [0.25, 0.0, 0.1],
+                normal: [1.0, 0.0, 0.0],
+                binormal: [0.0, 0.0, 1.0],
+            }))
         );
         assert_eq!(
             read(r#"PROBE a/b rec=waiting drive=chat by=other channel=-7 text="hi there""#)?,
@@ -760,8 +893,52 @@ mod tests {
             "PROBE a/b rec=waiting drive=dialog",
             "PROBE a/b rec=waiting drive=away",
             "PROBE a/b rec=waiting drive=away by=other seconds=20",
+            "PROBE a/b rec=waiting drive=touch face=1",
+            "PROBE a/b rec=waiting drive=touch face=x uv=0,0 st=0,0 at=0,0,0 normal=0,0,1 \
+             binormal=0,1,0",
+            "PROBE a/b rec=waiting drive=touch face=1 uv=0 st=0,0 at=0,0,0 normal=0,0,1 \
+             binormal=0,1,0",
         ] {
             assert!(read(refused).is_err(), "{refused}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_header_names_its_bare_prims() -> Result<(), HeaderError> {
+        let header =
+            Header::parse("// probe: a/b\n// drive: none\n// bare: C@22, D@3.5/2, E@0/100\n")?;
+        assert_eq!(
+            header.bare,
+            vec![
+                BarePrim {
+                    label: "C".to_owned(),
+                    distance: 22.0,
+                    height: 0.0
+                },
+                BarePrim {
+                    label: "D".to_owned(),
+                    distance: 3.5,
+                    height: 2.0
+                },
+                BarePrim {
+                    label: "E".to_owned(),
+                    distance: 0.0,
+                    height: 100.0
+                },
+            ]
+        );
+        for refused in ["C", "C@", "@3", "C@-1", "C@3/x"] {
+            assert_eq!(
+                Header::parse(&format!(
+                    "// probe: a/b\n// drive: none\n// bare: {refused}\n"
+                )),
+                Err(HeaderError::Invalid {
+                    key: "bare".to_owned(),
+                    value: refused.to_owned()
+                }),
+                "{refused}"
+            );
         }
         Ok(())
     }

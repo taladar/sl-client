@@ -1,0 +1,119 @@
+grid: aditi
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE detection/cast-ray rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE detection/cast-ray rec=ray step=default from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="" length=3 status=1
+PROBE detection/cast-ray rec=item step=default i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=default i=1 type=vector value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=default i=2 type=integer value=1
+PROBE detection/cast-ray rec=ray step=max-hits-4 from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4" length=5 status=2
+PROBE detection/cast-ray rec=item step=max-hits-4 i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=max-hits-4 i=1 type=vector value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-4 i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=max-hits-4 i=3 type=vector value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-4 i=4 type=integer value=2
+PROBE detection/cast-ray rec=ray step=phantom from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4, RC_DETECT_PHANTOM TRUE" length=7 status=3
+PROBE detection/cast-ray rec=item step=phantom i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=phantom i=1 type=vector value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=phantom i=2 type=key value=ghost
+PROBE detection/cast-ray rec=item step=phantom i=3 type=vector value=<7.250000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=phantom i=4 type=key value=ours
+PROBE detection/cast-ray rec=item step=phantom i=5 type=vector value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=phantom i=6 type=integer value=3
+PROBE detection/cast-ray rec=ray step=data-flags from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4, RC_DATA_FLAGS normal|root key|link num" length=9 status=2
+PROBE detection/cast-ray rec=item step=data-flags i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=data-flags i=1 type=integer value=0
+PROBE detection/cast-ray rec=item step=data-flags i=2 type=vector value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=3 type=vector normal=<-1.000000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=4 type=key value=ours
+PROBE detection/cast-ray rec=item step=data-flags i=5 type=integer value=0
+PROBE detection/cast-ray rec=item step=data-flags i=6 type=vector value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=7 type=vector normal=<-1.000000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=8 type=integer value=2
+PROBE detection/cast-ray rec=ray step=normal-only from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_DATA_FLAGS RC_GET_NORMAL" length=4 status=1
+PROBE detection/cast-ray rec=item step=normal-only i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=normal-only i=1 type=vector value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=normal-only i=2 type=vector normal=<-1.000000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=normal-only i=3 type=integer value=1
+PROBE detection/cast-ray rec=ray step=link-only from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_DATA_FLAGS RC_GET_LINK_NUM" length=4 status=1
+PROBE detection/cast-ray rec=item step=link-only i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=link-only i=1 type=integer value=0
+PROBE detection/cast-ray rec=item step=link-only i=2 type=vector value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=link-only i=3 type=integer value=1
+PROBE detection/cast-ray rec=ray step=reject-nonphysical from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_REJECT_TYPES RC_REJECT_NONPHYSICAL, RC_MAX_HITS 4" length=1 status=0
+PROBE detection/cast-ray rec=item step=reject-nonphysical i=0 type=integer value=0
+PROBE detection/cast-ray rec=ray step=reject-physical from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_REJECT_TYPES RC_REJECT_PHYSICAL, RC_MAX_HITS 4" length=5 status=2
+PROBE detection/cast-ray rec=item step=reject-physical i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=reject-physical i=1 type=vector value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reject-physical i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=reject-physical i=3 type=vector value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reject-physical i=4 type=integer value=2
+PROBE detection/cast-ray rec=ray step=from-inside from=<0.000000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4" length=5 status=2
+PROBE detection/cast-ray rec=item step=from-inside i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=from-inside i=1 type=vector value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=from-inside i=3 type=vector value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside i=4 type=integer value=2
+# debug-channel: from="Object" text="Invalid filter settings for llCastRay."
+PROBE detection/cast-ray rec=ray step=from-inside-reject-host from=<0.000000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_REJECT_TYPES RC_REJECT_HOST, RC_MAX_HITS 4" length=0 status=0
+PROBE detection/cast-ray rec=ray step=inside-wall from=<5.000000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4" length=3 status=1
+PROBE detection/cast-ray rec=item step=inside-wall i=0 type=key value=ours
+PROBE detection/cast-ray rec=item step=inside-wall i=1 type=vector value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=inside-wall i=2 type=integer value=1
+PROBE detection/cast-ray rec=ray step=reverse from=<15.000000,0.000000,0.000000> to=<0.500000,0.000000,0.000000> options="RC_MAX_HITS 4" length=5 status=2
+PROBE detection/cast-ray rec=item step=reverse i=0 type=key value=ours
+PROBE detection/cast-ray rec=item step=reverse i=1 type=vector value=<10.250000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reverse i=2 type=key value=wall
+PROBE detection/cast-ray rec=item step=reverse i=3 type=vector value=<5.250000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reverse i=4 type=integer value=2
+PROBE detection/cast-ray rec=ray step=down from=<2.500000,0.000000,0.000000> to=<2.500000,0.000000,-34.611000> options="RC_MAX_HITS 4" length=3 status=1
+PROBE detection/cast-ray rec=item step=down i=0 type=key value=land
+PROBE detection/cast-ray rec=item step=down i=1 type=vector land_at=<2.500000,0.000000,-2.158000>
+PROBE detection/cast-ray rec=item step=down i=2 type=integer value=1
+PROBE detection/cast-ray rec=ray step=down-reject-land from=<2.500000,0.000000,0.000000> to=<2.500000,0.000000,-34.611000> options="RC_REJECT_TYPES RC_REJECT_LAND, RC_MAX_HITS 4" length=1 status=0
+PROBE detection/cast-ray rec=item step=down-reject-land i=0 type=integer value=0
+PROBE detection/cast-ray rec=ray step=zero-length from=<0.500000,0.000000,0.000000> to=<0.500000,0.000000,0.000000> options="" length=1 status=0
+PROBE detection/cast-ray rec=item step=zero-length i=0 type=integer value=0
+PROBE detection/cast-ray rec=ray step=off-region from=<0.500000,0.000000,0.000000> to=<248.000000,0.000000,0.000000> options="RC_MAX_HITS 4" length=9 status=4
+PROBE detection/cast-ray rec=item step=off-region i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=off-region i=1 type=vector value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=off-region i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=off-region i=3 type=vector value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=off-region i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=off-region i=5 type=vector land_at=<149.122000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=off-region i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=off-region i=7 type=vector land_at=<203.173000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=off-region i=8 type=integer value=4
+# debug-channel: from="Object" text="You must request at least one result from llCastRay."
+PROBE detection/cast-ray rec=ray step=max-hits-0 from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 0" length=0 status=0
+# debug-channel: from="Object" text="Error. No more than 256 hits can be return by llCastRay."
+PROBE detection/cast-ray rec=ray step=max-hits-negative from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS -1" length=0 status=0
+# debug-channel: from="Object" text="Error. No more than 256 hits can be return by llCastRay."
+PROBE detection/cast-ray rec=ray step=max-hits-300 from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 300" length=0 status=0
+# debug-channel: from="Object" text="Invalid filter settings."
+PROBE detection/cast-ray rec=ray step=bad-option from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="99 1" length=0 status=0
+PROBE detection/cast-ray rec=ray step=owner from=<0.000000,0.000000,0.600000> to=<-2.027000,-1.043000,-2.923000> options="RC_MAX_HITS 4" length=7 status=3
+PROBE detection/cast-ray rec=item step=owner i=0 type=key value=self
+PROBE detection/cast-ray rec=item step=owner i=1 type=vector value=<-0.201000,-0.104000,0.250000>
+PROBE detection/cast-ray rec=item step=owner i=2 type=key value=owner
+PROBE detection/cast-ray rec=item step=owner i=3 type=vector agent_at=<-0.865000,-0.445000,-0.904000>
+PROBE detection/cast-ray rec=item step=owner i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=owner i=5 type=vector land_at=<-1.586000,-0.816000,-2.158000>
+PROBE detection/cast-ray rec=item step=owner i=6 type=integer value=3
+PROBE detection/cast-ray rec=ray step=owner-reject-agents from=<0.000000,0.000000,0.600000> to=<-2.027000,-1.043000,-2.923000> options="RC_REJECT_TYPES RC_REJECT_AGENTS, RC_MAX_HITS 4" length=5 status=2
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=0 type=key value=self
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=1 type=vector value=<-0.201000,-0.104000,0.250000>
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=2 type=key value=land
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=3 type=vector land_at=<-1.586000,-0.816000,-2.158000>
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=4 type=integer value=2
+PROBE detection/cast-ray rec=throttle calls=500 ok=500 failed=0 first_fail=-1 unknown=0 sim_perf_low=0 cast_time_exceeded=0 elapsed=0.778000 per_second=643
+PROBE detection/cast-ray rec=after after_status=1
+# debug-channel: from="Object" text="Syntax error in llCastRay call. Incorrect number of elements in param list."
+PROBE detection/cast-ray rec=ray step=missing-value options="RC_MAX_HITS" length=0 status=0
+PROBE detection/cast-ray rec=end

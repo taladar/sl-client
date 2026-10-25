@@ -228,6 +228,122 @@ rather than failing to encode. The refusals reach the viewer only as
 `DEBUG_CHANNEL` chat, which the roadmap task
 `viewer-script-warning-window` is to show.
 
+## Sensors, raycasts and touches
+
+Measured on 2026-10-25 by the probes `detection/sensor`,
+`detection/cast-ray` and `detection/touch-surface`, on the same grids, with
+both avatars standing by the probe's prims. The probe's prim A faces east,
+unrotated; its targets are 0.5 m cubes at known distances east of it and
+above it, some scripted (each names its prim `Target <letter>`), some bare
+(no script, the default name). OpenSim runs its default settings —
+`SensorMaxRange` 96, `SensorMaxResults` 16, `UseLlCastRayV3` false, so
+`llCastRay` is the older implementation — and **YEngine and XEngine agree on
+every row** (500 rays took YEngine 33 s and XEngine 21 s), so OpenSim is one
+column again. Both regions held other residents' objects, so a sweep's
+answer has strangers in it; the probe prints whether the owner owns each.
+Second Life was run three times: rows that changed between runs say so.
+
+### Sensors: what a sweep returns
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the most one sweep returns | **32** | 16 (`SensorMaxResults`) | no scripts |
+| the order | nearest first, by the distance between the prims' centres, strangers and the probe's own mixed | the same | no scripts |
+| the order the targets were rezzed in (far end first) | irrelevant: distance alone | the same | no scripts |
+| the scanning prim itself | never returned | the same | no scripts |
+| a target exactly at the range (3 m, range 3.0) | **left out**: in range means nearer than it | **returned**: within it means up to it | no scripts |
+| a target whose centre is 3.5 m away and whose near face is 3.25 m (range 3.4) | left out: the centre counts, not the bounds | the same | no scripts |
+| a target 100 m straight up, asked for with a range of 200 | not found: the range is held to 96 | the same (`SensorMaxRange`) | no scripts |
+| a range of 0, or −1 | **no event at all**: neither `sensor` nor `no_sensor` within five seconds | `no_sensor` | no scripts |
+| an arc of `PI / 4` | what lies within 45° of the prim's forward (east) axis: the target 3.5 m straight up is left out | the same | no scripts |
+| an arc of 0 | **no arc**: everything in range, the target straight up included | only what lies exactly on the axis | no scripts |
+| an arc of −1 | everything in range, as for 0 | **nothing**: `no_sensor` | no scripts |
+| an arc of 4.0 (more than `PI`) | everything in range, as `PI` | the same | no scripts |
+| a name filter (`"Target B"`), a key filter, both | the prims that match; a key with another name matches nothing (`no_sensor`) | the same | no scripts |
+| nothing matches | `no_sensor` | the same | no scripts |
+| `llDetectedType` of an idle scripted prim, of a bare prim | 12 (`PASSIVE \| SCRIPTED`), 4 (`PASSIVE`) | the same | no scripts |
+| `llDetectedPos`, `llDetectedRot`, `llDetectedVel`, `llDetectedOwner`, `llDetectedGroup` of a prim | its centre, rotation and velocity; its owner; 1 (the same group as the scanner, neither having one) | the same | no scripts |
+| `llDetectedLinkNumber`, `llDetectedGrab`, the `llDetectedTouch*` in `sensor` | 0, `ZERO_VECTOR`, the `TOUCH_INVALID_*` values | the same | no scripts |
+| `llDetectedKey` one past the last result | `NULL_KEY` | not `NULL_KEY` (an empty key) | no scripts |
+
+### Sensors: the type mask
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `ACTIVE \| PASSIVE \| SCRIPTED` | **scripted objects only**: `SCRIPTED` narrows the mask, so not one bare prim of eighteen is returned, though a ray hits them | **the union**: bare and scripted prims alike | no scripts |
+| `PASSIVE` alone | the bare prims and other unscripted objects — and some idle scripted ones (below) | the bare prims, never a scripted one | no scripts |
+| `SCRIPTED` alone, `ACTIVE` alone | scripted objects — but **not every idle scripted prim**: of the five targets, whose scripts set the name and do nothing more, one or two were missing each run, and a different one each time (Target B in two runs, Target W in one); the one `SCRIPTED` missed, `PASSIVE` found. `llDetectedType` says 12 for all of them in every sweep | every scripted prim, either way: OpenSim counts a scripted prim as active | no scripts |
+| a repeating sweep for Target B with `SCRIPTED`, later in the run | `no_sensor` every time, in two runs of two: by then Target B was not among the scripted | found every time | no scripts |
+| `AGENT` | every avatar in range, `llDetectedType` 3 (`AGENT \| ACTIVE`), 35 with a scripted attachment worn; `llDetectedOwner` the avatar itself; `llDetectedName` its `llKey2Name` | the two avatars, type 1 (`AGENT`) | no scripts |
+| `AGENT_BY_LEGACY_NAME` with the owner's legacy name | the owner alone | the same | no scripts |
+| `AGENT_BY_USERNAME` with `llGetUsername(owner)` | the owner alone | **nobody**: `no_sensor` | no scripts |
+
+### Repeating sensors
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llSensorRepeat` every 0.5 s, for 2.6 s | 5 sweeps, the first after 0.51 s, then every 0.51 s | 4, the first after **0.6 s**, then every 0.5 s | no scripts |
+| one that finds nothing | `no_sensor` every interval | the same | no scripts |
+| after `llSensorRemove` | nothing | one sweep already queued arrives at once, then nothing | no scripts |
+| every 0.01 s | 17–22 sweeps a second (a measurement) | 9.5 a second: about one every 0.1 s | no scripts |
+| every 0.0 s | **one** sweep, at once, then none | **none**: an interval of 0 is no repeat | no scripts |
+| `llSensor` while a 1 s repeat runs | the `llSensor`'s answer, then **nothing more**: the one sweep replaced the repeat | the `llSensor`'s answer, and the repeat runs on every second | no scripts |
+
+### Raycasts
+
+`llCastRay` along the row from just outside prim A's east face: a scripted
+`Wall` at 5 m, a phantom `Ghost` at 7.5 m and a bare prim at 10 m, so the
+near faces are 4.75 m, 7.25 m and 9.75 m away. Each answer is a list of
+hits, nearest the start first, and a status last.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| no options | `[wall's key, <4.75, 0, 0> (as a vector), 1]` — one hit, the face it entered | the same hit, but the position is a **string** (`"<124.75, 128, 27.5>"`, region coordinates) | no scripts |
+| `RC_MAX_HITS 4` | the wall and the bare prim; status 2 | the wall, the bare prim and **two hits on land 51.7 m out** — past the ray's 15 m end, at the ray's height, the same point twice; status 4 | no scripts |
+| `RC_DETECT_PHANTOM TRUE` | the ghost as well, between them | the same, and land | no scripts |
+| `RC_DATA_FLAGS` with `RC_GET_NORMAL \| RC_GET_ROOT_KEY \| RC_GET_LINK_NUM` | each hit `[key, link, position, normal]`: the link 0 (an unlinked prim), the key the prim's own, the normal `<-1, 0, 0>` | each hit `[key, position (a string), link, normal]` — the link **after** the position; land's normal the terrain's slope | no scripts |
+| `RC_REJECT_TYPES RC_REJECT_NONPHYSICAL` | nothing: status 0 | the three land hits alone | no scripts |
+| `RC_REJECT_TYPES RC_REJECT_PHYSICAL` | the wall and the bare prim | the same, and land | no scripts |
+| a ray from prim A's centre | **not** prim A: the wall and the bare prim | prim A first, at its east face, then the rest | no scripts |
+| `RC_REJECT_TYPES 0x20000000` (`RC_REJECT_HOST`) | refused: `Invalid filter settings for llCastRay.` on `DEBUG_CHANNEL`, and an **empty list** | accepted; prim A left out | no scripts |
+| a ray from inside the wall | not the wall: the bare prim alone | the wall (where it leaves it), then the rest | no scripts |
+| a ray from the far end back | the bare prim's and the wall's far faces, nearest the start first | the same, and prim A | no scripts |
+| a ray straight down to height 0 | land, where the ground is; `RC_REJECT_LAND` leaves nothing | the same | no scripts |
+| a ray from prim A's top down to the owner | prim A (entered from outside), the owner, land; `RC_REJECT_AGENTS` drops the owner | the owner, the other avatar standing by it, land twice | no scripts |
+| a ray of length 0 | `[0]` | the same | no scripts |
+| a ray whose end lies outside the region | cast as far as the region: the wall, the bare prim, land twice further out | the same, with OpenSim's land hits | no scripts |
+| `RC_MAX_HITS 0` | `You must request at least one result from llCastRay.`, an empty list | treated as 1 | no scripts |
+| `RC_MAX_HITS -1`, `RC_MAX_HITS 300` | `Error. No more than 256 hits can be return by llCastRay.`, an empty list | −1: `[0]`; 300: every hit | no scripts |
+| an option that does not exist (`99, 1`) | `Invalid filter settings.`, an empty list | ignored: the plain answer | no scripts |
+| `RC_MAX_HITS` with no value after it | `Syntax error in llCastRay call. Incorrect number of elements in param list.`, an empty list | an `IndexOutOfRangeException` in the engine that **stops the script** (YEngine: `Script must be Reset to re-enable.`) | no scripts |
+| 500 rays in a row | all answered, about 640 a second; no `RCERR_*` | all answered, 15–24 a second; no `RCERR_*` | no scripts |
+
+### Touches: where the touch landed
+
+A viewer that picks a point sends it with the grab and with the release
+(`ObjectGrab`'s and `ObjectDeGrab`'s `SurfaceInfo`), and the runner sent
+chosen values (`drive=touch face=… uv=… st=… at=… normal=… binormal=…`).
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a touch with no surface block | `TOUCH_INVALID_FACE` (−1), `TOUCH_INVALID_TEXCOORD` (`<-1, -1, 0>`) for UV and ST, `ZERO_VECTOR` for the point, normal and binormal, in `touch_start` and `touch_end` | the same | no scripts |
+| a touch a viewer could have picked (face 1, UV, ST, a point on the prim, a unit normal) | every value **as the viewer sent it**, in both events | the same | no scripts |
+| one no viewer could pick: face 9 of a six-faced cube, UV and ST outside 0–1, a point 8.7 m off the prim, a normal of length 2, a zero binormal | **as sent**: the grid checks nothing | the same | no scripts |
+| face −1 with the rest given | face −1 and the rest as sent | the same | no scripts |
+| the other avatar's touch | its values as sent | the same | no scripts |
+| a `touch` event for a grab and a release with no drag update between | **one** per touch | **none** | no scripts |
+| `llDetectedGrab`, `llDetectedLinkNumber` | `ZERO_VECTOR`, 0 | the same | no scripts |
+
+### What the viewer does with it
+
+Nothing of a sweep or a ray reaches the viewer; the refusals are
+`DEBUG_CHANNEL` chat, for `viewer-script-warning-window`. A touch's
+surface block is the viewer's to fill: since neither grid checks it, what
+a script reads is whatever the viewer picked, so the picking is the whole
+of it: our viewer fills `Command::GrabObject`'s `surface` from its own
+pick, in region metres (`world_test`'s
+`a_world_touch_states_its_position_in_the_region`).
+
 ## Compiling
 
 Measured on 2026-10-24 and 25 by the conformance case `script-compile`

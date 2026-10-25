@@ -69,21 +69,25 @@ impl Probe {
         drives
     }
 
-    /// Its prims, in the order a script first names each, with the distance
-    /// east of prim A and the height above it each stands at.
+    /// Its prims, in the order a script first names each — its own prim,
+    /// then the `bare` prims its header lists — with the distance east of
+    /// prim A and the height above it each stands at.
     #[must_use]
     pub fn prims(&self) -> Vec<(String, f32, f32)> {
         let mut prims: Vec<(String, f32, f32)> = vec![("A".to_owned(), 0.0, 0.0)];
+        let mut add = |label: &str, distance: f32, height: f32| {
+            if !prims.iter().any(|(known, _, _)| known == label) {
+                prims.push((label.to_owned(), distance, height));
+            }
+        };
         for script in &self.scripts {
-            if !prims
-                .iter()
-                .any(|(label, _, _)| *label == script.header.prim)
-            {
-                prims.push((
-                    script.header.prim.clone(),
-                    script.header.distance.unwrap_or(0.0),
-                    script.header.height.unwrap_or(0.0),
-                ));
+            add(
+                &script.header.prim,
+                script.header.distance.unwrap_or(0.0),
+                script.header.height.unwrap_or(0.0),
+            );
+            for bare in &script.header.bare {
+                add(&bare.label, bare.distance, bare.height);
             }
         }
         prims

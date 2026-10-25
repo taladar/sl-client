@@ -1,0 +1,186 @@
+grid: opensim-xengine
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE detection/cast-ray rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE detection/cast-ray rec=ray step=default from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="" length=3 status=1
+PROBE detection/cast-ray rec=item step=default i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=default i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=default i=2 type=integer value=1
+PROBE detection/cast-ray rec=ray step=max-hits-4 from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4" length=9 status=4
+PROBE detection/cast-ray rec=item step=max-hits-4 i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=max-hits-4 i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-4 i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=max-hits-4 i=3 type=string value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-4 i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=max-hits-4 i=5 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-4 i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=max-hits-4 i=7 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-4 i=8 type=integer value=4
+PROBE detection/cast-ray rec=ray step=phantom from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4, RC_DETECT_PHANTOM TRUE" length=9 status=4
+PROBE detection/cast-ray rec=item step=phantom i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=phantom i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=phantom i=2 type=key value=ghost
+PROBE detection/cast-ray rec=item step=phantom i=3 type=string value=<7.250000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=phantom i=4 type=key value=ours
+PROBE detection/cast-ray rec=item step=phantom i=5 type=string value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=phantom i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=phantom i=7 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=phantom i=8 type=integer value=4
+PROBE detection/cast-ray rec=ray step=data-flags from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4, RC_DATA_FLAGS normal|root key|link num" length=17 status=4
+PROBE detection/cast-ray rec=item step=data-flags i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=data-flags i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=2 type=integer value=0
+PROBE detection/cast-ray rec=item step=data-flags i=3 type=vector normal=<-1.000000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=4 type=key value=ours
+PROBE detection/cast-ray rec=item step=data-flags i=5 type=string value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=6 type=integer value=0
+PROBE detection/cast-ray rec=item step=data-flags i=7 type=vector normal=<-1.000000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=8 type=key value=land
+PROBE detection/cast-ray rec=item step=data-flags i=9 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=10 type=integer value=0
+PROBE detection/cast-ray rec=item step=data-flags i=11 type=vector normal=<-0.292000,0.000000,0.956000>
+PROBE detection/cast-ray rec=item step=data-flags i=12 type=key value=land
+PROBE detection/cast-ray rec=item step=data-flags i=13 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=data-flags i=14 type=integer value=0
+PROBE detection/cast-ray rec=item step=data-flags i=15 type=vector normal=<-0.292000,0.000000,0.956000>
+PROBE detection/cast-ray rec=item step=data-flags i=16 type=integer value=4
+PROBE detection/cast-ray rec=ray step=normal-only from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_DATA_FLAGS RC_GET_NORMAL" length=4 status=1
+PROBE detection/cast-ray rec=item step=normal-only i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=normal-only i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=normal-only i=2 type=vector normal=<-1.000000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=normal-only i=3 type=integer value=1
+PROBE detection/cast-ray rec=ray step=link-only from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_DATA_FLAGS RC_GET_LINK_NUM" length=4 status=1
+PROBE detection/cast-ray rec=item step=link-only i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=link-only i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=link-only i=2 type=integer value=0
+PROBE detection/cast-ray rec=item step=link-only i=3 type=integer value=1
+PROBE detection/cast-ray rec=ray step=reject-nonphysical from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_REJECT_TYPES RC_REJECT_NONPHYSICAL, RC_MAX_HITS 4" length=7 status=3
+PROBE detection/cast-ray rec=item step=reject-nonphysical i=0 type=key value=land
+PROBE detection/cast-ray rec=item step=reject-nonphysical i=1 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reject-nonphysical i=2 type=key value=land
+PROBE detection/cast-ray rec=item step=reject-nonphysical i=3 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reject-nonphysical i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=reject-nonphysical i=5 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reject-nonphysical i=6 type=integer value=3
+PROBE detection/cast-ray rec=ray step=reject-physical from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_REJECT_TYPES RC_REJECT_PHYSICAL, RC_MAX_HITS 4" length=9 status=4
+PROBE detection/cast-ray rec=item step=reject-physical i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=reject-physical i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reject-physical i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=reject-physical i=3 type=string value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reject-physical i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=reject-physical i=5 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reject-physical i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=reject-physical i=7 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reject-physical i=8 type=integer value=4
+PROBE detection/cast-ray rec=ray step=from-inside from=<0.000000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4" length=9 status=4
+PROBE detection/cast-ray rec=item step=from-inside i=0 type=key value=self
+PROBE detection/cast-ray rec=item step=from-inside i=1 type=string value=<0.250000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside i=2 type=key value=wall
+PROBE detection/cast-ray rec=item step=from-inside i=3 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside i=4 type=key value=ours
+PROBE detection/cast-ray rec=item step=from-inside i=5 type=string value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=from-inside i=7 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside i=8 type=integer value=4
+PROBE detection/cast-ray rec=ray step=from-inside-reject-host from=<0.000000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_REJECT_TYPES RC_REJECT_HOST, RC_MAX_HITS 4" length=9 status=4
+PROBE detection/cast-ray rec=item step=from-inside-reject-host i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=from-inside-reject-host i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside-reject-host i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=from-inside-reject-host i=3 type=string value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside-reject-host i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=from-inside-reject-host i=5 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside-reject-host i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=from-inside-reject-host i=7 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=from-inside-reject-host i=8 type=integer value=4
+PROBE detection/cast-ray rec=ray step=inside-wall from=<5.000000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 4" length=9 status=4
+PROBE detection/cast-ray rec=item step=inside-wall i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=inside-wall i=1 type=string value=<5.250000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=inside-wall i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=inside-wall i=3 type=string value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=inside-wall i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=inside-wall i=5 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=inside-wall i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=inside-wall i=7 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=inside-wall i=8 type=integer value=4
+PROBE detection/cast-ray rec=ray step=reverse from=<15.000000,0.000000,0.000000> to=<0.500000,0.000000,0.000000> options="RC_MAX_HITS 4" length=7 status=3
+PROBE detection/cast-ray rec=item step=reverse i=0 type=key value=ours
+PROBE detection/cast-ray rec=item step=reverse i=1 type=string value=<10.250000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reverse i=2 type=key value=wall
+PROBE detection/cast-ray rec=item step=reverse i=3 type=string value=<5.250000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reverse i=4 type=key value=self
+PROBE detection/cast-ray rec=item step=reverse i=5 type=string value=<0.250000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=reverse i=6 type=integer value=3
+PROBE detection/cast-ray rec=ray step=down from=<2.500000,0.000000,0.000000> to=<2.500000,0.000000,-27.500000> options="RC_MAX_HITS 4" length=3 status=1
+PROBE detection/cast-ray rec=item step=down i=0 type=key value=land
+PROBE detection/cast-ray rec=item step=down i=1 type=string land_at=<2.500000,0.000000,-6.500000>
+PROBE detection/cast-ray rec=item step=down i=2 type=integer value=1
+PROBE detection/cast-ray rec=ray step=down-reject-land from=<2.500000,0.000000,0.000000> to=<2.500000,0.000000,-27.500000> options="RC_REJECT_TYPES RC_REJECT_LAND, RC_MAX_HITS 4" length=1 status=0
+PROBE detection/cast-ray rec=item step=down-reject-land i=0 type=integer value=0
+PROBE detection/cast-ray rec=ray step=zero-length from=<0.500000,0.000000,0.000000> to=<0.500000,0.000000,0.000000> options="" length=1 status=0
+PROBE detection/cast-ray rec=item step=zero-length i=0 type=integer value=0
+PROBE detection/cast-ray rec=ray step=off-region from=<0.500000,0.000000,0.000000> to=<180.000000,0.000000,0.000000> options="RC_MAX_HITS 4" length=9 status=4
+PROBE detection/cast-ray rec=item step=off-region i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=off-region i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=off-region i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=off-region i=3 type=string value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=off-region i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=off-region i=5 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=off-region i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=off-region i=7 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=off-region i=8 type=integer value=4
+PROBE detection/cast-ray rec=ray step=max-hits-0 from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 0" length=3 status=1
+PROBE detection/cast-ray rec=item step=max-hits-0 i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=max-hits-0 i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-0 i=2 type=integer value=1
+PROBE detection/cast-ray rec=ray step=max-hits-negative from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS -1" length=1 status=0
+PROBE detection/cast-ray rec=item step=max-hits-negative i=0 type=integer value=0
+PROBE detection/cast-ray rec=ray step=max-hits-300 from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="RC_MAX_HITS 300" length=11 status=5
+PROBE detection/cast-ray rec=item step=max-hits-300 i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=max-hits-300 i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-300 i=2 type=key value=ours
+PROBE detection/cast-ray rec=item step=max-hits-300 i=3 type=string value=<9.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-300 i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=max-hits-300 i=5 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-300 i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=max-hits-300 i=7 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-300 i=8 type=key value=land
+PROBE detection/cast-ray rec=item step=max-hits-300 i=9 type=string land_at=<51.718000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=max-hits-300 i=10 type=integer value=5
+PROBE detection/cast-ray rec=ray step=bad-option from=<0.500000,0.000000,0.000000> to=<15.000000,0.000000,0.000000> options="99 1" length=3 status=1
+PROBE detection/cast-ray rec=item step=bad-option i=0 type=key value=wall
+PROBE detection/cast-ray rec=item step=bad-option i=1 type=string value=<4.750000,0.000000,0.000000>
+PROBE detection/cast-ray rec=item step=bad-option i=2 type=integer value=1
+PROBE detection/cast-ray rec=ray step=owner from=<0.000000,0.000000,0.600000> to=<9.934000,0.000000,-6.763000> options="RC_MAX_HITS 4" length=9 status=4
+PROBE detection/cast-ray rec=item step=owner i=0 type=key value=agent
+PROBE detection/cast-ray rec=item step=owner i=1 type=string agent_at=<7.648000,0.000000,-5.068000>
+PROBE detection/cast-ray rec=item step=owner i=2 type=key value=owner
+PROBE detection/cast-ray rec=item step=owner i=3 type=string agent_at=<8.027000,0.000000,-5.349000>
+PROBE detection/cast-ray rec=item step=owner i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=owner i=5 type=string land_at=<9.580000,0.000000,-6.500000>
+PROBE detection/cast-ray rec=item step=owner i=6 type=key value=land
+PROBE detection/cast-ray rec=item step=owner i=7 type=string land_at=<9.580000,0.000000,-6.500000>
+PROBE detection/cast-ray rec=item step=owner i=8 type=integer value=4
+PROBE detection/cast-ray rec=ray step=owner-reject-agents from=<0.000000,0.000000,0.600000> to=<9.934000,0.000000,-6.763000> options="RC_REJECT_TYPES RC_REJECT_AGENTS, RC_MAX_HITS 4" length=7 status=3
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=0 type=key value=land
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=1 type=string land_at=<9.580000,0.000000,-6.500000>
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=2 type=key value=land
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=3 type=string land_at=<9.580000,0.000000,-6.500000>
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=4 type=key value=land
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=5 type=string land_at=<9.580000,0.000000,-6.500000>
+PROBE detection/cast-ray rec=item step=owner-reject-agents i=6 type=integer value=3
+PROBE detection/cast-ray rec=throttle calls=500 ok=500 failed=0 first_fail=-1 unknown=0 sim_perf_low=0 cast_time_exceeded=0 elapsed=23.178000 per_second=22
+PROBE detection/cast-ray rec=after after_status=1
+# debug-channel: from="Object" text="System.Reflection.TargetInvocationException: Exception has been thrown by the target of an invocation. ---> System.IndexOutOfRangeException: Index was outside the bounds of the array.\n  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+list.GetLSLIntegerItem (System.Int32 itemIndex) [0x00007] in <4232b8ace8a34b48b171661be4717e89>:0 \n  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llCastRay (OpenSim.Region.ScriptEngine.Shared.LSL_Types+Vector3 start, OpenSim.Region.ScriptEngine.Shared.LSL_Types+Vector3 end, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list options) [0x0008c] in <d09853dcdece4467894564db0ef815df>:0 \n  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llCastRay (OpenSim.Region.ScriptEngine.Shared.LSL_Types+Vector3 start, OpenSim.Region.ScriptEngine.Shared.LSL_Types+Vector3 end, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list options) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0 \n  at SecondLife.XEngineScript.default_event_link_message (OpenSim.Regi"
+PROBE detection/cast-ray rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

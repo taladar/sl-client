@@ -50,10 +50,10 @@ use sl_client_tokio::{
     DeRezDestination, Event, FolderType, InstantMessage, InventoryFolder, InventoryFolderKey,
     InventoryKey, InventoryType, Object, ObjectKey, PrimShape, RegionHandle, RestoreItem,
     RezScriptParams, ScopedObjectId, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTarget, ScriptUploadLocation, TaskInventoryItem, TransactionId, Uuid, Vector,
-    XferListing,
+    ScriptTarget, ScriptUploadLocation, SurfaceInfo, TaskInventoryItem, TransactionId, Uuid,
+    Vector, XferListing,
 };
-use sl_lsl_runtime::probe::{Action, By, Drive, Line, PREFIX, ResultFile, Stimulus};
+use sl_lsl_runtime::probe::{Action, By, Drive, Line, PREFIX, ResultFile, Stimulus, TouchSurface};
 
 use crate::context::{Session, TestContext, TestFailure, now_rfc3339};
 use crate::grid::Grid;
@@ -1285,7 +1285,7 @@ async fn stimulate(
                 By::Other => avatars.other.send(released).await,
             };
         }
-        Action::Touch | Action::Chat { .. } | Action::Stand => {}
+        Action::Touch(_) | Action::Chat { .. } | Action::Stand => {}
     }
     let actor = match stimulus.by {
         By::Owner => &mut *avatars.session,
@@ -1301,7 +1301,7 @@ async fn stimulate(
         | Action::Away { .. }
         | Action::Sit
         | Action::Control { .. } => Ok(()),
-        Action::Touch => {
+        Action::Touch(surface) => {
             let prim = prims
                 .get("A")
                 .ok_or_else(|| TestFailure::State(format!("{}: no prim A", probe.id)))?;
@@ -1311,7 +1311,27 @@ async fn stimulate(
                 (By::Other, Some(false)) => " active_group=none",
                 (By::Other, None) => " active_group=unknown",
             };
-            transcript.body.push(format!("# touch{by}{group}"));
+            let surface = surface
+                .as_ref()
+                .map(|surface| surface_info(surface, &prim.motion.position));
+            let sent = surface.as_ref().map_or_else(
+                || " surface=none".to_owned(),
+                |info| {
+                    format!(
+                        " face={} uv=<{:.3}, {:.3}> st=<{:.3}, {:.3}> pos={} normal={} \
+                         binormal={}",
+                        info.face_index,
+                        info.uv[0],
+                        info.uv[1],
+                        info.st[0],
+                        info.st[1],
+                        vector_note(&info.position),
+                        vector_note(&info.normal),
+                        vector_note(&info.binormal)
+                    )
+                },
+            );
+            transcript.body.push(format!("# touch{by}{group}{sent}"));
             let local_id = scoped_for(actor, prim);
             actor
                 .send(Command::GrabObject {
@@ -1321,14 +1341,11 @@ async fn stimulate(
                         y: 0.0,
                         z: 0.0,
                     },
-                    surface: None,
+                    surface: surface.clone(),
                 })
                 .await?;
             actor
-                .send(Command::DegrabObject {
-                    local_id,
-                    surface: None,
-                })
+                .send(Command::DegrabObject { local_id, surface })
                 .await
         }
         Action::Chat { channel, text } => {
@@ -1343,6 +1360,24 @@ async fn stimulate(
                 })
                 .await
         }
+    }
+}
+
+/// The surface block a touch sends for `surface`, its point put in the
+/// region at prim A's `centre`.
+fn surface_info(surface: &TouchSurface, centre: &Vector) -> SurfaceInfo {
+    let vector = |[x, y, z]: [f32; 3]| Vector { x, y, z };
+    SurfaceInfo {
+        uv: surface.uv,
+        st: surface.st,
+        face_index: surface.face,
+        position: Vector {
+            x: centre.x + surface.at[0],
+            y: centre.y + surface.at[1],
+            z: centre.z + surface.at[2],
+        },
+        normal: vector(surface.normal),
+        binormal: vector(surface.binormal),
     }
 }
 

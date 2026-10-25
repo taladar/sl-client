@@ -136,3 +136,7 @@ AddNullFolderBlockToDecendentsPacket = "AddNullFolderBlockToDecendentsPacket"
 TextBgWriteableColor = "TextBgWriteableColor"
 ScrollBgWriteableColor = "ScrollBgWriteableColor"
 bg_writeable_color = "bg_writeable_color"
+# `CallSEH` is YEngine's own method name (`XMRInstAbstract.CallSEH`, "structured
+# exception handling"), in the stack trace the engine owner-says when a script
+# faults; the probe results (sl-lsl-runtime/probes/results/) keep it verbatim.
+CallSEH = "CallSEH"

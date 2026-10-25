@@ -1,0 +1,33 @@
+grid: opensim-xengine
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE detection/touch-surface rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE detection/touch-surface rec=constants invalid_face=-1 invalid_texcoord=<-1.000000,-1.000000,0.000000> invalid_vector=<0.000000,0.000000,0.000000>
+PROBE detection/touch-surface rec=waiting drive=touch
+# chat by=other type=say from="Object" length=14 text="Script running"
+# touch surface=none
+PROBE detection/touch-surface rec=touch_start step=1 event=touch_start key_is_owner=1 face=-1 uv=<-1.000000,-1.000000,0.000000> st=<-1.000000,-1.000000,0.000000> pos=zero normal=<0.000000,0.000000,0.000000> binormal=<0.000000,0.000000,0.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=touch_end step=1 event=touch_end key_is_owner=1 face=-1 uv=<-1.000000,-1.000000,0.000000> st=<-1.000000,-1.000000,0.000000> pos=zero normal=<0.000000,0.000000,0.000000> binormal=<0.000000,0.000000,0.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=waiting drive=touch face=1 uv=0.25,0.75 st=0.3,0.6 at=0.25,0.05,0.1 normal=1,0,0 binormal=0,0,1
+# touch face=1 uv=<0.250, 0.750> st=<0.300, 0.600> pos=<120.250, 128.050, 27.600> normal=<1.000, 0.000, 0.000> binormal=<0.000, 0.000, 1.000>
+PROBE detection/touch-surface rec=touch_start step=2 event=touch_start key_is_owner=1 face=1 uv=<0.250000,0.750000,0.000000> st=<0.300000,0.600000,0.000000> pos=<0.250000,0.050000,0.100000> normal=<1.000000,0.000000,0.000000> binormal=<0.000000,0.000000,1.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=touch_end step=2 event=touch_end key_is_owner=1 face=1 uv=<0.250000,0.750000,0.000000> st=<0.300000,0.600000,0.000000> pos=<0.250000,0.050000,0.100000> normal=<1.000000,0.000000,0.000000> binormal=<0.000000,0.000000,1.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=waiting drive=touch face=9 uv=1.5,-0.5 st=2,-1 at=5,5,5 normal=0,0,2 binormal=0,0,0
+# touch face=9 uv=<1.500, -0.500> st=<2.000, -1.000> pos=<125.000, 133.000, 32.500> normal=<0.000, 0.000, 2.000> binormal=<0.000, 0.000, 0.000>
+PROBE detection/touch-surface rec=touch_start step=3 event=touch_start key_is_owner=1 face=9 uv=<1.500000,-0.500000,0.000000> st=<2.000000,-1.000000,0.000000> pos=<5.000000,5.000000,5.000000> normal=<0.000000,0.000000,2.000000> binormal=<0.000000,0.000000,0.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=touch_end step=3 event=touch_end key_is_owner=1 face=9 uv=<1.500000,-0.500000,0.000000> st=<2.000000,-1.000000,0.000000> pos=<5.000000,5.000000,5.000000> normal=<0.000000,0.000000,2.000000> binormal=<0.000000,0.000000,0.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=waiting drive=touch face=-1 uv=0.5,0.5 st=0.5,0.5 at=0,0,0.25 normal=0,0,1 binormal=0,1,0
+# touch face=-1 uv=<0.500, 0.500> st=<0.500, 0.500> pos=<120.000, 128.000, 27.750> normal=<0.000, 0.000, 1.000> binormal=<0.000, 1.000, 0.000>
+PROBE detection/touch-surface rec=touch_start step=4 event=touch_start key_is_owner=1 face=-1 uv=<0.500000,0.500000,0.000000> st=<0.500000,0.500000,0.000000> pos=<0.000000,0.000000,0.250000> normal=<0.000000,0.000000,1.000000> binormal=<0.000000,1.000000,0.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=touch_end step=4 event=touch_end key_is_owner=1 face=-1 uv=<0.500000,0.500000,0.000000> st=<0.500000,0.500000,0.000000> pos=<0.000000,0.000000,0.250000> normal=<0.000000,0.000000,1.000000> binormal=<0.000000,1.000000,0.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=waiting drive=touch by=other face=2 uv=0.1,0.9 st=0.2,0.8 at=-0.25,0,0 normal=-1,0,0 binormal=0,0,1
+# touch by=other active_group=set face=2 uv=<0.100, 0.900> st=<0.200, 0.800> pos=<119.750, 128.000, 27.500> normal=<-1.000, 0.000, 0.000> binormal=<0.000, 0.000, 1.000>
+PROBE detection/touch-surface rec=touch_start step=5 event=touch_start key_is_owner=0 face=2 uv=<0.100000,0.900000,0.000000> st=<0.200000,0.800000,0.000000> pos=<-0.250000,0.000000,0.000000> normal=<-1.000000,0.000000,0.000000> binormal=<0.000000,0.000000,1.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=touch_end step=5 event=touch_end key_is_owner=0 face=2 uv=<0.100000,0.900000,0.000000> st=<0.200000,0.800000,0.000000> pos=<-0.250000,0.000000,0.000000> normal=<-1.000000,0.000000,0.000000> binormal=<0.000000,0.000000,1.000000> grab=<0.000000,0.000000,0.000000> link=0
+PROBE detection/touch-surface rec=touches held=0
+PROBE detection/touch-surface rec=end

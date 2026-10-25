@@ -1,0 +1,255 @@
+grid: aditi
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE detection/sensor rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE detection/sensor rec=sweep step=all name="" key="" type=14 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=all event=sensor num=32
+PROBE detection/sensor rec=found step=all i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=found step=all i=1 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=found step=all i=2 dist=3.500000 type=12 owned=1 name=target-w self=0
+PROBE detection/sensor rec=found step=all i=3 dist=4.000000 type=12 owned=1 name=target-u self=0
+PROBE detection/sensor rec=found step=all i=4 dist=7.768000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=5 dist=28.131000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=6 dist=28.833000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=7 dist=28.931000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=8 dist=30.843000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=9 dist=30.972000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=10 dist=32.521000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=11 dist=32.598000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=12 dist=32.728000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=13 dist=33.116000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=14 dist=34.531000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=15 dist=34.672000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=16 dist=34.783000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=17 dist=34.820000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=18 dist=35.731000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=19 dist=36.236000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=20 dist=36.833000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=21 dist=37.659000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=22 dist=38.068000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=23 dist=38.449000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=24 dist=38.965000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=25 dist=38.973000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=26 dist=42.587000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=27 dist=46.013000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=28 dist=47.131000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=29 dist=47.131000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=30 dist=47.131000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=all i=31 dist=49.952000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=sweep step=ours name="@ours" key="" type=14 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=ours event=sensor num=1
+PROBE detection/sensor rec=found step=ours i=0 dist=94.656000 type=12 owned=0 name=ours self=0
+PROBE detection/sensor rec=sweep step=agents name="" key="" type=1 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=agents event=sensor num=3
+PROBE detection/sensor rec=agent step=agents key_is_owner=0 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=5.071000
+PROBE detection/sensor rec=agent step=agents key_is_owner=1 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=11.420000
+PROBE detection/sensor rec=agent step=agents key_is_owner=0 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=58.330000
+PROBE detection/sensor rec=sweep step=owner-legacy name="@owner" key="" type=1 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=owner-legacy event=sensor num=1
+PROBE detection/sensor rec=agent step=owner-legacy key_is_owner=1 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=11.420000
+PROBE detection/sensor rec=sweep step=owner-username name="@username" key="" type=16 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=owner-username event=sensor num=1
+PROBE detection/sensor rec=agent step=owner-username key_is_owner=1 type=3 owner_is_self=1 name_is_key2name=1 agent_dist=11.420000
+PROBE detection/sensor rec=sweep step=scripted name="" key="" type=8 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=scripted event=sensor num=32
+PROBE detection/sensor rec=found step=scripted i=0 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=found step=scripted i=1 dist=3.500000 type=12 owned=1 name=target-w self=0
+PROBE detection/sensor rec=found step=scripted i=2 dist=4.000000 type=12 owned=1 name=target-u self=0
+PROBE detection/sensor rec=found step=scripted i=3 dist=30.972000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=4 dist=32.521000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=5 dist=34.783000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=6 dist=36.833000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=7 dist=37.659000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=8 dist=38.068000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=9 dist=38.965000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=10 dist=38.973000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=11 dist=46.013000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=12 dist=47.131000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=13 dist=47.131000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=14 dist=51.705000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=15 dist=67.074000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=16 dist=72.142000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=17 dist=76.795000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=18 dist=79.966000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=19 dist=84.516000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=20 dist=84.656000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=21 dist=85.758000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=22 dist=85.896000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=23 dist=86.274000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=24 dist=86.904000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=25 dist=87.099000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=26 dist=87.215000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=27 dist=87.351000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=28 dist=88.032000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=29 dist=88.876000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=30 dist=89.009000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=scripted i=31 dist=89.171000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=sweep step=passive name="@ours" key="" type=4 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=passive event=sensor num=32
+PROBE detection/sensor rec=found step=passive i=0 dist=5.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=1 dist=6.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=2 dist=7.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=3 dist=8.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=4 dist=9.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=5 dist=10.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=6 dist=11.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=7 dist=12.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=8 dist=13.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=9 dist=14.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=10 dist=15.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=11 dist=16.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=12 dist=17.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=13 dist=18.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=14 dist=19.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=15 dist=20.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=16 dist=21.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=17 dist=22.000000 type=4 owned=1 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=18 dist=28.467000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=19 dist=34.110000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=20 dist=34.304000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=21 dist=34.345000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=22 dist=34.346000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=23 dist=34.346000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=24 dist=34.420000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=25 dist=34.487000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=26 dist=34.487000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=27 dist=34.591000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=28 dist=34.702000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=29 dist=34.737000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=30 dist=34.803000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=found step=passive i=31 dist=35.008000 type=4 owned=0 name=ours self=0
+PROBE detection/sensor rec=sweep step=passive-scripted name="Target B" key="" type=4 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=passive-scripted event=sensor num=1
+PROBE detection/sensor rec=found step=passive-scripted i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=sweep step=active name="" key="" type=2 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=active event=sensor num=32
+PROBE detection/sensor rec=found step=active i=0 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=found step=active i=1 dist=3.500000 type=12 owned=1 name=target-w self=0
+PROBE detection/sensor rec=found step=active i=2 dist=4.000000 type=12 owned=1 name=target-u self=0
+PROBE detection/sensor rec=found step=active i=3 dist=30.972000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=4 dist=32.521000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=5 dist=34.783000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=6 dist=36.833000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=7 dist=37.659000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=8 dist=38.068000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=9 dist=38.965000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=10 dist=38.973000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=11 dist=46.013000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=12 dist=47.131000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=13 dist=47.131000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=14 dist=51.705000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=15 dist=67.074000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=16 dist=72.142000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=17 dist=76.795000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=18 dist=79.966000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=19 dist=84.516000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=20 dist=84.656000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=21 dist=85.758000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=22 dist=85.896000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=23 dist=86.274000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=24 dist=86.904000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=25 dist=87.099000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=26 dist=87.215000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=27 dist=87.351000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=28 dist=88.032000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=29 dist=88.876000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=30 dist=89.009000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=found step=active i=31 dist=89.171000 type=12 owned=0 name=other self=0
+PROBE detection/sensor rec=sweep step=name name="Target B" key="" type=14 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=name event=sensor num=1
+PROBE detection/sensor rec=found step=name i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=detail step=name offset=<2.000000,0.000000,0.000000> rot=<0.000000,0.000000,0.000000,1.000000> vel=<0.000000,0.000000,0.000000> owned=1 group=1 link=0 grab=<0.000000,0.000000,0.000000> touch_face=-1 touch_uv=<-1.000000,-1.000000,0.000000> touch_st=<-1.000000,-1.000000,0.000000> touch_pos=<0.000000,0.000000,0.000000> touch_normal=<0.000000,0.000000,0.000000> touch_binormal=<0.000000,0.000000,0.000000> past_end_key_null=1
+PROBE detection/sensor rec=sweep step=key name="" key="@B" type=14 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=key event=sensor num=1
+PROBE detection/sensor rec=found step=key i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=sweep step=key-wrong-name name="Nope" key="@B" type=14 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=key-wrong-name event=no_sensor num=0
+PROBE detection/sensor rec=sweep step=nothing name="Nobody here" key="" type=15 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=nothing event=no_sensor num=0
+PROBE detection/sensor rec=sweep step=range-3 name="" key="" type=14 range=3.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=range-3 event=sensor num=1
+PROBE detection/sensor rec=found step=range-3 i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=sweep step=range-3.2 name="" key="" type=14 range=3.200000 arc=3.142000
+PROBE detection/sensor rec=swept step=range-3.2 event=sensor num=2
+PROBE detection/sensor rec=found step=range-3.2 i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=found step=range-3.2 i=1 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=sweep step=range-3.4 name="" key="" type=14 range=3.400000 arc=3.142000
+PROBE detection/sensor rec=swept step=range-3.4 event=sensor num=2
+PROBE detection/sensor rec=found step=range-3.4 i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=found step=range-3.4 i=1 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=sweep step=range-4.1 name="" key="" type=14 range=4.100000 arc=3.142000
+PROBE detection/sensor rec=swept step=range-4.1 event=sensor num=4
+PROBE detection/sensor rec=found step=range-4.1 i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=found step=range-4.1 i=1 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=found step=range-4.1 i=2 dist=3.500000 type=12 owned=1 name=target-w self=0
+PROBE detection/sensor rec=found step=range-4.1 i=3 dist=4.000000 type=12 owned=1 name=target-u self=0
+PROBE detection/sensor rec=sweep step=arc-quarter name="" key="" type=14 range=4.100000 arc=0.785000
+PROBE detection/sensor rec=swept step=arc-quarter event=sensor num=3
+PROBE detection/sensor rec=found step=arc-quarter i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=found step=arc-quarter i=1 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=found step=arc-quarter i=2 dist=4.000000 type=12 owned=1 name=target-u self=0
+PROBE detection/sensor rec=sweep step=arc-zero name="" key="" type=14 range=4.100000 arc=0.000000
+PROBE detection/sensor rec=swept step=arc-zero event=sensor num=4
+PROBE detection/sensor rec=found step=arc-zero i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=found step=arc-zero i=1 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=found step=arc-zero i=2 dist=3.500000 type=12 owned=1 name=target-w self=0
+PROBE detection/sensor rec=found step=arc-zero i=3 dist=4.000000 type=12 owned=1 name=target-u self=0
+PROBE detection/sensor rec=sweep step=arc-negative name="" key="" type=14 range=4.100000 arc=-1.000000
+PROBE detection/sensor rec=swept step=arc-negative event=sensor num=4
+PROBE detection/sensor rec=found step=arc-negative i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=found step=arc-negative i=1 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=found step=arc-negative i=2 dist=3.500000 type=12 owned=1 name=target-w self=0
+PROBE detection/sensor rec=found step=arc-negative i=3 dist=4.000000 type=12 owned=1 name=target-u self=0
+PROBE detection/sensor rec=sweep step=arc-wide name="" key="" type=14 range=4.100000 arc=4.000000
+PROBE detection/sensor rec=swept step=arc-wide event=sensor num=4
+PROBE detection/sensor rec=found step=arc-wide i=0 dist=2.000000 type=12 owned=1 name=target-b self=0
+PROBE detection/sensor rec=found step=arc-wide i=1 dist=3.000000 type=12 owned=1 name=target-v self=0
+PROBE detection/sensor rec=found step=arc-wide i=2 dist=3.500000 type=12 owned=1 name=target-w self=0
+PROBE detection/sensor rec=found step=arc-wide i=3 dist=4.000000 type=12 owned=1 name=target-u self=0
+PROBE detection/sensor rec=sweep step=range-zero name="" key="" type=14 range=0.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=range-zero event=none num=0
+PROBE detection/sensor rec=sweep step=range-negative name="" key="" type=14 range=-1.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=range-negative event=none num=0
+PROBE detection/sensor rec=sweep step=far-96 name="Target X" key="" type=14 range=96.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=far-96 event=no_sensor num=0
+PROBE detection/sensor rec=sweep step=far-200 name="Target X" key="" type=14 range=200.000000 arc=3.142000
+PROBE detection/sensor rec=swept step=far-200 event=no_sensor num=0
+PROBE detection/sensor rec=repeat phase=1 call="llSensorRepeat Target B every 0.5 s"
+PROBE detection/sensor rec=fired phase=1 event=1 num=0 found=none t=0.511000
+PROBE detection/sensor rec=fired phase=1 event=2 num=0 found=none t=1.023000
+PROBE detection/sensor rec=fired phase=1 event=3 num=0 found=none t=1.534000
+PROBE detection/sensor rec=fired phase=1 event=4 num=0 found=none t=2.044000
+PROBE detection/sensor rec=fired phase=1 event=5 num=0 found=none t=2.555000
+PROBE detection/sensor rec=phase phase=1 events=5
+PROBE detection/sensor rec=removed after_phase=1
+PROBE detection/sensor rec=phase phase=2 events=0
+PROBE detection/sensor rec=repeat phase=3 call="llSensorRepeat nothing every 0.5 s"
+PROBE detection/sensor rec=fired phase=3 event=1 num=0 found=none t=0.511000
+PROBE detection/sensor rec=fired phase=3 event=2 num=0 found=none t=1.022000
+PROBE detection/sensor rec=fired phase=3 event=3 num=0 found=none t=1.533000
+PROBE detection/sensor rec=fired phase=3 event=4 num=0 found=none t=2.044000
+PROBE detection/sensor rec=fired phase=3 event=5 num=0 found=none t=2.555000
+PROBE detection/sensor rec=phase phase=3 events=5
+PROBE detection/sensor rec=removed after_phase=3
+PROBE detection/sensor rec=phase phase=4 events=0
+PROBE detection/sensor rec=repeat phase=5 call="llSensorRepeat Target B every 0.01 s"
+PROBE detection/sensor rec=rate phase=5 events=45 per_second=22.483000
+PROBE detection/sensor rec=removed after_phase=5
+PROBE detection/sensor rec=phase phase=6 events=0
+PROBE detection/sensor rec=repeat phase=7 call="llSensorRepeat Target B every 1 s, then llSensor Target X"
+PROBE detection/sensor rec=fired phase=7 event=1 num=0 found=none t=0.022000
+PROBE detection/sensor rec=phase phase=7 events=1
+PROBE detection/sensor rec=removed after_phase=7
+PROBE detection/sensor rec=phase phase=8 events=0
+PROBE detection/sensor rec=repeat phase=9 call="llSensorRepeat Target B every 0.0 s"
+PROBE detection/sensor rec=fired phase=9 event=1 num=0 found=none t=0.022000
+PROBE detection/sensor rec=phase phase=9 events=1
+PROBE detection/sensor rec=removed after_phase=9
+PROBE detection/sensor rec=phase phase=10 events=0
+PROBE detection/sensor rec=end
