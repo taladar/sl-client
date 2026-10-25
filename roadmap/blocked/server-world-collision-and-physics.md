@@ -61,3 +61,17 @@ Acceptance: two prims driven into each other produce exactly one
 walking into a `VolumeDetect` prim triggers it and passes through;
 `llCastRay` against a fixture scene returns the hit the geometry
 implies; and the whole thing is reproducible across two runs of one seed.
+
+## From gridspec-lsl-events (2026-10-25)
+
+`events/collision` (`book/src/gridspec/lsl.md` § Events), a physical prim
+dropped two metres onto a scripted one: on Second Life one
+`collision_start` and one `collision_end` with about 11 `collision` events
+between; on OpenSim each twice (the prim bounced) with 66–76. The faller's
+`llDetectedType` is 10 on both. Under `llVolumeDetect(TRUE)` the scripted
+prim gets a start and an end and no `collision`, on both. **A collision
+that begins and ends while the script sleeps is lost on Second Life** — no
+event at all on waking — and queued in full on OpenSim (82–132 `collision`
+events). From `events/state-drops`: an `llTarget` and `llRotTarget` set
+just before a state change keep raising `at_target` / `at_rot_target` in the
+new state on Second Life and are dropped on OpenSim.

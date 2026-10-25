@@ -85,3 +85,10 @@ camera, from the `avatar/*` probes' results on aditi, YEngine and XEngine
 Both grids honour an answer's mask as it came, more than was asked
 included, and drop `TAKE_CONTROLS` and `CONTROL_CAMERA` when a sitter
 stands.
+
+## From gridspec-lsl-events (2026-10-25)
+
+`events/state-drops` (`book/src/gridspec/lsl.md` § Events): a state change
+keeps taken controls — the new state's `control` runs on a press and the
+grid sends the viewer no `ScriptControlChange` — and keeps the permissions
+and their key, on every grid.

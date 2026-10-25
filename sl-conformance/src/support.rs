@@ -448,6 +448,21 @@ pub async fn created_item_announcement(
     timeout: Duration,
     item_type: i32,
 ) -> Result<(&'static str, InventoryItem), TestFailure> {
+    created_item_announcement_observing(session, timeout, item_type, |_event| {}).await
+}
+
+/// [`created_item_announcement`], handing every other event that arrives
+/// meanwhile to `observe` instead of discarding it.
+///
+/// # Errors
+///
+/// Propagates [`Session::wait_for`]'s timeout when neither shape arrives.
+pub async fn created_item_announcement_observing(
+    session: &mut Session,
+    timeout: Duration,
+    item_type: i32,
+    mut observe: impl FnMut(&Event),
+) -> Result<(&'static str, InventoryItem), TestFailure> {
     session
         .wait_for(timeout, |event| match event {
             Event::InventoryItemCreated { item, .. } if i32::from(item.item_type) == item_type => {
@@ -457,8 +472,15 @@ pub async fn created_item_announcement(
                 .iter()
                 .find(|item| i32::from(item.item_type) == item_type)
                 .cloned()
-                .map(|item| (ANNOUNCED_BULK, item)),
-            _other => None,
+                .map(|item| (ANNOUNCED_BULK, item))
+                .or_else(|| {
+                    observe(event);
+                    None
+                }),
+            other => {
+                observe(other);
+                None
+            }
         })
         .await
 }

@@ -1,0 +1,48 @@
+grid: aditi
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE events/attach rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE events/attach rec=step step=1 timer=0 attached=0 key_same=1
+PROBE events/attach rec=waiting drive=attach point=5
+# animations avatar=owner playing=""
+# attach point=5
+# attached point=5 key=same
+PROBE events/attach rec=event step=1 seq=1 type=attach id_is_owner=1 id_is_null=0 attached=5 key_same=1
+PROBE events/attach rec=step step=2 timer=1 attached=5 key_same=1
+PROBE events/attach rec=waiting drive=chat channel=7 text="step 2"
+# chat channel=7 text="step 2"
+PROBE events/attach rec=event step=2 seq=2 type=listen message="step 2" attached=5 key_same=1
+PROBE events/attach rec=step step=3 timer=1 attached=5 key_same=1
+PROBE events/attach rec=waiting drive=drop
+# drop worn=1
+# dropped key=same
+PROBE events/attach rec=event step=3 seq=3 type=attach id_is_owner=0 id_is_null=1 attached=0 key_same=1
+PROBE events/attach rec=step step=4 timer=1 attached=0 key_same=1
+PROBE events/attach rec=waiting drive=answer grant=32
+# question permissions=32 object="Object" owner="<first> <last>" experience=none
+# answer grant=32
+PROBE events/attach rec=event step=4 seq=4 type=run_time_permissions perms=32 attached=0 key_same=1
+PROBE events/attach rec=event step=4 seq=5 type=attach id_is_owner=1 id_is_null=0 attached=5 key_same=1
+PROBE events/attach rec=step step=5 timer=1 attached=5 key_same=1
+PROBE events/attach rec=waiting drive=drop
+# drop worn=1
+# dropped key=same
+PROBE events/attach rec=event step=5 seq=6 type=attach id_is_owner=0 id_is_null=1 attached=0 key_same=1
+PROBE events/attach rec=step step=6 timer=1 attached=0 key_same=1
+PROBE events/attach rec=waiting drive=rerez
+# take
+# taken announced=update-create-inventory-item
+# rez
+# rezzed key=new
+PROBE events/attach rec=event step=6 seq=7 type=on_rez param=0 attached=0 key_same=0
+PROBE events/attach rec=step step=7 timer=1 attached=0 key_same=0
+PROBE events/attach rec=waiting drive=chat channel=7 text="step 7"
+# chat channel=7 text="step 7"
+PROBE events/attach rec=event step=7 seq=8 type=listen message="step 7" attached=0 key_same=0
+PROBE events/attach rec=step step=8 timer=1 attached=0 key_same=0
+PROBE events/attach rec=end

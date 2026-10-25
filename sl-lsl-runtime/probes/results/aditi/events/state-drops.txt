@@ -1,0 +1,32 @@
+grid: aditi
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+PROBE events/state-drops rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE events/state-drops rec=waiting drive=answer grant=4
+# question permissions=4 object="Object" owner="<first> <last>" experience=none
+# answer grant=4
+PROBE events/state-drops rec=held perms=4
+# script-control-change action=release controls=4294967295 pass_to_agent=0
+# script-control-change action=take controls=256 pass_to_agent=0
+PROBE events/state-drops rec=waiting drive=control keys=256
+PROBE events/state-drops rec=waiting drive=chat channel=7 text="before"
+# control keys=256 held=1s
+# chat channel=7 text="before"
+# animations avatar=other playing=""
+PROBE events/state-drops rec=default sensed=1 sensors=13 presses=1 heard7=1 heard8=0 at_target=0 at_rot_target=0 ticks=14
+PROBE events/state-drops rec=entered exits=1 perms=4 perm_key_is_owner=1
+PROBE events/state-drops rec=waiting drive=control keys=256
+PROBE events/state-drops rec=waiting drive=chat channel=7 text="after"
+PROBE events/state-drops rec=waiting drive=chat channel=8 text="from state_exit"
+# control keys=256 held=1s
+# chat channel=7 text="after"
+# chat channel=8 text="from state_exit"
+PROBE events/state-drops rec=two sensed=0 sensors=0 presses=1 heard7=0 heard8=0 at_target=1 at_rot_target=1 ticks=14
+PROBE events/state-drops rec=fresh sensed=1 at_target=1 at_rot_target=1
+# script-control-change action=release controls=256 pass_to_agent=0
+PROBE events/state-drops rec=end

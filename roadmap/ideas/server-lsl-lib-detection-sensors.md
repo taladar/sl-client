@@ -101,3 +101,11 @@ build to. The rows a flavour splits on:
   `llDetectedTouch*` unchecked, the `TOUCH_INVALID_*` values when there is
   none; Second Life raises one `touch` event per grab and release with no
   drag update between, OpenSim none.
+
+## From gridspec-lsl-events (2026-10-25)
+
+`events/merging` and `events/state-drops` (`book/src/gridspec/lsl.md`
+§ Events): three `llSensor` calls in one handler answer **once** on Second
+Life (each replaces the last) and three times on OpenSim; a repeating
+sensor is dropped by a state change on every grid. On Second Life a sensor's
+answer can come after a timer that fired 0.3 s after the call.

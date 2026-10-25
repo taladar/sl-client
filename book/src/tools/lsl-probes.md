@@ -34,7 +34,7 @@ A probe's id is its path below `probes/` without the extension
 | key | meaning |
 | --- | --- |
 | `probe` | the id; required |
-| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`; required |
+| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`; required |
 | `script` | the inventory name, which the probe's scripts find each other by; required in a probe of several |
 | `order` | where the script comes in the save order; required in a probe of several |
 | `prim` | the object that holds it, `A` (the default), `B`, … |
@@ -77,10 +77,15 @@ on OpenSim; on aditi, where Mauve has none on the map, to the first of the
 fixtures' `ban_line_regions` the map knows), keeps it there `n` seconds, brings
 it back where it stood and walks it to the build location again; it is the
 owner's alone, and the probe should hold back its own lines meanwhile, since
-`llOwnerSay` may not reach an owner away. `by=other` has the runner's second
-avatar do it, which owns nothing of the probe's; without `by` it is the owner. A
-probe asks only for the drives its header declares, and the run fails if it asks
-for another.
+`llOwnerSay` may not reach an owner away. `drive=attach point=<n>` attaches prim
+A from the ground to the owner at that attachment point (`ATTACH_*`), beside
+whatever is worn there, and `drive=drop` drops it, worn, to the ground.
+`drive=rerez` takes prim A into the owner's Trash and rezzes the item back where
+the prim stood: the prim that comes back has a new key, which the runner takes
+for prim A's from then on. All three are the owner's alone. `by=other` has the
+runner's second avatar do it, which owns nothing of the probe's; without `by` it
+is the owner. A probe asks only for the drives its header declares, and the run
+fails if it asks for another.
 
 ```text
 PROBE avatar/permissions rec=waiting drive=answer grant=1044
@@ -88,6 +93,9 @@ PROBE avatar/sit rec=waiting drive=sit by=other
 PROBE avatar/controls rec=waiting drive=control keys=256
 PROBE comms/dialog rec=waiting drive=dialog by=other reply="No"
 PROBE comms/owner-away rec=waiting drive=away seconds=20
+PROBE events/attach rec=waiting drive=attach point=5
+PROBE events/attach rec=waiting drive=drop
+PROBE events/attach rec=waiting drive=rerez
 ```
 
 What a probe prints is one `llOwnerSay` line per observation:
@@ -184,10 +192,16 @@ code, or `# follow-cam-clear`), an avatar's animation list when it changes
 prim is its source; an uploaded one is the account's own and left out) and
 alerts. A long text is quoted to its first 60 characters, with its length beside
 it. A trip `away` is noted as `# away` and `# back`, with how each teleport
-went. Names are never written: both avatars' names in anything a grid wrote
-become `<first>`, `<last>`, `<other-first>`, `<other-last>`. Every wait inside a
-run keeps what arrives during it, so a line printed while the case waits for a
-compile or a listing is not lost.
+went. An attach is noted as `# attach` and, once the region shows prim A worn,
+`# attached` with the point and whether it kept its key; a drop as `# drop` and
+`# dropped`; a re-rez as `# take`, `# taken` (how the grid announced the item),
+`# rez` and `# rezzed`; a `response=none` says the region did not show it within
+twenty seconds. A line prim A prints before the update that names its new key is
+kept, not lost. A prim still worn when a probe ends is detached into the owner's
+inventory rather than derezzed. Names are never written: both avatars' names in
+anything a grid wrote become `<first>`, `<last>`, `<other-first>`,
+`<other-last>`. Every wait inside a run keeps what arrives during it, so a line
+printed while the case waits for a compile or a listing is not lost.
 
 A result file's header says where and how the run was made:
 
@@ -291,6 +305,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `avatar/*`, 2026-10-24: permissions, sitting, controls, camera and animations | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#animations-sitting-controls-and-camera) | | |
 | `comms/*`, 2026-10-24: listens, object chat, dialogs, text boxes, instant messages, the owner elsewhere, link messages | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#chat-listens-dialogs-and-link-messages) | | |
 | `detection/*`, 2026-10-25: sensors, raycasts, where a touch landed | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#sensors-raycasts-and-touches) | | |
+| `events/*`, 2026-10-25: the order across types, merging, collisions, attaching and re-rezzing, what else a state change keeps | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#events) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

@@ -85,3 +85,13 @@ beside the `SitPolicy` rows that task added:
 
 `sit-stand` skips its second-resident, scripted-seat and distance legs on a
 fake grid: take them offline here.
+
+## From gridspec-lsl-events (2026-10-25)
+
+`events/attach` (`book/src/gridspec/lsl.md` § Events): an attach from the
+ground (`ObjectAttach`) raises `attach` with the owner's key alone on Second
+Life; OpenSim raises two `changed(32768)` (its own `POSITION` bit) first. A
+drop (`ObjectDrop`) raises `attach(NULL_KEY)`, after one `changed(32768)` on
+OpenSim. `llAttachToAvatar` after `PERMISSION_ATTACH`: `run_time_permissions`,
+then the same as the attach from the ground. The prim keeps its key through
+both, the timer runs and a listen hears while worn, on every grid.

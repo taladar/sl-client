@@ -433,3 +433,125 @@ error is listed with its line alone. A save XEngine leaves unanswered
 fails after a minute as a save failure, in both runtimes (the reference
 gives up after 30 s), though the grid stored the source; reopening the
 script shows it.
+
+## Events
+
+Measured by the corpus's first event probes on 2026-10-23
+(`events/queue-limit`, `events/timer-no-stack`, `events/state-change`,
+`events/state-self`, `events/detected-cleared`) and on 2026-10-25 by
+`events/order`, `events/merging`, `events/collision`, `events/attach` and
+`events/state-drops`, on the same grids. **YEngine and XEngine agree on
+every row but two** — how much a queue holds, and what a take and a rez do
+to the script — which say so in the cell. A probe that wants to see what
+waited in a queue sleeps while its stimuli are raised and prints the
+handlers that then run, in order; a round ends at a fence, a link message
+to itself sent after the sleep, whose handler waits a second more and sends
+a second one, so that what was still on its way lands in front of it.
+
+### The queue, the timer and a state change
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| how many events a queue holds (100 link messages to itself) | 64; the rest are dropped | YEngine 64; **XEngine all 100** | no scripts |
+| a timer that fell due while the queue was full | dropped with the rest | YEngine the same | no scripts |
+| a 0.1 s timer over a 2 s sleep | runs once on waking: a timer never stacks | the same | no scripts |
+| a state change: the events still queued | dropped | the same | no scripts |
+| — the timer | kept, at its interval | the same | no scripts |
+| — the listens | dropped | the same | no scripts |
+| — a repeating sensor | dropped: not one sweep in the new state | the same | no scripts |
+| — controls taken with `TAKE_CONTROLS` | kept: the new state's `control` runs on a press, and the grid tells the viewer nothing at the change | the same | no scripts |
+| — the permissions and their key | kept | the same | no scripts |
+| — a listen opened in `state_exit` | dropped with the rest | the same | no scripts |
+| — an `llTarget` and an `llRotTarget` set in the handler that changes state | **kept**: `at_target` and `at_rot_target` run in the new state | **dropped**: neither runs | no scripts |
+| a sensor and targets set afresh in the new state | they work | the same | no scripts |
+| `state default` in `default` | runs neither `state_exit` nor `state_entry` | the same | no scripts |
+| `state` in a function | the caller carries on; the change comes when the handler ends | the handler ends at the `state` | no scripts |
+| `llDetectedKey`, `llDetectedName`, `llDetectedTouchFace` outside the event | `NULL_KEY`, `NULL_KEY`'s text, 0 | an empty key and name, −1 | no scripts |
+
+### The order of events of different types
+
+`events/order` raises its stimuli while the probe sleeps: a helper script in
+the same prim sends link messages and changes the prim's colour, a talker in
+another prim says a line on the probe's channel, the probe's own timer and
+sensor answer, and the runner touches the prim.
+
+| what was raised while the script slept, in that order | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a link message, then a colour change, in one handler | link, `changed` | the same | no scripts |
+| a colour change, then a link message | **link, `changed`**: the `changed` comes after | `changed`, link: in the order raised | no scripts |
+| link, colour, link, colour, 0.3 s apart | link, link, **one** `changed` | link, `changed`, link, `changed` | no scripts |
+| link and colour, the sensor's answer, the talker's line, a 0.3 s timer, a touch at about a second | the line, link, timer, sensor, `touch_start`, `touch_end`, `changed` | sensor, link, `changed`, the line, timer, `touch_start`, `touch_end` | no scripts |
+| a touch at about a second, link and colour at 2.5 s, the line at 3 s, a timer at 3.5 s | link, the line, timer, `touch_start`, `touch_end`, `changed` | `touch_start`, `touch_end`, link, `changed`, the line, timer | no scripts |
+
+OpenSim's queue is first in, first out across every type, on both engines.
+Second Life's is not: a touch and a `changed` raised while the script slept
+come after the link messages, chat, timers and sensor answers raised in the
+same sleep, whenever they were raised, and `changed` comes last of all.
+Among the others the order is the order they reached the script, which is
+frame timing (the sensor's answer came after a timer set to fire at 0.3 s,
+and the helper's link message after the talker's line).
+
+### What merges
+
+`events/merging`, the same way: each round raises one kind of event several
+times while the probe sleeps three seconds.
+
+| raised while the script slept | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| five colour changes in one handler | **one** `changed` (2) | five | no scripts |
+| three changes of the colour to the one it has | **one** `changed` (2): setting a colour raises it, changed or not | **none** | no scripts |
+| a colour, a scale and a texture change (plywood to blank) in one handler | **one** `changed`, 10: colour and scale, no texture bit (`llSetTexture` raised none on aditi in 2026-09 either) | three: 2, 8, 16 | no scripts |
+| three colour changes half a second apart | **one** `changed`: queued behind the probe's own cue, so each later one joined it — the `Coalescing::Reference` rule | three | no scripts |
+| five identical link messages | five | the same | no scripts |
+| one line said five times, then five different lines | five each, in order | the same | no scripts |
+| `llSensor` three times in one handler | **one** `sensor` | three | no scripts |
+| three touches a second apart | **one** `touch_start` and one `touch_end`, each of one avatar, and one `touch` | three of each, no `touch` | no scripts |
+
+### Collisions
+
+`events/collision`: prim B, two metres above the probe's prim, turns
+physical, falls onto it and comes to rest; five seconds later it is put back.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a physical prim falling onto the scripted one | `collision_start` and `collision_end` once each, with 11 `collision` events between (a measurement) | each **twice** — it bounced — with 66–76 `collision` events | no scripts |
+| `llDetectedType` of the falling prim | 10 (`ACTIVE \| SCRIPTED`) | the same | no scripts |
+| the scripted prim under `llVolumeDetect(TRUE)` | `collision_start` and `collision_end` as the prim falls through, no `collision` | the same | no scripts |
+| the falling prim's own events, landing on the solid prim | `collision_start`, `collision_end` and `collision` of its own | the same | no scripts |
+| the scripted prim asleep three seconds while it is hit | **nothing at all**: no `collision_start`, `collision` or `collision_end` on waking, though the falling prim's own events show it hit | all of it queued: each start and end twice, 82–132 `collision` events | no scripts |
+
+Where the falling prim lands after a volume-detect pass is the region's: on
+aditi it fell on to land (`land_collision_start`), on the local OpenSim on
+to the region's reference prim beneath (another `collision_start`).
+
+### Attached, dropped, taken and rezzed again
+
+`events/attach`: the runner attaches the probe's prim to the owner's left
+hand from the ground (`ObjectAttach`) and drops it (`ObjectDrop`); the script
+attaches itself with `llAttachToAvatar` once granted `PERMISSION_ATTACH`;
+then the runner takes the prim into the owner's inventory and rezzes the
+item back where it stood. The script's one-second timer and its listen on 7
+run all the while.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| attached from the ground | `attach` with the owner's key, alone; `llGetAttached` 5 | two `changed` of **32768** first — OpenSim's own `POSITION` bit, which LSL has no constant for — then `attach` | no scripts |
+| dropped | `attach(NULL_KEY)`, alone | one `changed` of 32768, then `attach(NULL_KEY)` | no scripts |
+| `llAttachToAvatar` | `run_time_permissions(32)`, then `attach` | `run_time_permissions(32)`, two `changed` of 32768, then `attach` | no scripts |
+| the prim's key, attached and dropped | kept | the same | no scripts |
+| worn | the timer runs and the listen hears | the same | no scripts |
+| taken and rezzed again | a new key; `on_rez(0)` alone; the timer and the listen carry on — the script's state is kept | YEngine the same; **XEngine resets the script**: `state_entry` runs, the globals are gone, and `on_rez(0)` comes after it | no scripts |
+
+The restart of a region (`CHANGED_REGION_START`, and what runs first) is
+measured with the script persistence it belongs to, in
+`gridspec-lsl-persistence`: aditi grants no restart without estate rights,
+and the runner does not survive one.
+
+### What the viewer does with it
+
+Nothing of a script's queue reaches the viewer: a state change sends it
+nothing, not even about the controls it keeps (what `llTakeControls`
+sends is in [Controls](#controls)). The viewer's half is the wire the
+stimuli travel, the same on both grids — the touch, the attach from the
+ground and the drop, the take and the rez — which the runner sends with our
+own client.

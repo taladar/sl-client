@@ -1,0 +1,24 @@
+grid: opensim-yengine
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE events/order rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE events/order rec=order round=1 events="link1,changed2" touches=0
+PROBE events/order rec=order round=2 events="changed2,link2" touches=0
+PROBE events/order rec=order round=3 events="link3,changed2,link4,changed2" touches=0
+PROBE events/order rec=waiting drive=touch
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# touch surface=none
+PROBE events/order rec=order round=4 events="sensor,link5,changed2,listen,timer,touch_start,touch_end" touches=0
+PROBE events/order rec=waiting drive=touch
+# touch surface=none
+PROBE events/order rec=order round=5 events="touch_start,touch_end,link6,changed2,listen,timer" touches=0
+PROBE events/order rec=end

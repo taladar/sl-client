@@ -52,3 +52,25 @@ Acceptance: a scenario test drives each raiser on the fake grid and a
 script in the object prints the bits it received; every row above either
 matches its aditi measurement or is recorded as not raised, as
 `llSetTexture` is.
+
+## From gridspec-lsl-events (2026-10-25)
+
+`events/merging` and `events/order` (`book/src/gridspec/lsl.md` § Events),
+changes made by a helper script while the probe slept:
+
+- **Second Life merges, OpenSim never does** (both engines;
+  `Coalescing::Never`): five colours in one handler are one `changed` on
+  Second Life and five on OpenSim; three half a second apart, queued behind
+  another event, one against three; colour, scale and texture in one
+  handler one `changed` of 10 (no texture bit, as before) against three of
+  2, 8 and 16 — OpenSim's `llSetTexture` raises `CHANGED_TEXTURE`.
+- **A colour set to the one it has** raises `CHANGED_COLOR` on Second Life
+  and nothing on OpenSim.
+- **Where it lands in the queue**: on Second Life a `changed` raised while
+  the script slept comes after every link message, line of chat, timer,
+  sensor answer and touch raised in the same sleep, whenever it was raised;
+  on OpenSim it keeps its place (first in, first out across every type).
+- **OpenSim raises its own bit 32768** (`Changed.POSITION`, no LSL
+  constant) on an attach from the ground (twice), a drop (once) and an
+  `llAttachToAvatar` (twice); Second Life raises no `changed` for any of them
+  (`events/attach`). An OpenSim flavour that is faithful raises it too.

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 134 |
-| ready | 351 |
+| ready | 350 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1423 |
+| done | 1424 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2074** |
@@ -351,7 +351,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (351)
+## ready (350)
 
 ### protocol
 
@@ -1148,9 +1148,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-events`](ready/gridspec-lsl-events.md) — The LSL event model on
-  OpenSim, beside what aditi already showed (blocked by
-  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-experience`](ready/gridspec-lsl-experience.md) — LSL library
   behaviour on each grid — experiences and the key-value store (blocked by
   `gridspec-lsl-live-differential-runner` (done))
@@ -1363,7 +1360,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-agent-movement` (done))
 - [`server-world-changed-raisers`](blocked/server-world-changed-raisers.md) —
   Raise changed() from every grid-side cause, with the right bit (blocked by
-  `server-fake-grid-script-engine-wiring`, `gridspec-lsl-events`)
+  `server-fake-grid-script-engine-wiring`, `gridspec-lsl-events` (done))
 - [`server-world-collision-and-physics`](blocked/server-world-collision-and-physics.md)
   — Enough physics for the collision, target and volume-detect events (blocked
   by `server-world-heartbeat`, `server-world-ecs-store`)
@@ -1544,7 +1541,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1423)
+## done (1424)
 
 ### protocol
 
@@ -4634,6 +4631,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-detection-sensors`](done/gridspec-lsl-detection-sensors.md) —
   LSL library behaviour on each grid — sensors and raycasts (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-events`](done/gridspec-lsl-events.md) — The LSL event model on
+  OpenSim, beside what aditi already showed (blocked by
   `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-live-differential-runner`](done/gridspec-lsl-live-differential-runner.md)
   — Run one probe on OpenSim YEngine, XEngine and aditi and collect the

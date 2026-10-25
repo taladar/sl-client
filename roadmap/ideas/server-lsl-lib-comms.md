@@ -98,3 +98,11 @@ every row; the ones a flavour must split on:
 
 `SimSession::send_script_dialog` and the decoded `ScriptDialogReply` exist
 now, so the dialog leg of this task's acceptance needs no protocol work.
+
+## From gridspec-lsl-events (2026-10-25)
+
+`events/state-drops` and `events/merging` (`book/src/gridspec/lsl.md`
+§ Events): a listen opened in `state_exit` is dropped with the others at the
+state change, on every grid; five lines said in one handler, the same or
+different, are five `listen` events in order, and five identical link
+messages five `link_message`s — nothing merges either, anywhere.

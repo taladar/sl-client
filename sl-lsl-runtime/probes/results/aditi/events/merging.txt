@@ -1,0 +1,26 @@
+grid: aditi
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE events/merging rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# animations avatar=owner playing=""
+PROBE events/merging rec=merged round=1 name=color-burst events="changed2" touches=0
+PROBE events/merging rec=merged round=2 name=color-same events="changed2" touches=0
+PROBE events/merging rec=merged round=3 name=mixed-change events="changed10" touches=0
+PROBE events/merging rec=merged round=4 name=color-spaced events="changed2" touches=0
+PROBE events/merging rec=merged round=5 name=link-burst events="link7,link7,link7,link7,link7" touches=0
+PROBE events/merging rec=merged round=6 name=listen-same events="listen:same,listen:same,listen:same,listen:same,listen:same" touches=0
+PROBE events/merging rec=merged round=7 name=listen-distinct events="listen:1,listen:2,listen:3,listen:4,listen:5" touches=0
+PROBE events/merging rec=merged round=8 name=sensor-burst events="sensor" touches=0
+PROBE events/merging rec=waiting drive=touch
+PROBE events/merging rec=waiting drive=touch
+PROBE events/merging rec=waiting drive=touch
+# touch surface=none
+# touch surface=none
+# touch surface=none
+PROBE events/merging rec=merged round=9 name=touch-burst events="touch_start1,touch_end1" touches=1
+PROBE events/merging rec=end

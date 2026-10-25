@@ -84,3 +84,14 @@ the unscripted legs there and holds the fake flavours to `MEASURED` only, not
 `MEASURED_LIVE` (audit 2026-10-15) — and a unit test shows a held grab
 producing exactly one `touch_start`, N `touch` and one `touch_end` over
 N+2 ticks.
+
+## From gridspec-lsl-events (2026-10-25)
+
+`events/merging` and `events/order` (`book/src/gridspec/lsl.md` § Events):
+three touches a second apart, made while the script slept, are **one**
+`touch_start`, one `touch` and one `touch_end` on Second Life, and three of
+each start and end (no `touch`) on OpenSim — the `Reference` coalescing rule
+merges only within a tick, so it needs the measured cross-tick merge. On
+Second Life a touch raised during a sleep also runs after the link messages,
+chat, timers and sensor answers raised in it, whenever it came; on OpenSim
+in the order raised.

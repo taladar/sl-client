@@ -46,6 +46,13 @@ pub enum Drive {
     Dialog,
     /// The owner leaving the probe's region for a while.
     Away,
+    /// The owner attaching the probe's prim A to itself from the ground.
+    Attach,
+    /// The owner dropping the probe's prim A, worn, to the ground.
+    Drop,
+    /// The owner taking the probe's prim A into its inventory and rezzing it
+    /// back where it stood.
+    Rerez,
 }
 
 impl Drive {
@@ -60,6 +67,9 @@ impl Drive {
             "control" => Some(Self::Control),
             "dialog" => Some(Self::Dialog),
             "away" => Some(Self::Away),
+            "attach" => Some(Self::Attach),
+            "drop" => Some(Self::Drop),
+            "rerez" => Some(Self::Rerez),
             _ => None,
         }
     }
@@ -481,6 +491,17 @@ pub enum Action {
         /// How long the owner stays away.
         seconds: u32,
     },
+    /// Attach prim A, from the ground, to the owner at `point` (an
+    /// `ATTACH_*` constant).
+    Attach {
+        /// The attachment point.
+        point: u8,
+    },
+    /// Drop prim A, worn, to the ground.
+    Drop,
+    /// Take prim A into the owner's inventory and rez it back where it
+    /// stood.
+    Rerez,
 }
 
 impl Action {
@@ -496,18 +517,22 @@ impl Action {
             Self::Control { .. } => Drive::Control,
             Self::Dialog { .. } => Drive::Dialog,
             Self::Away { .. } => Drive::Away,
+            Self::Attach { .. } => Drive::Attach,
+            Self::Drop => Drive::Drop,
+            Self::Rerez => Drive::Rerez,
         }
     }
 }
 
 /// What a `waiting` record asks the runner for:
-/// `rec=waiting drive=touch|chat|answer|sit|stand|control|dialog|away
+/// `rec=waiting
+/// drive=touch|chat|answer|sit|stand|control|dialog|away|attach|drop|rerez
 /// [by=owner|other]`, and for a touch optionally `face=<n> uv=<u>,<v>
 /// st=<s>,<t> at=<x>,<y>,<z> normal=<x>,<y>,<z> binormal=<x>,<y>,<z>` (all of
 /// them, or none), for chat `channel=<n> text="…"`, for an answer
 /// `grant=<mask>`, for controls `keys=<mask>`, for a dialog `reply="…"`, for
-/// away `seconds=<n>`. Without `by` it is the owner; only the owner goes
-/// `away`.
+/// away `seconds=<n>`, for attach `point=<n>`. Without `by` it is the
+/// owner; only the owner goes `away`, attaches, drops or re-rezzes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stimulus {
     /// Who gives it.
@@ -524,7 +549,8 @@ impl Stimulus {
     /// What is wrong with it: not a `waiting` record, an unknown drive or
     /// avatar, a touch with part of a surface, a chat without its channel or
     /// text, a dialog without its
-    /// reply, an away without its seconds, or the other avatar sent away.
+    /// reply, an away without its seconds, an attach without its point, or
+    /// the other avatar sent away, attaching, dropping or re-rezzing.
     pub fn from_waiting(line: &Line) -> Result<Self, String> {
         if line.rec != "waiting" {
             return Err(format!("`{}` is not a `waiting` record", line.rec));
@@ -575,9 +601,22 @@ impl Stimulus {
                     .and_then(|seconds| seconds.parse().ok())
                     .ok_or("an away drive without an unsigned integer `seconds`")?,
             },
+            Some(Drive::Attach) => Action::Attach {
+                point: line
+                    .field("point")
+                    .and_then(|point| point.parse().ok())
+                    .ok_or("an attach drive without an attachment point `point`")?,
+            },
+            Some(Drive::Drop) => Action::Drop,
+            Some(Drive::Rerez) => Action::Rerez,
             None => return Err(format!("`drive={drive}` is not a drive")),
         };
-        if by == By::Other && matches!(action, Action::Away { .. }) {
+        if by == By::Other
+            && matches!(
+                action,
+                Action::Away { .. } | Action::Attach { .. } | Action::Drop | Action::Rerez
+            )
+        {
             return Err(format!("`drive={drive}` is the owner's alone"));
         }
         Ok(Self { by, action })
@@ -785,7 +824,8 @@ mod tests {
     #[test]
     fn a_header_lists_its_drives_and_its_tolerances() -> Result<(), HeaderError> {
         let header = Header::parse(
-            "// probe: a/b\n// drive: chat, touch, answer, sit, stand, control, dialog, away\n\
+            "// probe: a/b\n// drive: chat, touch, answer, sit, stand, control, dialog, away, attach, \
+             drop, rerez\n\
              // vary: seconds, rate\n// unordered: heard\n",
         )?;
         assert_eq!(
@@ -798,7 +838,10 @@ mod tests {
                 Drive::Stand,
                 Drive::Control,
                 Drive::Dialog,
-                Drive::Away
+                Drive::Away,
+                Drive::Attach,
+                Drive::Drop,
+                Drive::Rerez
             ]
         );
         assert_eq!(header.vary, vec!["seconds".to_owned(), "rate".to_owned()]);
@@ -880,6 +923,18 @@ mod tests {
             read("PROBE a/b rec=waiting drive=away by=owner seconds=20")?.action,
             Action::Away { seconds: 20 }
         );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=attach point=5")?.action,
+            Action::Attach { point: 5 }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=drop")?.action,
+            Action::Drop
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=rerez")?.action,
+            Action::Rerez
+        );
         for refused in [
             "PROBE a/b rec=waiting drive=answer",
             "PROBE a/b rec=waiting drive=answer grant=all",
@@ -893,6 +948,11 @@ mod tests {
             "PROBE a/b rec=waiting drive=dialog",
             "PROBE a/b rec=waiting drive=away",
             "PROBE a/b rec=waiting drive=away by=other seconds=20",
+            "PROBE a/b rec=waiting drive=attach",
+            "PROBE a/b rec=waiting drive=attach point=300",
+            "PROBE a/b rec=waiting drive=attach by=other point=5",
+            "PROBE a/b rec=waiting drive=drop by=other",
+            "PROBE a/b rec=waiting drive=rerez by=other",
             "PROBE a/b rec=waiting drive=touch face=1",
             "PROBE a/b rec=waiting drive=touch face=x uv=0,0 st=0,0 at=0,0,0 normal=0,0,1 \
              binormal=0,1,0",

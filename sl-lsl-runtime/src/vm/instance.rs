@@ -85,12 +85,20 @@ pub enum Coalescing {
     /// newest `changed` still queued, **unless that one is next in line**:
     /// four changes a fifth of a second apart, made while the script was
     /// busy, arrived as the first alone and the other three as one, every
-    /// time. Touches and collisions merge within the tick only; nothing
-    /// measured them further.
+    /// time (and three half a second apart, queued behind another event,
+    /// as one: `events/merging`, 2026-10-25). Touches and collisions merge
+    /// within the tick only here, which is not all aditi does: three
+    /// touches a second apart, made while the script slept, arrived as one,
+    /// and a collision that began and ended while it slept arrived not at
+    /// all (`events/merging`, `events/collision`) — the raisers'
+    /// tasks, `server-world-touch-and-grab` and
+    /// `server-world-collision-and-physics`, carry that.
     #[default]
     Reference,
     /// Never merge: every raise is an event of its own, the most split-up
-    /// arrival a script can see.
+    /// arrival a script can see. OpenSim's rule, on both engines
+    /// (`events/merging`, 2026-10-25): five colour changes in one handler
+    /// are five `changed`, three touches three `touch_start`s.
     Never,
     /// Merge into the same event while it is still queued, whatever tick it
     /// was raised in — the most merged arrival a script can see.

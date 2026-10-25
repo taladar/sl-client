@@ -17,8 +17,9 @@
 //!    an answer to the permission question or the dialog the probe's script
 //!    puts, a sit on prim A, a stand, or movement controls held down for a
 //!    moment, from the owner or from a second avatar, or the owner leaving
-//!    the region for a while — one the probe's header declares among its
-//!    `drive`s;
+//!    the region for a while, attaching prim A from the ground, dropping it,
+//!    or taking it and rezzing it back (when it takes a new key) — one the
+//!    probe's header declares among its `drive`s;
 //! 4. keeps every owner-say line of the probe's (`PROBE <id> …`) from its
 //!    prims, and every `DEBUG_CHANNEL` message they shout as a `#` note,
 //!    until the probe prints `end` — and a little longer, for a second
@@ -46,22 +47,23 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    AgentKey, ChatChannel, ChatMessage, ChatSource, ChatType, Command, ControlFlags,
-    DeRezDestination, Event, FolderType, InstantMessage, InventoryFolder, InventoryFolderKey,
-    InventoryKey, InventoryType, Object, ObjectKey, PrimShape, RegionHandle, RestoreItem,
-    RezScriptParams, ScopedObjectId, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTarget, ScriptUploadLocation, SurfaceInfo, TaskInventoryItem, TransactionId, Uuid,
-    Vector, XferListing,
+    AgentKey, AssetType, AttachmentMode, AttachmentPoint, ChatChannel, ChatMessage, ChatSource,
+    ChatType, Command, ControlFlags, DeRezDestination, Event, FolderType, InstantMessage,
+    InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, Object, ObjectKey, PrimShape,
+    RegionHandle, RegionLocalObjectId, RestoreItem, RezScriptParams, Rotation, ScopedObjectId,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
+    SurfaceInfo, TaskInventoryItem, TransactionId, Uuid, Vector, XferListing,
 };
 use sl_lsl_runtime::probe::{Action, By, Drive, Line, PREFIX, ResultFile, Stimulus, TouchSurface};
 
+use super::object_rez_derez::rez_params;
 use crate::context::{Session, TestContext, TestFailure, now_rfc3339};
 use crate::grid::Grid;
 use crate::probe_corpus::{Probe, corpus_root, load_corpus, result_path, select};
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    REGION_TIMEOUT, REPLY_TIMEOUT, is_opensim, settle_scene, settle_scene_observing,
-    settle_scene_with_avatar, wait_for_own_new_object,
+    REGION_TIMEOUT, REPLY_TIMEOUT, created_item_announcement_observing, is_opensim, is_own,
+    settle_scene, settle_scene_observing, settle_scene_with_avatar, wait_for_own_new_object,
 };
 use crate::teleport_trace::{other_region, request_teleport};
 
@@ -348,6 +350,13 @@ struct Transcript {
     other_dialogs: VecDeque<ScriptDialog>,
     /// The animation list last noted for each avatar.
     animations: HashMap<AgentKey, String>,
+    /// The keys prim A took on beside the probe's own when a stimulus gave it
+    /// a new one (taken and rezzed again, or a grid that re-keys an
+    /// attachment): its lines are the probe's too.
+    extra: HashSet<ObjectKey>,
+    /// The newest object update of each of the probe's prims, by key: where
+    /// it is now, and whether it is worn.
+    latest: HashMap<ObjectKey, Object>,
 }
 
 impl Transcript {
@@ -356,6 +365,22 @@ impl Transcript {
         Self {
             cast,
             ..Self::default()
+        }
+    }
+
+    /// Whether `object` is one of the probe's prims: one of `prims`, or a key
+    /// prim A took on since.
+    fn is_probe(&self, prims: &HashSet<ObjectKey>, object: ObjectKey) -> bool {
+        prims.contains(&object) || self.extra.contains(&object)
+    }
+
+    /// What `object` is to a note: one of the probe's prims (`probe`), or
+    /// another object.
+    fn object_role(&self, prims: &HashSet<ObjectKey>, object: ObjectKey) -> &'static str {
+        if self.is_probe(prims, object) {
+            "probe"
+        } else {
+            "other-object"
         }
     }
 
@@ -423,8 +448,8 @@ impl Transcript {
     /// (`llInstantMessage`'s dialog 19), with who the grid says sent it and
     /// what its id is, as roles.
     fn instant_message(&mut self, by: &str, prims: &HashSet<ObjectKey>, im: &InstantMessage) {
-        let from_prim = prims.contains(&ObjectKey::from(im.from_agent_id.uuid()));
-        let id_prim = prims.contains(&ObjectKey::from(im.id));
+        let from_prim = self.is_probe(prims, ObjectKey::from(im.from_agent_id.uuid()));
+        let id_prim = self.is_probe(prims, ObjectKey::from(im.id));
         let dialog = im.dialog.to_u8();
         if dialog != MESSAGE_FROM_OBJECT && !from_prim && !id_prim {
             return;
@@ -481,16 +506,16 @@ impl Transcript {
     fn take_other(&mut self, prims: &HashSet<ObjectKey>, event: &Event) {
         const BY: &str = " by=other";
         match event {
-            Event::ScriptPermissionRequest(request) if prims.contains(&request.task_id) => {
+            Event::ScriptPermissionRequest(request) if self.is_probe(prims, request.task_id) => {
                 self.question(BY, request);
             }
-            Event::ScriptDialog(dialog) if prims.contains(&dialog.object_id) => {
+            Event::ScriptDialog(dialog) if self.is_probe(prims, dialog.object_id) => {
                 self.dialog(BY, dialog);
             }
             Event::InstantMessageReceived(im) => self.instant_message(BY, prims, im),
             Event::ChatReceived(chat) => match chat.source {
                 ChatSource::Object(source)
-                    if prims.contains(&source) && chat.chat_type != ChatType::DebugChannel =>
+                    if self.is_probe(prims, source) && chat.chat_type != ChatType::DebugChannel =>
                 {
                     self.heard(BY, chat);
                 }
@@ -508,15 +533,22 @@ impl Transcript {
     /// probe's prims, or what the grid sent the owner's viewer about the
     /// avatars meanwhile — a permission question or a dialog from the prims,
     /// an object's instant message, a control change, a follow camera, an
-    /// animation list that changed, an alert — which it notes. Returns the
+    /// animation list that changed, an alert — which it notes; and an update
+    /// of one of the prims, which it keeps as that prim's newest. Returns the
     /// record name of a probe line it kept.
     fn take(&mut self, id: &str, prims: &HashSet<ObjectKey>, event: &Event) -> Option<String> {
         match event {
-            Event::ScriptPermissionRequest(request) if prims.contains(&request.task_id) => {
+            Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                if self.is_probe(prims, object.full_id) =>
+            {
+                let _previous = self.latest.insert(object.full_id, (**object).clone());
+                return None;
+            }
+            Event::ScriptPermissionRequest(request) if self.is_probe(prims, request.task_id) => {
                 self.question("", request);
                 return None;
             }
-            Event::ScriptDialog(dialog) if prims.contains(&dialog.object_id) => {
+            Event::ScriptDialog(dialog) if self.is_probe(prims, dialog.object_id) => {
                 self.dialog("", dialog);
                 return None;
             }
@@ -549,7 +581,7 @@ impl Transcript {
                     .collect();
                 self.body.push(format!(
                     "# follow-cam object={} {}",
-                    object_role(prims, *object_id),
+                    self.object_role(prims, *object_id),
                     values.join(" ")
                 ));
                 return None;
@@ -557,7 +589,7 @@ impl Transcript {
             Event::ClearFollowCamProperties { object_id } => {
                 self.body.push(format!(
                     "# follow-cam-clear object={}",
-                    object_role(prims, *object_id)
+                    self.object_role(prims, *object_id)
                 ));
                 return None;
             }
@@ -580,7 +612,7 @@ impl Transcript {
                         let name = sl_anim::builtin_animation(animation.anim_id)?.name;
                         Some(match animation.source_id {
                             Some(source) if source.0 != avatar_id.0 => {
-                                format!("{name}@{}", object_role(prims, source))
+                                format!("{name}@{}", self.object_role(prims, source))
                             }
                             Some(_) | None => name.to_owned(),
                         })
@@ -609,7 +641,7 @@ impl Transcript {
         let ChatSource::Object(source) = chat.source else {
             return None;
         };
-        if !prims.contains(&source) {
+        if !self.is_probe(prims, source) {
             return None;
         }
         if chat.chat_type == ChatType::DebugChannel {
@@ -658,16 +690,6 @@ fn chat_type_name(chat_type: ChatType) -> String {
         ChatType::Owner => "owner".to_owned(),
         ChatType::Direct => "direct".to_owned(),
         other => format!("type-{}", other.to_u8()),
-    }
-}
-
-/// What `object` is to a note: one of the probe's prims (`probe`), or
-/// another object.
-fn object_role(prims: &HashSet<ObjectKey>, object: ObjectKey) -> &'static str {
-    if prims.contains(&object) {
-        "probe"
-    } else {
-        "other-object"
     }
 }
 
@@ -1107,6 +1129,7 @@ async fn run_probe(
                 &mut Scene {
                     prims: &mut prims,
                     seen: &mut *seen,
+                    trash,
                 },
                 &keys,
                 &mut transcript,
@@ -1129,12 +1152,20 @@ async fn run_probe(
         drain_other(avatars.other, &keys, &mut transcript).await?;
     }
 
+    // Where the prims are now, and whether one is worn: a stimulus, or the
+    // probe's own script, may have moved, attached or re-keyed one.
+    for prim in prims.values_mut() {
+        if let Some(latest) = transcript.latest.get(&prim.full_id) {
+            prim.clone_from(latest);
+        }
+    }
     clear_away(avatars.session, &prims, trash).await?;
     Ok(transcript)
 }
 
-/// Derezzes `prims` to the Trash and waits until the region has removed
-/// every one.
+/// Derezzes `prims` to the Trash — a prim still worn (a probe that ended
+/// before it was dropped) is detached into inventory instead — and waits
+/// until the region has removed every one.
 async fn clear_away(
     session: &mut Session,
     prims: &BTreeMap<String, Object>,
@@ -1144,14 +1175,26 @@ async fn clear_away(
         return Ok(());
     }
     let local_ids: Vec<ScopedObjectId> = prims.values().map(Object::scoped_id).collect();
-    session
-        .send(Command::DerezObjects {
-            local_ids: local_ids.clone(),
-            destination: DeRezDestination::Trash(trash),
-            transaction_id: TransactionId::from(Uuid::new_v4()),
-            group_id: None,
-        })
-        .await?;
+    let (worn, grounded): (Vec<&Object>, Vec<&Object>) = prims
+        .values()
+        .partition(|prim| prim.attachment_point_id().is_some());
+    if !worn.is_empty() {
+        session
+            .send(Command::DetachObjects {
+                local_ids: worn.iter().map(|prim| prim.scoped_id()).collect(),
+            })
+            .await?;
+    }
+    if !grounded.is_empty() {
+        session
+            .send(Command::DerezObjects {
+                local_ids: grounded.iter().map(|prim| prim.scoped_id()).collect(),
+                destination: DeRezDestination::Trash(trash),
+                transaction_id: TransactionId::from(Uuid::new_v4()),
+                group_id: None,
+            })
+            .await?;
+    }
     let mut gone: HashSet<ScopedObjectId> = HashSet::new();
     while gone.len() < local_ids.len() {
         let removed = session
@@ -1260,6 +1303,11 @@ async fn stimulate(
             return away(avatars, probe, scene, keys, transcript, *seconds).await;
         }
         Action::Sit => return sit(avatars, stimulus.by, probe, prims, keys, transcript).await,
+        Action::Attach { point } => {
+            return attach(avatars.session, probe, scene, keys, transcript, *point).await;
+        }
+        Action::Drop => return drop_prim(avatars.session, probe, scene, keys, transcript).await,
+        Action::Rerez => return rerez(avatars.session, probe, scene, keys, transcript).await,
         Action::Control { keys: held } => {
             transcript.body.push(format!(
                 "# control{by} keys={held} held={}s",
@@ -1300,7 +1348,10 @@ async fn stimulate(
         | Action::Dialog { .. }
         | Action::Away { .. }
         | Action::Sit
-        | Action::Control { .. } => Ok(()),
+        | Action::Control { .. }
+        | Action::Attach { .. }
+        | Action::Drop
+        | Action::Rerez => Ok(()),
         Action::Touch(surface) => {
             let prim = prims
                 .get("A")
@@ -1488,12 +1539,275 @@ async fn answer(
 }
 
 /// The probe's prims, by label, and every object the run has sighted: what
-/// a stimulus that takes the owner out of the region renews on its return.
+/// a stimulus that takes the owner out of the region renews on its return,
+/// or that moves, attaches or re-keys prim A.
 struct Scene<'a> {
     /// The probe's prims.
     prims: &'a mut BTreeMap<String, Object>,
     /// Every object the run has sighted.
     seen: &'a mut HashSet<ScopedObjectId>,
+    /// The owner's Trash, which a re-rez takes prim A into.
+    trash: InventoryFolderKey,
+}
+
+impl Scene<'_> {
+    /// Prim A as the region last sent it.
+    fn prim_a(&self, probe: &Probe, transcript: &Transcript) -> Result<Object, TestFailure> {
+        let prim = self
+            .prims
+            .get("A")
+            .ok_or_else(|| TestFailure::State(format!("{}: no prim A", probe.id)))?;
+        Ok(transcript.latest.get(&prim.full_id).unwrap_or(prim).clone())
+    }
+
+    /// Prim A is `object` from now on: sighted, and its newest update.
+    fn renew_a(&mut self, transcript: &mut Transcript, object: &Object) {
+        self.seen.insert(object.scoped_id());
+        let _previous = transcript.latest.insert(object.full_id, object.clone());
+        let _old = self.prims.insert("A".to_owned(), object.clone());
+    }
+}
+
+/// How long a stimulus that moves prim A waits for the region to show it
+/// moved: attached, dropped, or rezzed again.
+const MOVE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Waits until an object update `matches` (an update of a prim already
+/// known, or a new object — `true` beside an [`Event::ObjectAdded`]),
+/// holding every other event meanwhile and handing them to the transcript
+/// once it is known — with the object's key among the probe's, since a
+/// line it printed may come ahead of the update that names it. `None` when
+/// no update matched within `timeout`.
+async fn await_prim(
+    session: &mut Session,
+    probe: &Probe,
+    keys: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    timeout: Duration,
+    mut matches: impl FnMut(&Object, bool) -> bool,
+) -> Result<Option<Object>, TestFailure> {
+    let mut held: Vec<Event> = Vec::new();
+    let outcome = session
+        .wait_for(timeout, |event| match event {
+            Event::ObjectAdded(object) if matches(object, true) => Some((**object).clone()),
+            Event::ObjectUpdated(object) if matches(object, false) => Some((**object).clone()),
+            other => {
+                held.push(other.clone());
+                None
+            }
+        })
+        .await;
+    let found = match outcome {
+        Ok(object) => Some(object),
+        Err(TestFailure::Timeout(_)) => None,
+        Err(other) => return Err(other),
+    };
+    if let Some(object) = &found
+        && !keys.contains(&object.full_id)
+    {
+        transcript.extra.insert(object.full_id);
+    }
+    for event in &held {
+        let _kept = transcript.take(&probe.id, keys, event);
+    }
+    Ok(found)
+}
+
+/// The owner's agent id, as an object's owner names it.
+fn owner_uuid(session: &Session) -> Result<Uuid, TestFailure> {
+    session
+        .agent_id()
+        .map(|agent| agent.uuid())
+        .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))
+}
+
+/// Whether `object` is `prim`'s key (`same`) or another (`new`), as a note
+/// says it.
+fn key_note(object: &Object, prim: &Object) -> &'static str {
+    if object.full_id == prim.full_id {
+        "same"
+    } else {
+        "new"
+    }
+}
+
+/// Attaches prim A from the ground to the owner at `point`, alongside what
+/// is worn there, and notes the attachment the region shows — its point,
+/// and whether it kept its key — or that none came within
+/// [`MOVE_TIMEOUT`].
+async fn attach(
+    session: &mut Session,
+    probe: &Probe,
+    scene: &mut Scene<'_>,
+    keys: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    point: u8,
+) -> Result<(), TestFailure> {
+    let prim = scene.prim_a(probe, transcript)?;
+    let owner = owner_uuid(session)?;
+    transcript.body.push(format!("# attach point={point}"));
+    session
+        .send(Command::AttachObject {
+            local_id: prim.scoped_id(),
+            attachment_point: AttachmentPoint::from_code(point),
+            mode: AttachmentMode::Add,
+            rotation: Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+        })
+        .await?;
+    let seen = &*scene.seen;
+    let worn = await_prim(
+        session,
+        probe,
+        keys,
+        transcript,
+        MOVE_TIMEOUT,
+        |object, added| {
+            object.attachment_point_id().is_some()
+                && (object.full_id == prim.full_id
+                    || (added && is_own(object, owner) && !seen.contains(&object.scoped_id())))
+        },
+    )
+    .await?;
+    match worn {
+        Some(object) => {
+            transcript.body.push(format!(
+                "# attached point={} key={}",
+                object.attachment_point_id().unwrap_or_default(),
+                key_note(&object, &prim)
+            ));
+            scene.renew_a(transcript, &object);
+        }
+        None => transcript.body.push("# attached response=none".to_owned()),
+    }
+    Ok(())
+}
+
+/// Drops prim A, worn by the owner, to the ground, and notes it on the
+/// ground — whether it kept its key — or that it did not come down within
+/// [`MOVE_TIMEOUT`].
+async fn drop_prim(
+    session: &mut Session,
+    probe: &Probe,
+    scene: &mut Scene<'_>,
+    keys: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+) -> Result<(), TestFailure> {
+    let prim = scene.prim_a(probe, transcript)?;
+    let owner = owner_uuid(session)?;
+    let worn = prim.attachment_point_id().is_some();
+    transcript
+        .body
+        .push(format!("# drop worn={}", u8::from(worn)));
+    session
+        .send(Command::DropAttachments {
+            local_ids: vec![prim.scoped_id()],
+        })
+        .await?;
+    let seen = &*scene.seen;
+    let grounded = await_prim(
+        session,
+        probe,
+        keys,
+        transcript,
+        MOVE_TIMEOUT,
+        |object, added| {
+            object.attachment_point_id().is_none()
+                && object.parent_id == RegionLocalObjectId(0)
+                && (object.full_id == prim.full_id
+                    || (added && is_own(object, owner) && !seen.contains(&object.scoped_id())))
+        },
+    )
+    .await?;
+    match grounded {
+        Some(object) => {
+            transcript
+                .body
+                .push(format!("# dropped key={}", key_note(&object, &prim)));
+            scene.renew_a(transcript, &object);
+        }
+        None => transcript.body.push("# dropped response=none".to_owned()),
+    }
+    Ok(())
+}
+
+/// Takes prim A into the owner's Trash and rezzes the item back where the
+/// prim stood, and notes how each went: the item the take made, and the
+/// prim rezzed from it — whose key is new.
+async fn rerez(
+    session: &mut Session,
+    probe: &Probe,
+    scene: &mut Scene<'_>,
+    keys: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+) -> Result<(), TestFailure> {
+    let prim = scene.prim_a(probe, transcript)?;
+    let owner = owner_uuid(session)?;
+    transcript.body.push("# take".to_owned());
+    session
+        .send(Command::DerezObjects {
+            local_ids: vec![prim.scoped_id()],
+            destination: DeRezDestination::TakeIntoAgentInventory(scene.trash),
+            transaction_id: TransactionId::from(Uuid::new_v4()),
+            group_id: None,
+        })
+        .await?;
+    let id = probe.id.clone();
+    let announced = created_item_announcement_observing(
+        session,
+        MOVE_TIMEOUT,
+        AssetType::Object.to_code(),
+        |event| {
+            let _kept = transcript.take(&id, keys, event);
+        },
+    )
+    .await;
+    let item = match announced {
+        Ok((how, item)) => {
+            transcript.body.push(format!("# taken announced={how}"));
+            item
+        }
+        Err(TestFailure::Timeout(_)) => {
+            transcript.body.push("# taken response=none".to_owned());
+            return Ok(());
+        }
+        Err(other) => return Err(other),
+    };
+    transcript.body.push("# rez".to_owned());
+    session
+        .send(Command::RezObjectFromInventory {
+            params: Box::new(rez_params(&item, &prim.motion.position)),
+        })
+        .await?;
+    let seen = &*scene.seen;
+    let rezzed = await_prim(
+        session,
+        probe,
+        keys,
+        transcript,
+        MOVE_TIMEOUT,
+        |object, added| {
+            added
+                && is_own(object, owner)
+                && object.parent_id == RegionLocalObjectId(0)
+                && !seen.contains(&object.scoped_id())
+        },
+    )
+    .await?;
+    match rezzed {
+        Some(object) => {
+            transcript
+                .body
+                .push(format!("# rezzed key={}", key_note(&object, &prim)));
+            scene.renew_a(transcript, &object);
+        }
+        None => transcript.body.push("# rezzed response=none".to_owned()),
+    }
+    Ok(())
 }
 
 /// The newest of `dialogs`, with the older ones dropped: a dialog a probe
