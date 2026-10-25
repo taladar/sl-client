@@ -13,6 +13,15 @@
 //! the card's *Yes*, which the grid has from the viewer as that mask; and a
 //! question for one, refused on its *No*, which the grid has as an empty
 //! mask.
+//!
+//! The experience card has no live answer to be held to: a script in no
+//! experience is refused `llRequestExperiencePermissions` at once on Second
+//! Life (`experience_permissions_denied`, reason 5) with no question to the
+//! viewer, OpenSim compiles no such script, and none of our avatars can save a
+//! script into an experience ([[gridspec-lsl-experience]]). So the fake Second
+//! Life flavour puts the question as the reference reads it — the ordinary
+//! `ScriptQuestion` with its `Experience` block naming a catalogue experience
+//! — and the card's *Yes* must both grant the mask and admit the experience.
 
 #[cfg(test)]
 mod test {
@@ -21,7 +30,10 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_e2e::{BodyError, Stage, StageBuilder};
     use sl_fake_grid::ImitatedGrid;
-    use sl_proto::{InventoryKey, ObjectKey, ScriptPermissionRequest, ScriptPermissions, Uuid};
+    use sl_fake_grid::experiences::stranger_experience;
+    use sl_proto::{
+        ExperienceKey, InventoryKey, ObjectKey, ScriptPermissionRequest, ScriptPermissions, Uuid,
+    };
 
     /// A failed stage, or a test that could not set one up.
     type TestError = Box<dyn core::error::Error>;
@@ -56,6 +68,17 @@ mod test {
         item: InventoryKey,
         mask: i32,
     ) -> Result<(), BodyError> {
+        ask_under(stage, label, item, mask, None).await
+    }
+
+    /// [`ask`], under `experience` when it names one.
+    async fn ask_under(
+        stage: &Stage,
+        label: &str,
+        item: InventoryKey,
+        mask: i32,
+        experience: Option<ExperienceKey>,
+    ) -> Result<(), BodyError> {
         let owner = stage.account_name(label)?.to_owned();
         let agent = stage.agent(label).await?;
         let now = agent.now();
@@ -64,7 +87,7 @@ mod test {
             item_id: item,
             object_name: "Object".to_owned(),
             object_owner: owner,
-            experience_id: None,
+            experience_id: experience,
             permissions: ScriptPermissions(mask),
         };
         agent
@@ -147,6 +170,54 @@ mod test {
                     Ok(())
                 })?;
         }
+        Ok(())
+    }
+
+    /// **The experience card on the Second Life flavour**: a question under
+    /// an experience raises the experience card, not the permission card, and
+    /// its *Yes* grants the mask asked and puts the experience on the agent's
+    /// allowed list.
+    #[test]
+    fn an_experience_question_is_accepted_on_the_experience_card() -> Result<(), TestError> {
+        StageBuilder::new("experience_permissions_second_life")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .configure_grid(|grid| grid.imitates(ImitatedGrid::SecondLife))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                let experience = stranger_experience();
+                let item = InventoryKey::from(Uuid::from_u128(0x9E53_0003));
+                ask_under(stage, "Alpha", item, AVATAR_CONTROL, Some(experience)).await?;
+                let _yes = alpha
+                    .ui()
+                    .test_id("experience-permission-action:Yes")
+                    .timeout(WAIT)
+                    .click()
+                    .await?;
+                assert_eq!(
+                    answered(stage, "Alpha", item).await?,
+                    ScriptPermissions(AVATAR_CONTROL),
+                    "Yes grants the mask asked"
+                );
+                let agent = stage.agent("Alpha").await?;
+                let started = std::time::Instant::now();
+                loop {
+                    let (allowed, _blocked) = agent
+                        .with_sim(|sim| sim.experiences().agent_permissions())
+                        .await;
+                    if allowed.contains(&experience) {
+                        break;
+                    }
+                    if started.elapsed() >= WAIT {
+                        return Err(format!(
+                            "Yes never admitted the experience: allowed {allowed:?}"
+                        )
+                        .into());
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Ok(())
+            })?;
         Ok(())
     }
 }

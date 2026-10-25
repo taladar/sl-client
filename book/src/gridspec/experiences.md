@@ -111,3 +111,8 @@ capabilities are missing is the roadmap's
 - `GroupExperiences` for a group our avatar is in that has experiences.
 - The `disabled` key's meaning: aditi only ever sent it `<undef/>`, and the
   reference never reads it.
+- A script in an experience: the question it puts, a grant, the key-value
+  store holding anything — saving a script into an experience needs one of
+  the three relationships above. What a script in **no** experience is
+  answered is in
+  [LSL scripts](lsl.md#experiences-and-the-key-value-store).

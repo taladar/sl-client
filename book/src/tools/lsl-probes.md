@@ -189,19 +189,23 @@ and rotation, camera offsets), a `ScriptControlChange`
 (`# script-control-change`), a follow camera (`# follow-cam`, the parameters by
 code, or `# follow-cam-clear`), an avatar's animation list when it changes
 (`# animations`, the built-in ones by name, each with `@probe` when the probe's
-prim is its source; an uploaded one is the account's own and left out) and
-alerts. A long text is quoted to its first 60 characters, with its length beside
-it. A trip `away` is noted as `# away` and `# back`, with how each teleport
-went. An attach is noted as `# attach` and, once the region shows prim A worn,
-`# attached` with the point and whether it kept its key; a drop as `# drop` and
-`# dropped`; a re-rez as `# take`, `# taken` (how the grid announced the item),
-`# rez` and `# rezzed`; a `response=none` says the region did not show it within
-twenty seconds. A line prim A prints before the update that names its new key is
-kept, not lost. A prim still worn when a probe ends is detached into the owner's
-inventory rather than derezzed. Names are never written: both avatars' names in
-anything a grid wrote become `<first>`, `<last>`, `<other-first>`,
-`<other-last>`. Every wait inside a run keeps what arrives during it, so a line
-printed while the case waits for a compile or a listing is not lost.
+prim is its source; an uploaded one is the account's own and left out), the
+teleport messages a script's `llTeleportAgent` brings (`# teleport-started`,
+`# teleport-local`, `# teleport-failed`, with their flags; an avatar a script
+teleported inside the region is walked back to the build location before the
+next probe) and alerts. A long text is quoted to its first 60 characters, with
+its length beside it. A trip `away` is noted as `# away` and `# back`, with how
+each teleport went. An attach is noted as `# attach` and, once the region shows
+prim A worn, `# attached` with the point and whether it kept its key; a drop as
+`# drop` and `# dropped`; a re-rez as `# take`, `# taken` (how the grid
+announced the item), `# rez` and `# rezzed`; a `response=none` says the region
+did not show it within twenty seconds. A line prim A prints before the update
+that names its new key is kept, not lost. A prim still worn when a probe ends is
+detached into the owner's inventory rather than derezzed. Names are never
+written: both avatars' names in anything a grid wrote become `<first>`,
+`<last>`, `<other-first>`, `<other-last>`. Every wait inside a run keeps what
+arrives during it, so a line printed while the case waits for a compile or a
+listing is not lost.
 
 A result file's header says where and how the run was made:
 
@@ -220,9 +224,11 @@ PROBE events/queue-limit rec=end
 
 `settings` on OpenSim is the `lsl_settings` fixture (`fixtures.toml`): the
 engine settings the operator configured (`MinTimerInterval`,
-`ScriptDelayFactor`, the sensor limits), which no script can read. A run
-that never printed `end` says `complete: no`, and the conformance record
-is `partial`. On Second Life the case needs the fixtures' build location,
+`ScriptDelayFactor`, the sensor limits), which no script can read. A run that
+never printed `end` says `complete: no`, and the conformance record is
+`partial`. A probe the grid would not compile prints nothing at all: its run
+holds a `# compile error in …` note per error in place of the `start`, and that
+is the measurement. On Second Life the case needs the fixtures' build location,
 as every case that rezzes does.
 
 The case collects; it never compares.
@@ -306,6 +312,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `comms/*`, 2026-10-24: listens, object chat, dialogs, text boxes, instant messages, the owner elsewhere, link messages | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#chat-listens-dialogs-and-link-messages) | | |
 | `detection/*`, 2026-10-25: sensors, raycasts, where a touch landed | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#sensors-raycasts-and-touches) | | |
 | `events/*`, 2026-10-25: the order across types, merging, collisions, attaching and re-rezzing, what else a state change keeps | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#events) | | |
+| `experience/*`, 2026-10-25: the experience functions and the key-value store from a script in no experience, teleporting an agent, a temporary attachment | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#experiences-and-the-key-value-store) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

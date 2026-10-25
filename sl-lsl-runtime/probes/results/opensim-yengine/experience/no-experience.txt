@@ -1,0 +1,22 @@
+grid: opensim-yengine
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: unknown (no start record)
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both
+complete: no
+
+# chat type=say from="Object" length=14 text="Script running"
+# compile error in "Probe": "(97,15) Error: undefined constant/function/variable llGetExperienceDetails(key)"
+# compile error in "Probe": "(132,4) Error: undefined constant/function/variable llRequestExperiencePermissions(key,string)"
+# compile error in "Probe": "(143,22) Error: undefined constant/function/variable llAgentInExperience(key)"
+# compile error in "Probe": "(185,31) Error: undefined name llGetExperienceErrorMessage(integer)"
+# compile error in "Probe": "(195,31) Error: undefined constant/function/variable llCreateKeyValue(string,string)"
+# compile error in "Probe": "(196,29) Error: undefined constant/function/variable llReadKeyValue(string)"
+# compile error in "Probe": "(197,31) Error: undefined constant/function/variable llUpdateKeyValue(string,string,integer,string)"
+# compile error in "Probe": "(198,31) Error: undefined constant/function/variable llDeleteKeyValue(string)"
+# compile error in "Probe": "(199,33) Error: undefined constant/function/variable llKeyCountKeyValue()"
+# compile error in "Probe": "(200,29) Error: undefined constant/function/variable llKeysKeyValue(integer,integer)"
+# compile error in "Probe": "(201,33) Error: undefined constant/function/variable llDataSizeKeyValue()"
+# compile error in "Probe": "(211,22) Error: undefined constant/function/variable llAgentInExperience(key)"
+# compile error in "Probe": "(281,4) Error: unknown event handler experience_permissions_denied(key,integer)"

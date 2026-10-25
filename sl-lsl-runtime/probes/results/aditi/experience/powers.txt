@@ -1,0 +1,56 @@
+grid: aditi
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE experience/powers rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE experience/powers rec=teleport step=1 call=llTeleportAgent of=owner back=0 perms=0 granter=none
+# debug-channel: from="Object" text="Script trying to teleport agent without current permission!"
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE experience/powers rec=after step=1 of=owner landed=0 moved=0 off=3.0 dz=0.0
+PROBE experience/powers rec=waiting drive=answer grant=4096
+PROBE experience/powers rec=asked step=2 of=owner mask=4096
+# question permissions=4096 object="Object" owner="<first> <last>" experience=none
+# answer grant=4096
+PROBE experience/powers rec=held step=2 answer=4096 perms=4096 granter=owner
+PROBE experience/powers rec=teleport step=3 call=llTeleportAgent of=owner back=0 perms=4096 granter=owner
+# teleport-started flags=0x20010
+# teleport-local flags=0x20010
+# alert text="You have been teleported by the object 'Object' on the parcel 'PUBLIC SANDBOX - All Welcome! (PG) No weapons. No Selling' owned by <first>."
+PROBE experience/powers rec=after step=3 of=owner landed=0 moved=1 off=65.8 dz=0.8
+PROBE experience/powers rec=teleport step=4 call=llTeleportAgent of=owner back=1 perms=4096 granter=owner
+# teleport-started flags=0x20010
+# teleport-local flags=0x20010
+PROBE experience/powers rec=after step=4 of=owner landed=0 moved=1 off=68.5 dz=0.8
+PROBE experience/powers rec=waiting drive=touch by=other
+# touch by=other active_group=none surface=none
+PROBE experience/powers rec=touch step=5 by=other
+PROBE experience/powers rec=teleport step=6 call=llTeleportAgent of=other back=0 perms=4096 granter=owner
+PROBE experience/powers rec=after step=6 of=other landed=0 moved=0 off=3.0 dz=0.0
+PROBE experience/powers rec=waiting drive=answer by=other grant=4096
+# question by=other permissions=4096 object="Object" owner="<first> <last>" experience=none
+PROBE experience/powers rec=asked step=7 of=other mask=4096
+# answer by=other grant=4096
+PROBE experience/powers rec=held step=7 answer=4096 perms=4096 granter=other
+PROBE experience/powers rec=teleport step=8 call=llTeleportAgent of=other back=0 perms=4096 granter=other
+PROBE experience/powers rec=after step=8 of=other landed=0 moved=0 off=3.0 dz=0.0
+PROBE experience/powers rec=waiting drive=answer grant=4128
+PROBE experience/powers rec=asked step=9 of=owner mask=4128
+# question permissions=4128 object="Object" owner="<first> <last>" experience=none
+# answer grant=4128
+PROBE experience/powers rec=held step=9 answer=4128 perms=4128 granter=owner
+PROBE experience/powers rec=teleport step=10 call=llTeleportAgentGlobalCoords of=owner back=0 perms=4128 granter=owner
+# teleport-started flags=0x30000
+# teleport-local flags=0x30000
+# alert text="You have been teleported by the object 'Object' on the parcel 'PUBLIC SANDBOX - All Welcome! (PG) No weapons. No Selling' owned by <first>."
+PROBE experience/powers rec=after step=10 of=owner landed=0 moved=1 off=18.5 dz=0.0
+PROBE experience/powers rec=teleport step=11 call=llTeleportAgent of=owner back=1 perms=4128 granter=owner
+# teleport-started flags=0x20010
+# teleport-failed reason="Could not teleport closer to destination"
+PROBE experience/powers rec=after step=11 of=owner landed=0 moved=1 off=17.5 dz=0.0
+PROBE experience/powers rec=attach-temp step=12 perms=4128 granter=owner
+PROBE experience/powers rec=attached step=12 to=owner point=5 owner=owner perms=4128
+PROBE experience/powers rec=end attached=5

@@ -12,7 +12,9 @@ control the camera, and so on, without prompting every time.
 
 What each grid actually sends — a record's fields as Second Life fills them,
 search paging, the preference and estate replies, and the refusals — is
-measured in [Grid Behaviour: Experiences](../gridspec/experiences.md).
+measured in [Grid Behaviour: Experiences](../gridspec/experiences.md); what a
+script's experience functions answer, in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#experiences-and-the-key-value-store).
 
 ## The model
 

@@ -657,6 +657,10 @@ pub const GRIDS: &[&str] = &[
 /// written.
 pub const RESULT_KEYS: &[&str] = &["grid", "date", "runner", "region", "engine", "settings"];
 
+/// How a result file's note for a compile error the grid reported starts:
+/// the runner writes one per error of a script that did not compile.
+pub const COMPILE_ERROR_NOTE: &str = "# compile error in ";
+
 /// One run's transcript: `probes/results/<grid>/<probe id>.txt`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResultFile {
@@ -730,7 +734,9 @@ impl ResultFile {
     /// What is wrong with this file as the run of probe `id` on `grid`: the
     /// header keys, the date, and the transcript — every line a probe line
     /// of `id` or a `#` note, exactly one `start` and, unless the header
-    /// says `complete: no`, exactly one `end`, last.
+    /// says `complete: no`, exactly one `end`, last. A run the grid would
+    /// not compile holds no record at all: `complete: no`, and a compile
+    /// error note in place of the `start`.
     #[must_use]
     pub fn problems(&self, grid: &str, id: &str) -> Vec<String> {
         let mut problems = Vec::new();
@@ -761,7 +767,13 @@ impl ResultFile {
                 Err(error) => problems.push(error.to_string()),
             }
         }
-        if records.iter().filter(|rec| *rec == "start").count() != 1 {
+        let not_compiled = !self.complete()
+            && records.is_empty()
+            && self
+                .body
+                .iter()
+                .any(|line| line.starts_with(COMPILE_ERROR_NOTE));
+        if !not_compiled && records.iter().filter(|rec| *rec == "start").count() != 1 {
             problems.push("the run does not hold one `start`".to_owned());
         }
         let ends = records.iter().filter(|rec| *rec == "end").count();
@@ -1095,6 +1107,32 @@ mod tests {
         )?;
         assert!(!file.complete());
         assert_eq!(file.problems("aditi", "a/b"), Vec::<String>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn a_run_that_never_compiled_needs_no_start_but_only_when_incomplete() -> Result<(), String> {
+        let head = "grid: opensim-xengine\ndate: 2026-10-25\nrunner: r\nregion: r\n\
+                    engine: XEngine\nsettings: s\n";
+        let note = "\n# compile error in \"Probe\": \"(272,4) syntax error\"\n";
+        let incomplete = ResultFile::parse(&format!("{head}complete: no\n{note}"))?;
+        assert_eq!(
+            incomplete.problems("opensim-xengine", "a/b"),
+            Vec::<String>::new()
+        );
+        let complete = ResultFile::parse(&format!("{head}{note}"))?;
+        assert_eq!(
+            complete.problems("opensim-xengine", "a/b"),
+            vec![
+                "the run does not hold one `start`".to_owned(),
+                "the run does not end with one `end`".to_owned(),
+            ]
+        );
+        let silent = ResultFile::parse(&format!("{head}complete: no\n\n# a note\n"))?;
+        assert_eq!(
+            silent.problems("opensim-xengine", "a/b"),
+            vec!["the run does not hold one `start`".to_owned()]
+        );
         Ok(())
     }
 }

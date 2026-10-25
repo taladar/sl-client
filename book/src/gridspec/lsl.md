@@ -555,3 +555,70 @@ sends is in [Controls](#controls)). The viewer's half is the wire the
 stimuli travel, the same on both grids — the touch, the attach from the
 ground and the drop, the take and the rez — which the runner sends with our
 own client.
+
+## Experiences and the key-value store
+
+Measured on 2026-10-25 by the probes `experience/no-experience` and
+`experience/powers`, with the same two avatars, on the same grids. Every
+script here was saved into **no experience**: none of our avatars owns,
+administers or contributes to one, and saving a script into an experience
+needs one of the three (creating an experience needs a Premium account —
+[Experiences](experiences.md)). So what follows is what each grid answers a
+script outside every experience, and what the powers an experience widens
+do without one. Granted experience permissions, a key-value store that
+holds anything, `llSitOnLink` and the experience-only reach of
+`llTeleportAgent` are unmeasured.
+
+### The experience functions
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a script that calls any experience function or has an `experience_permissions*` handler | compiles | **does not compile**: YEngine refuses each of the eleven calls, `undefined constant/function/variable llAgentInExperience(key)` and so on (`undefined name` for `llGetExperienceErrorMessage`), and the handler, `unknown event handler experience_permissions_denied(key,integer)` — it names no error for `experience_permissions`; XEngine's parser stops at the first handler, `syntax error`, before it would reach a call | no scripts |
+| `llAgentInExperience`, the owner or the other avatar | 0 | — | no scripts |
+| `llGetExperienceDetails(NULL_KEY)` (the script's own experience) | an empty list, still after five seconds | — | no scripts |
+| `llGetExperienceDetails` of a public experience (Bugsly Testing) | six fields at once: the name, the owner's key, the experience's key, the state `"0"`, its message `"no error"`, the group's key — in that order, which is not the library table's (it puts the group third) | — | no scripts |
+| `llGetExperienceDetails` of an id no experience has | an empty list at first; a second later six fields: an empty name, `NULL_KEY` owner and group, the id asked, state `"7"`, `"invalid experience"` | — | no scripts |
+| `llGetExperienceErrorMessage(0 … 18)` | `no error`, `exceeded throttle`, `experiences are disabled`, `invalid parameters`, `operation not permitted`, `script not associated with an experience`, `not found`, `invalid experience`, `experience is disabled`, `experience is suspended`, `unknown error`, `experience data quota exceeded`, `key-value store is disabled`, `key-value store communication failed`, `key doesn't exist`, `retry update`, `experience content rating too high`, `not allowed to run in current location`, `experience permissions request timed out` | — | no scripts |
+| `llGetExperienceErrorMessage` of −1, 19, 20 | `unknown error id` (not code 10's `unknown error`) | — | no scripts |
+| `llRequestExperiencePermissions`, the owner or the other avatar | `experience_permissions_denied` at once, reason **5**, `XP_ERROR_NO_EXPERIENCE` (`script not associated with an experience`); no question to either viewer, no `DEBUG_CHANNEL` complaint, nothing held | — | no scripts |
+| the seven key-value calls (`llCreateKeyValue`, `llReadKeyValue`, `llUpdateKeyValue`, `llDeleteKeyValue`, `llKeyCountKeyValue`, `llKeysKeyValue`, `llDataSizeKeyValue`) | each returns a request key, and the `dataserver` answers each `"0,5"` within a second, **not in the order called** | — | no scripts |
+
+### Teleporting an agent and a temporary attachment
+
+`experience/powers` aims each teleport three metres east of where the
+agent stands, in the region, and reads where it is five seconds later; the
+runner notes the teleport messages each viewer is sent. Bit 16 is
+`TeleportFlags::VIA_LOCATION`, `0x20000` `WITHIN_REGION`, `0x10000`
+`VIA_REGION_ID`.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llTeleportAgent(owner)` with no permission | `Script trying to teleport agent without current permission!` on `DEBUG_CHANNEL`; nothing moves | nothing at all | no scripts |
+| asking the owner for `PERMISSION_TELEPORT` (4096) | an ordinary question, no experience; granted | the same | no scripts |
+| `llTeleportAgent(owner, "", …)` granted | a `TeleportStart` and a `TeleportLocal`, flags `0x20010`, and an alert, `You have been teleported by the object 'Object' on the parcel '…' owned by <the object's owner>.`; the avatar lands **where the region routes it** — by Mauve's telehub, 66–80 m from the aim in three runs — not at the aim | `TeleportStart` and `TeleportLocal`, flags `0x10`, no alert; the avatar lands at the aim | no scripts |
+| — teleported back where it stood | the same routing, no alert; still as far off | lands where it stood | no scripts |
+| `llTeleportAgent(other)` with the owner's grant | nothing moves, no complaint | the same | no scripts |
+| asking the other avatar for `PERMISSION_TELEPORT` | the question is put to it; granted, the key is that avatar's | the same | no scripts |
+| `llTeleportAgent(other)` granted by that avatar | **nothing moves**, no complaint, nothing sent to either viewer: outside an experience only the owner is teleported | **teleported**, as the owner is | no scripts |
+| `llTeleportAgentGlobalCoords(owner, llGetRegionCorner(), …)` granted (with `PERMISSION_ATTACH`) | flags `0x30000`, the alert; lands 18.5 m from the aim | flags `0x10`, lands at the aim | no scripts |
+| — `llTeleportAgent` back where it stood | **refused**: `TeleportFailed`, `Could not teleport closer to destination` | lands where it stood | no scripts |
+| `llAttachToAvatarTemp(ATTACH_LHAND)` by the owner's prim, granted `PERMISSION_ATTACH` | `attach` with the owner's key; `llGetAttached` 5; the owner and the permissions unchanged | the same | no scripts |
+
+A landing that is not the aim is the region's routing, not the function's:
+Mauve has a telehub, and a teleport inside a region with one is sent to it
+(the conformance support's walk to the build location exists for the same
+reason). Where a parcel or a region routes nothing, as on the local OpenSim,
+the avatar lands at the aim. The runner walks an avatar a probe's script
+teleported back to the build location before the next probe.
+
+### What the viewer does with it
+
+Nothing an experience asks reaches the viewer from a script in no
+experience: Second Life denies `llRequestExperiencePermissions` without a
+question, and OpenSim does not compile it. The question a script *in* an
+experience puts — a `ScriptQuestion` naming the experience — is unmeasured
+for the reason above; the viewer's experience card is held to it as the
+reference viewer reads it by `e2e_script_permissions` on the fake Second
+Life flavour (*Yes* grants the mask and admits the experience). A script's
+teleport reaches the viewer as an ordinary in-region teleport, the
+`TeleportLocal` it handles for any other.

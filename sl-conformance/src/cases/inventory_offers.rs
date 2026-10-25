@@ -193,10 +193,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "accept_told_b",
         each(
             Answer::Text(
-                "im InventoryOffered from A as \"<A>\" \"conf-off-<n>-accept\", bucket type 7 and B's copy",
+                "im InventoryOffered from A as \"<A>\" \"conf-off-<run>-accept\", bucket type 7 and B's copy",
             ),
             Answer::Text(
-                "bulk update: [\"conf-off-<n>-accept\" type 7 in B's Notecard]; im InventoryOffered from A as \"<A>\" \"conf-off-<n>-accept\", bucket type 7 and B's copy",
+                "bulk update: [\"conf-off-<run>-accept\" type 7 in B's Notecard]; im InventoryOffered from A as \"<A>\" \"conf-off-<run>-accept\", bucket type 7 and B's copy",
             ),
         ),
     ),
@@ -244,7 +244,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "decline_reply_told_b",
         each(
             Answer::Text("nothing"),
-            Answer::Text("item created: \"conf-off-<n>-decline\" type 7 in B's Trash"),
+            Answer::Text("item created: \"conf-off-<run>-decline\" type 7 in B's Trash"),
         ),
     ),
     ("decline_told_a", both(Answer::Text("nothing"))),
@@ -252,10 +252,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "decline_told_b",
         each(
             Answer::Text(
-                "im InventoryOffered from A as \"<A>\" \"conf-off-<n>-decline\", bucket type 7 and B's copy",
+                "im InventoryOffered from A as \"<A>\" \"conf-off-<run>-decline\", bucket type 7 and B's copy",
             ),
             Answer::Text(
-                "bulk update: [\"conf-off-<n>-decline\" type 7 in B's Notecard]; im InventoryOffered from A as \"<A>\" \"conf-off-<n>-decline\", bucket type 7 and B's copy",
+                "bulk update: [\"conf-off-<run>-decline\" type 7 in B's Notecard]; im InventoryOffered from A as \"<A>\" \"conf-off-<run>-decline\", bucket type 7 and B's copy",
             ),
         ),
     ),
@@ -307,7 +307,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "folder_told_b",
         both(Answer::Text(
-            "bulk update: [folder \"conf-off-<n>-folder\" in B's RootInventory]; im InventoryOffered from A as \"<A>\" \"conf-off-<n>-folder\", bucket type 8 and B's copy",
+            "bulk update: [folder \"conf-off-<run>-folder\" in B's RootInventory]; im InventoryOffered from A as \"<A>\" \"conf-off-<run>-folder\", bucket type 8 and B's copy",
         )),
     ),
     ("ignore_by_id_after", both(Answer::Text("B's Notecard"))),
@@ -344,10 +344,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "ignore_told_b",
         each(
             Answer::Text(
-                "im InventoryOffered from A as \"<A>\" \"conf-off-<n>-ignore\", bucket type 7 and B's copy",
+                "im InventoryOffered from A as \"<A>\" \"conf-off-<run>-ignore\", bucket type 7 and B's copy",
             ),
             Answer::Text(
-                "bulk update: [\"conf-off-<n>-ignore\" type 7 in B's Notecard]; im InventoryOffered from A as \"<A>\" \"conf-off-<n>-ignore\", bucket type 7 and B's copy",
+                "bulk update: [\"conf-off-<run>-ignore\" type 7 in B's Notecard]; im InventoryOffered from A as \"<A>\" \"conf-off-<run>-ignore\", bucket type 7 and B's copy",
             ),
         ),
     ),
@@ -401,7 +401,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "nocopy_decline_reply_told_b",
         each(
             Answer::Text("nothing"),
-            Answer::Text("item created: \"conf-off-<n>-nocopy_decline\" type 7 in B's Trash"),
+            Answer::Text("item created: \"conf-off-<run>-nocopy_decline\" type 7 in B's Trash"),
         ),
     ),
     ("nocopy_decline_told_a", both(Answer::Text("nothing"))),
@@ -409,10 +409,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "nocopy_decline_told_b",
         each(
             Answer::Text(
-                "im InventoryOffered from A as \"<A>\" \"conf-off-<n>-nocopy_decline\", bucket type 7 and B's copy",
+                "im InventoryOffered from A as \"<A>\" \"conf-off-<run>-nocopy_decline\", bucket type 7 and B's copy",
             ),
             Answer::Text(
-                "bulk update: [\"conf-off-<n>-nocopy_decline\" type 7 in B's Notecard]; im InventoryOffered from A as \"<A>\" \"conf-off-<n>-nocopy_decline\", bucket type 7 and B's copy",
+                "bulk update: [\"conf-off-<run>-nocopy_decline\" type 7 in B's Notecard]; im InventoryOffered from A as \"<A>\" \"conf-off-<run>-nocopy_decline\", bucket type 7 and B's copy",
             ),
         ),
     ),
@@ -494,10 +494,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "nocopy_object_told_a",
         each(
             Answer::Text(
-                "im InventoryOffered from B as \"<B>\" \"conf-off-<n>-object\", bucket type 6 and A's copy",
+                "im InventoryOffered from B as \"<B>\" \"conf-off-<run>-object\", bucket type 6 and A's copy",
             ),
             Answer::Text(
-                "bulk update: [\"conf-off-<n>-object\" type 6 in A's Object]; im InventoryOffered from B as \"<B>\" \"conf-off-<n>-object\", bucket type 6 and A's copy",
+                "bulk update: [\"conf-off-<run>-object\" type 6 in A's Object]; im InventoryOffered from B as \"<B>\" \"conf-off-<run>-object\", bucket type 6 and A's copy",
             ),
         ),
     ),
@@ -531,9 +531,9 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "object_decline_offer_message",
         each(
             Answer::Text(
-                "'conf-off-<n>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )",
+                "'conf-off-<run>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )",
             ),
-            Answer::Text("'conf-off-<n>-in-cube'. (Object is located at <region> <position>)"),
+            Answer::Text("'conf-off-<run>-in-cube'. (Object is located at <region> <position>)"),
         ),
     ),
     ("object_decline_readable", both(Answer::Flag(true))),
@@ -542,7 +542,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "object_decline_reply_told_b",
         each(
             Answer::Text("nothing"),
-            Answer::Text("item created: \"conf-off-<n>-in-cube\" type 7 in B's Trash"),
+            Answer::Text("item created: \"conf-off-<run>-in-cube\" type 7 in B's Trash"),
         ),
     ),
     (
@@ -553,10 +553,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "object_decline_told_b",
         each(
             Answer::Text(
-                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<n>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )\", bucket type 7 alone, kept",
+                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<run>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )\", bucket type 7 alone, kept",
             ),
             Answer::Text(
-                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<n>-in-cube'. (Object is located at <region> <position>)\", bucket type 7 alone, kept; item created: \"conf-off-<n>-in-cube\" type 7 in B's Notecard",
+                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<run>-in-cube'. (Object is located at <region> <position>)\", bucket type 7 alone, kept; item created: \"conf-off-<run>-in-cube\" type 7 in B's Notecard",
             ),
         ),
     ),
@@ -587,9 +587,9 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "object_list_offer_message",
         each(
             Answer::Text(
-                "'conf-off-<n>-list'  ( http://slurl.com/secondlife/<region>/<position> )",
+                "'conf-off-<run>-list'  ( http://slurl.com/secondlife/<region>/<position> )",
             ),
-            Answer::Text("'conf-off-<n>-list'"),
+            Answer::Text("'conf-off-<run>-list'"),
         ),
     ),
     ("object_list_readable", both(Answer::Flag(true))),
@@ -597,9 +597,9 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "object_list_reply_told_b",
         each(
-            Answer::Text("bulk update: [folder \"conf-off-<n>-list\" in B's RootInventory]"),
+            Answer::Text("bulk update: [folder \"conf-off-<run>-list\" in B's RootInventory]"),
             Answer::Text(
-                "bulk update: [folder \"conf-off-<n>-list\" in B's RootInventory, \"conf-off-<n>-in-cube\" type 7 in B's copy]",
+                "bulk update: [folder \"conf-off-<run>-list\" in B's RootInventory, \"conf-off-<run>-in-cube\" type 7 in B's copy]",
             ),
         ),
     ),
@@ -611,10 +611,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "object_list_told_b",
         each(
             Answer::Text(
-                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<n>-list'  ( http://slurl.com/secondlife/<region>/<position> )\", bucket type 8 alone",
+                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<run>-list'  ( http://slurl.com/secondlife/<region>/<position> )\", bucket type 8 alone",
             ),
             Answer::Text(
-                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<n>-list'\", bucket type 8 alone",
+                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<run>-list'\", bucket type 8 alone",
             ),
         ),
     ),
@@ -644,9 +644,9 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "object_offer_message",
         each(
             Answer::Text(
-                "'conf-off-<n>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )",
+                "'conf-off-<run>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )",
             ),
-            Answer::Text("'conf-off-<n>-in-cube'. (Object is located at <region> <position>)"),
+            Answer::Text("'conf-off-<run>-in-cube'. (Object is located at <region> <position>)"),
         ),
     ),
     (
@@ -677,16 +677,16 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "object_owner_offer_message",
         each(
             Answer::Text(
-                "'conf-off-<n>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )",
+                "'conf-off-<run>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )",
             ),
-            Answer::Text("'conf-off-<n>-in-cube'. (Object is located at <region> <position>)"),
+            Answer::Text("'conf-off-<run>-in-cube'. (Object is located at <region> <position>)"),
         ),
     ),
     ("object_owner_readable", both(Answer::Flag(true))),
     (
         "object_owner_reply_told_a",
         each(
-            Answer::Text("item created: \"conf-off-<n>-in-cube\" type 7 in A's Notecard"),
+            Answer::Text("item created: \"conf-off-<run>-in-cube\" type 7 in A's Notecard"),
             Answer::Text("nothing"),
         ),
     ),
@@ -695,10 +695,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "object_owner_told_a",
         each(
             Answer::Text(
-                "chat by A's cube \"SLCOFFER|give\"; im TaskInventoryOffered from A as \"Object\" \"'conf-off-<n>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )\", bucket type 7 alone, kept",
+                "chat by A's cube \"SLCOFFER|give\"; im TaskInventoryOffered from A as \"Object\" \"'conf-off-<run>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )\", bucket type 7 alone, kept",
             ),
             Answer::Text(
-                "chat by A's cube \"SLCOFFER|give\"; im TaskInventoryOffered from A as \"Object\" \"'conf-off-<n>-in-cube'. (Object is located at <region> <position>)\", bucket type 7 alone, kept; item created: \"conf-off-<n>-in-cube\" type 7 in A's Notecard",
+                "chat by A's cube \"SLCOFFER|give\"; im TaskInventoryOffered from A as \"Object\" \"'conf-off-<run>-in-cube'. (Object is located at <region> <position>)\", bucket type 7 alone, kept; item created: \"conf-off-<run>-in-cube\" type 7 in A's Notecard",
             ),
         ),
     ),
@@ -708,7 +708,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
     (
         "object_reply_told_b",
         each(
-            Answer::Text("item created: \"conf-off-<n>-in-cube\" type 7 in B's Notecard"),
+            Answer::Text("item created: \"conf-off-<run>-in-cube\" type 7 in B's Notecard"),
             Answer::Text("nothing"),
         ),
     ),
@@ -720,10 +720,10 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         "object_told_b",
         each(
             Answer::Text(
-                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<n>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )\", bucket type 7 alone, kept",
+                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<run>-in-cube'  ( http://slurl.com/secondlife/<region>/<position> )\", bucket type 7 alone, kept",
             ),
             Answer::Text(
-                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<n>-in-cube'. (Object is located at <region> <position>)\", bucket type 7 alone, kept; item created: \"conf-off-<n>-in-cube\" type 7 in B's Notecard",
+                "im TaskInventoryOffered from A as \"Object\" \"'conf-off-<run>-in-cube'. (Object is located at <region> <position>)\", bucket type 7 alone, kept; item created: \"conf-off-<run>-in-cube\" type 7 in B's Notecard",
             ),
         ),
     ),
@@ -741,7 +741,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         each(
             Answer::Text("nothing"),
             Answer::Text(
-                "im InventoryOffered from A as \"<A>\" \"conf-off-<n>-offline\", bucket type 7 and B's copy",
+                "im InventoryOffered from A as \"<A>\" \"conf-off-<run>-offline\", bucket type 7 and B's copy",
             ),
         ),
     ),
@@ -839,7 +839,7 @@ const MEASURED: &[(&str, Measured<Answer>)] = &[
         each(
             Answer::Any,
             Answer::Text(
-                "bulk update: [\"conf-off-<n>-reverse\" type 7 in A's Notecard]; im InventoryOffered from B as \"<B>\" \"conf-off-<n>-reverse\", bucket type 7 and A's copy",
+                "bulk update: [\"conf-off-<run>-reverse\" type 7 in A's Notecard]; im InventoryOffered from B as \"<B>\" \"conf-off-<run>-reverse\", bucket type 7 and A's copy",
             ),
         ),
     ),
@@ -1043,14 +1043,19 @@ impl Scene {
         for (id, word) in &self.ids {
             out = out.replace(&id.to_string(), &format!("<{word}>"));
         }
+        // Before `without_ids`, which would take a tag that happens to hold
+        // a digit for a number and leave one of letters alone.
+        if !self.tag.is_empty() {
+            out = out.replace(
+                &format!("{NAME_PREFIX}{}", self.tag),
+                &format!("{NAME_PREFIX}<run>"),
+            );
+        }
         out = without_ids(&out);
         for (name, word) in &self.names {
             if !name.is_empty() {
                 out = out.replace(name.as_str(), word);
             }
-        }
-        if !self.tag.is_empty() {
-            out = out.replace(&self.tag, "<run>");
         }
         if !self.region.is_empty() {
             out = out.replace(&self.region, "<region>");
@@ -2885,6 +2890,21 @@ mod tests {
             ..Scene::default()
         };
         assert_eq!(scene.scrub("Some Resident gave it"), "<A> gave it");
+    }
+
+    /// A run's tag is `<run>` whether or not it happens to hold a digit.
+    #[test]
+    fn a_tag_is_the_run_of_digits_or_of_letters() {
+        for tag in ["3f9a0c", "fabcde"] {
+            let scene = Scene {
+                tag: tag.to_owned(),
+                ..Scene::default()
+            };
+            assert_eq!(
+                scene.scrub(&format!("\"{}\" in 1234ab", scene.name("accept"))),
+                "\"conf-off-<run>-accept\" in <n>"
+            );
+        }
     }
 
     /// A bucket is described by its shape and the role of the id it names.

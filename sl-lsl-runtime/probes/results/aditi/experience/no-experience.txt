@@ -1,0 +1,65 @@
+grid: aditi
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE experience/no-experience rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE experience/no-experience rec=in-experience of=owner answer=0
+PROBE experience/no-experience rec=details of=own try=0 length=0
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE experience/no-experience rec=details of=own try=1 length=0
+PROBE experience/no-experience rec=details of=own try=2 length=0
+PROBE experience/no-experience rec=details of=own try=3 length=0
+PROBE experience/no-experience rec=details of=own try=4 length=0
+PROBE experience/no-experience rec=details of=own try=5 length=0
+PROBE experience/no-experience rec=details of=bugsly try=0 length=6 name="Bugsly Testing" owner=set experience=bugsly state="0" message="no error" group=set
+PROBE experience/no-experience rec=details of=nobody try=0 length=0
+PROBE experience/no-experience rec=details of=nobody try=1 length=6 name="" owner=nil experience=nobody state="7" message="invalid experience" group=nil
+PROBE experience/no-experience rec=error-message code=-1 text="unknown error id"
+PROBE experience/no-experience rec=error-message code=0 text="no error"
+PROBE experience/no-experience rec=error-message code=1 text="exceeded throttle"
+PROBE experience/no-experience rec=error-message code=2 text="experiences are disabled"
+PROBE experience/no-experience rec=error-message code=3 text="invalid parameters"
+PROBE experience/no-experience rec=error-message code=4 text="operation not permitted"
+PROBE experience/no-experience rec=error-message code=5 text="script not associated with an experience"
+PROBE experience/no-experience rec=error-message code=6 text="not found"
+PROBE experience/no-experience rec=error-message code=7 text="invalid experience"
+PROBE experience/no-experience rec=error-message code=8 text="experience is disabled"
+PROBE experience/no-experience rec=error-message code=9 text="experience is suspended"
+PROBE experience/no-experience rec=error-message code=10 text="unknown error"
+PROBE experience/no-experience rec=error-message code=11 text="experience data quota exceeded"
+PROBE experience/no-experience rec=error-message code=12 text="key-value store is disabled"
+PROBE experience/no-experience rec=error-message code=13 text="key-value store communication failed"
+PROBE experience/no-experience rec=error-message code=14 text="key doesn't exist"
+PROBE experience/no-experience rec=error-message code=15 text="retry update"
+PROBE experience/no-experience rec=error-message code=16 text="experience content rating too high"
+PROBE experience/no-experience rec=error-message code=17 text="not allowed to run in current location"
+PROBE experience/no-experience rec=error-message code=18 text="experience permissions request timed out"
+PROBE experience/no-experience rec=error-message code=19 text="unknown error id"
+PROBE experience/no-experience rec=error-message code=20 text="unknown error id"
+PROBE experience/no-experience rec=asked step=6 of=owner
+PROBE experience/no-experience rec=denied step=6 agent=owner reason=5 text="script not associated with an experience" perms=0
+PROBE experience/no-experience rec=kv-call call=llCreateKeyValue request=set
+PROBE experience/no-experience rec=kv-call call=llReadKeyValue request=set
+PROBE experience/no-experience rec=kv-call call=llUpdateKeyValue request=set
+PROBE experience/no-experience rec=kv-call call=llDeleteKeyValue request=set
+PROBE experience/no-experience rec=kv-call call=llKeyCountKeyValue request=set
+PROBE experience/no-experience rec=kv-call call=llKeysKeyValue request=set
+PROBE experience/no-experience rec=kv-call call=llDataSizeKeyValue request=set
+PROBE experience/no-experience rec=kv-answer call=llKeyCountKeyValue data="0,5"
+PROBE experience/no-experience rec=kv-answer call=llDataSizeKeyValue data="0,5"
+PROBE experience/no-experience rec=kv-answer call=llDeleteKeyValue data="0,5"
+PROBE experience/no-experience rec=kv-answer call=llCreateKeyValue data="0,5"
+PROBE experience/no-experience rec=kv-answer call=llReadKeyValue data="0,5"
+PROBE experience/no-experience rec=kv-answer call=llUpdateKeyValue data="0,5"
+PROBE experience/no-experience rec=kv-answer call=llKeysKeyValue data="0,5"
+PROBE experience/no-experience rec=waiting drive=touch by=other
+# touch by=other active_group=none surface=none
+PROBE experience/no-experience rec=touch step=8 by=other
+PROBE experience/no-experience rec=in-experience of=other answer=0
+PROBE experience/no-experience rec=asked step=9 of=other
+PROBE experience/no-experience rec=denied step=9 agent=other reason=5 text="script not associated with an experience" perms=0
+PROBE experience/no-experience rec=end

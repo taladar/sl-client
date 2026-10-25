@@ -41,3 +41,9 @@ and let the table tests say what moved. Check that the legacy three are in
 it; if the served document omits functions the grid still compiles, add
 them from a second source rather than leave them uncompilable. Afterwards
 the scale run's "not in the library table" list should be empty.
+
+## From gridspec-lsl-experience (2026-10-25)
+
+`llSitOnLink`, `llClearExperiencePermissions` and `llGetExperienceList` went
+unprobed because the probe corpus test compiles every probe against this
+table; once refreshed, add them to `experience/no-experience`.

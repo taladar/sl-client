@@ -54,7 +54,9 @@ use sl_client_tokio::{
     ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
     SurfaceInfo, TaskInventoryItem, TransactionId, Uuid, Vector, XferListing,
 };
-use sl_lsl_runtime::probe::{Action, By, Drive, Line, PREFIX, ResultFile, Stimulus, TouchSurface};
+use sl_lsl_runtime::probe::{
+    Action, By, COMPILE_ERROR_NOTE, Drive, Line, PREFIX, ResultFile, Stimulus, TouchSurface,
+};
 
 use super::object_rez_derez::rez_params;
 use crate::context::{Session, TestContext, TestFailure, now_rfc3339};
@@ -64,6 +66,7 @@ use crate::registry::{GridTest, TestFuture};
 use crate::support::{
     REGION_TIMEOUT, REPLY_TIMEOUT, created_item_announcement_observing, is_opensim, is_own,
     settle_scene, settle_scene_observing, settle_scene_with_avatar, wait_for_own_new_object,
+    walk_within_region,
 };
 use crate::teleport_trace::{other_region, request_teleport};
 
@@ -357,6 +360,11 @@ struct Transcript {
     /// The newest object update of each of the probe's prims, by key: where
     /// it is now, and whether it is worn.
     latest: HashMap<ObjectKey, Object>,
+    /// Where the grid last put the owner by a teleport inside the region (a
+    /// script's `llTeleportAgent`), which may be far from the build location.
+    owner_moved: Option<Vector>,
+    /// Where it last put the other avatar, likewise.
+    other_moved: Option<Vector>,
 }
 
 impl Transcript {
@@ -417,6 +425,39 @@ impl Transcript {
                 "# agent-alert{by} modal={} text={}",
                 u8::from(*modal),
                 quote(&self.cast.scrub(message))
+            )),
+            _ => {}
+        }
+    }
+
+    /// Notes a teleport message the grid sent the avatar `by` names — a
+    /// script's `llTeleportAgent` moves an avatar without its asking: the
+    /// start, a teleport inside the region and a failure, each with its flags
+    /// (a landing position would differ between build locations).
+    fn teleport(&mut self, by: &str, event: &Event) {
+        match event {
+            Event::TeleportStarted { flags } => self
+                .body
+                .push(format!("# teleport-started{by} flags={:#x}", flags.0)),
+            Event::TeleportLocal {
+                flags, position, ..
+            } => {
+                let landed = Some(Vector {
+                    x: position.x(),
+                    y: position.y(),
+                    z: position.z(),
+                });
+                if by.is_empty() {
+                    self.owner_moved = landed;
+                } else {
+                    self.other_moved = landed;
+                }
+                self.body
+                    .push(format!("# teleport-local{by} flags={:#x}", flags.0));
+            }
+            Event::TeleportFailed { reason, .. } => self.body.push(format!(
+                "# teleport-failed{by} reason={}",
+                quote(&self.cast.scrub(reason))
             )),
             _ => {}
         }
@@ -524,6 +565,9 @@ impl Transcript {
             Event::AlertMessage { .. } | Event::AgentAlertMessage { .. } => {
                 self.alert(BY, event);
             }
+            Event::TeleportStarted { .. }
+            | Event::TeleportLocal { .. }
+            | Event::TeleportFailed { .. } => self.teleport(BY, event),
             _ => {}
         }
     }
@@ -631,6 +675,12 @@ impl Transcript {
             }
             Event::AlertMessage { .. } | Event::AgentAlertMessage { .. } => {
                 self.alert("", event);
+                return None;
+            }
+            Event::TeleportStarted { .. }
+            | Event::TeleportLocal { .. }
+            | Event::TeleportFailed { .. } => {
+                self.teleport("", event);
                 return None;
             }
             _ => {}
@@ -794,8 +844,14 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
         // the prims: a login that a telehub redirected (Mauve's) leaves it at
         // the hub.
         if build_position.is_some() {
-            let _settled =
-                settle_scene(other, grid, build_position, SETTLE_WINDOW, SETTLE_IDLE).await?;
+            let _settled = settle_scene(
+                other,
+                grid,
+                build_position.clone(),
+                SETTLE_WINDOW,
+                SETTLE_IDLE,
+            )
+            .await?;
         }
         active_group(other).await?
     };
@@ -847,6 +903,22 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
             trash,
         )
         .await?;
+        // A probe's script may have teleported an avatar inside the region,
+        // and a grid that routes such a teleport (Mauve's telehub) leaves it
+        // far from the build location, out of the next probe's chat range.
+        if let Some(build) = &build_position {
+            let (session, other) = ctx.primary_and_secondary().ok_or_else(|| {
+                TestFailure::State("the case runs with a secondary avatar".to_owned())
+            })?;
+            for (moved, avatar) in [
+                (transcript.owner_moved.clone(), session),
+                (transcript.other_moved.clone(), other),
+            ] {
+                if let Some(from) = moved {
+                    let _stopped = walk_within_region(avatar, from, build, |_event| {}).await?;
+                }
+            }
+        }
         let ended = transcript.ended;
         let file = ResultFile {
             header: result_header(&ResultHeader {
@@ -1086,7 +1158,7 @@ async fn run_probe(
             Ok((false, errors)) => {
                 for error in errors {
                     transcript.body.push(format!(
-                        "# compile error in {}: {}",
+                        "{COMPILE_ERROR_NOTE}{}: {}",
                         quote(&script.name),
                         quote(&error.raw)
                     ));
