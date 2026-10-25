@@ -47,3 +47,10 @@ the scale run's "not in the library table" list should be empty.
 `llSitOnLink`, `llClearExperiencePermissions` and `llGetExperienceList` went
 unprobed because the probe corpus test compiles every probe against this
 table; once refreshed, add them to `experience/no-experience`.
+
+## From gridspec-lsl-http-url (2026-10-25)
+
+`HTTP_USER_AGENT`, `HTTP_ACCEPT` and `HTTP_EXTENDED_ERROR` are not in this
+table, so `http/outbound` could not set the user agent or the `Accept` header
+the documented way, nor ask for the extended error body; once refreshed, add
+those steps to it.

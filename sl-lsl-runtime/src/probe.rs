@@ -53,6 +53,9 @@ pub enum Drive {
     /// The owner taking the probe's prim A into its inventory and rezzing it
     /// back where it stood.
     Rerez,
+    /// An HTTP request from outside the grid to a URL the probe's script
+    /// was given (`llRequestURL`).
+    Fetch,
 }
 
 impl Drive {
@@ -70,6 +73,7 @@ impl Drive {
             "attach" => Some(Self::Attach),
             "drop" => Some(Self::Drop),
             "rerez" => Some(Self::Rerez),
+            "fetch" => Some(Self::Fetch),
             _ => None,
         }
     }
@@ -502,6 +506,86 @@ pub enum Action {
     /// Take prim A into the owner's inventory and rez it back where it
     /// stood.
     Rerez,
+    /// Send an HTTP request from outside the grid to `url` followed by
+    /// `path`.
+    Fetch(Fetch),
+}
+
+/// The HTTP request a `fetch` stimulus sends: `url=<url> [method=<name>]
+/// [path="…"] [body="…"] [repeat=<n>] [type="…"] [header="<name>: <value>"]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fetch {
+    /// The URL the probe's script was given, as it printed it.
+    pub url: String,
+    /// The method, as it is sent (`GET` when the record names none).
+    pub method: String,
+    /// What follows the URL: a path and a query, as they are sent.
+    pub path: String,
+    /// The body: the record's `body` repeated `repeat` times (once when it
+    /// names no `repeat`), which lets a record of a few characters send a
+    /// body longer than a line of chat.
+    pub body: String,
+    /// The body's `Content-Type`, if the record names one.
+    pub content_type: Option<String>,
+    /// One more header, as a name and a value, if the record names one.
+    pub header: Option<(String, String)>,
+}
+
+impl Fetch {
+    /// The most a `repeat` may ask for: a body of at most this many copies.
+    pub const MAX_REPEAT: usize = 50_000;
+
+    /// Reads a `fetch` record's fields.
+    ///
+    /// # Errors
+    ///
+    /// What is wrong: no `url`, a `repeat` that is not a count up to
+    /// [`Self::MAX_REPEAT`], a `header` that is not `<name>: <value>`, or a
+    /// method or header name that is not a token.
+    fn from_waiting(line: &Line) -> Result<Self, String> {
+        let url = line.field("url").ok_or("a fetch drive without `url`")?;
+        let method = line.field("method").unwrap_or("GET");
+        let is_token = |text: &str| {
+            !text.is_empty()
+                && text
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c))
+        };
+        if !is_token(method) {
+            return Err(format!("a fetch drive's `method={method}` is not a token"));
+        }
+        let repeat = line
+            .field("repeat")
+            .map(|repeat| {
+                repeat
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|repeat| *repeat <= Self::MAX_REPEAT)
+                    .ok_or_else(|| format!("a fetch drive's `repeat={repeat}` is not a count"))
+            })
+            .transpose()?
+            .unwrap_or(1);
+        let header = line
+            .field("header")
+            .map(|header| {
+                header
+                    .split_once(": ")
+                    .filter(|(name, _)| is_token(name))
+                    .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                    .ok_or_else(|| {
+                        format!("a fetch drive's `header` \"{header}\" is not `<name>: <value>`")
+                    })
+            })
+            .transpose()?;
+        Ok(Self {
+            url: url.to_owned(),
+            method: method.to_owned(),
+            path: line.field("path").unwrap_or_default().to_owned(),
+            body: line.field("body").unwrap_or_default().repeat(repeat),
+            content_type: line.field("type").map(str::to_owned),
+            header,
+        })
+    }
 }
 
 impl Action {
@@ -520,19 +604,21 @@ impl Action {
             Self::Attach { .. } => Drive::Attach,
             Self::Drop => Drive::Drop,
             Self::Rerez => Drive::Rerez,
+            Self::Fetch(_) => Drive::Fetch,
         }
     }
 }
 
 /// What a `waiting` record asks the runner for:
 /// `rec=waiting
-/// drive=touch|chat|answer|sit|stand|control|dialog|away|attach|drop|rerez
+/// drive=touch|chat|answer|sit|stand|control|dialog|away|attach|drop|rerez|fetch
 /// [by=owner|other]`, and for a touch optionally `face=<n> uv=<u>,<v>
 /// st=<s>,<t> at=<x>,<y>,<z> normal=<x>,<y>,<z> binormal=<x>,<y>,<z>` (all of
 /// them, or none), for chat `channel=<n> text="…"`, for an answer
 /// `grant=<mask>`, for controls `keys=<mask>`, for a dialog `reply="…"`, for
-/// away `seconds=<n>`, for attach `point=<n>`. Without `by` it is the
-/// owner; only the owner goes `away`, attaches, drops or re-rezzes.
+/// away `seconds=<n>`, for attach `point=<n>`, for a fetch what [`Fetch`]
+/// reads. Without `by` it is the owner; only the owner goes `away`, attaches,
+/// drops or re-rezzes, and a fetch comes from no avatar at all.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stimulus {
     /// Who gives it.
@@ -549,8 +635,9 @@ impl Stimulus {
     /// What is wrong with it: not a `waiting` record, an unknown drive or
     /// avatar, a touch with part of a surface, a chat without its channel or
     /// text, a dialog without its
-    /// reply, an away without its seconds, an attach without its point, or
-    /// the other avatar sent away, attaching, dropping or re-rezzing.
+    /// reply, an away without its seconds, an attach without its point, a
+    /// fetch [`Fetch`] refuses, the other avatar sent away, attaching,
+    /// dropping or re-rezzing, or a fetch given `by` at all.
     pub fn from_waiting(line: &Line) -> Result<Self, String> {
         if line.rec != "waiting" {
             return Err(format!("`{}` is not a `waiting` record", line.rec));
@@ -609,6 +696,12 @@ impl Stimulus {
             },
             Some(Drive::Drop) => Action::Drop,
             Some(Drive::Rerez) => Action::Rerez,
+            Some(Drive::Fetch) => {
+                if line.field("by").is_some() {
+                    return Err("a fetch comes from no avatar, so it takes no `by`".to_owned());
+                }
+                Action::Fetch(Fetch::from_waiting(line)?)
+            }
             None => return Err(format!("`drive={drive}` is not a drive")),
         };
         if by == By::Other
@@ -802,7 +895,8 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        Action, BarePrim, By, Drive, Header, HeaderError, Line, ResultFile, Stimulus, TouchSurface,
+        Action, BarePrim, By, Drive, Fetch, Header, HeaderError, Line, ResultFile, Stimulus,
+        TouchSurface,
     };
 
     #[test]
@@ -837,7 +931,7 @@ mod tests {
     fn a_header_lists_its_drives_and_its_tolerances() -> Result<(), HeaderError> {
         let header = Header::parse(
             "// probe: a/b\n// drive: chat, touch, answer, sit, stand, control, dialog, away, attach, \
-             drop, rerez\n\
+             drop, rerez, fetch\n\
              // vary: seconds, rate\n// unordered: heard\n",
         )?;
         assert_eq!(
@@ -853,7 +947,8 @@ mod tests {
                 Drive::Away,
                 Drive::Attach,
                 Drive::Drop,
-                Drive::Rerez
+                Drive::Rerez,
+                Drive::Fetch
             ]
         );
         assert_eq!(header.vary, vec!["seconds".to_owned(), "rate".to_owned()]);
@@ -947,7 +1042,40 @@ mod tests {
             read("PROBE a/b rec=waiting drive=rerez")?.action,
             Action::Rerez
         );
+        assert_eq!(
+            read(
+                r#"PROBE a/b rec=waiting drive=fetch url=http://h:1/cap/x method=POST path="/p?q=1" body=ab repeat=3 type="text/plain" header="X-Probe: one two""#
+            )?,
+            Stimulus {
+                by: By::Owner,
+                action: Action::Fetch(Fetch {
+                    url: "http://h:1/cap/x".to_owned(),
+                    method: "POST".to_owned(),
+                    path: "/p?q=1".to_owned(),
+                    body: "ababab".to_owned(),
+                    content_type: Some("text/plain".to_owned()),
+                    header: Some(("X-Probe".to_owned(), "one two".to_owned())),
+                })
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=fetch url=http://h:1/cap/x")?.action,
+            Action::Fetch(Fetch {
+                url: "http://h:1/cap/x".to_owned(),
+                method: "GET".to_owned(),
+                path: String::new(),
+                body: String::new(),
+                content_type: None,
+                header: None,
+            })
+        );
         for refused in [
+            "PROBE a/b rec=waiting drive=fetch",
+            "PROBE a/b rec=waiting drive=fetch url=u by=owner",
+            "PROBE a/b rec=waiting drive=fetch url=u method=\"GE T\"",
+            "PROBE a/b rec=waiting drive=fetch url=u repeat=-1",
+            "PROBE a/b rec=waiting drive=fetch url=u repeat=50001",
+            "PROBE a/b rec=waiting drive=fetch url=u header=\"no colon\"",
             "PROBE a/b rec=waiting drive=answer",
             "PROBE a/b rec=waiting drive=answer grant=all",
             "PROBE a/b rec=waiting drive=control keys=-1",

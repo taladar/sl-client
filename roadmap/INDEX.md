@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 349 |
+| ready | 348 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1425 |
+| done | 1426 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2075** |
@@ -291,7 +291,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-http-url`](ideas/server-lsl-lib-http-url.md) — Library
   tranche — outbound HTTP and in-world URLs (blocked by
   `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
-  `gridspec-lsl-http-url`)
+  `gridspec-lsl-http-url` (done))
 - [`server-lsl-lib-json-linkset-data`](ideas/server-lsl-lib-json-linkset-data.md)
   — Library tranche — llJson* and the linkset data store (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (349)
+## ready (348)
 
 ### protocol
 
@@ -1153,9 +1153,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-http-url`](ready/gridspec-lsl-http-url.md) — LSL library
-  behaviour on each grid — outbound HTTP and in-world URLs (blocked by
-  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-json-linkset-data`](ready/gridspec-lsl-json-linkset-data.md) —
   LSL library behaviour on each grid — llJson* and the linkset data store
   (blocked by `gridspec-lsl-live-differential-runner` (done))
@@ -1543,7 +1540,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1425)
+## done (1426)
 
 ### protocol
 
@@ -4639,6 +4636,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-experience`](done/gridspec-lsl-experience.md) — LSL library
   behaviour on each grid — experiences and the key-value store (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-http-url`](done/gridspec-lsl-http-url.md) — LSL library
+  behaviour on each grid — outbound HTTP and in-world URLs (blocked by
   `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-live-differential-runner`](done/gridspec-lsl-live-differential-runner.md)
   — Run one probe on OpenSim YEngine, XEngine and aditi and collect the

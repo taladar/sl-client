@@ -34,7 +34,7 @@ A probe's id is its path below `probes/` without the extension
 | key | meaning |
 | --- | --- |
 | `probe` | the id; required |
-| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`; required |
+| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`, `fetch`; required |
 | `script` | the inventory name, which the probe's scripts find each other by; required in a probe of several |
 | `order` | where the script comes in the save order; required in a probe of several |
 | `prim` | the object that holds it, `A` (the default), `B`, … |
@@ -82,10 +82,22 @@ A from the ground to the owner at that attachment point (`ATTACH_*`), beside
 whatever is worn there, and `drive=drop` drops it, worn, to the ground.
 `drive=rerez` takes prim A into the owner's Trash and rezzes the item back where
 the prim stood: the prim that comes back has a new key, which the runner takes
-for prim A's from then on. All three are the owner's alone. `by=other` has the
-runner's second avatar do it, which owns nothing of the probe's; without `by` it
-is the owner. A probe asks only for the drives its header declares, and the run
-fails if it asks for another.
+for prim A's from then on. All three are the owner's alone. `drive=fetch`
+(`url=<url>`, and optionally `method=<name>`, `path="…"`, `body="…"`,
+`repeat=<n>`, `type="…"`, `header="<name>: <value>"`) sends an HTTP request from
+the runner itself — outside the grid, no avatar — to the URL the probe's script
+was given (`llRequestURL`) followed by `path`: the method (`GET` when absent),
+the body (`body` repeated `repeat` times, so a record of a few characters can
+send one longer than a line of chat), its `Content-Type` and one more header,
+each only when named. The runner sends the user agent `sl-conformance-probe`,
+follows no redirect and waits up to a minute; it keeps the probe's lines
+meanwhile, then notes the status, the `Content-Type`, the length and start of
+the body and how many seconds the answer took (`# fetched`), or `status=none`
+and why. The URL names the simulator's host and changes with every run, so the
+transcript keeps the record with `url=<url>`. `by=other` has the runner's second
+avatar do it, which owns nothing of the probe's; without `by` it is the owner (a
+`fetch` takes no `by`). A probe asks only for the drives its header declares,
+and the run fails if it asks for another.
 
 ```text
 PROBE avatar/permissions rec=waiting drive=answer grant=1044
@@ -96,6 +108,7 @@ PROBE comms/owner-away rec=waiting drive=away seconds=20
 PROBE events/attach rec=waiting drive=attach point=5
 PROBE events/attach rec=waiting drive=drop
 PROBE events/attach rec=waiting drive=rerez
+PROBE http/url rec=waiting drive=fetch url=<url> method=PUT path="/put" body=changed
 ```
 
 What a probe prints is one `llOwnerSay` line per observation:
@@ -174,18 +187,18 @@ script can read; every touch says the surface it sent, `surface=none` or
 `face=… uv=… st=… pos=… normal=… binormal=…` with `pos` in the region). It keeps
 the probe's owner-say lines from its prims, and every `DEBUG_CHANNEL` message
 they send as a `# debug-channel:` note (an owner-say line that is not a probe
-line as `# owner-say:`), until `end` or two minutes, then derezzes the prims to
-the Trash — and so it does when the grid refuses one of a probe's rezzes, with
-the prims already rezzed, before the run fails. It also notes what the grid sent
-the two viewers meanwhile, about the avatars: a permission question from the
-probe's prims (`# question`, the mask, the object's name, how the owner's name
-was put), a dialog from them (`# dialog`, the message, the buttons in the order
-sent, the channel) and the reply (`# dialog-reply`, the index and how many bytes
-went), an instant message from an object (`# im`, the dialog, who the grid names
-as sender and what the message id is, as roles — `owner`, `other`, `probe`), any
-other line of the prims' chat an avatar hears (`# chat`, its type and length,
-`# owner-say:` for the owner's own), the sit response (`# sit`, seat position
-and rotation, camera offsets), a `ScriptControlChange`
+line as `# owner-say:`), until `end` or three minutes, then derezzes the prims
+to the Trash — and so it does when the grid refuses one of a probe's rezzes,
+with the prims already rezzed, before the run fails. It also notes what the grid
+sent the two viewers meanwhile, about the avatars: a permission question from
+the probe's prims (`# question`, the mask, the object's name, how the owner's
+name was put), a dialog from them (`# dialog`, the message, the buttons in the
+order sent, the channel) and the reply (`# dialog-reply`, the index and how many
+bytes went), an instant message from an object (`# im`, the dialog, who the grid
+names as sender and what the message id is, as roles — `owner`, `other`,
+`probe`), any other line of the prims' chat an avatar hears (`# chat`, its type
+and length, `# owner-say:` for the owner's own), the sit response (`# sit`, seat
+position and rotation, camera offsets), a `ScriptControlChange`
 (`# script-control-change`), a follow camera (`# follow-cam`, the parameters by
 code, or `# follow-cam-clear`), an avatar's animation list when it changes
 (`# animations`, the built-in ones by name, each with `@probe` when the probe's
@@ -313,6 +326,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `detection/*`, 2026-10-25: sensors, raycasts, where a touch landed | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#sensors-raycasts-and-touches) | | |
 | `events/*`, 2026-10-25: the order across types, merging, collisions, attaching and re-rezzing, what else a state change keeps | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#events) | | |
 | `experience/*`, 2026-10-25: the experience functions and the key-value store from a script in no experience, teleporting an agent, a temporary attachment | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#experiences-and-the-key-value-store) | | |
+| `http/*`, 2026-10-25: what arrives at an in-world URL, what `llHTTPRequest` accepts, what comes back, URLs and the throttle | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#outbound-http-and-in-world-urls) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

@@ -1,0 +1,95 @@
+grid: aditi
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE http/outbound rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE http/outbound rec=url granted=1
+PROBE http/outbound rec=sent step=1 case=default request=set
+PROBE http/outbound rec=inbound step=1 method="GET" path="/s1" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=headers step=1 shard="Testing" object_name=match object_key=match region="Mauve (255744, 257792)" position="(52.000000, 62.000000, 34.594490)" here="<52.00000, 62.00000, 34.59449>" rotation="(0.000000, 0.000000, 0.000000, 1.000000)" turn="<0.00000, 0.00000, 0.00000, 1.00000>" velocity="(0.000000, 0.000000, 0.000000)" owner_name=legacy owner_key=match
+PROBE http/outbound rec=transport step=1 user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com)" accept="" accept_charset="" accept_encoding="" cache_control="" connection="" via="" forwarded_for=empty remote_ip=set host=empty script_url=match
+PROBE http/outbound rec=response step=1 status=200 metadata="" length=4 body="ok-1"
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE http/outbound rec=sent step=2 case=post-json request=set
+PROBE http/outbound rec=inbound step=2 method="POST" path="/s2" query="" length=7 body="{\"a\":1}" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=headers step=2 shard="Testing" object_name=match object_key=match region="Mauve (255744, 257792)" position="(52.000000, 62.000000, 34.594490)" here="<52.00000, 62.00000, 34.59449>" rotation="(0.000000, 0.000000, 0.000000, 1.000000)" turn="<0.00000, 0.00000, 0.00000, 1.00000>" velocity="(0.000000, 0.000000, 0.000000)" owner_name=legacy owner_key=match
+PROBE http/outbound rec=transport step=2 user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com)" accept="" accept_charset="" accept_encoding="" cache_control="" connection="" via="" forwarded_for=empty remote_ip=set host=empty script_url=match
+PROBE http/outbound rec=response step=2 status=200 metadata="" length=4 body="ok-2"
+PROBE http/outbound rec=sent step=3 case=post-default-type request=set
+PROBE http/outbound rec=inbound step=3 method="POST" path="/s3" query="" length=5 body="plain" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=3 status=200 metadata="" length=4 body="ok-3"
+PROBE http/outbound rec=sent step=4 case=put request=set
+PROBE http/outbound rec=inbound step=4 method="PUT" path="/s4" query="" length=8 body="put-body" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=4 status=200 metadata="" length=4 body="ok-4"
+PROBE http/outbound rec=sent step=5 case=delete request=set
+PROBE http/outbound rec=inbound step=5 method="DELETE" path="/s5" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=5 status=200 metadata="" length=4 body="ok-5"
+PROBE http/outbound rec=sent step=6 case=patch request=set
+PROBE http/outbound rec=inbound step=6 method="PATCH" path="/s6" query="" length=10 body="patch-body" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=6 status=200 metadata="" length=4 body="ok-6"
+PROBE http/outbound rec=sent step=7 case=head request=set
+PROBE http/outbound rec=response step=7 status=400 metadata="" length=158 body="HTTP/1.1 400 Bad Request\nDate: Sun, 25 O..."
+# debug-channel: from="Object" text="HTTP method OPTIONS is unsupported"
+PROBE http/outbound rec=sent step=8 case=options request=null
+# debug-channel: from="Object" text="HTTP method get is unsupported"
+PROBE http/outbound rec=sent step=9 case=lower-case request=null
+# debug-channel: from="Object" text="HTTP method FOO is unsupported"
+PROBE http/outbound rec=sent step=10 case=unknown-method request=null
+PROBE http/outbound rec=sent step=11 case=get-with-body request=set
+PROBE http/outbound rec=inbound step=11 method="GET" path="/s11" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=11 status=200 metadata="" length=5 body="ok-11"
+PROBE http/outbound rec=sent step=12 case=query request=set
+PROBE http/outbound rec=inbound step=12 method="GET" path="/s12" query="a=1&b=two%20words" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=12 status=200 metadata="" length=5 body="ok-12"
+PROBE http/outbound rec=sent step=13 case=custom request=set
+PROBE http/outbound rec=inbound step=13 method="GET" path="/s13" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=13 status=200 metadata="" length=5 body="ok-13"
+# debug-channel: from="Object" text="HTTP_CUSTOM_HEADER value is an invalid header"
+PROBE http/outbound rec=sent step=14 case=custom-host request=null
+# debug-channel: from="Object" text="HTTP_CUSTOM_HEADER value is an invalid header"
+PROBE http/outbound rec=sent step=15 case=custom-shard request=null
+# debug-channel: from="Object" text="HTTP_CUSTOM_HEADER value is an invalid header"
+PROBE http/outbound rec=sent step=16 case=custom-user-agent request=null
+# debug-channel: from="Object" text="HTTP_CUSTOM_HEADER value is an invalid header"
+PROBE http/outbound rec=sent step=17 case=custom-accept request=null
+PROBE http/outbound rec=sent step=18 case=no-pragma request=set
+PROBE http/outbound rec=inbound step=18 method="GET" path="/s18" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=18 status=200 metadata="" length=5 body="ok-18"
+PROBE http/outbound rec=sent step=19 case=long-request request=set
+PROBE http/outbound rec=inbound step=19 method="POST" path="/s19" query="" length=2048 body="0123456789012345678901234567890123456789..." content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=19 status=200 metadata="" length=5 body="ok-19"
+PROBE http/outbound rec=sent step=20 case=long-answer request=set
+PROBE http/outbound rec=inbound step=20 method="GET" path="/s20" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=20 status=200 metadata="0, 2048" length=2048 body="0123456789012345678901234567890123456789..."
+PROBE http/outbound rec=sent step=21 case=long-answer-max request=set
+PROBE http/outbound rec=inbound step=21 method="GET" path="/s21" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=21 status=200 metadata="" length=3000 body="0123456789012345678901234567890123456789..."
+PROBE http/outbound rec=sent step=22 case=long-answer-small request=set
+PROBE http/outbound rec=inbound step=22 method="GET" path="/s22" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=22 status=200 metadata="0, 100" length=100 body="0123456789012345678901234567890123456789..."
+# debug-channel: from="Object" text="HTTP_BODY_MAXLENGTH value is invalid"
+PROBE http/outbound rec=sent step=23 case=max-over request=null
+PROBE http/outbound rec=sent step=24 case=status-201 request=set
+PROBE http/outbound rec=inbound step=24 method="GET" path="/s24" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=24 status=201 metadata="" length=7 body="created"
+PROBE http/outbound rec=sent step=25 case=status-404 request=set
+PROBE http/outbound rec=inbound step=25 method="GET" path="/s25" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=25 status=404 metadata="" length=7 body="missing"
+PROBE http/outbound rec=sent step=26 case=status-500 request=set
+PROBE http/outbound rec=inbound step=26 method="GET" path="/s26" query="" length=0 body="" content_type="" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=26 status=500 metadata="" length=6 body="broken"
+# debug-channel: from="Object" text="HTTP parameter key 1 is not recognized"
+PROBE http/outbound rec=sent step=27 case=unknown-option request=null
+# debug-channel: from="Object" text="URL passed to llHTTPRequest is not valid"
+PROBE http/outbound rec=sent step=28 case=not-a-url request=null
+# debug-channel: from="Object" text="URL passed to llHTTPRequest is not valid"
+PROBE http/outbound rec=sent step=29 case=ftp request=null
+# debug-channel: from="Object" text="URL passed to llHTTPRequest is not valid"
+PROBE http/outbound rec=sent step=30 case=refused-port request=null
+PROBE http/outbound rec=sent step=31 case=no-such-host request=set
+PROBE http/outbound rec=response step=31 status=502 metadata="" length=391 body="<HTML>\n<HEAD>\n<TITLE>Unknown Host</TITLE..."
+PROBE http/outbound rec=end

@@ -1,0 +1,108 @@
+grid: opensim-yengine
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE http/outbound rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE http/outbound rec=url granted=1
+PROBE http/outbound rec=sent step=1 case=default request=set
+PROBE http/outbound rec=inbound step=1 method="GET" path="//s1" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=headers step=1 shard="OpenSim" object_name=match object_key=match region="Default Region (256000, 256000)" position="(120.000000, 128.000000, 27.500000)" here="<120.000000, 128.000000, 27.500000>" rotation="(0.000000, 0.000000, 0.000000, 1.000000)" turn="<0.000000, 0.000000, 0.000000, 1.000000>" velocity="(0.000000, 0.000000, 0.000000)" owner_name=legacy owner_key=match
+PROBE http/outbound rec=transport step=1 user_agent="" accept="" accept_charset="" accept_encoding="" cache_control="" connection="" via="" forwarded_for=empty remote_ip=loopback host=empty script_url=without-slash
+PROBE http/outbound rec=response step=1 status=200 metadata="" length=4 body="ok-1"
+PROBE http/outbound rec=sent step=2 case=post-json request=set
+PROBE http/outbound rec=inbound step=2 method="POST" path="//s2" query="" length=7 body="{\"a\":1}" content_type="application/json" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=headers step=2 shard="OpenSim" object_name=match object_key=match region="Default Region (256000, 256000)" position="(120.000000, 128.000000, 27.500000)" here="<120.000000, 128.000000, 27.500000>" rotation="(0.000000, 0.000000, 0.000000, 1.000000)" turn="<0.000000, 0.000000, 0.000000, 1.000000>" velocity="(0.000000, 0.000000, 0.000000)" owner_name=legacy owner_key=match
+PROBE http/outbound rec=transport step=2 user_agent="" accept="" accept_charset="" accept_encoding="" cache_control="" connection="" via="" forwarded_for=empty remote_ip=loopback host=empty script_url=without-slash
+PROBE http/outbound rec=response step=2 status=200 metadata="" length=4 body="ok-2"
+PROBE http/outbound rec=sent step=3 case=post-default-type request=set
+PROBE http/outbound rec=inbound step=3 method="POST" path="//s3" query="" length=5 body="plain" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=3 status=200 metadata="" length=4 body="ok-3"
+PROBE http/outbound rec=sent step=4 case=put request=set
+PROBE http/outbound rec=inbound step=4 method="PUT" path="//s4" query="" length=8 body="put-body" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=4 status=200 metadata="" length=4 body="ok-4"
+PROBE http/outbound rec=sent step=5 case=delete request=set
+PROBE http/outbound rec=inbound step=5 method="DELETE" path="//s5" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=5 status=200 metadata="" length=4 body="ok-5"
+PROBE http/outbound rec=sent step=6 case=patch request=set
+PROBE http/outbound rec=inbound step=6 method="PATCH" path="//s6" query="" length=10 body="patch-body" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=6 status=200 metadata="" length=4 body="ok-6"
+PROBE http/outbound rec=sent step=7 case=head request=set
+PROBE http/outbound rec=inbound step=7 method="HEAD" path="//s7" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=7 status=200 metadata="" length=0 body=""
+PROBE http/outbound rec=sent step=8 case=options request=set
+PROBE http/outbound rec=inbound step=8 method="OPTIONS" path="//s8" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=8 status=200 metadata="" length=4 body="ok-8"
+PROBE http/outbound rec=sent step=9 case=lower-case request=set
+PROBE http/outbound rec=inbound step=9 method="GET" path="//s9" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=9 status=200 metadata="" length=4 body="ok-9"
+PROBE http/outbound rec=sent step=10 case=unknown-method request=set
+PROBE http/outbound rec=inbound step=10 method="FOO" path="//s10" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=10 status=200 metadata="" length=5 body="ok-10"
+PROBE http/outbound rec=sent step=11 case=get-with-body request=set
+PROBE http/outbound rec=response step=11 status=499 metadata="" length=47 body="Cannot send a content-body with this ver..."
+PROBE http/outbound rec=sent step=12 case=query request=set
+PROBE http/outbound rec=inbound step=12 method="GET" path="//s12" query="a=1&b=two words" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=12 status=200 metadata="" length=5 body="ok-12"
+PROBE http/outbound rec=sent step=13 case=custom request=set
+PROBE http/outbound rec=inbound step=13 method="GET" path="//s13" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="one" x_probe_two="two"
+PROBE http/outbound rec=response step=13 status=200 metadata="" length=5 body="ok-13"
+# debug-channel: from="Object" text="llHTTPRequest: Name is invalid as a custom header at parameter 1"
+PROBE http/outbound rec=sent step=14 case=custom-host request=set
+PROBE http/outbound rec=no-response step=14
+PROBE http/outbound rec=sent step=15 case=custom-shard request=set
+PROBE http/outbound rec=inbound step=15 method="GET" path="//s15" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=headers step=15 shard="OpenSim"
+PROBE http/outbound rec=response step=15 status=200 metadata="" length=5 body="ok-15"
+# debug-channel: from="Object" text="llHTTPRequest: Name is invalid as a custom header at parameter 1"
+PROBE http/outbound rec=sent step=16 case=custom-user-agent request=set
+PROBE http/outbound rec=no-response step=16
+# debug-channel: from="Object" text="llHTTPRequest: Name is invalid as a custom header at parameter 1"
+PROBE http/outbound rec=sent step=17 case=custom-accept request=set
+PROBE http/outbound rec=no-response step=17
+PROBE http/outbound rec=sent step=18 case=no-pragma request=set
+PROBE http/outbound rec=inbound step=18 method="GET" path="//s18" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="no-cache" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=18 status=200 metadata="" length=5 body="ok-18"
+PROBE http/outbound rec=sent step=19 case=long-request request=set
+PROBE http/outbound rec=inbound step=19 method="POST" path="//s19" query="" length=3000 body="0123456789012345678901234567890123456789..." content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=19 status=200 metadata="" length=5 body="ok-19"
+PROBE http/outbound rec=sent step=20 case=long-answer request=set
+PROBE http/outbound rec=inbound step=20 method="GET" path="//s20" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=20 status=200 metadata="" length=2048 body="0123456789012345678901234567890123456789..."
+PROBE http/outbound rec=sent step=21 case=long-answer-max request=set
+PROBE http/outbound rec=inbound step=21 method="GET" path="//s21" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=21 status=200 metadata="" length=3000 body="0123456789012345678901234567890123456789..."
+PROBE http/outbound rec=sent step=22 case=long-answer-small request=set
+PROBE http/outbound rec=inbound step=22 method="GET" path="//s22" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=22 status=200 metadata="" length=100 body="0123456789012345678901234567890123456789..."
+PROBE http/outbound rec=sent step=23 case=max-over request=set
+PROBE http/outbound rec=inbound step=23 method="GET" path="//s23" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=23 status=200 metadata="" length=3000 body="0123456789012345678901234567890123456789..."
+PROBE http/outbound rec=sent step=24 case=status-201 request=set
+PROBE http/outbound rec=inbound step=24 method="GET" path="//s24" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=24 status=201 metadata="" length=7 body="created"
+PROBE http/outbound rec=sent step=25 case=status-404 request=set
+PROBE http/outbound rec=inbound step=25 method="GET" path="//s25" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=25 status=404 metadata="" length=7 body="missing"
+PROBE http/outbound rec=sent step=26 case=status-500 request=set
+PROBE http/outbound rec=inbound step=26 method="GET" path="//s26" query="" length=0 body="" content_type="text/plain;charset=utf-8" content_length="" pragma="" x_probe="" x_probe_two=""
+PROBE http/outbound rec=response step=26 status=500 metadata="" length=6 body="broken"
+# debug-channel: from="Object" text="llHTTPRequest: Parameter 0 is an invalid flag"
+PROBE http/outbound rec=sent step=27 case=unknown-option request=set
+PROBE http/outbound rec=no-response step=27
+# debug-channel: from="Object" text="llHTTPRequest: Invalid url"
+PROBE http/outbound rec=sent step=28 case=not-a-url request=set
+PROBE http/outbound rec=no-response step=28
+# debug-channel: from="Object" text="llHTTPRequest: Invalid url schema"
+PROBE http/outbound rec=sent step=29 case=ftp request=set
+PROBE http/outbound rec=no-response step=29
+# debug-channel: from="Object" text="llHttpRequest: Request to http://127.0.0.1:1/ disallowed by filter"
+PROBE http/outbound rec=sent step=30 case=refused-port request=set
+PROBE http/outbound rec=no-response step=30
+PROBE http/outbound rec=sent step=31 case=no-such-host request=set
+PROBE http/outbound rec=response step=31 status=499 metadata="" length=28 body="Error: NameResolutionFailure"
+PROBE http/outbound rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

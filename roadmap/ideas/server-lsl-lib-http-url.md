@@ -50,3 +50,40 @@ from a test client hitting it, and answers with `llHTTPResponse`, end to
 end in one `cargo test` with no socket outside loopback; the SL request
 headers present and asserted; and an outbound request with no injected
 responder failing cleanly rather than hanging.
+
+## Measured (gridspec-lsl-http-url, 2026-10-25)
+
+The rows are in `book/src/gridspec/lsl.md` § Outbound HTTP and in-world URLs,
+from the `http/*` probes on aditi and both OpenSim engines; the fake grid
+should take each flavour's column. The parts that shape the implementation:
+
+- **The URL** a flavour grants: Second Life's `…/cap/<key>` with no closing
+  slash (and an `https://…:12043` one for `llRequestSecureURL`), OpenSim's
+  `…/lslhttp/<key>/` with one (and `URL_REQUEST_DENIED` for a secure one
+  without an HTTPS listener). `x-script-url` is the URL without that slash;
+  OpenSim decodes `x-query-string`, Second Life does not.
+- **What `llGetHTTPHeader` gives**: on Second Life only the `x-*` headers
+  and `user-agent` — never a custom header, `content-type` or `pragma`; on
+  OpenSim every header.
+- **The headers a script's request carries**: `X-SecondLife-Shard`
+  (`Testing` / `OpenSim`), `-Object-Name`, `-Object-Key`, `-Owner-Name` (the
+  legacy name), `-Owner-Key`, `-Region` (`Name (x, y)`, the corner in
+  metres), `-Local-Position`, `-Local-Rotation`, `-Local-Velocity` in
+  parentheses; the user agent `Second-Life-LSL/<version>
+  (https://secondlife.com)` or none; OpenSim's inverted `Pragma: no-cache`.
+- **Refusals**: Second Life refuses with `NULL_KEY` and a `DEBUG_CHANNEL`
+  line (each text is in the table); OpenSim returns a key that is never
+  answered, after its own line.
+- **Lengths**: an inbound body over 2048 bytes is cut to 2048 on Second
+  Life; an answer is cut at `HTTP_BODY_MAXLENGTH` (2048 by default, at most
+  16384 on Second Life, unbounded on OpenSim), with `[HTTP_BODY_TRUNCATED,
+  <n>]` metadata on Second Life only.
+- **Timeouts and errors**: an unanswered request is 504 `Timed out waiting
+  for response from internal server.` (26 s) or 500 `Script timeout` (25 s);
+  a released URL 404; `HEAD` 400 and `OPTIONS` answered by the simulator on
+  Second Life; `llSetContentType` honoured on Second Life only.
+- **The throttle**: Second Life accepts 25 requests at once from a prim and
+  shouts `Too many HTTP requests too fast.` for each refusal unless
+  `HTTP_VERBOSE_THROTTLE` is off; OpenSim's defaults accept 4 and refuse
+  silently. A stated tick count in the fake grid's model, per the
+  determinism rule.

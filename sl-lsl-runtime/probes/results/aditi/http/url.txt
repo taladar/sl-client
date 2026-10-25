@@ -1,0 +1,78 @@
+grid: aditi
+date: 2026-10-25
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE http/url rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE http/url rec=free when=before free=7851
+PROBE http/url rec=asked kind=plain request=set
+PROBE http/url rec=granted kind=plain granted=1 id_matches=1 used=1 free=7850 scheme=http port=12046 path="/cap/08fca92b-6952-07fe-db71-be6daaf8be9e" host=name length=99
+PROBE http/url rec=asked kind=secure request=set
+PROBE http/url rec=granted kind=secure granted=1 id_matches=1 used=2 free=7849 scheme=https port=12043 path="/cap/c9648115-45c9-c7bd-da6f-252354a7a230" host=name length=100
+PROBE http/url rec=asked kind=third request=set
+PROBE http/url rec=granted kind=third granted=1 id_matches=1 used=3 free=7848 scheme=http port=12046 path="/cap/fca6a390-54e5-96bd-e7e2-d820e9035ae7" host=name length=99
+PROBE http/url rec=released kind=secure used=2
+PROBE http/url rec=free when=later used=2
+PROBE http/url rec=waiting drive=fetch url=<url> method=GET path="/get/a?x=1&y=two%20words" header="X-Probe: one"
+# fetch method=GET path="/get/a?x=1&y=two%20words" body_length=0 header="X-Probe: one"
+PROBE http/url rec=inbound method="GET" path="/get/a" query="x=1&y=two%20words" length=0 body="" script_url=match remote_ip=set user_agent="sl-conformance-probe" content_type="" content_length="" x_probe="" host=empty shard=""
+PROBE http/url rec=answer path="/get/a" status=200 length=2
+# fetched status=200 type="text/plain; charset=utf-8" length=2 body="ok" seconds=0
+PROBE http/url rec=waiting drive=fetch url=<url> method=POST path="/post" body=x repeat=3000 type="text/plain"
+# fetch method=POST path="/post" body_length=3000 type="text/plain"
+PROBE http/url rec=inbound method="POST" path="/post" query="" length=2048 body="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..." script_url=match remote_ip=set user_agent="sl-conformance-probe" content_type="" content_length="" x_probe="" host=empty shard=""
+PROBE http/url rec=answer path="/post" status=201 length=8
+# fetched status=201 type="application/json; charset=utf-8" length=8 body="{\"ok\":1}" seconds=0
+PROBE http/url rec=waiting drive=fetch url=<url> method=PUT path="/put" body=changed type="text/plain"
+# fetch method=PUT path="/put" body_length=7 type="text/plain"
+PROBE http/url rec=inbound method="PUT" path="/put" query="" length=7 body="changed" script_url=match remote_ip=set user_agent="sl-conformance-probe" content_type="" content_length="" x_probe="" host=empty shard=""
+PROBE http/url rec=answer path="/put" status=200 length=2
+# fetched status=200 type="text/plain; charset=utf-8" length=2 body="ok" seconds=0
+PROBE http/url rec=waiting drive=fetch url=<url> method=DELETE path="/delete"
+# fetch method=DELETE path="/delete" body_length=0
+PROBE http/url rec=inbound method="DELETE" path="/delete" query="" length=0 body="" script_url=match remote_ip=set user_agent="sl-conformance-probe" content_type="" content_length="" x_probe="" host=empty shard=""
+PROBE http/url rec=answer path="/delete" status=200 length=2
+# fetched status=200 type="text/plain; charset=utf-8" length=2 body="ok" seconds=0
+PROBE http/url rec=waiting drive=fetch url=<url> method=PATCH path="/patch" body=changed type="text/plain"
+# fetch method=PATCH path="/patch" body_length=7 type="text/plain"
+PROBE http/url rec=inbound method="PATCH" path="/patch" query="" length=7 body="changed" script_url=match remote_ip=set user_agent="sl-conformance-probe" content_type="" content_length="" x_probe="" host=empty shard=""
+PROBE http/url rec=answer path="/patch" status=200 length=2
+# fetched status=200 type="text/plain; charset=utf-8" length=2 body="ok" seconds=0
+PROBE http/url rec=waiting drive=fetch url=<url> method=HEAD path="/head"
+# fetch method=HEAD path="/head" body_length=0
+# fetched status=400 type="" length=0 body="" seconds=0
+PROBE http/url rec=no-inbound path="/head"
+PROBE http/url rec=waiting drive=fetch url=<url> method=OPTIONS path="/options"
+# fetch method=OPTIONS path="/options" body_length=0
+# fetched status=200 type="text/plain" length=2 body="OK" seconds=0
+PROBE http/url rec=no-inbound path="/options"
+PROBE http/url rec=waiting drive=fetch url=<url> method=GET path="/big"
+# fetch method=GET path="/big" body_length=0
+PROBE http/url rec=inbound method="GET" path="/big" query="" length=0 body="" script_url=match remote_ip=set user_agent="sl-conformance-probe" content_type="" content_length="" x_probe="" host=empty shard=""
+PROBE http/url rec=answer path="/big" status=200 length=5000
+# fetched status=200 type="text/plain; charset=utf-8" length=5000 body="012345678901234567890123456789012345678901234567890123456789…" seconds=0
+PROBE http/url rec=waiting drive=fetch url=<url> method=GET path="/html"
+# fetch method=GET path="/html" body_length=0
+PROBE http/url rec=inbound method="GET" path="/html" query="" length=0 body="" script_url=match remote_ip=set user_agent="sl-conformance-probe" content_type="" content_length="" x_probe="" host=empty shard=""
+PROBE http/url rec=answer path="/html" status=200 length=9
+# fetched status=200 type="text/plain; charset=utf-8" length=9 body="<p>hi</p>" seconds=0
+PROBE http/url rec=waiting drive=fetch url=<url> method=GET path="/status"
+# fetch method=GET path="/status" body_length=0
+PROBE http/url rec=inbound method="GET" path="/status" query="" length=0 body="" script_url=match remote_ip=set user_agent="sl-conformance-probe" content_type="" content_length="" x_probe="" host=empty shard=""
+PROBE http/url rec=answer path="/status" status=418 length=6
+# fetched status=418 type="text/plain; charset=utf-8" length=6 body="teapot" seconds=0
+PROBE http/url rec=waiting drive=fetch url=<url> method=GET path="/silent"
+# fetch method=GET path="/silent" body_length=0
+PROBE http/url rec=inbound method="GET" path="/silent" query="" length=0 body="" script_url=match remote_ip=set user_agent="sl-conformance-probe" content_type="" content_length="" x_probe="" host=empty shard=""
+PROBE http/url rec=answer path="/silent" status=none
+# fetched status=504 type="text/plain" length=52 body="Timed out waiting for response from internal server." seconds=26
+PROBE http/url rec=released kind=plain used=1
+PROBE http/url rec=waiting drive=fetch url=<url> method=GET path="/after-release"
+# fetch method=GET path="/after-release" body_length=0
+# fetched status=404 type="" length=54 body="cap not found: '08fca92b-6952-07fe-db71-be6daaf8be9e'\n" seconds=0
+PROBE http/url rec=free when=after used=0
+PROBE http/url rec=end

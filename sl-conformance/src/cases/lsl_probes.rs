@@ -47,15 +47,16 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    AgentKey, AssetType, AttachmentMode, AttachmentPoint, ChatChannel, ChatMessage, ChatSource,
-    ChatType, Command, ControlFlags, DeRezDestination, Event, FolderType, InstantMessage,
-    InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, Object, ObjectKey, PrimShape,
-    RegionHandle, RegionLocalObjectId, RestoreItem, RezScriptParams, Rotation, ScopedObjectId,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
-    SurfaceInfo, TaskInventoryItem, TransactionId, Uuid, Vector, XferListing,
+    AgentKey, AssetType, AttachmentMode, AttachmentPoint, ChatAudible, ChatChannel, ChatMessage,
+    ChatSource, ChatType, Command, ControlFlags, DeRezDestination, Event, FolderType,
+    InstantMessage, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, Object,
+    ObjectKey, PrimShape, RegionHandle, RegionLocalObjectId, RestoreItem, RezScriptParams,
+    Rotation, ScopedObjectId, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
+    ScriptTarget, ScriptUploadLocation, SurfaceInfo, TaskInventoryItem, TransactionId, Uuid,
+    Vector, XferListing,
 };
 use sl_lsl_runtime::probe::{
-    Action, By, COMPILE_ERROR_NOTE, Drive, Line, PREFIX, ResultFile, Stimulus, TouchSurface,
+    Action, By, COMPILE_ERROR_NOTE, Drive, Fetch, Line, PREFIX, ResultFile, Stimulus, TouchSurface,
 };
 
 use super::object_rez_derez::rez_params;
@@ -86,8 +87,9 @@ const SETTLE_IDLE: Duration = Duration::from_secs(5);
 const STEP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a probe may run before its transcript is written as
-/// incomplete. The longest probe in the corpus runs about thirty seconds.
-pub const PROBE_DEADLINE: Duration = Duration::from_secs(120);
+/// incomplete. The longest probe in the corpus, `http/outbound`, runs about
+/// a minute and a half.
+pub const PROBE_DEADLINE: Duration = Duration::from_secs(180);
 
 /// How long the case keeps listening after a probe's `end`, for a second
 /// prim's lines that are still on their way.
@@ -695,8 +697,17 @@ impl Transcript {
             return None;
         }
         if chat.chat_type == ChatType::DebugChannel {
+            // A line the listener could not hear comes with its text left out,
+            // which a note must not read as an empty message.
+            let audible = match chat.audible {
+                ChatAudible::Fully => String::new(),
+                ChatAudible::Barely => " audible=barely".to_owned(),
+                ChatAudible::Not => " audible=not".to_owned(),
+                ChatAudible::Unknown(byte) => format!(" audible={byte}"),
+                _ => " audible=other".to_owned(),
+            };
             self.body.push(format!(
-                "# debug-channel: from={} text={}",
+                "# debug-channel: from={} text={}{audible}",
                 quote(&chat.from_name),
                 quote(&self.cast.scrub(&chat.message))
             ));
@@ -707,8 +718,11 @@ impl Transcript {
             self.heard("", chat);
             return None;
         }
-        self.body.push(line.to_owned());
-        let parsed = Line::parse(line).ok()?;
+        let Ok(parsed) = Line::parse(line) else {
+            self.body.push(line.to_owned());
+            return None;
+        };
+        self.body.push(shown_line(line, &parsed));
         if parsed.rec == "start" && self.region.is_none() {
             self.region = parsed.field("region").map(str::to_owned);
         }
@@ -720,6 +734,17 @@ impl Transcript {
             self.waits.push(parsed);
         }
         Some(rec)
+    }
+}
+
+/// `line` as a transcript keeps it: a `fetch` record's URL, which names the
+/// simulator's host and changes with every run, is put as `<url>`.
+fn shown_line(line: &str, parsed: &Line) -> String {
+    match parsed.field("url") {
+        Some(url) if parsed.rec == "waiting" && parsed.field("drive") == Some("fetch") => {
+            line.replace(url, "<url>")
+        }
+        Some(_) | None => line.to_owned(),
     }
 }
 
@@ -1380,6 +1405,9 @@ async fn stimulate(
         }
         Action::Drop => return drop_prim(avatars.session, probe, scene, keys, transcript).await,
         Action::Rerez => return rerez(avatars.session, probe, scene, keys, transcript).await,
+        Action::Fetch(fetch) => {
+            return fetch_url(avatars.session, probe, keys, transcript, fetch).await;
+        }
         Action::Control { keys: held } => {
             transcript.body.push(format!(
                 "# control{by} keys={held} held={}s",
@@ -1423,7 +1451,8 @@ async fn stimulate(
         | Action::Control { .. }
         | Action::Attach { .. }
         | Action::Drop
-        | Action::Rerez => Ok(()),
+        | Action::Rerez
+        | Action::Fetch(_) => Ok(()),
         Action::Touch(surface) => {
             let prim = prims
                 .get("A")
@@ -1513,6 +1542,132 @@ fn scoped_for(actor: &Session, prim: &Object) -> ScopedObjectId {
         || prim.scoped_id(),
         |circuit| ScopedObjectId::new(circuit, prim.local_id),
     )
+}
+
+/// How long a `fetch` waits for the grid's answer: longer than either
+/// grid keeps a request a script does not answer.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How often a `fetch` in flight looks whether it is answered, keeping the
+/// probe's lines meanwhile.
+const FETCH_POLL: Duration = Duration::from_millis(200);
+
+/// The `User-Agent` a `fetch` sends, so that a probe can tell it apart.
+const FETCH_USER_AGENT: &str = "sl-conformance-probe";
+
+/// What the grid answered a `fetch`.
+#[derive(Debug)]
+struct Fetched {
+    /// The status.
+    status: u16,
+    /// The `Content-Type`, if any.
+    content_type: Option<String>,
+    /// The body.
+    body: String,
+}
+
+/// Sends the HTTP request a `fetch` stimulus names from outside the grid —
+/// from the runner, which is no avatar — and notes it and the answer: the
+/// status, the `Content-Type`, the body's length and its start, and how long
+/// the answer took. The probe's lines that arrive meanwhile are kept, so the
+/// script's view of the request comes before the answer's note.
+async fn fetch_url(
+    session: &mut Session,
+    probe: &Probe,
+    prims: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    fetch: &Fetch,
+) -> Result<(), TestFailure> {
+    let header = fetch
+        .header
+        .as_ref()
+        .map_or_else(String::new, |(name, value)| {
+            format!(" header={}", quote(&format!("{name}: {value}")))
+        });
+    let content_type = fetch
+        .content_type
+        .as_ref()
+        .map_or_else(String::new, |content_type| {
+            format!(" type={}", quote(content_type))
+        });
+    transcript.body.push(format!(
+        "# fetch method={} path={} body_length={}{content_type}{header}",
+        fetch.method,
+        quote(&fetch.path),
+        fetch.body.len()
+    ));
+    let client = reqwest::Client::builder()
+        .user_agent(FETCH_USER_AGENT)
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(FETCH_TIMEOUT)
+        .build()
+        .map_err(|error| TestFailure::State(format!("{}: no HTTP client: {error}", probe.id)))?;
+    let method = reqwest::Method::from_bytes(fetch.method.as_bytes())
+        .map_err(|error| TestFailure::State(format!("{}: {error}", probe.id)))?;
+    let mut request = client.request(method, format!("{}{}", fetch.url, fetch.path));
+    if let Some(content_type) = &fetch.content_type {
+        request = request.header(reqwest::header::CONTENT_TYPE, content_type);
+    }
+    if let Some((name, value)) = &fetch.header {
+        request = request.header(name, value);
+    }
+    if !fetch.body.is_empty() {
+        request = request.body(fetch.body.clone());
+    }
+    let started = Instant::now();
+    let flight = tokio::spawn(async move {
+        let response = request.send().await?;
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
+        let body = response.text().await?;
+        Ok::<_, reqwest::Error>(Fetched {
+            status,
+            content_type,
+            body,
+        })
+    });
+    while !flight.is_finished() {
+        collect(
+            session,
+            probe,
+            prims,
+            transcript,
+            after(FETCH_POLL),
+            Until::Deadline,
+        )
+        .await?;
+    }
+    let seconds = started.elapsed().as_secs();
+    let outcome = flight
+        .await
+        .map_err(|error| TestFailure::State(format!("{}: the fetch failed: {error}", probe.id)))?;
+    let note = match outcome {
+        Ok(fetched) => {
+            let body = transcript.cast.scrub(&fetched.body);
+            format!(
+                "# fetched status={} type={} length={} body={} seconds={seconds}",
+                fetched.status,
+                quote(fetched.content_type.as_deref().unwrap_or("")),
+                fetched.body.len(),
+                quote(&clip(&body))
+            )
+        }
+        Err(error) => {
+            let kind = if error.is_timeout() {
+                "timeout"
+            } else if error.is_connect() {
+                "connect"
+            } else {
+                "other"
+            };
+            format!("# fetched status=none error={kind} seconds={seconds}")
+        }
+    };
+    transcript.body.push(note);
+    Ok(())
 }
 
 /// How long the case waits after a probe asks for a stimulus before it
@@ -2247,7 +2402,29 @@ fn trash_folder(folders: &[InventoryFolder]) -> Option<InventoryFolderKey> {
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{Cast, clip, replace_ignoring_case, split_name};
+    use sl_lsl_runtime::probe::Line;
+
+    use super::{Cast, clip, replace_ignoring_case, shown_line, split_name};
+
+    #[test]
+    fn a_fetch_record_keeps_its_url_out_of_the_transcript() -> Result<(), String> {
+        let shown = |line: &str| {
+            Line::parse(line)
+                .map(|parsed| shown_line(line, &parsed))
+                .map_err(|error| error.to_string())
+        };
+        assert_eq!(
+            shown(
+                "PROBE http/url rec=waiting drive=fetch url=http://h.example:12046/cap/k path=\"/a\""
+            )?,
+            "PROBE http/url rec=waiting drive=fetch url=<url> path=\"/a\""
+        );
+        assert_eq!(
+            shown("PROBE http/url rec=granted url=http://h.example:12046/cap/k")?,
+            "PROBE http/url rec=granted url=http://h.example:12046/cap/k"
+        );
+        Ok(())
+    }
 
     #[test]
     fn a_name_is_replaced_as_a_whole_word_in_any_case() {

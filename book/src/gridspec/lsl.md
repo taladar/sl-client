@@ -622,3 +622,105 @@ reference viewer reads it by `e2e_script_permissions` on the fake Second
 Life flavour (*Yes* grants the mask and admits the experience). A script's
 teleport reaches the viewer as an ordinary in-region teleport, the
 `TeleportLocal` it handles for any other.
+
+## Outbound HTTP and in-world URLs
+
+Measured on 2026-10-25 by the probes `http/outbound`, `http/throttle` and
+`http/url`, on the same grids; YEngine and XEngine answered every one of
+them alike, so the OpenSim column is both. `http/outbound` sends each
+request to the script's **own** in-world URL, so one script is both the
+client and the server and nothing leaves the grid; `http/url` has the
+runner send requests to a script's URL from outside the grid (the `fetch`
+drive). OpenSim refuses scripts any address on the simulator's own network
+by default (`OutboundDisallowForUserScripts`), its own included, so the
+local grid lets them reach `127.0.0.1:9000` alone
+(`OutboundDisallowForUserScriptsExcept`, stated in each result's
+`settings`); every other llHTTPRequest limit is at its default.
+
+### What arrives at the URL
+
+What `llGetHTTPHeader` gives the receiving script of a plain
+`llHTTPRequest(url, [], "")` and of the runner's request.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the URL `llRequestURL` grants | `http://<simhost>:12046/cap/<key>`, no slash at the end | `http://127.0.0.1:9000/lslhttp/<key>/`, **with** one — so `<url>/path` arrives as `//path` | no scripts |
+| `x-path-info`, `x-query-string` | the path; the query **as sent** (`b=two%20words`) | the path; the query **decoded** (`b=two words`) | no scripts |
+| `x-script-url` | the URL granted | the URL without its closing slash | no scripts |
+| `x-remote-ip` | set | set (`127.…` for the script's own request) | no scripts |
+| `x-secondlife-shard` | `Testing` (aditi) | `OpenSim` (the `[Network] shard` setting) | no scripts |
+| `x-secondlife-object-name`, `-object-key`, `-owner-key` | the object's name and key, the owner's key | the same | no scripts |
+| `x-secondlife-owner-name` | the owner's legacy name (`First Last`) | the same | no scripts |
+| `x-secondlife-region` | `Mauve (255744, 257792)`: the name and the region's corner in metres | `Default Region (256000, 256000)`, the same form | no scripts |
+| `x-secondlife-local-position`, `-local-rotation`, `-local-velocity` | the object's, in parentheses — `(52.000000, 62.000000, 34.594490)` — which a cast to `vector` or `rotation` does not read | the same | no scripts |
+| `user-agent` of a script's request | `Second-Life-LSL/<sim version> (https://secondlife.com)` | **none** (`user_agent` is unset by default) | no scripts |
+| `content-type` of a script's request | not given to the script | `text/plain;charset=utf-8`, or the `HTTP_MIMETYPE` | no scripts |
+| `pragma` of a script's request | not given to the script | **inverted**: none by default, `no-cache` with `HTTP_PRAGMA_NO_CACHE, FALSE` (`ScriptsHttpRequests.cs` adds the header when the flag is off) | no scripts |
+| a custom header (`HTTP_CUSTOM_HEADER`, or the runner's `X-Probe`) | **not given to the script**: `llGetHTTPHeader` answers the `x-*` headers above and `user-agent` only | given | no scripts |
+| `host`, `accept`, `via`, `x-forwarded-for`, `content-length` | not given | not given | no scripts |
+| a request body over 2048 bytes (3000 sent, from a script or from outside) | **cut to 2048** | all 3000 | no scripts |
+
+### What `llHTTPRequest` accepts
+
+A refusal is `NULL_KEY` from `llHTTPRequest` and a line on
+`DEBUG_CHANNEL`; on OpenSim a refused request still returns a **key**, the
+`DEBUG_CHANNEL` line comes, and no `http_response` ever follows.
+
+| request | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `GET`, `POST`, `PUT`, `DELETE`, `PATCH` | sent; the method arrives as given | the same | no scripts |
+| `HEAD` | sent; the URL answers **400** with the raw `HTTP/1.1 400 Bad Request…` as the body, and the script never hears it | sent; the script hears it, the answer is 200 with no body | no scripts |
+| `OPTIONS`, `get` (lower case), `FOO` | refused: `HTTP method <name> is unsupported` | sent as given; the script hears it | no scripts |
+| `GET` with a body | sent; the body is dropped (the script reads 0 bytes) | **499**, `Cannot send a content-body with this verb-type.` | no scripts |
+| `HTTP_CUSTOM_HEADER` `X-Probe` | accepted (a key, a 200); whether it went out no script can see, since `llGetHTTPHeader` does not give it | accepted; arrives | no scripts |
+| `HTTP_CUSTOM_HEADER` `Host`, `User-Agent`, `Accept` | refused: `HTTP_CUSTOM_HEADER value is an invalid header` | refused: `llHTTPRequest: Name is invalid as a custom header at parameter 1` | no scripts |
+| `HTTP_CUSTOM_HEADER` `X-SecondLife-Shard` | refused, the same | **sent**, and the shard arrives as the grid's own, not the script's | no scripts |
+| `HTTP_BODY_MAXLENGTH` 16385 | refused: `HTTP_BODY_MAXLENGTH value is invalid` | accepted | no scripts |
+| an unknown option (99) | refused: `HTTP parameter key 1 is not recognized` | refused: `llHTTPRequest: Parameter 0 is an invalid flag` | no scripts |
+| `not a url`, `ftp://…` | refused: `URL passed to llHTTPRequest is not valid` | refused: `llHTTPRequest: Invalid url`, `… Invalid url schema` | no scripts |
+| `http://127.0.0.1:1/` | refused, the same `not valid` | refused: `llHttpRequest: Request to http://127.0.0.1:1/ disallowed by filter` | no scripts |
+| a host that does not resolve (`.invalid`) | **502**, an HTML `Unknown Host` page from the grid's proxy | **499**, `Error: NameResolutionFailure` | no scripts |
+
+### What comes back
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the status `llHTTPResponse` gives (201, 404, 500, 418) | arrives as given, to a script and outside | the same | no scripts |
+| an answer of 3000 bytes, no `HTTP_BODY_MAXLENGTH` | 2048 bytes, metadata `[0, 2048]` (`HTTP_BODY_TRUNCATED` at 2048) | 2048 bytes, **empty metadata** | no scripts |
+| — `HTTP_BODY_MAXLENGTH` 16384 | all 3000, empty metadata | the same | no scripts |
+| — `HTTP_BODY_MAXLENGTH` 100 | 100 bytes, metadata `[0, 100]` | 100 bytes, empty metadata | no scripts |
+| an answer of 5000 bytes, fetched from outside | all of it | the same | no scripts |
+| `Content-Type` outside, by default | `text/plain; charset=utf-8` | `text/plain` | no scripts |
+| — after `llSetContentType(CONTENT_TYPE_JSON)` | `application/json; charset=utf-8` | **`text/plain`**: the call has no effect | no scripts |
+| — after `llSetContentType(CONTENT_TYPE_HTML)` | `text/plain; charset=utf-8`: HTML is served only to the owner's own viewer | `text/plain` | no scripts |
+| `HEAD` from outside | **400**, the script never hears it | 200, the script hears it | no scripts |
+| `OPTIONS` from outside | 200, `text/plain`, `OK` — **answered by the simulator**, the script never hears it | the script hears it and answers | no scripts |
+| a request the script never answers | **504**, `Timed out waiting for response from internal server.`, after 26 s | **500**, `Script timeout`, after 25 s | no scripts |
+| a request to a released URL | 404, `cap not found: '<key>'` | 404, an HTML `Page not found` | no scripts |
+
+### URLs: what a script may hold
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llGetFreeURLs` before any | 7851 in Mauve's sandbox parcel (the parcel's and region's allowance, shared with everyone there) | 100 | no scripts |
+| `llRequestURL` | `URL_REQUEST_GRANTED`; the `http_request` id is the key the call returned; one URL fewer | the same | no scripts |
+| `llRequestSecureURL` | granted: `https://<simhost>:12043/cap/<key>` | **`URL_REQUEST_DENIED`**, no reason: the local simulator runs no HTTPS listener | no scripts |
+| `llReleaseURL` | the URL is free again at once | the same | no scripts |
+
+### The throttle
+
+`http/throttle` sends 30 requests in one event, then five more with
+`HTTP_VERBOSE_THROTTLE` off, all to its own URL.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the first 30 | **25** accepted, the next 5 refused (`NULL_KEY`), each with `Too many HTTP requests too fast.` on `DEBUG_CHANNEL` | **4** accepted (a burst of 3 and one more — `PrimRequestsBurst` 3, `PrimRequestsPerSec` 1), 26 refused, **no message** | no scripts |
+| five more with `HTTP_VERBOSE_THROTTLE, FALSE` | all refused, silently | all refused, silently | no scripts |
+| what came back for the accepted ones | 200 each; nothing for a refused one (no 499) | the same | no scripts |
+| one more request 40 s later | accepted, 200 | the same | no scripts |
+
+### What the viewer does with it
+
+Nothing: none of this reaches a viewer. A refused request's complaint is an
+ordinary `DEBUG_CHANNEL` line, and the HTML a script serves is only drawn as
+HTML by the owner's own viewer's browser, which `http/url` did not measure.
