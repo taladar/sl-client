@@ -1,0 +1,78 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE money/pay rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE money/pay rec=waiting drive=pay amount=1
+# pay amount=1 prim=A
+PROBE money/pay rec=money script=till step=1 payer=owner amount=1
+PROBE money/pay rec=money script=second payer=owner amount=1
+# money-balance success=1 change=0 type=5008 source=owner dest=owner amount=1 item="Object" description="You paid <first> <last> L$1."
+# money-balance success=1 change=0 type=5008 source=owner dest=owner amount=1 item="Object" description="<first> <last> paid you L$1."
+PROBE money/pay rec=waiting drive=pay by=other amount=1
+# pay by=other amount=1 prim=A
+PROBE money/pay rec=money script=second payer=other amount=1
+PROBE money/pay rec=money script=till step=2 payer=other amount=1
+# money-balance success=1 change=1 type=5008 source=other dest=owner amount=1 item="Object" description="<other-first> <last> paid you L$1."
+# money-balance by=other success=1 change=-1 type=5008 source=other dest=owner amount=1 item="Object" description="You paid <first> <last> L$1."
+PROBE money/pay rec=waiting drive=pay by=other amount=0
+# pay by=other amount=0 prim=A
+PROBE money/pay rec=set step=4 price=5 buttons="1, 2, 3, 4"
+PROBE money/pay rec=waiting drive=pay by=other amount=7
+# pay by=other amount=7 prim=A
+PROBE money/pay rec=money script=second payer=other amount=7
+PROBE money/pay rec=money script=till step=4 payer=other amount=7
+# money-balance success=1 change=7 type=5008 source=other dest=owner amount=7 item="Object" description="<other-first> <last> paid you L$7."
+# money-balance by=other success=1 change=-7 type=5008 source=other dest=owner amount=7 item="Object" description="You paid <first> <last> L$7."
+PROBE money/pay rec=set step=5 price=-1 buttons="-1, -1, -1, -1"
+PROBE money/pay rec=waiting drive=pay by=other amount=1
+# pay by=other amount=1 prim=A
+# alert by=other text="Payment stopped:  the price paid does not match any of the pay buttons set for this object"
+PROBE money/pay rec=set step=6 price=-1 buttons="1, 2, 3, 4"
+PROBE money/pay rec=waiting drive=pay by=other amount=7
+# pay by=other amount=7 prim=A
+PROBE money/pay rec=waiting drive=pay by=other amount=2
+# pay by=other amount=2 prim=A
+# money-balance success=1 change=2 type=5008 source=other dest=owner amount=2 item="Object" description="<other-first> <last> paid you L$2."
+PROBE money/pay rec=money script=second payer=other amount=2
+PROBE money/pay rec=money script=till step=7 payer=other amount=2
+# money-balance by=other success=1 change=-2 type=5008 source=other dest=owner amount=2 item="Object" description="You paid <first> <last> L$2."
+PROBE money/pay rec=set step=8 price=5 buttons="-1, -1, -1, -1"
+PROBE money/pay rec=waiting drive=pay by=other amount=7
+# pay by=other amount=7 prim=A
+# money-balance success=1 change=7 type=5008 source=other dest=owner amount=7 item="Object" description="<other-first> <last> paid you L$7."
+PROBE money/pay rec=money script=second payer=other amount=7
+PROBE money/pay rec=money script=till step=8 payer=other amount=7
+# money-balance by=other success=1 change=-7 type=5008 source=other dest=owner amount=7 item="Object" description="You paid <first> <last> L$7."
+PROBE money/pay rec=waiting drive=pay by=other amount=5
+# pay by=other amount=5 prim=A
+# money-balance success=1 change=5 type=5008 source=other dest=owner amount=5 item="Object" description="<other-first> <last> paid you L$5."
+PROBE money/pay rec=money script=second payer=other amount=5
+PROBE money/pay rec=money script=till step=9 payer=other amount=5
+# money-balance by=other success=1 change=-5 type=5008 source=other dest=owner amount=5 item="Object" description="You paid <first> <last> L$5."
+PROBE money/pay rec=set step=10 price=-2 buttons="-2, -2, -2, -2"
+PROBE money/pay rec=state step=10 state=closed
+PROBE money/pay rec=waiting drive=pay by=other amount=1
+# pay by=other amount=1 prim=A
+PROBE money/pay rec=money script=second payer=other amount=1
+# money-balance success=1 change=1 type=5008 source=other dest=owner amount=1 item="Object" description="<other-first> <last> paid you L$1."
+# money-balance by=other success=1 change=-1 type=5008 source=other dest=owner amount=1 item="Object" description="You paid <first> <last> L$1."
+PROBE money/pay rec=waiting drive=pay amount=1
+PROBE money/pay rec=removed script=second
+# pay amount=1 prim=A
+# money-balance success=1 change=0 type=5008 source=owner dest=owner amount=1 item="Object" description="You paid <first> <last> L$1."
+# money-balance success=1 change=0 type=5008 source=owner dest=owner amount=1 item="Object" description="<first> <last> paid you L$1."
+PROBE money/pay rec=state step=11 state=default
+PROBE money/pay rec=waiting drive=answer grant=2
+# question permissions=2 object="Object" owner="<first> <last>" experience=none
+# answer grant=2
+PROBE money/pay rec=granted step=12 perms=2
+PROBE money/pay rec=refund step=12 amount=23 result=0
+# money-balance success=1 change=-23 type=5009 source=owner dest=other amount=23 item="Object" description="You paid <other-first> <last> L$23."
+PROBE money/pay rec=end
+# money-balance by=other success=1 change=23 type=5009 source=owner dest=other amount=23 item="Object" description="<first> <last> paid you L$23."

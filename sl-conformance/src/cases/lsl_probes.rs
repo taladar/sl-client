@@ -51,11 +51,11 @@ use std::time::{Duration, Instant};
 use sl_client_tokio::{
     AgentKey, AssetType, AttachmentMode, AttachmentPoint, ChatAudible, ChatChannel, ChatMessage,
     ChatSource, ChatType, Command, ControlFlags, DeRezDestination, Event, FolderType,
-    InstantMessage, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, Object,
-    ObjectKey, PrimShape, RegionHandle, RegionLocalObjectId, RestoreItem, RezScriptParams,
-    Rotation, ScopedObjectId, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTarget, ScriptUploadLocation, SimStatId, SurfaceInfo, TaskInventoryItem, TransactionId,
-    Uuid, Vector, XferListing,
+    InstantMessage, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, LindenAmount,
+    MoneyBalance, MoneyTransactionType, Object, ObjectKey, OwnerKey, PrimShape, RegionHandle,
+    RegionLocalObjectId, RestoreItem, RezScriptParams, Rotation, ScopedObjectId, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimStatId,
+    SurfaceInfo, TaskInventoryItem, TransactionId, Uuid, Vector, XferListing,
 };
 use sl_lsl_runtime::probe::{
     Action, By, COMPILE_ERROR_NOTE, Drive, Fetch, Line, PREFIX, ResultFile, Stimulus, Target,
@@ -375,6 +375,9 @@ struct Transcript {
     notes_active_scripts: bool,
     /// The active-script count last noted.
     active_scripts: Option<f32>,
+    /// Each avatar's L$ balance as the grid last told it (by role), so that
+    /// a note can say how a balance changed and never what it is.
+    balances: HashMap<&'static str, u64>,
 }
 
 impl Transcript {
@@ -550,6 +553,56 @@ impl Transcript {
         self.body.push(note);
     }
 
+    /// What `id` — a transaction's source or destination — is to a note:
+    /// one of the avatars, one of the probe's prims, `nil`, or `someone`.
+    fn party(&self, prims: &HashSet<ObjectKey>, id: Uuid) -> &'static str {
+        if id.is_nil() {
+            "nil"
+        } else if self.is_probe(prims, ObjectKey::from(id)) {
+            "probe"
+        } else {
+            self.cast.role(AgentKey::from(id))
+        }
+    }
+
+    /// Notes a balance the grid sent the avatar `by` names, when it changed
+    /// or names a transaction: how much it changed by (`unknown` before a
+    /// first balance is known), never what it is, and the transaction's
+    /// type, parties, amount and description. A first balance that names no
+    /// transaction is kept quietly, as what later changes are measured from.
+    fn money(&mut self, by: &str, prims: &HashSet<ObjectKey>, balance: &MoneyBalance) {
+        let role = if by.is_empty() { "owner" } else { "other" };
+        let LindenAmount(now) = balance.balance;
+        let before = self.balances.insert(role, now);
+        let change = before.map(|before| i128::from(now).saturating_sub(i128::from(before)));
+        if balance.transaction.is_none() && change.is_none_or(|change| change == 0) {
+            return;
+        }
+        let change = change.map_or_else(|| "unknown".to_owned(), |change| change.to_string());
+        let transaction = balance
+            .transaction
+            .as_ref()
+            .map_or_else(String::new, |transaction| {
+                let uuid = |owner: &OwnerKey| match owner {
+                    OwnerKey::Agent(agent) => agent.uuid(),
+                    OwnerKey::Group(group) => group.uuid(),
+                };
+                let LindenAmount(amount) = transaction.amount;
+                format!(
+                    " type={} source={} dest={} amount={amount} item={}",
+                    transaction.transaction_type,
+                    self.party(prims, uuid(&transaction.source)),
+                    self.party(prims, uuid(&transaction.dest)),
+                    quote(&self.cast.scrub(&transaction.item_description))
+                )
+            });
+        self.body.push(format!(
+            "# money-balance{by} success={} change={change}{transaction} description={}",
+            u8::from(balance.success),
+            quote(&self.cast.scrub(&balance.description))
+        ));
+    }
+
     /// Takes one event of the other avatar's session: the permission
     /// questions and dialogs from the probe's prims (kept for an answer by
     /// that avatar), what it hears of their chat and instant messages, and
@@ -564,6 +617,7 @@ impl Transcript {
                 self.dialog(BY, dialog);
             }
             Event::InstantMessageReceived(im) => self.instant_message(BY, prims, im),
+            Event::MoneyBalance(balance) => self.money(BY, prims, balance),
             Event::ChatReceived(chat) => match chat.source {
                 ChatSource::Object(source)
                     if self.is_probe(prims, source) && chat.chat_type != ChatType::DebugChannel =>
@@ -623,6 +677,10 @@ impl Transcript {
             }
             Event::InstantMessageReceived(im) => {
                 self.instant_message("", prims, im);
+                return None;
+            }
+            Event::MoneyBalance(balance) => {
+                self.money("", prims, balance);
                 return None;
             }
             Event::ScriptControlChange(changes) => {
@@ -1151,6 +1209,13 @@ async fn run_probe(
     let keys: HashSet<ObjectKey> = prims.values().map(|object| object.full_id).collect();
     let mut transcript = Transcript::new(avatars.cast.clone());
     transcript.notes_active_scripts = probe.notes_active_scripts();
+    if probe.drives().contains(&Drive::Pay) {
+        // What each avatar holds before anything is paid, so that the notes
+        // can say how a payment changed it. The answers come while the
+        // scripts are planted.
+        session.send(Command::RequestMoneyBalance).await?;
+        avatars.other.send(Command::RequestMoneyBalance).await?;
+    }
 
     let mut planted = true;
     for script in &probe.scripts {
@@ -1442,6 +1507,53 @@ async fn stimulate(
         Action::Fetch(fetch) => {
             return fetch_url(avatars.session, probe, keys, transcript, fetch).await;
         }
+        Action::Pay { amount, prim } => {
+            return pay(
+                avatars,
+                stimulus.by,
+                probe,
+                prims,
+                keys,
+                transcript,
+                (*amount, prim),
+            )
+            .await;
+        }
+        Action::PayPrice { prim } => {
+            return pay_price(avatars, stimulus.by, probe, prims, keys, transcript, prim).await;
+        }
+        Action::Revoke {
+            permissions,
+            whole_region,
+        } => {
+            let actor = match stimulus.by {
+                By::Owner => &mut *avatars.session,
+                By::Other => &mut *avatars.other,
+            };
+            let (object_id, target) = if *whole_region {
+                let region = actor
+                    .region_identity()
+                    .map(|identity| identity.region_id)
+                    .ok_or_else(|| {
+                        TestFailure::State(format!("{}: the region's id is unknown", probe.id))
+                    })?;
+                (ObjectKey::from(region), "region")
+            } else {
+                let prim = prims
+                    .get("A")
+                    .ok_or_else(|| TestFailure::State(format!("{}: no prim A", probe.id)))?;
+                (prim.full_id, "object")
+            };
+            transcript
+                .body
+                .push(format!("# revoke{by} perms={permissions} target={target}"));
+            return actor
+                .send(Command::RevokeScriptPermissions {
+                    object_id,
+                    permissions: ScriptPermissions(i32::from_ne_bytes(permissions.to_ne_bytes())),
+                })
+                .await;
+        }
         Action::Control { keys: held } => {
             transcript.body.push(format!(
                 "# control{by} keys={held} held={}s",
@@ -1486,7 +1598,10 @@ async fn stimulate(
         | Action::Attach { .. }
         | Action::Drop
         | Action::Rerez
-        | Action::Fetch(_) => Ok(()),
+        | Action::Fetch(_)
+        | Action::Pay { .. }
+        | Action::PayPrice { .. }
+        | Action::Revoke { .. } => Ok(()),
         Action::Touch(surface) => {
             let prim = prims
                 .get("A")
@@ -1547,6 +1662,119 @@ async fn stimulate(
                 .await
         }
     }
+}
+
+/// How long a `pay-price` waits for the answer: a grid answers at once or
+/// not at all (OpenSim sends nothing for a layout of zeros), and a probe
+/// that asks after each change must not find the runner still waiting for
+/// the last.
+const PAY_PRICE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a `pay` keeps the probe's lines after it pays, for the
+/// `money` event and the balances the grid sends both avatars.
+const PAY_SETTLE: Duration = Duration::from_secs(5);
+
+/// Pays the prim `paid` labels `amount` L$ from the avatar `by` names, as a
+/// viewer's pay dialog does — a `MoneyTransferRequest` of the object-payment
+/// type, to the object — and notes it, then keeps the probe's lines and both
+/// avatars' balances for [`PAY_SETTLE`].
+async fn pay(
+    avatars: &mut Avatars<'_>,
+    by: By,
+    probe: &Probe,
+    prims: &BTreeMap<String, Object>,
+    keys: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    (amount, paid): (u64, &str),
+) -> Result<(), TestFailure> {
+    let prim = prims
+        .get(paid)
+        .ok_or_else(|| TestFailure::State(format!("{}: no prim {paid}", probe.id)))?;
+    let label = match by {
+        By::Owner => "",
+        By::Other => " by=other",
+    };
+    transcript
+        .body
+        .push(format!("# pay{label} amount={amount} prim={paid}"));
+    let command = Command::SendMoneyTransfer {
+        dest: prim.full_id.uuid(),
+        amount: LindenAmount(amount),
+        kind: MoneyTransactionType::PayObject,
+        description: String::new(),
+    };
+    match by {
+        By::Owner => avatars.session.send(command).await?,
+        By::Other => avatars.other.send(command).await?,
+    }
+    collect(
+        avatars.session,
+        probe,
+        keys,
+        transcript,
+        after(PAY_SETTLE),
+        Until::Deadline,
+    )
+    .await?;
+    drain_other(avatars.other, keys, transcript).await
+}
+
+/// Asks the prim `asked` labels for its pay buttons from the avatar `by`
+/// names (`RequestPayPrice`) and notes the answer — the default amount and
+/// the buttons, as sent — or that none came within [`PAY_PRICE_TIMEOUT`].
+async fn pay_price(
+    avatars: &mut Avatars<'_>,
+    by: By,
+    probe: &Probe,
+    prims: &BTreeMap<String, Object>,
+    keys: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    asked: &str,
+) -> Result<(), TestFailure> {
+    let object_id = prims
+        .get(asked)
+        .ok_or_else(|| TestFailure::State(format!("{}: no prim {asked}", probe.id)))?
+        .full_id;
+    let (actor, label) = match by {
+        By::Owner => (&mut *avatars.session, ""),
+        By::Other => (&mut *avatars.other, " by=other"),
+    };
+    actor.send(Command::RequestPayPrice { object_id }).await?;
+    let outcome = actor
+        .wait_for(PAY_PRICE_TIMEOUT, |event| match event {
+            Event::PayPriceReply {
+                object_id: replied,
+                default_pay_price,
+                pay_buttons,
+            } if *replied == object_id => Some(format!(
+                "# pay-price{label} prim={asked} default={default_pay_price} buttons={}",
+                quote(
+                    &pay_buttons
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            )),
+            _ => {
+                match by {
+                    By::Owner => {
+                        let _kept = transcript.take(&probe.id, keys, event);
+                    }
+                    By::Other => transcript.take_other(keys, event),
+                }
+                None
+            }
+        })
+        .await;
+    match outcome {
+        Ok(note) => transcript.body.push(note),
+        Err(TestFailure::Timeout(_)) => transcript
+            .body
+            .push(format!("# pay-price{label} prim={asked} response=none")),
+        Err(other) => return Err(other),
+    }
+    Ok(())
 }
 
 /// The surface block a touch sends for `surface`, its point put in the
@@ -2438,7 +2666,13 @@ mod tests {
 
     use sl_lsl_runtime::probe::Line;
 
-    use super::{Cast, clip, replace_ignoring_case, shown_line, split_name};
+    use std::collections::HashSet;
+
+    use sl_client_tokio::{
+        AgentKey, LandArea, LindenAmount, MoneyBalance, MoneyTransaction, ObjectKey, OwnerKey, Uuid,
+    };
+
+    use super::{Cast, Transcript, clip, replace_ignoring_case, shown_line, split_name};
 
     #[test]
     fn a_fetch_record_keeps_its_url_out_of_the_transcript() -> Result<(), String> {
@@ -2485,6 +2719,67 @@ mod tests {
             "<first> <last> offered <other-first> <other-last> a seat"
         );
         assert_eq!(split_name("Single"), ("Single".to_owned(), String::new()));
+    }
+
+    #[test]
+    fn a_balance_is_noted_as_its_change_with_the_parties_as_roles() {
+        let owner = AgentKey::from(Uuid::from_u128(1));
+        let other = AgentKey::from(Uuid::from_u128(2));
+        let prim = Uuid::from_u128(3);
+        let mut transcript = Transcript::new(Cast {
+            owner: Some(owner),
+            other: Some(other),
+            owner_name: split_name("Knob Label"),
+            other_name: split_name("Lever Dial"),
+        });
+        let prims: HashSet<ObjectKey> = HashSet::from([ObjectKey::from(prim)]);
+        let balance = |amount: u64, transaction: Option<MoneyTransaction>| MoneyBalance {
+            agent_id: owner,
+            transaction_id: Uuid::nil(),
+            success: true,
+            balance: LindenAmount(amount),
+            square_meters_credit: LandArea(0),
+            square_meters_committed: LandArea(0),
+            description: transaction
+                .as_ref()
+                .map_or_else(String::new, |_| "Lever Dial paid you L$2.".to_owned()),
+            transaction,
+        };
+        // The first balance, a poll, is only what later changes are measured
+        // from; an unchanged poll says nothing either.
+        transcript.money("", &prims, &balance(100, None));
+        transcript.money("", &prims, &balance(100, None));
+        assert!(transcript.body.is_empty());
+        transcript.money(
+            "",
+            &prims,
+            &balance(
+                102,
+                Some(MoneyTransaction {
+                    transaction_type: 5008,
+                    source: OwnerKey::Agent(other),
+                    dest: OwnerKey::Agent(owner),
+                    amount: LindenAmount(2),
+                    item_description: "Object".to_owned(),
+                }),
+            ),
+        );
+        // A change without a transaction is noted too, and the other
+        // avatar's first balance has no change to tell.
+        transcript.money("", &prims, &balance(101, None));
+        transcript.money(" by=other", &prims, &balance(7, None));
+        assert_eq!(
+            transcript.body,
+            vec![
+                "# money-balance success=1 change=2 type=5008 source=other dest=owner amount=2 \
+                 item=\"Object\" description=\"<other-first> <other-last> paid you L$2.\""
+                    .to_owned(),
+                "# money-balance success=1 change=-1 description=\"\"".to_owned(),
+            ]
+        );
+        assert_eq!(transcript.party(&prims, prim), "probe");
+        assert_eq!(transcript.party(&prims, Uuid::nil()), "nil");
+        assert_eq!(transcript.party(&prims, Uuid::from_u128(9)), "someone");
     }
 
     #[test]

@@ -34,7 +34,7 @@ A probe's id is its path below `probes/` without the extension
 | key | meaning |
 | --- | --- |
 | `probe` | the id; required |
-| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`, `fetch`; required |
+| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`, `fetch`, `pay`, `pay-price`, `revoke`; required |
 | `script` | the inventory name, which the probe's scripts find each other by; required in a probe of several |
 | `order` | where the script comes in the save order; required in a probe of several |
 | `prim` | the object that holds it, `A` (the default), `B`, … |
@@ -96,7 +96,19 @@ follows no redirect and waits up to a minute; it keeps the probe's lines
 meanwhile, then notes the status, the `Content-Type`, the length and start of
 the body and how many seconds the answer took (`# fetched`), or `status=none`
 and why. The URL names the simulator's host and changes with every run, so the
-transcript keeps the record with `url=<url>`. `by=other` has the runner's second
+transcript keeps the record with `url=<url>`. `drive=pay amount=<n>` (and
+optionally `prim=<label>`, prim A by default) pays that prim `n` L$ as a
+viewer's pay dialog does — a `MoneyTransferRequest` of type `5008` to the
+object, the amount as it is, which may be 0 or one the pay buttons do not offer
+— notes it (`# pay`) and keeps the probe's lines and both avatars' balances for
+five seconds. `drive=pay-price` (optionally `prim=<label>`) asks that prim for
+its pay buttons (`RequestPayPrice`) and notes the answer, the default amount and
+the four buttons as sent (`# pay-price`), or `response=none` after five seconds.
+`drive=revoke perms=<mask>` sends the `RevokePermissions` a viewer sends: of
+prim A's scripts, or with `target=region` of every object in the region (what
+the reference sends when its avatar stops all animations); the mask goes as it
+is, so `perms=4294967295` is the every-permission revocation the reference sends
+for an object its avatar stands up from. `by=other` has the runner's second
 avatar do it, which owns nothing of the probe's; without `by` it is the owner (a
 `fetch` takes no `by`). A probe asks only for the drives its header declares,
 and the run fails if it asks for another.
@@ -111,6 +123,9 @@ PROBE events/attach rec=waiting drive=attach point=5
 PROBE events/attach rec=waiting drive=drop
 PROBE events/attach rec=waiting drive=rerez
 PROBE http/url rec=waiting drive=fetch url=<url> method=PUT path="/put" body=changed
+PROBE money/pay rec=waiting drive=pay by=other amount=7
+PROBE money/pay-price rec=waiting drive=pay-price prim=B
+PROBE money/lapse rec=waiting drive=revoke target=region perms=32784
 ```
 
 What a probe prints is one `llOwnerSay` line per observation:
@@ -176,6 +191,18 @@ What has bitten already, and how a probe should be shaped for it:
   still runs a timer event queued before `llSetTimerEvent(0.0)`, so a
   sequence driven by a timer reports its last step twice unless it marks
   itself finished and returns early (`memory/recursion`).
+- **A key's truth is no test on OpenSim.** `if ((key)text)` is true there for
+  any text that is not empty, so a probe that looks for keys in a string
+  (`money/debit`, in `transaction_result`'s data) checks the form itself.
+- **OpenSim changes a list argument in place.** Its `llSetPayPrice` pads a
+  list of fewer than four buttons with `PAY_HIDE` in the caller's own list,
+  so a list printed after the call is not the one that was passed
+  (`money/pay-price` prints it after, which is how this was found).
+- **The runner is slow back from a trip `away`.** It settles the owner in and
+  walks it to the build location before it answers anything, which can take
+  half a minute on Second Life; a probe that asks a question right after the
+  owner returns should wait longer for the answer than it otherwise would
+  (`money/lapse`), or its timeout and the late answer cross.
 
 ## Running
 
@@ -222,27 +249,32 @@ line as `# owner-say:`), until `end` or three minutes, then derezzes the prims
 to the Trash — and so it does when the grid refuses one of a probe's rezzes,
 with the prims already rezzed, before the run fails. For a probe whose header
 asks (`stats`), it notes the region's active-script count as `# sim-stats`
-whenever it changes. It also notes what the grid sent the two viewers
-meanwhile, about the avatars: a permission question from the probe's prims
-(`# question`, the mask, the object's name, how the owner's name was put), a
-dialog from them (`# dialog`, the message, the buttons in the
-order sent, the channel) and the reply (`# dialog-reply`, the index and how many
-bytes went), an instant message from an object (`# im`, the dialog, who the grid
-names as sender and what the message id is, as roles — `owner`, `other`,
-`probe`), any other line of the prims' chat an avatar hears (`# chat`, its type
-and length, `# owner-say:` for the owner's own), the sit response (`# sit`, seat
-position and rotation, camera offsets), a `ScriptControlChange`
-(`# script-control-change`), a follow camera (`# follow-cam`, the parameters by
-code, or `# follow-cam-clear`), an avatar's animation list when it changes
-(`# animations`, the built-in ones by name, each with `@probe` when the probe's
-prim is its source; an uploaded one is the account's own and left out), the
-teleport messages a script's `llTeleportAgent` brings (`# teleport-started`,
-`# teleport-local`, `# teleport-failed`, with their flags; an avatar a script
-teleported inside the region is walked back to the build location before the
-next probe) and alerts. A long text is quoted to its first 60 characters, with
-its length beside it. A trip `away` is noted as `# away` and `# back`, with how
-each teleport went. An attach is noted as `# attach` and, once the region shows
-prim A worn, `# attached` with the point and whether it kept its key; a drop as
+whenever it changes. It also notes what the grid sent the two viewers meanwhile,
+about the avatars: a permission question from the probe's prims (`# question`,
+the mask, the object's name, how the owner's name was put), a dialog from them
+(`# dialog`, the message, the buttons in the order sent, the channel) and the
+reply (`# dialog-reply`, the index and how many bytes went), an instant message
+from an object (`# im`, the dialog, who the grid names as sender and what the
+message id is, as roles — `owner`, `other`, `probe`), any other line of the
+prims' chat an avatar hears (`# chat`, its type and length, `# owner-say:` for
+the owner's own), the sit response (`# sit`, seat position and rotation, camera
+offsets), a `ScriptControlChange` (`# script-control-change`), a follow camera
+(`# follow-cam`, the parameters by code, or `# follow-cam-clear`), an avatar's
+animation list when it changes (`# animations`, the built-in ones by name, each
+with `@probe` when the probe's prim is its source; an uploaded one is the
+account's own and left out), the teleport messages a script's `llTeleportAgent`
+brings (`# teleport-started`, `# teleport-local`, `# teleport-failed`, with
+their flags; an avatar a script teleported inside the region is walked back to
+the build location before the next probe), the balance replies each avatar is
+sent (`# money-balance`, when a balance changed or a reply names a transaction:
+whether it succeeded, how much the balance **changed** — never what it is, which
+differs between accounts and runs — the transaction's type, its source and
+destination as roles, the amount, the item and the description; for a probe that
+declares `pay` the runner asks both balances first, so the first change is
+known) and alerts. A long text is quoted to its first 60 characters, with its
+length beside it. A trip `away` is noted as `# away` and `# back`, with how each
+teleport went. An attach is noted as `# attach` and, once the region shows prim
+A worn, `# attached` with the point and whether it kept its key; a drop as
 `# drop` and `# dropped`; a re-rez as `# take`, `# taken` (how the grid
 announced the item), `# rez` and `# rezzed`; a `response=none` says the region
 did not show it within twenty seconds. A line prim A prints before the update
@@ -363,6 +395,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `http/*`, 2026-10-25: what arrives at an in-world URL, what `llHTTPRequest` accepts, what comes back, URLs and the throttle | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#outbound-http-and-in-world-urls) | | |
 | `land/*`, 2026-10-26: `llGetEnv`, parcel details, flags, prim counts and owners, region flags and data, `llEdgeOfWorld`, the ground and weather, the day cycle, and Second Life's environment, sim stats and navmesh calls | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#parcel-region-estate-and-environment-queries) | | |
 | `memory/*`, 2026-10-26: the memory functions, what values cost, `llSetMemoryLimit`, running out by recursion and by allocation, Mono against LSO, `OBJECT_SCRIPT_MEMORY` and the region's active-script count | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#memory-and-limits) | | |
+| `money/*`, 2026-10-26: the pay buttons after `llSetPayPrice`, what the `money` event hears of a payment and which payments a grid takes, `llGiveMoney`, `llTransferLindenDollars` and `transaction_result`, `PERMISSION_DEBIT` from a non-owner, and when a grant lapses | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#script-permissions-money-and-payment) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

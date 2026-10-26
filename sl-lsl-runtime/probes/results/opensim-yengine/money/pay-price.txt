@@ -1,0 +1,70 @@
+grid: opensim-yengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE money/pay-price rec=set prim=B price=9 buttons=1,2,3,4
+# chat type=say from="Object" length=14 text="Script running"
+PROBE money/pay-price rec=mixed prim=C call=before
+# owner-say: from="Object" text="[YEngine]: Exception while running 0ecd561f-79e4-4c6d-8978-a3b654052ae0"
+# owner-say: from="Object" text="InvalidCastException: Specified cast is not valid."
+# owner-say: from="Object" text="Prim: <Object>, Script: <Mixed>, Location: Default Region <126,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+list.GetLSLIntegerItem (System.Int32 itemIndex) [0x00030] in <4232b8ace8a34b48b171661be4717e89>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llSetPayPrice (System.Int32 price, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list quick_pay_buttons) [0x00089] in <d09853dcdece4467894564db0ef815df>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llSetPayPrice (System.Int32 price, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list quick_pay_buttons) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default state_entry(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.StartEx () [0x00009] in <494689fd7fc54dbc80fad348ad979238>:0"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE money/pay-price rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE money/pay-price rec=ask step=0 what=fresh
+PROBE money/pay-price rec=waiting drive=pay-price
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# pay-price prim=A default=-2 buttons="-2,-2,-2,-2"
+PROBE money/pay-price rec=set step=1 what=default price=-2 buttons="-2, -2, -2, -2"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=-2 buttons="-2,-2,-2,-2"
+PROBE money/pay-price rec=set step=2 what=ordinary price=25 buttons="1, 5, 10, 20"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=25 buttons="1,5,10,20"
+PROBE money/pay-price rec=set step=3 what=hide price=-1 buttons="-1, -1, -1, -1"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=-1 buttons="-1,-1,-1,-1"
+PROBE money/pay-price rec=set step=4 what=zero price=0 buttons="0, 0, 0, 0"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A response=none
+PROBE money/pay-price rec=set step=5 what=negative price=-5 buttons="-7, -3, -1000, 3"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=-5 buttons="-7,-3,-1000,3"
+PROBE money/pay-price rec=set step=6 what=huge price=2000000000 buttons="1000000, 99999, 1, 2"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=2000000000 buttons="1000000,99999,1,2"
+PROBE money/pay-price rec=set step=7 what=two price=7 buttons="1, 2, -1, -1, -1"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=7 buttons="1,2,-1,-1"
+PROBE money/pay-price rec=set step=8 what=six price=7 buttons="1, 2, 3, 4, 5, 6"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=7 buttons="1,2,3,4"
+PROBE money/pay-price rec=set step=9 what=none price=7 buttons="-1, -1, -1, -1, -1"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=7 buttons="-1,-1,-1,-1"
+PROBE money/pay-price rec=set step=10 what=ordinary price=12 buttons="2, 4, 6, 8"
+PROBE money/pay-price rec=waiting drive=pay-price by=other
+# pay-price by=other prim=A default=12 buttons="2,4,6,8"
+PROBE money/pay-price rec=ask step=11 prim=B
+PROBE money/pay-price rec=waiting drive=pay-price prim=B
+# pay-price prim=B default=9 buttons="1,2,3,4"
+PROBE money/pay-price rec=ask step=12 prim=C
+PROBE money/pay-price rec=waiting drive=pay-price prim=C
+# pay-price prim=C default=-2 buttons="-2,-2,-2,-2"
+PROBE money/pay-price rec=set step=13 what=before-reset price=13 buttons="3, 6, 9, 12"
+PROBE money/pay-price rec=reset step=13
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=13 buttons="3,6,9,12"
+PROBE money/pay-price rec=end

@@ -59,3 +59,18 @@ runs it on login; the Contents floater's Running checkbox reflects and
 controls the real run state; Reset restarts it; `llDie` removes the
 object and the viewer sees the `KillObject`; and the region survives a
 script that throws.
+
+## Which OpenSim engine `FakeOpensim` runs (gridspec, 2026-10-26)
+
+The probe corpus measures OpenSim under both of its engines
+(`probes/results/opensim-yengine/` and `opensim-xengine/`, the engine picked
+per script by its `//YEngine:` / `//XEngine:` first line), but the fake grid
+has one OpenSim flavour and one results directory, `fake-opensim`. The
+gridspec tasks so far model `FakeOpensim` on **YEngine**, OpenSim's default
+(e.g. [[server-lsl-memory-and-limits]]), and record XEngine's divergences as
+XEngine rows in `book/src/gridspec/lsl.md` — a 0.5 s timer floor, an event
+queue without a limit, a faulted script that runs on, a script reset on
+take-and-rez, no memory accounting. Decide here whether the wiring takes an
+engine knob on `FakeOpensim` (so a fake run can be held to either column) or
+stays YEngine-only; a fake run is compared against `opensim-yengine` until
+then.

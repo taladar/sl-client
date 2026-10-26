@@ -1,0 +1,111 @@
+grid: opensim-yengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE money/lapse rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE money/lapse rec=held step=0 why=fresh perms=0 granter=none attached=0
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# chat by=other type=say from="Object" length=14 text="Script running"
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# answer grant=1046
+PROBE money/lapse rec=answer step=1 answer=1046
+PROBE money/lapse rec=held step=1 why=state-other perms=1046 granter=owner attached=0
+PROBE money/lapse rec=held step=1 why=state-default perms=1046 granter=owner attached=0
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# answer grant=1046
+PROBE money/lapse rec=answer step=2 answer=1046
+PROBE money/lapse rec=waiting drive=revoke perms=16
+# revoke perms=16 target=object
+PROBE money/lapse rec=held step=2 why=after perms=1030 granter=owner attached=0
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# answer grant=1046
+PROBE money/lapse rec=answer step=3 answer=1046
+PROBE money/lapse rec=waiting drive=revoke target=region perms=32784
+# revoke perms=32784 target=region
+PROBE money/lapse rec=held step=3 why=after perms=1030 granter=owner attached=0
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# answer grant=1046
+PROBE money/lapse rec=answer step=4 answer=1046
+PROBE money/lapse rec=waiting drive=revoke perms=4294967295
+# revoke perms=4294967295 target=object
+PROBE money/lapse rec=held step=4 why=after perms=0 granter=none attached=0
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# answer grant=1046
+PROBE money/lapse rec=answer step=5 answer=1046
+PROBE money/lapse rec=held step=5 why=took perms=1046 granter=owner attached=0
+# script-control-change action=release controls=1 pass_to_agent=0
+# script-control-change action=release controls=1 pass_to_agent=1
+# script-control-change action=take controls=1 pass_to_agent=1
+# script-control-change action=release controls=1 pass_to_agent=0
+# script-control-change action=release controls=1 pass_to_agent=1
+PROBE money/lapse rec=held step=5 why=after perms=1042 granter=owner attached=0
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# answer grant=1046
+PROBE money/lapse rec=answer step=6 answer=1046
+PROBE money/lapse rec=waiting drive=away seconds=20
+# teleport-started flags=0x10
+# away arrived seconds=20
+# animations avatar=owner playing="stand"
+# teleport-started flags=0x10
+# back arrived
+# animations avatar=other playing="stand"
+PROBE money/lapse rec=away step=6 poll=1 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=2 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=3 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=4 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=5 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=6 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=7 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=8 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=9 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=10 owner_gone=1 perms=1046 granter=owner
+PROBE money/lapse rec=away step=6 poll=11 owner_gone=0 perms=1046 granter=owner
+PROBE money/lapse rec=held step=6 why=back perms=1046 granter=owner attached=0
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# answer grant=1046
+PROBE money/lapse rec=answer step=7 answer=1046
+PROBE money/lapse rec=held step=7 why=after-reset perms=0 granter=none attached=0
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# answer grant=1046
+PROBE money/lapse rec=answer step=8 answer=1046
+PROBE money/lapse rec=waiting drive=rerez
+# take
+# taken announced=update-create-inventory-item
+# rez
+PROBE money/lapse rec=held step=8 why=on-rez perms=1046 granter=owner attached=0
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# rezzed key=new
+# answer grant=1046
+PROBE money/lapse rec=answer step=9 answer=1046
+PROBE money/lapse rec=waiting drive=attach point=5
+# attach point=5
+PROBE money/lapse rec=held step=9 why=attached perms=1046 granter=owner attached=5
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# attached point=5 key=same
+# answer grant=1046
+PROBE money/lapse rec=answer step=9 answer=1046
+PROBE money/lapse rec=held step=9 why=worn-asked perms=1046 granter=owner attached=5
+PROBE money/lapse rec=held step=9 why=after perms=1046 granter=owner attached=5
+PROBE money/lapse rec=waiting drive=answer grant=1046
+# question permissions=1046 object="Object" owner="<first> <last>" experience=none
+# answer grant=1046
+PROBE money/lapse rec=answer step=10 answer=1046
+PROBE money/lapse rec=waiting drive=drop
+# drop worn=1
+PROBE money/lapse rec=held step=10 why=dropped perms=1042 granter=owner attached=0
+# dropped key=same
+PROBE money/lapse rec=held step=10 why=after perms=1042 granter=owner attached=0
+PROBE money/lapse rec=end

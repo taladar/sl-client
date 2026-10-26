@@ -1,0 +1,57 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE money/pay-price rec=set prim=B price=9 buttons=1,2,3,4
+PROBE money/pay-price rec=mixed prim=C call=before
+PROBE money/pay-price rec=mixed prim=C call=after
+# animations avatar=owner playing=""
+PROBE money/pay-price rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE money/pay-price rec=ask step=0 what=fresh
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=-2 buttons="1,5,10,20"
+PROBE money/pay-price rec=set step=1 what=default price=-2 buttons="-2, -2, -2, -2"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=-2 buttons="1,5,10,20"
+PROBE money/pay-price rec=set step=2 what=ordinary price=25 buttons="1, 5, 10, 20"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=25 buttons="1,5,10,20"
+PROBE money/pay-price rec=set step=3 what=hide price=-1 buttons="-1, -1, -1, -1"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=-1 buttons="-1,-1,-1,-1"
+PROBE money/pay-price rec=set step=4 what=zero price=0 buttons="0, 0, 0, 0"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=0 buttons="0,0,0,0"
+PROBE money/pay-price rec=set step=5 what=negative price=-5 buttons="-7, -3, -1000, 3"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=-5 buttons="-7,-3,-1000,3"
+PROBE money/pay-price rec=set step=6 what=huge price=2000000000 buttons="1000000, 99999, 1, 2"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=2000000000 buttons="1000000,99999,1,2"
+PROBE money/pay-price rec=set step=7 what=two price=7 buttons="1, 2"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=7 buttons="1,2,-1,-1"
+PROBE money/pay-price rec=set step=8 what=six price=7 buttons="1, 2, 3, 4, 5, 6"
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=7 buttons="1,2,3,4"
+PROBE money/pay-price rec=set step=9 what=none price=7 buttons=""
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=7 buttons="1,5,10,20"
+PROBE money/pay-price rec=set step=10 what=ordinary price=12 buttons="2, 4, 6, 8"
+PROBE money/pay-price rec=waiting drive=pay-price by=other
+# pay-price by=other prim=A default=12 buttons="2,4,6,8"
+PROBE money/pay-price rec=ask step=11 prim=B
+PROBE money/pay-price rec=waiting drive=pay-price prim=B
+# pay-price prim=B default=9 buttons="1,2,3,4"
+PROBE money/pay-price rec=ask step=12 prim=C
+PROBE money/pay-price rec=waiting drive=pay-price prim=C
+# pay-price prim=C default=7 buttons="-1,-1,-1,8"
+PROBE money/pay-price rec=set step=13 what=before-reset price=13 buttons="3, 6, 9, 12"
+PROBE money/pay-price rec=reset step=13
+PROBE money/pay-price rec=waiting drive=pay-price
+# pay-price prim=A default=13 buttons="3,6,9,12"
+PROBE money/pay-price rec=end

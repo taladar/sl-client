@@ -60,3 +60,34 @@ raises `money` with the right amount, and the payer's balance and the
 economy event stream agree; a script calling `llGiveMoney` without
 `PERMISSION_DEBIT` fails and says so on `DEBUG_CHANNEL`; and a grant is
 shown to lapse on a state change.
+
+## Measured (gridspec-lsl-money-permissions, 2026-10-26)
+
+`book/src/gridspec/lsl.md` § Script permissions, money and payment is the
+model per flavour. The points the library has to get right:
+
+- **Lapses.** A grant survives a state change, the owner leaving the
+  region, attaching and a take-and-rez (`on_rez`, script not reset — XEngine
+  alone resets it); it is cleared by `llResetScript`; `llReleaseControls`
+  and a detach drop `TAKE_CONTROLS` only; `RevokePermissions` drops exactly
+  the bits it names, of the object or of every object in the region, and
+  `0xFFFFFFFF` clears the granter too. No lapse runs `run_time_permissions`.
+- **Debit.** Unpermitted `llGiveMoney` returns 0 and complains on
+  `DEBUG_CHANNEL` on Second Life (silent on OpenSim); `llTransferLindenDollars`
+  always returns a handle and answers `transaction_result` with
+  `MISSING_PERMISSION_DEBIT`, `INVALID_DESTINATION` (`NULL_KEY`, SL),
+  `LINDENDOLLAR_ENTITYDOESNOTEXIST`, `INVALID_AMOUNT` (≤ 0),
+  `LINDENDOLLAR_INSUFFICIENTFUNDS`, or success with `"<dest>, <amount>"`;
+  the money moves as type `5009`. Second Life refuses to ask a non-owner for
+  `PERMISSION_DEBIT` (`DEBUG_CHANNEL`, no question); OpenSim asks.
+- **Payments.** Every script in the prim with a `money` event in its current
+  state hears a payment; one is taken even when none can. Second Life
+  accepts any amount above 0 while the price field shows, only a button's
+  amount while it is hidden (anything else dropped silently), and none at
+  all, with an alert, when every amount is hidden. The stock OpenSim module
+  takes nothing.
+- **Pay buttons.** `PAY_DEFAULT` buttons answer 1, 5, 10, 20 on Second Life
+  and `-2` on OpenSim; missing buttons are hidden, an empty list keeps the
+  defaults on Second Life; a non-integer button is hidden on Second Life and
+  throws on OpenSim; a layout of zeros gets no reply on OpenSim; the layout
+  survives a reset.

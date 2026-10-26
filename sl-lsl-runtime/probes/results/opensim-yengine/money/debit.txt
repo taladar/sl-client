@@ -1,0 +1,53 @@
+grid: opensim-yengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE money/debit rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE money/debit rec=held step=0 why=fresh perms=0 granter=none
+PROBE money/debit rec=waiting drive=touch by=other
+# chat by=other type=say from="Object" length=14 text="Script running"
+# touch by=other active_group=set surface=none
+PROBE money/debit rec=touch by=other
+PROBE money/debit rec=give step=1 to=other amount=1 result=0
+PROBE money/debit rec=transfer step=1 to=other amount=1 handle_null=0
+PROBE money/debit rec=result step=1 id=handle success=0 data="MISSING_PERMISSION_DEBIT"
+PROBE money/debit rec=timeout step=1
+PROBE money/debit rec=waiting drive=answer grant=2
+# question permissions=2 object="Object" owner="<first> <last>" experience=none
+# answer grant=2
+PROBE money/debit rec=answer step=2 perms=2
+PROBE money/debit rec=held step=2 why=answer perms=2 granter=owner
+PROBE money/debit rec=give step=3 to=other amount=1 result=0
+PROBE money/debit rec=timeout step=3
+PROBE money/debit rec=transfer step=4 to=other amount=1 handle_null=0
+PROBE money/debit rec=result step=4 id=handle success=1 data="other, 1"
+PROBE money/debit rec=transfer step=5 to=owner amount=1 handle_null=0
+PROBE money/debit rec=result step=5 id=handle success=1 data="owner, 1"
+PROBE money/debit rec=transfer step=6 to=none amount=1 handle_null=0
+PROBE money/debit rec=result step=6 id=handle success=0 data="LINDENDOLLAR_ENTITYDOESNOTEXIST"
+PROBE money/debit rec=transfer step=7 to=prim amount=1 handle_null=0
+PROBE money/debit rec=result step=7 id=handle success=0 data="LINDENDOLLAR_ENTITYDOESNOTEXIST"
+PROBE money/debit rec=transfer step=8 to=someone amount=1 handle_null=0
+PROBE money/debit rec=result step=8 id=handle success=0 data="LINDENDOLLAR_ENTITYDOESNOTEXIST"
+PROBE money/debit rec=transfer step=9 to=other amount=0 handle_null=0
+PROBE money/debit rec=result step=9 id=handle success=0 data="INVALID_AMOUNT"
+PROBE money/debit rec=transfer step=10 to=other amount=-1 handle_null=0
+PROBE money/debit rec=result step=10 id=handle success=0 data="INVALID_AMOUNT"
+PROBE money/debit rec=transfer step=11 to=other amount=1000000000 handle_null=0
+PROBE money/debit rec=result step=11 id=handle success=1 data="other, 1000000000"
+PROBE money/debit rec=give step=12 to=other amount=0 result=0
+PROBE money/debit rec=give step=12 to=other amount=-1 result=0
+PROBE money/debit rec=timeout step=12
+PROBE money/debit rec=waiting drive=answer by=other grant=2
+# question by=other permissions=2 object="Object" owner="<first> <last>" experience=none
+# answer by=other grant=2
+PROBE money/debit rec=answer step=13 perms=2
+PROBE money/debit rec=held step=13 why=answer perms=2 granter=other
+PROBE money/debit rec=waiting drive=pay by=other amount=2
+# pay by=other amount=2 prim=A
+PROBE money/debit rec=timeout step=14
+PROBE money/debit rec=end

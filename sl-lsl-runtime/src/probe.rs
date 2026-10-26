@@ -56,6 +56,12 @@ pub enum Drive {
     /// An HTTP request from outside the grid to a URL the probe's script
     /// was given (`llRequestURL`).
     Fetch,
+    /// Paying one of the probe's prims an amount of L$ (`MoneyTransferRequest`).
+    Pay,
+    /// Asking one of the probe's prims for its pay buttons (`RequestPayPrice`).
+    PayPrice,
+    /// Revoking script permissions, as a viewer does (`RevokePermissions`).
+    Revoke,
 }
 
 impl Drive {
@@ -74,6 +80,9 @@ impl Drive {
             "drop" => Some(Self::Drop),
             "rerez" => Some(Self::Rerez),
             "fetch" => Some(Self::Fetch),
+            "pay" => Some(Self::Pay),
+            "pay-price" => Some(Self::PayPrice),
+            "revoke" => Some(Self::Revoke),
             _ => None,
         }
     }
@@ -555,6 +564,32 @@ pub enum Action {
     /// Send an HTTP request from outside the grid to `url` followed by
     /// `path`.
     Fetch(Fetch),
+    /// Pay the prim labelled `prim` `amount` L$, as a viewer's pay dialog
+    /// does (a `MoneyTransferRequest` of the object-payment type), the amount
+    /// sent as it is.
+    Pay {
+        /// The amount, which may be one no pay dialog would offer (none, or
+        /// more than the payer holds).
+        amount: u64,
+        /// The prim paid (`A` unless the record names another).
+        prim: String,
+    },
+    /// Ask the prim labelled `prim` for its pay buttons, as a viewer does
+    /// before it shows its pay dialog (`RequestPayPrice`).
+    PayPrice {
+        /// The prim asked (`A` unless the record names another).
+        prim: String,
+    },
+    /// Revoke the permissions `permissions` (the `PERMISSION_*` bits, sent as
+    /// they are) of prim A's scripts, or of every object in the region — the
+    /// two `RevokePermissions` a viewer sends.
+    Revoke {
+        /// The permissions revoked.
+        permissions: u32,
+        /// Whether the revocation names the region (every object in it)
+        /// rather than prim A.
+        whole_region: bool,
+    },
 }
 
 /// The HTTP request a `fetch` stimulus sends: `url=<url> [method=<name>]
@@ -651,19 +686,23 @@ impl Action {
             Self::Drop => Drive::Drop,
             Self::Rerez => Drive::Rerez,
             Self::Fetch(_) => Drive::Fetch,
+            Self::Pay { .. } => Drive::Pay,
+            Self::PayPrice { .. } => Drive::PayPrice,
+            Self::Revoke { .. } => Drive::Revoke,
         }
     }
 }
 
 /// What a `waiting` record asks the runner for:
 /// `rec=waiting
-/// drive=touch|chat|answer|sit|stand|control|dialog|away|attach|drop|rerez|fetch
+/// drive=touch|chat|answer|sit|stand|control|dialog|away|attach|drop|rerez|fetch|pay|pay-price|revoke
 /// [by=owner|other]`, and for a touch optionally `face=<n> uv=<u>,<v>
 /// st=<s>,<t> at=<x>,<y>,<z> normal=<x>,<y>,<z> binormal=<x>,<y>,<z>` (all of
 /// them, or none), for chat `channel=<n> text="…"`, for an answer
 /// `grant=<mask>`, for controls `keys=<mask>`, for a dialog `reply="…"`, for
 /// away `seconds=<n>`, for attach `point=<n>`, for a fetch what [`Fetch`]
-/// reads. Without `by` it is the owner; only the owner goes `away`, attaches,
+/// reads, for a payment `amount=<n> [prim=<label>]`, for the pay buttons
+/// `[prim=<label>]`, for a revocation `perms=<mask> [target=object|region]`. Without `by` it is the owner; only the owner goes `away`, attaches,
 /// drops or re-rezzes, and a fetch comes from no avatar at all.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stimulus {
@@ -748,6 +787,29 @@ impl Stimulus {
                 }
                 Action::Fetch(Fetch::from_waiting(line)?)
             }
+            Some(Drive::Pay) => Action::Pay {
+                amount: line
+                    .field("amount")
+                    .and_then(|amount| amount.parse().ok())
+                    .ok_or("a pay drive without an unsigned integer `amount`")?,
+                prim: line.field("prim").unwrap_or("A").to_owned(),
+            },
+            Some(Drive::PayPrice) => Action::PayPrice {
+                prim: line.field("prim").unwrap_or("A").to_owned(),
+            },
+            Some(Drive::Revoke) => Action::Revoke {
+                permissions: line
+                    .field("perms")
+                    .and_then(|perms| perms.parse().ok())
+                    .ok_or("a revoke drive without an unsigned integer `perms`")?,
+                whole_region: match line.field("target") {
+                    None | Some("object") => false,
+                    Some("region") => true,
+                    Some(target) => {
+                        return Err(format!("`target={target}` is neither object nor region"));
+                    }
+                },
+            },
             None => return Err(format!("`drive={drive}` is not a drive")),
         };
         if by == By::Other
@@ -979,7 +1041,7 @@ mod tests {
     fn a_header_lists_its_drives_and_its_tolerances() -> Result<(), HeaderError> {
         let header = Header::parse(
             "// probe: a/b\n// drive: chat, touch, answer, sit, stand, control, dialog, away, attach, \
-             drop, rerez, fetch\n\
+             drop, rerez, fetch, pay, pay-price, revoke\n\
              // vary: seconds, rate\n// unordered: heard\n",
         )?;
         assert_eq!(
@@ -996,7 +1058,10 @@ mod tests {
                 Drive::Attach,
                 Drive::Drop,
                 Drive::Rerez,
-                Drive::Fetch
+                Drive::Fetch,
+                Drive::Pay,
+                Drive::PayPrice,
+                Drive::Revoke
             ]
         );
         assert_eq!(header.vary, vec!["seconds".to_owned(), "rate".to_owned()]);
@@ -1107,6 +1172,36 @@ mod tests {
             }
         );
         assert_eq!(
+            read("PROBE a/b rec=waiting drive=pay by=other amount=3 prim=B")?,
+            Stimulus {
+                by: By::Other,
+                action: Action::Pay {
+                    amount: 3,
+                    prim: "B".to_owned()
+                }
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=pay-price")?.action,
+            Action::PayPrice {
+                prim: "A".to_owned()
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=revoke perms=4294967295")?.action,
+            Action::Revoke {
+                permissions: u32::MAX,
+                whole_region: false
+            }
+        );
+        assert_eq!(
+            read("PROBE a/b rec=waiting drive=revoke perms=32784 target=region")?.action,
+            Action::Revoke {
+                permissions: 32784,
+                whole_region: true
+            }
+        );
+        assert_eq!(
             read("PROBE a/b rec=waiting drive=fetch url=http://h:1/cap/x")?.action,
             Action::Fetch(Fetch {
                 url: "http://h:1/cap/x".to_owned(),
@@ -1141,6 +1236,10 @@ mod tests {
             "PROBE a/b rec=waiting drive=attach by=other point=5",
             "PROBE a/b rec=waiting drive=drop by=other",
             "PROBE a/b rec=waiting drive=rerez by=other",
+            "PROBE a/b rec=waiting drive=pay",
+            "PROBE a/b rec=waiting drive=pay amount=-1",
+            "PROBE a/b rec=waiting drive=revoke",
+            "PROBE a/b rec=waiting drive=revoke perms=16 target=parcel",
             "PROBE a/b rec=waiting drive=touch face=1",
             "PROBE a/b rec=waiting drive=touch face=x uv=0,0 st=0,0 at=0,0,0 normal=0,0,1 \
              binormal=0,1,0",

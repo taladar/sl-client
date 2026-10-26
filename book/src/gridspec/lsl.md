@@ -1106,3 +1106,128 @@ viewer through the top-scripts report and the script-limits floater
 (`viewer-script-limits`), not from these calls; their numbers are the
 same kind of figure — the limit on Second Life, a flat 16 384 per running
 script on OpenSim.
+
+## Script permissions, money and payment
+
+Measured on 2026-10-26 by the probes `money/pay-price`, `money/pay`,
+`money/debit` and `money/lapse`, on the same grids, with the two avatars of
+every probe run: the owner, which owns the prims, and another, which pays
+them and is paid. A payment is what a viewer's pay dialog sends (a
+`MoneyTransferRequest` of type `5008` to the object, `drive=pay`); the pay
+buttons are what a viewer asks before it shows that dialog
+(`RequestPayPrice`, `drive=pay-price`). Balances are noted as the change
+each avatar's balance reply shows, never as the balance. Every amount is a
+few L$ of aditi's beta currency, and the probes give the other avatar back
+what it paid, so a run costs neither account anything. The local OpenSim
+runs the stock `BetaGridLikeMoneyModule`, which moves no money
+([Money](economy.md)); what a viewer sees of payments without a script is
+measured there.
+
+### Pay buttons after `llSetPayPrice`
+
+What `RequestPayPrice` is answered after each call, by a script that has a
+`money` event (the other avatar is answered alike). YEngine and XEngine
+agree on every row but the last but one.
+
+| the script calls | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| nothing yet | default `-2`, buttons `1, 5, 10, 20` | default `-2`, buttons `-2, -2, -2, -2` | no scripts |
+| `llSetPayPrice(PAY_DEFAULT, [PAY_DEFAULT ×4])` | the same as nothing | the same as nothing | no scripts |
+| `(25, [1, 5, 10, 20])`, `(PAY_HIDE, [PAY_HIDE ×4])`, `(-5, [-7, -3, -1000, 3])`, `(2000000000, [1000000, 99999, 1, 2])` | as set: no grid checks a price's sign or size | as set | no scripts |
+| `(0, [0, 0, 0, 0])` | as set, every amount `0` | **no answer at all**: `LLClientView.SendPayPrice` sends nothing for a layout of zeros | no scripts |
+| two buttons, `(7, [1, 2])` | `7`, `1, 2, -1, -1`: the missing buttons hidden | the same — and the **script's own list** has grown to `[1, 2, -1, -1, -1]`: OpenSim pads the argument in place | no scripts |
+| six buttons | the first four | the first four | no scripts |
+| no buttons, `(7, [])` | `7`, **`1, 5, 10, 20`**: an empty list leaves the buttons at the defaults | `7`, `-1, -1, -1, -1`, and the empty list is now five `-1`s | no scripts |
+| buttons of other types, `(7, ["5", 2.5, <1, 2, 3>, 8])` | `7`, `-1, -1, -1, 8`: a button that is not an integer is hidden; the script runs on | the call throws an `InvalidCastException` and the layout stays as it was (`-2` ×5). YEngine tells the owner and stops the script (`Script must be Reset to re-enable.`); XEngine shouts the exception on `DEBUG_CHANNEL` and the event ends | no scripts |
+| a prim whose only script has **no** `money` event | answered as that script set it | the same | no scripts |
+| set, then `llResetScript` | the layout survives the reset: it is the prim's | the same | no scripts |
+
+OpenSim also ignores `llSetPayPrice` from a script in a child prim (it
+returns at once unless the script is in the root, `LSL_Api.llSetPayPrice`);
+the probe measured only a root prim.
+
+### Giving money: `llGiveMoney` and `llTransferLindenDollars`
+
+The other avatar touches first, so the script learns its key; the runner
+grants `PERMISSION_DEBIT` when asked. `transaction_result`'s data is
+printed with each key in it put as a role.
+
+| the script calls | Second Life | OpenSim (both engines) | fake grid |
+| --- | --- | --- | --- |
+| `llGiveMoney(other, 1)` before any grant | returns `0`; `Script trying to debit L$ from owner but PERMISSION_DEBIT permission not set!` on `DEBUG_CHANNEL` | returns `0`, nothing said | no scripts |
+| `llTransferLindenDollars(other, 1)` before any grant | a handle (not `NULL_KEY`); `transaction_result(handle, FALSE, "MISSING_PERMISSION_DEBIT")` | the same | no scripts |
+| asking the owner for `PERMISSION_DEBIT` | an ordinary question, mask `2` | the same | the viewer's money-caution card |
+| `llGiveMoney(other, 1)`, granted | returns `0`, no `transaction_result`; L$ 1 moves: the owner's balance reply −1, the other's +1, both of type **`5009`** (`TRANS_OBJECT_PAYS`), the object's name as the item, "You paid *other* L$1." and "*owner* paid you L$1." | returns `0`; nothing moves, no balance reply | no scripts |
+| `llTransferLindenDollars(other, 1)`, granted | `transaction_result(handle, TRUE, "<other's key>, 1")` and the same two balance replies | `TRUE`, `"<other's key>, 1"` — and nothing moves | no scripts |
+| … to the owner itself | `TRUE`, `"<owner>, 1"`; two balance replies to the owner, no change | `TRUE` | no scripts |
+| … to `NULL_KEY` | `FALSE`, `INVALID_DESTINATION` | `FALSE`, `LINDENDOLLAR_ENTITYDOESNOTEXIST` | no scripts |
+| … to the prim's own key, to a key that names nobody | `FALSE`, `LINDENDOLLAR_ENTITYDOESNOTEXIST`, and a **failed** balance reply to the owner naming that key, "There has been a problem transferring L$. This error has been logged and reported." | `FALSE`, `LINDENDOLLAR_ENTITYDOESNOTEXIST` | no scripts |
+| … of L$ 0 or L$ −1 | `FALSE`, `INVALID_AMOUNT` | the same | no scripts |
+| … of more than the owner holds (L$ 1 000 000 000) | `FALSE`, `LINDENDOLLAR_INSUFFICIENTFUNDS`, and a failed reply "Insufficient funds." | **`TRUE`**, `"<other's key>, 1000000000"`: the stock module refuses nothing | no scripts |
+| `llGiveMoney(other, 0)`, `llGiveMoney(other, -1)` | returns `0`; `Invalid amount for llGiveMoney().` on `DEBUG_CHANNEL` for each | returns `0`, nothing said | no scripts |
+| asking the **other** avatar for `PERMISSION_DEBIT` | no question; `Script asking non-owner for run time permissions only owner can grant` on `DEBUG_CHANNEL`, no `run_time_permissions`, the owner's grant kept | **put to the other avatar like any question**; granted, the script holds `DEBIT` with the other avatar as the granter | no scripts |
+
+A balance reply comes on its own time, often after the
+`transaction_result` and sometimes after the script's next call, so a
+transcript's balance notes trail the step that caused them.
+
+### Paying a scripted object
+
+Prim A holds two scripts with a `money` event, Till and Second till; the
+runner pays it as a viewer does. A payment the grid takes is told to both
+avatars as for a gift, but of type `5008`, the object's name as the item
+([Money § Paying an object](economy.md#paying-an-object)).
+
+| the payment | Second Life | OpenSim (both engines) | fake grid |
+| --- | --- | --- | --- |
+| the owner, L$ 1 | taken; `money(owner, 1)` in **both** scripts; two balance replies to the owner, no change | nothing: no `money` event, no balance reply (the stock module drops every payment) | no scripts |
+| the other avatar, L$ 1 | taken, the other −1 and the owner +1; `money(other, 1)` in both scripts, in either order | nothing | no scripts |
+| L$ 0 | nothing at all | nothing | no scripts |
+| L$ 7 under price `5`, buttons `1, 2, 3, 4` | taken: a shown price field takes any amount | nothing | no scripts |
+| L$ 7 or L$ 5 under price `5`, every button hidden | both taken | nothing | no scripts |
+| L$ 2 under price `PAY_HIDE`, buttons `1, 2, 3, 4` | taken: the amount is a button's | nothing | no scripts |
+| L$ 7 under the same | **refused silently**: no event, no reply, no alert | nothing | no scripts |
+| L$ 1 when the price and every button are hidden | refused: the payer is alerted "Payment stopped:  the price paid does not match any of the pay buttons set for this object" | nothing | no scripts |
+| L$ 1 while Till is in a state without a `money` event | taken; only Second till's `money` runs | nothing | no scripts |
+| L$ 1 to the prim once no script in it has a `money` event (Till in that state, Second till removed) | taken all the same | nothing | no scripts |
+
+So Second Life checks the amount only when the price field is hidden: then
+it must be one of the buttons, and a payment with no button to match is
+dropped without a word — unless every amount is hidden, which is refused
+with the alert. It does not check against a shown price at all, and takes a
+payment to an object none of whose scripts can hear it. The probe gives the
+other avatar its L$ 23 back with `llGiveMoney` at the end (type `5009`).
+
+### When a grant lapses
+
+The script holds `TAKE_CONTROLS | TRIGGER_ANIMATION | TRACK_CAMERA | DEBIT`
+(`1046`), granted by the owner, before each of these. A revocation is the
+`RevokePermissions` a viewer sends (`drive=revoke`): the reference sends
+`TRIGGER_ANIMATION | OVERRIDE_ANIMATIONS` of the whole region when its
+avatar stops all animations, and every bit of an object when its avatar
+stands up from it. YEngine agrees with Second Life on every row.
+
+| after | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| a state change and back | all kept | the same | the same | no scripts |
+| the viewer revoking `TRIGGER_ANIMATION` of the object | that bit gone (`1030`), the rest and the granter kept; **no** `run_time_permissions` | the same | the same | no scripts (the grid surfaces `ServerEvent::RevokeScriptPermissions`) |
+| … `TRIGGER_ANIMATION \| OVERRIDE_ANIMATIONS` of the region | the same: `1030` | the same | the same | no scripts |
+| … every bit (`0xFFFFFFFF`) of the object | nothing held, the granter `NULL_KEY`; no event | the same | the same | no scripts |
+| `llTakeControls`, then `llReleaseControls` | `TAKE_CONTROLS` gone (`1042`) | the same | the same | no scripts |
+| the owner in another region for 20 s | all kept, while it is gone and after | the same | the same | no scripts |
+| `llResetScript` | nothing held | the same | the same | no scripts |
+| the owner taking the prim and rezzing it again | all kept: the script carries on and runs `on_rez` | the same | **the script is reset**: `state_entry` again, nothing held | no scripts |
+| the owner attaching it from the ground | all kept; asking again while worn puts the question to the wearer as before | the same | the same | no scripts |
+| the owner dropping it | `TAKE_CONTROLS` gone (`1042`), the rest kept | the same (by the time the drop is reported, or within three seconds of it) | the same | no scripts |
+
+No grid ran `run_time_permissions` for anything but an answer: a lapse is
+silent, and a script learns of it only by asking `llGetPermissions`.
+
+### What the viewer does with it
+
+A `PERMISSION_DEBIT` question raises the viewer's money-caution card (the
+reference's `ScriptQuestionCaution`), and balance replies of type `5009`
+raise the same payment notices as any other transaction
+([Money § The viewer](economy.md#the-viewer)). The viewer has no pay dialog
+yet, so nothing of it sends `RequestPayPrice` or a payment to an object
+(`viewer-money-economy-ui`), nor anything that sends `RevokePermissions`.

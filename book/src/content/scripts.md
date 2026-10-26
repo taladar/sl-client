@@ -104,7 +104,10 @@ ready to answer:
 
 How each grid puts the question, takes the answer, and what a script can do
 with the grant — sitting, controls, the camera, animations — is measured in
-[Grid Behaviour → LSL scripts](../gridspec/lsl.md#animations-sitting-controls-and-camera).
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#animations-sitting-controls-and-camera);
+when a grant lapses, `PERMISSION_DEBIT`, the pay buttons a script sets and
+what its `money` event hears of a payment, in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#script-permissions-money-and-payment).
 
 ## Uploading & compiling a script
 

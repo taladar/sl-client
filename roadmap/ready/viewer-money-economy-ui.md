@@ -95,3 +95,16 @@ Second Life answers `RequestPayPrice` with its default amounts (1, 5, 10, 20)
 already in place of `PAY_DEFAULT`, OpenSim with the raw `-2`, and the
 reference shows a quick-pay button only for an amount above zero
 (`LLFloaterPay::processPayPriceReply`). `book/src/gridspec/economy.md`.
+
+## From gridspec-lsl-money-permissions (2026-10-26)
+
+What the pay floater will be answered and what it may send: OpenSim sends
+**no** `PayPriceReply` for a layout of zeros (the floater must not wait for
+one), Second Life answers it with the zeros; Second Life fills an empty
+button list with 1, 5, 10, 20 and hides any button a script gave as a
+non-integer. Second Life takes any amount above 0 typed into a shown price
+field, only a button's amount when the price field is hidden — anything else
+is dropped with no reply at all — and refuses every amount, alerting "Payment
+stopped: …", when everything is hidden; so the floater should offer only
+what the layout offers. `book/src/gridspec/lsl.md` § Script permissions,
+money and payment.
