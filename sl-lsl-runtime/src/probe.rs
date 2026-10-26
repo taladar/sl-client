@@ -62,6 +62,9 @@ pub enum Drive {
     PayPrice,
     /// Revoking script permissions, as a viewer does (`RevokePermissions`).
     Revoke,
+    /// Restarting the probe's region, as an estate manager does
+    /// (`EstateOwnerMessage` `restart`), and coming back once it is up.
+    Restart,
 }
 
 impl Drive {
@@ -83,6 +86,7 @@ impl Drive {
             "pay" => Some(Self::Pay),
             "pay-price" => Some(Self::PayPrice),
             "revoke" => Some(Self::Revoke),
+            "restart" => Some(Self::Restart),
             _ => None,
         }
     }
@@ -649,6 +653,13 @@ pub enum Action {
         /// rather than prim A.
         whole_region: bool,
     },
+    /// Restart the probe's region in `seconds`, as an estate manager does,
+    /// and bring both avatars back once it is up.
+    Restart {
+        /// How far ahead the restart is scheduled, which decides the notices
+        /// the region sends before it goes down.
+        seconds: u32,
+    },
 }
 
 /// The HTTP request a `fetch` stimulus sends: `url=<url> [method=<name>]
@@ -748,21 +759,25 @@ impl Action {
             Self::Pay { .. } => Drive::Pay,
             Self::PayPrice { .. } => Drive::PayPrice,
             Self::Revoke { .. } => Drive::Revoke,
+            Self::Restart { .. } => Drive::Restart,
         }
     }
 }
 
 /// What a `waiting` record asks the runner for:
 /// `rec=waiting
-/// drive=touch|chat|answer|sit|stand|control|dialog|away|attach|drop|rerez|fetch|pay|pay-price|revoke
+/// drive=touch|chat|answer|sit|stand|control|dialog|away|attach|drop|rerez|fetch|pay|pay-price|revoke|restart
 /// [by=owner|other]`, and for a touch optionally `face=<n> uv=<u>,<v>
 /// st=<s>,<t> at=<x>,<y>,<z> normal=<x>,<y>,<z> binormal=<x>,<y>,<z>` (all of
 /// them, or none), for chat `channel=<n> text="…"`, for an answer
 /// `grant=<mask>`, for controls `keys=<mask>`, for a dialog `reply="…"`, for
 /// away `seconds=<n>`, for attach `point=<n>`, for a fetch what [`Fetch`]
 /// reads, for a payment `amount=<n> [prim=<label>]`, for the pay buttons
-/// `[prim=<label>]`, for a revocation `perms=<mask> [target=object|region]`. Without `by` it is the owner; only the owner goes `away`, attaches,
-/// drops or re-rezzes, and a fetch comes from no avatar at all.
+/// `[prim=<label>]`, for a revocation `perms=<mask> [target=object|region]`,
+/// for a restart `seconds=<n>`. Without `by` it is the owner; only the owner
+/// goes `away`, attaches, drops or re-rezzes, and neither a fetch nor a
+/// restart comes from either avatar: a fetch comes from no avatar at all, a
+/// restart from the estate's.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stimulus {
     /// Who gives it.
@@ -869,6 +884,21 @@ impl Stimulus {
                     }
                 },
             },
+            Some(Drive::Restart) => {
+                if line.field("by").is_some() {
+                    return Err(
+                        "a restart comes from the estate, not an avatar of the probe's, so it \
+                         takes no `by`"
+                            .to_owned(),
+                    );
+                }
+                Action::Restart {
+                    seconds: line
+                        .field("seconds")
+                        .and_then(|seconds| seconds.parse().ok())
+                        .ok_or("a restart drive without an unsigned integer `seconds`")?,
+                }
+            }
             None => return Err(format!("`drive={drive}` is not a drive")),
         };
         if by == By::Other
@@ -1136,7 +1166,7 @@ mod tests {
     fn a_header_lists_its_drives_and_its_tolerances() -> Result<(), HeaderError> {
         let header = Header::parse(
             "// probe: a/b\n// drive: chat, touch, answer, sit, stand, control, dialog, away, attach, \
-             drop, rerez, fetch, pay, pay-price, revoke\n\
+             drop, rerez, fetch, pay, pay-price, revoke, restart\n\
              // vary: seconds, rate\n// unordered: heard\n",
         )?;
         assert_eq!(
@@ -1156,7 +1186,8 @@ mod tests {
                 Drive::Fetch,
                 Drive::Pay,
                 Drive::PayPrice,
-                Drive::Revoke
+                Drive::Revoke,
+                Drive::Restart
             ]
         );
         assert_eq!(header.vary, vec!["seconds".to_owned(), "rate".to_owned()]);
@@ -1297,6 +1328,13 @@ mod tests {
             }
         );
         assert_eq!(
+            read("PROBE a/b rec=waiting drive=restart seconds=15")?,
+            Stimulus {
+                by: By::Owner,
+                action: Action::Restart { seconds: 15 }
+            }
+        );
+        assert_eq!(
             read("PROBE a/b rec=waiting drive=fetch url=http://h:1/cap/x")?.action,
             Action::Fetch(Fetch {
                 url: "http://h:1/cap/x".to_owned(),
@@ -1335,6 +1373,9 @@ mod tests {
             "PROBE a/b rec=waiting drive=pay amount=-1",
             "PROBE a/b rec=waiting drive=revoke",
             "PROBE a/b rec=waiting drive=revoke perms=16 target=parcel",
+            "PROBE a/b rec=waiting drive=restart",
+            "PROBE a/b rec=waiting drive=restart seconds=-1",
+            "PROBE a/b rec=waiting drive=restart by=owner seconds=15",
             "PROBE a/b rec=waiting drive=touch face=1",
             "PROBE a/b rec=waiting drive=touch face=x uv=0,0 st=0,0 at=0,0,0 normal=0,0,1 \
              binormal=0,1,0",

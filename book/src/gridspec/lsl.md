@@ -542,10 +542,8 @@ run all the while.
 | worn | the timer runs and the listen hears | the same | no scripts |
 | taken and rezzed again | a new key; `on_rez(0)` alone; the timer and the listen carry on — the script's state is kept | YEngine the same; **XEngine resets the script**: `state_entry` runs, the globals are gone, and `on_rez(0)` comes after it | no scripts |
 
-The restart of a region (`CHANGED_REGION_START`, and what runs first) is
-measured with the script persistence it belongs to, in
-`gridspec-lsl-persistence`: aditi grants no restart without estate rights,
-and the runner does not survive one.
+What else a take and a rez keep — globals, permissions, the queue, a sleep —
+and what a restart of the region does are in [Persistence](#persistence).
 
 ### What the viewer does with it
 
@@ -1335,3 +1333,77 @@ highlighting yet (`viewer-lsl-editor-highlight`): when it takes its keywords
 from the grid's `LSLSyntax` document, OSSL is highlighted on OpenSim with no
 code of its own — denied functions included, and `osListenRegex` and
 `modSendCommand` left out, since that is what the document says.
+
+## Persistence
+
+Measured on 2026-10-26 by the probes `persistence/rerez` and
+`persistence/restart`, on the same grids. Each probe's script sets every
+global to a value no initialiser gives it, goes into a state of its own
+(`kept`), starts a one-second timer and a listen, is granted
+`PERMISSION_TRIGGER_ANIMATION` and `PERMISSION_TRACK_CAMERA`, stops a second
+script in its prim, resets its script time, and prints what it holds. Then
+it asks for the take or the restart, sends itself three link messages and
+sleeps, and prints what it holds again on `on_rez` or `CHANGED_REGION_START`.
+A take and a rez is the runner's `rerez` (into the owner's Trash and back
+where the prim stood). A restart is the runner's `restart`: the estate owner,
+logged in for that alone, asks for one in 15 seconds (`EstateOwnerMessage`
+`restart`), and the owner and the other avatar are logged in again once the
+region takes a login. The probe's lines wait in a list while its owner is
+not in the region, since an owner-say to an absent owner is lost.
+
+### Taken and rezzed again
+
+| what the script had | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| its globals and its state | kept: still in `kept`, every value as set | YEngine the same; **XEngine resets the script**: `state_entry` in `default`, every global at its default | no scripts |
+| its permissions and their key | kept: 1040, the owner's | YEngine the same; XEngine none (0) | no scripts |
+| its timer and its listen | kept: the timer ticks on, and the line on 7 is heard | YEngine the same; XEngine has only what its reset opened again | no scripts |
+| three link messages to itself, queued before the take | delivered, **after** `on_rez` | YEngine delivered, **before** `on_rez`; XEngine lost with the reset | no scripts |
+| an 8 s `llSleep` the take came in | runs its full 8 s, script time and clock alike: the handler finishes after the rez, with the prim's new key | YEngine **ends at the take**: the handler goes on once the prim is rezzed, 1.2 s of script time and 2 s by the clock after the sleep began; XEngine lost: the handler never finishes | no scripts |
+| its script time (`llGetTime`) | counts on through the take and the rez | YEngine counts on; XEngine starts again with the reset | no scripts |
+| a second script it had stopped (`llSetScriptState(…, FALSE)`) | stays stopped: no `on_rez`, no answer to a link message, `llGetScriptState` 0 | YEngine the same; **XEngine runs it again**: its `state_entry` and `on_rez` run, it answers, `llGetScriptState` 1 | no scripts |
+| what runs on the rez | the sleeping handler's end, `on_rez(0)`, the queued link messages | YEngine the sleeping handler's end, the link messages, `on_rez(0)`; XEngine the stopped script's `state_entry` and `on_rez`, then its own `state_entry` and `on_rez(0)` | no scripts |
+
+`llGetStartParameter` is 0 on every grid, as for any rez from inventory, and
+no grid sends a `changed`. The prim's description (where the probe marks its
+first start) is kept on all three.
+
+### A restart of the region
+
+Not measured on Second Life: neither test avatar holds estate rights on aditi
+(`gridspec-aditi-test-land`), so the runner asks for no restart there and the
+probe waits its patience out. On OpenSim each avatar in the region is told
+`/Region will restart in 15 seconds`, an agent alert, then kicked with `The
+simulator is going down.`, as [Estate](estate.md) measured too. The region
+was taking logins again four seconds after it went down. A login meanwhile
+does not fail: OpenSim cannot find the region, falls back to its defaults and
+puts the avatar in a neighbour (East Region here), which the runner logs out
+and tries again.
+
+| what the script had | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| its key, globals and state | not measured | kept: the same key, still in `kept`, every value as set | **kept** too — unlike a take and a rez, no reset | no scripts |
+| its permissions and their key | not measured | kept | kept | no scripts |
+| its timer and its listen | not measured | kept | kept | no scripts |
+| three link messages to itself, queued before the restart | not measured | delivered, first | delivered, first | no scripts |
+| a 60 s `llSleep` the restart came in | not measured (it ran its full 60 s on aditi, where nothing restarted) | **ends at the shutdown**: the handler goes on once the region is back, 18 s of script time and 20 s by the clock after the sleep began | lost: the handler never finishes, though the events queued behind it run | no scripts |
+| its script time | not measured | counts on | starts again from 0 | no scripts |
+| a second script it had stopped | not measured | stays stopped | **runs again**, and answers | no scripts |
+| what runs when the region is back | not measured | the sleeping handler's end, the link messages, `changed(32768)` — OpenSim's own `POSITION` bit — then `changed(1024)`, `CHANGED_REGION_START` | the link messages, `changed(32768)`, `changed(1024)` | no scripts |
+
+Neither engine runs `state_entry` or `on_rez` after a restart: a script learns
+of it from `CHANGED_REGION_START` alone. The prims come back with their keys
+(`back prims=all`).
+
+### What the viewer does with it
+
+Nothing of a script's state reaches the viewer. A take and a rez are the
+viewer's own messages (`DeRezObject`, `RezObject`), sent by the runner with
+our own client on every grid. Of a restart the viewer sees the notice and the
+kick: the notice opens the restart countdown card in either grid's form
+(`e2e_windows`' `a_restart_notice_counts_down_and_a_cancellation_closes_it`,
+against both fake flavours), and the kick, `Disconnected(Kicked)` with
+`The simulator is going down.`, ends the session as any disconnect does
+today; the reference's disconnect dialog, and a login again that does not
+land in a neighbour while the region is still down, are
+`viewer-disconnect-screen`.

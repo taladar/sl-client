@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 344 |
+| ready | 343 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1432 |
+| done | 1433 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2077** |
@@ -334,7 +334,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
   Script state that survives a take, a rez and a region restart (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done),
-  `gridspec-lsl-persistence`)
+  `gridspec-lsl-persistence` (done))
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (344)
+## ready (343)
 
 ### protocol
 
@@ -1153,9 +1153,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-persistence`](ready/gridspec-lsl-persistence.md) — Script state
-  across take, rez and region restart on each grid (blocked by
-  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-physics-vehicles`](ready/gridspec-lsl-physics-vehicles.md) —
   LSL library behaviour on each grid — status flags, forces, targets and
   vehicles (blocked by `gridspec-lsl-live-differential-runner` (done))
@@ -1528,7 +1525,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1432)
+## done (1433)
 
 ### protocol
 
@@ -4647,6 +4644,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-ossl`](done/gridspec-lsl-ossl.md) — OSSL availability and
   denial on OpenSim (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-persistence`](done/gridspec-lsl-persistence.md) — Script state
+  across take, rez and region restart on each grid (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-probe-corpus`](done/gridspec-lsl-probe-corpus.md) — A committed
   LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct

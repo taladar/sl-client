@@ -59,3 +59,11 @@ OpenSim kicks with "You have been kicked out" (`kickestate`), "Your access to
 the region was revoked and TP home failed - you have been logged out." (an
 estate ban on a resident with no home) and "The simulator is going down." (a
 region restart); each arrives as `DisconnectReason::Kicked`.
+
+## Logging in again after a restart (2026-10-26, gridspec-lsl-persistence)
+
+OpenSim takes logins for a restarting region again a few seconds after it
+went down, but a login in between does not fail: the login service cannot
+find the region, falls back to its defaults and puts the avatar in a
+neighbour. A **Log in again** offered after `The simulator is going down.`
+should wait for the region, or say where the login landed.

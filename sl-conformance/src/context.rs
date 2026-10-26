@@ -840,6 +840,81 @@ pub struct LoginSpec<'a> {
     pub handshake_flags: RegionHandshakeReplyFlags,
 }
 
+/// A login the runner prepares but does not make: an avatar a case logs in
+/// only when it needs it, for something its own avatars may not do — the
+/// estate owner's region restart — so that it is not standing in the region
+/// for everything else the case measures.
+#[derive(Debug, Clone)]
+pub struct StandbyLogin {
+    /// The grid to log in to.
+    grid: Grid,
+    /// The account to log in as.
+    avatar: Avatar,
+    /// The viewer channel reported at login.
+    channel: String,
+    /// The version reported with it.
+    version: String,
+    /// The `start` wire string the avatar logs in at: the case's own.
+    start_location: String,
+    /// The per-avatar login-cooldown stamps, waited out before the login.
+    cooldown: LoginCooldown,
+    /// Whether to log in despite an unexpired cooldown stamp.
+    force: bool,
+}
+
+impl StandbyLogin {
+    /// A login of `avatar` as `spec` describes every other login of the run.
+    #[must_use]
+    pub fn new(avatar: &Avatar, spec: &LoginSpec<'_>) -> Self {
+        Self {
+            grid: spec.grid,
+            avatar: avatar.clone(),
+            channel: spec.channel.to_owned(),
+            version: spec.version.to_owned(),
+            start_location: spec.start_location.to_owned(),
+            cooldown: spec.cooldown.clone(),
+            force: spec.force,
+        }
+    }
+
+    /// The avatar's first and last name, so that a case can keep them out of
+    /// what it writes.
+    #[must_use]
+    pub fn name(&self) -> (String, String) {
+        (
+            self.avatar.first().to_owned(),
+            self.avatar.last().to_owned(),
+        )
+    }
+
+    /// Logs the avatar in, waiting out its login cooldown first on a grid
+    /// that rate-limits logins, as [`Session::relogin`] does.
+    ///
+    /// # Errors
+    ///
+    /// As [`login`], or the cooldown stamp cannot be written.
+    pub async fn login(&self) -> Result<Session, TestFailure> {
+        if self.grid.needs_cooldown() {
+            wait_out_cooldown(&self.cooldown, &avatar_label(&self.avatar), self.force).await?;
+        }
+        login(LoginSpec {
+            grid: self.grid,
+            avatar: &self.avatar,
+            channel: &self.channel,
+            version: &self.version,
+            start_location: &self.start_location,
+            cooldown: &self.cooldown,
+            force: self.force,
+            cache_dir: None,
+            probe: CircuitProbe::Off,
+            options: None,
+            capabilities: None,
+            handshake_flags: RegionHandshakeReplyFlags::CLIENT_DEFAULT,
+        })
+        .await
+    }
+}
+
 /// Log in as the spec says, answering any MFA challenge, and spawn the run
 /// loop, returning the live [`Session`].
 ///
@@ -1154,6 +1229,10 @@ pub struct TestContext {
     /// [selects probes](crate::registry::GridTest::selects_probes); empty
     /// is every probe.
     probe_selection: Vec<String>,
+    /// The estate owner, logged in only when a case needs it, for a case
+    /// that [keeps one on call](crate::registry::GridTest::estate_on_call)
+    /// on a grid whose credentials name one.
+    estate: Option<StandbyLogin>,
 }
 
 impl TestContext {
@@ -1177,7 +1256,22 @@ impl TestContext {
             completeness_note: None,
             fake: None,
             probe_selection: Vec::new(),
+            estate: None,
         }
+    }
+
+    /// Keep the estate owner on call: `estate` logs it in when the case
+    /// asks.
+    #[must_use]
+    pub fn with_estate(mut self, estate: StandbyLogin) -> Self {
+        self.estate = Some(estate);
+        self
+    }
+
+    /// The estate owner's login, if the runner keeps one on call.
+    #[must_use]
+    pub const fn estate(&self) -> Option<&StandbyLogin> {
+        self.estate.as_ref()
     }
 
     /// Narrow a probe-running case to these probe ids.

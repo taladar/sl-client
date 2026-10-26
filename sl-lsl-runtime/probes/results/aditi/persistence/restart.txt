@@ -1,0 +1,24 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE persistence/restart rec=stopped_entry
+# animations avatar=owner playing=""
+PROBE persistence/restart rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE persistence/restart rec=waiting drive=answer grant=1040
+# question permissions=1040 object="Object" owner="<first> <last>" experience=none
+# animations avatar=other playing=""
+# answer grant=1040
+PROBE persistence/restart rec=event seq=1 type=run_time_permissions perms=1040
+PROBE persistence/restart rec=before state=kept gi=42 gf=2.500000 gs="kept" gk_is_owner=1 gv="<1.00000, 2.00000, 3.00000>" gr="<0.00000, 0.00000, 0.70711, 0.70711>" gl="1, two, 3.000000" perms=1040 perms_key_is_owner=1 stopped_state=0 script_time=0.065592 timer=1 key_same=1
+PROBE persistence/restart rec=waiting drive=restart seconds=15
+# restart sent=no reason="the credentials name no estate owner"
+PROBE persistence/restart rec=woke script_time=60.015890 wall=60 key_same=1
+PROBE persistence/restart rec=event seq=2 type=link_message number=1 text="queued"
+PROBE persistence/restart rec=event seq=3 type=link_message number=2 text="queued"
+PROBE persistence/restart rec=event seq=4 type=link_message number=3 text="queued"
+PROBE persistence/restart rec=timeout awaited=region_start
+PROBE persistence/restart rec=end

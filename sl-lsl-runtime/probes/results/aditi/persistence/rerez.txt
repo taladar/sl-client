@@ -1,0 +1,31 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE persistence/rerez rec=stopped_entry
+# animations avatar=owner playing=""
+PROBE persistence/rerez rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE persistence/rerez rec=waiting drive=answer grant=1040
+# question permissions=1040 object="Object" owner="<first> <last>" experience=none
+# answer grant=1040
+PROBE persistence/rerez rec=event seq=1 type=run_time_permissions perms=1040
+PROBE persistence/rerez rec=before state=kept gi=42 gf=2.500000 gs="kept" gk_is_owner=1 gv="<1.00000, 2.00000, 3.00000>" gr="<0.00000, 0.00000, 0.70711, 0.70711>" gl="1, two, 3.000000" perms=1040 perms_key_is_owner=1 stopped_state=0 start_param=0 script_time=0.044664 timer=1 key_same=1
+PROBE persistence/rerez rec=waiting drive=rerez
+# animations avatar=other playing=""
+# take
+# taken announced=update-create-inventory-item
+# rez
+# rezzed key=new
+PROBE persistence/rerez rec=woke script_time=8.006987 wall=8 key_same=0
+PROBE persistence/rerez rec=event seq=2 type=on_rez param=0
+PROBE persistence/rerez rec=after state=kept gi=42 gf=2.500000 gs="kept" gk_is_owner=1 gv="<1.00000, 2.00000, 3.00000>" gr="<0.00000, 0.00000, 0.70711, 0.70711>" gl="1, two, 3.000000" perms=1040 perms_key_is_owner=1 stopped_state=0 start_param=0 script_time=8.207213 timer=0 key_same=0
+PROBE persistence/rerez rec=waiting drive=chat channel=7 text="after"
+PROBE persistence/rerez rec=event seq=3 type=link_message number=1 text="queued"
+PROBE persistence/rerez rec=event seq=4 type=link_message number=2 text="queued"
+PROBE persistence/rerez rec=event seq=5 type=link_message number=3 text="queued"
+# chat channel=7 text="after"
+PROBE persistence/rerez rec=event seq=6 type=listen message="after" timer=1
+PROBE persistence/rerez rec=end

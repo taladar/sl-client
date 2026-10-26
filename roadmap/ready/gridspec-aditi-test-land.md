@@ -77,3 +77,11 @@ Life: every stroke and its patches, the limits, undo (whether Second Life
 honours `UndoLand`), bake, the RAW transfers, the terrain tab and a manager's
 `ModifyRegion` write. Any parcel the primary may terraform (or estate rights)
 runs the strokes; estate rights run the rest.
+
+## From gridspec-lsl-persistence (2026-10-26)
+
+The `persistence/restart` probe's Second Life column in
+`book/src/gridspec/lsl.md` § Persistence reads "not measured": the runner's
+`restart` drive needs an `estate-owner` avatar in `credentials.aditi.toml`
+with estate rights on the build region (or a manager's on any region the
+probes can be run in).

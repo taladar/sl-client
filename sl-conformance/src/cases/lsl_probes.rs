@@ -20,8 +20,10 @@
 //!    puts, a sit on prim A, a stand, or movement controls held down for a
 //!    moment, from the owner or from a second avatar, or the owner leaving
 //!    the region for a while, attaching prim A from the ground, dropping it,
-//!    or taking it and rezzing it back (when it takes a new key) — one the
-//!    probe's header declares among its `drive`s;
+//!    or taking it and rezzing it back (when it takes a new key), or the
+//!    region restarting — asked for by the estate owner the runner keeps on
+//!    call, after which both avatars log in again — one the probe's header
+//!    declares among its `drive`s;
 //! 4. keeps every owner-say line of the probe's (`PROBE <id> …`) from its
 //!    prims, and every `DEBUG_CHANNEL` message they shout as a `#` note,
 //!    until the probe prints `end` — and a little longer, for a second
@@ -50,12 +52,12 @@ use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
     AgentKey, AssetType, AttachmentMode, AttachmentPoint, ChatAudible, ChatChannel, ChatMessage,
-    ChatSource, ChatType, Command, ControlFlags, DeRezDestination, Event, FolderType,
-    InstantMessage, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, LindenAmount,
-    MoneyBalance, MoneyTransactionType, Object, ObjectKey, OwnerKey, PrimShape, RegionHandle,
-    RegionLocalObjectId, RestoreItem, RezScriptParams, Rotation, ScopedObjectId, ScriptDialog,
-    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimStatId,
-    SurfaceInfo, TaskInventoryItem, TransactionId, Uuid, Vector, XferListing,
+    ChatSource, ChatType, Command, ControlFlags, DeRezDestination, DisconnectReason, Event,
+    FolderType, InstantMessage, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType,
+    LindenAmount, MoneyBalance, MoneyTransactionType, Object, ObjectKey, OwnerKey, PrimShape,
+    RegionHandle, RegionLocalObjectId, RestoreItem, RezScriptParams, Rotation, ScopedObjectId,
+    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
+    SimStatId, SurfaceInfo, TaskInventoryItem, TransactionId, Uuid, Vector, XferListing,
 };
 use sl_lsl_runtime::probe::{
     Action, By, COMPILE_ERROR_NOTE, Drive, Fetch, Line, PREFIX, ResultFile, Stimulus, Target,
@@ -63,7 +65,7 @@ use sl_lsl_runtime::probe::{
 };
 
 use super::object_rez_derez::rez_params;
-use crate::context::{Session, TestContext, TestFailure, now_rfc3339};
+use crate::context::{Session, StandbyLogin, TestContext, TestFailure, now_rfc3339};
 use crate::grid::Grid;
 use crate::probe_corpus::{Probe, corpus_root, load_corpus, result_path, select};
 use crate::registry::{GridTest, TestFuture};
@@ -175,6 +177,10 @@ impl GridTest for LslProbes {
         true
     }
 
+    fn estate_on_call(&self) -> bool {
+        true
+    }
+
     fn rezzes_objects(&self) -> bool {
         true
     }
@@ -214,6 +220,10 @@ impl GridTest for XEngineProbes {
     }
 
     fn selects_probes(&self) -> bool {
+        true
+    }
+
+    fn estate_on_call(&self) -> bool {
         true
     }
 
@@ -266,6 +276,9 @@ struct Cast {
     owner_name: (String, String),
     /// The other avatar's first and last name.
     other_name: (String, String),
+    /// The on-call estate owner's first and last name, which the notices of
+    /// a restart it asks for may carry.
+    estate_name: (String, String),
 }
 
 impl Cast {
@@ -291,6 +304,8 @@ impl Cast {
             (&self.owner_name.1, "<last>"),
             (&self.other_name.0, "<other-first>"),
             (&self.other_name.1, "<other-last>"),
+            (&self.estate_name.0, "<estate-first>"),
+            (&self.estate_name.1, "<estate-last>"),
         ] {
             scrubbed = replace_ignoring_case(&scrubbed, name, placeholder);
         }
@@ -916,6 +931,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
         })?
     };
     let elsewhere = ctx.ban_line_regions().to_vec();
+    let estate = ctx.estate().cloned();
     let travels = probes
         .iter()
         .any(|probe| probe.drives().contains(&Drive::Away));
@@ -994,6 +1010,7 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
             other: other.agent_id(),
             owner_name: split_name(&session.avatar_legacy_name()),
             other_name: split_name(&other.avatar_legacy_name()),
+            estate_name: estate.as_ref().map(StandbyLogin::name).unwrap_or_default(),
         }
     };
 
@@ -1010,6 +1027,11 @@ async fn run_corpus(ctx: &mut TestContext, xengine: bool) -> Result<(), TestFail
                 other_active_group,
                 cast: cast.clone(),
                 trip: trip.clone(),
+                estate: estate.as_ref(),
+                comeback: Comeback {
+                    grid,
+                    build_position: build_position.clone(),
+                },
             },
             probe,
             engine,
@@ -1132,6 +1154,22 @@ struct Avatars<'a> {
     /// Where the owner goes when a probe sends it `away`, and comes back
     /// to; `None` when no probe of the run asks.
     trip: Option<Trip>,
+    /// The estate owner the runner keeps on call, who restarts the region
+    /// when a probe asks; `None` when the credentials name none.
+    estate: Option<&'a StandbyLogin>,
+    /// How both avatars come back to the probe's prims after a restart.
+    comeback: Comeback,
+}
+
+/// How both avatars come back to the probe's prims after a restart: logged
+/// in again where they first logged in, then walked to the build location.
+#[derive(Debug, Clone)]
+struct Comeback {
+    /// The grid, for the settle on coming back.
+    grid: Grid,
+    /// The fixtures' build location, which an avatar walks to on a grid
+    /// whose arrival point is elsewhere.
+    build_position: Option<Vector>,
 }
 
 /// The owner's way out of the probe's region and back.
@@ -1309,7 +1347,7 @@ async fn run_probe(
     }
 
     if planted {
-        let deadline = after(PROBE_DEADLINE);
+        let mut deadline = after(PROBE_DEADLINE);
         let mut answered = 0_usize;
         while collect(
             avatars.session,
@@ -1328,6 +1366,7 @@ async fn run_probe(
             let stimulus = Stimulus::from_waiting(&wait)
                 .map_err(|reason| TestFailure::Assertion(format!("{}: {reason}", probe.id)))?;
             drain_other(avatars.other, &keys, &mut transcript).await?;
+            let stimulated = Instant::now();
             stimulate(
                 avatars,
                 probe,
@@ -1341,6 +1380,13 @@ async fn run_probe(
                 &stimulus,
             )
             .await?;
+            // A restart's time is the region's, not the probe's: the probe
+            // gets it back.
+            if matches!(stimulus.action, Action::Restart { .. }) {
+                deadline = deadline
+                    .checked_add(stimulated.elapsed())
+                    .unwrap_or(deadline);
+            }
         }
         if transcript.ended {
             let linger = after(LINGER);
@@ -1513,6 +1559,9 @@ async fn stimulate(
         }
         Action::Drop => return drop_prim(avatars.session, probe, scene, keys, transcript).await,
         Action::Rerez => return rerez(avatars.session, probe, scene, keys, transcript).await,
+        Action::Restart { seconds } => {
+            return restart(avatars, probe, scene, keys, transcript, *seconds).await;
+        }
         Action::Fetch(fetch) => {
             return fetch_url(avatars.session, probe, keys, transcript, fetch).await;
         }
@@ -1607,6 +1656,7 @@ async fn stimulate(
         | Action::Attach { .. }
         | Action::Drop
         | Action::Rerez
+        | Action::Restart { .. }
         | Action::Fetch(_)
         | Action::Pay { .. }
         | Action::PayPrice { .. }
@@ -2308,6 +2358,177 @@ async fn rerez(
     Ok(())
 }
 
+/// How long a restart may take to bring the region down after the time it
+/// was scheduled for.
+const DOWN_GRACE: Duration = Duration::from_secs(60);
+
+/// How long the region may take to come back up after it went down.
+const UP_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// How long between two logins that find the region still down.
+const LOGIN_RETRY: Duration = Duration::from_secs(5);
+
+/// How long the other avatar is given to hear that the region went down
+/// once the owner has.
+const OTHER_DOWN_GRACE: Duration = Duration::from_secs(10);
+
+/// Restarts the probe's region in `seconds`, as an estate manager does, and
+/// brings both avatars back to the probe's prims once it is up again: the
+/// on-call estate owner logs in, asks for the restart and is dropped once the
+/// region goes down; the owner and the other avatar hear it out, are logged
+/// in again as soon as the region takes a login, and walk back; the prims
+/// are renewed as the region streams them (a region keeps its objects' keys
+/// across a restart). Notes the restart, the region going down — what the
+/// owner was told — and coming back, or that no restart was sent, since the
+/// credentials name no estate owner.
+async fn restart(
+    avatars: &mut Avatars<'_>,
+    probe: &Probe,
+    scene: &mut Scene<'_>,
+    keys: &HashSet<ObjectKey>,
+    transcript: &mut Transcript,
+    seconds: u32,
+) -> Result<(), TestFailure> {
+    let Some(estate) = avatars.estate else {
+        transcript
+            .body
+            .push("# restart sent=no reason=\"the credentials name no estate owner\"".to_owned());
+        return Ok(());
+    };
+    let scheduled = i32::try_from(seconds).map_err(|_overflow| {
+        TestFailure::Assertion(format!("{}: a restart in {seconds} s", probe.id))
+    })?;
+    let region = avatars
+        .session
+        .region_handle()
+        .ok_or_else(|| TestFailure::State("the owner is in no region".to_owned()))?;
+    let mut manager = estate.login().await?;
+    manager.wait_for_region(REGION_TIMEOUT).await?;
+    transcript.body.push(format!("# restart seconds={seconds}"));
+    manager
+        .send(Command::RestartRegion { seconds: scheduled })
+        .await?;
+    // The owner hears the notices, then the region going down.
+    let down_within = Duration::from_secs(u64::from(seconds)).saturating_add(DOWN_GRACE);
+    let id = probe.id.clone();
+    let down = avatars
+        .session
+        .wait_for(down_within, |event| match event {
+            Event::Disconnected(reason) => Some(reason.clone()),
+            _ => {
+                let _kept = transcript.take(&id, keys, event);
+                None
+            }
+        })
+        .await;
+    let reason = match down {
+        Ok(reason) => reason,
+        Err(TestFailure::Timeout(_)) => {
+            transcript
+                .body
+                .push("# region-down response=none".to_owned());
+            return Ok(());
+        }
+        Err(other) => return Err(other),
+    };
+    let told = match &reason {
+        DisconnectReason::Kicked { message } => quote(&transcript.cast.scrub(message)),
+        other => quote(&format!("{other:?}")),
+    };
+    transcript.body.push(format!("# region-down told={told}"));
+    let gone = avatars
+        .other
+        .wait_for(OTHER_DOWN_GRACE, |event| {
+            transcript.take_other(keys, event);
+            matches!(event, Event::Disconnected(_)).then_some(())
+        })
+        .await;
+    match gone {
+        Ok(()) | Err(TestFailure::Timeout(_) | TestFailure::Disconnected(_)) => {}
+        Err(other) => return Err(other),
+    }
+    drop(manager);
+
+    // Back in as soon as the region takes a login.
+    let up_by = after(UP_TIMEOUT);
+    relogin_into(avatars.session, region, up_by).await?;
+    transcript.body.push("# region-up".to_owned());
+    let mut renewed: HashMap<ObjectKey, Object> = HashMap::new();
+    let settled = settle_scene_observing(
+        avatars.session,
+        avatars.comeback.grid,
+        avatars.comeback.build_position.clone(),
+        SETTLE_WINDOW,
+        SETTLE_IDLE,
+        |event| {
+            if let Event::ObjectAdded(object) = event
+                && keys.contains(&object.full_id)
+            {
+                let _previous = renewed.insert(object.full_id, (**object).clone());
+            }
+            let _kept = transcript.take(&probe.id, keys, event);
+        },
+    )
+    .await?;
+    scene.seen.extend(settled.seen);
+    let mut missing = Vec::new();
+    for (label, prim) in &mut *scene.prims {
+        match renewed.remove(&prim.full_id) {
+            Some(object) => *prim = object,
+            None => missing.push(label.clone()),
+        }
+    }
+    for label in &missing {
+        // A prim the region did not bring back is not there to clear away.
+        let _gone = scene.prims.remove(label);
+    }
+    transcript.body.push(if missing.is_empty() {
+        "# back prims=all".to_owned()
+    } else {
+        format!("# back missing={}", missing.join(","))
+    });
+    relogin_into(avatars.other, region, after(UP_TIMEOUT)).await?;
+    if avatars.comeback.build_position.is_some() {
+        let _settled = settle_scene(
+            avatars.other,
+            avatars.comeback.grid,
+            avatars.comeback.build_position.clone(),
+            SETTLE_WINDOW,
+            SETTLE_IDLE,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Logs `session`'s avatar in again until the login lands it in `region`,
+/// and waits for the region: a login while the region is still down fails,
+/// or lands the avatar in another region (OpenSim's default), which is
+/// logged out again. Fails once `up_by` has passed.
+async fn relogin_into(
+    session: &mut Session,
+    region: RegionHandle,
+    up_by: Instant,
+) -> Result<(), TestFailure> {
+    loop {
+        let outcome = match session.relogin().await {
+            Ok(()) if session.region_handle() == Some(region) => {
+                return session.wait_for_region(REGION_TIMEOUT).await;
+            }
+            Ok(()) => {
+                session.disconnect().await?;
+                TestFailure::State("the login landed in another region".to_owned())
+            }
+            Err(error) => error,
+        };
+        if Instant::now() >= up_by {
+            return Err(outcome);
+        }
+        tracing::info!("the region is not back yet: {outcome}");
+        tokio::time::sleep(LOGIN_RETRY).await;
+    }
+}
+
 /// The newest of `dialogs`, with the older ones dropped: a dialog a probe
 /// put without asking for a reply is left unanswered, as a resident would
 /// close it.
@@ -2718,15 +2939,20 @@ mod tests {
     }
 
     #[test]
-    fn both_avatars_names_become_placeholders() {
+    fn every_avatars_name_becomes_a_placeholder() {
         let cast = Cast {
             owner_name: split_name("Knob Label"),
             other_name: split_name("Lever Dial"),
+            estate_name: split_name("Switch Gauge"),
             ..Cast::default()
         };
         assert_eq!(
             cast.scrub("Knob Label offered Lever Dial a seat"),
             "<first> <last> offered <other-first> <other-last> a seat"
+        );
+        assert_eq!(
+            cast.scrub("Switch Gauge restarted the region"),
+            "<estate-first> <estate-last> restarted the region"
         );
         assert_eq!(split_name("Single"), ("Single".to_owned(), String::new()));
     }
@@ -2741,6 +2967,7 @@ mod tests {
             other: Some(other),
             owner_name: split_name("Knob Label"),
             other_name: split_name("Lever Dial"),
+            estate_name: (String::new(), String::new()),
         });
         let prims: HashSet<ObjectKey> = HashSet::from([ObjectKey::from(prim)]);
         let balance = |amount: u64, transaction: Option<MoneyTransaction>| MoneyBalance {

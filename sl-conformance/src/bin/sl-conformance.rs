@@ -127,6 +127,10 @@ fn distinct(left: &Avatar, right: &Avatar) -> bool {
     left.first() != right.first() || left.last() != right.last()
 }
 
+/// The credentials entry a case that keeps the estate owner on call logs in
+/// ([`GridTest::estate_on_call`]).
+const ESTATE_OWNER: &str = "estate-owner";
+
 /// Resolve the secondary avatar for a two-account test: an explicit
 /// `--secondary`, else the conventional `secondary` entry, else the first other
 /// distinct avatar in the file.
@@ -349,7 +353,7 @@ async fn run(args: RunArgs) -> Result<(), Error> {
     };
     let start_location = start_location.as_str();
 
-    let primary_session = context::login(context::LoginSpec {
+    let primary_spec = context::LoginSpec {
         grid: args.grid,
         avatar: primary,
         channel: CHANNEL,
@@ -366,9 +370,24 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         options: None,
         capabilities: None,
         handshake_flags: sl_client_tokio::RegionHandshakeReplyFlags::CLIENT_DEFAULT,
-    })
-    .await
-    .map_err(|error| Error::Test(error.to_string()))?;
+    };
+    // The estate owner on call, for a case that keeps one: logged in only
+    // when the case asks, like every other login of the run otherwise. An
+    // estate owner that is one of the case's own avatars is not kept, since
+    // that avatar is logged in already.
+    let estate = credentials
+        .select(Some(ESTATE_OWNER))
+        .ok()
+        .filter(|estate| {
+            test.estate_on_call()
+                && distinct(estate, primary)
+                && secondary.is_none_or(|secondary| distinct(estate, secondary))
+                && tertiary.is_none_or(|tertiary| distinct(estate, tertiary))
+        })
+        .map(|estate| context::StandbyLogin::new(estate, &primary_spec));
+    let primary_session = context::login(primary_spec)
+        .await
+        .map_err(|error| Error::Test(error.to_string()))?;
     let secondary_session = match secondary {
         Some(secondary) => Some(
             context::login(context::LoginSpec {
@@ -420,6 +439,9 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         fixtures,
     )
     .with_probe_selection(args.probe.clone());
+    if let Some(estate) = estate {
+        ctx = ctx.with_estate(estate);
+    }
     // On the fake grid the case may also drive the simulator; hand it the
     // grid-side handle onto the primary's session, now that it exists.
     if let Some(harness) = &fake {

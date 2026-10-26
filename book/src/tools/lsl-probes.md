@@ -34,7 +34,7 @@ A probe's id is its path below `probes/` without the extension
 | key | meaning |
 | --- | --- |
 | `probe` | the id; required |
-| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`, `fetch`, `pay`, `pay-price`, `revoke`; required |
+| `drive` | `none` (runs from `state_entry`), or the stimuli the probe asks for with `waiting` records, comma-separated: `touch`, `chat`, `answer`, `sit`, `stand`, `control`, `dialog`, `away`, `attach`, `drop`, `rerez`, `fetch`, `pay`, `pay-price`, `revoke`, `restart`; required |
 | `script` | the inventory name, which the probe's scripts find each other by; required in a probe of several |
 | `order` | where the script comes in the save order; required in a probe of several |
 | `prim` | the object that holds it, `A` (the default), `B`, … |
@@ -109,10 +109,19 @@ the four buttons as sent (`# pay-price`), or `response=none` after five seconds.
 prim A's scripts, or with `target=region` of every object in the region (what
 the reference sends when its avatar stops all animations); the mask goes as it
 is, so `perms=4294967295` is the every-permission revocation the reference sends
-for an object its avatar stands up from. `by=other` has the runner's second
-avatar do it, which owns nothing of the probe's; without `by` it is the owner (a
-`fetch` takes no `by`). A probe asks only for the drives its header declares,
-and the run fails if it asks for another.
+for an object its avatar stands up from. `drive=restart seconds=<n>` has the
+region restarted in `n` seconds, as an estate manager does (`EstateOwnerMessage`
+`restart`): the runner logs in the credentials' `estate-owner` avatar for that
+alone — it stands in the region for nothing else — and sends the request,
+listens to the owner until the region drops it, then logs the owner and the
+other avatar in again as soon as the region takes them (a login that lands in
+another region, OpenSim's fallback while the region is down, is logged out and
+tried again) and walks them back to the build location. With no `estate-owner`
+in the credentials (aditi's) nothing is sent. The time it takes is not counted
+against the probe's three minutes. `by=other` has the runner's second avatar do
+it, which owns nothing of the probe's; without `by` it is the owner (a `fetch`
+and a `restart` take no `by`). A probe asks only for the drives its header
+declares, and the run fails if it asks for another.
 
 ```text
 PROBE avatar/permissions rec=waiting drive=answer grant=1044
@@ -127,6 +136,7 @@ PROBE http/url rec=waiting drive=fetch url=<url> method=PUT path="/put" body=cha
 PROBE money/pay rec=waiting drive=pay by=other amount=7
 PROBE money/pay-price rec=waiting drive=pay-price prim=B
 PROBE money/lapse rec=waiting drive=revoke target=region perms=32784
+PROBE persistence/restart rec=waiting drive=restart seconds=15
 ```
 
 What a probe prints is one `llOwnerSay` line per observation:
@@ -205,6 +215,13 @@ What has bitten already, and how a probe should be shaped for it:
   and a shout. Give each call that may be denied a script of its own, and
   read the region's `[OSSL]` configuration before calling anything that
   would do harm were it allowed.
+- **An owner-say to an owner who is not there is lost.** A probe that asks
+  for something that logs its owner out — a `restart` — keeps its lines in a
+  list and says them once `llGetAgentSize(llGetOwner())` is not
+  `ZERO_VECTOR` again (`persistence/restart`). Its patience should count only
+  while the owner is there, and a timer may not survive what it asked for, so
+  start a repeating sensor as a second clock when the event it waits for
+  comes.
 - **The runner is slow back from a trip `away`.** It settles the owner in and
   walks it to the build location before it answers anything, which can take
   half a minute on Second Life; a probe that asks a question right after the
@@ -284,7 +301,10 @@ length beside it. A trip `away` is noted as `# away` and `# back`, with how each
 teleport went. An attach is noted as `# attach` and, once the region shows prim
 A worn, `# attached` with the point and whether it kept its key; a drop as
 `# drop` and `# dropped`; a re-rez as `# take`, `# taken` (how the grid
-announced the item), `# rez` and `# rezzed`; a `response=none` says the region
+announced the item), `# rez` and `# rezzed`; a restart as `# restart`, `#
+region-down` (what the owner was told as the region dropped it), `#
+region-up` and `# back` (whether the region brought every prim back), or `#
+restart sent=no` and why; a `response=none` says the region
 did not show it within twenty seconds. A line prim A prints before the update
 that names its new key is kept, not lost. A prim still worn when a probe ends is
 detached into the owner's inventory rather than derezzed. Names are never
@@ -405,6 +425,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `memory/*`, 2026-10-26: the memory functions, what values cost, `llSetMemoryLimit`, running out by recursion and by allocation, Mono against LSO, `OBJECT_SCRIPT_MEMORY` and the region's active-script count | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#memory-and-limits) | | |
 | `money/*`, 2026-10-26: the pay buttons after `llSetPayPrice`, what the `money` event hears of a payment and which payments a grid takes, `llGiveMoney`, `llTransferLindenDollars` and `transaction_result`, `PERMISSION_DEBIT` from a non-owner, and when a grant lapses | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#script-permissions-money-and-payment) | | |
 | `ossl/*`, 2026-10-26: which OSSL functions an ordinary owner's script may call on OpenSim, by threat level, `Allow_` line or neither, what a denied, failing or deprecated call says, to whom and what it does to the script, and a LightShare and a MOD call; Second Life's compile errors for them | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#ossl) | | |
+| `persistence/*`, 2026-10-26: what a running script keeps when its object is taken and rezzed again, and across a restart of its region (OpenSim only): globals, state, permissions, timer, listen, queued events, a sleep in progress, script time, a stopped script beside it, and what runs first | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#persistence) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

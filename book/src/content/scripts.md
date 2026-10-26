@@ -147,7 +147,10 @@ when it runs out is in
 [Grid Behaviour → LSL scripts](../gridspec/lsl.md#memory-and-limits). The
 functions only OpenSim has — OSSL and its siblings — which of them a script
 may call there, and what a denial says and to whom, are in
-[Grid Behaviour → LSL scripts](../gridspec/lsl.md#ossl).
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#ossl). What a running
+script keeps when its object is taken and rezzed again, or its region
+restarts, is in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#persistence).
 
 Creating a brand-new script goes through `CreateInventoryItem` (carrying the
 language subtype): the **simulator fills a compilable default body** (the LSL

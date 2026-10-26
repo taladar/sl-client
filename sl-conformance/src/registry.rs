@@ -95,6 +95,15 @@ pub trait GridTest: Send + Sync {
         false
     }
 
+    /// Whether the runner keeps the credentials' `estate-owner` avatar on
+    /// call for the case ([`TestContext::estate`]): logged in only when the
+    /// case asks, for what only an estate manager may do (a region restart),
+    /// so that it does not stand in the region for the rest. The runner
+    /// keeps none when the credentials name none. Defaults to `false`.
+    fn estate_on_call(&self) -> bool {
+        false
+    }
+
     /// The overall wall-clock budget the runner gives this case's body before
     /// cancelling it as hung ([`crate::isolate::run_isolated`]).
     ///

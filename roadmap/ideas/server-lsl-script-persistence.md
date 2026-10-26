@@ -49,3 +49,17 @@ Acceptance (when picked up): a running script taken to inventory and
 re-rezzed resumes with its globals and its timer; a deliberate
 `llResetScript` clears them; and the serialised form round-trips through
 a unit test with no grid.
+
+## Measured by gridspec-lsl-persistence (2026-10-26)
+
+`book/src/gridspec/lsl.md` § Persistence is the behaviour to build to, per
+flavour. A take and a rez: Second Life keeps globals, state, permissions,
+timer, listen and the queue, lets a sleep in progress run its course, keeps a
+stopped script stopped and delivers the queued events after `on_rez`; OpenSim
+under YEngine the same but ends the sleep at the take and delivers the queue
+before `on_rez`; XEngine resets the script and starts the stopped one again.
+A region restart (OpenSim only so far): both engines keep globals, state,
+permissions, timer, listen and the queue and send `changed(32768)` then
+`CHANGED_REGION_START`, no `state_entry` or `on_rez`; YEngine ends the sleep
+at the shutdown and keeps the script time, XEngine loses the sleeping handler,
+starts the script time again and runs the stopped script again.
