@@ -113,6 +113,55 @@ impl Target {
     }
 }
 
+/// The library a probe script is written against (its header's `library`).
+///
+/// The corpus compiles every script against Second Life's library, the only
+/// one the workspace's compiler knows. A script for OpenSim calls OSSL and
+/// its sibling families as well, which that compiler cannot resolve.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Library {
+    /// Second Life's (`sl`), the default.
+    #[default]
+    SecondLife,
+    /// OpenSim's (`opensim`): Second Life's plus the `os*` (OSSL), `ls*`
+    /// (LightShare) and `mod*` (MOD) functions and their constants.
+    OpenSim,
+}
+
+impl Library {
+    /// The library a header names.
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "sl" => Some(Self::SecondLife),
+            "opensim" => Some(Self::OpenSim),
+            _ => None,
+        }
+    }
+
+    /// Whether `name`, which Second Life's library does not define, is one
+    /// this library adds: a function of the OSSL, LightShare or MOD family,
+    /// or one of their constants.
+    #[must_use]
+    pub fn adds(self, name: &str) -> bool {
+        match self {
+            Self::SecondLife => false,
+            Self::OpenSim => {
+                let family = |prefix: &str| {
+                    name.strip_prefix(prefix)
+                        .and_then(|rest| rest.chars().next())
+                        .is_some_and(|first| first.is_ascii_uppercase())
+                };
+                family("os")
+                    || family("ls")
+                    || family("mod")
+                    || ["OS_", "OSTPOBJ_", "NPCLOOKAT_", "WL_"]
+                        .iter()
+                        .any(|prefix| name.starts_with(prefix))
+            }
+        }
+    }
+}
+
 /// The `// key: value` lines that open a probe script.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Header {
@@ -158,6 +207,9 @@ pub struct Header {
     /// count (the `SimStats` the grid sends the owner's viewer) each time it
     /// changes while the probe runs.
     pub active_scripts: bool,
+    /// `library`: the library the script is written against, `sl` (the
+    /// default) or `opensim` ([`Library`]).
+    pub library: Library,
 }
 
 /// A prim a [`Header`]'s `bare` key names: one that holds no script.
@@ -239,6 +291,7 @@ impl Header {
                 "bare",
                 "target",
                 "stats",
+                "library",
             ]
             .contains(key)
             {
@@ -306,6 +359,11 @@ impl Header {
             Some(&"active-scripts") => true,
             Some(value) => return Err(invalid("stats", value)),
         };
+        let library = pairs
+            .get("library")
+            .map(|value| Library::parse(value).ok_or_else(|| invalid("library", value)))
+            .transpose()?
+            .unwrap_or_default();
         Ok(Self {
             probe,
             drives,
@@ -326,6 +384,7 @@ impl Header {
             bare,
             target,
             active_scripts,
+            library,
         })
     }
 
@@ -1003,8 +1062,8 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        Action, BarePrim, By, Drive, Fetch, Header, HeaderError, Line, ResultFile, Stimulus,
-        Target, TouchSurface,
+        Action, BarePrim, By, Drive, Fetch, Header, HeaderError, Library, Line, ResultFile,
+        Stimulus, Target, TouchSurface,
     };
 
     #[test]
@@ -1012,7 +1071,8 @@ mod tests {
         let header = Header::parse(
             "// probe: errors/runtime-errors\n// script: Div int\n// prim: B\n\
              // order: 3\n// distance: 50\n// height: 99\n// drive: none\n\
-             // skip-on: opensim-xengine, fake-sl\n// target: lsl2\n// stats: active-scripts\n//\n// probe: not/this\n",
+             // skip-on: opensim-xengine, fake-sl\n// target: lsl2\n// stats: active-scripts\n\
+             // library: opensim\n//\n// probe: not/this\n",
         )?;
         assert_eq!(
             header,
@@ -1030,11 +1090,46 @@ mod tests {
                 bare: Vec::new(),
                 target: Target::Lsl2,
                 active_scripts: true,
+                library: Library::OpenSim,
             }
         );
         assert!(header.skipped_on("fake-sl"));
         assert!(!header.skipped_on("aditi"));
         Ok(())
+    }
+
+    #[test]
+    fn a_header_defaults_to_the_second_life_library_and_refuses_another() {
+        assert_eq!(
+            Header::parse("// probe: a/b\n// drive: none\n").map(|header| header.library),
+            Ok(Library::SecondLife)
+        );
+        assert_eq!(
+            Header::parse("// probe: a/b\n// drive: none\n// library: xengine\n"),
+            Err(HeaderError::Invalid {
+                key: "library".to_owned(),
+                value: "xengine".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn opensims_library_adds_only_its_own_families() {
+        for name in [
+            "osGetScriptEngineName",
+            "lsGetWindlightScene",
+            "modSendCommand",
+            "OS_LISTEN_REGEX_MESSAGE",
+            "OSTPOBJ_STOPATTARGET",
+            "NPCLOOKAT_FOCUS",
+            "WL_WATER_COLOR",
+        ] {
+            assert!(Library::OpenSim.adds(name), "{name}");
+            assert!(!Library::SecondLife.adds(name), "{name}");
+        }
+        for name in ["os", "osmium", "llOwnerSay", "lsx", "model", "nope"] {
+            assert!(!Library::OpenSim.adds(name), "{name}");
+        }
     }
 
     #[test]

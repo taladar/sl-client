@@ -89,3 +89,22 @@ ranges ever get a box of their own.
 
 Reference (Firestorm, read-only): `llscripteditor`, `llkeywords` (the token
 table), `llsyntaxid`.
+
+## Measured (2026-10-26, [[gridspec-lsl-ossl]])
+
+Two things to know before this is built:
+
+- **Nothing delivers the grid's document to the editor yet.** The fetch,
+  cache and decode are done ([[protocol-lsl-syntax]]): `Event::LslSyntax`
+  arrives, and `sl-client-bevy` only logs it (`sl-client-bevy/src/lib.rs`,
+  `SessionEvent::LslSyntax`). Keeping the decoded table as a resource the
+  editor (and, later, `sl-lsl-lsp`, whose binary starts with
+  `LslSyntax::default()`) can read is part of this task.
+- **OpenSim's document is not what the region allows.** The one the local
+  grid served lists 224 `os*` functions and four `ls*` ones with no word
+  about who may call them — `osAvatarStopAnimation` and `osConsoleCommand`
+  (disabled by the stock `[OSSL]` configuration) and `osTerrainSetHeight`
+  (denied by threat level) read like `osGetRegionSize` — and it leaves out
+  `osListenRegex` and every `mod*` function, which compile and run. So OSSL
+  colours as the document says, not as the region behaves; a denial shows
+  only at run time, as `DEBUG_CHANNEL` chat ([[viewer-script-warning-window]]).

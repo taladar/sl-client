@@ -1,0 +1,9 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: unknown (no start record)
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+complete: no
+
+# compile error in "Probe": "(76, 35) : ERROR : Name not defined within scope\n"

@@ -62,3 +62,12 @@ side and is closed as a duplicate of this item. What it adds:
 Acceptance also includes: a viewer logged into the fake grid fetches a
 non-empty `LSLSyntax` document and its editor highlights and completes from
 it.
+
+## Measured (2026-10-26, [[gridspec-lsl-ossl]])
+
+OpenSim's served document is not a list of what the region allows: it
+carries every `os*` function whatever the `[OSSL]` configuration denies or
+disables, and it leaves out `osListenRegex` and every `mod*` function, which
+compile and run there. A `FakeOpensim` document vendored from it imitates
+those gaps too; one rendered from the engine's table would not. Say which
+the flavour is meant to imitate.

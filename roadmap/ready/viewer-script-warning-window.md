@@ -69,3 +69,19 @@ on both, in each grid's words (`llDialog: button list too long, must be 12
 or fewer entries` against `llDialog: No more than 12 buttons can be shown`,
 `Invalid Key passed to instant message.` against `llInstantMessage: An
 invalid key  was passed to llInstantMessage`).
+
+## Measured (2026-10-26, [[gridspec-lsl-ossl]])
+
+The "owner only" premise above does not hold on OpenSim for OSSL: with the
+stock `PermissionErrorToOwner = false` a denied or failing OSSL call
+(`OSSL Permission Error: …`, `OSSL Runtime Error: …`) reaches **every**
+avatar near the object as `DEBUG_CHANNEL` chat, and a deprecated function's
+warning or an `osRegexIsMatch` pattern error is a `DEBUG_CHANNEL` **shout**
+that the other avatar and scripts 50 m away hear too. So the owner-only
+default has to be the window's own filter (by the chat's owner id), not
+something the grid already did. The two engines wrap the same text
+differently — YEngine `YEngine: <text> (script: <name> event: <event>
+primID: <key> at: <x,y,z>) Script must be Reset to re-enable.`, XEngine
+`<text>(script: <name> event: <event> primID:<key> at <x, y, z>)` — so the
+script name, prim and position the window wants to show are in the text, in
+two layouts (`book/src/gridspec/lsl.md` § OSSL).

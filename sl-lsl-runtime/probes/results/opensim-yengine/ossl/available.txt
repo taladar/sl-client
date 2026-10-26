@@ -1,0 +1,49 @@
+grid: opensim-yengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE ossl/available rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE ossl/available rec=allow-true fn=osGetScriptEngineName value="YEngine"
+PROBE ossl/available rec=allow-true fn=osGetSimulatorVersion version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE ossl/available rec=allow-true fn=osGetPhysicsEngineType value="ubODE"
+PROBE ossl/available rec=allow-true fn=osGetGridName value="the lost continent of hippo"
+PROBE ossl/available rec=allow-true fn=osGetGridNick value="hippogrid"
+PROBE ossl/available rec=allow-true fn=osFormatString value="a-2-a"
+PROBE ossl/available rec=allow-true fn=osMatchString value="b, 1, b, 4"
+PROBE ossl/available rec=allow-true fn=osReplaceString value="axcaxc"
+PROBE ossl/available rec=allow-true fn=osRegexIsMatch value=1
+PROBE ossl/available rec=allow-true fn=osUnixTimeToTimestamp value="1970-01-01T00:00:00.0000000Z"
+PROBE ossl/available rec=allow-true fn=osGetWindParam value=1.000000
+PROBE ossl/available rec=allow-true fn=osGetAgentIP ip="" len=0
+PROBE ossl/available rec=allow-true fn=osListenRegex handle_positive=1
+PROBE ossl/available rec=threat-level fn=osGetGender value="female"
+PROBE ossl/available rec=threat-level fn=osGetHealth value=100.000000
+PROBE ossl/available rec=threat-level fn=osGetRezzingObject value=00000000-0000-0000-0000-000000000000
+PROBE ossl/available rec=threat-level fn=osWindActiveModelPluginName value="SimpleRandomWind"
+PROBE ossl/available rec=threat-level fn=osDrawText value="Text hi; "
+PROBE ossl/available rec=always fn=osGetRegionSize value="<256.000000, 256.000000, 0.000000>"
+PROBE ossl/available rec=always fn=osIsNpc value=0
+PROBE ossl/available rec=always fn=osIsUUID value=0,1
+PROBE ossl/available rec=always fn=osMin value=-2.000000
+PROBE ossl/available rec=always fn=osMax value=1.500000
+PROBE ossl/available rec=always fn=osGetSunParam value=14400.000000
+PROBE ossl/available rec=always fn=osGetLinkNumber value=-1
+PROBE ossl/available rec=always fn=osGetMapTexture map_texture=adbd3c39-3db3-49e9-ab5f-d5b1227639fb
+PROBE ossl/available rec=always fn=osGetPhysicsEngineName value="ubODE 1.0-0.13.2"
+PROBE ossl/available rec=always fn=osCheckODE value=0
+PROBE ossl/available rec=always fn=osStringSubString value="cde"
+PROBE ossl/available rec=always fn=osGetApparentTimeString apparent="02:30:52"
+PROBE ossl/available rec=unchecked fn=osSHA256 value="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+PROBE ossl/available rec=unchecked fn=osRound value=1.230000
+PROBE ossl/available rec=unchecked fn=osVecMagSquare value=14.000000
+PROBE ossl/available rec=unchecked fn=osApproxEquals value=1
+PROBE ossl/available rec=unchecked fn=osStringReplace value="axcaxc"
+PROBE ossl/available rec=unchecked fn=osIsNotValidNumber value=0
+PROBE ossl/available rec=unchecked fn=osGetPSTWallclock wallclock=48308.825519
+PROBE ossl/available rec=unchecked fn=osGetInventoryItemKey value=00000000-0000-0000-0000-000000000000
+PROBE ossl/available rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

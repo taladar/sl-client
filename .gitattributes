@@ -88,3 +88,17 @@ sl-object-asset/tests/data/*.txt -whitespace
 # it would break that provenance, so it is exempt from the xmllint group like the
 # vendored character XML above.
 sl-lsl-runtime/keywords_lsl_default.xml skipchecks=xml;;;vendored[[space]]upstream[[space]]content
+
+# The OSSL probes call the os*, ls* and mod* functions only OpenSim has, which
+# lslint (Second Life's library only) rejects as undeclared; the probe corpus
+# test compiles them instead, admitting what their `library: opensim` header
+# names. The leader and listeners of ossl/errors are plain LSL and stay linted.
+sl-lsl-runtime/probes/ossl/available.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+sl-lsl-runtime/probes/ossl/errors/threat.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+sl-lsl-runtime/probes/ossl/errors/listed.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+sl-lsl-runtime/probes/ossl/errors/disabled.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+sl-lsl-runtime/probes/ossl/errors/runtime.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+sl-lsl-runtime/probes/ossl/errors/deprecated.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+sl-lsl-runtime/probes/ossl/errors/shout.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+sl-lsl-runtime/probes/ossl/errors/lightshare.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+sl-lsl-runtime/probes/ossl/errors/mod.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions

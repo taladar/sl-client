@@ -1,0 +1,106 @@
+grid: opensim-xengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE ossl/errors rec=listening channel=2147483647
+PROBE ossl/errors rec=listening channel=2147483647
+# chat type=say from="Object" length=14 text="Script running"
+PROBE ossl/errors rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE ossl/errors rec=trigger script="Threat"
+PROBE ossl/errors rec=call script="Threat"
+# debug-channel: from="Object" text="OSSL Permission Error: osTerrainSetHeight permission denied.  Allowed threat level is VeryLow but function threat level is High.(script: Threat event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"
+PROBE ossl/errors rec=trigger script="Listed"
+PROBE ossl/errors rec=call script="Listed"
+# debug-channel: from="Object" text="OSSL Permission Error: osGetAgents permission denied.(script: Listed event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"
+PROBE ossl/errors rec=trigger script="Disabled"
+PROBE ossl/errors rec=call script="Disabled"
+# debug-channel: from="Object" text="OSSL Permission Error: osAvatarStopAnimation disabled in region configuration(script: Disabled event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"
+PROBE ossl/errors rec=trigger script="Runtime"
+PROBE ossl/errors rec=call script="Runtime"
+# debug-channel: from="Object" text="OSSL Runtime Error: osGetTerrainHeight: Coordinate out of bounds(script: Runtime event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"
+PROBE ossl/errors rec=trigger script="Deprecated"
+PROBE ossl/errors rec=call script="Deprecated"
+# debug-channel: from="Object" text="Use of function osSunGetParam is deprecated. Use osGetSunParam instead."
+PROBE ossl/errors rec=heard name="Object" same_owner=1 dist=50.000000 len=71 msg="Use of function osSunGetParam is deprecated. Use osGetSunParam instead."
+PROBE ossl/errors rec=heard name="Object" same_owner=1 dist=10.000000 len=71 msg="Use of function osSunGetParam is deprecated. Use osGetSunParam instead."
+PROBE ossl/errors rec=returned script="Deprecated" value="14400.000000" elapsed=1.000999
+PROBE ossl/errors rec=trigger script="Shout"
+PROBE ossl/errors rec=call script="Shout"
+# debug-channel: from="Object" text="Possible invalid regular expression detected."
+PROBE ossl/errors rec=heard name="Object" same_owner=1 dist=10.000000 len=45 msg="Possible invalid regular expression detected."
+PROBE ossl/errors rec=heard name="Object" same_owner=1 dist=50.000000 len=45 msg="Possible invalid regular expression detected."
+PROBE ossl/errors rec=returned script="Shout" value="0" elapsed=1.000000
+PROBE ossl/errors rec=trigger script="LightShare"
+PROBE ossl/errors rec=call script="LightShare"
+PROBE ossl/errors rec=returned script="LightShare" value="0, <4.000000, 38.000000, 64.000000>" elapsed=0.000000
+PROBE ossl/errors rec=trigger script="Mod"
+PROBE ossl/errors rec=call script="Mod"
+PROBE ossl/errors rec=returned script="Mod" value="65158aff-620e-4aab-aee5-6a9ac0dadc5e" elapsed=0.000000
+PROBE ossl/errors rec=script-state when=after-calls script="Threat" running=1
+PROBE ossl/errors rec=script-state when=after-calls script="Listed" running=1
+PROBE ossl/errors rec=script-state when=after-calls script="Disabled" running=1
+PROBE ossl/errors rec=script-state when=after-calls script="Runtime" running=1
+PROBE ossl/errors rec=script-state when=after-calls script="Deprecated" running=1
+PROBE ossl/errors rec=script-state when=after-calls script="Shout" running=1
+PROBE ossl/errors rec=script-state when=after-calls script="LightShare" running=1
+PROBE ossl/errors rec=script-state when=after-calls script="Mod" running=1
+PROBE ossl/errors rec=ping when=after-calls
+PROBE ossl/errors rec=answer script="Threat"
+PROBE ossl/errors rec=answer script="Disabled"
+PROBE ossl/errors rec=answer script="Listed"
+PROBE ossl/errors rec=answer script="Mod"
+PROBE ossl/errors rec=answer script="Shout"
+PROBE ossl/errors rec=answer script="LightShare"
+PROBE ossl/errors rec=answer script="Runtime"
+PROBE ossl/errors rec=answer script="Deprecated"
+PROBE ossl/errors rec=reset script="Threat"
+PROBE ossl/errors rec=ping when=after-reset
+PROBE ossl/errors rec=answer script="Runtime"
+PROBE ossl/errors rec=answer script="Deprecated"
+PROBE ossl/errors rec=answer script="Disabled"
+PROBE ossl/errors rec=answer script="Listed"
+PROBE ossl/errors rec=answer script="Threat"
+PROBE ossl/errors rec=answer script="LightShare"
+PROBE ossl/errors rec=answer script="Shout"
+PROBE ossl/errors rec=answer script="Mod"
+PROBE ossl/errors rec=trigger script="Threat" again=1
+PROBE ossl/errors rec=call script="Threat"
+# debug-channel: from="Object" text="OSSL Permission Error: osTerrainSetHeight permission denied.  Allowed threat level is VeryLow but function threat level is High.(script: Threat event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"
+PROBE ossl/errors rec=script-state when=after-again script="Threat" running=1
+PROBE ossl/errors rec=script-state when=after-again script="Listed" running=1
+PROBE ossl/errors rec=script-state when=after-again script="Disabled" running=1
+PROBE ossl/errors rec=script-state when=after-again script="Runtime" running=1
+PROBE ossl/errors rec=script-state when=after-again script="Deprecated" running=1
+PROBE ossl/errors rec=script-state when=after-again script="Shout" running=1
+PROBE ossl/errors rec=script-state when=after-again script="LightShare" running=1
+PROBE ossl/errors rec=script-state when=after-again script="Mod" running=1
+PROBE ossl/errors rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="OSSL Permission Error: osTerrainSetHeight permission denied.  Allowed threat level is VeryLow but function threat level is High.(script: Threat event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"
+# debug-channel by=other: from="Object" text="OSSL Permission Error: osGetAgents permission denied.(script: Listed event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"
+# debug-channel by=other: from="Object" text="OSSL Permission Error: osAvatarStopAnimation disabled in region configuration(script: Disabled event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"
+# debug-channel by=other: from="Object" text="OSSL Runtime Error: osGetTerrainHeight: Coordinate out of bounds(script: Runtime event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"
+# debug-channel by=other: from="Object" text="Use of function osSunGetParam is deprecated. Use osGetSunParam instead."
+# debug-channel by=other: from="Object" text="Possible invalid regular expression detected."
+# debug-channel by=other: from="Object" text="OSSL Permission Error: osTerrainSetHeight permission denied.  Allowed threat level is VeryLow but function threat level is High.(script: Threat event: link_message primID:e7140b15-bc14-4b61-b3a7-992905132afb at <120, 128, 27.5>)"

@@ -4,9 +4,10 @@
 //! A probe is one `.lsl` file directly under an area directory
 //! (`probes/<area>/<probe>.lsl`), or a directory of scripts that run together
 //! (`probes/<area>/<probe>/*.lsl`); its id is its path below `probes/`
-//! without the extension. Every script compiles here, opens with a header
-//! naming its probe, and — in a probe of several — names its inventory name
-//! and its place in the save order, each once. A script that names its
+//! without the extension. Every script compiles here (but for the names
+//! OpenSim's library adds, in a script whose header says `library: opensim`),
+//! opens with a header naming its probe, and — in a probe of several — names
+//! its inventory name and its place in the save order, each once. A script that names its
 //! probe in a `string ID = "…"` global names its own.
 //!
 //! Every result file, `probes/results/<grid>/<probe id>.txt`, is for a known
@@ -18,8 +19,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use pretty_assertions::assert_eq;
-    use sl_lsl_runtime::compile;
     use sl_lsl_runtime::probe::{Drive, GRIDS, Header, Line, ResultFile, Stimulus};
+    use sl_lsl_runtime::{CompileErrorKind, compile};
 
     /// The corpus root.
     fn probes_root() -> PathBuf {
@@ -119,8 +120,21 @@ mod tests {
                 .display()
                 .to_string();
             let source = fs_err::read_to_string(script).map_err(|error| error.to_string())?;
+            // A script for OpenSim may name what OpenSim's library adds,
+            // which the compiler here does not know; everything else must
+            // compile as Second Life's library has it.
+            let library = Header::parse(&source)
+                .map(|header| header.library)
+                .unwrap_or_default();
             if let Err(errors) = compile(&source) {
                 for error in errors {
+                    if error.kind == CompileErrorKind::Undefined
+                        && source
+                            .get(error.span.clone())
+                            .is_some_and(|name| library.adds(name))
+                    {
+                        continue;
+                    }
                     problems.push(format!(
                         "{shown}:{}:{} {}",
                         error.position.line,

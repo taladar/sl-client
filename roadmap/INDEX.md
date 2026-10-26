@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 345 |
+| ready | 344 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1431 |
+| done | 1432 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2077** |
@@ -310,7 +310,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-money-permissions` (done))
 - [`server-lsl-lib-ossl`](ideas/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
   surface — how much, and why (blocked by `server-lsl-library-surface-table`
-  (done), `gridspec-lsl-ossl`)
+  (done), `gridspec-lsl-ossl` (done))
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
   `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (345)
+## ready (344)
 
 ### protocol
 
@@ -1153,8 +1153,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-ossl`](ready/gridspec-lsl-ossl.md) — OSSL availability and
-  denial on OpenSim (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-persistence`](ready/gridspec-lsl-persistence.md) — Script state
   across take, rez and region restart on each grid (blocked by
   `gridspec-lsl-live-differential-runner` (done))
@@ -1530,7 +1528,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1431)
+## done (1432)
 
 ### protocol
 
@@ -4647,6 +4645,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-money-permissions`](done/gridspec-lsl-money-permissions.md) —
   LSL library behaviour on each grid — script permissions, money and payment
   (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-ossl`](done/gridspec-lsl-ossl.md) — OSSL availability and
+  denial on OpenSim (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-probe-corpus`](done/gridspec-lsl-probe-corpus.md) — A committed
   LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct

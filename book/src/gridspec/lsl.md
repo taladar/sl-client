@@ -1231,3 +1231,107 @@ raise the same payment notices as any other transaction
 ([Money § The viewer](economy.md#the-viewer)). The viewer has no pay dialog
 yet, so nothing of it sends `RequestPayPrice` or a payment to an object
 (`viewer-money-economy-ui`), nor anything that sends `RevokePermissions`.
+
+## OSSL
+
+Measured on 2026-10-26 by the probes `ossl/available` and `ossl/errors`, on
+the same grids. OSSL (the `os*` functions) and its two sibling families —
+LightShare (`ls*`) and MOD (`mod*`) — are OpenSim's own; Second Life has
+none of them. On OpenSim a script may call an OSSL function when the
+region's `[OSSL]` configuration allows it for the script's owner. The local
+grid runs the stock `config-include/osslDefaultEnable.ini`:
+`AllowOSFunctions`, `AllowMODFunctions` and `AllowLightShareFunctions` on,
+`OSFunctionThreatLevel = VeryLow`, `PermissionErrorToOwner = false`, and an
+`Allow_<function>` line for most functions, which overrides the threat level
+in either direction: `true` for everyone, `false` for no one, or a list of
+who may (`ESTATE_OWNER`, `ESTATE_MANAGER`, parcel owners and group members,
+gods, avatar or group keys). The probes' owner is an ordinary account,
+neither estate owner nor manager.
+
+### What runs
+
+`ossl/available` calls one or more functions of each way a function comes to
+be allowed, and prints what each answered. The two engines answer alike but
+for `osGetScriptEngineName`.
+
+| allowed because | the calls and what OpenSim answered | Second Life | fake grid |
+| --- | --- | --- | --- |
+| its `Allow_` line is `true`, most of them above `VeryLow` | `osGetScriptEngineName` `YEngine` or `XEngine`; `osGetSimulatorVersion` the region's `sim_version`; `osGetPhysicsEngineType` `ubODE`; `osGetGridName` and `osGetGridNick` the stock `the lost continent of hippo` and `hippogrid`; `osFormatString("{0}-{1}-{0}", ["a", 2])` `a-2-a`; `osMatchString("abcabc", "b", 0)` `b, 1, b, 4`; `osReplaceString("abcabc", "b", "x", -1, 0)` `axcaxc`; `osRegexIsMatch("abc", "^a.c$")` `1`; `osUnixTimeToTimestamp(0)` `1970-01-01T00:00:00.0000000Z`; `osGetWindParam` `1.0`; `osListenRegex` a listen handle | none of it compiles: `(76, 35) : ERROR : Name not defined within scope` | no scripts |
+| … `true`, with a second check of its own | `osGetAgentIP(owner)`: `""`, no error — the address is for gods only | — | no scripts |
+| no `Allow_` line, threat level `None`, under the configured `VeryLow` | `osGetGender(owner)` `female`; `osGetHealth` `100.0`; `osGetRezzingObject` `NULL_KEY`; `osWindActiveModelPluginName` `SimpleRandomWind`; `osDrawText("", "hi")` `Text hi;` and a trailing space | — | no scripts |
+| it checks only that OSSL is on | `osGetRegionSize` `<256, 256, 0>`; `osIsNpc(owner)` `0`; `osIsUUID`; `osMin`, `osMax`; `osGetSunParam("day_length")` `14400.0`; `osGetLinkNumber` of the prim's own name in an unlinked prim `-1`; `osGetMapTexture` a key; `osGetPhysicsEngineName` `ubODE 1.0-0.13.2`; `osCheckODE` `0`; `osStringSubString("abcdef", 2, 3)` `cde` | — | no scripts |
+| it checks nothing | `osSHA256("abc")` the SHA-256 in lower-case hex; `osRound(1.23456, 2)` `1.23`; `osVecMagSquare`, `osApproxEquals`, `osStringReplace`, `osIsNotValidNumber`; `osGetPSTWallclock`; `osGetInventoryItemKey` of an item the prim lacks `NULL_KEY` | — | no scripts |
+
+Second Life reports one compile error per script, and not the first in the
+source: `ossl/available` calls `osGetScriptEngineName` first, yet the error
+is the constant `OS_LISTEN_REGEX_MESSAGE` two dozen lines further on,
+pointing as ever at the token after it: an undefined constant is found ahead
+of the undefined calls. In `ossl/errors`' first script, which uses no
+constant, it is the inner of two nested calls, `osGetTerrainHeight(128, 128)`
+inside `osTerrainSetHeight(…)`, at the inner call's closing parenthesis. The
+text is the one any undefined name gets ([Compiling](#compiling)).
+
+### Denials and errors
+
+`ossl/errors` puts each call that may throw in a script of its own in prim
+A, has them called one at a time, then reads every script's
+`llGetScriptState`, pings them all with a link message, resets the first and
+has it call again. Two listeners in other objects, 10 m and 50 m away, listen
+on `DEBUG_CHANNEL`.
+
+| the call | what is said (both engines) | Second Life | fake grid |
+| --- | --- | --- | --- |
+| a threat level above the configured one, no `Allow_` line: `osTerrainSetHeight` (`High`) | `OSSL Permission Error: osTerrainSetHeight permission denied.  Allowed threat level is VeryLow but function threat level is High.` (two spaces after the first full stop) | the probe stops here, at this script's compile error: `(39, 81) : ERROR : Name not defined within scope` | no scripts |
+| an `Allow_` list the owner is not on, threat level `None`: `osGetAgents` | `OSSL Permission Error: osGetAgents permission denied.` — beneath the threat level, the list alone decides | — | no scripts |
+| `Allow_` `false`: `osAvatarStopAnimation` | `OSSL Permission Error: osAvatarStopAnimation disabled in region configuration` | — | no scripts |
+| an argument error: `osGetTerrainHeight(-1, -1)` | `OSSL Runtime Error: osGetTerrainHeight: Coordinate out of bounds` | — | no scripts |
+| a deprecated function: `osSunGetParam` | shouted on `DEBUG_CHANNEL`: `Use of function osSunGetParam is deprecated. Use osGetSunParam instead.`; the call returns its value (`14400.0`) a second later: the warning costs the script a one-second sleep | — | no scripts |
+| a pattern that is no regular expression: `osRegexIsMatch("a", "(")` | shouted: `Possible invalid regular expression detected.`; returns `0`, a second later | — | no scripts |
+| `lsGetWindlightScene([WL_WATER_COLOR])` | nothing; `[0, <4, 38, 64>]` (the rule, then the region's water colour) | — | no scripts |
+| `modSendCommand` to a module no region has | nothing; a fresh request key, though no module answers | — | no scripts |
+
+A **permission or run-time error** is thrown: the event ends at the call
+(its `returned` line never prints) and the engine reports it as a script
+error, on `DEBUG_CHANNEL` to **both** avatars near it, as
+`PermissionErrorToOwner = false` asks — no script hears it, at 10 m or at
+50 m. Each engine wraps the text in its own way:
+
+| | OpenSim YEngine | OpenSim XEngine |
+| --- | --- | --- |
+| the message | `YEngine: <text> (script: Threat event: link_message primID: <key> at: <120,128,27>) Script must be Reset to re-enable.` and a newline | `<text>(script: Threat event: link_message primID:<key> at <120, 128, 27.5>)` — no space before the bracket, the position as a vector |
+| the script afterwards | reads as running (`llGetScriptState` `1`) but answers nothing, as after any YEngine fault | runs on: the next link message is answered |
+| after `llResetOtherScript` | answers again; the same call is denied again, with the same message | the same |
+
+A **warning or a shouted error** is not thrown: the call returns, and the
+message is a shout on `DEBUG_CHANNEL`, from the object's name, that both
+avatars and both listening scripts hear.
+
+With `PermissionErrorToOwner = true` the source (`OSSL_Api.CheckThreatLevel`)
+prefixes `(OWNER)` to a permission error and both engines send it to the
+owner alone; the grid here does not run that way. The source also reads
+`ESTATE_MANAGER` as a manager who is **not** the estate owner, and
+`ESTATE_OWNER` as the owner alone, which is why the stock lines name both.
+
+### The syntax document
+
+OpenSim serves its `bin/ScriptSyntax.xml` as the `LSLSyntax` capability
+(`[SimulatorFeatures] ScriptSyntax`, on by default), with the `LSLSyntaxId`
+in the simulator features. The document the local grid served lists 224
+`os*` functions and the four `ls*` ones, with their arguments and return
+types and nothing about who may call them: `osAvatarStopAnimation` and
+`osConsoleCommand` (disabled here) and `osTerrainSetHeight` (denied here)
+read like any other. It leaves out functions that compile and run:
+`osListenRegex`, which `ossl/available` called, and every `mod*` function.
+Second Life's lists no OpenSim function.
+
+### What the viewer does with it
+
+Every message in the tables above reaches the viewer as `DEBUG_CHANNEL` chat
+(`ChatType::DebugChannel`), which the viewer shows as an ordinary line of
+nearby chat; the reference's Script Warning window, which would gather them
+per object, is `viewer-script-warning-window`. A script's compile errors on
+Second Life are the editor's usual error list. The script editor has no
+highlighting yet (`viewer-lsl-editor-highlight`): when it takes its keywords
+from the grid's `LSLSyntax` document, OSSL is highlighted on OpenSim with no
+code of its own — denied functions included, and `osListenRegex` and
+`modSendCommand` left out, since that is what the document says.

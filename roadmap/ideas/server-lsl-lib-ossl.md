@@ -44,3 +44,34 @@ Acceptance: a written scope — the list of `os*` functions in, the list
 explicitly out, and the reason — plus the surface table marking the rest
 `out of scope` rather than `missing`, so the coverage harness stops
 counting 224 functions as a gap.
+
+## Measured (2026-10-26, [[gridspec-lsl-ossl]])
+
+The model to imitate, as the local OpenSim answers it
+(`book/src/gridspec/lsl.md` § OSSL, probes `ossl/available` and
+`ossl/errors`):
+
+- **The permission decision** is per function: an `Allow_` line wins over
+  the threat level in both directions (`osGetAgents`, threat level `None`, is
+  denied by its estate-only list; `osGetScriptEngineName`, `High`, is allowed
+  by `true`); a function with no line is allowed when its level is at or
+  under `OSFunctionThreatLevel`. Dozens of functions check only that OSSL
+  is on, and some (`osSHA256`, `osRound`, `osApproxEquals`, …) check
+  nothing.
+- **The three denial texts**, prefixed `OSSL Permission Error: `:
+  `<fn> permission denied.  Allowed threat level is <max> but function
+  threat level is <level>.`, `<fn> permission denied.`, `<fn> disabled in
+  region configuration`; an argument error is `OSSL Runtime Error: <fn>: …`.
+  Each is thrown: the event ends, YEngine stops the script until a reset,
+  XEngine runs on; the message goes on `DEBUG_CHANNEL` to every avatar near
+  it, in each engine's wrapping, and no script hears it.
+- **Warnings are shouted, not thrown**: a deprecated function (`Use of
+  function <fn> is deprecated. Use <new> instead.`) and some argument errors
+  shout on `DEBUG_CHANNEL`, where scripts hear them, and sleep the script a
+  second; the call still returns its value.
+- `modSendCommand` returns a fresh key whether or not a module answers;
+  `lsGetWindlightScene` answers from the region's environment.
+
+A fake grid that flattens the tiers should still produce these texts for
+whatever it refuses, since a script (or a test) that reads the debug channel
+reads them.

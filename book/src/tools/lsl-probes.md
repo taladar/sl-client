@@ -46,6 +46,7 @@ A probe's id is its path below `probes/` without the extension
 | `bare` | prims that hold no script, comma-separated as `<label>@<east>` or `<label>@<east>/<up>` in metres from prim A — the targets a sensor or a ray is to find; they are rezzed in the order listed, after the script's own prim |
 | `target` | the compile target the script is uploaded for: `mono` (the default) or `lsl2`, Second Life's LSO with its 16 KB; OpenSim ignores the upload's target and compiles every script for the engine its first line picks |
 | `stats` | `active-scripts`: the runner notes the region's active-script count, from the `SimStats` the grid sends the owner's viewer, each time it changes while the probe runs |
+| `library` | the library the script is written against: `sl` (the default) or `opensim`, Second Life's plus OpenSim's `os*`, `ls*` and `mod*` functions and their constants; the corpus test compiles every script against Second Life's library, and lets a script for OpenSim name what OpenSim adds. The runner uploads it to every grid all the same: Second Life's compile error is its measurement there |
 
 A probe that needs something done to it prints a `waiting` record and
 waits; the runner answers each one, a second after it arrives, in order:
@@ -198,6 +199,12 @@ What has bitten already, and how a probe should be shaped for it:
   list of fewer than four buttons with `PAY_HIDE` in the caller's own list,
   so a list printed after the call is not the one that was passed
   (`money/pay-price` prints it after, which is how this was found).
+- **An OSSL call the region denies throws.** A denial, like an OSSL
+  argument error, ends the event, and under YEngine stops the script until
+  it is reset (`ossl/errors`); a deprecated function costs a one-second sleep
+  and a shout. Give each call that may be denied a script of its own, and
+  read the region's `[OSSL]` configuration before calling anything that
+  would do harm were it allowed.
 - **The runner is slow back from a trip `away`.** It settles the owner in and
   walks it to the build location before it answers anything, which can take
   half a minute on Second Life; a probe that asks a question right after the
@@ -244,8 +251,9 @@ touch by the other avatar also says whether that avatar has an active group,
 script can read; every touch says the surface it sent, `surface=none` or
 `face=… uv=… st=… pos=… normal=… binormal=…` with `pos` in the region). It keeps
 the probe's owner-say lines from its prims, and every `DEBUG_CHANNEL` message
-they send as a `# debug-channel:` note (an owner-say line that is not a probe
-line as `# owner-say:`), until `end` or three minutes, then derezzes the prims
+they send as a `# debug-channel:` note (`# debug-channel by=other:` for what the
+other avatar is sent; an owner-say line that is not a probe line as
+`# owner-say:`), until `end` or three minutes, then derezzes the prims
 to the Trash — and so it does when the grid refuses one of a probe's rezzes,
 with the prims already rezzed, before the run fails. For a probe whose header
 asks (`stats`), it notes the region's active-script count as `# sim-stats`
@@ -396,6 +404,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `land/*`, 2026-10-26: `llGetEnv`, parcel details, flags, prim counts and owners, region flags and data, `llEdgeOfWorld`, the ground and weather, the day cycle, and Second Life's environment, sim stats and navmesh calls | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#parcel-region-estate-and-environment-queries) | | |
 | `memory/*`, 2026-10-26: the memory functions, what values cost, `llSetMemoryLimit`, running out by recursion and by allocation, Mono against LSO, `OBJECT_SCRIPT_MEMORY` and the region's active-script count | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#memory-and-limits) | | |
 | `money/*`, 2026-10-26: the pay buttons after `llSetPayPrice`, what the `money` event hears of a payment and which payments a grid takes, `llGiveMoney`, `llTransferLindenDollars` and `transaction_result`, `PERMISSION_DEBIT` from a non-owner, and when a grant lapses | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#script-permissions-money-and-payment) | | |
+| `ossl/*`, 2026-10-26: which OSSL functions an ordinary owner's script may call on OpenSim, by threat level, `Allow_` line or neither, what a denied, failing or deprecated call says, to whom and what it does to the script, and a LightShare and a MOD call; Second Life's compile errors for them | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#ossl) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

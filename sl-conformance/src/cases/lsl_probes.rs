@@ -553,6 +553,26 @@ impl Transcript {
         self.body.push(note);
     }
 
+    /// Notes a `DEBUG_CHANNEL` message from one of the probe's prims, as the
+    /// avatar `by` names was sent it: a script error, a warning, or what a
+    /// script said on that channel.
+    fn debug_channel(&mut self, by: &str, chat: &ChatMessage) {
+        // A line the listener could not hear comes with its text left out,
+        // which a note must not read as an empty message.
+        let audible = match chat.audible {
+            ChatAudible::Fully => String::new(),
+            ChatAudible::Barely => " audible=barely".to_owned(),
+            ChatAudible::Not => " audible=not".to_owned(),
+            ChatAudible::Unknown(byte) => format!(" audible={byte}"),
+            _ => " audible=other".to_owned(),
+        };
+        self.body.push(format!(
+            "# debug-channel{by}: from={} text={}{audible}",
+            quote(&chat.from_name),
+            quote(&self.cast.scrub(&chat.message))
+        ));
+    }
+
     /// What `id` — a transaction's source or destination — is to a note:
     /// one of the avatars, one of the probe's prims, `nil`, or `someone`.
     fn party(&self, prims: &HashSet<ObjectKey>, id: Uuid) -> &'static str {
@@ -605,8 +625,8 @@ impl Transcript {
 
     /// Takes one event of the other avatar's session: the permission
     /// questions and dialogs from the probe's prims (kept for an answer by
-    /// that avatar), what it hears of their chat and instant messages, and
-    /// alerts. Its other events are dropped.
+    /// that avatar), what it hears of their chat (`DEBUG_CHANNEL` too) and
+    /// instant messages, and alerts. Its other events are dropped.
     fn take_other(&mut self, prims: &HashSet<ObjectKey>, event: &Event) {
         const BY: &str = " by=other";
         match event {
@@ -619,10 +639,12 @@ impl Transcript {
             Event::InstantMessageReceived(im) => self.instant_message(BY, prims, im),
             Event::MoneyBalance(balance) => self.money(BY, prims, balance),
             Event::ChatReceived(chat) => match chat.source {
-                ChatSource::Object(source)
-                    if self.is_probe(prims, source) && chat.chat_type != ChatType::DebugChannel =>
-                {
-                    self.heard(BY, chat);
+                ChatSource::Object(source) if self.is_probe(prims, source) => {
+                    if chat.chat_type == ChatType::DebugChannel {
+                        self.debug_channel(BY, chat);
+                    } else {
+                        self.heard(BY, chat);
+                    }
                 }
                 _ => {}
             },
@@ -778,20 +800,7 @@ impl Transcript {
             return None;
         }
         if chat.chat_type == ChatType::DebugChannel {
-            // A line the listener could not hear comes with its text left out,
-            // which a note must not read as an empty message.
-            let audible = match chat.audible {
-                ChatAudible::Fully => String::new(),
-                ChatAudible::Barely => " audible=barely".to_owned(),
-                ChatAudible::Not => " audible=not".to_owned(),
-                ChatAudible::Unknown(byte) => format!(" audible={byte}"),
-                _ => " audible=other".to_owned(),
-            };
-            self.body.push(format!(
-                "# debug-channel: from={} text={}{audible}",
-                quote(&chat.from_name),
-                quote(&self.cast.scrub(&chat.message))
-            ));
+            self.debug_channel("", chat);
             return None;
         }
         let line = chat.message.trim_end();
@@ -2669,7 +2678,8 @@ mod tests {
     use std::collections::HashSet;
 
     use sl_client_tokio::{
-        AgentKey, LandArea, LindenAmount, MoneyBalance, MoneyTransaction, ObjectKey, OwnerKey, Uuid,
+        AgentKey, ChatAudible, ChatMessage, ChatSource, ChatType, Event, LandArea, LindenAmount,
+        MoneyBalance, MoneyTransaction, ObjectKey, OwnerKey, RegionCoordinates, Uuid,
     };
 
     use super::{Cast, Transcript, clip, replace_ignoring_case, shown_line, split_name};
@@ -2780,6 +2790,55 @@ mod tests {
         assert_eq!(transcript.party(&prims, prim), "probe");
         assert_eq!(transcript.party(&prims, Uuid::nil()), "nil");
         assert_eq!(transcript.party(&prims, Uuid::from_u128(9)), "someone");
+    }
+
+    #[test]
+    fn the_other_avatars_debug_channel_chat_is_noted_as_its_own() {
+        let prim = ObjectKey::from(Uuid::from_u128(3));
+        let mut transcript = Transcript::new(Cast {
+            owner_name: split_name("Knob Label"),
+            other_name: split_name("Lever Dial"),
+            ..Cast::default()
+        });
+        let prims: HashSet<ObjectKey> = HashSet::from([prim]);
+        let chat = |source: ObjectKey, chat_type: ChatType, message: &str| {
+            Event::ChatReceived(Box::new(ChatMessage {
+                from_name: "Object".to_owned(),
+                source: ChatSource::Object(source),
+                owner_id: None,
+                chat_type,
+                audible: ChatAudible::Fully,
+                position: RegionCoordinates::new(120.0, 128.0, 27.0),
+                message: message.to_owned(),
+            }))
+        };
+        transcript.take_other(
+            &prims,
+            &chat(
+                prim,
+                ChatType::DebugChannel,
+                "OSSL Permission Error: Lever Dial",
+            ),
+        );
+        transcript.take_other(&prims, &chat(prim, ChatType::Shout, "hi"));
+        // Another object's debug chat is not the probe's.
+        transcript.take_other(
+            &prims,
+            &chat(
+                ObjectKey::from(Uuid::from_u128(9)),
+                ChatType::DebugChannel,
+                "elsewhere",
+            ),
+        );
+        assert_eq!(
+            transcript.body,
+            vec![
+                "# debug-channel by=other: from=\"Object\" \
+                 text=\"OSSL Permission Error: <other-first> <other-last>\""
+                    .to_owned(),
+                "# chat by=other type=shout from=\"Object\" length=2 text=\"hi\"".to_owned(),
+            ]
+        );
     }
 
     #[test]
