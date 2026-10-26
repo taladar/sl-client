@@ -11,6 +11,8 @@
 //!    name its header gives (a single-script probe's is `Probe`), in the
 //!    header's save order, and uploads the source running — on OpenSim with
 //!    the first line that picks the engine (`//YEngine:` or `//XEngine:`).
+//!    The upload names the compile target the header gives (`target`, Mono
+//!    unless it says `lsl2`), which OpenSim ignores.
 //!    A script whose `skip-on` names this grid is left out, with a note;
 //! 3. answers each `waiting` record the probe prints with the stimulus it
 //!    names ([`Stimulus`]): a touch of prim A, a line of chat on a channel,
@@ -52,11 +54,12 @@ use sl_client_tokio::{
     InstantMessage, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType, Object,
     ObjectKey, PrimShape, RegionHandle, RegionLocalObjectId, RestoreItem, RezScriptParams,
     Rotation, ScopedObjectId, ScriptDialog, ScriptPermissionRequest, ScriptPermissions,
-    ScriptTarget, ScriptUploadLocation, SurfaceInfo, TaskInventoryItem, TransactionId, Uuid,
-    Vector, XferListing,
+    ScriptTarget, ScriptUploadLocation, SimStatId, SurfaceInfo, TaskInventoryItem, TransactionId,
+    Uuid, Vector, XferListing,
 };
 use sl_lsl_runtime::probe::{
-    Action, By, COMPILE_ERROR_NOTE, Drive, Fetch, Line, PREFIX, ResultFile, Stimulus, TouchSurface,
+    Action, By, COMPILE_ERROR_NOTE, Drive, Fetch, Line, PREFIX, ResultFile, Stimulus, Target,
+    TouchSurface,
 };
 
 use super::object_rez_derez::rez_params;
@@ -367,6 +370,11 @@ struct Transcript {
     owner_moved: Option<Vector>,
     /// Where it last put the other avatar, likewise.
     other_moved: Option<Vector>,
+    /// Whether the probe asked for the region's active-script count
+    /// (`stats: active-scripts`).
+    notes_active_scripts: bool,
+    /// The active-script count last noted.
+    active_scripts: Option<f32>,
 }
 
 impl Transcript {
@@ -584,6 +592,21 @@ impl Transcript {
     /// record name of a probe line it kept.
     fn take(&mut self, id: &str, prims: &HashSet<ObjectKey>, event: &Event) -> Option<String> {
         match event {
+            Event::SimStats(stats) if self.notes_active_scripts => {
+                let count = stats
+                    .stats
+                    .iter()
+                    .find(|(stat, _)| *stat == SimStatId::ActiveScripts)
+                    .map(|(_, value)| *value);
+                if count.is_some() && count != self.active_scripts {
+                    self.active_scripts = count;
+                    if let Some(count) = count {
+                        self.body
+                            .push(format!("# sim-stats active_scripts={count}"));
+                    }
+                }
+                return None;
+            }
             Event::ObjectAdded(object) | Event::ObjectUpdated(object)
                 if self.is_probe(prims, object.full_id) =>
             {
@@ -1127,6 +1150,7 @@ async fn run_probe(
     }
     let keys: HashSet<ObjectKey> = prims.values().map(|object| object.full_id).collect();
     let mut transcript = Transcript::new(avatars.cast.clone());
+    transcript.notes_active_scripts = probe.notes_active_scripts();
 
     let mut planted = true;
     for script in &probe.scripts {
@@ -1152,6 +1176,13 @@ async fn run_probe(
             },
         )
         .await?;
+        if script.header.target == Target::Lsl2 {
+            // The result header names the run's engine; a script uploaded
+            // for another target says so where it was saved.
+            transcript
+                .body
+                .push(format!("# target: script {} lsl2", quote(&script.name)));
+        }
         let source = format!("{}{}", engine.source_prefix(), script.source);
         session
             .send(Command::UploadScript {
@@ -1161,7 +1192,10 @@ async fn run_probe(
                     running: true,
                     experience: None,
                 },
-                target: ScriptTarget::Mono,
+                target: match script.header.target {
+                    Target::Mono => ScriptTarget::Mono,
+                    Target::Lsl2 => ScriptTarget::Lsl2,
+                },
                 source: source.into_bytes(),
             })
             .await?;

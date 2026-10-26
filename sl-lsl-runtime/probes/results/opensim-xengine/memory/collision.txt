@@ -1,0 +1,129 @@
+grid: opensim-xengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "Doubling LSO" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE memory/collision rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE memory/collision rec=grow script="Doubling"
+PROBE memory/collision rec=before script=doubling used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=1 length=2 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=2 length=4 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=3 length=8 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=4 length=16 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=5 length=32 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=6 length=64 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=7 length=128 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=8 length=256 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=9 length=512 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=10 length=1024 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=11 length=2048 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=12 length=4096 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=13 length=8192 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=14 length=16384 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=15 length=32768 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=16 length=65536 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=17 length=131072 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=18 length=262144 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=19 length=524288 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=20 length=1048576 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=21 length=2097152 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling step=22 length=4194304 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=no-collision script=doubling length=4194304
+PROBE memory/collision rec=reached script="Doubling" last="22" running=1
+PROBE memory/collision rec=grow script="Doubling LSO"
+PROBE memory/collision rec=before script=doubling-lso used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=1 length=2 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=2 length=4 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=3 length=8 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=4 length=16 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=5 length=32 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=6 length=64 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=7 length=128 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=8 length=256 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=9 length=512 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=10 length=1024 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=11 length=2048 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=12 length=4096 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=13 length=8192 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=14 length=16384 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=15 length=32768 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=16 length=65536 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=17 length=131072 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=18 length=262144 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=19 length=524288 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=20 length=1048576 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=21 length=2097152 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=22 length=4194304 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=no-collision script=doubling-lso length=4194304
+PROBE memory/collision rec=reached script="Doubling LSO" last="22" running=1
+PROBE memory/collision rec=grow script="Full list"
+PROBE memory/collision rec=before script=full-list used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=1000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=1500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=2000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=2500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=3000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=3500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=4000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=4500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=5000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=5500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=6000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=6500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=7000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=7500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=8000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=8500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=9000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=9500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=10000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=10500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=11000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=11500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=12000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=12500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=13000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=13500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=14000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=14500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=15000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=15500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=16000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=16500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=17000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=17500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=18000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=18500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=19000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=19500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=full-list count=20000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=no-collision script=full-list count=20000
+PROBE memory/collision rec=reached script="Full list" last="20000" running=1
+PROBE memory/collision rec=grow script="Limited list"
+PROBE memory/collision rec=before script=limited-list used=65536 free=65536 limit=65536
+PROBE memory/collision rec=set-limit script=limited-list asked=used+8192 result=0 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=1000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=1500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=2000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=2500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=3000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=3500 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=4000 used=65536 free=65536 limit=65536
+PROBE memory/collision rec=no-collision script=limited-list count=4000
+PROBE memory/collision rec=reached script="Limited list" last="4000" running=1
+PROBE memory/collision rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

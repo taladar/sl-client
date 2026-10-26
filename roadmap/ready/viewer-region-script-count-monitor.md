@@ -30,3 +30,10 @@ settings and their consumer (fsfloater/statistics glue).
 Builds on: sim-stats ingest (done; the statistics floater task
 [[viewer-statistics-floater]] reads the same feed) and the shared system
 chat-notice emitter ([[viewer-generated-chat-notices]]).
+
+## Measured (gridspec-lsl-memory-limits, 2026-10-26)
+
+The `ActiveScripts` stat is a **fractional time average** on Second Life
+(`2563.4`, `2564.7`, … on Mauve), so compare against a threshold rather
+than printing every change; on OpenSim it is a whole count of the scripts in
+the region's prims, stopped ones included (`memory/object`).

@@ -1,0 +1,93 @@
+grid: opensim-yengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE memory/budget rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE memory/budget rec=read when=entry used=26 free=1048550 limit=65536
+PROBE memory/budget rec=read when=again used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=integer count=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=integer count=1 used=30 free=1048546 limit=65536
+PROBE memory/budget rec=held kind=integer count=2 used=34 free=1048542 limit=65536
+PROBE memory/budget rec=held kind=integer count=4 used=42 free=1048534 limit=65536
+PROBE memory/budget rec=held kind=integer count=16 used=90 free=1048486 limit=65536
+PROBE memory/budget rec=held kind=integer count=64 used=282 free=1048294 limit=65536
+PROBE memory/budget rec=held kind=integer count=cleared used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=float count=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=float count=1 used=34 free=1048542 limit=65536
+PROBE memory/budget rec=held kind=float count=2 used=42 free=1048534 limit=65536
+PROBE memory/budget rec=held kind=float count=4 used=58 free=1048518 limit=65536
+PROBE memory/budget rec=held kind=float count=16 used=154 free=1048422 limit=65536
+PROBE memory/budget rec=held kind=float count=64 used=538 free=1048038 limit=65536
+PROBE memory/budget rec=held kind=float count=cleared used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=string count=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=string count=1 used=27 free=1048549 limit=65536
+PROBE memory/budget rec=held kind=string count=2 used=28 free=1048548 limit=65536
+PROBE memory/budget rec=held kind=string count=4 used=30 free=1048546 limit=65536
+PROBE memory/budget rec=held kind=string count=16 used=42 free=1048534 limit=65536
+PROBE memory/budget rec=held kind=string count=64 used=90 free=1048486 limit=65536
+PROBE memory/budget rec=held kind=string count=cleared used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=key count=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=key count=1 used=62 free=1048514 limit=65536
+PROBE memory/budget rec=held kind=key count=2 used=98 free=1048478 limit=65536
+PROBE memory/budget rec=held kind=key count=4 used=170 free=1048406 limit=65536
+PROBE memory/budget rec=held kind=key count=16 used=602 free=1047974 limit=65536
+PROBE memory/budget rec=held kind=key count=64 used=2330 free=1046246 limit=65536
+PROBE memory/budget rec=held kind=key count=cleared used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=vector count=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=vector count=1 used=58 free=1048518 limit=65536
+PROBE memory/budget rec=held kind=vector count=2 used=90 free=1048486 limit=65536
+PROBE memory/budget rec=held kind=vector count=4 used=154 free=1048422 limit=65536
+PROBE memory/budget rec=held kind=vector count=16 used=538 free=1048038 limit=65536
+PROBE memory/budget rec=held kind=vector count=64 used=2074 free=1046502 limit=65536
+PROBE memory/budget rec=held kind=vector count=cleared used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=rotation count=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=rotation count=1 used=90 free=1048486 limit=65536
+PROBE memory/budget rec=held kind=rotation count=2 used=154 free=1048422 limit=65536
+PROBE memory/budget rec=held kind=rotation count=4 used=282 free=1048294 limit=65536
+PROBE memory/budget rec=held kind=rotation count=16 used=1050 free=1047526 limit=65536
+PROBE memory/budget rec=held kind=rotation count=64 used=4122 free=1044454 limit=65536
+PROBE memory/budget rec=held kind=rotation count=cleared used=26 free=1048550 limit=65536
+PROBE memory/budget rec=text kind=ascii length=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=text kind=ascii length=1 used=44 free=1048532 limit=65536
+PROBE memory/budget rec=text kind=ascii length=16 used=74 free=1048502 limit=65536
+PROBE memory/budget rec=text kind=ascii length=256 used=554 free=1048022 limit=65536
+PROBE memory/budget rec=text kind=ascii length=1024 used=2090 free=1046486 limit=65536
+PROBE memory/budget rec=text kind=ascii length=cleared used=42 free=1048534 limit=65536
+PROBE memory/budget rec=text kind=two-byte length=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=text kind=two-byte length=1 used=44 free=1048532 limit=65536
+PROBE memory/budget rec=text kind=two-byte length=16 used=74 free=1048502 limit=65536
+PROBE memory/budget rec=text kind=two-byte length=256 used=554 free=1048022 limit=65536
+PROBE memory/budget rec=text kind=two-byte length=1024 used=2090 free=1046486 limit=65536
+PROBE memory/budget rec=text kind=two-byte length=cleared used=42 free=1048534 limit=65536
+PROBE memory/budget rec=text kind=three-byte length=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=text kind=three-byte length=1 used=44 free=1048532 limit=65536
+PROBE memory/budget rec=text kind=three-byte length=16 used=74 free=1048502 limit=65536
+PROBE memory/budget rec=text kind=three-byte length=256 used=554 free=1048022 limit=65536
+PROBE memory/budget rec=text kind=three-byte length=1024 used=2090 free=1046486 limit=65536
+PROBE memory/budget rec=text kind=three-byte length=cleared used=42 free=1048534 limit=65536
+PROBE memory/budget rec=held kind=integer count=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=held kind=integer count=1 used=30 free=1048546 limit=65536
+PROBE memory/budget rec=held kind=integer count=2 used=34 free=1048542 limit=65536
+PROBE memory/budget rec=held kind=integer count=4 used=42 free=1048534 limit=65536
+PROBE memory/budget rec=held kind=integer count=16 used=90 free=1048486 limit=65536
+PROBE memory/budget rec=held kind=integer count=64 used=282 free=1048294 limit=65536
+PROBE memory/budget rec=held kind=integer count=cleared used=26 free=1048550 limit=65536
+PROBE memory/budget rec=profiler sp_max_before=65536 sp_max_after=65536 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=65536 value=65536 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=65537 value=65537 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=100000 value=100000 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=32768 value=32768 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=used+1024 value=1050 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=used value=26 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=used-1024 value=-998 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=1 value=1 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=0 value=0 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=-1 value=-1 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=set-limit asked=65536 value=65536 result=0 used=26 free=1048550 limit=65536
+PROBE memory/budget rec=read when=last used=26 free=1048550 limit=65536
+PROBE memory/budget rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

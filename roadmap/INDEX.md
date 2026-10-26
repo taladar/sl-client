@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 347 |
+| ready | 346 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1429 |
+| done | 1430 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2077** |
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (347)
+## ready (346)
 
 ### protocol
 
@@ -1153,9 +1153,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-memory-limits`](ready/gridspec-lsl-memory-limits.md) — LSL
-  memory and limits on OpenSim and the remaining SL unknowns (blocked by
-  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-money-permissions`](ready/gridspec-lsl-money-permissions.md) —
   LSL library behaviour on each grid — script permissions, money and payment
   (blocked by `gridspec-lsl-live-differential-runner` (done))
@@ -1348,7 +1345,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-memory-and-limits`](blocked/server-lsl-memory-and-limits.md) —
   Script memory and limits, because scripts observe them (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-memory-sizes`,
-  `gridspec-lsl-memory-limits`)
+  `gridspec-lsl-memory-limits` (done))
 - [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
   agent never moves — AgentUpdate is decoded and ignored (blocked by
   `server-world-heartbeat`, `gridspec-neighbours-crossing` (done),
@@ -1536,7 +1533,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1429)
+## done (1430)
 
 ### protocol
 
@@ -4647,6 +4644,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-live-differential-runner`](done/gridspec-lsl-live-differential-runner.md)
   — Run one probe on OpenSim YEngine, XEngine and aditi and collect the
   transcripts (blocked by `gridspec-lsl-probe-corpus` (done))
+- [`gridspec-lsl-memory-limits`](done/gridspec-lsl-memory-limits.md) — LSL
+  memory and limits on OpenSim and the remaining SL unknowns (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-probe-corpus`](done/gridspec-lsl-probe-corpus.md) — A committed
   LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct

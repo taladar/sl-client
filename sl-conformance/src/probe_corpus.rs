@@ -93,6 +93,15 @@ impl Probe {
         prims
     }
 
+    /// Whether a script asks for the region's active-script count to be
+    /// noted (`stats: active-scripts`).
+    #[must_use]
+    pub fn notes_active_scripts(&self) -> bool {
+        self.scripts
+            .iter()
+            .any(|script| script.header.active_scripts)
+    }
+
     /// What a comparison of two of its runs lets differ.
     #[must_use]
     pub fn tolerance(&self) -> Tolerance {

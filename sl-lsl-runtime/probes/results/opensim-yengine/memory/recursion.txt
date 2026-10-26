@@ -1,0 +1,36 @@
+grid: opensim-yengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# skipped: script "Narrow" (skip-on: opensim-yengine)
+# skipped: script "Wide" (skip-on: opensim-yengine)
+# skipped: script "Limited" (skip-on: opensim-yengine)
+# skipped: script "Narrow LSO" (skip-on: opensim-yengine)
+# skipped: script "Wide LSO" (skip-on: opensim-yengine)
+# chat type=say from="Object" length=14 text="Script running"
+PROBE memory/recursion rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE memory/recursion rec=recurse script="Narrow"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Narrow'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Narrow'"
+PROBE memory/recursion rec=reached script="Narrow" depth="" running=0
+PROBE memory/recursion rec=recurse script="Wide"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Wide'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Wide'"
+PROBE memory/recursion rec=reached script="Wide" depth="" running=0
+PROBE memory/recursion rec=recurse script="Limited"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Limited'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Limited'"
+PROBE memory/recursion rec=reached script="Limited" depth="" running=0
+PROBE memory/recursion rec=recurse script="Narrow LSO"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Narrow LSO'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Narrow LSO'"
+PROBE memory/recursion rec=reached script="Narrow LSO" depth="" running=0
+PROBE memory/recursion rec=recurse script="Wide LSO"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Wide LSO'"
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'Wide LSO'"
+PROBE memory/recursion rec=reached script="Wide LSO" depth="" running=0
+PROBE memory/recursion rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

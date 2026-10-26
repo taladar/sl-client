@@ -1020,3 +1020,89 @@ naming a constant of one grid does not compile on the other.
 Nothing directly: these calls read the region a viewer is also told about
 (parcel properties, region handshake, the environment), and none of them
 sends the viewer anything.
+
+## Memory and limits
+
+Measured on 2026-10-26 by the probes `memory/budget`, `memory/budget-lso`,
+`memory/recursion`, `memory/collision` and `memory/object`, on the same
+grids. A probe script marked `target: lsl2` is compiled to LSO on Second
+Life; OpenSim ignores the upload's target, so there the LSO twins run as
+every other script does and answer alike. The exact per-value costs Second
+Life charges are for the task `server-lsl-memory-sizes` to pin down; the
+numbers here are what the probes saw on the way.
+
+### The memory functions
+
+| call | Second Life, Mono | Second Life, LSO | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- | --- |
+| `llGetMemoryLimit` | `65536`, or what `llSetMemoryLimit` set | `16384` | always `65536` | always `65536` | no scripts |
+| `llGetUsedMemory` | what the script uses now (about 13 500 bytes for `memory/budget`, 6 500 for a small script); it falls again when a value is cleared | always `16384`, the whole budget | the heap the script's values hold, counted by YEngine's heap tracker (`26` bytes for `memory/budget` at start: its one global string) | always `65536` | no scripts |
+| `llGetFreeMemory` | the limit less the **most** the script has used since the limit was last set: it falls as the script grows and never rises when it shrinks | the budget less the most it has used: likewise a low-water mark | the 1 MiB heap (`ScriptHeapSize`) less what is used now: it rises again when a value is cleared | always `65536` | no scripts |
+| `llScriptProfiler(PROFILE_SCRIPT_MEMORY)`, then `llGetSPMaxMemory` | `0` before any profiling; after, the most used while profiling (`14562`) | `16384` | always `65536` | always `65536` | no scripts |
+
+### What a value costs
+
+What `llGetUsedMemory` (Mono, YEngine) or `llGetFreeMemory` (LSO) moved by
+as a global list grew from 2 to 64 elements, per element; and a global
+string per character.
+
+| value | Second Life, Mono | Second Life, LSO | OpenSim YEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| an integer in a list | 16 bytes (exactly 8 000 per 500 in `memory/collision`); the list itself about 200 | about 30, the copy an append makes included | 4 | no scripts |
+| a float | 16 | nothing more after the integers' low-water mark | 8 | no scripts |
+| a one-character string | a few bytes, unevenly | nothing more | 1 | no scripts |
+| a key | 80 to 100 | the low-water mark fell by 4 251 at 64 keys | 36 | no scripts |
+| a vector | 24 | nothing more | 32 | no scripts |
+| a rotation | 28 | nothing more | 64 | no scripts |
+| a character of a string | 2, whether one, two or three bytes in UTF-8 (U+00E9, U+20AC) | 1 024 ASCII or two-byte characters stayed within the earlier low-water mark; 1 024 three-byte ones lowered it by 2 899 | 2, whatever the character | no scripts |
+
+XEngine counts nothing: every read is `65536`.
+
+### `llSetMemoryLimit`
+
+| asked for | Second Life, Mono | Second Life, LSO | OpenSim (both engines) | fake grid |
+| --- | --- | --- | --- | --- |
+| `65536` | `TRUE` | `FALSE` | `FALSE`, and the limit stays `65536` | no scripts |
+| more than `65536` (`65537`, `100000`) | `FALSE` | `FALSE` | `FALSE` | no scripts |
+| less, but not below what the script uses (`32768`, used + 1024) | `TRUE`; the limit is the number asked, and `llGetFreeMemory` is reset to the new limit less what is used now | `FALSE` | `FALSE` | no scripts |
+| exactly `16384` | `TRUE` when the script uses less | `TRUE`, the one value LSO takes | `FALSE` | no scripts |
+| below what the script uses, `1`, `0`, `-1` | `FALSE`, the limit unchanged | `FALSE` | `FALSE` | no scripts |
+
+### Running out
+
+| case | Second Life, Mono | Second Life, LSO | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- | --- |
+| recursion, one integer argument (`Narrow`) | `Stack-Heap Collision` at a depth that differs from run to run: 1 085, 1 039 and 1 116 in three runs | at depth 763, every run | **the simulator aborts**: with a library call at every level the native stack overflows inside YEngine's own stack check (`CheckRunStack`) — `skip-on` | the simulator aborts — `skip-on` | no scripts |
+| recursion, five arguments and two locals (`Wide`) | at 512, 413 and 518 | at 208 | `skip-on` | `skip-on` | no scripts |
+| recursion under `llSetMemoryLimit(used + 4096)` | at 253, 129 and 151: the stack counts against the lowered limit | — | `skip-on` | `skip-on` | no scripts |
+| a string doubled from one character | `Stack-Heap Collision` making 32 768 characters (step 15) | making 8 192 (step 13) | an `OutOfHeapException` making 524 288 (step 19), against the 1 MiB heap | never: 4 194 304 characters and on | no scripts |
+| a list of integers, ten at a time | `Stack-Heap Collision` making 3 660 | — | never within 20 000 (80 KB of its 1 MiB) | never within 20 000 | no scripts |
+| the same under `llSetMemoryLimit(used + 8192)` | at 540 | — | `llSetMemoryLimit` refused: never within 4 000 | the same | no scripts |
+| what the owner is told | `Object [script:<name>] Script run-time error`, then `Stack-Heap Collision`, both on `DEBUG_CHANNEL` | the same | to the owner alone: `[YEngine]: Exception while running <item>`, `OutOfHeapException: oldtotal=0, newtotal=524288, limit=1048576`, the prim, the script and the place, `Script must be Reset to re-enable.` and the engine's stack trace | — | no scripts |
+| the script afterwards | stopped: `llGetScriptState` `0` | the same | reads as running (`1`), as after any YEngine fault | — | no scripts |
+
+### `llGetObjectDetails` and the region's count
+
+An object of five scripts — two idle Mono ones, one whose limit is
+lowered to 16 384 and later raised to 32 768, one that stops itself as it
+starts and an idle LSO one — and another object with one Mono script.
+
+| what | Second Life | OpenSim (both engines) | fake grid |
+| --- | --- | --- | --- |
+| `OBJECT_SCRIPT_MEMORY` | the sum of every script's **limit**, running or not: 65 536 a Mono script (or its lowered limit), 16 384 an LSO one — `229376` for the five; stopping a script changes nothing; raising the limit to 32 768 adds 16 384 | **16 384 per running script**: `65536` for the four running, `49152` with one stopped; the other object `16384` | no scripts |
+| `OBJECT_RUNNING_SCRIPT_COUNT`, `OBJECT_TOTAL_SCRIPT_COUNT` | the running ones (`4`, `3` with one stopped), all of them (`5`) | the same | no scripts |
+| `OBJECT_SCRIPT_TIME` | a few microseconds | a few milliseconds | no scripts |
+| of an avatar (the owner) | its attachments' scripts: five, `327680` | `0`, `0`, `0`: the local avatar wears none | no scripts |
+| of `NULL_KEY`, of a key that names nothing | `[]` | `[]` | no scripts |
+| the region's active-script count (`SimStats` `ActiveScripts`) | a time average (`2563.4`, `2564.7`, … on Mauve) that rose by the probe's five running scripts and fell by one while `Idle` was stopped | a whole number that counts the scripts in the region's prims, running or not (`6` for the probe's six, the self-stopped one among them, as OpenSim adds one when a script is put in a prim and takes one when it is removed) | `0`: it runs no scripts |
+
+### What the viewer does with it
+
+The region's active-script count is what a statistics floater and the
+script-count monitor (`viewer-region-script-count-monitor`) read: on
+Second Life a fractional average of the running scripts, on OpenSim the
+scripts present, stopped or not. Per-object script memory reaches the
+viewer through the top-scripts report and the script-limits floater
+(`viewer-script-limits`), not from these calls; their numbers are the
+same kind of figure — the limit on Second Life, a flat 16 384 per running
+script on OpenSim.

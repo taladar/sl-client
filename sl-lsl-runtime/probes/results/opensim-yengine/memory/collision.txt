@@ -1,0 +1,139 @@
+grid: opensim-yengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "Doubling LSO" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE memory/collision rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE memory/collision rec=grow script="Doubling"
+PROBE memory/collision rec=before script=doubling used=48 free=1048528 limit=65536
+PROBE memory/collision rec=grown script=doubling step=1 length=2 used=52 free=1048524 limit=65536
+PROBE memory/collision rec=grown script=doubling step=2 length=4 used=56 free=1048520 limit=65536
+PROBE memory/collision rec=grown script=doubling step=3 length=8 used=64 free=1048512 limit=65536
+PROBE memory/collision rec=grown script=doubling step=4 length=16 used=80 free=1048496 limit=65536
+PROBE memory/collision rec=grown script=doubling step=5 length=32 used=112 free=1048464 limit=65536
+PROBE memory/collision rec=grown script=doubling step=6 length=64 used=176 free=1048400 limit=65536
+PROBE memory/collision rec=grown script=doubling step=7 length=128 used=304 free=1048272 limit=65536
+PROBE memory/collision rec=grown script=doubling step=8 length=256 used=560 free=1048016 limit=65536
+PROBE memory/collision rec=grown script=doubling step=9 length=512 used=1072 free=1047504 limit=65536
+PROBE memory/collision rec=grown script=doubling step=10 length=1024 used=2096 free=1046480 limit=65536
+PROBE memory/collision rec=grown script=doubling step=11 length=2048 used=4144 free=1044432 limit=65536
+PROBE memory/collision rec=grown script=doubling step=12 length=4096 used=8240 free=1040336 limit=65536
+PROBE memory/collision rec=grown script=doubling step=13 length=8192 used=16432 free=1032144 limit=65536
+PROBE memory/collision rec=grown script=doubling step=14 length=16384 used=32816 free=1015760 limit=65536
+PROBE memory/collision rec=grown script=doubling step=15 length=32768 used=65584 free=982992 limit=65536
+PROBE memory/collision rec=grown script=doubling step=16 length=65536 used=131120 free=917456 limit=65536
+PROBE memory/collision rec=grown script=doubling step=17 length=131072 used=262192 free=786384 limit=65536
+PROBE memory/collision rec=grown script=doubling step=18 length=262144 used=524336 free=524240 limit=65536
+# owner-say: from="Object" text="[YEngine]: Exception while running d9cbb4b7-206e-45c2-8c9a-7429643962ac"
+# owner-say: from="Object" text="OutOfHeapException: oldtotal=0, newtotal=524288, limit=1048576"
+# owner-say: from="Object" text="Prim: <Object>, Script: <Doubling>, Location: Default Region <120,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.UpdateArraysHeapUse (System.Int32 olduse, System.Int32 newuse) [0x00032] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstArrays.PopString (System.Int32 index, System.String str) [0x00016] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.grow()(XMRInstanceSuperType)"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default link_message(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.StartEx () [0x00009] in <494689fd7fc54dbc80fad348ad979238>:0"
+PROBE memory/collision rec=reached script="Doubling" last="19" running=1
+PROBE memory/collision rec=grow script="Doubling LSO"
+PROBE memory/collision rec=before script=doubling-lso used=56 free=1048520 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=1 length=2 used=60 free=1048516 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=2 length=4 used=64 free=1048512 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=3 length=8 used=72 free=1048504 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=4 length=16 used=88 free=1048488 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=5 length=32 used=120 free=1048456 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=6 length=64 used=184 free=1048392 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=7 length=128 used=312 free=1048264 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=8 length=256 used=568 free=1048008 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=9 length=512 used=1080 free=1047496 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=10 length=1024 used=2104 free=1046472 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=11 length=2048 used=4152 free=1044424 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=12 length=4096 used=8248 free=1040328 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=13 length=8192 used=16440 free=1032136 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=14 length=16384 used=32824 free=1015752 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=15 length=32768 used=65592 free=982984 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=16 length=65536 used=131128 free=917448 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=17 length=131072 used=262200 free=786376 limit=65536
+PROBE memory/collision rec=grown script=doubling-lso step=18 length=262144 used=524344 free=524232 limit=65536
+# owner-say: from="Object" text="[YEngine]: Exception while running 08e1b50c-183a-4287-b282-27819d53c05e"
+# owner-say: from="Object" text="OutOfHeapException: oldtotal=0, newtotal=524288, limit=1048576"
+# owner-say: from="Object" text="Prim: <Object>, Script: <Doubling LSO>, Location: Default Region <120,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.UpdateArraysHeapUse (System.Int32 olduse, System.Int32 newuse) [0x00032] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstArrays.PopString (System.Int32 index, System.String str) [0x00016] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.grow()(XMRInstanceSuperType)"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default link_message(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.StartEx () [0x00009] in <494689fd7fc54dbc80fad348ad979238>:0"
+PROBE memory/collision rec=reached script="Doubling LSO" last="19" running=1
+PROBE memory/collision rec=grow script="Full list"
+PROBE memory/collision rec=before script=full-list used=50 free=1048526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=500 used=2050 free=1046526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=1000 used=4050 free=1044526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=1500 used=6050 free=1042526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=2000 used=8050 free=1040526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=2500 used=10050 free=1038526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=3000 used=12050 free=1036526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=3500 used=14050 free=1034526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=4000 used=16050 free=1032526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=4500 used=18050 free=1030526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=5000 used=20050 free=1028526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=5500 used=22050 free=1026526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=6000 used=24050 free=1024526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=6500 used=26050 free=1022526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=7000 used=28050 free=1020526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=7500 used=30050 free=1018526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=8000 used=32050 free=1016526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=8500 used=34050 free=1014526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=9000 used=36050 free=1012526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=9500 used=38050 free=1010526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=10000 used=40050 free=1008526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=10500 used=42050 free=1006526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=11000 used=44050 free=1004526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=11500 used=46050 free=1002526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=12000 used=48050 free=1000526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=12500 used=50050 free=998526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=13000 used=52050 free=996526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=13500 used=54050 free=994526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=14000 used=56050 free=992526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=14500 used=58050 free=990526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=15000 used=60050 free=988526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=15500 used=62050 free=986526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=16000 used=64050 free=984526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=16500 used=66050 free=982526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=17000 used=68050 free=980526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=17500 used=70050 free=978526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=18000 used=72050 free=976526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=18500 used=74050 free=974526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=19000 used=76050 free=972526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=19500 used=78050 free=970526 limit=65536
+PROBE memory/collision rec=grown script=full-list count=20000 used=80050 free=968526 limit=65536
+PROBE memory/collision rec=no-collision script=full-list count=20000
+PROBE memory/collision rec=reached script="Full list" last="20000" running=1
+PROBE memory/collision rec=grow script="Limited list"
+PROBE memory/collision rec=before script=limited-list used=56 free=1048520 limit=65536
+PROBE memory/collision rec=set-limit script=limited-list asked=used+8192 result=0 used=56 free=1048520 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=500 used=2056 free=1046520 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=1000 used=4056 free=1044520 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=1500 used=6056 free=1042520 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=2000 used=8056 free=1040520 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=2500 used=10056 free=1038520 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=3000 used=12056 free=1036520 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=3500 used=14056 free=1034520 limit=65536
+PROBE memory/collision rec=grown script=limited-list count=4000 used=16056 free=1032520 limit=65536
+PROBE memory/collision rec=no-collision script=limited-list count=4000
+PROBE memory/collision rec=reached script="Limited list" last="4000" running=1
+PROBE memory/collision rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

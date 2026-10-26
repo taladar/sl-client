@@ -1,0 +1,67 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+# target: script "Doubling LSO" lsl2
+# animations avatar=other playing=""
+PROBE memory/collision rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE memory/collision rec=grow script="Doubling"
+PROBE memory/collision rec=before script=doubling used=6542 free=58994 limit=65536
+PROBE memory/collision rec=grown script=doubling step=1 length=2 used=6656 free=58880 limit=65536
+PROBE memory/collision rec=grown script=doubling step=2 length=4 used=6970 free=58566 limit=65536
+PROBE memory/collision rec=grown script=doubling step=3 length=8 used=6978 free=58558 limit=65536
+PROBE memory/collision rec=grown script=doubling step=4 length=16 used=6994 free=58542 limit=65536
+PROBE memory/collision rec=grown script=doubling step=5 length=32 used=7026 free=58510 limit=65536
+PROBE memory/collision rec=grown script=doubling step=6 length=64 used=7090 free=58446 limit=65536
+PROBE memory/collision rec=grown script=doubling step=7 length=128 used=7218 free=58318 limit=65536
+PROBE memory/collision rec=grown script=doubling step=8 length=256 used=7282 free=58254 limit=65536
+PROBE memory/collision rec=grown script=doubling step=9 length=512 used=7794 free=57742 limit=65536
+PROBE memory/collision rec=grown script=doubling step=10 length=1024 used=8818 free=56718 limit=65536
+PROBE memory/collision rec=grown script=doubling step=11 length=2048 used=10866 free=54670 limit=65536
+PROBE memory/collision rec=grown script=doubling step=12 length=4096 used=14962 free=50574 limit=65536
+PROBE memory/collision rec=grown script=doubling step=13 length=8192 used=23154 free=42382 limit=65536
+PROBE memory/collision rec=grown script=doubling step=14 length=16384 used=39542 free=25994 limit=65536
+# debug-channel: from="Object" text="Object [script:Doubling] Script run-time error"
+# debug-channel: from="Object" text="Stack-Heap Collision"
+PROBE memory/collision rec=reached script="Doubling" last="15" running=0
+PROBE memory/collision rec=grow script="Doubling LSO"
+PROBE memory/collision rec=before script=doubling-lso used=16384 free=15358 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=1 length=2 used=16384 free=15189 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=2 length=4 used=16384 free=15124 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=3 length=8 used=16384 free=15121 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=4 length=16 used=16384 free=15118 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=5 length=32 used=16384 free=15088 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=6 length=64 used=16384 free=15073 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=7 length=128 used=16384 free=14987 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=8 length=256 used=16384 free=14784 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=9 length=512 used=16384 free=14264 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=10 length=1024 used=16384 free=13232 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=11 length=2048 used=16384 free=11176 limit=16384
+PROBE memory/collision rec=grown script=doubling-lso step=12 length=4096 used=16384 free=7072 limit=16384
+# debug-channel: from="Object" text="Object [script:Doubling LSO] Script run-time error"
+# debug-channel: from="Object" text="Stack-Heap Collision"
+PROBE memory/collision rec=reached script="Doubling LSO" last="13" running=0
+PROBE memory/collision rec=grow script="Full list"
+PROBE memory/collision rec=before script=full-list used=7078 free=58458 limit=65536
+PROBE memory/collision rec=grown script=full-list count=500 used=15232 free=50304 limit=65536
+PROBE memory/collision rec=grown script=full-list count=1000 used=23232 free=42304 limit=65536
+PROBE memory/collision rec=grown script=full-list count=1500 used=31336 free=34200 limit=65536
+PROBE memory/collision rec=grown script=full-list count=2000 used=39232 free=26304 limit=65536
+PROBE memory/collision rec=grown script=full-list count=2500 used=47232 free=18304 limit=65536
+PROBE memory/collision rec=grown script=full-list count=3000 used=55232 free=10304 limit=65536
+PROBE memory/collision rec=grown script=full-list count=3500 used=63232 free=2304 limit=65536
+# debug-channel: from="Object" text="Object [script:Full list] Script run-time error"
+# debug-channel: from="Object" text="Stack-Heap Collision"
+PROBE memory/collision rec=reached script="Full list" last="3660" running=0
+PROBE memory/collision rec=grow script="Limited list"
+PROBE memory/collision rec=before script=limited-list used=7084 free=58452 limit=65536
+PROBE memory/collision rec=set-limit script=limited-list asked=used+8192 result=1 used=7286 free=8136 limit=15422
+PROBE memory/collision rec=grown script=limited-list count=500 used=15250 free=172 limit=15422
+# debug-channel: from="Object" text="Object [script:Limited list] Script run-time error"
+# debug-channel: from="Object" text="Stack-Heap Collision"
+PROBE memory/collision rec=reached script="Limited list" last="540" running=0
+PROBE memory/collision rec=end

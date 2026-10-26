@@ -40,3 +40,11 @@ names (`ATTACH_RIGHT_PEC` — map them to the point's display name), HUDs
 listed, available memory `-1` (show as unlimited) and 38 URLs. OpenSim never
 states an object's `memory` and its used memory is always 0 — show "not
 reported", not 0 KB. Our client already reads it under either media label.
+
+## Measured (gridspec-lsl-memory-limits, 2026-10-26)
+
+What a script sees of the same figures (`book/src/gridspec/lsl.md` § Memory
+and limits): Second Life counts an object's script memory as the sum of its
+scripts' limits, running or not (65 536 a Mono script unless lowered, 16 384
+an LSO one), OpenSim as 16 384 per running script. A floater that totals
+attachment or parcel memory should expect exactly those figures.

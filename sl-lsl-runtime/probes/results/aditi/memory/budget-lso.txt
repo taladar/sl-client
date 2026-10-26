@@ -1,0 +1,94 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+# target: script "Probe" lsl2
+PROBE memory/budget-lso rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE memory/budget-lso rec=read when=entry used=16384 free=12706 limit=16384
+PROBE memory/budget-lso rec=read when=again used=16384 free=12706 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=0 used=16384 free=12686 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=1 used=16384 free=12635 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=2 used=16384 free=12632 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=4 used=16384 free=12588 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=16 used=16384 free=12349 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=64 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=cleared used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=float count=0 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=float count=1 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=float count=2 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=float count=4 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=float count=16 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=float count=64 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=float count=cleared used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=string count=0 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=string count=1 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=string count=2 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=string count=4 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=string count=16 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=string count=64 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=string count=cleared used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=key count=0 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=key count=1 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=key count=2 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=key count=4 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=key count=16 used=16384 free=10680 limit=16384
+PROBE memory/budget-lso rec=held kind=key count=64 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=key count=cleared used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=vector count=0 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=vector count=1 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=vector count=2 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=vector count=4 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=vector count=16 used=16384 free=6429 limit=16384
+# animations avatar=other playing=""
+PROBE memory/budget-lso rec=held kind=vector count=64 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=vector count=cleared used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=rotation count=0 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=rotation count=1 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=rotation count=2 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=rotation count=4 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=rotation count=16 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=rotation count=64 used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=held kind=rotation count=cleared used=16384 free=6429 limit=16384
+PROBE memory/budget-lso rec=text kind=ascii length=0 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=ascii length=1 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=ascii length=16 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=ascii length=256 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=ascii length=1024 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=ascii length=cleared used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=two-byte length=0 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=two-byte length=1 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=two-byte length=16 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=two-byte length=256 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=two-byte length=1024 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=two-byte length=cleared used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=three-byte length=0 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=three-byte length=1 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=three-byte length=16 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=three-byte length=256 used=16384 free=6417 limit=16384
+PROBE memory/budget-lso rec=text kind=three-byte length=1024 used=16384 free=3518 limit=16384
+PROBE memory/budget-lso rec=text kind=three-byte length=cleared used=16384 free=3518 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=1 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=2 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=4 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=16 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=64 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=held kind=integer count=cleared used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=profiler sp_max_before=16384 sp_max_after=16384 used=16384 free=3550 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=65536 value=65536 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=65537 value=65537 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=100000 value=100000 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=32768 value=32768 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=used+1024 value=17408 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=used value=16384 result=1 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=used-1024 value=15360 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=1 value=1 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=0 value=0 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=-1 value=-1 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=set-limit asked=65536 value=65536 result=0 used=16384 free=3530 limit=16384
+PROBE memory/budget-lso rec=read when=last used=16384 free=3550 limit=16384
+PROBE memory/budget-lso rec=end

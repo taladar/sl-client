@@ -79,6 +79,31 @@ impl Drive {
     }
 }
 
+/// The compile target a probe script asks for (its header's `target`).
+///
+/// Second Life compiles a script to the target its upload names; OpenSim
+/// ignores the upload's target and compiles every script for the engine its
+/// first line picks, so there an LSO script runs as every other does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Target {
+    /// Mono (`mono`), Second Life's default.
+    #[default]
+    Mono,
+    /// The legacy LSO bytecode (`lsl2`), with its 16 KB budget.
+    Lsl2,
+}
+
+impl Target {
+    /// The target a header names.
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "mono" => Some(Self::Mono),
+            "lsl2" => Some(Self::Lsl2),
+            _ => None,
+        }
+    }
+}
+
 /// The `// key: value` lines that open a probe script.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Header {
@@ -117,6 +142,13 @@ pub struct Header {
     /// own. They are rezzed in the order listed, after the script's own
     /// prim.
     pub bare: Vec<BarePrim>,
+    /// `target`: the compile target the script is uploaded for, `mono` (the
+    /// default) or `lsl2` ([`Target`]).
+    pub target: Target,
+    /// `stats: active-scripts`: the runner notes the region's active-script
+    /// count (the `SimStats` the grid sends the owner's viewer) each time it
+    /// changes while the probe runs.
+    pub active_scripts: bool,
 }
 
 /// A prim a [`Header`]'s `bare` key names: one that holds no script.
@@ -196,6 +228,8 @@ impl Header {
                 "vary",
                 "unordered",
                 "bare",
+                "target",
+                "stats",
             ]
             .contains(key)
             {
@@ -253,6 +287,16 @@ impl Header {
                 .collect::<Option<Vec<_>>>()
                 .ok_or_else(|| invalid("bare", value))?,
         };
+        let target = pairs
+            .get("target")
+            .map(|value| Target::parse(value).ok_or_else(|| invalid("target", value)))
+            .transpose()?
+            .unwrap_or_default();
+        let active_scripts = match pairs.get("stats") {
+            None => false,
+            Some(&"active-scripts") => true,
+            Some(value) => return Err(invalid("stats", value)),
+        };
         Ok(Self {
             probe,
             drives,
@@ -271,6 +315,8 @@ impl Header {
                 .map(|value| list(value))
                 .unwrap_or_default(),
             bare,
+            target,
+            active_scripts,
         })
     }
 
@@ -896,7 +942,7 @@ mod tests {
 
     use super::{
         Action, BarePrim, By, Drive, Fetch, Header, HeaderError, Line, ResultFile, Stimulus,
-        TouchSurface,
+        Target, TouchSurface,
     };
 
     #[test]
@@ -904,7 +950,7 @@ mod tests {
         let header = Header::parse(
             "// probe: errors/runtime-errors\n// script: Div int\n// prim: B\n\
              // order: 3\n// distance: 50\n// height: 99\n// drive: none\n\
-             // skip-on: opensim-xengine, fake-sl\n//\n// probe: not/this\n",
+             // skip-on: opensim-xengine, fake-sl\n// target: lsl2\n// stats: active-scripts\n//\n// probe: not/this\n",
         )?;
         assert_eq!(
             header,
@@ -920,6 +966,8 @@ mod tests {
                 vary: Vec::new(),
                 unordered: Vec::new(),
                 bare: Vec::new(),
+                target: Target::Lsl2,
+                active_scripts: true,
             }
         );
         assert!(header.skipped_on("fake-sl"));
@@ -1161,6 +1209,20 @@ mod tests {
             Err(HeaderError::Invalid {
                 key: "skip-on".to_owned(),
                 value: "mainland".to_owned()
+            })
+        );
+        assert_eq!(
+            Header::parse("// probe: a/b\n// drive: none\n// target: luau\n"),
+            Err(HeaderError::Invalid {
+                key: "target".to_owned(),
+                value: "luau".to_owned()
+            })
+        );
+        assert_eq!(
+            Header::parse("// probe: a/b\n// drive: none\n// stats: lag\n"),
+            Err(HeaderError::Invalid {
+                key: "stats".to_owned(),
+                value: "lag".to_owned()
             })
         );
         assert_eq!(

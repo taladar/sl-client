@@ -71,3 +71,14 @@ Acceptance: every type × context the measuring script covers has a
 recorded aditi value, and the cost function reproduces each one exactly;
 every measured rotation and vector product is reproduced bit-for-bit by
 `sl-lsl-runtime`, the `8.32` case included.
+
+## First numbers (gridspec-lsl-memory-limits, 2026-10-26)
+
+`memory/budget` and `memory/collision` (`sl-lsl-runtime/probes/`) already
+show some of Mono's costs on aditi: an integer in a global list 16 bytes
+(exactly 8 000 per 500), a float 16, a vector 24, a rotation 28, a key 80 to
+100, a string character 2 whatever its UTF-8 length; a small script uses
+about 6 500 bytes. Read the cost from `llGetUsedMemory`, never from
+`llGetFreeMemory`, which is a low-water mark there; and expect the reading
+to wander by a few hundred bytes between two reads of nothing (13 598, then
+13 508).

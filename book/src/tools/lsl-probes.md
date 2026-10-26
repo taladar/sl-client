@@ -44,6 +44,8 @@ A probe's id is its path below `probes/` without the extension
 | `vary` | the fields that are measurements (a duration, a rate, a clock), comma-separated: a comparison sets them side by side and never counts them as a difference |
 | `unordered` | the records whose order among a run of their own kind is not defined, comma-separated: a comparison takes such a run as a set |
 | `bare` | prims that hold no script, comma-separated as `<label>@<east>` or `<label>@<east>/<up>` in metres from prim A — the targets a sensor or a ray is to find; they are rezzed in the order listed, after the script's own prim |
+| `target` | the compile target the script is uploaded for: `mono` (the default) or `lsl2`, Second Life's LSO with its 16 KB; OpenSim ignores the upload's target and compiles every script for the engine its first line picks |
+| `stats` | `active-scripts`: the runner notes the region's active-script count, from the `SimStats` the grid sends the owner's viewer, each time it changes while the probe runs |
 
 A probe that needs something done to it prints a `waiting` record and
 waits; the runner answers each one, a second after it arrives, in order:
@@ -160,7 +162,20 @@ What has bitten already, and how a probe should be shaped for it:
   literal first.
 - **Some failures take the region with them.** Unbounded recursion under
   XEngine overflows the simulator's own stack, and the whole OpenSim
-  process aborts. That is what `skip-on` is for.
+  process aborts. So does one under YEngine that calls a library function
+  at every level (`memory/recursion`): YEngine catches a recursion that
+  calls nothing, but the native stack then runs out inside its own stack
+  check. That is what `skip-on` is for.
+- **A script that ran out of memory says nothing more**, and on YEngine
+  still reads as running. Where a probe needs to know how far a script got
+  before it stopped, have it write its progress into the prim's
+  description (`llSetObjectDesc`) as it goes, and have another script read
+  it once it stops changing (`memory/recursion`, `memory/collision`).
+  OpenSim has no linkset data store to keep it in instead.
+- **Stopping a timer does not stop the event already queued.** XEngine
+  still runs a timer event queued before `llSetTimerEvent(0.0)`, so a
+  sequence driven by a timer reports its last step twice unless it marks
+  itself finished and returns early (`memory/recursion`).
 
 ## Running
 
@@ -194,7 +209,8 @@ region's reference primitive (prim A 1 m above it, the others `distance` east
 and `height` above it, the `bare` ones after the prim of the script that lists
 them). It makes each script in its prim under its name with `RezScript`, in save
 order, and uploads the source running, prefixed on OpenSim with the line that
-picks the engine (`//YEngine:` or `//XEngine:`). It answers each `waiting`
+picks the engine (`//YEngine:` or `//XEngine:`), for the header's `target` (a
+script uploaded for `lsl2` is noted `# target:`). It answers each `waiting`
 record and notes what it did (`# touch`, `# chat by=other channel=7 text="…"`; a
 touch by the other avatar also says whether that avatar has an active group,
 `active_group=set|none`, which decides what `llDetectedGroup` answers and no
@@ -204,10 +220,12 @@ the probe's owner-say lines from its prims, and every `DEBUG_CHANNEL` message
 they send as a `# debug-channel:` note (an owner-say line that is not a probe
 line as `# owner-say:`), until `end` or three minutes, then derezzes the prims
 to the Trash — and so it does when the grid refuses one of a probe's rezzes,
-with the prims already rezzed, before the run fails. It also notes what the grid
-sent the two viewers meanwhile, about the avatars: a permission question from
-the probe's prims (`# question`, the mask, the object's name, how the owner's
-name was put), a dialog from them (`# dialog`, the message, the buttons in the
+with the prims already rezzed, before the run fails. For a probe whose header
+asks (`stats`), it notes the region's active-script count as `# sim-stats`
+whenever it changes. It also notes what the grid sent the two viewers
+meanwhile, about the avatars: a permission question from the probe's prims
+(`# question`, the mask, the object's name, how the owner's name was put), a
+dialog from them (`# dialog`, the message, the buttons in the
 order sent, the channel) and the reply (`# dialog-reply`, the index and how many
 bytes went), an instant message from an object (`# im`, the dialog, who the grid
 names as sender and what the message id is, as roles — `owner`, `other`,
@@ -344,6 +362,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `experience/*`, 2026-10-25: the experience functions and the key-value store from a script in no experience, teleporting an agent, a temporary attachment | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#experiences-and-the-key-value-store) | | |
 | `http/*`, 2026-10-25: what arrives at an in-world URL, what `llHTTPRequest` accepts, what comes back, URLs and the throttle | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#outbound-http-and-in-world-urls) | | |
 | `land/*`, 2026-10-26: `llGetEnv`, parcel details, flags, prim counts and owners, region flags and data, `llEdgeOfWorld`, the ground and weather, the day cycle, and Second Life's environment, sim stats and navmesh calls | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#parcel-region-estate-and-environment-queries) | | |
+| `memory/*`, 2026-10-26: the memory functions, what values cost, `llSetMemoryLimit`, running out by recursion and by allocation, Mono against LSO, `OBJECT_SCRIPT_MEMORY` and the region's active-script count | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#memory-and-limits) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

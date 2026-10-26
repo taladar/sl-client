@@ -1,0 +1,51 @@
+grid: opensim-xengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# sim-stats active_scripts=1
+# chat type=say from="Object" length=14 text="Script running"
+PROBE memory/object rec=limit script=limited asked=16384 result=0 limit=65536
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "Idle LSO" lsl2
+# sim-stats active_scripts=4
+# chat type=say from="Object" length=14 text="Script running"
+PROBE memory/object rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE memory/object rec=self used=65536 limit=65536
+# sim-stats active_scripts=6
+PROBE memory/object rec=script-state when=settled script="Idle" running=1
+PROBE memory/object rec=script-state when=settled script="Limited" running=1
+PROBE memory/object rec=script-state when=settled script="Stopped" running=0
+PROBE memory/object rec=script-state when=settled script="Idle LSO" running=1
+PROBE memory/object rec=script-state when=settled script="Reader" running=1
+PROBE memory/object rec=details of=self when=settled length=4 script_memory=65536 running=4 total=5 script_time=0.002000
+PROBE memory/object rec=script-state when=idle-stopped script="Idle" running=0
+PROBE memory/object rec=script-state when=idle-stopped script="Limited" running=1
+PROBE memory/object rec=script-state when=idle-stopped script="Stopped" running=0
+PROBE memory/object rec=script-state when=idle-stopped script="Idle LSO" running=1
+PROBE memory/object rec=script-state when=idle-stopped script="Reader" running=1
+PROBE memory/object rec=details of=self when=idle-stopped length=4 script_memory=49152 running=3 total=5 script_time=0.005000
+PROBE memory/object rec=limit script=limited asked=32768 result=0 limit=65536
+PROBE memory/object rec=script-state when=idle-started script="Idle" running=1
+PROBE memory/object rec=script-state when=idle-started script="Limited" running=1
+PROBE memory/object rec=script-state when=idle-started script="Stopped" running=0
+PROBE memory/object rec=script-state when=idle-started script="Idle LSO" running=1
+PROBE memory/object rec=script-state when=idle-started script="Reader" running=1
+PROBE memory/object rec=details of=self when=idle-started length=4 script_memory=65536 running=4 total=5 script_time=0.008000
+PROBE memory/object rec=other answered=1
+PROBE memory/object rec=details of=other when=settled length=4 script_memory=16384 running=1 total=1 script_time=0.010000
+PROBE memory/object rec=details of=owner when=settled length=4 script_memory=0 running=0 total=0 script_time=0.000000
+PROBE memory/object rec=details of=null-key when=settled length=0
+PROBE memory/object rec=details of=nothing when=settled length=0
+PROBE memory/object rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

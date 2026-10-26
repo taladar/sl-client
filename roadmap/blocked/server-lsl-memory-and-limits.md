@@ -55,3 +55,33 @@ aditi-measured amounts, and rises when it is cleared; `llSetMemoryLimit` below
 current usage fails as the reference's does; a deliberate runaway allocation
 stops the script with a stack-heap collision rather than exhausting the host;
 and the top-scripts report lists a genuinely busy script above an idle one.
+
+## Measured (gridspec-lsl-memory-limits, 2026-10-26)
+
+`book/src/gridspec/lsl.md` § Memory and limits has the table per grid; what
+it changes here:
+
+- **Second Life's `llGetFreeMemory` is a low-water mark**: the limit less the
+  most the script has used since the limit was last set — it never rises
+  when a value is cleared, while `llGetUsedMemory` does. `llSetMemoryLimit`
+  resets it to the new limit less the current use. LSO reports
+  `llGetUsedMemory` as the whole 16 384 always, and takes only
+  `llSetMemoryLimit(16384)`.
+- **`llSetMemoryLimit`** is `TRUE` from the current use up to 65 536 on
+  Mono, `FALSE` above or below; `FALSE` always on both OpenSim engines,
+  whose limit stays 65 536.
+- **The stack counts** against the limit (a lowered limit cuts the
+  recursion depth), and Mono's depth at the collision differs from run to
+  run (1 039–1 116 levels for one integer argument), so a test can only
+  hold the fake grid to a range there; LSO's is fixed (763).
+- **Per flavour**: `FakeSl` is Mono's model (the budget, the low-water
+  mark, the collision message pair on `DEBUG_CHANNEL`, the script stopped);
+  `FakeOpensim` is YEngine's (a 1 MiB heap of the values the script holds,
+  globals 4 bytes an integer and 2 a character, `OutOfHeapException` told to
+  the owner alone, the script still reading as running) — XEngine counts
+  nothing and answers 65 536 to every call.
+- **The region-level view**: `OBJECT_SCRIPT_MEMORY` is the sum of every
+  script's limit, running or not, on Second Life, and 16 384 per *running*
+  script on OpenSim; the region's `ActiveScripts` stat is a fractional
+  average of the running scripts on Second Life and the count of scripts
+  present, stopped or not, on OpenSim. The fake grid sends `0` today.

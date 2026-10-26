@@ -1,0 +1,46 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# sim-stats active_scripts=2563.4001
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+# sim-stats active_scripts=2564.6987
+PROBE memory/object rec=limit script=limited asked=16384 result=1 limit=16384
+# target: script "Idle LSO" lsl2
+# sim-stats active_scripts=2566.2695
+PROBE memory/object rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE memory/object rec=self used=12210 limit=65536
+# sim-stats active_scripts=2567.5864
+# sim-stats active_scripts=2568
+PROBE memory/object rec=script-state when=settled script="Idle" running=1
+PROBE memory/object rec=script-state when=settled script="Limited" running=1
+PROBE memory/object rec=script-state when=settled script="Stopped" running=0
+PROBE memory/object rec=script-state when=settled script="Idle LSO" running=1
+PROBE memory/object rec=script-state when=settled script="Reader" running=1
+PROBE memory/object rec=details of=self when=settled length=4 script_memory=229376 running=4 total=5 script_time=0.000058
+# sim-stats active_scripts=2567
+PROBE memory/object rec=script-state when=idle-stopped script="Idle" running=0
+PROBE memory/object rec=script-state when=idle-stopped script="Limited" running=1
+PROBE memory/object rec=script-state when=idle-stopped script="Stopped" running=0
+PROBE memory/object rec=script-state when=idle-stopped script="Idle LSO" running=1
+PROBE memory/object rec=script-state when=idle-stopped script="Reader" running=1
+PROBE memory/object rec=details of=self when=idle-stopped length=4 script_memory=229376 running=3 total=5 script_time=0.000035
+PROBE memory/object rec=limit script=limited asked=32768 result=1 limit=32768
+# sim-stats active_scripts=2567.4053
+# sim-stats active_scripts=2568
+PROBE memory/object rec=script-state when=idle-started script="Idle" running=1
+PROBE memory/object rec=script-state when=idle-started script="Limited" running=1
+PROBE memory/object rec=script-state when=idle-started script="Stopped" running=0
+PROBE memory/object rec=script-state when=idle-started script="Idle LSO" running=1
+PROBE memory/object rec=script-state when=idle-started script="Reader" running=1
+PROBE memory/object rec=details of=self when=idle-started length=4 script_memory=245760 running=4 total=5 script_time=0.000047
+PROBE memory/object rec=other answered=1
+PROBE memory/object rec=details of=other when=settled length=4 script_memory=65536 running=1 total=1 script_time=0.000002
+PROBE memory/object rec=details of=owner when=settled length=4 script_memory=327680 running=5 total=5 script_time=0.000007
+PROBE memory/object rec=details of=null-key when=settled length=0
+PROBE memory/object rec=details of=nothing when=settled length=0
+PROBE memory/object rec=end
