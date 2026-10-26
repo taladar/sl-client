@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 348 |
+| ready | 347 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1428 |
+| done | 1429 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2077** |
@@ -299,7 +299,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
   Library tranche — parcel, region, estate and environment queries (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
-  `gridspec-lsl-land-region-env`)
+  `gridspec-lsl-land-region-env` (done))
 - [`server-lsl-lib-math-rotations`](ideas/server-lsl-lib-math-rotations.md) —
   Library tranche — maths, vectors and rotations (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (348)
+## ready (347)
 
 ### protocol
 
@@ -1153,9 +1153,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-land-region-env`](ready/gridspec-lsl-land-region-env.md) — LSL
-  library behaviour on each grid — parcel, region, estate and environment
-  queries (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-memory-limits`](ready/gridspec-lsl-memory-limits.md) — LSL
   memory and limits on OpenSim and the remaining SL unknowns (blocked by
   `gridspec-lsl-live-differential-runner` (done))
@@ -1539,7 +1536,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1428)
+## done (1429)
 
 ### protocol
 
@@ -4644,6 +4641,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-json-linkset-data`](done/gridspec-lsl-json-linkset-data.md) —
   LSL library behaviour on each grid — llJson* and the linkset data store
   (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-land-region-env`](done/gridspec-lsl-land-region-env.md) — LSL
+  library behaviour on each grid — parcel, region, estate and environment
+  queries (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-live-differential-runner`](done/gridspec-lsl-live-differential-runner.md)
   — Run one probe on OpenSim YEngine, XEngine and aditi and collect the
   transcripts (blocked by `gridspec-lsl-probe-corpus` (done))

@@ -1,0 +1,27 @@
+grid: opensim-xengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE land/ground rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE land/ground rec=ground offset=none same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=east-3 same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=north-3 same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=west-3 same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=up-10 same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=down-100 same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=west-out same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=east-out same_as_clamped=1 above_prim=11.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=south-out same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=north-out same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground offset=fraction same_as_clamped=1 above_prim=-6.500 water=20.000 water_same_here=1
+PROBE land/ground rec=ground-west near_minus_edge=0.000 mid_minus_edge=0.000 far_minus_edge=0.000 far_minus_mid=0.000
+PROBE land/ground rec=surface normal_length=1.000 slope_length=0.000 contour_length=0.000 normal_up=1 normal_dot_slope=0.000 normal_dot_contour=0.000 slope_dot_contour=0.000 contour_z=0.000
+PROBE land/ground rec=surface-agrees normal_dot_heights=1.000 slope_points_down=1
+PROBE land/ground rec=surface-flat normal="<0.000000, 0.000000, 1.000000>" slope="<0.000000, 0.000000, 0.000000>" contour="<0.000000, 0.000000, 0.000000>"
+PROBE land/ground rec=weather wind="<0.337100, -0.288315, 0.000000>" wind_level=1 cloud=0.000000 cloud_in_range=1 wind_far_same=0
+PROBE land/ground rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

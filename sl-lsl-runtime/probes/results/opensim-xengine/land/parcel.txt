@@ -1,0 +1,81 @@
+grid: opensim-xengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# debug-channel: from="Object" text="System.Reflection.TargetInvocationException: Exception has been thrown by the target of an invocation. ---> System.NullReferenceException: Object reference not set to an instance of an object\n  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llGetParcelFlags (OpenSim.Region.ScriptEngine.Shared.LSL_Types+Vector3 pos) [0x0001f] in <d09853dcdece4467894564db0ef815df>:0 \n  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llGetParcelFlags (OpenSim.Region.ScriptEngine.Shared.LSL_Types+Vector3 pos) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0 \n  at SecondLife.XEngineScript.default_event_state_entry () [0x0003b] in <6e9c7528dd0947028c51389622cf280c>:0 \n  at (wrapper managed-to-native) System.Reflection.RuntimeMethodInfo.InternalInvoke(System.Reflection.RuntimeMethodInfo,object,object[],System.Exception&)\n  at System.Reflection.RuntimeMethodInfo.Invoke (System.Object obj, System.Reflection.BindingFlags invokeAttr, System.Reflection.Binder binder, System.Object[] parameters"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE land/parcel rec=outside call=llGetParcelDetails length=1 area="0" id_set=1 same_as_west_edge=0
+# chat type=say from="Object" length=14 text="Script running"
+PROBE land/parcel rec=outside call=llGetLandOwnerAt nil=1 empty=0
+# chat type=say from="Object" length=14 text="Script running"
+PROBE land/parcel rec=outside call=llScriptDanger answer=1
+# chat type=say from="Object" length=14 text="Script running"
+PROBE land/parcel rec=outside call=llGetParcelMaxPrims answer=0
+# chat type=say from="Object" length=14 text="Script running"
+PROBE land/parcel rec=outside call=llGetParcelPrimCount answer=0
+# chat type=say from="Object" length=14 text="Script running"
+PROBE land/parcel rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE land/parcel rec=flags value=671096907 set="ALLOW_FLY,ALLOW_SCRIPTS,ALLOW_LANDMARK,ALLOW_CREATE_OBJECTS,ALLOW_ALL_OBJECT_ENTRY" other_bits=536879104
+PROBE land/parcel rec=details at=here codes="-1" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="0" length=1 got="string:\"Your Parcel\""
+PROBE land/parcel rec=details at=here codes="1" length=1 got="string:\"\""
+PROBE land/parcel rec=details at=here codes="2" length=1 got="key:set"
+PROBE land/parcel rec=details at=here codes="3" length=1 got="key:nil"
+PROBE land/parcel rec=details at=here codes="4" length=1 got="integer:\"65536\""
+PROBE land/parcel rec=details at=here codes="5" length=1 got="key:set"
+PROBE land/parcel rec=details at=here codes="6" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="7" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="8" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="9" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="10" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="11" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="12" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="13" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="14" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="15" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="64" length=1 got="integer:\"57\""
+PROBE land/parcel rec=details at=here codes="99" length=1 got="integer:\"0\""
+PROBE land/parcel rec=details at=here codes="0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13" length=14 got="string:\"Your Parcel\",string:\"\",key:set,key:nil,integer:\"65536\",key:set,integer:\"0\",integer:\"0\",integer:\"0\",integer:\"0\",integer:\"0\",integer:\"0\",integer:\"0\",integer:\"0\""
+PROBE land/parcel rec=details at=here codes="5, 99, 2, 2" length=4 got="key:set,integer:\"0\",key:set,key:set"
+PROBE land/parcel rec=details at=here codes="" length=0 got=""
+PROBE land/parcel rec=same-parcel ground=1
+PROBE land/parcel rec=max-prims parcel=15000 sim_wide=15000
+PROBE land/parcel rec=prim-count category=-1 count="0/0"
+PROBE land/parcel rec=prim-count category=0 count="42/42"
+PROBE land/parcel rec=prim-count category=1 count="34/0"
+PROBE land/parcel rec=prim-count category=2 count="0/0"
+PROBE land/parcel rec=prim-count category=3 count="8/0"
+PROBE land/parcel rec=prim-count category=4 count="0/0"
+PROBE land/parcel rec=prim-count category=5 count="0/0"
+PROBE land/parcel rec=prim-count category=6 count="0/0"
+PROBE land/parcel rec=prim-owners empty=0 owner_counted=8 used=2
+PROBE land/parcel rec=land-owner at=here owner=set parcel_owner=set
+PROBE land/parcel rec=over-my-land of=owner answer=0 of_nil=0
+PROBE land/parcel rec=script-danger here=0 west_edge=0
+PROBE land/parcel rec=media-query code=5 length=0 got=""
+PROBE land/parcel rec=media-query code=4 length=0 got=""
+PROBE land/parcel rec=media-query code=10 length=0 got=""
+PROBE land/parcel rec=media-query code=11 length=0 got=""
+PROBE land/parcel rec=media-query code=12 length=0 got=""
+PROBE land/parcel rec=media-query code=13 length=0 got=""
+PROBE land/parcel rec=media-query code=9 length=0 got=""
+PROBE land/parcel rec=media-query code=3 length=0 got=""
+PROBE land/parcel rec=media-query code=6 length=0 got=""
+PROBE land/parcel rec=media-query code=99 length=0 got=""
+PROBE land/parcel rec=media-query code=all length=0 got=""
+PROBE land/parcel rec=music step=read url=""
+PROBE land/parcel rec=music step=set url="" changed=0
+PROBE land/parcel rec=details at=high codes="4, 5" length=2 got="integer:\"65536\",key:set"
+PROBE land/parcel rec=details at=low codes="4, 5" length=2 got="integer:\"65536\",key:set"
+PROBE land/parcel rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

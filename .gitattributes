@@ -24,6 +24,10 @@ sl-viewer-ui-core/assets/fonts/OFL.txt -whitespace
 # LSL linter for the whole corpus tree.
 sl-lsl/tests/corpus/**/*.lsl skipchecks=lsl:::lslint;;;deliberately[[space]]invalid[[space]]differential-oracle[[space]]fixtures
 
+# The land/ground probe measures what each grid answers llCloud, which lslint
+# rejects as deprecated; calling it is the measurement.
+sl-lsl-runtime/probes/land/ground.lsl skipchecks=lsl:::lslint;;;measures[[space]]the[[space]]deprecated[[space]]llCloud
+
 # The cargo-about license template is a whitespace-significant plain-text
 # template (its output format is machine-parsed by the About floater), not an
 # HTML/glimmer document: prettier's glimmer formatter reflows and breaks the

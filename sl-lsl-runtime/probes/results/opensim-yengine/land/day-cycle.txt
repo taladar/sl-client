@@ -1,0 +1,19 @@
+grid: opensim-yengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE land/day-cycle rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE land/day-cycle rec=day length=14400 offset=57600 region_length=14400 region_offset=57600
+PROBE land/day-cycle rec=body which=sun scope=parcel sun="<-0.120053, 0.000000, 0.992768>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=sun scope=region sun="<-0.120054, 0.000000, 0.992767>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=moon scope=parcel moon="<0.120054, 0.000000, -0.992768>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=body which=moon scope=region moon="<0.120054, 0.000000, -0.992767>" length=1.000 rot_length=1.000 dot_fwd=1.000 dot_left=0.000 dot_up=0.000
+PROBE land/day-cycle rec=agree sun=1 moon=1 sun_dot_moon=-1.000
+PROBE land/day-cycle rec=time time_of_day=11241.292949 within_day=1 fraction=0.781
+PROBE land/day-cycle rec=time-later advanced=1 time_of_day=11243.293111
+PROBE land/day-cycle rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

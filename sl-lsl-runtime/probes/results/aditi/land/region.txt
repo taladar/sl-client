@@ -1,0 +1,51 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE land/region rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE land/region rec=region named=1 corner="<255744.00000, 257792.00000, 0.00000>" corner_on_grid=1
+PROBE land/region rec=region-flags value=1048576 set="ALLOW_DIRECT_TELEPORT" other_bits=0
+PROBE land/region rec=load fps=44.885350 dilation=0.992881 agents=9
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE land/region rec=hostname hostname="simhost-08ead0889a544632b.aditi.secondlife.io" same_as_env=1
+PROBE land/region rec=agent-list scope=1 owner_in=1 others=4
+PROBE land/region rec=agent-list scope=2 owner_in=1 others=4
+PROBE land/region rec=agent-list scope=4 owner_in=1 others=8
+PROBE land/region rec=agent-list scope=0 owner_in=0 others=1 only="INVALID_SCOPE"
+PROBE land/region rec=agent-list scope=8 owner_in=0 others=1 only="INVALID_SCOPE"
+PROBE land/region rec=edge from=here dir="<1.00000, 0.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=here dir="<-1.00000, 0.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=here dir="<0.00000, 1.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=here dir="<0.00000, -1.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=here dir="<1.00000, 1.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=here dir="<0.00000, 0.00000, 1.00000>" answer=1
+PROBE land/region rec=edge from=here dir="<1.00000, 0.00000, 1.00000>" answer=1
+PROBE land/region rec=edge from=here dir="<0.00000, 0.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=west-edge dir="<-1.00000, 0.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=east-edge dir="<1.00000, 0.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=south-edge dir="<0.00000, -1.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=north-edge dir="<0.00000, 1.00000, 0.00000>" answer=1
+PROBE land/region rec=edge from=outside dir="<-1.00000, 0.00000, 0.00000>" answer=0
+PROBE land/region rec=sim-data-asked of=own data=5 got_key=1
+PROBE land/region rec=sim-data-asked of=own data=6 got_key=1
+PROBE land/region rec=sim-data-asked of=own data=7 got_key=1
+PROBE land/region rec=sim-data-asked of=own data=128 got_key=0
+PROBE land/region rec=sim-data-asked of=lower data=5 got_key=1
+PROBE land/region rec=sim-data-asked of=lower data=6 got_key=1
+PROBE land/region rec=sim-data-asked of=nowhere data=5 got_key=1
+PROBE land/region rec=sim-data-asked of=nowhere data=6 got_key=1
+PROBE land/region rec=sim-data-asked of=empty data=6 got_key=1
+PROBE land/region rec=sim-data-asked of=own data=99 got_key=0
+PROBE land/region rec=sim-data of=own data=5 data_text="<255744,257792,0>"
+PROBE land/region rec=sim-data of=own data=6 data_text="up"
+PROBE land/region rec=sim-data of=own data=7 data_text="ADULT"
+PROBE land/region rec=sim-data of=lower data=5 data_text="<255744,257792,0>"
+PROBE land/region rec=sim-data of=lower data=6 data_text="up"
+PROBE land/region rec=sim-data of=nowhere data=6 data_text="unknown"
+PROBE land/region rec=sim-data of=empty data=6 data_text="crashed"
+PROBE land/region rec=sim-data-unanswered of=nowhere data=5
+PROBE land/region rec=end

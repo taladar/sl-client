@@ -1,0 +1,80 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE land/sl-only rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# debug-channel: from="Object" text="Unknown stat."
+PROBE land/sl-only rec=sim-stat code=-1 value=0.000000 zero=1 negative=0 whole=1
+PROBE land/sl-only rec=sim-stat code=0 value=95.366170 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=1 value=44.973730 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=2 value=180.874400 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=3 value=22.016560 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=4 value=0.617882 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=5 value=0.161832 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=6 value=0.098993 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=7 value=0.096218 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=8 value=0.002808 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=9 value=1.619087 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=10 value=9.000000 zero=0 negative=0 whole=1
+# animations avatar=owner playing=""
+PROBE land/sl-only rec=sim-stat code=11 value=0.000000 zero=1 negative=0 whole=1
+PROBE land/sl-only rec=sim-stat code=12 value=1989.000000 zero=0 negative=0 whole=1
+PROBE land/sl-only rec=sim-stat code=13 value=40.600610 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=14 value=76.153310 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=15 value=0.167059 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=16 value=0.000000 zero=1 negative=0 whole=1
+PROBE land/sl-only rec=sim-stat code=17 value=29.367920 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=18 value=0.063550 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=19 value=0.000384 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=20 value=0.023731 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=21 value=257.973600 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=22 value=19.364040 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=23 value=19.263940 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=24 value=0.087507 zero=0 negative=0 whole=0
+PROBE land/sl-only rec=sim-stat code=25 value=100.000000 zero=0 negative=0 whole=1
+PROBE land/sl-only rec=sim-stat code=26 value=0.000251 zero=0 negative=0 whole=0
+# debug-channel: from="Object" text="Unknown stat."
+PROBE land/sl-only rec=sim-stat code=27 value=0.000000 zero=1 negative=0 whole=1
+PROBE land/sl-only rec=environment at=here rule=200 length=3 got="14400, 57600, 7928.637207"
+PROBE land/sl-only rec=environment at=here rule=0 length=1 got="<0.350000, 0.350000, 0.350000>"
+PROBE land/sl-only rec=environment at=here rule=1 length=3 got="1, 1, 1"
+PROBE land/sl-only rec=environment at=here rule=2 length=8 got="<0.410000, 0.410000, 0.410000>, 0.270000, 0.420000, 0.000000, <0.000000, 0.011000, 0.000000>, <1.000000, 0.526097, 1.000000>, <1.000000, 0.526097, 0.125000>, 1"
+PROBE land/sl-only rec=environment at=here rule=4 length=3 got="0.960000, 15000.000000, 1605.000000"
+PROBE land/sl-only rec=environment at=here rule=5 length=1 got="1.000000"
+PROBE land/sl-only rec=environment at=here rule=6 length=2 got="1.750000, 0.096000"
+PROBE land/sl-only rec=environment at=here rule=8 length=3 got="<-0.171462, 0.000000, 0.985191>, <1.324725, 1.325546, 1.342404>, <1.000000, 0.999963, 0.999907>"
+PROBE land/sl-only rec=environment at=here rule=9 length=7 got="<-0.000000, 0.643637, 0.000000, 0.765331>, 1.000000, 0.500000, 1, <0.171462, 0.000000, -0.985191>, <0.008249, 0.008248, 0.014996>, <0.000384, 0.000362, 0.001000>"
+PROBE land/sl-only rec=environment at=here rule=10 length=3 got="6360.000000, 6360.000000, 6420.000000"
+PROBE land/sl-only rec=environment at=here rule=11 length=3 got="0.000000, 800.000000, 0.000000"
+PROBE land/sl-only rec=environment at=here rule=13 length=1 got="0.000000"
+PROBE land/sl-only rec=environment at=here rule=14 length=7 got="<0.000000, -0.765331, 0.000000, 0.643637>, 1.000000, <0.244737, 0.260526, 0.300000>, 1, <-0.171462, 0.000000, 0.985191>, <1.000000, 0.999963, 0.999907>, <0.649067, 0.650803, 0.683995>"
+PROBE land/sl-only rec=environment at=here rule=15 length=3 got="1000.000000, 2000.000000, 3000.000000"
+# debug-channel: from="Object" text="llGetEnvironment Error running rule #1 (SKY_CLOUD_TEXTURE): Attempt to read unreadable value.."
+PROBE land/sl-only rec=environment at=here rule=19 length=0 got=""
+# debug-channel: from="Object" text="llGetEnvironment Error running rule #1 (SKY_MOON_TEXTURE): Attempt to read unreadable value.."
+PROBE land/sl-only rec=environment at=here rule=20 length=0 got=""
+# debug-channel: from="Object" text="llGetEnvironment Error running rule #1 (SKY_SUN_TEXTURE): Attempt to read unreadable value.."
+PROBE land/sl-only rec=environment at=here rule=21 length=0 got=""
+PROBE land/sl-only rec=environment at=here rule=22 length=2 got="<0.122379, 0.224361, 0.380000>, <0.247742, 0.247742, 0.320000>"
+PROBE land/sl-only rec=environment at=here rule=23 length=4 got="0.070000, 0.190000, 0.180000, 0.800000"
+PROBE land/sl-only rec=environment at=here rule=24 length=1 got="0.000000"
+PROBE land/sl-only rec=environment at=here rule=100 length=1 got="0.040000"
+PROBE land/sl-only rec=environment at=here rule=101 length=3 got="<0.015686, 0.149020, 0.250980>, 10.000000, 0.250000"
+PROBE land/sl-only rec=environment at=here rule=102 length=2 got="0.500000, 0.400000"
+# animations avatar=other playing=""
+PROBE land/sl-only rec=environment at=here rule=103 length=2 got="1, 0"
+PROBE land/sl-only rec=environment at=here rule=104 length=1 got="<2.000000, 2.000000, 2.000000>"
+PROBE land/sl-only rec=environment at=here rule=105 length=2 got="0.030000, 0.200000"
+PROBE land/sl-only rec=environment at=here rule=106 length=2 got="<1.050000, -0.420000, 0.000000>, <1.110000, -1.160000, 0.000000>"
+# debug-channel: from="Object" text="llGetEnvironment Error running rule #1 (WATER_NORMAL_TEXTURE): Attempt to read unreadable value.."
+PROBE land/sl-only rec=environment at=here rule=107 length=0 got=""
+# debug-channel: from="Object" text="llGetEnvironment Error running rule #1: unknown rule id 999."
+PROBE land/sl-only rec=environment at=here rule=999 length=0 got=""
+PROBE land/sl-only rec=environment at=high rule=0 length=1 got="<0.350000, 0.350000, 0.350000>"
+PROBE land/sl-only rec=environment at=west rule=200 length=3 got="14400, 57600, 7928.925293"
+PROBE land/sl-only rec=time time_of_day=7928.925000 same_as_parcel=1
+PROBE land/sl-only rec=nav-point length=1 within_50m=1 got="<52.010170, 61.986401, 32.401733>"
+PROBE land/sl-only rec=end

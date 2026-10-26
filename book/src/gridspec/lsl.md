@@ -886,3 +886,137 @@ on OpenSim.
 ### What the viewer does with it
 
 Nothing: neither JSON nor linkset data reaches a viewer.
+
+## Parcel, region, estate and environment queries
+
+Measured on 2026-10-26 by the probes `land/env`, `land/parcel`,
+`land/region`, `land/ground`, `land/day-cycle` and `land/sl-only`, on the
+same grids; YEngine and XEngine answered every one of them alike (but for a
+dwell that moved by one between the runs), so the OpenSim column is both.
+The land is each grid's own: Second Life is the Mauve public sandbox, a
+group-owned mainland parcel of 14 176 m² our avatars do not own; OpenSim is
+the Default Region, one parcel of the whole region, owned by the estate
+owner rather than the probe's owner. So the heights, counts and names in the
+transcripts are the land's; the tables hold what the calls do with them.
+OpenSim lacks `llGetSimStats`, `llGetEnvironment`, `llGetRegionTimeOfDay`
+and `llGetClosestNavPoint`, and every `ENVIRONMENT_*`, `SKY_*` and `WATER_*`
+constant: `land/sl-only` holds them so the other probes compile there, and
+does not compile under either engine (YEngine: `undefined
+constant/function/variable llGetEnvironment(vector,list)`; XEngine:
+`CS0103: The name 'llGetEnvironment' does not exist`).
+
+### `llGetEnv`
+
+| key | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `sim_channel`, `sim_version` | `Luau`, the release (`2026-07-24.30110090421`) | `OpenSim`, the version string with build and platform (`OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)`) | no scripts |
+| `estate_id`, `estate_name` | `1`, `mainland` | the estate's (`101`, `My Estate`) | no scripts |
+| `region_product_name`, `region_product_sku` | `Mainland / Full Region`, `023` | `""` (the region type, empty here), always `OpenSim` | no scripts |
+| `region_max_prims`, `region_object_bonus` | the land capacity with the bonus (`22510`), the bonus (`10`) | the object capacity (`15000`), the bonus (`1`) | no scripts |
+| `agent_limit` | `55` | the region setting (`40`) | no scripts |
+| `whisper_range`, `chat_range`, `shout_range` | `10`, `20`, `100` | the same (the configured distances) | no scripts |
+| `dynamic_pathfinding` | `enabled` | always `0` | no scripts |
+| `region_cpu_ratio`, `region_idle` | `1`, `0` | always `1`, always `0` | no scripts |
+| `region_start_time` | Unix seconds | the same | no scripts |
+| `frame_number` | counts 45 a second, as `llGetRegionFPS` | counts **11 a second**, while `llGetRegionFPS` says 55 | no scripts |
+| `region_up_time` | `""` | seconds since start | no scripts |
+| `simulator_hostname` | the host's name (`simhost-….aditi.secondlife.io`), as `llGetSimulatorHostname` | the external host name configured for scripts (`127.0.0.1`), as `llGetSimulatorHostname` | no scripts |
+| `agent_reserved`, `agent_unused` | `5`, `""` | `""` | no scripts |
+| `region_rating`, `grid`, `region_name` | `ADULT`, `aditi`, `Mauve` | `""` | no scripts |
+| `allow_damage_adjust`, `damage_limit` | `1`, `0` | `""` | no scripts |
+| `restrict_pushobject`, `estate_owner`, `region_corner`, `region_idle_timeout`, `agent_avatar_limit`, a made-up key, `""` | `""` | `""` | no scripts |
+| a key in capitals (`SIM_CHANNEL`, `Sim_Version`) | `""`: the key is case-sensitive | **answered**: OpenSim lowers the key first | no scripts |
+
+### Parcel queries
+
+The `PARCEL_DETAILS_*` codes are the probe's numbers, because the grids name
+three of them differently: Second Life's 7, 8 and 10 are `PRIM_CAPACITY`,
+`PRIM_USED` and `LANDING_LOOKAT`, OpenSim's `ANY_AVATAR_SOUNDS`,
+`GROUP_SOUNDS` and `CLAIMDATE`, and OpenSim adds 64 (`DWELL`). A script
+naming a constant of one grid does not compile on the other.
+
+| call | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llGetParcelDetails` 0–6: name, description, owner, group, area, id, see-avatars | the parcel's (the owner of group land is its group); see-avatars `0` | the same, the group `NULL_KEY` | no scripts |
+| — 7, 8 | the prim capacity (`78532`) and the prims used | `0`, `0` | no scripts |
+| — 9, 10 | the landing point and look-at, vectors | integer `0` | no scripts |
+| — 11 (`TP_ROUTING`), 12 (`FLAGS`), 13 (`SCRIPT_DANGER`) | `1`, the parcel flags, `1` | integer `0` | no scripts |
+| — 64 | nothing, and a `DEBUG_CHANNEL` error | the dwell (`56`) | no scripts |
+| — any other code (-1, 14, 15, 99) | **left out**, and `llGetParcelDetails error: Unknown parameter '99'` on `DEBUG_CHANNEL` | **integer `0`** in its place, silently | no scripts |
+| — several codes | one element per code, in the order asked, repeats repeated | the same | no scripts |
+| — no codes | `[]` | the same | no scripts |
+| — a position above the region (z 5000) or under the ground (z −100) | the parcel below or above it | the same | no scripts |
+| — a position outside the region (10 m west) | **the parcel at the edge it is clamped to** (the same id) | **one element**, `0`: no parcel | no scripts |
+| `llGetParcelFlags` | the parcel's flags, with `PF_ALLOW_VOICE_CHAT` (`0x20000000`) beside the named ones | the same with `PF_ALLOW_DEED_TO_GROUP` (`0x2000`) too | no scripts |
+| — outside the region | the edge parcel's flags | **throws**: a `NullReferenceException` that stops the script (`Script must be Reset to re-enable.`) | no scripts |
+| `llGetParcelMaxPrims`, parcel and region-wide | the region's capacity both times (`22510`): mainland pools it | the same (`15000`) | no scripts |
+| — outside the region | an answer (`11650`, a parcel's) | `0` | no scripts |
+| `llGetParcelPrimCount`, total / owner / group / other, parcel and region-wide | counts; region-wide larger | counts; the **region-wide owner and other counts are `0`** while the parcel's are not | no scripts |
+| — selected (4), temporary (5) | counts | `0` | no scripts |
+| — a category that is none (−1, 6) | `0` | `0` | no scripts |
+| — outside the region | a parcel's count | `0` | no scripts |
+| `llGetParcelPrimOwners` of land the script's owner does not own | `[]` | **the list**: each owner and its count | no scripts |
+| `llGetLandOwnerAt` | the parcel's owner (its group for group land) | the same | no scripts |
+| — outside the region | an owner, not `NULL_KEY` | `NULL_KEY` | no scripts |
+| `llOverMyLand` of the owner on land it does not own; of `NULL_KEY` | `0`; `0` | the same | no scripts |
+| `llScriptDanger` | `1`: damage or push on this public sandbox | `0` | no scripts |
+| — outside the region | `1` | `1` | no scripts |
+| `llParcelMediaQuery`, any code or several, on land the owner does not own | `[]` | `[]` | no scripts |
+| `llGetParcelMusicURL` | the stream (none here: `""`) | the same | no scripts |
+| `llSetParcelMusicURL` on land the owner does not own | ignored: the URL is unchanged, and nothing is said | the same | no scripts |
+
+### Region queries
+
+| call | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llGetRegionCorner` | the region's corner in metres, a multiple of 256 | the same | no scripts |
+| `llGetRegionFlags` | only the documented `REGION_FLAG_*` bits (`ALLOW_DIRECT_TELEPORT` here) | **the raw region flags**: `0x14000006` here, the reference's `REGION_FLAGS_DEFAULT` (landmark, set home, parcel changes, voice), none of them a `REGION_FLAG_*` | no scripts |
+| `llGetRegionFPS`, `llGetRegionTimeDilation` | about 45, about 0.99 | about 55, 1.0 | no scripts |
+| `llGetRegionAgentCount` | the avatars in the region | the same | no scripts |
+| `llGetAgentList` with `AGENT_LIST_PARCEL` (1), `_PARCEL_OWNER` (2), `_REGION` (4) | the avatars in the scope, the owner among them | the same | no scripts |
+| — any other scope (0, 8) | `["INVALID_SCOPE"]` | the same | no scripts |
+| `llEdgeOfWorld` from inside, along x or y | `1` where no region adjoins (Mauve has none on any side) | `1` where none does (west and south of the Default Region), `0` towards East and North | no scripts |
+| — a direction with an upward part | `1` (as every direction on Mauve) | `1` straight up; with a level part, as that part says | no scripts |
+| — a direction of zero length | `1` | `1` | no scripts |
+| — from a position outside the region | `0` | `1` | no scripts |
+| `llRequestSimulatorData`, `DATA_SIM_POS` (5) of the own region | the corner, `<255744,257792,0>`: integers, no spaces | **`<1000.000000, 1000.000000, 0.000000>`: the grid coordinates in regions** — the own region's branch reads `RegionInfo.RegionLocX`, which counts regions | no scripts |
+| — of the own region's name in lower case | the same as the name: names are case-insensitive | **the corner in metres** (`<256000.000000, …>`): the name is not the region's own, so the grid service answers | no scripts |
+| — `DATA_SIM_STATUS` (6), `DATA_SIM_RATING` (7) | `up`, `ADULT` | `up`, `PG` | no scripts |
+| — `DATA_SIM_RELEASE` (128) | **no request**: `NULL_KEY` | `OpenSim` | no scripts |
+| — an unknown code (99) | `NULL_KEY` | `NULL_KEY` | no scripts |
+| — a region no grid has | status `unknown`; the position is **never answered** | `unknown` to both | no scripts |
+| — the empty name | status **`crashed`** | `unknown` | no scripts |
+
+### Ground and weather
+
+| call | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llGround` | the terrain under the offset; a vertical offset changes nothing | the same | no scripts |
+| — an offset out of the region | the height at the region edge it is clamped to (constant beyond the edge, within 0.04 m of the height at the edge itself) | the height at the edge, exactly | no scripts |
+| `llGroundNormal`, `llGroundSlope`, `llGroundContour` on level ground | `<0,0,1>`, zero, zero | the same | no scripts |
+| `llWater` | the region's water height (20), wherever the offset points | the same | no scripts |
+| `llWind` | level (z 0), a few m/s, different 100 m away | level, about 1 m/s, different 100 m away | no scripts |
+| `llCloud` | `0.0` | `0.0` | no scripts |
+
+### Day cycle and environment
+
+| call | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llGetDayLength`, `llGetDayOffset` and the region's | `14400`, `57600`, the parcel's the region's | the same | no scripts |
+| `llGetTimeOfDay` | seconds into the day, below the day length, advancing | the same | no scripts |
+| `llGetSunDirection`, `llGetMoonDirection` and the region's | unit vectors in the x–z plane, the moon opposite the sun, the parcel's the region's | the same | no scripts |
+| `llGetSunRotation`, `llGetMoonRotation` and the region's | unit rotations whose forward axis is the direction | the same | no scripts |
+| `llGetRegionTimeOfDay` | the region's time of day, the parcel's here | none | no scripts |
+| `llGetEnvironment`, `ENVIRONMENT_DAYINFO` | `[day length, offset, time of day]` | none | no scripts |
+| — each `SKY_*` and `WATER_*` rule | the setting's values (`SKY_AMBIENT` one vector, `SKY_CLOUDS` eight values, …) | none | no scripts |
+| — `SKY_CLOUD_TEXTURE`, `SKY_MOON_TEXTURE`, `SKY_SUN_TEXTURE`, `WATER_NORMAL_TEXTURE` | `[]`, and `llGetEnvironment Error running rule #1 (SKY_SUN_TEXTURE): Attempt to read unreadable value..` on `DEBUG_CHANNEL`: the textures are not the script owner's | none | no scripts |
+| — an unknown rule | `[]`, `unknown rule id 999.` | none | no scripts |
+| — above the region (z 3000), outside it (10 m west) | answered: the same sky, the same day info | none | no scripts |
+| `llGetSimStats`, codes 0–26 | a float each; unknown codes (−1, 27) `0.0` and `Unknown stat.` on `DEBUG_CHANNEL` | none | no scripts |
+| `llGetClosestNavPoint` | the nearest point of the navmesh, a few metres away | none | no scripts |
+
+### What the viewer does with it
+
+Nothing directly: these calls read the region a viewer is also told about
+(parcel properties, region handshake, the environment), and none of them
+sends the viewer anything.

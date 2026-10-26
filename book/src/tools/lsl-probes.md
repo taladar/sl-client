@@ -151,6 +151,13 @@ What has bitten already, and how a probe should be shaped for it:
   every character (`data/json`), so a replace loop over the sentinels grows
   without end and wedges an engine thread until the region restarts. Compare
   character by character with `llListFindList`.
+- **OpenSim throws where Second Life answers.** Its `llGetParcelFlags` of a
+  position outside the region raises a `NullReferenceException` that stops
+  the script (`land/parcel`). Put each call that may throw in a script of
+  its own, saved before the leader, so the rest of the probe still runs.
+- **XEngine cannot parse a vector literal followed by an operator.**
+  `<a, b, c> - v` is a `syntax error` there (`land/ground`); assign the
+  literal first.
 - **Some failures take the region with them.** Unbounded recursion under
   XEngine overflows the simulator's own stack, and the whole OpenSim
   process aborts. That is what `skip-on` is for.
@@ -336,6 +343,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `events/*`, 2026-10-25: the order across types, merging, collisions, attaching and re-rezzing, what else a state change keeps | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#events) | | |
 | `experience/*`, 2026-10-25: the experience functions and the key-value store from a script in no experience, teleporting an agent, a temporary attachment | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#experiences-and-the-key-value-store) | | |
 | `http/*`, 2026-10-25: what arrives at an in-world URL, what `llHTTPRequest` accepts, what comes back, URLs and the throttle | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#outbound-http-and-in-world-urls) | | |
+| `land/*`, 2026-10-26: `llGetEnv`, parcel details, flags, prim counts and owners, region flags and data, `llEdgeOfWorld`, the ground and weather, the day cycle, and Second Life's environment, sim stats and navmesh calls | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#parcel-region-estate-and-environment-queries) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

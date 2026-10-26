@@ -1,0 +1,52 @@
+grid: opensim-xengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE land/region rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE land/region rec=region named=1 corner="<256000.000000, 256000.000000, 0.000000>" corner_on_grid=1
+PROBE land/region rec=region-flags value=335544326 set="" other_bits=335544326
+PROBE land/region rec=load fps=54.997696 dilation=1.000000 agents=2
+PROBE land/region rec=hostname hostname="127.0.0.1" same_as_env=1
+PROBE land/region rec=agent-list scope=1 owner_in=1 others=1
+PROBE land/region rec=agent-list scope=2 owner_in=1 others=1
+PROBE land/region rec=agent-list scope=4 owner_in=1 others=1
+PROBE land/region rec=agent-list scope=0 owner_in=0 others=1 only="INVALID_SCOPE"
+PROBE land/region rec=agent-list scope=8 owner_in=0 others=1 only="INVALID_SCOPE"
+PROBE land/region rec=edge from=here dir="<1.000000, 0.000000, 0.000000>" answer=0
+PROBE land/region rec=edge from=here dir="<-1.000000, 0.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=here dir="<0.000000, 1.000000, 0.000000>" answer=0
+PROBE land/region rec=edge from=here dir="<0.000000, -1.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=here dir="<1.000000, 1.000000, 0.000000>" answer=0
+PROBE land/region rec=edge from=here dir="<0.000000, 0.000000, 1.000000>" answer=1
+PROBE land/region rec=edge from=here dir="<1.000000, 0.000000, 1.000000>" answer=0
+PROBE land/region rec=edge from=here dir="<0.000000, 0.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=west-edge dir="<-1.000000, 0.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=east-edge dir="<1.000000, 0.000000, 0.000000>" answer=0
+PROBE land/region rec=edge from=south-edge dir="<0.000000, -1.000000, 0.000000>" answer=1
+PROBE land/region rec=edge from=north-edge dir="<0.000000, 1.000000, 0.000000>" answer=0
+PROBE land/region rec=edge from=outside dir="<-1.000000, 0.000000, 0.000000>" answer=1
+PROBE land/region rec=sim-data-asked of=own data=5 got_key=1
+PROBE land/region rec=sim-data-asked of=own data=6 got_key=1
+PROBE land/region rec=sim-data-asked of=own data=7 got_key=1
+PROBE land/region rec=sim-data-asked of=own data=128 got_key=1
+PROBE land/region rec=sim-data-asked of=lower data=5 got_key=1
+PROBE land/region rec=sim-data-asked of=lower data=6 got_key=1
+PROBE land/region rec=sim-data-asked of=nowhere data=5 got_key=1
+PROBE land/region rec=sim-data-asked of=nowhere data=6 got_key=1
+PROBE land/region rec=sim-data-asked of=empty data=6 got_key=1
+PROBE land/region rec=sim-data-asked of=own data=99 got_key=0
+PROBE land/region rec=sim-data of=own data=5 data_text="<1000.000000, 1000.000000, 0.000000>"
+PROBE land/region rec=sim-data of=own data=6 data_text="up"
+PROBE land/region rec=sim-data of=own data=7 data_text="PG"
+PROBE land/region rec=sim-data of=own data=128 data_text="OpenSim"
+PROBE land/region rec=sim-data of=lower data=5 data_text="<256000.000000, 256000.000000, 0.000000>"
+PROBE land/region rec=sim-data of=lower data=6 data_text="up"
+PROBE land/region rec=sim-data of=nowhere data=5 data_text="unknown"
+PROBE land/region rec=sim-data of=nowhere data=6 data_text="unknown"
+PROBE land/region rec=sim-data of=empty data=6 data_text="unknown"
+PROBE land/region rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
