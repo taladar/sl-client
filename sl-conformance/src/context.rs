@@ -6,7 +6,7 @@
 //! the live session(s) and a [`Metrics`] collector to the test body.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -851,6 +851,14 @@ pub async fn login(spec: LoginSpec<'_>) -> Result<Session, TestFailure> {
     connect_and_spawn(spec).await
 }
 
+/// The cache every session shares across accounts and runs:
+/// `target/sl-conformance/shared-cache` in the workspace. The runtime keeps
+/// each grid's `LSLSyntax` document there, under `lsl-syntax/`, as the grid
+/// served it.
+fn shared_cache_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/sl-conformance/shared-cache")
+}
+
 /// Perform the XML-RPC login, spawn the run loop and its drains, and assemble a
 /// live [`Session`]. This is the shared core of [`login`] and
 /// [`Session::relogin`].
@@ -996,16 +1004,20 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
     // `inventory-cache-skip` does). The runtime then loads the cache before the
     // login skeleton and reconciles it, so version-matching folders stay loaded
     // across a relogin instead of being refetched.
-    if let Some(dir) = cache_dir.as_ref() {
+    if cache_dir.is_some() {
         client.set_inventory_cache_config(InventoryCacheConfig {
             enabled: true,
             ..InventoryCacheConfig::default()
         });
-        client.set_directories(ClientDirectories {
-            agent_cache_dir: Some(dir.clone()),
-            ..ClientDirectories::default()
-        });
     }
+    // The shared cache is always on: it is where the runtime keeps the grid's
+    // `LSLSyntax` document, which is how the library table is refreshed from
+    // what Second Life serves (`sl-lsl-runtime/README.md`).
+    client.set_directories(ClientDirectories {
+        agent_cache_dir: cache_dir.clone(),
+        shared_cache_dir: Some(shared_cache_dir()),
+        ..ClientDirectories::default()
+    });
 
     // Capture the region capability map so a case can drive a TextureStore off
     // the live `GetTexture` cap. The reporter fires at startup and each region

@@ -724,3 +724,165 @@ A refusal is `NULL_KEY` from `llHTTPRequest` and a line on
 Nothing: none of this reaches a viewer. A refused request's complaint is an
 ordinary `DEBUG_CHANNEL` line, and the HTML a script serves is only drawn as
 HTML by the owner's own viewer's browser, which `http/url` did not measure.
+
+## llJson* and the linkset data store
+
+Measured on 2026-10-26 by the probes `data/json` and `data/linkset-data`, on
+the same grids; YEngine and XEngine answered `data/json` alike, so the
+OpenSim column is both. OpenSim has no linkset data at all: `data/linkset-data`
+does not compile under either engine (YEngine: `undefined
+constant/function/variable llLinksetDataAvailable()`; XEngine: `syntax error`
+at the `linkset_data` event), so its tables are Second Life's alone.
+
+### The sentinels
+
+`JSON_INVALID` … `JSON_DELETE` are one character each, `U+FDD0` … `U+FDD8`
+(`llEscapeURL` gives `%EF%B7%90` for `JSON_INVALID`), on both grids.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llSubStringIndex("abc", JSON_INVALID)` | -1 | **0**: OpenSim's string search treats the sentinels as characters to ignore, so it finds one at the start of any string that is not empty | no scripts |
+| `llSubStringIndex("a" + JSON_INVALID, JSON_INVALID)` | 1 | **0** | no scripts |
+| `llParseStringKeepNulls("abc", [JSON_INVALID], [])` | `["abc"]` | **`["", "", "", ""]`**: a separator between every character, and the characters lost | no scripts |
+| `==`, `llListFindList` with a sentinel | not equal, -1 | the same | no scripts |
+| a list variable of no specifiers given to `llJsonGetValue`, `llJsonValueType` or `llJsonSetValue` | unchanged | **gains an element**, `0`: OpenSim adds to the list it is given (an empty `[]` written in the call is not affected) | no scripts |
+
+### `llList2Json`
+
+| input | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| an integer, a float | `1`, `2.500000` (six decimals) | the same | no scripts |
+| a vector, a rotation, a key | quoted strings of their LSL text (`"<1.000000, 2.000000, 3.000000>"`) | the same | no scripts |
+| `1.0e20`, `-0.0` | `100000002004087734272.000000`, `-0.000000` (single precision) | `100000000000000000000.000000`, `0.000000` | no scripts |
+| `(float)"1e39"` (infinity on Second Life) | **`inf`**, `-inf`: not JSON | the number written out in full: OpenSim's floats are doubles | no scripts |
+| `"true"`, `"false"`, `"null"`, `JSON_TRUE`, `JSON_FALSE`, `JSON_NULL` | `true`, `false`, `null` | the same | no scripts |
+| a string starting with `[` or `{` | inserted as it is, even when it is no JSON (`{bad`, `[1,]`) | the same | no scripts |
+| — with spaces round it (`" [2] "`) | trimmed and inserted (`[2]`) | a string, spaces kept | no scripts |
+| `"\"q\""` | **`"q"`**: a quoted string is taken as a JSON string | the string escaped, `"\"q\""` | no scripts |
+| `" 7 "`, `"7"`, `"1e3"`, `"-0"` | strings; `" 7 "` trimmed to `"7"` | strings, spaces kept | no scripts |
+| a newline, `\`, `/` | `\n`, `\\`, `\/` | the same | no scripts |
+| characters 1 and 127 | **raw** in the string | **`\u000`** followed by the raw characters — a broken escape | no scripts |
+| `é€`, an emoji | raw UTF-8 | the same | no scripts |
+| `JSON_INVALID` as an element | **nothing**: `[,"…"]` | the sentinel character in a string | no scripts |
+| `JSON_DELETE`, `JSON_OBJECT`, `JSON_STRING` as elements | the sentinel character in a string | the same | no scripts |
+| `JSON_OBJECT` of pairs | `{"a":1,"b":"x","c":[1,2],"d":2.500000}` | the same | no scripts |
+| — a key repeated | both pairs kept | the same | no scripts |
+| — an odd count, an integer or vector key | `JSON_INVALID` | the same | no scripts |
+| — a `key` as a key | `JSON_INVALID` | **accepted** as a string | no scripts |
+| — an empty key | `{"":1}` | the same | no scripts |
+| a type other than `JSON_ARRAY` or `JSON_OBJECT` | `JSON_INVALID` | the same | no scripts |
+
+### `llJson2List`
+
+Second Life's parser is lenient and parses a scalar; OpenSim parses only a
+document whose first character is `[` or `{`, and answers anything it
+cannot read with the whole text as one string.
+
+| input | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `[1,2.5,"a",true,false,null,[1,2],{"a":1}]` | integer 1, float 2.5, `"a"`, `JSON_TRUE`, `JSON_FALSE`, `JSON_NULL`, and the nested two as strings of their text | the same | no scripts |
+| an object | key, value, key, value… | the same | no scripts |
+| `"  [ 1 , 2 ]  "` | 1, 2 | **the text** | no scripts |
+| `1`, `"s"`, `true` | integer 1, `s`, `JSON_TRUE` | the text | no scripts |
+| `""`, `{}`, `[]` | an empty list | the same | no scripts |
+| `garbage`, `[1,`, `[1] x` | the text | the same | no scripts |
+| `[1,]` | 1, `""` | the text | no scripts |
+| `{"a"}` | `""`, `a` | the text | no scripts |
+| `[01]` | the string `01` | the text | no scripts |
+| `[1.]`, `[.5]` | floats 1.0, 0.5 | the text | no scripts |
+| `[1e5,1E-2,-0,2.50]` | floats, integer 0, float | the same | no scripts |
+| `["a" "b"]` | `b` | the text | no scripts |
+| `[truth]` | `truth` | the text | no scripts |
+| `{'a':1}` | `JSON_INVALID` | **`a`, 1**: single quotes accepted | no scripts |
+| `["A\n\/\"\\"]` | **not decoded**: one string, from the opening quote to the end of the text | decoded: `A`, a newline, `/`, `"`, `\` | no scripts |
+| `["😀"]` | `ud83dude00`: the backslashes dropped | the emoji | no scripts |
+| `["\ud83d"]` (a lone half) | `ud83d` | a lone surrogate, which `llEscapeURL` then answers with the text of an exception | no scripts |
+| `[12345678901234567890,2147483648,1.5e300,-1e400]` | integers **2147483647** twice, floats `Infinity`, `-Infinity` | the text | no scripts |
+| a key repeated (`{"a":1,"a":2}`) | both pairs | **the last only** | no scripts |
+| a raw newline or control character in a string | kept | the same | no scripts |
+
+### `llJsonGetValue` and `llJsonValueType`
+
+Of `{"a":1,"b":[10,"x",true,null,{"c":2.50}],"s":"t\"u","n":-1.0e2}`.
+
+| path | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `[]` | the document **as written** | the document **written anew**: `2.5`, `-100.0` | no scripts |
+| `["b",4,"c"]`, `["n"]` | `2.50`, `-1.0e2`, as written; `JSON_NUMBER` | `2.5`, `-100.0` | no scripts |
+| `["b",2]`, `["b",3]` | `JSON_TRUE`, `JSON_NULL`, and the same type | the same | no scripts |
+| `["s"]` | `t"u`, `JSON_STRING` | the same | no scripts |
+| `["b","0"]` (a string index) | **`10`** | `JSON_INVALID` | no scripts |
+| `["b",5]`, `["b",-1]`, `["b",JSON_APPEND]`, `["b",1.0]` | `JSON_INVALID` | the same | no scripts |
+| `["a",0]`, `[0]` on the object, `["z"]` | `JSON_INVALID` | the same | no scripts |
+| a key repeated | the last value | the same | no scripts |
+| `"\"str\""`, `"  7 "` with `[]` | `str` (`JSON_STRING`), `7` (`JSON_NUMBER`) | the same | no scripts |
+| `abc`, `""`, `[1,2`, `[1,2,}` | `JSON_INVALID` | the same | no scripts |
+
+`JSON_APPEND` is the **integer** -1 on Second Life and the **string** `"-1"`
+on OpenSim.
+
+### `llJsonSetValue`
+
+| call | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `{"a":1}`, `["b"]`, `"x"`, `"true"`, `"  7 "`, `""` | `"x"`, `true`, `7`, `""` | the same | no scripts |
+| — `"1.50"`, `"-0"` | `1.50`, `-0`, as written | `1.5`, `0` | no scripts |
+| — `"01"` | the string `"01"` | the number `1` | no scripts |
+| — `"[1, 2]"` | inserted as JSON, as written | **the string** `"[1, 2]"` | no scripts |
+| — `"\"q\""` | the string `"q"` | the string escaped, `"\"q\""` | no scripts |
+| — `"{bad"` | a string | the same | no scripts |
+| — `JSON_TRUE`, `JSON_NULL` | `true`, `null` | the same | no scripts |
+| — `JSON_INVALID` | **nothing**: `{"a":1,"b":}` | the text `"﷐"` | no scripts |
+| `JSON_DELETE` on a key or an element | removed | the same | no scripts |
+| `JSON_DELETE` of what is not there | `JSON_INVALID` | the same | no scripts |
+| a new path, `["x","y"]`, `["x",0]` | `{"y":1}`, `[1]` made | the same | no scripts |
+| `["x",1]` in a new array, `[3]` in `[1,2]`, `[-2]` | `JSON_INVALID` | the same | no scripts |
+| `[2]` in `[1,2]`, `[JSON_APPEND]` | appended | the same | no scripts |
+| a key through a number (`["a","b"]`), `[0]` on an object, `[]` | the value replaced: `{"a":{"b":1}}`, `[1]`, the value alone | the same | no scripts |
+| a key on an array (`[1,2]`, `["k"]`) | **the array replaced**: `{"k":1}` | **unchanged**: `[1,2]` | no scripts |
+| on `[1`, on `abc` | `[2]`, `{"a":1}`: written over | `JSON_INVALID` | no scripts |
+| on `""` | `{"a":1}`, `[1]` | the same | no scripts |
+| the rest of the document | the level written to compact, the values in it as written (`{"a":2,"c":[ 1 ]}` of `{"a" : 1 , "c" : [ 1 ] }`) | all of it written anew, compact | no scripts |
+| a key repeated | one pair, the new value | the same | no scripts |
+
+### The linkset data store
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| an empty store | `llLinksetDataAvailable` 131072, no keys, a missing key reads `""` | none | no scripts |
+| what a pair costs | the bytes of name and value in UTF-8 (`a`=`1`: 2; ten `é` as the value: 21) | none | no scripts |
+| a protected pair | **32 bytes more**, whatever the password's length (2 or 20 characters) | none | no scripts |
+| — with an empty password | an ordinary pair | none | no scripts |
+| writing the value it has | `LINKSETDATA_NOUPDATE` (5), no event | none | no scripts |
+| writing another value | the difference in bytes | none | no scripts |
+| an empty value | deletes the pair (`LINKSETDATA_OK`, a delete event); of a missing name `LINKSETDATA_NOTFOUND` (4) | none | no scripts |
+| an empty name | `LINKSETDATA_ENOKEY` (2) | none | no scripts |
+| a name of 1100 characters | accepted | none | no scripts |
+| reading a protected pair: `llLinksetDataRead`, a wrong password | `""` | none | no scripts |
+| — `llLinksetDataReadProtected` of an ordinary pair | `""` | none | no scripts |
+| writing or deleting a protected pair without its password, giving it a new one, protecting an ordinary pair | `LINKSETDATA_EPROTECTED` (3) | none | no scripts |
+| deleting a protected pair with its password | `LINKSETDATA_OK`; `llLinksetDataDeleteProtected` of an ordinary pair is `LINKSETDATA_EPROTECTED` | none | no scripts |
+| deleting a missing name | `LINKSETDATA_NOTFOUND` | none | no scripts |
+| `llLinksetDataListKeys` | sorted by code point (`K0,k1,k10,k2,…`); a count of 0 or -1 is all of them, a start past the end none, a negative start 0 | none | no scripts |
+| `llLinksetDataFindKeys`, `llLinksetDataCountFound` | a regular expression, with start and count as above; an empty pattern and one that is no regular expression (`(`) find nothing, without an error | none | no scripts |
+| `llLinksetDataDeleteFound` | `[deleted, not deleted]`: a protected pair is not deleted without its password (`4, 1`), and is with it | none | no scripts |
+| filling it with pairs of 1000 characters | 130 fit, the 131st is `LINKSETDATA_EMEMORY` (1); a pair of exactly the bytes left is accepted, `llLinksetDataAvailable` is then 0 | none | no scripts |
+| `llLinksetDataReset` | empty again, 131072 | none | no scripts |
+| `llResetScript` | the store is kept | none | no scripts |
+| another object | a store of its own: neither sees the other's pairs | none | no scripts |
+
+### The `linkset_data` event
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a write | `LINKSETDATA_UPDATE`, the name and the value; for a protected pair the value is `""` | no such event | no scripts |
+| a delete, an empty value | `LINKSETDATA_DELETE`, the name, `""` | no such event | no scripts |
+| `llLinksetDataDeleteFound` | **one** `LINKSETDATA_MULTIDELETE` per call, the names comma-separated without spaces (`k1,k10,k2,k3`), `""` | no such event | no scripts |
+| `llLinksetDataReset` | `LINKSETDATA_RESET`, `""`, `""` | no such event | no scripts |
+| a refused write, `LINKSETDATA_NOUPDATE`, a delete of a missing name | no event | no such event | no scripts |
+| who gets it | every script in the linkset, the writer too, in the order of the calls | no such event | no scripts |
+| a script writing 131 pairs in one event | its queue fills: 64 events, one of them its own link message, the rest dropped | no such event | no scripts |
+
+### What the viewer does with it
+
+Nothing: neither JSON nor linkset data reaches a viewer.

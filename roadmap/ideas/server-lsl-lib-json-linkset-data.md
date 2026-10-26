@@ -50,3 +50,41 @@ from `lsljson.py`'s own cases; linkset data shown to survive a
 `llResetScript`, to be visible from a second script in the same linkset
 and invisible from a different object, and to raise `linkset_data` with
 the right action.
+
+## Measured (gridspec-lsl-json-linkset-data, 2026-10-26)
+
+The rows are in `book/src/gridspec/lsl.md` § llJson* and the linkset data
+store, from the `data/*` probes on aditi and both OpenSim engines; the fake
+grid should take each flavour's column. The parts that shape the
+implementation:
+
+- **Second Life keeps the text.** `llJsonGetValue` and `llJsonSetValue`
+  answer numbers and untouched values as written (`2.50`, `-1.0e2`,
+  `[ 1 ]`); OpenSim writes everything anew, compact (`2.5`, `-100.0`). A
+  port of `lsljson.py` keeps the text, which is Second Life's flavour.
+- **Second Life's `llJson2List` is lenient and does not decode escapes**:
+  it parses a scalar and whitespace round a document, reads `[1,]`, `[1.]`,
+  `[.5]`, `["a" "b"]` and `[truth]`, clamps an integer to 2147483647, and
+  returns a string with escapes from its opening quote to the end of the
+  text. OpenSim parses only a document starting with `[` or `{`, decodes
+  escapes, accepts single quotes, and answers anything else with the whole
+  text.
+- **`JSON_APPEND` is the integer -1 on Second Life**, the string `"-1"` on
+  OpenSim; a string index (`"0"`) reads an array element on Second Life
+  only.
+- **`JSON_INVALID` as a value writes nothing** on Second Life (`[,…]`,
+  `{"b":}`); `llList2Json` writes infinity as `inf`.
+- **OpenSim's own bugs, for its flavour or not**: it adds `0` to the
+  specifier list a script gives it when that list is empty, and its string
+  functions treat the sentinels as ignorable (`llSubStringIndex` finds
+  `JSON_INVALID` at 0 in any string). Whether the OpenSim flavour imitates
+  these is the flavour's call; the second is a .NET culture-sensitive
+  comparison rather than anything LSL says.
+- **Linkset data is Second Life's only**: OpenSim has neither the functions
+  nor the event, so its flavour refuses to compile them. The budget is
+  131072 bytes; a pair costs its name and value in UTF-8, a protected one
+  32 bytes more; the return codes, the event's four actions (one
+  `LINKSETDATA_MULTIDELETE` per `llLinksetDataDeleteFound` call, names
+  comma-separated; a protected pair's value hidden) and the key order
+  (code points) are in the table. The store survives `llResetScript`, is
+  shared by every script in the linkset and invisible to another object.

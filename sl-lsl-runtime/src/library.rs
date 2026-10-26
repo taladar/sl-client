@@ -2,8 +2,8 @@
 //! dispatch and a coverage count.
 //!
 //! **The table** is generated at build time from the vendored
-//! `keywords_lsl_default.xml` — Linden Lab's own `LSLSyntax` document as the
-//! viewer ships it (provenance in the crate `README.md`). It yields one
+//! `keywords_lsl_default.xml` — Linden Lab's own `LSLSyntax` document as
+//! Second Life serves it (provenance in the crate `README.md`). It yields one
 //! [`BuiltinId`] and one [`Builtin`] descriptor per function (name, typed
 //! parameters, return type, forced sleep, energy, flags, description), every
 //! [`Constant`] with its typed value, and every [`Event`] with its
@@ -101,7 +101,7 @@ mod tests {
             builtin("llAbs").map(|b| (b.args, b.ret)),
             Some((
                 &[Argument {
-                    name: "Value",
+                    name: "val",
                     ty: TypeName::Integer
                 }][..],
                 Some(TypeName::Integer)
@@ -124,8 +124,10 @@ mod tests {
             value("NULL_KEY"),
             Some(Value::String(crate::value::NULL_KEY.to_owned()))
         );
-        // `EOF` is served escaped twice; the `JSON_*` markers as `U+XXXX`.
+        // Escaped twice: `EOF` and `NAK` with `\\n` and `\\x15`, the `JSON_*`
+        // markers with `\\ufdd2`.
         assert_eq!(value("EOF"), Some(Value::String("\n\n\n".to_owned())));
+        assert_eq!(value("NAK"), Some(Value::String("\n\u{15}\n".to_owned())));
         assert_eq!(
             value("JSON_ARRAY"),
             Some(Value::String("\u{FDD2}".to_owned()))
@@ -204,8 +206,8 @@ mod tests {
             assert_eq!(ours, names, "{}", event.name);
         }
         // Every constant but the `default` placeholder, with the served text
-        // cast by the runtime's own LSL parsers — except the two string
-        // notations the table decodes.
+        // cast by the runtime's own LSL parsers — except the escaped strings
+        // the table decodes.
         assert_eq!(syntax.constants.len(), CONSTANTS.len().saturating_add(1));
         for constant in &CONSTANTS {
             let decoded = syntax.constants.get(constant.name).ok_or(constant.name)?;
@@ -216,7 +218,7 @@ mod tests {
                 constant.name
             );
             let text = decoded.value.clone().unwrap_or_default();
-            let notation = constant.name == "EOF" || text.starts_with("U+");
+            let notation = text.contains('\\');
             if !notation {
                 let parsed = crate::cast(Value::String(text), constant.value.type_name())
                     .map_err(|error| error.to_string())?;

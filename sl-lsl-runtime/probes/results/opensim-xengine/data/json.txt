@@ -1,0 +1,139 @@
+grid: opensim-xengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE data/json rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE data/json rec=sentinel-search what=length result=1
+PROBE data/json rec=sentinel-search what=escaped result=%EF%B7%90
+PROBE data/json rec=sentinel-search what=index-in-abc result=0
+PROBE data/json rec=sentinel-search what=index-in-empty result=-1
+PROBE data/json rec=sentinel-search what=index-after-a result=0
+PROBE data/json rec=sentinel-search what=split-abc count=4 parts="|||"
+PROBE data/json rec=sentinel-search what=equal-abc result=0
+PROBE data/json rec=sentinel-search what=list-find-abc result=-1
+PROBE data/json rec=list2json case=types type=ARRAY result="[1,2.500000,\"a\",\"<1.000000, 2.000000, 3.000000>\",\"<0.000000, 0.000000, 0.000000, 1.000000>\",\"00000000-0000-0000-0000-000000000000\"]"
+PROBE data/json rec=list2json case=words type=ARRAY result="[true,false,null,true,false,null]"
+PROBE data/json rec=list2json case=looks-like-json type=ARRAY result="[\"\\\"q\\\"\",[1],{\"a\":1},\" [2] \",{bad,[1,]]"
+PROBE data/json rec=list2json case=looks-like-numbers type=ARRAY result="[\"7\",\" 7 \",\"-0\",\"1e3\",\"01\",\"1.\",\".5\",\"0x10\",\"+1\",\"1.50\"]"
+PROBE data/json rec=list2json case=strings type=ARRAY result="[\"\",\"a\\nb\",\"a\\\\b\",\"a\\/b\",\"\\u000??\",\"é€\",\"?\"]" result_esc="%5B%22%22%2C%22a%5Cnb%22%2C%22a%5C%5Cb%22%2C%22a%5C%2Fb%22%2C%22%5Cu000%01%7F%22%2C%22%C3%A9%E2%82%AC%22%2C%22%F0%9F%98%80%22%5D"
+PROBE data/json rec=list2json case=floats type=ARRAY result="[3.141593,100000000000000000000.000000,0.000000,0.000000,0.000000,1000000000000000000000000000000000000000.000000,-1000000000000000000000000000000000000000.000000]"
+PROBE data/json rec=list2json case=integers type=ARRAY result="[-2147483648,2147483647,0,-1]"
+PROBE data/json rec=list2json case=empty type=ARRAY result="[]"
+PROBE data/json rec=list2json case=sentinels type=ARRAY result="[\"<INVALID>\",\"<DELETE>\",\"<OBJECT>\",\"<STRING>\"]"
+PROBE data/json rec=list2json case=pairs type=OBJECT result="{\"a\":1,\"b\":\"x\",\"c\":[1,2],\"d\":2.500000}"
+PROBE data/json rec=list2json case=duplicate type=OBJECT result="{\"a\":1,\"a\":2}"
+PROBE data/json rec=list2json case=odd type=OBJECT result=INVALID
+PROBE data/json rec=list2json case=integer-key type=OBJECT result=INVALID
+PROBE data/json rec=list2json case=vector-key type=OBJECT result=INVALID
+PROBE data/json rec=list2json case=key-key type=OBJECT result="{\"00000000-0000-0000-0000-000000000000\":1}"
+PROBE data/json rec=list2json case=empty-key type=OBJECT result="{\"\":1}"
+PROBE data/json rec=list2json case=empty type=OBJECT result="{}"
+PROBE data/json rec=list2json case=other-type type=STRING result=INVALID
+PROBE data/json rec=list2json case=word-type type="x" result=INVALID
+PROBE data/json rec=json2list case=array json="[1,2.5,\"a\",true,false,null,[1,2],{\"a\":1}]" count=8 t0=i e0="1" t1=f e1="2.500000" t2=s e2="a" t3=s e3=TRUE t4=s e4=FALSE t5=s e5=NULL t6=s e6="[1,2]" t7=s e7="{\"a\":1}"
+PROBE data/json rec=json2list case=object json="{\"a\":1,\"b\":[2,3],\"c\":{\"d\":null}}" count=6 t0=s e0="a" t1=i e1="1" t2=s e2="b" t3=s e3="[2,3]" t4=s e4="c" t5=s e5="{\"d\":null}"
+PROBE data/json rec=json2list case=spaces json="  [ 1 , 2 ]  " count=1 t0=s e0="  [ 1 , 2 ]  "
+PROBE data/json rec=json2list case=number json="1" count=1 t0=s e0="1"
+PROBE data/json rec=json2list case=string json="\"s\"" count=1 t0=s e0="\"s\""
+PROBE data/json rec=json2list case=true json="true" count=1 t0=s e0="true"
+PROBE data/json rec=json2list case=empty json="" count=0
+PROBE data/json rec=json2list case=word json="garbage" count=1 t0=s e0="garbage"
+PROBE data/json rec=json2list case=unclosed json="[1," count=1 t0=s e0="[1,"
+PROBE data/json rec=json2list case=trailing-comma json="[1,]" count=1 t0=s e0="[1,]"
+PROBE data/json rec=json2list case=no-value json="{\"a\"}" count=1 t0=s e0="{\"a\"}"
+PROBE data/json rec=json2list case=leading-zero json="[01]" count=1 t0=s e0="[01]"
+PROBE data/json rec=json2list case=bare-point json="[1.]" count=1 t0=s e0="[1.]"
+PROBE data/json rec=json2list case=leading-point json="[.5]" count=1 t0=s e0="[.5]"
+PROBE data/json rec=json2list case=exponents json="[1e5,1E-2,-0,2.50]" count=4 t0=f e0="100000.000000" t1=f e1="0.010000" t2=i e2="0" t3=f e3="2.500000"
+PROBE data/json rec=json2list case=escapes json="[\"\\u0041\\n\\/\\\"\\\\\"]" count=1 t0=s e0="A\n/\"\\"
+PROBE data/json rec=json2list case=no-comma json="[\"a\" \"b\"]" count=1 t0=s e0="[\"a\" \"b\"]"
+PROBE data/json rec=json2list case=big-numbers json="[12345678901234567890,2147483648,1.5e300,-1e400]" count=1 t0=s e0="[12345678901234567890,2147483648,1.5e300,-1e400]"
+PROBE data/json rec=json2list case=duplicate json="{\"a\":1,\"a\":2}" count=2 t0=s e0="a" t1=i e1="2"
+PROBE data/json rec=json2list case=nested-empty json="[[],{}]" count=2 t0=s e0="[]" t1=s e1="{}"
+PROBE data/json rec=json2list case=empty-object json="{}" count=0
+PROBE data/json rec=json2list case=empty-array json="[]" count=0
+PROBE data/json rec=json2list case=surrogates json="[\"\\ud83d\\ude00\"]" count=1 t0=s e0="?" e0_esc="%F0%9F%98%80"
+PROBE data/json rec=json2list case=lone-surrogate json="[\"\\ud83d\"]" count=1 t0=s e0="?" e0_esc="llEscapeURL: System.UriFormatException: Invalid URI: There is an invalid sequence in the string.\n  at System.UriHelper.EscapeString (System.String input, System.Int32 start, System.Int32 end, System.C"
+PROBE data/json rec=json2list case=literal-utf8 json="[\"é\"]" count=1 t0=s e0="é" e0_esc="%C3%A9"
+PROBE data/json rec=json2list case=partial-word json="[truth]" count=1 t0=s e0="[truth]"
+PROBE data/json rec=json2list case=single-quotes json="{'a':1}" count=2 t0=s e0="a" t1=i e1="1"
+PROBE data/json rec=json2list case=trailing-garbage json="[1] x" count=1 t0=s e0="[1] x"
+PROBE data/json rec=json2list case=control-in-string json="[\"ab\"]" count=1 t0=s e0="a?b" e0_esc="a%01b"
+PROBE data/json rec=json2list case=newline-in-string json="[\"a\nb\"]" count=1 t0=s e0="a\nb"
+PROBE data/json rec=document json="{\"a\":1,\"b\":[10,\"x\",true,null,{\"c\":2.50}],\"s\":\"t\\\"u\",\"n\":-1.0e2}"
+PROBE data/json rec=get case=whole path="" value="{\"a\":1,\"b\":[10,\"x\",true,null,{\"c\":2.5}],\"s\":\"t\\\"u\",\"n\":-100.0}" type=OBJECT
+PROBE data/json rec=get case=a path="s:a" value="1" type=NUMBER
+PROBE data/json rec=get case=b path="s:b" value="[10,\"x\",true,null,{\"c\":2.5}]" type=ARRAY
+PROBE data/json rec=get case=b0 path="s:b,i:0" value="10" type=NUMBER
+PROBE data/json rec=get case=b1 path="s:b,i:1" value="x" type=STRING
+PROBE data/json rec=get case=b2 path="s:b,i:2" value=TRUE type=TRUE
+PROBE data/json rec=get case=b3 path="s:b,i:3" value=NULL type=NULL
+PROBE data/json rec=get case=b4c path="s:b,i:4,s:c" value="2.5" type=NUMBER
+PROBE data/json rec=get case=b5 path="s:b,i:5" value=INVALID type=INVALID
+PROBE data/json rec=get case=b-1 path="s:b,i:-1" value=INVALID type=INVALID
+PROBE data/json rec=get case=b-append path="s:b,s:-1" value=INVALID type=INVALID
+PROBE data/json rec=get case=b-string-index path="s:b,s:0" value=INVALID type=INVALID
+PROBE data/json rec=get case=b-float-index path="s:b,f:1.000000" value=INVALID type=INVALID
+PROBE data/json rec=get case=a-index path="s:a,i:0" value=INVALID type=INVALID
+PROBE data/json rec=get case=b0-index path="s:b,i:0,i:0" value=INVALID type=INVALID
+PROBE data/json rec=get case=missing path="s:z" value=INVALID type=INVALID
+PROBE data/json rec=get case=index-on-object path="i:0" value=INVALID type=INVALID
+PROBE data/json rec=get case=s path="s:s" value="t\"u" type=STRING
+PROBE data/json rec=get case=n path="s:n" value="-100.0" type=NUMBER
+PROBE data/json rec=get case=broken path="i:0" value=INVALID type=INVALID
+PROBE data/json rec=get case=broken-whole path="" value=INVALID type=INVALID
+PROBE data/json rec=get case=string-whole path="" value="str" type=STRING
+PROBE data/json rec=get case=number-whole path="" value="7" type=NUMBER
+PROBE data/json rec=get case=word-whole path="" value=INVALID type=INVALID
+PROBE data/json rec=get case=empty-whole path="" value=INVALID type=INVALID
+PROBE data/json rec=get case=duplicate path="s:a" value="2" type=NUMBER
+PROBE data/json rec=get case=later-broken path="i:0" value=INVALID type=INVALID
+PROBE data/json rec=set case=replace json="{\"a\":1}" path="s:a" value="2" result="{\"a\":2}"
+PROBE data/json rec=set case=word json="{\"a\":1}" path="s:b" value="x" result="{\"a\":1,\"b\":\"x\"}"
+PROBE data/json rec=set case=true-word json="{\"a\":1}" path="s:b" value="true" result="{\"a\":1,\"b\":true}"
+PROBE data/json rec=set case=number-text json="{\"a\":1}" path="s:b" value="1.50" result="{\"a\":1,\"b\":1.5}"
+PROBE data/json rec=set case=array-text json="{\"a\":1}" path="s:b" value="[1, 2]" result="{\"a\":1,\"b\":\"[1, 2]\"}"
+PROBE data/json rec=set case=quoted-text json="{\"a\":1}" path="s:b" value="\"q\"" result="{\"a\":1,\"b\":\"\\\"q\\\"\"}"
+PROBE data/json rec=set case=broken-text json="{\"a\":1}" path="s:b" value="{bad" result="{\"a\":1,\"b\":\"{bad\"}"
+PROBE data/json rec=set case=spaced-number json="{\"a\":1}" path="s:b" value="  7 " result="{\"a\":1,\"b\":7}"
+PROBE data/json rec=set case=minus-zero json="{\"a\":1}" path="s:b" value="-0" result="{\"a\":1,\"b\":0}"
+PROBE data/json rec=set case=leading-zero json="{\"a\":1}" path="s:b" value="01" result="{\"a\":1,\"b\":1}"
+PROBE data/json rec=set case=empty json="{\"a\":1}" path="s:b" value="" result="{\"a\":1,\"b\":\"\"}"
+PROBE data/json rec=set case=true json="{\"a\":1}" path="s:b" value=TRUE result="{\"a\":1,\"b\":true}"
+PROBE data/json rec=set case=null json="{\"a\":1}" path="s:b" value=NULL result="{\"a\":1,\"b\":null}"
+PROBE data/json rec=set case=invalid json="{\"a\":1}" path="s:b" value=INVALID result="{\"a\":1,\"b\":\"\\uFDD0\"}"
+PROBE data/json rec=set case=delete json="{\"a\":1}" path="s:a" value=DELETE result="{}"
+PROBE data/json rec=set case=delete-missing json="{\"a\":1}" path="s:z" value=DELETE result=INVALID
+PROBE data/json rec=set case=nested-new json="{\"a\":1}" path="s:x,s:y" value="1" result="{\"a\":1,\"x\":{\"y\":1}}"
+PROBE data/json rec=set case=nested-array-new json="{\"a\":1}" path="s:x,i:0" value="1" result="{\"a\":1,\"x\":[1]}"
+PROBE data/json rec=set case=nested-array-past json="{\"a\":1}" path="s:x,i:1" value="1" result=INVALID
+PROBE data/json rec=set case=whole json="{\"a\":1}" path="" value="5" result="5"
+PROBE data/json rec=set case=index-on-object json="{\"a\":1}" path="i:0" value="1" result="[1]"
+PROBE data/json rec=set case=a-nested json="{\"a\":1}" path="s:a,s:b" value="1" result="{\"a\":{\"b\":1}}"
+PROBE data/json rec=set case=index json="[1,2]" path="i:0" value="9" result="[9,2]"
+PROBE data/json rec=set case=at-end json="[1,2]" path="i:2" value="3" result="[1,2,3]"
+PROBE data/json rec=set case=past-end json="[1,2]" path="i:3" value="4" result=INVALID
+PROBE data/json rec=set case=append json="[1,2]" path="s:-1" value="5" result="[1,2,5]"
+PROBE data/json rec=set case=delete json="[1,2]" path="i:1" value=DELETE result="[1]"
+PROBE data/json rec=set case=delete-past json="[1,2]" path="i:5" value=DELETE result=INVALID
+PROBE data/json rec=set case=key-on-array json="[1,2]" path="s:k" value="1" result="[1,2]"
+PROBE data/json rec=set case=minus-two json="[1,2]" path="i:-2" value="x" result=INVALID
+PROBE data/json rec=set case=nested-past json="[1,2]" path="i:5,i:0" value="x" result=INVALID
+PROBE data/json rec=set case=nested-at-end json="[1,2]" path="i:2,i:0" value="x" result="[1,2,[\"x\"]]"
+PROBE data/json rec=set case=broken json="[1" path="i:0" value="2" result=INVALID
+PROBE data/json rec=set case=empty-document json="" path="s:a" value="1" result="{\"a\":1}"
+PROBE data/json rec=set case=empty-document-index json="" path="i:0" value="1" result="[1]"
+PROBE data/json rec=set case=word-document json="abc" path="s:a" value="1" result=INVALID
+PROBE data/json rec=set case=spaced json="  {\"a\" : 1 }  " path="s:b" value="2" result="{\"a\":1,\"b\":2}"
+PROBE data/json rec=set case=spaced-replace json="  {\"a\" : 1 , \"c\" : [ 1 ] }  " path="s:a" value="2" result="{\"a\":2,\"c\":[1]}"
+PROBE data/json rec=set case=duplicate json="{\"a\":1,\"a\":2}" path="s:a" value="3" result="{\"a\":3}"
+PROBE data/json rec=shared-list what=get-variable length=1 value="7"
+PROBE data/json rec=shared-list what=type-variable length=1 value=NUMBER
+PROBE data/json rec=shared-list what=set-variable length=1 value="2"
+PROBE data/json rec=shared-list what=get-literal length=0 value="7"
+PROBE data/json rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

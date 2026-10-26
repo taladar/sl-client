@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1426 |
+| done | 1428 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2075** |
+| **total** | **2077** |
 
 ## ideas (135)
 
@@ -295,7 +295,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-json-linkset-data`](ideas/server-lsl-lib-json-linkset-data.md)
   — Library tranche — llJson* and the linkset data store (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
-  `gridspec-lsl-json-linkset-data`)
+  `gridspec-lsl-json-linkset-data` (done))
 - [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
   Library tranche — parcel, region, estate and environment queries (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
@@ -1139,8 +1139,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
   size-proportional call costs and the region's script budget on aditi
-- [`server-lsl-library-table-refresh`](ready/server-lsl-library-table-refresh.md)
-  — The vendored library document lacks 50 current functions
+- [`server-lsl-library-unserved-functions`](ready/server-lsl-library-unserved-functions.md)
+  — Five functions no served LSLSyntax document lists
 - [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
@@ -1153,9 +1153,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-json-linkset-data`](ready/gridspec-lsl-json-linkset-data.md) —
-  LSL library behaviour on each grid — llJson* and the linkset data store
-  (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-land-region-env`](ready/gridspec-lsl-land-region-env.md) — LSL
   library behaviour on each grid — parcel, region, estate and environment
   queries (blocked by `gridspec-lsl-live-differential-runner` (done))
@@ -1176,6 +1173,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-prim-state`](ready/gridspec-lsl-prim-state.md) — LSL library
   behaviour on each grid — reading and writing the prim (blocked by
   `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-refreshed-table-probe-steps`](ready/gridspec-lsl-refreshed-table-probe-steps.md)
+  — Probe steps the refreshed library table unblocks
 - [`gridspec-lsl-runtime-errors`](ready/gridspec-lsl-runtime-errors.md) — LSL
   run-time errors on OpenSim and the debug channel in our viewer (blocked by
   `gridspec-lsl-live-differential-runner` (done))
@@ -1540,7 +1539,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1426)
+## done (1428)
 
 ### protocol
 
@@ -4551,6 +4550,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-library-surface-table`](done/server-lsl-library-surface-table.md)
   — One generated table for the library, and a coverage harness over it (blocked
   by `server-lsl-architecture` (done))
+- [`server-lsl-library-table-refresh`](done/server-lsl-library-table-refresh.md)
+  — The vendored library document lacks 50 current functions
 - [`server-lsl-state-and-events`](done/server-lsl-state-and-events.md) — The
   event and state machine — 35 events and the rules around them (blocked by
   `server-lsl-vm-execution` (done))
@@ -4640,6 +4641,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-http-url`](done/gridspec-lsl-http-url.md) — LSL library
   behaviour on each grid — outbound HTTP and in-world URLs (blocked by
   `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-json-linkset-data`](done/gridspec-lsl-json-linkset-data.md) —
+  LSL library behaviour on each grid — llJson* and the linkset data store
+  (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-live-differential-runner`](done/gridspec-lsl-live-differential-runner.md)
   — Run one probe on OpenSim YEngine, XEngine and aditi and collect the
   transcripts (blocked by `gridspec-lsl-probe-corpus` (done))

@@ -491,13 +491,13 @@ fn messages_say_what_is_wrong() {
         (
             "",
             "        llSay(0);",
-            "(5, 8): ERROR : `llSay(integer Channel, string Text)` takes 2 arguments, \
+            "(5, 8): ERROR : `llSay(integer channel, string msg)` takes 2 arguments, \
              but 1 was given",
         ),
         (
             "",
             "        llSay(<1,2,3>, \"x\");",
-            "(5, 14): ERROR : argument 1 of `llSay(integer Channel, string Text)` must be \
+            "(5, 14): ERROR : argument 1 of `llSay(integer channel, string msg)` must be \
              `integer`, but this is `vector`",
         ),
         (
@@ -550,6 +550,6 @@ fn messages_say_what_is_wrong() {
     }
     assert_eq!(
         disassemble("default { touch_start(string n) {} }"),
-        "(0, 10): ERROR : the `touch_start` event takes (integer NumberOfTouches), not (string)"
+        "(0, 10): ERROR : the `touch_start` event takes (integer num_detected), not (string)"
     );
 }

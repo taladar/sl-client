@@ -1,0 +1,43 @@
+grid: opensim-yengine
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: unknown (no start record)
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+complete: no
+
+# chat type=say from="Object" length=14 text="Script running"
+# compile error in "Leader": "(74,18) Error: undefined constant/function/variable llLinksetDataAvailable()"
+# compile error in "Leader": "(102,19) Error: undefined constant/function/variable llLinksetDataWrite(string,string)"
+# compile error in "Leader": "(110,19) Error: undefined constant/function/variable llLinksetDataWriteProtected(string,string,string)"
+# compile error in "Leader": "(120,50) Error: undefined name llLinksetDataRead(string)"
+# compile error in "Leader": "(126,24) Error: undefined name llLinksetDataReadProtected(string,string)"
+# compile error in "Leader": "(131,19) Error: undefined constant/function/variable llLinksetDataDelete(string)"
+# compile error in "Leader": "(137,19) Error: undefined constant/function/variable llLinksetDataDeleteProtected(string,string)"
+# compile error in "Leader": "(144,41) Error: undefined name llLinksetDataListKeys(integer,integer)"
+# compile error in "Leader": "(151,41) Error: undefined name llLinksetDataFindKeys(string,integer,integer)"
+# compile error in "Leader": "(152,30) Error: undefined constant/function/variable llLinksetDataCountFound(string)"
+# compile error in "Leader": "(157,18) Error: undefined constant/function/variable llLinksetDataDeleteFound(string,string)"
+# compile error in "Leader": "(161,29) Error: undefined constant/function/variable llLinksetDataCountKeys()"
+# compile error in "Leader": "(169,17) Error: undefined constant/function/variable llLinksetDataAvailable()"
+# compile error in "Leader": "(172,27) Error: undefined name llLinksetDataRead(string)"
+# compile error in "Leader": "(185,41) Error: undefined constant/function/variable llLinksetDataCountKeys()"
+# compile error in "Leader": "(213,8) Error: undefined constant/function/variable llLinksetDataReset()"
+# compile error in "Leader": "(214,17) Error: undefined constant/function/variable llLinksetDataAvailable()"
+# compile error in "Leader": "(232,41) Error: undefined constant/function/variable llLinksetDataCountKeys()"
+# compile error in "Leader": "(248,43) Error: undefined name llLinksetDataRead(string)"
+# compile error in "Leader": "(249,33) Error: undefined constant/function/variable llLinksetDataCountKeys()"
+# compile error in "Leader": "(250,8) Error: undefined constant/function/variable llLinksetDataReset()"
+# compile error in "Leader": "(251,17) Error: undefined constant/function/variable llLinksetDataAvailable()"
+# compile error in "Leader": "(260,19) Error: undefined constant/function/variable llLinksetDataWrite(string,string)"
+# compile error in "Leader": "(263,23) Error: undefined constant/function/variable llLinksetDataAvailable()"
+# compile error in "Leader": "(265,64) Error: undefined constant/function/variable llLinksetDataCountKeys()"
+# compile error in "Leader": "(268,27) Error: undefined constant/function/variable llLinksetDataWrite(string,string)"
+# compile error in "Leader": "(271,42) Error: undefined constant/function/variable llLinksetDataAvailable()"
+# compile error in "Leader": "(272,27) Error: undefined constant/function/variable llLinksetDataWrite(string,string)"
+# compile error in "Leader": "(274,42) Error: undefined constant/function/variable llLinksetDataAvailable()"
+# compile error in "Leader": "(282,8) Error: undefined constant/function/variable llLinksetDataReset()"
+# compile error in "Leader": "(284,33) Error: undefined constant/function/variable llLinksetDataCountKeys()"
+# compile error in "Leader": "(288,8) Error: undefined constant/function/variable llLinksetDataWrite(string,string)"
+# compile error in "Leader": "(289,8) Error: undefined constant/function/variable llLinksetDataWrite(string,string)"
+# compile error in "Leader": "(350,4) Error: unknown event handler linkset_data(integer,string,string)"

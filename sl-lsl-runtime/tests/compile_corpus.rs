@@ -25,10 +25,11 @@
 //!   where tailslide's heap-stacked parser goes on (its
 //!   `parserstackdepth2.lsl`); `sl-lsl`'s differential test sets it apart
 //!   the same way.
-//! - **Functions missing from the library table.** The table is Linden's
-//!   own viewer `LSLSyntax` document, which leaves out a few functions the
-//!   grid still compiles and tailslide's `builtins.txt` lists
-//!   (`llPointAt`, `llRemoteLoadScript`). A call to one is undefined here.
+//! - **Functions missing from the library table.** The table is the
+//!   `LSLSyntax` document Second Life serves, which leaves out five
+//!   functions tailslide's `builtins.txt` lists (`llPointAt`,
+//!   `llStopPointAt`, `llRemoteLoadScript`, `llClearExperiencePermissions`,
+//!   `llGetExperienceList`). A call to one is undefined here.
 //!
 //! And one error sits on a different line by design: "Not all code paths
 //! return a value" is reported at the function's closing brace, where Second

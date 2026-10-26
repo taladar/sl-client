@@ -1,5 +1,5 @@
 //! Build script: reads the vendored `keywords_lsl_default.xml` — Linden Lab's
-//! own `LSLSyntax` document, as the viewer ships it — and generates the
+//! own `LSLSyntax` document, as Second Life serves it — and generates the
 //! library table into `OUT_DIR`: the `BuiltinId` enum, the `BUILTINS`,
 //! `CONSTANTS` and `EVENTS` descriptor arrays, and one `Signature` type per
 //! function, which is what makes a hand-written implementation with the wrong
@@ -208,26 +208,43 @@ fn raw_value(entry: &Llsd) -> Option<String> {
     }
 }
 
-/// String constants the document spells in a notation rather than
-/// literally, with the raw text expected — so a changed source stops the
-/// build instead of being misread — and the value it stands for.
-const STRING_OVERRIDES: [(&str, &str, &str); 1] = [("EOF", "\\\\n\\\\n\\\\n", "\n\n\n")];
-
-/// A string constant's value: an override, a `U+XXXX` code point (the
-/// `JSON_*` markers), or the text itself.
+/// A string constant's value. The document spells a character no XML text
+/// can carry as an escape behind two backslashes — `\\n` (`EOF`, `NAK`),
+/// `\\x15` (`NAK`), `\\ufdd0` (the `JSON_*` markers) — and every other value
+/// literally. Any other escape stops the build rather than being misread.
 fn string_value(name: &str, raw: &str) -> Result<String, BoxError> {
-    if let Some((_, expected, value)) = STRING_OVERRIDES.iter().find(|(n, ..)| *n == name) {
-        if raw != *expected {
-            return Err(format!("{name}: raw value `{raw}` changed; review the override").into());
-        }
-        return Ok((*value).to_owned());
+    let mut out = String::new();
+    let mut rest = raw;
+    while let Some(at) = rest.find('\\') {
+        out.push_str(rest.get(..at).unwrap_or_default());
+        let escape = rest
+            .get(at..)
+            .and_then(|tail| tail.strip_prefix("\\\\"))
+            .ok_or_else(|| format!("{name}: `{raw}`: a backslash that is not `\\\\`"))?;
+        // The escape's width: its letter, then the hex digits after it.
+        let (character, width) = if escape.starts_with('n') {
+            ('\n', 1)
+        } else {
+            let width = match escape.get(..1) {
+                Some("x") => 3,
+                Some("u") => 5,
+                _ => {
+                    return Err(format!("{name}: `{raw}`: an escape this build cannot read").into());
+                }
+            };
+            let hex = escape
+                .get(1..width)
+                .ok_or_else(|| format!("{name}: `{raw}`: a short escape"))?;
+            let code = u32::from_str_radix(hex, 16)?;
+            let character =
+                char::from_u32(code).ok_or_else(|| format!("{name}: bad code point"))?;
+            (character, width)
+        };
+        out.push(character);
+        rest = escape.get(width..).unwrap_or_default();
     }
-    if let Some(hex) = raw.strip_prefix("U+") {
-        let code = u32::from_str_radix(hex, 16)?;
-        let character = char::from_u32(code).ok_or_else(|| format!("{name}: bad code point"))?;
-        return Ok(character.to_string());
-    }
-    Ok(raw.to_owned())
+    out.push_str(rest);
+    Ok(out)
 }
 
 /// An integer constant: decimal or `0x` hex, possibly negative; hex is a

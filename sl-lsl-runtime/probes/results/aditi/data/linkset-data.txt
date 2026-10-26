@@ -1,0 +1,130 @@
+grid: aditi
+date: 2026-10-26
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE data/linkset-data rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE data/linkset-data rec=empty available=131072 keys=0 read=""
+PROBE data/linkset-data rec=write case=one-one name_length=1 value_length=1 code=0 cost=2 available=131070
+PROBE data/linkset-data rec=write case=ten-hundred name_length=10 value_length=100 code=0 cost=110 available=130960
+PROBE data/linkset-data rec=write case=same-value name_length=1 value_length=1 code=5 cost=0 available=130960
+PROBE data/linkset-data rec=write case=longer-value name_length=1 value_length=2 code=0 cost=1 available=130959
+PROBE data/linkset-data rec=write case=shorter-value name_length=1 value_length=1 code=0 cost=-1 available=130960
+PROBE data/linkset-data rec=write case=two-byte name_length=1 value_length=10 code=0 cost=21 available=130939
+PROBE data/linkset-data rec=write case=two-byte-name name_length=10 value_length=1 code=0 cost=21 available=130918
+PROBE data/linkset-data rec=write case=empty-new name_length=1 value_length=0 code=4 cost=0 available=130918
+PROBE data/linkset-data rec=write case=empty-existing name_length=1 value_length=0 code=0 cost=-2 available=130920
+PROBE data/linkset-data rec=write case=empty-name name_length=0 value_length=1 code=2 cost=0 available=130920
+PROBE data/linkset-data rec=write case=long-name name_length=1100 value_length=1 code=0 cost=1101 available=129819
+PROBE data/linkset-data rec=read case=after-empty value=""
+PROBE data/linkset-data rec=keys count=4
+PROBE data/linkset-data rec=event action=update name="a" value="1"
+PROBE data/linkset-data rec=event action=update name="abcdefghij" value=length:100
+PROBE data/linkset-data rec=event action=update name="a" value="22"
+PROBE data/linkset-data rec=event action=update name="a" value="3"
+PROBE data/linkset-data rec=event action=update name="u" value="éééééééééé"
+PROBE data/linkset-data rec=event action=update name="éééééééééé" value="v"
+PROBE data/linkset-data rec=event action=delete name="a" value=""
+PROBE data/linkset-data rec=event action=update name=length:1100 value="x"
+PROBE data/linkset-data rec=write-protected case=two name_length=1 value_length=1 pass_length=2 code=0 cost=34 available=129785
+PROBE data/linkset-data rec=write-protected case=empty-pass name_length=2 value_length=1 pass_length=0 code=0 cost=3 available=129782
+PROBE data/linkset-data rec=write-protected case=twenty name_length=3 value_length=1 pass_length=20 code=0 cost=36 available=129746
+PROBE data/linkset-data rec=read case=protected-plain value=""
+PROBE data/linkset-data rec=read case=empty-pass-plain value="v"
+PROBE data/linkset-data rec=read-protected case=wrong value=""
+PROBE data/linkset-data rec=read-protected case=right value="v"
+PROBE data/linkset-data rec=read-protected case=plain-pair value=""
+PROBE data/linkset-data rec=read-protected case=missing value=""
+PROBE data/linkset-data rec=write case=over-protected name_length=1 value_length=3 code=3 cost=0 available=129746
+PROBE data/linkset-data rec=write-protected case=wrong-pass name_length=1 value_length=3 pass_length=4 code=3 cost=0 available=129746
+PROBE data/linkset-data rec=write-protected case=right-pass name_length=1 value_length=3 pass_length=2 code=0 cost=2 available=129744
+PROBE data/linkset-data rec=write-protected case=new-pass name_length=1 value_length=5 pass_length=5 code=3 cost=0 available=129744
+PROBE data/linkset-data rec=read-protected case=after-new-pass value="new"
+PROBE data/linkset-data rec=write-protected case=protect-plain-pair name_length=10 value_length=1 pass_length=2 code=3 cost=0 available=129744
+PROBE data/linkset-data rec=delete case=protected code=3 cost=0 available=129744
+PROBE data/linkset-data rec=delete-protected case=wrong code=3 cost=0 available=129744
+PROBE data/linkset-data rec=delete-protected case=right code=0 cost=-36 available=129780
+PROBE data/linkset-data rec=delete case=missing code=4 cost=0 available=129780
+PROBE data/linkset-data rec=delete-protected case=plain-pair code=3 cost=0 available=129780
+PROBE data/linkset-data rec=delete case=plain code=0 cost=-21 available=129801
+PROBE data/linkset-data rec=event action=update name="p" value=""
+PROBE data/linkset-data rec=event action=update name="p0" value="v"
+PROBE data/linkset-data rec=event action=update name="p20" value=""
+PROBE data/linkset-data rec=event action=update name="p" value=""
+PROBE data/linkset-data rec=event action=delete name="p" value=""
+PROBE data/linkset-data rec=event action=delete name="u" value=""
+PROBE data/linkset-data rec=write case=k3 name_length=2 value_length=1 code=0 cost=3 available=131069
+PROBE data/linkset-data rec=write case=k1 name_length=2 value_length=1 code=0 cost=3 available=131066
+PROBE data/linkset-data rec=write case=k10 name_length=3 value_length=1 code=0 cost=4 available=131062
+PROBE data/linkset-data rec=write case=K0 name_length=2 value_length=1 code=0 cost=3 available=131059
+PROBE data/linkset-data rec=write case=k2 name_length=2 value_length=1 code=0 cost=3 available=131056
+PROBE data/linkset-data rec=write-protected case=k4 name_length=2 value_length=1 pass_length=2 code=0 cost=35 available=131021
+PROBE data/linkset-data rec=list-keys start=0 count=0 keys="K0,k1,k10,k2,k3,k4"
+PROBE data/linkset-data rec=list-keys start=0 count=2 keys="K0,k1"
+PROBE data/linkset-data rec=list-keys start=2 count=10 keys="k10,k2,k3,k4"
+PROBE data/linkset-data rec=list-keys start=10 count=1 keys=""
+PROBE data/linkset-data rec=list-keys start=-2 count=2 keys="K0,k1"
+PROBE data/linkset-data rec=list-keys start=0 count=-1 keys="K0,k1,k10,k2,k3,k4"
+PROBE data/linkset-data rec=find-keys pattern="^k[0-9]$" start=0 count=0 keys="k1,k2,k3,k4" found=4
+PROBE data/linkset-data rec=find-keys pattern="k" start=1 count=2 keys="k10,k2" found=5
+PROBE data/linkset-data rec=find-keys pattern="^K" start=0 count=0 keys="K0" found=1
+PROBE data/linkset-data rec=find-keys pattern="" start=0 count=0 keys="" found=0
+PROBE data/linkset-data rec=find-keys pattern="(" start=0 count=0 keys="" found=0
+PROBE data/linkset-data rec=keys count=6
+PROBE data/linkset-data rec=event action=reset name="" value=""
+PROBE data/linkset-data rec=event action=update name="k3" value="v"
+PROBE data/linkset-data rec=event action=update name="k1" value="v"
+PROBE data/linkset-data rec=event action=update name="k10" value="v"
+PROBE data/linkset-data rec=event action=update name="K0" value="v"
+PROBE data/linkset-data rec=event action=update name="k2" value="v"
+PROBE data/linkset-data rec=event action=update name="k4" value=""
+PROBE data/linkset-data rec=delete-found case=no-pass pattern="^k" length=2 result="4, 1" keys=2 cost=-13 available=131034
+PROBE data/linkset-data rec=delete-found case=pass pattern="^k" length=2 result="1, 0" keys=1 cost=-35 available=131069
+PROBE data/linkset-data rec=delete-found case=nothing pattern="^zz" length=2 result="0, 0" keys=1 cost=0 available=131069
+PROBE data/linkset-data rec=delete-found case=bad-pattern pattern="(" length=2 result="0, 0" keys=1 cost=0 available=131069
+PROBE data/linkset-data rec=event action=multidelete name="k1,k10,k2,k3" value=""
+PROBE data/linkset-data rec=event action=multidelete name="k4" value=""
+PROBE data/linkset-data rec=write case=for-stranger name_length=4 value_length=4 code=0 cost=8 available=131061
+PROBE data/linkset-data rec=event action=update name="seen" value="by-a"
+PROBE data/linkset-data rec=stranger own="by-b" seen="" keys=1
+PROBE data/linkset-data rec=stranger-pair read="" keys=2
+PROBE data/linkset-data rec=filling available=131072
+PROBE data/linkset-data rec=filled writes=131 last_code=1 available=662 keys=130
+PROBE data/linkset-data rec=rest value_length=661 code=0 available=0
+PROBE data/linkset-data rec=over code=1 available=0
+PROBE data/linkset-data rec=fill-events count=63
+PROBE data/linkset-data rec=reset available=131072 keys=0
+PROBE data/linkset-data rec=event action=reset name="" value=""
+PROBE data/linkset-data rec=resetting
+PROBE data/linkset-data rec=after-script-reset keep="x" keys=2 available=131051
+PROBE data/linkset-data rec=watcher-event n=0 action=update name="a" value="1"
+PROBE data/linkset-data rec=watcher-event n=1 action=update name="abcdefghij" value=length:100
+PROBE data/linkset-data rec=watcher-event n=2 action=update name="a" value="22"
+PROBE data/linkset-data rec=watcher-event n=3 action=update name="a" value="3"
+PROBE data/linkset-data rec=watcher-event n=4 action=update name="u" value="éééééééééé"
+PROBE data/linkset-data rec=watcher-event n=5 action=update name="éééééééééé" value="v"
+PROBE data/linkset-data rec=watcher-event n=6 action=delete name="a" value=""
+PROBE data/linkset-data rec=watcher-event n=7 action=update name=length:1100 value="x"
+PROBE data/linkset-data rec=watcher-event n=8 action=update name="p" value=""
+PROBE data/linkset-data rec=watcher-event n=9 action=update name="p0" value="v"
+PROBE data/linkset-data rec=watcher-event n=10 action=update name="p20" value=""
+PROBE data/linkset-data rec=watcher-event n=11 action=update name="p" value=""
+PROBE data/linkset-data rec=watcher-event n=12 action=delete name="p" value=""
+PROBE data/linkset-data rec=watcher-event n=13 action=delete name="u" value=""
+PROBE data/linkset-data rec=watcher-event n=14 action=reset name="" value=""
+PROBE data/linkset-data rec=watcher-event n=15 action=update name="k3" value="v"
+PROBE data/linkset-data rec=watcher-event n=16 action=update name="k1" value="v"
+PROBE data/linkset-data rec=watcher-event n=17 action=update name="k10" value="v"
+PROBE data/linkset-data rec=watcher-event n=18 action=update name="K0" value="v"
+PROBE data/linkset-data rec=watcher-event n=19 action=update name="k2" value="v"
+PROBE data/linkset-data rec=watcher-event n=20 action=update name="k4" value=""
+PROBE data/linkset-data rec=watcher-event n=21 action=multidelete name="k1,k10,k2,k3" value=""
+PROBE data/linkset-data rec=watcher-event n=22 action=multidelete name="k4" value=""
+PROBE data/linkset-data rec=watcher-event n=23 action=update name="seen" value="by-a"
+PROBE data/linkset-data rec=watcher-event n=24 action=reset name="" value=""
+PROBE data/linkset-data rec=watcher-fill-events got=82
+PROBE data/linkset-data rec=end

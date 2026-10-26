@@ -143,6 +143,14 @@ What has bitten already, and how a probe should be shaped for it:
   they merge measures the frame, not the rule.
 - **A function name is not free.** `control`, `timer` and the other event
   names cannot name a function.
+- **Second Life evaluates an expression right to left.** In
+  `"code=" + (string)llLinksetDataDelete(n) + cost()`, `cost()` runs before
+  the delete. Call what changes state in a statement of its own first.
+- **Never look for a JSON sentinel with a string function on OpenSim.** It
+  finds `JSON_INVALID` at the start of every string and splits on it between
+  every character (`data/json`), so a replace loop over the sentinels grows
+  without end and wedges an engine thread until the region restarts. Compare
+  character by character with `llListFindList`.
 - **Some failures take the region with them.** Unbounded recursion under
   XEngine overflows the simulator's own stack, and the whole OpenSim
   process aborts. That is what `skip-on` is for.
@@ -323,6 +331,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | — unbounded recursion | `Stack-Heap Collision` | a `StackOverflowException` the engine catches (logged; no message) | the simulator process aborts — `skip-on` |
 | `avatar/*`, 2026-10-24: permissions, sitting, controls, camera and animations | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#animations-sitting-controls-and-camera) | | |
 | `comms/*`, 2026-10-24: listens, object chat, dialogs, text boxes, instant messages, the owner elsewhere, link messages | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#chat-listens-dialogs-and-link-messages) | | |
+| `data/*`, 2026-10-26: what `llList2Json`, `llJson2List`, `llJsonGetValue`, `llJsonValueType` and `llJsonSetValue` make of lists and JSON, how the string functions treat a sentinel, the linkset data store and the `linkset_data` event | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#lljson-and-the-linkset-data-store) | | |
 | `detection/*`, 2026-10-25: sensors, raycasts, where a touch landed | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#sensors-raycasts-and-touches) | | |
 | `events/*`, 2026-10-25: the order across types, merging, collisions, attaching and re-rezzing, what else a state change keeps | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#events) | | |
 | `experience/*`, 2026-10-25: the experience functions and the key-value store from a script in no experience, teleporting an agent, a temporary attachment | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#experiences-and-the-key-value-store) | | |

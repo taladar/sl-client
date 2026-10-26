@@ -182,9 +182,8 @@ pub struct ClientDirectories {
     /// Passed verbatim to the runtime `ChatLog` shell — there is no derived
     /// per-account sub-directory; the host supplies an already-per-account path.
     pub agent_chat_log_dir: Option<std::path::PathBuf>,
-    /// Reserved for a cache directory shared across accounts (e.g. a grid-wide
-    /// texture or name cache). Not yet consumed; `None` until a shared-cache
-    /// feature lands.
+    /// A cache directory shared across accounts, or `None` to disable what is
+    /// kept there: the grid's `LSLSyntax` document, under `lsl-syntax/`.
     pub shared_cache_dir: Option<std::path::PathBuf>,
 }
 
