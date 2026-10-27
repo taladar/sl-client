@@ -1,0 +1,80 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE prim/faces rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE prim/faces rec=fresh sides=6 color=<1.000000,1.000000,1.000000> alpha=6.000000
+PROBE prim/faces rec=try label=one-face
+PROBE prim/faces rec=color label=one-face face0=<0.250000,0.500000,0.750000> face1=<1.000000,1.000000,1.000000> all=<0.875000,0.916700,0.958300>
+PROBE prim/faces rec=try label=all-sides
+PROBE prim/faces rec=color label=all-sides face0=<0.250000,0.500000,0.750000> face1=<0.250000,0.500000,0.750000> all=<0.250000,0.500000,0.750000>
+PROBE prim/faces rec=try label=past-range
+PROBE prim/faces rec=color label=past-range face0=<2.000000,-1.000000,0.500000> face1=<1.000000,1.000000,1.000000> all=<1.166700,0.666700,0.916700>
+PROBE prim/faces rec=try label=face-6
+PROBE prim/faces rec=color label=face-6 face0=<1.000000,1.000000,1.000000> face1=<1.000000,1.000000,1.000000> all=<1.000000,1.000000,1.000000>
+PROBE prim/faces rec=try label=face-minus-2
+PROBE prim/faces rec=color label=face-minus-2 face0=<1.000000,0.000000,0.000000> face1=<1.000000,0.000000,0.000000> all=<1.000000,0.000000,0.000000>
+PROBE prim/faces rec=color label=two-faces-differ all=<0.833300,0.666700,0.833300> face6=<1.000000,1.000000,1.000000> face-minus-2=<0.833300,0.666700,0.833300>
+PROBE prim/faces rec=try label=one-face
+PROBE prim/faces rec=alpha label=one-face face0=0.250000 face1=1.000000 all=5.250000
+PROBE prim/faces rec=try label=all-sides
+PROBE prim/faces rec=alpha label=all-sides face0=0.250000 face1=0.250000 all=1.500000
+PROBE prim/faces rec=try label=past-range
+PROBE prim/faces rec=alpha label=past-range face0=1.000000 face1=1.000000 all=6.000000
+PROBE prim/faces rec=try label=negative
+PROBE prim/faces rec=alpha label=negative face0=0.000000 face1=1.000000 all=5.000000
+PROBE prim/faces rec=try label=face-6
+PROBE prim/faces rec=alpha label=face-6 face0=1.000000 face1=1.000000 all=6.000000
+PROBE prim/faces rec=alpha label=two-faces-differ all=4.500000 face6=1.000000
+PROBE prim/faces rec=try label=by-key
+PROBE prim/faces rec=texture label=by-key face0="plywood"
+PROBE prim/faces rec=try label=missing-name
+# debug-channel: from="Object" text="Could not find texture 'no such texture'."
+PROBE prim/faces rec=texture label=missing-name face0="blank"
+PROBE prim/faces rec=try label=unknown-key
+PROBE prim/faces rec=texture label=unknown-key face0="11111111-2222-3333-4444-555555555555"
+PROBE prim/faces rec=try label=null-key
+# debug-channel: from="Object" text="Could not find texture '00000000-0000-0000-0000-000000000000'."
+PROBE prim/faces rec=texture label=null-key face0="blank"
+PROBE prim/faces rec=try label=empty
+# debug-channel: from="Object" text="Could not find texture ''."
+PROBE prim/faces rec=texture label=empty face0="blank"
+PROBE prim/faces rec=texture label=all-sides-fresh all="5748decc-f629-461c-9a36-a35a221fe21f" face6="00000000-0000-0000-0000-000000000000"
+PROBE prim/faces rec=placement label=scale repeats=<2.000000,3.000000,0.000000> offsets=<0.000000,0.000000,0.000000> rotation=0.000000
+PROBE prim/faces rec=placement label=scale-past-range repeats=<200.000000,-200.000000,0.000000> offsets=<0.000000,0.000000,0.000000> rotation=0.000000
+PROBE prim/faces rec=placement label=scale-zero repeats=<0.000000,0.000000,0.000000> offsets=<0.000000,0.000000,0.000000> rotation=0.000000
+PROBE prim/faces rec=placement label=offset repeats=<1.000000,1.000000,0.000000> offsets=<0.250000,-0.250000,0.000000> rotation=0.000000
+PROBE prim/faces rec=placement label=offset-past-range repeats=<1.000000,1.000000,0.000000> offsets=<3.000000,-3.000000,0.000000> rotation=0.000000
+PROBE prim/faces rec=placement label=rotate repeats=<1.000000,1.000000,0.000000> offsets=<0.000000,0.000000,0.000000> rotation=1.570800
+PROBE prim/faces rec=placement label=rotate-past-two-pi repeats=<1.000000,1.000000,0.000000> offsets=<0.000000,0.000000,0.000000> rotation=7.000000
+PROBE prim/faces rec=placement label=rotate-negative repeats=<1.000000,1.000000,0.000000> offsets=<0.000000,0.000000,0.000000> rotation=-1.000000
+PROBE prim/faces rec=text label=past-range got="hello, <1.000000, 0.000000, 0.500000>, 1.000000"
+PROBE prim/faces rec=text label=300 length=254
+PROBE prim/faces rec=text label=two-byte length=251
+PROBE prim/faces rec=text label=newline got="a\nb, <1.000000, 1.000000, 1.000000>, 0.000000"
+PROBE prim/faces rec=sides label=box sides=6
+PROBE prim/faces rec=sides label=box-hollow sides=7
+PROBE prim/faces rec=sides label=box-cut sides=6
+PROBE prim/faces rec=sides label=box-hollow-cut sides=7
+PROBE prim/faces rec=sides label=box-tapered-to-point sides=6
+PROBE prim/faces rec=sides label=cylinder sides=3
+PROBE prim/faces rec=sides label=cylinder-hollow-cut sides=6
+PROBE prim/faces rec=sides label=prism sides=5
+PROBE prim/faces rec=sides label=sphere sides=1
+PROBE prim/faces rec=sides label=sphere-hollow-cut-dimple sides=6
+PROBE prim/faces rec=sides label=torus sides=3
+PROBE prim/faces rec=sides label=tube sides=6
+PROBE prim/faces rec=sides label=ring sides=5
+PROBE prim/faces rec=sides label=sculpt sides=1
+PROBE prim/faces rec=sides label=box-again sides=6
+PROBE prim/faces rec=link label=this color=<0.000000,1.000000,0.000000> alpha=0.500000 plywood=1
+PROBE prim/faces rec=link label=two-and-zero face0=<1.000000,1.000000,1.000000> face1=<0.000000,0.000000,1.000000>
+PROBE prim/faces rec=end
+# debug-channel by=other: from="Object" text="Could not find texture 'no such texture'."
+# debug-channel by=other: from="Object" text="Could not find texture '00000000-0000-0000-0000-000000000000'."
+# debug-channel by=other: from="Object" text="Could not find texture ''."

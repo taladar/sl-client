@@ -1,0 +1,95 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE prim/changed rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE prim/changed rec=try label=color
+PROBE prim/changed rec=changed label=color bits=COLOR events=1
+PROBE prim/changed rec=try label=color-same
+PROBE prim/changed rec=changed label=color-same bits=COLOR events=1
+PROBE prim/changed rec=try label=alpha
+PROBE prim/changed rec=changed label=alpha bits=COLOR events=1
+PROBE prim/changed rec=try label=alpha-same
+PROBE prim/changed rec=changed label=alpha-same bits=COLOR events=1
+PROBE prim/changed rec=try label=texture
+PROBE prim/changed rec=changed label=texture bits=none events=0
+PROBE prim/changed rec=try label=texture-same
+PROBE prim/changed rec=changed label=texture-same bits=none events=0
+PROBE prim/changed rec=try label=scale-texture
+PROBE prim/changed rec=changed label=scale-texture bits=none events=0
+PROBE prim/changed rec=try label=offset-texture
+PROBE prim/changed rec=changed label=offset-texture bits=none events=0
+PROBE prim/changed rec=try label=rotate-texture
+PROBE prim/changed rec=changed label=rotate-texture bits=none events=0
+PROBE prim/changed rec=try label=scale
+PROBE prim/changed rec=changed label=scale bits=SCALE events=1
+PROBE prim/changed rec=try label=scale-same
+PROBE prim/changed rec=changed label=scale-same bits=none events=0
+PROBE prim/changed rec=try label=position
+PROBE prim/changed rec=changed label=position bits=none events=0
+PROBE prim/changed rec=try label=rotation
+PROBE prim/changed rec=changed label=rotation bits=none events=0
+PROBE prim/changed rec=try label=shape
+PROBE prim/changed rec=changed label=shape bits=SHAPE events=1
+PROBE prim/changed rec=try label=size
+PROBE prim/changed rec=changed label=size bits=SCALE events=1
+PROBE prim/changed rec=try label=glow
+PROBE prim/changed rec=changed label=glow bits=none events=0
+PROBE prim/changed rec=try label=fullbright
+PROBE prim/changed rec=changed label=fullbright bits=none events=0
+PROBE prim/changed rec=try label=bump-shiny
+PROBE prim/changed rec=changed label=bump-shiny bits=none events=0
+PROBE prim/changed rec=try label=texgen
+PROBE prim/changed rec=changed label=texgen bits=none events=0
+PROBE prim/changed rec=try label=text
+PROBE prim/changed rec=changed label=text bits=none events=0
+PROBE prim/changed rec=try label=name
+PROBE prim/changed rec=changed label=name bits=none events=0
+PROBE prim/changed rec=try label=desc
+PROBE prim/changed rec=changed label=desc bits=none events=0
+PROBE prim/changed rec=try label=light
+PROBE prim/changed rec=changed label=light bits=none events=0
+PROBE prim/changed rec=try label=flexible
+PROBE prim/changed rec=changed label=flexible bits=none events=0
+PROBE prim/changed rec=try label=material
+PROBE prim/changed rec=changed label=material bits=none events=0
+PROBE prim/changed rec=try label=phantom
+PROBE prim/changed rec=changed label=phantom bits=none events=0
+PROBE prim/changed rec=try label=slice
+PROBE prim/changed rec=changed label=slice bits=none events=0
+PROBE prim/changed rec=try label=target-omega
+PROBE prim/changed rec=changed label=target-omega bits=none events=0
+PROBE prim/changed rec=try label=texture-anim
+PROBE prim/changed rec=changed label=texture-anim bits=none events=0
+PROBE prim/changed rec=try label=particles
+PROBE prim/changed rec=changed label=particles bits=none events=0
+PROBE prim/changed rec=try label=sit-target
+PROBE prim/changed rec=changed label=sit-target bits=none events=0
+PROBE prim/changed rec=try label=sit-text
+PROBE prim/changed rec=changed label=sit-text bits=none events=0
+PROBE prim/changed rec=try label=click-action
+PROBE prim/changed rec=changed label=click-action bits=none events=0
+PROBE prim/changed rec=try label=allow-drop
+PROBE prim/changed rec=changed label=allow-drop bits=none events=0
+PROBE prim/changed rec=try label=media
+PROBE prim/changed rec=changed label=media bits=MEDIA events=1
+PROBE prim/changed rec=try label=media-clear
+PROBE prim/changed rec=changed label=media-clear bits=MEDIA events=1
+PROBE prim/changed rec=try label=alpha-mode
+PROBE prim/changed rec=changed label=alpha-mode bits=none events=0
+PROBE prim/changed rec=try label=normal
+PROBE prim/changed rec=changed label=normal bits=none events=0
+PROBE prim/changed rec=try label=specular
+PROBE prim/changed rec=changed label=specular bits=none events=0
+PROBE prim/changed rec=try label=render-material
+PROBE prim/changed rec=changed label=render-material bits=RENDER_MATERIAL events=1
+PROBE prim/changed rec=try label=color-and-size
+PROBE prim/changed rec=changed label=color-and-size bits=COLOR|SCALE events=1
+PROBE prim/changed rec=try label=link-color-this
+PROBE prim/changed rec=changed label=link-color-this bits=COLOR events=1
+PROBE prim/changed rec=end

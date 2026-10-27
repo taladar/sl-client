@@ -155,6 +155,10 @@ makes of the status flags, the physics material, forces, targets, keyframed
 motion, vehicles and pathfinding characters — their clamps and their errors —
 is in
 [Grid Behaviour → LSL scripts](../gridspec/lsl.md#status-flags-forces-targets-and-vehicles).
+How each grid places, scales and turns a prim, what `llGetPrimitiveParams`
+reads back after each `PRIM_*` rule, how a rule list's errors are told,
+linking, and which setter raises which `changed` bit is in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#reading-and-writing-the-prim).
 
 Creating a brand-new script goes through `CreateInventoryItem` (carrying the
 language subtype): the **simulator fills a compilable default body** (the LSL

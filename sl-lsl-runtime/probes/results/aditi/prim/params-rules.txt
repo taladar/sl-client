@@ -1,0 +1,119 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE prim/params-rules rec=try label=code-as-string
+# animations avatar=owner playing=""
+PROBE prim/params-rules rec=get label=code-as-string count=0 got=""
+PROBE prim/params-rules rec=try label=face-100
+PROBE prim/params-rules rec=get label=face-100 count=1 got="Object"
+PROBE prim/params-rules rec=try label=face-minus-2
+PROBE prim/params-rules rec=get label=face-minus-2 count=7 got="0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, Object"
+PROBE prim/params-rules rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE prim/params-rules rec=faces sides=6
+PROBE prim/params-rules rec=try label=order
+PROBE prim/params-rules rec=get label=order count=4 types=vsfi got="<0.500000, 0.500000, 0.500000>, Object, 0.000000, 3"
+PROBE prim/params-rules rec=try label=order-reversed
+PROBE prim/params-rules rec=get label=order-reversed count=4 types=ifsv got="3, 0.000000, Object, <0.500000, 0.500000, 0.500000>"
+PROBE prim/params-rules rec=try label=same-twice
+PROBE prim/params-rules rec=get label=same-twice count=2 types=ss got="Object, Object"
+PROBE prim/params-rules rec=try label=all-sides-glow
+PROBE prim/params-rules rec=get label=all-sides-glow count=6 types=ffffff got="0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000"
+PROBE prim/params-rules rec=try label=all-sides-color
+PROBE prim/params-rules rec=get label=all-sides-color count=12 types=vfvfvfvfvfvf got="<1.000000, 1.000000, 1.000000>, 1.000000, <1.000000, 1.000000, 1.000000>, 1.000000, <1.000000, 1.000000, 1.000000>, 1.000000, <1.000000, 1.000000, 1.000000>, 1.000000, <1.000000, 1.000000, 1.000000>, 1.000000, <1.000000, 1.000000, 1.000000>, 1.000000"
+PROBE prim/params-rules rec=try label=all-sides-then-name
+PROBE prim/params-rules rec=get label=all-sides-then-name count=7 types=iiiiiis got="0, 0, 0, 0, 0, 0, Object"
+PROBE prim/params-rules rec=try label=empty
+PROBE prim/params-rules rec=get label=empty count=0 types= got=""
+PROBE prim/params-rules rec=try label=face-6
+PROBE prim/params-rules rec=get label=face-6 count=1 types=s got="Object"
+PROBE prim/params-rules rec=try label=set-face-6
+PROBE prim/params-rules rec=set label=set-face-6 name="after" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=set-face-minus-2
+PROBE prim/params-rules rec=set label=set-face-minus-2 name="after" glow0=0.500000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.500000
+PROBE prim/params-rules rec=try label=unknown-code
+# debug-channel: from="after" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
+PROBE prim/params-rules rec=get label=unknown-code count=0 types= got=""
+PROBE prim/params-rules rec=try label=unknown-negative-code
+# debug-channel: from="after" text="llGetPrimitiveParams error: Param 0 error, unknown parameter"
+PROBE prim/params-rules rec=get label=unknown-negative-code count=0 types= got=""
+PROBE prim/params-rules rec=try label=set-unknown-code
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
+PROBE prim/params-rules rec=set label=set-unknown-code name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=set-unknown-then-glow
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1: unknown rule."
+PROBE prim/params-rules rec=set label=set-unknown-then-glow name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=glow-as-string
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): arg #2 (glow) float expected but string given."
+PROBE prim/params-rules rec=set label=glow-as-string name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=glow-as-integer
+PROBE prim/params-rules rec=set label=glow-as-integer name="after" glow0=1.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=glow-as-vector
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): arg #2 (glow) float expected but vector given."
+PROBE prim/params-rules rec=set label=glow-as-vector name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=face-as-float
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_GLOW): arg #1 (face number) integer expected but float given."
+PROBE prim/params-rules rec=set label=face-as-float name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=color-as-string
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_COLOR): arg #2 (color) vector expected but string given."
+PROBE prim/params-rules rec=set label=color-as-string name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=name-as-integer
+# debug-channel: from="Object" text="llSetPrimitiveParams error running rule #1 (PRIM_NAME): arg #1 string expected but integer given."
+PROBE prim/params-rules rec=set label=name-as-integer name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=name-as-key
+PROBE prim/params-rules rec=set label=name-as-key name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=glow-too-few
+PROBE prim/params-rules rec=set label=glow-too-few name="before" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=color-too-few
+PROBE prim/params-rules rec=set label=color-too-few name="before" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=a-good-rule-before-a-bad
+PROBE prim/params-rules rec=set label=a-good-rule-before-a-bad name="before" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=link-target-1
+PROBE prim/params-rules rec=get label=link-target-1 count=0 types= got=""
+PROBE prim/params-rules rec=try label=link-target-0
+PROBE prim/params-rules rec=get label=link-target-0 count=1 types=s got="before"
+PROBE prim/params-rules rec=try label=link-target-2
+PROBE prim/params-rules rec=get label=link-target-2 count=1 types=s got="before"
+PROBE prim/params-rules rec=try label=link-target-this
+PROBE prim/params-rules rec=get label=link-target-this count=1 types=s got="before"
+PROBE prim/params-rules rec=try label=link-target-set
+PROBE prim/params-rules rec=get label=link-target-set count=0 types= got=""
+PROBE prim/params-rules rec=try label=link-target-last
+PROBE prim/params-rules rec=get label=link-target-last count=1 types=s got="before"
+PROBE prim/params-rules rec=try label=set-link-target-0
+PROBE prim/params-rules rec=set label=set-link-target-0 name="after" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=set-link-target-2
+PROBE prim/params-rules rec=set label=set-link-target-2 name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=set-link-target-2-then-1
+PROBE prim/params-rules rec=set label=set-link-target-2-then-1 name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=link-get-0
+PROBE prim/params-rules rec=get label=link-get-0 count=1 types=s got="Object"
+PROBE prim/params-rules rec=try label=link-get-1
+PROBE prim/params-rules rec=get label=link-get-1 count=0 types= got=""
+PROBE prim/params-rules rec=try label=link-get-2
+PROBE prim/params-rules rec=get label=link-get-2 count=0 types= got=""
+PROBE prim/params-rules rec=try label=link-get-this
+PROBE prim/params-rules rec=get label=link-get-this count=1 types=s got="Object"
+PROBE prim/params-rules rec=try label=link-get-set
+PROBE prim/params-rules rec=get label=link-get-set count=0 types= got=""
+PROBE prim/params-rules rec=try label=link-get-root
+PROBE prim/params-rules rec=get label=link-get-root count=0 types= got=""
+PROBE prim/params-rules rec=try label=link-set-0
+PROBE prim/params-rules rec=set label=link-set-0 name="after" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=link-set-1
+PROBE prim/params-rules rec=set label=link-set-1 name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=link-set-2
+PROBE prim/params-rules rec=set label=link-set-2 name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=link-set-set
+PROBE prim/params-rules rec=set label=link-set-set name="after" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=link-set-others
+PROBE prim/params-rules rec=set label=link-set-others name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=link-set-children
+PROBE prim/params-rules rec=set label=link-set-children name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=try label=link-set-root
+PROBE prim/params-rules rec=set label=link-set-root name="Object" glow0=0.000000 color0="<1.000000, 1.000000, 1.000000>" glow5=0.000000
+PROBE prim/params-rules rec=end

@@ -1,0 +1,56 @@
+grid: opensim-xengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE prim/effects rec=try label=particles-missing-value
+# debug-channel: from="Object" text="System.Reflection.TargetInvocationException: Exception has been thrown by the target of an invocation. ---> System.IndexOutOfRangeException: Index was outside the bounds of the array.\n  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+list.GetLSLFloatItem (System.Int32 itemIndex) [0x00007] in <4232b8ace8a34b48b171661be4717e89>:0 \n  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.SetParticleSystem (OpenSim.Region.Framework.Scenes.SceneObjectPart part, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list rules, System.String originFunc, System.Boolean expire) [0x00681] in <d09853dcdece4467894564db0ef815df>:0 \n  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llParticleSystem (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list rules) [0x00001] in <d09853dcdece4467894564db0ef815df>:0 \n  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llParticleSystem (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list rules) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0 \n  at SecondLife."
+# chat type=say from="Object" length=14 text="Script running"
+PROBE prim/effects rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE prim/effects rec=try label=play-missing-name
+PROBE prim/effects rec=try label=play-unknown-key
+PROBE prim/effects rec=try label=play-null-key
+PROBE prim/effects rec=try label=play-empty
+PROBE prim/effects rec=try label=play-volume-2
+PROBE prim/effects rec=try label=play-volume-negative
+PROBE prim/effects rec=try label=loop-missing-name
+PROBE prim/effects rec=try label=loop-master-missing-name
+PROBE prim/effects rec=try label=loop-slave-missing-name
+PROBE prim/effects rec=try label=trigger-missing-name
+PROBE prim/effects rec=try label=trigger-limited-upside-down
+PROBE prim/effects rec=try label=preload-missing-name
+PROBE prim/effects rec=try label=collision-sound-missing-name
+PROBE prim/effects rec=try label=sound-radius-negative
+PROBE prim/effects rec=try label=sound-radius-large
+PROBE prim/effects rec=try label=adjust-volume-2
+PROBE prim/effects rec=try label=sound-queueing
+PROBE prim/effects rec=try label=stop-nothing-playing
+PROBE prim/effects rec=try label=particles-unknown-rule
+PROBE prim/effects rec=try label=particles-wrong-type
+PROBE prim/effects rec=try label=particles-missing-texture
+PROBE prim/effects rec=try label=particles-age-past-range
+PROBE prim/effects rec=try label=particles-empty
+PROBE prim/effects rec=try label=link-particles-3
+PROBE prim/effects rec=try label=texture-anim-zero-frames
+PROBE prim/effects rec=try label=texture-anim-negative-rate
+PROBE prim/effects rec=try label=texture-anim-face-9
+PROBE prim/effects rec=try label=texture-anim-without-on
+PROBE prim/effects rec=try label=media-face-9
+PROBE prim/effects rec=media label=face-9 status=1003
+PROBE prim/effects rec=try label=media-long-url
+PROBE prim/effects rec=media label=long-url status=0 length=1109
+PROBE prim/effects rec=try label=media-unknown-rule
+PROBE prim/effects rec=media label=unknown-rule status=1000
+PROBE prim/effects rec=try label=media-width-past-max
+PROBE prim/effects rec=media label=width-past-max status=0 got=5000
+PROBE prim/effects rec=media label=get-face-9 count=0
+PROBE prim/effects rec=media label=get-unknown-rule got="1000"
+PROBE prim/effects rec=media label=clear status=0
+PROBE prim/effects rec=media label=clear-face-9 status=1003
+PROBE prim/effects rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="System.Reflection.TargetInvocationException: Exception has been thrown by the target of an invocation. ---> System.IndexOutOfRangeException: Index was outside the bounds of the array.\n  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+list.GetLSLFloatItem (System.Int32 itemIndex) [0x00007] in <4232b8ace8a34b48b171661be4717e89>:0 \n  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.SetParticleSystem (OpenSim.Region.Framework.Scenes.SceneObjectPart part, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list rules, System.String originFunc, System.Boolean expire) [0x00681] in <d09853dcdece4467894564db0ef815df>:0 \n  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llParticleSystem (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list rules) [0x00001] in <d09853dcdece4467894564db0ef815df>:0 \n  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llParticleSystem (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list rules) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0 \n  at SecondLife."
+# chat by=other type=say from="Object" length=14 text="Script running"

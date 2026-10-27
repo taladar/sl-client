@@ -1568,3 +1568,231 @@ its position, rotation and velocities, its physics and phantom flags — the
 same updates any moving prim sends, which it already renders. A keyframed
 motion is no message of its own: the grid moves the object and sends the
 updates.
+
+## Reading and writing the prim
+
+Measured on 2026-10-27 by the eight `prim/*` probes, on aditi's Mauve and
+the local OpenSim under YEngine and XEngine. Each works on the 0.5 m cube the
+runner rezzes, which is not physical; a probe that moves it puts it back. What
+a grid says about a call is its debug-channel chat, which the runner notes
+beside the `try` record the probe prints before the call. Where the two
+engines agree, OpenSim is one column: the prim is the region's, not the
+engine's. OpenSim stores a colour, an alpha and a glow as a byte, so a value
+it reads back is the nearest 1/255 (0.5 reads 0.498039); Second Life reads
+back what was set.
+
+### Placement
+
+`prim/placement`: each move starts where the prim was rezzed and is read as
+an offset from there.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llSetPos` 5 and 10 m | moves there | the same | no scripts |
+| `llSetPos` 15 or 50 m east, 15 or 100 m up, past the region's east edge, past 4096 m | **10 m** towards the target, in one call | the same | no scripts |
+| `llSetPos` or `llSetRegionPos` 20 m down, below the ground | stops at the ground (here 2.1 m below the prim) | the same | no scripts |
+| `PRIM_POS_LOCAL` of a root prim | the region position, like `llSetPos` | the same | no scripts |
+| `llSetRegionPos` 50 m east, 100 m up, to 4000 m | moves there in one call, answers TRUE | the same | no scripts |
+| `llSetRegionPos` into the ground | stops at the ground and answers **FALSE** | the same | no scripts |
+| `llSetRegionPos` to 5000 m | does not move, FALSE | the same | no scripts |
+| `llSetRegionPos` past the west edge, no neighbour there | moves the object off the region and **returns it to its owner's inventory** (seen once, 2026-10-27; the probe leaves it out since) | FALSE, it does not move (OpenSim's code refuses any position outside the region) | no scripts |
+| `llSetRot` of a rotation that is not normalised, `<0,0,2,2>`, and `PRIM_ROTATION` of it | normalised: `<0,0,0.7071,0.7071>` | the same | no scripts |
+| `llSetRot` of `<0,0,0,0>` | the identity | the same | no scripts |
+| `llSetRot` of `<0,0,0,−1>` | read back as `<0,0,0,−1>`, not flipped | the same | no scripts |
+| `llSetLocalRot` of a root prim | the region rotation | the same | no scripts |
+| `llSetScale` and `PRIM_SIZE` under 0.01 (0.005) | **0.01** | **0.005**: kept | no scripts |
+| a negative or zero axis | 0.01 | 0.001 | no scripts |
+| past 64 m (65) | **64** | kept | no scripts |
+| past 256 m (300) | 64 | **256** | no scripts |
+| `llGetBoundingBox` in the event that set the scale | **the box of an earlier scale**: it follows a scale late | the new box | no scripts |
+| `llGetBoundingBox` a second later; `llGetGeometricCenter` | the half sizes of the new scale, in the prim's frame (a quarter turn does not change it); the centre 0 | the same | no scripts |
+| `llTargetOmega(<0,0,1>, 2, 1)` | `PRIM_OMEGA` reads it back; `llGetRot` does not move (the spin is the viewer's) | the same | no scripts |
+| `PRIM_OMEGA` with a gain of 0.5 | read back 0.5 | read back **1.0** | no scripts |
+
+### `PRIM_*` round trips
+
+`prim/params`: each rule set, then read back with the same rule. The
+newer rules go by number, since OpenSim has no constants for them.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a fresh prim's `PRIM_MATERIAL` | 3 (wood) | the same | no scripts |
+| a fresh prim's `PRIM_POINT_LIGHT` intensity, `PRIM_TEXT` alpha | 0 and 1 | **1 and 0** | no scripts |
+| a fresh prim's `PRIM_ALLOW_UNSIT`, `PRIM_SCRIPTED_SIT_ONLY`, `PRIM_CLICK_ACTION`, `PRIM_REFLECTION_PROBE`, `PRIM_RENDER_MATERIAL`, `PRIM_SIT_FLAGS` | 1, 0, 0, off, `NULL_KEY`, 2 | nothing: each is `unsupported parameter` on the debug channel, set or get | no scripts |
+| `PRIM_PROJECTOR` (42), `PRIM_CAST_SHADOWS` (24), get | nothing, `llGetPrimitiveParams error: Param 0 error, unknown parameter` | nothing, silently; a set of 24 is `unsupported parameter` under YEngine and **never returns under XEngine** (left out there) | no scripts |
+| hollow 0.99 | **0.95** | kept, 0.99 | no scripts |
+| cut, twist, taper and shear past their ranges | clamped to `[0,1]`, `[−1,1]`, `[0,2]` and `[−0.5,0.5]` | the same | no scripts |
+| a cut whose begin is past its end (0.8, 0.2) | the begin pulled to 0.02 below the end: `<0.18, 0.2>` | the same | no scripts |
+| a hole shape that does not exist (`0x40`) | kept as the default, with `warning running rule #1 (PRIM_TYPE_BOX): Invalid hole type.` | the default, silently | no scripts |
+| a torus's revolutions 0, radius offset 2 | revolutions 1; radius offset **0.666667** | revolutions 1; radius offset 1 | no scripts |
+| a torus's hole size `<2, 0.01>`, top shear 1, taper `<2, 2>`, radius offset 5, skew 2 | hole **`<1, 0.05>`**, shear 0.5, taper `<1, 1>`, radius offset 1, skew 0.95 | hole `<1, 0.01>`; the rest the same | no scripts |
+| a tube's or ring's radius offset 1 | read back **0** | read back 1 | no scripts |
+| a sculpt type no grid has (6) | kept, 6 | 7 (mesh) | no scripts |
+| a sculpt map that is not a key, a prim type that does not exist (9) | nothing changes; the second says `error running rule #1: unknown rule.` | nothing changes; the second says `Error running rule #2: arg #0 - unsupported parameter` | no scripts |
+| colour and alpha past their ranges | clamped to `[0,1]` | the same | no scripts |
+| texture offsets past ±1, rotation past 2π | kept as given (3, 7) | clamped to ±1, the rotation taken modulo 2π | no scripts |
+| texture repeats of ±200 and 0 | kept | the same | no scripts |
+| a texture `NULL_KEY` | **applied**, silently (unlike `llSetTexture`, below) | not applied, silently | no scripts |
+| a texture name not in the inventory | not applied, silently | the same | no scripts |
+| a texture key no asset has | applied | the same | no scripts |
+| shiny 7, bump 40 | refused, `bounds error; 7 is not in (0, 3).` | **set to 0 and 8** | no scripts |
+| fullbright 2, glow 2 or −1, texgen 5, material 8 or −1 | refused, each with a `bounds error` line naming the range | fullbright TRUE, glow clamped to `[0,1]`, texgen 0, the materials refused silently | no scripts |
+| a light with intensity 2, radius 30, falloff 3 | clamped to 1, 20, 2 | the same | no scripts |
+| a light with negative values | 0, 0, 0 | 0, **0.1, 0.01** | no scripts |
+| a light or flexible path turned off | every value read back as 0 | the other values kept (a light's colour, radius 0.1 and falloff 0.01) | no scripts |
+| a flexible path past its ranges: softness 5, gravity 20, friction −20, wind 20, tension 20 | clamped: 3, 10, 0, 10, 10 | kept as given | no scripts |
+| a flexible tension of 0.25 | read back 0.2: kept in tenths | 0.25 | no scripts |
+| hover text of 300 characters | **refused**: the old text stays | cut to 254 | no scripts |
+| a slice past its range; reversed (0.8, 0.2) | clamped; the begin pulled below the end, `<0.18, 0.2>` | clamped; **swapped round**, `<0.2, 0.8>` | no scripts |
+| a name of 100 characters | cut to 63 | **kept** | no scripts |
+| a description of 200 characters | cut to 127 | the same | no scripts |
+| a pipe or a newline in a name or description | each becomes `?` | kept | no scripts |
+| alpha mode with a cutoff past 255, an alpha mode that does not exist (9) | 255; mode 3 | refused: `must be 0 to 255`, `must be 0 to 3` | no scripts |
+| normal and specular maps | round-trip | the same | no scripts |
+| the sit target, `PRIM_ALLOW_UNSIT`, `PRIM_SCRIPTED_SIT_ONLY`, a click action, sit flags, a reflection probe, a render material | set and read back; a click action of 99 is ignored | the sit target round-trips; the rest are `unsupported parameter` | no scripts |
+| `PRIM_POSITION` 15 m east | 10 m | 10 m | no scripts |
+
+### Rule lists
+
+`prim/params-rules`: a rule list as a whole.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| several rules in a get, the same rule twice | in the order asked, once per asking | the same | no scripts |
+| `ALL_SIDES` in a get | one entry per face, in face order | the same | no scripts |
+| a get of a face past the prim's (6, 100, −2) | nothing for that rule; the rules after it are answered (−2 is `ALL_SIDES`) | face 6 is answered as if it were there; **face 100 and −2 throw**: YEngine stops the script (`100 is outside the range of MAX_FACES`), XEngine ends the event | no scripts |
+| a set of face 6, of face −2 | face 6 nothing; −2 as `ALL_SIDES` | nothing for either | no scripts |
+| an unknown rule code in a get (9999, −5) | the whole get answers **nothing**, `Param 0 error, unknown parameter` | the code is skipped, the rules after it answered | no scripts |
+| an unknown rule code in a set | `error running rule #1: unknown rule.`; the rules after it do not run | `unsupported parameter`; the rules after it do not run | no scripts |
+| a rule code as a string (`"7"`) | the get answers nothing | read as the integer | no scripts |
+| a value of the wrong type: a glow as a string, a vector; a face as a float; a colour as a string; a name as an integer or a key | refused with `arg #2 (glow) float expected but string given.` and its like; the rules after it do not run | a string, integer or key that converts is **taken** (glow `"0.5"`, name `7`); a vector, a float face and a string colour are refused (`parameter 3 must be float`), and the rules after them do not run | no scripts |
+| a glow as an integer | taken | taken | no scripts |
+| a rule with too few values | the rule does nothing, silently | the same | no scripts |
+| a name, a glow of `"x"`, then a colour | the name is set, the colour is not | all three run: `"x"` is read as a glow of 0 | no scripts |
+| `PRIM_LINK_TARGET` 0, `LINK_THIS` on a single prim | the prim | the same | no scripts |
+| `PRIM_LINK_TARGET` 1 or `LINK_SET` on a single prim, get | nothing | the prim | no scripts |
+| `PRIM_LINK_TARGET` 2 on a single prim | nothing for the rules after it | the same | no scripts |
+| `llGetLinkPrimitiveParams` of 0, `LINK_THIS` on a single prim | the prim | the same | no scripts |
+| `llGetLinkPrimitiveParams` of 1, `LINK_SET`, `LINK_ROOT` on a single prim | nothing | **the prim** | no scripts |
+| `llSetLinkPrimitiveParamsFast` of 0, `LINK_THIS`, `LINK_SET` on a single prim | the prim | the same | no scripts |
+| `llSetLinkPrimitiveParamsFast` of 1, `LINK_ROOT` on a single prim | nothing | **the prim** | no scripts |
+
+### The older per-face calls
+
+`prim/faces`.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llGetColor(ALL_SIDES)` | the **mean** of the faces' colours | the same | no scripts |
+| `llGetAlpha(ALL_SIDES)` | the **sum** of the faces' alphas (6 for an opaque cube) | the same | no scripts |
+| `llSetColor` past its range, read by `llGetColor` in the same event | **as given**, `<2,−1,0.5>` (`PRIM_COLOR` reads it clamped) | clamped | no scripts |
+| `llSetColor` of face 6 | nothing | the same | no scripts |
+| `llSetColor` of face −2 | every face, as `ALL_SIDES` | nothing | no scripts |
+| `llGetColor` or `llGetAlpha` of face 6 | white, 1 | **black, 0** | no scripts |
+| `llGetColor` of face −2 | the mean, as `ALL_SIDES` | black | no scripts |
+| `llSetAlpha` past 1 and below 0 | clamped | the same | no scripts |
+| `llSetTexture` of a name not in the inventory, `NULL_KEY` or `""` | not applied, `Could not find texture '…'.` (also for `NULL_KEY`) | a name or `""`: not applied, silently; **`NULL_KEY` is applied** | no scripts |
+| `llGetTexture` of face 6 | `NULL_KEY` | the same | no scripts |
+| `llScaleTexture` past its range, of 0 | kept as given | the same | no scripts |
+| `llOffsetTexture` past ±1 | kept | clamped to ±1 | no scripts |
+| `llRotateTexture` past 2π | kept | modulo 2π | no scripts |
+| `llSetText` alpha 2 | 1 | **0** | no scripts |
+| `llSetText` alpha −1 | 0 | **1** | no scripts |
+| `llSetText` of 300 characters; of 100 + three `é` + 300 | cut to 254; to 251 characters (254 bytes) | the same | no scripts |
+| `llGetNumberOfSides`: box 6, hollow 7, cut 6, hollow and cut 7, tapered to a point 6; cylinder 3, hollow and cut 6; prism 5; sphere 1, hollow, cut and dimpled 6; torus 3; tube 6; ring 5; sculpt 1 | as listed | the same | no scripts |
+| `llSetLinkColor`, `llSetLinkAlpha`, `llSetLinkTexture` of `LINK_THIS`; of link 0 | the prim | the same | no scripts |
+| `llSetLinkColor` of link 2 on a single prim | nothing | the same | no scripts |
+
+### The object's identity
+
+`prim/identity`.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a fresh prim | `llGetLinkNumber` 0, `llGetNumberOfPrims` 1, `llGetCreator` the owner | the same | no scripts |
+| `llGetLinkKey(0)`, `llGetLinkKey(1)` on a single prim | the prim, `NULL_KEY` | the prim, **the prim** | no scripts |
+| `llGetLinkName(1)` on a single prim | `NULL_KEY` as text | the same | no scripts |
+| `llSetObjectName` of 64 or 100 characters | cut to **63** | **kept** | no scripts |
+| a name of forty `é` | sixty-two `?`: cut to whole characters within 63 bytes, and every byte of a character outside ASCII reads back as `?` | kept | no scripts |
+| a description of 128 or 200 characters | cut to 127 | the same | no scripts |
+| a description of a hundred `é` | a hundred and twenty-six `?` | sixty-three `é`: cut within 127 bytes | no scripts |
+| a pipe or a newline in a name or description | `?` | kept | no scripts |
+| leading and trailing spaces, an empty name | kept | the same | no scripts |
+| `llSetClickAction` 0 to 9 | `PRIM_CLICK_ACTION` and `OBJECT_CLICK_ACTION` read it back | `OBJECT_CLICK_ACTION` reads it back; `PRIM_CLICK_ACTION` is unsupported | no scripts |
+| `llSetClickAction` 10, 99, −1 | ignored: reads 0 | **kept**: 10, 99, 255 | no scripts |
+| `llGetObjectDetails` of `NULL_KEY`, a key nothing has, text that is no key, or with no codes | an empty list | the same | no scripts |
+| an unknown code among known ones | −1 in its place (`OBJECT_UNKNOWN_DETAIL`) | the same | no scripts |
+| `OBJECT_VELOCITY` of a prim at rest | a vector | a value `llGetListEntryType` calls `TYPE_INVALID`, printed `<0, 0, 0>` | no scripts |
+| `OBJECT_STREAMING_COST`, `OBJECT_PHYSICS_COST`, `OBJECT_SERVER_COST` of the cube | 0.05, 1.0, 0.5 | 1.0, 0.1, 0 | no scripts |
+| `OBJECT_LAST_OWNER_ID` | `NULL_KEY` | the owner | no scripts |
+| codes 42 to 56 (`OBJECT_MATERIAL` to `OBJECT_VOLUME_DETECT`) | answered (material 3, mass 125, scale, text colour and alpha, health, damage, the five permission masks, …) | **−1** for each | no scripts |
+| `OBJECT_PRIM_COUNT` of the owner | the prims the avatar wears (22 here) | 0 | no scripts |
+
+### Linking
+
+`prim/link`: prim A links prim B, two metres east, once the owner has
+granted `PERMISSION_CHANGE_LINKS`; each step is a second and a half apart.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llCreateLink` with no permission | `Script trying to link but PERMISSION_CHANGE_LINKS permission not set!` | `llCreateLink: PERMISSION_CHANGE_LINKS permission not set` | no scripts |
+| `llCreateLink` of `NULL_KEY`, a key nothing has, the owner | `Script trying to link but target is invalid.` each | nothing, silently | no scripts |
+| linked | `CHANGED_LINK` in both prims; the root is link 1, the child 2, `llGetNumberOfPrims` 2 | the same, and the child gets a `changed` of 32768 (OpenSim's `CHANGED_POSITION`) whenever it moves | no scripts |
+| `llGetLinkKey(0)` in a linkset | `NULL_KEY` | the prim itself | no scripts |
+| `llSetLinkPrimitiveParamsFast` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN`, `LINK_ROOT`, `LINK_THIS`, 1, 2 | the prims each names | the same | no scripts |
+| … of link 0 or 3 in a linkset of two | nothing | the same | no scripts |
+| `llGetLinkPrimitiveParams` of `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN` | **nothing** | the prims each names, in link order | no scripts |
+| `PRIM_LINK_TARGET` in a get and in a set | moves on to the link named | the same | no scripts |
+| the child's `PRIM_POS_LOCAL` 5, 20, 60 m | set as given | the same | no scripts |
+| the child's `PRIM_POSITION` of a region position 5, 20, 60 m from the root | **nothing**: the child stays where it was | the region position is taken **as the offset**: the child goes that far from the root | no scripts |
+| `llSetPos` in a child, 15 m from the root | 15 m: no 10 m cap for a child's offset | **12 m**: capped 10 m from where it was (2 m) | no scripts |
+| `llBreakLink(2)`, `llBreakLink(1)` | unlinks; `CHANGED_LINK` in both | the same | no scripts |
+| `llBreakLink(3)` | nothing | the same | no scripts |
+| `llCreateLink(…, FALSE)` | the target becomes the root, this script's prim link 2 | the same | no scripts |
+| `llBreakAllLinks` from a child | unlinks every prim | the same | no scripts |
+
+### `changed`: which setter raises what
+
+`prim/changed`: one setter a second, and every `changed` event in the second
+after it.
+
+| setter | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llSetColor`, `llSetAlpha`, `llSetLinkColor` | `CHANGED_COLOR` | the same | no scripts |
+| the same colour again | `CHANGED_COLOR` again | **nothing** | no scripts |
+| the same alpha again | `CHANGED_COLOR` | the same | no scripts |
+| `llSetTexture`, `llScaleTexture`, `llOffsetTexture`, `llRotateTexture`, glow, fullbright, bump and shiny, texgen, alpha mode, normal and specular maps | **nothing** | `CHANGED_TEXTURE` (the same texture again: nothing) | no scripts |
+| `llSetScale`, `PRIM_SIZE` | `CHANGED_SCALE` | the same | no scripts |
+| the same scale again | nothing | `CHANGED_SCALE` again | no scripts |
+| `PRIM_TYPE` | `CHANGED_SHAPE` | the same | no scripts |
+| `llSetPos` | nothing | 32768 (`CHANGED_POSITION`, OpenSim's own) | no scripts |
+| `llSetRot`, text, name, description, light, flexible, material, phantom, slice, `llTargetOmega`, texture animation, particles, sit target, sit text, click action, `llAllowInventoryDrop` | nothing | the same | no scripts |
+| `llSetPrimMediaParams`, `llClearPrimMedia` | `CHANGED_MEDIA` | YEngine the same; XEngine nothing for the set, **two** for the clear | no scripts |
+| a render material (`PRIM_RENDER_MATERIAL`) | `CHANGED_RENDER_MATERIAL` | nothing: the rule is unsupported | no scripts |
+| colour and size in one call | one event, `CHANGED_COLOR \| CHANGED_SCALE` | **two** events | no scripts |
+
+### Sound, particles, texture animation and media
+
+`prim/effects`: no function reads these back.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a sound name not in the inventory, `NULL_KEY` or `""`, to `llPlaySound`, `llLoopSound`, its master and slave, `llTriggerSound`, `llPreloadSound` | `Could not find sound '…'.` | nothing, silently | no scripts |
+| a sound key no asset has, a volume past 1 or below 0, `llCollisionSound` of a missing name, the radius, volume and queueing calls past their ranges, `llStopSound` with nothing playing | nothing | the same | no scripts |
+| `llParticleSystem` with a value of the wrong type | `PSYS error: Rule 1 error, PSYS_PART_MAX_AGE needs float data.` | nothing | no scripts |
+| … with a rule missing its value | nothing; the script carries on | **throws** (`IndexOutOfRangeException`): YEngine stops the script, XEngine ends the event | no scripts |
+| … with an unknown rule, a missing texture, values past their ranges; `llLinkParticleSystem` of link 3; texture animations of zero frames, a negative rate, face 9, without `ANIM_ON` | nothing | the same | no scripts |
+| `llSetPrimMediaParams` of face 9 | 1003 (`STATUS_NOT_FOUND`), `PRIM_MEDIA error: face 9 on object … not found` | 1003, silently | no scripts |
+| a URL past 1024 characters, a width past 2048 | 1002 (`STATUS_BOUNDS_ERROR`), `Bounds error near parameter #0, param=3.  No values have been set.` | **0**: kept as given | no scripts |
+| an unknown media rule | 1000 (`STATUS_MALFORMED_PARAMS`), `Malformed parameters …` | 1000, silently | no scripts |
+| `llGetPrimMediaParams` of an unknown rule | nothing | `1000` | no scripts |
+| `llClearPrimMedia` of face 9 | 1003 | the same | no scripts |
+
+### What the viewer does with it
+
+Every setter here ends in an object update, which the viewer already renders
+as it arrives: the position and rotation, the scale, the shape, each face's
+colour, texture and material, the light, the flexible path, hover text, the
+particle system and the texture animation. `llTargetOmega`'s spin is applied
+by the viewer itself from the update's angular velocity. The grid's clamps are
+the grid's: the viewer draws what it is sent.

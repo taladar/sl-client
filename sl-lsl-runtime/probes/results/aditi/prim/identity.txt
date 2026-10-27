@@ -1,0 +1,105 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE prim/identity rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE prim/identity rec=fresh name="Object" desc="" key=self owner=owner creator=owner link=0 prims=1 link_key_0=self link_key_1=null link_key_2=null link_name_0="Object" link_name_1="00000000-0000-0000-0000-000000000000" link_name_2="00000000-0000-0000-0000-000000000000"
+PROBE prim/identity rec=name label=short asked=5 length=5 bytes=6 got="Probe" detail_same=1
+PROBE prim/identity rec=name label=63 asked=63 length=63 bytes=63 got="012345678901234567890123456789012345678901234567890123456789012" detail_same=1
+PROBE prim/identity rec=name label=64 asked=64 length=63 bytes=63 got="012345678901234567890123456789012345678901234567890123456789012" detail_same=1
+PROBE prim/identity rec=name label=100 asked=100 length=63 bytes=63 got="012345678901234567890123456789012345678901234567890123456789012" detail_same=1
+PROBE prim/identity rec=name label=two-byte-40 asked=40 length=62 bytes=63 got="??????????????????????????????????????????????????????????????" detail_same=1
+PROBE prim/identity rec=name label=pipe asked=3 length=3 bytes=3 got="a?b" detail_same=1
+PROBE prim/identity rec=name label=newline asked=3 length=3 bytes=3 got="a?b" detail_same=1
+PROBE prim/identity rec=name label=spaces asked=10 length=10 bytes=12 got="  padded  " detail_same=1
+PROBE prim/identity rec=name label=empty asked=0 length=0 bytes=0 got="" detail_same=1
+PROBE prim/identity rec=desc label=short asked=13 length=13 got="a description" detail_same=1
+PROBE prim/identity rec=desc label=127 asked=127 length=127 got="0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456" detail_same=1
+PROBE prim/identity rec=desc label=128 asked=128 length=127 got="0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456" detail_same=1
+PROBE prim/identity rec=desc label=200 asked=200 length=127 got="0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456" detail_same=1
+PROBE prim/identity rec=desc label=two-byte-100 asked=100 length=126 got="??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????" detail_same=1
+PROBE prim/identity rec=desc label=pipe asked=3 length=3 got="a?b" detail_same=1
+PROBE prim/identity rec=desc label=newline asked=3 length=3 got="a?b" detail_same=1
+PROBE prim/identity rec=desc label=spaces asked=10 length=10 got="  padded  " detail_same=1
+# animations avatar=owner playing=""
+PROBE prim/identity rec=click-action asked=0 prim=0 detail=0
+# animations avatar=other playing=""
+PROBE prim/identity rec=click-action asked=1 prim=1 detail=1
+PROBE prim/identity rec=click-action asked=2 prim=2 detail=2
+PROBE prim/identity rec=click-action asked=3 prim=3 detail=3
+PROBE prim/identity rec=click-action asked=4 prim=4 detail=4
+PROBE prim/identity rec=click-action asked=5 prim=5 detail=5
+PROBE prim/identity rec=click-action asked=6 prim=6 detail=6
+PROBE prim/identity rec=click-action asked=7 prim=7 detail=7
+PROBE prim/identity rec=click-action asked=8 prim=8 detail=8
+PROBE prim/identity rec=click-action asked=9 prim=9 detail=9
+PROBE prim/identity rec=click-action asked=10 prim=0 detail=0
+PROBE prim/identity rec=click-action asked=99 prim=0 detail=0
+PROBE prim/identity rec=click-action asked=-1 prim=0 detail=0
+PROBE prim/identity rec=detail code=1 count=1 got="s:Object"
+PROBE prim/identity rec=detail code=2 count=1 got="s:"
+PROBE prim/identity rec=detail code=3 count=1 got="v:-"
+PROBE prim/identity rec=detail code=4 count=1 got="r:<0.000000, 0.000000, 0.000000, 1.000000>"
+PROBE prim/identity rec=detail code=5 count=1 got="v:<0.000000, 0.000000, 0.000000>"
+PROBE prim/identity rec=detail code=6 count=1 got="key:owner"
+PROBE prim/identity rec=detail code=7 count=1 got="key:null"
+PROBE prim/identity rec=detail code=8 count=1 got="key:owner"
+PROBE prim/identity rec=detail code=9 count=1 got="i:1"
+PROBE prim/identity rec=detail code=10 count=1 got="i:1"
+PROBE prim/identity rec=detail code=11 count=1 got="i:-"
+PROBE prim/identity rec=detail code=12 count=1 got="f:-"
+PROBE prim/identity rec=detail code=13 count=1 got="i:1"
+PROBE prim/identity rec=detail code=14 count=1 got="f:0.500000"
+PROBE prim/identity rec=detail code=15 count=1 got="f:0.050000"
+PROBE prim/identity rec=detail code=16 count=1 got="f:1.000000"
+PROBE prim/identity rec=detail code=17 count=1 got="f:-"
+PROBE prim/identity rec=detail code=18 count=1 got="key:self"
+PROBE prim/identity rec=detail code=19 count=1 got="i:0"
+PROBE prim/identity rec=detail code=20 count=1 got="i:0"
+PROBE prim/identity rec=detail code=21 count=1 got="i:0"
+PROBE prim/identity rec=detail code=22 count=1 got="i:0"
+PROBE prim/identity rec=detail code=23 count=1 got="i:0"
+PROBE prim/identity rec=detail code=24 count=1 got="i:0"
+PROBE prim/identity rec=detail code=25 count=1 got="f:0.000000"
+PROBE prim/identity rec=detail code=26 count=1 got="f:-1.000000"
+PROBE prim/identity rec=detail code=27 count=1 got="key:null"
+PROBE prim/identity rec=detail code=28 count=1 got="i:0"
+PROBE prim/identity rec=detail code=29 count=1 got="v:<0.000000, 0.000000, 0.000000>"
+PROBE prim/identity rec=detail code=30 count=1 got="i:1"
+PROBE prim/identity rec=detail code=31 count=1 got="i:1"
+PROBE prim/identity rec=detail code=32 count=1 got="key:owner"
+PROBE prim/identity rec=detail code=33 count=1 got="s:"
+PROBE prim/identity rec=detail code=34 count=1 got="i:0"
+PROBE prim/identity rec=detail code=35 count=1 got="i:0"
+PROBE prim/identity rec=detail code=36 count=1 got="s:-"
+PROBE prim/identity rec=detail code=37 count=1 got="i:0"
+PROBE prim/identity rec=detail code=38 count=1 got="i:0"
+PROBE prim/identity rec=detail code=39 count=1 got="i:0"
+PROBE prim/identity rec=detail code=40 count=1 got="i:0"
+PROBE prim/identity rec=detail code=41 count=1 got="i:-1"
+PROBE prim/identity rec=detail code=42 count=1 got="i:3"
+PROBE prim/identity rec=detail code=43 count=1 got="f:125.000000"
+PROBE prim/identity rec=detail code=44 count=1 got="s:"
+PROBE prim/identity rec=detail code=45 count=1 got="s:-"
+PROBE prim/identity rec=detail code=46 count=1 got="i:0"
+PROBE prim/identity rec=detail code=47 count=1 got="v:<0.500000, 0.500000, 0.500000>"
+PROBE prim/identity rec=detail code=48 count=1 got="v:<0.000000, 0.000000, 0.000000>"
+PROBE prim/identity rec=detail code=49 count=1 got="f:1.000000"
+PROBE prim/identity rec=detail code=50 count=1 got="f:0.000000"
+PROBE prim/identity rec=detail code=51 count=1 got="f:0.000000"
+PROBE prim/identity rec=detail code=52 count=1 got="i:0"
+PROBE prim/identity rec=detail code=53 count=5 got="i:2147483647;i:2147483647;i:0;i:0;i:532480"
+PROBE prim/identity rec=detail code=54 count=5 got="i:2147483647;i:2147483647;i:0;i:0;i:532480"
+PROBE prim/identity rec=detail code=55 count=1 got="i:0"
+PROBE prim/identity rec=detail code=56 count=1 got="i:0"
+PROBE prim/identity rec=detail code=57 count=1 got="i:-1"
+PROBE prim/identity rec=details label=unknown-codes count=4 got="Object, -1, , -1"
+PROBE prim/identity rec=details label=null-key count=0
+PROBE prim/identity rec=details label=no-such-key count=0
+PROBE prim/identity rec=details label=not-a-key count=0
+PROBE prim/identity rec=details label=owner count=5 got="key:owner;key:owner;key:null;i:22;key:null"
+PROBE prim/identity rec=details label=empty-list count=0
+PROBE prim/identity rec=end

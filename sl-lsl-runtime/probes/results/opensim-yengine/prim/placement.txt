@@ -1,0 +1,55 @@
+grid: opensim-yengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE prim/placement rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE prim/placement rec=home scale=<0.500000,0.500000,0.500000> rot=<0.000000,0.000000,0.000000,1.000000> local=<0.000000,0.000000,0.000000> root=<0.000000,0.000000,0.000000> ground_below=-6.500000 link=0
+PROBE prim/placement rec=move label=setpos-east-5 moved=<5.000000,0.000000,0.000000> any=1
+PROBE prim/placement rec=move label=setpos-east-10 moved=<10.000000,0.000000,0.000000> any=1
+PROBE prim/placement rec=move label=setpos-east-15 moved=<10.000000,0.000000,0.000000> any=1
+PROBE prim/placement rec=move label=setpos-east-50 moved=<10.000000,0.000000,0.000000> any=1
+PROBE prim/placement rec=move label=setpos-up-15 moved=<0.000000,0.000000,10.000000> any=1
+PROBE prim/placement rec=move label=setpos-up-100 moved=<0.000000,0.000000,10.000000> any=1
+PROBE prim/placement rec=move label=setpos-down-20 moved=<0.000000,0.000000,-6.500000> any=1
+PROBE prim/placement rec=move label=setpos-past-east-edge moved=<10.000000,0.000000,0.000000> any=1
+PROBE prim/placement rec=move label=setpos-past-4096 moved=<0.000000,0.000000,10.000000> any=1
+PROBE prim/placement rec=move label=pos-local-root-3 moved=<3.000000,0.000000,0.000000> any=1
+PROBE prim/placement rec=move label=regionpos-east-50 answer=1 moved=<50.000000,0.000000,0.000000> any=1
+PROBE prim/placement rec=move label=regionpos-up-100 answer=1 moved=<0.000000,0.000000,100.000000> any=1
+PROBE prim/placement rec=move label=regionpos-down-20 answer=0 moved=<0.000000,0.000000,-6.500000> any=1
+PROBE prim/placement rec=move label=regionpos-4000 answer=1 moved=<0.000000,0.000000,3972.500000> any=1
+PROBE prim/placement rec=move label=regionpos-5000 answer=0 moved=<0.000000,0.000000,0.000000> any=0
+PROBE prim/placement rec=move label=regionpos-home answer=1 moved=<0.000000,0.000000,0.000000> any=0
+PROBE prim/placement rec=rot label=not-normalised got=<0.000000,0.000000,0.707100,0.707100>
+PROBE prim/placement rec=rot label=zero got=<0.000000,0.000000,0.000000,1.000000>
+PROBE prim/placement rec=rot label=negative-s got=<0.000000,0.000000,0.000000,-1.000000>
+PROBE prim/placement rec=rot label=quarter-z got=<0.000000,0.000000,0.707100,0.707100> local=<0.000000,0.000000,0.707100,0.707100> root=<0.000000,0.000000,0.707100,0.707100>
+PROBE prim/placement rec=rot label=local-quarter-z got=<0.000000,0.000000,0.707100,0.707100>
+PROBE prim/placement rec=rot label=prim-rotation-not-normalised got=<0.000000,0.000000,0.707100,0.707100>
+PROBE prim/placement rec=scale label=under-min asked=<0.005000,0.005000,0.005000> got=<0.005000,0.005000,0.005000>
+PROBE prim/placement rec=scale label=min asked=<0.010000,0.010000,0.010000> got=<0.010000,0.010000,0.010000>
+PROBE prim/placement rec=scale label=max asked=<64.000000,64.000000,64.000000> got=<64.000000,64.000000,64.000000>
+PROBE prim/placement rec=scale label=past-max asked=<65.000000,1.000000,1.000000> got=<65.000000,1.000000,1.000000>
+PROBE prim/placement rec=scale label=past-256 asked=<300.000000,1.000000,1.000000> got=<256.000000,1.000000,1.000000>
+PROBE prim/placement rec=scale label=negative asked=<-1.000000,1.000000,1.000000> got=<0.001000,1.000000,1.000000>
+PROBE prim/placement rec=scale label=zero asked=<0.000000,1.000000,1.000000> got=<0.001000,1.000000,1.000000>
+PROBE prim/placement rec=size label=under-min asked=<0.005000,0.005000,0.005000> got=<0.005000,0.005000,0.005000>
+PROBE prim/placement rec=size label=past-max asked=<65.000000,1.000000,1.000000> got=<65.000000,1.000000,1.000000>
+PROBE prim/placement rec=size label=negative asked=<-1.000000,1.000000,1.000000> got=<0.001000,1.000000,1.000000>
+PROBE prim/placement rec=box label=half when=at-once scale=<0.500000,0.500000,0.500000> min=<-0.250000,-0.250000,-0.250000> max=<0.250000,0.250000,0.250000> centre=<0.000000,0.000000,0.000000>
+PROBE prim/placement rec=box label=half when=later scale=<0.500000,0.500000,0.500000> min=<-0.250000,-0.250000,-0.250000> max=<0.250000,0.250000,0.250000> centre=<0.000000,0.000000,0.000000>
+PROBE prim/placement rec=box label=flat when=at-once scale=<2.000000,1.000000,0.100000> min=<-1.000000,-0.500000,-0.050000> max=<1.000000,0.500000,0.050000> centre=<0.000000,0.000000,0.000000>
+PROBE prim/placement rec=box label=flat when=later scale=<2.000000,1.000000,0.100000> min=<-1.000000,-0.500000,-0.050000> max=<1.000000,0.500000,0.050000> centre=<0.000000,0.000000,0.000000>
+PROBE prim/placement rec=box label=flat-turned when=at-once scale=<2.000000,1.000000,0.100000> min=<-1.000000,-0.500000,-0.050000> max=<1.000000,0.500000,0.050000> centre=<0.000000,0.000000,0.000000>
+PROBE prim/placement rec=box label=flat-turned when=later scale=<2.000000,1.000000,0.100000> min=<-1.000000,-0.500000,-0.050000> max=<1.000000,0.500000,0.050000> centre=<0.000000,0.000000,0.000000>
+PROBE prim/placement rec=omega label=fresh got="<0.000000, 0.000000, 0.000000>, 0.000000, 0.000000"
+PROBE prim/placement rec=omega label=target-omega got="<0.000000, 0.000000, 1.000000>, 2.000000, 1.000000" rot_moved=0
+PROBE prim/placement rec=omega label=stopped got="<0.000000, 0.000000, 0.000000>, 0.000000, 0.000000"
+PROBE prim/placement rec=omega label=prim-omega got="<1.000000, 0.000000, 0.000000>, 3.000000, 1.000000"
+PROBE prim/placement rec=after moved=<0.000000,0.000000,0.000000> scale=<0.500000,0.500000,0.500000>
+PROBE prim/placement rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

@@ -1,0 +1,82 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE prim/effects rec=try label=particles-missing-value
+PROBE prim/effects rec=carried-on label=particles-missing-value
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE prim/effects rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE prim/effects rec=try label=play-missing-name
+# debug-channel: from="Object" text="Could not find sound 'no such sound'."
+PROBE prim/effects rec=try label=play-unknown-key
+PROBE prim/effects rec=try label=play-null-key
+# debug-channel: from="Object" text="Could not find sound '00000000-0000-0000-0000-000000000000'."
+PROBE prim/effects rec=try label=play-empty
+# debug-channel: from="Object" text="Could not find sound ''."
+PROBE prim/effects rec=try label=play-volume-2
+PROBE prim/effects rec=try label=play-volume-negative
+PROBE prim/effects rec=try label=loop-missing-name
+# debug-channel: from="Object" text="Could not find sound 'no such sound'."
+PROBE prim/effects rec=try label=loop-master-missing-name
+# debug-channel: from="Object" text="Could not find sound 'no such sound'."
+PROBE prim/effects rec=try label=loop-slave-missing-name
+# debug-channel: from="Object" text="Could not find sound 'no such sound'."
+PROBE prim/effects rec=try label=trigger-missing-name
+# debug-channel: from="Object" text="Could not find sound 'no such sound'."
+PROBE prim/effects rec=try label=trigger-limited-upside-down
+PROBE prim/effects rec=try label=preload-missing-name
+# debug-channel: from="Object" text="Could not find sound 'no such sound'."
+PROBE prim/effects rec=try label=collision-sound-missing-name
+PROBE prim/effects rec=try label=sound-radius-negative
+PROBE prim/effects rec=try label=sound-radius-large
+PROBE prim/effects rec=try label=adjust-volume-2
+PROBE prim/effects rec=try label=sound-queueing
+PROBE prim/effects rec=try label=stop-nothing-playing
+PROBE prim/effects rec=try label=particles-unknown-rule
+PROBE prim/effects rec=try label=particles-wrong-type
+# debug-channel: from="Object" text="PSYS error: Rule 1 error, PSYS_PART_MAX_AGE needs float data."
+PROBE prim/effects rec=try label=particles-missing-texture
+PROBE prim/effects rec=try label=particles-age-past-range
+PROBE prim/effects rec=try label=particles-empty
+PROBE prim/effects rec=try label=link-particles-3
+PROBE prim/effects rec=try label=texture-anim-zero-frames
+PROBE prim/effects rec=try label=texture-anim-negative-rate
+PROBE prim/effects rec=try label=texture-anim-face-9
+PROBE prim/effects rec=try label=texture-anim-without-on
+PROBE prim/effects rec=try label=media-face-9
+# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object 8b4133c2-85c9-1de1-e68b-1d5a4457e975 not found"
+PROBE prim/effects rec=media label=face-9 status=1003
+PROBE prim/effects rec=try label=media-long-url
+# debug-channel: from="Object" text="llSetPrimMediaParams error: Bounds error near parameter #0, param=3.  No values have been set."
+PROBE prim/effects rec=media label=long-url status=1002 length=0
+PROBE prim/effects rec=try label=media-unknown-rule
+# debug-channel: from="Object" text="llSetPrimMediaParams error: Malformed parameters near parameter #0, param=99.  No values have been set."
+PROBE prim/effects rec=media label=unknown-rule status=1000
+PROBE prim/effects rec=try label=media-width-past-max
+# debug-channel: from="Object" text="llSetPrimMediaParams error: Bounds error near parameter #0, param=9.  No values have been set."
+PROBE prim/effects rec=media label=width-past-max status=1002 got=
+# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object 8b4133c2-85c9-1de1-e68b-1d5a4457e975 not found"
+PROBE prim/effects rec=media label=get-face-9 count=0
+PROBE prim/effects rec=media label=get-unknown-rule got=""
+PROBE prim/effects rec=media label=clear status=0
+# debug-channel: from="Object" text="PRIM_MEDIA error: face 9 on object 8b4133c2-85c9-1de1-e68b-1d5a4457e975 not found"
+PROBE prim/effects rec=media label=clear-face-9 status=1003
+PROBE prim/effects rec=end
+# debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
+# debug-channel by=other: from="Object" text="Could not find sound '00000000-0000-0000-0000-000000000000'."
+# debug-channel by=other: from="Object" text="Could not find sound ''."
+# debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
+# debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
+# debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
+# debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
+# debug-channel by=other: from="Object" text="Could not find sound 'no such sound'."
+# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object 8b4133c2-85c9-1de1-e68b-1d5a4457e975 not found"
+# debug-channel by=other: from="Object" text="llSetPrimMediaParams error: Bounds error near parameter #0, param=3.  No values have been set."
+# debug-channel by=other: from="Object" text="llSetPrimMediaParams error: Malformed parameters near parameter #0, param=99.  No values have been set."
+# debug-channel by=other: from="Object" text="llSetPrimMediaParams error: Bounds error near parameter #0, param=9.  No values have been set."
+# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object 8b4133c2-85c9-1de1-e68b-1d5a4457e975 not found"
+# debug-channel by=other: from="Object" text="PRIM_MEDIA error: face 9 on object 8b4133c2-85c9-1de1-e68b-1d5a4457e975 not found"

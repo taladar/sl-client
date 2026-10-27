@@ -1,0 +1,101 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE prim/link rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE prim/link rec=child-found from_home=<2.000000,0.000000,0.000000>
+PROBE prim/link rec=try label=link-without-permission
+# debug-channel: from="Object" text="Script trying to link but PERMISSION_CHANGE_LINKS permission not set!"
+PROBE prim/link rec=links label=without-permission prims=1 link=0 key0=self key1=null key2=null key3=null name1="00000000-0000-0000-0000-000000000000" name2="00000000-0000-0000-0000-000000000000"
+PROBE prim/link rec=waiting drive=answer grant=128
+# question permissions=128 object="Object" owner="<first> <last>" experience=none
+# answer grant=128
+PROBE prim/link rec=permissions got=128
+PROBE prim/link rec=try label=link-null-key
+# debug-channel: from="Object" text="Script trying to link but target is invalid."
+PROBE prim/link rec=try label=link-no-such-key
+# debug-channel: from="Object" text="Script trying to link but target is invalid."
+PROBE prim/link rec=try label=link-owner
+# debug-channel: from="Object" text="Script trying to link but target is invalid."
+PROBE prim/link rec=links label=after-bad-links prims=1 link=0 key0=self key1=null key2=null key3=null name1="00000000-0000-0000-0000-000000000000" name2="00000000-0000-0000-0000-000000000000"
+PROBE prim/link rec=try label=link
+PROBE prim/link rec=child-changed bits=LINK link=2 prims=2
+PROBE prim/link rec=changed bits=LINK link=1 prims=2
+PROBE prim/link rec=links label=linked prims=2 link=1 key0=null key1=self key2=child key3=null name1="Object" name2="Object"
+PROBE prim/link rec=try label=link-set
+PROBE prim/link rec=child label=linked link=2 from_root=<2.000000,0.000000,0.000000> local=<2.000000,0.000000,0.000000> prims=2 sender=1
+PROBE prim/link rec=link-name label=link-set name1="named" name2="named"
+PROBE prim/link rec=try label=link-all-others
+PROBE prim/link rec=link-name label=link-all-others name1="Object" name2="named"
+PROBE prim/link rec=try label=link-all-children
+PROBE prim/link rec=link-name label=link-all-children name1="Object" name2="named"
+PROBE prim/link rec=try label=link-root
+PROBE prim/link rec=link-name label=link-root name1="named" name2="Object"
+PROBE prim/link rec=try label=link-this
+PROBE prim/link rec=link-name label=link-this name1="named" name2="Object"
+PROBE prim/link rec=try label=link-0
+PROBE prim/link rec=link-name label=link-0 name1="Object" name2="Object"
+PROBE prim/link rec=try label=link-1
+PROBE prim/link rec=link-name label=link-1 name1="named" name2="Object"
+PROBE prim/link rec=try label=link-2
+PROBE prim/link rec=link-name label=link-2 name1="Object" name2="named"
+PROBE prim/link rec=try label=link-3
+PROBE prim/link rec=link-name label=link-3 name1="Object" name2="Object"
+PROBE prim/link rec=link-get label=child-place from_root=<2.000000,0.000000,0.000000> local=<2.000000,0.000000,0.000000> rot="<0.000000, 0.000000, 0.000000, 1.000000>" rot_local="<0.000000, 0.000000, 0.000000, 1.000000>" size=<0.500000,0.500000,0.500000>
+PROBE prim/link rec=try label=link-get-set
+PROBE prim/link rec=link-get label=link-get-set count=0 got=""
+PROBE prim/link rec=try label=link-get-others
+PROBE prim/link rec=link-get label=link-get-others count=0 got=""
+PROBE prim/link rec=try label=link-get-children
+PROBE prim/link rec=link-get label=link-get-children count=0 got=""
+PROBE prim/link rec=try label=link-get-3
+PROBE prim/link rec=link-get label=link-get-3 count=0 got=""
+PROBE prim/link rec=try label=link-get-target
+PROBE prim/link rec=link-get label=link-get-target count=3 got="Object, , "
+PROBE prim/link rec=try label=link-set-target
+PROBE prim/link rec=try label=link-set-target
+PROBE prim/link rec=link-get label=link-set-target count=0 got=""
+PROBE prim/link rec=try label=pos-local-5
+PROBE prim/link rec=child-moved label=pos-local-5 local=<5.000000,0.000000,0.000000>
+PROBE prim/link rec=try label=pos-local-20
+PROBE prim/link rec=child-moved label=pos-local-20 local=<20.000000,0.000000,0.000000>
+PROBE prim/link rec=try label=pos-local-60
+PROBE prim/link rec=child-moved label=pos-local-60 local=<60.000000,0.000000,0.000000>
+PROBE prim/link rec=try label=position-5
+PROBE prim/link rec=child-moved label=position-5 local=<2.000000,0.000000,0.000000>
+PROBE prim/link rec=try label=position-20
+PROBE prim/link rec=child-moved label=position-20 local=<2.000000,0.000000,0.000000>
+PROBE prim/link rec=try label=position-60
+PROBE prim/link rec=child-moved label=position-60 local=<2.000000,0.000000,0.000000>
+PROBE prim/link rec=child-setpos asked=15 local=<15.000000,0.000000,0.000000>
+PROBE prim/link rec=try label=break-2
+PROBE prim/link rec=child-changed bits=LINK link=0 prims=1
+PROBE prim/link rec=changed bits=LINK link=0 prims=1
+PROBE prim/link rec=links label=broken-2 prims=1 link=0 key0=self key1=null key2=null key3=null name1="00000000-0000-0000-0000-000000000000" name2="00000000-0000-0000-0000-000000000000"
+PROBE prim/link rec=try label=relink
+PROBE prim/link rec=child-changed bits=LINK link=2 prims=2
+PROBE prim/link rec=changed bits=LINK link=1 prims=2
+PROBE prim/link rec=links label=relinked prims=2 link=1 key0=null key1=self key2=child key3=null name1="Object" name2="Object"
+PROBE prim/link rec=try label=break-3
+PROBE prim/link rec=try label=break-1
+PROBE prim/link rec=child-changed bits=LINK link=0 prims=1
+PROBE prim/link rec=changed bits=LINK link=0 prims=1
+PROBE prim/link rec=links label=after-break-1 prims=1 link=0 key0=self key1=null key2=null key3=null name1="00000000-0000-0000-0000-000000000000" name2="00000000-0000-0000-0000-000000000000"
+PROBE prim/link rec=try label=break-all
+PROBE prim/link rec=links label=broken-all prims=1 link=0 key0=self key1=null key2=null key3=null name1="00000000-0000-0000-0000-000000000000" name2="00000000-0000-0000-0000-000000000000"
+PROBE prim/link rec=try label=break-all-single
+PROBE prim/link rec=try label=link-as-child
+PROBE prim/link rec=child-changed bits=LINK link=1 prims=2
+PROBE prim/link rec=changed bits=LINK link=2 prims=2
+PROBE prim/link rec=links label=as-child prims=2 link=2 key0=child key1=child key2=self key3=null name1="Object" name2="Object"
+PROBE prim/link rec=try label=break-all-from-child
+PROBE prim/link rec=child label=as-child link=0 from_root=<0.000000,0.000000,0.000000> local=region<0.000000,0.000000,0.000000> prims=1 sender=2
+PROBE prim/link rec=child-changed bits=LINK link=0 prims=1
+PROBE prim/link rec=changed bits=LINK link=0 prims=1
+PROBE prim/link rec=links label=end prims=1 link=0 key0=self key1=null key2=null key3=null name1="00000000-0000-0000-0000-000000000000" name2="00000000-0000-0000-0000-000000000000"
+PROBE prim/link rec=end

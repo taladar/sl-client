@@ -234,6 +234,25 @@ What has bitten already, and how a probe should be shaped for it:
   while the owner is there, and a timer may not survive what it asked for, so
   start a repeating sensor as a second clock when the event it waits for
   comes.
+- **OpenSim throws on a face it cannot index.** A get of face 100 or −2
+  (`llGetPrimitiveParams([PRIM_COLOR, 100])`) is an exception there, which
+  under YEngine stops the script, and so is a particle rule with no value
+  after it (`prim/params-rules`, `prim/effects`). Ask for each in a script of
+  its own.
+- **Some calls never return on XEngine.** `llSetPrimitiveParams` of rule 24
+  (`PRIM_CAST_SHADOWS`) did not come back, and a script stuck in it held the
+  engine up so long that the next upload went unanswered and the run failed
+  (`prim/params`); that script is `skip-on: opensim-xengine`. Separately,
+  XEngine can stop answering uploads late in a long run (once at the eighth
+  of the `prim/*` set): run a large set of probes under XEngine in batches,
+  restarting OpenSim between them.
+- **A move past the region's edge can lose the prim on Second Life.**
+  `llSetRegionPos` a few metres past an edge with no neighbour moved the
+  prim off the region, which returned it to its owner's inventory and ended
+  the probe (`prim/placement`). Keep moves inside the region.
+- **Second Life reads some things back late.** `llGetBoundingBox` in the
+  event that set the scale is the box of an earlier scale
+  (`prim/placement`); read it again a second later.
 - **The runner is slow back from a trip `away`.** It settles the owner in and
   walks it to the build location before it answers anything, which can take
   half a minute on Second Life; a probe that asks a question right after the
@@ -439,6 +458,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `ossl/*`, 2026-10-26: which OSSL functions an ordinary owner's script may call on OpenSim, by threat level, `Allow_` line or neither, what a denied, failing or deprecated call says, to whom and what it does to the script, and a LightShare and a MOD call; Second Life's compile errors for them | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#ossl) | | |
 | `persistence/*`, 2026-10-26: what a running script keeps when its object is taken and rezzed again, and across a restart of its region (OpenSim only): globals, state, permissions, timer, listen, queued events, a sleep in progress, script time, a stopped script beside it, and what runs first | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#persistence) | | |
 | `physics/*`, 2026-10-27: the status flags, the physics material and mass, forces, velocities and impulses, position and rotation targets, `llMoveToTarget` and the look-at functions, keyframed motion, the vehicle setters and motors, and pathfinding characters (Second Life only) — their clamps and their errors | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#status-flags-forces-targets-and-vehicles) | | |
+| `prim/*`, 2026-10-27: `llSetPos` and `llSetRegionPos` and their limits, rotation and scale clamps, the bounding box, every `PRIM_*` rule read back after a set, how a rule list's order, faces, unknown codes and wrong types are treated, the per-face setters, the object's name and description, `llGetObjectDetails`, linking and the link numbers, which setter raises which `changed` bit, and the sound, particle, texture-animation and media calls' errors | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#reading-and-writing-the-prim) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |
