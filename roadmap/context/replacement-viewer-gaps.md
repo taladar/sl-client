@@ -304,8 +304,8 @@ framework: `viewer-script-mirror-download` (mirror grid scripts to a real
 directory so nvim / ripgrep / git just work — for a power user probably
 worth more than the in-viewer editor) and its `-upload-watch` half, and the
 two error surfaces `viewer-script-warning-window` /
-`viewer-script-error-window` — today a script that errors at run time talks
-to `DEBUG_CHANNEL` and **no viewer crate mentions that channel at all**.
+`viewer-script-error-window` — one window since 2026-10-15, built 2026-10-27
+(the Script Errors window).
 Then `viewer-script-queue` (mass reset / recompile) and
 `viewer-script-limits`.
 

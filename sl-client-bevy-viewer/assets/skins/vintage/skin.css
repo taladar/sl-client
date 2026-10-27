@@ -297,6 +297,8 @@
   --chat-objects: #b2e5b2;
   --chat-im: #e6e6e6;
   --chat-system: #e6e6e6;
+  /* Script errors: the reference's ScriptErrorColor, Red. */
+  --chat-script-error: #ff0000;
 
   --keyword-alert: #ffc740;
 

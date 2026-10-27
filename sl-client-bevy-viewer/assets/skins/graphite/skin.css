@@ -295,6 +295,9 @@
   --chat-objects: #bfbfbf;
   --chat-im: #a8c8ea;
   --chat-system: #ffffff;
+  /* Script errors (the reference ScriptErrorColor, softened for the dark
+   * ground). */
+  --chat-script-error: #ff6b6b;
 
   /* Keyword-alert highlight (consumed by the chat keyword-alerts feature). */
   --keyword-alert: #ffc740;

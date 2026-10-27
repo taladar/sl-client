@@ -1172,6 +1172,8 @@ script-readonly-note = You do not have permission to modify this script.
 script-running = Running
 script-experience = Experience: { $name }
 script-status-loading = Loading…
+# The grid refused to send the script's source.
+script-status-load-failed = The script could not be loaded.
 script-status-saving = Saving & compiling…
 script-status-saved = Saved.
 script-status-compile-failed = Compilation failed.
@@ -4009,6 +4011,14 @@ preferences-chat-font-medium = Medium
 preferences-chat-font-large = Large
 preferences-row-nearby-toast-lifetime = Nearby chat stays on screen for (s)
 preferences-row-chat-max-lines = Most nearby chat lines shown at once
+preferences-section-script-errors = Script errors
+preferences-row-script-errors-show-in = Show script errors and warnings in
+preferences-script-errors-window = The Script Errors window
+preferences-script-errors-chat = Nearby chat
+preferences-script-errors-nowhere = Nowhere
+preferences-row-script-errors-from-others = Show other residents' objects' script errors too
+preferences-row-script-errors-owner-say = Show my objects' owner-say messages in the Script Errors window
+preferences-row-script-errors-clear-on-close = Clear the Script Errors window when it is closed
 preferences-section-chat-logging = Chat & IM logging
 preferences-row-log-nearby-chat = Save nearby chat on my computer
 preferences-row-log-instant-messages = Save IMs and group chat on my computer
@@ -4246,6 +4256,7 @@ preferences-row-chat-color-others = Other avatars
 preferences-row-chat-color-objects = Objects
 preferences-row-chat-color-im = Instant messages
 preferences-row-chat-color-system = System messages
+preferences-row-chat-color-script-error = Script errors
 preferences-row-keyword-alert-color = Keyword alerts
 preferences-section-name-tag-colors = Name tag colors
 preferences-row-name-tag-color-default = Default
@@ -4730,6 +4741,7 @@ menu-bar-about = About…
 menu-bar-shortcuts = Shortcuts
 menu-bar-joystick-flycam = Joystick Flycam
 menu-bar-advanced = Advanced
+menu-bar-script-errors = Script Errors…
 menu-bar-debug-settings = Debug settings…
 menu-bar-collect-protocol-diagnostics = Collect Protocol Diagnostics
 menu-bar-debug = Debug
@@ -5275,6 +5287,7 @@ setting-desc-ChatColorObjects = Chat colour of object chat (skin --chat-objects)
 setting-desc-ChatColorOthers = Chat colour of other avatars' lines (skin --chat-others)
 setting-desc-ChatColorSelf = Chat colour of my own lines (RGB override of the skin's --chat-self)
 setting-desc-ChatColorSystem = Colour of system and viewer-notice chat lines (skin --chat-system)
+setting-desc-ChatColorScriptError = Colour of script errors and warnings in nearby chat (skin --chat-script-error)
 setting-desc-ChatFontSize = Chat text size: 0 = small, 1 = medium, 2 = large
 setting-desc-ChatLogLocation = Custom chat-log directory; empty = the platform default (takes effect on restart)
 setting-desc-ChatOnlineNotification = Show a toast when a friend comes online or goes offline
@@ -5359,6 +5372,10 @@ setting-desc-NameTagDistanceColorChat = Distance-band tag colour inside chat ran
 setting-desc-NameTagDistanceColorShout = Distance-band tag colour inside shout range (skin --name-tag-distance-shout)
 setting-desc-NameTagDistanceColorWhisper = Distance-band tag colour inside whisper range (skin --name-tag-distance-whisper)
 setting-desc-NearbyChatToastLifetime = Seconds a nearby-chat overlay line stays on screen (including the fade)
+setting-desc-ScriptErrorsShowIn = Where scripts' DEBUG_CHANNEL lines are shown: window (the Script Errors window), chat (nearby chat) or nowhere
+setting-desc-ScriptErrorsFromOthers = Show the DEBUG_CHANNEL lines of objects other residents own, not only your own
+setting-desc-ScriptErrorsOwnerSay = Show your objects' llOwnerSay messages in the Script Errors window instead of nearby chat
+setting-desc-ScriptErrorsClearOnClose = Empty the Script Errors window when it is closed
 setting-desc-NetMapDoubleClickAction = Minimap double-click action: 0 nothing, 1 world map, 2 teleport
 setting-desc-NetMapPhantomOpacity = Phantom-object opacity on the minimap, in percent
 setting-desc-NetMapPhysical = Highlight physical objects on the minimap
@@ -5629,3 +5646,10 @@ region-restart-heading = Region restarting
 region-restart-body = The region you are in now ({ $name }) is about to restart. If you stay in this region you will be logged out.
 region-restart-countdown = Time until restart: { $seconds } s
 region-restart-unknown-region = unknown
+
+## The Script Errors window (viewer-script-warning-window)
+# The window that gathers what scripts say on DEBUG_CHANNEL.
+script-errors-title = Script Errors
+# The tab that shows every object's lines together.
+script-errors-all = All
+script-errors-clear = Clear

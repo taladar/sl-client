@@ -2279,13 +2279,20 @@ fn run_contents_actions(
                 ) {
                     continue;
                 }
-                // A redacted (nil) asset id means the grid withheld it — the item
-                // cannot be fetched, so there is nothing to open.
-                let Some(asset_id) = item.asset_id else {
-                    outbox.notices.write(LocalChatNotice::new(
-                        outbox.translator.get("build-content-no-modify"),
-                    ));
-                    continue;
+                // A redacted (nil) asset id is the grid withholding it. A
+                // notecard's cannot be fetched without it; a script's is read
+                // by the item (`edit_script`'s `fetch_command`), and Second
+                // Life withholds every script's, even from its owner, so a
+                // script opens with the nil id as the reference opens it.
+                let asset_id = match item.asset_id {
+                    Some(asset_id) => asset_id.uuid(),
+                    None if item.inv_type == InventoryType::Script => Uuid::nil(),
+                    None => {
+                        outbox.notices.write(LocalChatNotice::new(
+                            outbox.translator.get("build-content-no-modify"),
+                        ));
+                        continue;
+                    }
                 };
                 // Editable needs BOTH the object's modify and the item's own
                 // modify bit (the reference's two-level rule); otherwise the
@@ -2294,7 +2301,7 @@ fn run_contents_actions(
                 if item.inv_type == InventoryType::Script {
                     outbox.script_opens.write(crate::intents::OpenScript {
                         name: item.name.clone(),
-                        asset_id: asset_id.uuid(),
+                        asset_id,
                         editable,
                         source: crate::intents::ScriptSource::Task {
                             task_id: full,
@@ -2307,7 +2314,7 @@ fn run_contents_actions(
                 } else {
                     outbox.notecard_opens.write(crate::intents::OpenNotecard {
                         name: item.name.clone(),
-                        asset_id: asset_id.uuid(),
+                        asset_id,
                         editable,
                         source: crate::intents::NotecardSource::Task {
                             task_id: full,

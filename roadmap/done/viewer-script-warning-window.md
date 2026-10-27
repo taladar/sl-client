@@ -2,7 +2,7 @@
 id: viewer-script-warning-window
 title: Nothing in the viewer shows a script run-time error
 topic: viewer
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
 refs: [server-lsl-runtime-errors, viewer-lsl-editor-save-compile,
@@ -85,3 +85,48 @@ primID: <key> at: <x,y,z>) Script must be Reset to re-enable.`, XEngine
 `<text>(script: <name> event: <event> primID:<key> at <x, y, z>)` — so the
 script name, prim and position the window wants to show are in the text, in
 two layouts (`book/src/gridspec/lsl.md` § OSSL).
+
+## Done (2026-10-27, with [[gridspec-lsl-runtime-errors]])
+
+- **The window.** `sl-viewer-notices`' `script_errors` (Advanced ▸ Script
+  Errors, floater `script-errors`): an All tab and a tab per speaking object
+  in the order they first spoke, each line stamped `[HH:MM]` with the local
+  time it arrived, a multi-line message (XEngine's .NET stack, YEngine's
+  report) a row per line, at most 1000 messages, a Clear button. A new line
+  opens it, as the reference does. Debug lines wear the skin's console-error
+  class.
+- **One routing rule.** `world_api::script_chat_route` decides for the
+  window, the Nearby transcript and the chat overlay alike, so a line shows
+  in exactly one place. Preferences ▸ Chat ▸ Script errors:
+  `ScriptErrorsShowIn` (`window`, the reference's default; `chat`;
+  `nowhere`), `ScriptErrorsFromOthers` (off: only the agent's own objects,
+  by the chat's owner field — the grid does not filter for us on OpenSim),
+  `ScriptErrorsOwnerSay` (`llOwnerSay` to the window instead of nearby
+  chat) and `ScriptErrorsClearOnClose`.
+- **In nearby chat** a debug line wears its own palette colour,
+  `ChatColorScriptError` (`--chat-script-error`, the reference's
+  `ScriptErrorColor`), in the transcript and the overlay.
+- **Click-through.** An object's tab is headed by its name as an `objectim`
+  link carrying its owner and SLURL — the object inspector, with Show on
+  Map — and where it was, and a debug beacon marks the object while the tab
+  is shown.
+- **Tests.** Unit tests of the route and the log; `e2e_script_errors` on the
+  fake grid (the window opens on the owner's object's two fault lines, with
+  a tab for it; another owner's line is not shown; routed to chat it is a
+  `debug` line of the Nearby transcript); `e2e_pilot`'s debug-channel test
+  now opts its listener into chat. A live stage,
+  `a_scripts_fault_opens_the_script_errors_window_on_a_live_grid`
+  (`e2e_objects`, `SL_E2E_GRID=opensim|aditi`), saves a division by zero from
+  the script editor and expects the grid's words in the window.
+
+Not done, and why:
+
+- **Editor at the reported line**: no grid names a line (Second Life's
+  `Math Error`, OpenSim's `(script: … event: …)`), so there is nothing to
+  open the editor at.
+- **Firestorm's owner-say routing variant**
+  (`FSllOwnerSayToScriptDebugWindowRouting`: All tab only, object tab only,
+  both): an owner-say sent here goes to both, the variant's default.
+- **The chat log on disk** is written by the runtime (`sl-client-bevy`'s
+  `ChatLog`), below the routing, so a debug line is still logged with
+  nearby chat whichever surface shows it.

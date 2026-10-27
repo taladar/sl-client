@@ -57,3 +57,22 @@ Acceptance: every function in the tranche implemented (no stubs), each
 with table-driven tests whose expectations are taken from the oracle and
 whose source is named in a comment; the coverage harness moves the
 tranche to fully implemented.
+
+## Measured (gridspec-lsl-runtime-errors, 2026-10-27)
+
+`book/src/gridspec/lsl.md` § Run-time errors, *Indices and strides out of
+range*, has what each grid answers for list and string calls past either
+end, reversed and with odd strides. Where the flavours differ: Second Life
+does not convert a string element for `llList2Vector` / `llList2Rot`
+(zero), truncates a float in `llList2Integer` (1.9 → 1) and reads an
+exponent in `llList2Float` (`"1e3"` → 1000); OpenSim converts, rounds (2)
+and stops at the exponent (1.0). `llDeleteSubList(l, 1, -99)` keeps `[a]`
+on Second Life and nothing on OpenSim; `llListFindList` of an empty pattern
+is 0 there and -1 here; `llParseString2List` uses only the first eight
+separators on Second Life. OpenSim throws (a run-time error on the script,
+[[server-lsl-runtime-errors]]) where Second Life answers:
+`llList2ListStrided` with a stride of -1 or 99 or a reversed range,
+`llListStatistics`' median of strings, `llInsertString` at a negative index.
+OpenSim compiles none of `llReplaceSubString`, `llList2ListSlice`,
+`llListFindStrided`, `llListSortStrided`; Second Life's answers to an empty
+pattern and strides of zero are in the table.

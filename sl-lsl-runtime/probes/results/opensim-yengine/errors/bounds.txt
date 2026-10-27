@@ -1,0 +1,146 @@
+grid: opensim-yengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE errors/bounds rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE errors/bounds rec=case script="Bounds 1" case=list-read-past-end step=before
+PROBE errors/bounds rec=case script="Bounds 1" case=list-read-past-end step=after result="|0|0.000000||<0.000000, 0.000000, 0.000000>|<0.000000, 0.000000, 0.000000, 1.000000>|0"
+PROBE errors/bounds rec=case script="Bounds 2" case=list-read-before-start step=before
+PROBE errors/bounds rec=case script="Bounds 2" case=list-read-before-start step=after result="|0|0.000000||<0.000000, 0.000000, 0.000000>|<0.000000, 0.000000, 0.000000, 1.000000>|0"
+PROBE errors/bounds rec=case script="Bounds 3" case=list-read-other-type step=before
+PROBE errors/bounds rec=case script="Bounds 3" case=list-read-other-type step=after result="<1.000000, 2.000000, 3.000000>|<1.000000, 2.000000, 3.000000, 4.000000>|16|2|1.000000||0|7"
+PROBE errors/bounds rec=case script="Bounds 4" case=list2list-ranges step=before
+PROBE errors/bounds rec=case script="Bounds 4" case=list2list-ranges step=after result="[][a, b, e, f][a, b, c, d, e, f][b, c, d, e, f][a, b, c, d, e, f]"
+PROBE errors/bounds rec=case script="Bounds 5" case=deletesublist-ranges step=before
+PROBE errors/bounds rec=case script="Bounds 5" case=deletesublist-ranges step=after result="[a, b, c, d, e, f][c, d][][][]"
+PROBE errors/bounds rec=case script="Bounds 6" case=replacelist-ranges step=before
+PROBE errors/bounds rec=case script="Bounds 6" case=replacelist-ranges step=after result="[a, b, c, d, e, f, x][a, b, c, d, e, f][c, d, x][a, b, c, d, e, f, x]"
+PROBE errors/bounds rec=case script="Bounds 7" case=insertlist-at step=before
+PROBE errors/bounds rec=case script="Bounds 7" case=insertlist-at step=after result="[a, b, c, d, e, f, x][x, a, b, c, d, e, f][a, b, c, d, e, f, x][a, b, c, d, e, x, f]"
+PROBE errors/bounds rec=case script="Bounds 8" case=strided-stride-zero step=before
+PROBE errors/bounds rec=case script="Bounds 8" case=strided-stride-zero step=after result="[a, b, c, d, e, f]"
+PROBE errors/bounds rec=case script="Bounds 9" case=strided-odd step=before
+# owner-say: from="Object" text="[YEngine]: Exception while running 4b2d6597-743c-422a-9476-5424e3ac90ce"
+# owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
+# owner-say: from="Object" text="Prim: <Object>, Script: <Bounds 9>, Location: Default Region <120,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llList2ListStrided (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list src, System.Int32 start, System.Int32 end, System.Int32 stride) [0x001ea] in <d09853dcdece4467894564db0ef815df>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llList2ListStrided (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list src, System.Int32 start, System.Int32 end, System.Int32 stride) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.run()(XMRInstanceSuperType)"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default link_message(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.StartEx () [0x00009] in <494689fd7fc54dbc80fad348ad979238>:0"
+PROBE errors/bounds rec=case script="Bounds 10" case=sort-stride-zero step=before
+PROBE errors/bounds rec=case script="Bounds 10" case=sort-stride-zero step=after result="[a, b, c, d, e, f]"
+PROBE errors/bounds rec=case script="Bounds 11" case=sort-odd step=before
+PROBE errors/bounds rec=case script="Bounds 11" case=sort-odd step=after result="[a, b, c, d, e, f][a, b, c, d, e, f][a, b, c, d, e, f]"
+PROBE errors/bounds rec=case script="Bounds 12" case=randomize-odd step=before
+PROBE errors/bounds rec=case script="Bounds 12" case=randomize-odd step=after result="6|6|6"
+PROBE errors/bounds rec=case script="Bounds 13" case=statistics-odd step=before
+# owner-say: from="Object" text="[YEngine]: Exception while running a074ccdc-4625-4791-b32f-4bfbfdc3d450"
+# owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
+# owner-say: from="Object" text="Prim: <Object>, Script: <Bounds 13>, Location: Default Region <120,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+list.Qi (System.Double i) [0x00034] in <4232b8ace8a34b48b171661be4717e89>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+list.Median () [0x00001] in <4232b8ace8a34b48b171661be4717e89>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llListStatistics (System.Int32 operation, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list src) [0x00089] in <d09853dcdece4467894564db0ef815df>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llListStatistics (System.Int32 operation, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list src) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.run()(XMRInstanceSuperType)"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default link_message(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.StartEx () [0x00009] in <494689fd7fc54dbc80fad348ad979238>:0"
+PROBE errors/bounds rec=case script="Bounds 14" case=findlist-empty step=before
+PROBE errors/bounds rec=case script="Bounds 14" case=findlist-empty step=after result="-1|-1|-1"
+PROBE errors/bounds rec=case script="Bounds 15" case=substring-ranges step=before
+PROBE errors/bounds rec=case script="Bounds 15" case=substring-ranges step=after result="|abcdef|abef|abcdf|abcdef|cd"
+PROBE errors/bounds rec=case script="Bounds 16" case=insertstring-at step=before
+# owner-say: from="Object" text="[YEngine]: Exception while running e53d40f8-83bb-495c-ae69-023277532f94"
+# owner-say: from="Object" text="IndexOutOfRangeException: Index was outside the bounds of the array."
+# owner-say: from="Object" text="Prim: <Object>, Script: <Bounds 16>, Location: Default Region <120,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llInsertString (System.String dest, System.Int32 index, System.String src) [0x00064] in <d09853dcdece4467894564db0ef815df>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llInsertString (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString dst, System.Int32 position, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString src) [0x00014] in <d9ccfe93a15141ee87e03afb3d189fbf>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.run()(XMRInstanceSuperType)"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default link_message(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.StartEx () [0x00009] in <494689fd7fc54dbc80fad348ad979238>:0"
+PROBE errors/bounds rec=case script="Bounds 17" case=parse-limits step=before
+PROBE errors/bounds rec=case script="Bounds 17" case=parse-limits step=after result="[a, b, c, d, e, f, g, h, i, j][abc][a, b]"
+PROBE errors/bounds rec=case script="Bounds 18" case=ord-char-out-of-range step=before
+PROBE errors/bounds rec=case script="Bounds 18" case=ord-char-out-of-range step=after result="0|0|\"�\"|\"�\"|\"\""
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 1" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 2" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 3" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 4" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 5" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 6" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 7" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 8" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 9" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 10" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 11" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 12" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 13" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 14" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 15" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 16" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 17" running=1
+PROBE errors/bounds rec=script-state when=after-faults script="Bounds 18" running=1
+PROBE errors/bounds rec=ping when=after-faults
+PROBE errors/bounds rec=answer script="Bounds 2"
+PROBE errors/bounds rec=answer script="Bounds 1"
+PROBE errors/bounds rec=answer script="Bounds 3"
+PROBE errors/bounds rec=answer script="Bounds 4"
+PROBE errors/bounds rec=answer script="Bounds 6"
+PROBE errors/bounds rec=answer script="Bounds 5"
+PROBE errors/bounds rec=answer script="Bounds 7"
+PROBE errors/bounds rec=answer script="Bounds 10"
+PROBE errors/bounds rec=answer script="Bounds 8"
+PROBE errors/bounds rec=answer script="Bounds 11"
+PROBE errors/bounds rec=answer script="Bounds 12"
+PROBE errors/bounds rec=answer script="Bounds 14"
+PROBE errors/bounds rec=answer script="Bounds 15"
+PROBE errors/bounds rec=answer script="Bounds 17"
+PROBE errors/bounds rec=answer script="Bounds 18"
+PROBE errors/bounds rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

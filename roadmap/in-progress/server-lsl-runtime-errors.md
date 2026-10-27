@@ -259,3 +259,45 @@ the same way. The faulted script reports stopped, a link message to it goes
 nowhere, and `llSetScriptState(name, TRUE)` does **not** start it again —
 which this task's "restarts" assumption should be checked against. The
 Script Debug window's text was not captured (no viewer in the run).
+
+## Measured (gridspec-lsl-runtime-errors, 2026-10-27)
+
+`book/src/gridspec/lsl.md` § Run-time errors has the tables; what the
+flavours must differ in:
+
+- **What faults.** Second Life's Mono faults only on division by zero —
+  integer, modulo, float and a vector by `0.0` — and hands every other
+  non-finite result on as `Infinity` or `NaN`; LSO (`target: lsl2`) also
+  faults on `llSqrt` of a negative, a float overflow, `llAcos` out of range,
+  `llPow` giving NaN and the casts of `(float)"inf"` / `"nan"`. Neither
+  faults on `INT_MIN / -1` (`-2147483648`) or `llModPow(…, 0)` (`0`).
+  OpenSim faults on the same divisions, and XEngine also on `INT_MIN / -1`
+  and `% -1` (`OverflowException`); both throw inside `llModPow(…, 0)`,
+  `llList2ListStrided` with a stride of -1 or 99 or a reversed range,
+  `llListStatistics`' median of strings and `llInsertString` at a negative
+  index, where Second Life answers.
+- **The words.** Second Life: two `DEBUG_CHANNEL` lines, `<object name>
+  [script:<name>] Script run-time error` then `Math Error` / `Stack-Heap
+  Collision`, the object's name as it is now. YEngine: one, `YEngine:
+  <Division by Zero | Vector division by zero> (script: … event: … primID:
+  … at: <x,y,z>) Script must be Reset to re-enable.\n`. XEngine: one,
+  `<Integer division by Zero | Float division by zero | Vector division by
+  zero>(script: … event: … primID:… at <x, y, z>)`. A library exception is
+  owner-say lines with the stack on YEngine, one `DEBUG_CHANNEL` line with
+  the .NET stack (`System.Reflection.TargetInvocationException: …`) on
+  XEngine.
+- **Reach.** Second Life says it (20 m: a script at 19 m hears it, at 21 m
+  not; an avatar past 20 m gets it barely audible, text left out). OpenSim's
+  fault lines reach the avatars near but no script.
+- **Floods** (Second Life only): eight lines per object, then `Too many
+  errors... dropping further messages until the flood stops`; the object's
+  next line passes after between 10 and 30 seconds of quiet. Another object
+  of the same owner's is not affected. OpenSim has no limit.
+- **After the fault.** Second Life: stopped (`llGetScriptState` 0);
+  `llSetScriptState(TRUE)` alone does not restart it, a reset with it (in
+  either order) does. YEngine: reads running, answers nothing until reset.
+  XEngine: runs on.
+
+So the acceptance above ("one `DEBUG_CHANNEL` message naming the script and
+the line") is the OpenSim shape; the Second Life flavour sends two lines and
+names no line number.

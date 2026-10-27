@@ -1,0 +1,124 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# target: script "LSO 1" lsl2
+# target: script "LSO 2" lsl2
+# target: script "LSO 3" lsl2
+# animations avatar=owner playing=""
+# target: script "LSO 4" lsl2
+# target: script "LSO 5" lsl2
+# animations avatar=other playing=""
+# target: script "LSO 6" lsl2
+# target: script "LSO 7" lsl2
+# target: script "LSO 8" lsl2
+# target: script "LSO 9" lsl2
+# target: script "LSO 10" lsl2
+# target: script "LSO 11" lsl2
+# target: script "LSO 12" lsl2
+# target: script "LSO 13" lsl2
+# target: script "LSO 14" lsl2
+# target: script "LSO 15" lsl2
+PROBE errors/math-lso rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE errors/math-lso rec=case script="LSO 1" case=int-div step=before
+# debug-channel: from="Object" text="Object [script:LSO 1] Script run-time error"
+# debug-channel: from="Object" text="Math Error"
+PROBE errors/math-lso rec=case script="LSO 2" case=int-mod step=before
+# debug-channel: from="Object" text="Object [script:LSO 2] Script run-time error"
+# debug-channel: from="Object" text="Math Error"
+PROBE errors/math-lso rec=case script="LSO 3" case=float-div step=before
+# debug-channel: from="Object" text="Object [script:LSO 3] Script run-time error"
+# debug-channel: from="Object" text="Math Error"
+PROBE errors/math-lso rec=case script="LSO 4" case=vector-div step=before
+# debug-channel: from="Object" text="Object [script:LSO 4] Script run-time error"
+# debug-channel: from="Object" text="Math Error"
+PROBE errors/math-lso rec=case script="LSO 5" case=rotation-div step=before
+PROBE errors/math-lso rec=case script="LSO 5" case=rotation-div step=after result="<0.00000, 0.00000, 0.00000, 0.00000>"
+PROBE errors/math-lso rec=case script="LSO 6" case=int-min-div step=before
+PROBE errors/math-lso rec=case script="LSO 6" case=int-min-div step=after result="-2147483648"
+PROBE errors/math-lso rec=case script="LSO 7" case=int-min-mod step=before
+PROBE errors/math-lso rec=case script="LSO 7" case=int-min-mod step=after result="0"
+PROBE errors/math-lso rec=case script="LSO 8" case=sqrt-negative step=before
+# debug-channel: from="Object" text="Object [script:LSO 8] Script run-time error"
+# debug-channel: from="Object" text="Math Error"
+PROBE errors/math-lso rec=case script="LSO 9" case=float-overflow step=before
+# debug-channel: from="Object" text="Object [script:LSO 9] Script run-time error"
+# debug-channel: from="Object" text="Math Error"
+PROBE errors/math-lso rec=case script="LSO 10" case=modpow-zero step=before
+PROBE errors/math-lso rec=case script="LSO 10" case=modpow-zero step=after result="0"
+PROBE errors/math-lso rec=case script="LSO 11" case=log-zero step=before
+PROBE errors/math-lso rec=case script="LSO 11" case=log-zero step=after result="0.000000 0.000000"
+PROBE errors/math-lso rec=case script="LSO 12" case=acos-out-of-range step=before
+# debug-channel: from="Object" text="Object [script:LSO 12] Script run-time error"
+# debug-channel: from="Object" text="Math Error"
+PROBE errors/math-lso rec=case script="LSO 13" case=pow-nan step=before
+# debug-channel: from="Object" text="Object [script:LSO 13] Script run-time error"
+# debug-channel: from="Object" text="Math Error"
+PROBE errors/math-lso rec=case script="LSO 14" case=inf-nan-casts step=before
+# debug-channel: from="Object" text="Object [script:LSO 14] Script run-time error"
+# debug-channel: from="Object" text="Math Error"
+PROBE errors/math-lso rec=case script="LSO 15" case=zero-normalise step=before
+PROBE errors/math-lso rec=case script="LSO 15" case=zero-normalise step=after result="<0.00000, 0.00000, 0.00000> <0.00000, 0.00000, 0.00000> <1.00000, 0.00000, 0.00000, 0.00000>"
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 1" running=0
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 2" running=0
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 3" running=0
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 4" running=0
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 5" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 6" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 7" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 8" running=0
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 9" running=0
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 10" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 11" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 12" running=0
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 13" running=0
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 14" running=0
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 15" running=1
+PROBE errors/math-lso rec=revive script="LSO 1" how=reset-then-run
+PROBE errors/math-lso rec=revive script="LSO 2" how=run-then-reset
+PROBE errors/math-lso rec=ping when=after-revive
+PROBE errors/math-lso rec=answer script="LSO 1"
+PROBE errors/math-lso rec=answer script="LSO 5"
+PROBE errors/math-lso rec=answer script="LSO 2"
+PROBE errors/math-lso rec=answer script="LSO 10"
+PROBE errors/math-lso rec=answer script="LSO 7"
+PROBE errors/math-lso rec=answer script="LSO 15"
+PROBE errors/math-lso rec=answer script="LSO 11"
+PROBE errors/math-lso rec=answer script="LSO 6"
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 1" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 2" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 3" running=0
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 4" running=0
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 5" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 6" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 7" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 8" running=0
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 9" running=0
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 10" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 11" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 12" running=0
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 13" running=0
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 14" running=0
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 15" running=1
+PROBE errors/math-lso rec=end
+# debug-channel by=other: from="Object" text="Object [script:LSO 1] Script run-time error"
+# debug-channel by=other: from="Object" text="Math Error"
+# debug-channel by=other: from="Object" text="Object [script:LSO 2] Script run-time error"
+# debug-channel by=other: from="Object" text="Math Error"
+# debug-channel by=other: from="Object" text="Object [script:LSO 3] Script run-time error"
+# debug-channel by=other: from="Object" text="Math Error"
+# debug-channel by=other: from="Object" text="Object [script:LSO 4] Script run-time error"
+# debug-channel by=other: from="Object" text="Math Error"
+# debug-channel by=other: from="Object" text="Object [script:LSO 8] Script run-time error"
+# debug-channel by=other: from="Object" text="Math Error"
+# debug-channel by=other: from="Object" text="Object [script:LSO 9] Script run-time error"
+# debug-channel by=other: from="Object" text="Math Error"
+# debug-channel by=other: from="Object" text="Object [script:LSO 12] Script run-time error"
+# debug-channel by=other: from="Object" text="Math Error"
+# debug-channel by=other: from="Object" text="Object [script:LSO 13] Script run-time error"
+# debug-channel by=other: from="Object" text="Math Error"
+# debug-channel by=other: from="Object" text="Object [script:LSO 14] Script run-time error"
+# debug-channel by=other: from="Object" text="Math Error"

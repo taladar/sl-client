@@ -99,6 +99,7 @@ use crate::probes::ReflectionProbePlugin;
 use crate::region_restart::RegionRestartPlugin;
 use crate::resolution_divisor::ResolutionDivisorPlugin;
 use crate::script_dialog::ScriptDialogPlugin;
+use crate::script_errors::ScriptErrorsPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
 use crate::settings::SettingsPersistPlugin;
 use crate::settings_binding::SettingsBindingPlugin;
@@ -869,6 +870,7 @@ impl Plugin for ViewerUiPlugins {
             // channel (Command::ReplyScriptDialog). After NotificationHostPlugin, whose
             // shared channel it adopts its card into.
             .add_plugins(ScriptDialogPlugin)
+            .add_plugins(ScriptErrorsPlugin)
             // The script web-page request toast host (viewer-dialog-script-load-url):
             // pops a card — heading, object / owner title, message and the target URL —
             // when a scripted object calls llLoadURL (the LoadURL message), with Load

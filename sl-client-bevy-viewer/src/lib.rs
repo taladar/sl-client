@@ -330,6 +330,7 @@ pub(crate) use sl_viewer_render_fixtures as render_scene;
 #[cfg(test)]
 mod render_test;
 pub(crate) use sl_viewer_notices::script_dialog;
+pub(crate) use sl_viewer_notices::script_errors;
 pub(crate) use sl_viewer_notices::script_permission;
 pub(crate) use sl_viewer_search::search;
 pub(crate) use sl_viewer_world_avatar::replay_bundle;

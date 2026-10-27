@@ -45,6 +45,11 @@
 //!   last grid-confirmed state. The IM-to-email toggle is meaningful on
 //!   OpenSim; Second Life manages the forwarding preference on the account
 //!   website and ignores the field.
+//! - The **script errors** section routes `DEBUG_CHANNEL` lines (window,
+//!   nearby chat or nowhere), lets other residents' objects' lines through,
+//!   sends `llOwnerSay` to the window and empties it on close; the keys are
+//!   [`crate::world_api`]'s, read by `sl-viewer-notices`' `script_errors` and
+//!   by every surface that shows nearby chat.
 //! - Script-permission prompt suppression lives in the **alerts** tab's
 //!   notification table (`ScriptPerm`), not here. Chat *colours* are the
 //!   colors & skins tab's task; keyword alerts, chat bubbles, per-line
@@ -221,6 +226,33 @@ pub fn register_settings(settings: &mut ViewerSettings) {
         SettingValue::U32(30),
         "setting-desc-ConversationLogRetentionDays",
     );
+    settings.register_in(
+        CHAT_SECTION,
+        crate::world_api::SETTING_SCRIPT_ERRORS_SHOW_IN,
+        SettingValue::String("window".to_owned()),
+        "setting-desc-ScriptErrorsShowIn",
+    );
+    for (name, description_key) in [
+        (
+            crate::world_api::SETTING_SCRIPT_ERRORS_FROM_OTHERS,
+            "setting-desc-ScriptErrorsFromOthers",
+        ),
+        (
+            crate::world_api::SETTING_SCRIPT_ERRORS_OWNER_SAY,
+            "setting-desc-ScriptErrorsOwnerSay",
+        ),
+        (
+            crate::world_api::SETTING_SCRIPT_ERRORS_CLEAR_ON_CLOSE,
+            "setting-desc-ScriptErrorsClearOnClose",
+        ),
+    ] {
+        settings.register_in(
+            CHAT_SECTION,
+            name,
+            SettingValue::Bool(false),
+            description_key,
+        );
+    }
     settings.register_transient(
         SETTING_ONLINE_STATUS_HIDDEN,
         SettingValue::Bool(false),
@@ -283,6 +315,46 @@ pub(crate) fn build_chat_tab(commands: &mut Commands, panel: Entity) {
         SettingBinding::global(SETTING_CHAT_MAX_LINES),
         TextInputKind::NonNegativeInteger,
         SpinStep::new(1.0, 1.0, 50.0, 0),
+    );
+
+    spawn_pref_section(commands, panel, "preferences-section-script-errors");
+    spawn_pref_combo(
+        commands,
+        panel,
+        "preferences-row-script-errors-show-in",
+        SettingBinding::global(crate::world_api::SETTING_SCRIPT_ERRORS_SHOW_IN),
+        &[
+            (
+                "preferences-script-errors-window",
+                SettingValue::String("window".to_owned()),
+            ),
+            (
+                "preferences-script-errors-chat",
+                SettingValue::String("chat".to_owned()),
+            ),
+            (
+                "preferences-script-errors-nowhere",
+                SettingValue::String("nowhere".to_owned()),
+            ),
+        ],
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-script-errors-from-others",
+        SettingBinding::global(crate::world_api::SETTING_SCRIPT_ERRORS_FROM_OTHERS),
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-script-errors-owner-say",
+        SettingBinding::global(crate::world_api::SETTING_SCRIPT_ERRORS_OWNER_SAY),
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-script-errors-clear-on-close",
+        SettingBinding::global(crate::world_api::SETTING_SCRIPT_ERRORS_CLEAR_ON_CLOSE),
     );
 
     spawn_pref_section(commands, panel, "preferences-section-chat-logging");

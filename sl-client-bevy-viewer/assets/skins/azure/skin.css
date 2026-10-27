@@ -254,6 +254,7 @@
   --chat-objects: #b9d4ee;
   --chat-im: #8fd0ff;
   --chat-system: #eaf3ff;
+  --chat-script-error: #ff8a80;
 
   /* Keyword-alert highlight */
   --keyword-alert: #ffd166;

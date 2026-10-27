@@ -41,6 +41,7 @@ use crate::ui_font::UiFont;
 use crate::world_api::rlv::swallows_owner_say;
 use crate::world_api::{
     ObjectState, SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
+    ScriptChatRoute, script_chat_route,
 };
 
 /// The most chat lines the overlay ever shows at once when no
@@ -135,6 +136,9 @@ pub(crate) enum ChatLineSource {
     /// The system / region, an unknown source, or a viewer-generated notice
     /// ([`crate::skin_colors::SETTING_CHAT_SYSTEM`]).
     System,
+    /// A script's `DEBUG_CHANNEL` line, whoever said it
+    /// ([`crate::skin_colors::SETTING_CHAT_SCRIPT_ERROR`]).
+    ScriptError,
 }
 
 /// One transient chat line in the overlay: a text node under the
@@ -213,6 +217,9 @@ fn format_chat_line(message: &ChatMessage) -> String {
 /// another avatar, an object, or the system (unknown sources read as system,
 /// the defensive default).
 fn classify_source(message: &ChatMessage, own_agent: Option<AgentKey>) -> ChatLineSource {
+    if message.chat_type == ChatType::DebugChannel {
+        return ChatLineSource::ScriptError;
+    }
     match &message.source {
         ChatSource::Agent(agent) if Some(*agent) == own_agent => ChatLineSource::Own,
         ChatSource::Agent(_) => ChatLineSource::Others,
@@ -229,6 +236,7 @@ fn line_color(source: ChatLineSource, settings: Option<&ViewerSettings>) -> Colo
         ChatLineSource::Others => crate::skin_colors::SETTING_CHAT_OTHERS,
         ChatLineSource::Objects => crate::skin_colors::SETTING_CHAT_OBJECTS,
         ChatLineSource::System => crate::skin_colors::SETTING_CHAT_SYSTEM,
+        ChatLineSource::ScriptError => crate::skin_colors::SETTING_CHAT_SCRIPT_ERROR,
     };
     crate::skin_colors::setting_color(settings, name)
 }
@@ -408,6 +416,7 @@ pub fn update_chat_overlay(
                 message.chat_type,
                 &message.message,
             )
+            && script_chat_route(settings.as_deref(), own_agent, message) == ScriptChatRoute::Chat
             && !mutes
                 .as_deref()
                 .is_some_and(|mutes| chat_text_muted(mutes.list(), message))

@@ -464,7 +464,10 @@ mod test {
     /// (`book/src/gridspec/chat.md`): Alpha types it with the chat bar's
     /// channel prefix. Second Life passes it on as the say it was sent as;
     /// OpenSim says it as a debug line. Beta's transcript shows it either
-    /// way, as the kind the grid made of it.
+    /// way, as the kind the grid made of it — Beta having asked for debug
+    /// lines in nearby chat, others' included, since by default a debug line
+    /// goes to the Script Errors window and only from Beta's own objects
+    /// (`e2e_script_errors`).
     #[test]
     fn a_line_on_the_debug_channel_is_heard_as_each_grid_says_it() -> Result<(), TestError> {
         for (flavour, name, kind) in [
@@ -477,6 +480,12 @@ mod test {
                 .run(async |stage: &Stage| {
                     let alpha = &stage.viewer("Alpha")?;
                     let beta = &stage.viewer("Beta")?;
+                    let _chat = beta
+                        .set_setting("ScriptErrorsShowIn", json!("chat"))
+                        .await?;
+                    let _others = beta
+                        .set_setting("ScriptErrorsFromOthers", json!(true))
+                        .await?;
                     let bar = alpha.ui().test_id("nearby-chat-bar").role(Role::Textbox);
                     let _typed = bar.fill(&format!("/{} {DEBUG_LINE}", i32::MAX)).await?;
                     bar.press("Enter").await?;

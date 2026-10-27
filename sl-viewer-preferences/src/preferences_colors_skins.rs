@@ -154,6 +154,7 @@ pub(crate) fn build_colors_skins_tab(commands: &mut Commands, panel: Entity) {
         crate::skin_colors::SETTING_CHAT_OBJECTS,
         crate::skin_colors::SETTING_CHAT_IM,
         crate::skin_colors::SETTING_CHAT_SYSTEM,
+        crate::skin_colors::SETTING_CHAT_SCRIPT_ERROR,
         crate::skin_colors::SETTING_KEYWORD_ALERT,
     ] {
         spawn_color_row(commands, panel, setting);
@@ -225,6 +226,7 @@ fn row_label_key(setting: &str) -> &'static str {
         "ChatColorObjects" => "preferences-row-chat-color-objects",
         "ChatColorIm" => "preferences-row-chat-color-im",
         "ChatColorSystem" => "preferences-row-chat-color-system",
+        "ChatColorScriptError" => "preferences-row-chat-color-script-error",
         "KeywordAlertColor" => "preferences-row-keyword-alert-color",
         "NameTagColorDefault" => "preferences-row-name-tag-color-default",
         "NameTagColorSelf" => "preferences-row-name-tag-color-self",

@@ -1,0 +1,28 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE errors/bounds-newer rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# animations avatar=owner playing=""
+PROBE errors/bounds-newer rec=case script="Bounds 1" case=replace-empty-pattern step=before
+PROBE errors/bounds-newer rec=case script="Bounds 1" case=replace-empty-pattern step=after result="abcdef|abxdef|abxdef"
+PROBE errors/bounds-newer rec=case script="Bounds 2" case=slice-stride-zero step=before
+PROBE errors/bounds-newer rec=case script="Bounds 2" case=slice-stride-zero step=after result="[]"
+PROBE errors/bounds-newer rec=case script="Bounds 3" case=findstrided-stride-zero step=before
+PROBE errors/bounds-newer rec=case script="Bounds 3" case=findstrided-stride-zero step=after result="0"
+PROBE errors/bounds-newer rec=case script="Bounds 4" case=sortstrided-stride-zero step=before
+PROBE errors/bounds-newer rec=case script="Bounds 4" case=sortstrided-stride-zero step=after result="[a, b, c, d, e, f]"
+PROBE errors/bounds-newer rec=script-state when=after-faults script="Bounds 1" running=1
+PROBE errors/bounds-newer rec=script-state when=after-faults script="Bounds 2" running=1
+PROBE errors/bounds-newer rec=script-state when=after-faults script="Bounds 3" running=1
+PROBE errors/bounds-newer rec=script-state when=after-faults script="Bounds 4" running=1
+PROBE errors/bounds-newer rec=ping when=after-faults
+PROBE errors/bounds-newer rec=answer script="Bounds 3"
+PROBE errors/bounds-newer rec=answer script="Bounds 4"
+PROBE errors/bounds-newer rec=answer script="Bounds 2"
+PROBE errors/bounds-newer rec=answer script="Bounds 1"
+PROBE errors/bounds-newer rec=end

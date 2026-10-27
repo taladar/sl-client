@@ -1,0 +1,141 @@
+grid: opensim-xengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 1" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 2" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 3" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 4" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 5" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 6" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 7" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 8" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 9" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 10" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 11" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 12" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 13" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 14" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 15" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+PROBE errors/math-lso rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE errors/math-lso rec=case script="LSO 1" case=int-div step=before
+# debug-channel: from="Object" text="Integer division by Zero(script: LSO 1 event: link_message primID:c8b4e259-d594-47be-8d72-5ec6397c4e42 at <120, 128, 27.5>)"
+PROBE errors/math-lso rec=case script="LSO 2" case=int-mod step=before
+# debug-channel: from="Object" text="Integer division by Zero(script: LSO 2 event: link_message primID:c8b4e259-d594-47be-8d72-5ec6397c4e42 at <120, 128, 27.5>)"
+PROBE errors/math-lso rec=case script="LSO 3" case=float-div step=before
+# debug-channel: from="Object" text="Float division by zero(script: LSO 3 event: link_message primID:c8b4e259-d594-47be-8d72-5ec6397c4e42 at <120, 128, 27.5>)"
+PROBE errors/math-lso rec=case script="LSO 4" case=vector-div step=before
+# debug-channel: from="Object" text="Vector division by zero(script: LSO 4 event: link_message primID:c8b4e259-d594-47be-8d72-5ec6397c4e42 at <120, 128, 27.5>)"
+PROBE errors/math-lso rec=case script="LSO 5" case=rotation-div step=before
+PROBE errors/math-lso rec=case script="LSO 5" case=rotation-div step=after result="<0.000000, 0.000000, 0.000000, 1.000000>"
+PROBE errors/math-lso rec=case script="LSO 6" case=int-min-div step=before
+# debug-channel: from="Object" text="System.OverflowException: Arithmetic operation resulted in an overflow.\n  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger.op_Division (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger i1, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger i2) [0x00002] in <4232b8ace8a34b48b171661be4717e89>:0 \n  at SecondLife.XEngineScript.run (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString zero) [0x00072] in <69b9582e0a7744a1a4d6d81beab0c0f6>:0 \n  at SecondLife.XEngineScript.default_event_link_message (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger sender, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger num, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString msg, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString id) [0x0001d] in <69b9582e0a7744a1a4d6d81beab0c0f6>:0 \n  at (wrapper managed-to-native) System.Reflection.RuntimeMethodInfo.InternalInvoke(System.Reflection.RuntimeMethodInfo,object,object[],System.Exception&)\n  at System.Reflection.Runti"
+PROBE errors/math-lso rec=case script="LSO 7" case=int-min-mod step=before
+# debug-channel: from="Object" text="System.OverflowException: Arithmetic operation resulted in an overflow.\n  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger.op_Modulus (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger i1, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger i2) [0x00002] in <4232b8ace8a34b48b171661be4717e89>:0 \n  at SecondLife.XEngineScript.run (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString zero) [0x00072] in <dbfce0032ab74e7ea752dec5e1e3d097>:0 \n  at SecondLife.XEngineScript.default_event_link_message (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger sender, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger num, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString msg, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString id) [0x0001d] in <dbfce0032ab74e7ea752dec5e1e3d097>:0 \n  at (wrapper managed-to-native) System.Reflection.RuntimeMethodInfo.InternalInvoke(System.Reflection.RuntimeMethodInfo,object,object[],System.Exception&)\n  at System.Reflection.Runtim"
+PROBE errors/math-lso rec=case script="LSO 8" case=sqrt-negative step=before
+PROBE errors/math-lso rec=case script="LSO 8" case=sqrt-negative step=after result="NaN"
+PROBE errors/math-lso rec=case script="LSO 9" case=float-overflow step=before
+PROBE errors/math-lso rec=case script="LSO 9" case=float-overflow step=after result="10000000000000000000000000000000000000000000000000000000000000000000000000000.000000"
+PROBE errors/math-lso rec=case script="LSO 10" case=modpow-zero step=before
+# debug-channel: from="Object" text="System.Reflection.TargetInvocationException: Exception has been thrown by the target of an invocation. ---> System.DivideByZeroException: Attempted to divide by zero.\n  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llModPow (System.Int32 a, System.Int32 b, System.Int32 c) [0x0000a] in <d09853dcdece4467894564db0ef815df>:0 \n  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llModPow (System.Int32 a, System.Int32 b, System.Int32 c) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0 \n  at SecondLife.XEngineScript.run (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString zero) [0x00071] in <1d9107fb595e4992870c9604935dd0ac>:0 \n  at SecondLife.XEngineScript.default_event_link_message (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger sender, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger num, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString msg, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString id) [0x0001e] in <1d9107fb595e4992870c9604935dd0ac>"
+PROBE errors/math-lso rec=case script="LSO 11" case=log-zero step=before
+PROBE errors/math-lso rec=case script="LSO 11" case=log-zero step=after result="-Infinity NaN"
+PROBE errors/math-lso rec=case script="LSO 12" case=acos-out-of-range step=before
+PROBE errors/math-lso rec=case script="LSO 12" case=acos-out-of-range step=after result="NaN NaN"
+PROBE errors/math-lso rec=case script="LSO 13" case=pow-nan step=before
+PROBE errors/math-lso rec=case script="LSO 13" case=pow-nan step=after result="NaN Infinity"
+PROBE errors/math-lso rec=case script="LSO 14" case=inf-nan-casts step=before
+PROBE errors/math-lso rec=case script="LSO 14" case=inf-nan-casts step=after result="0.000000 0 0.000000 0"
+PROBE errors/math-lso rec=case script="LSO 15" case=zero-normalise step=before
+PROBE errors/math-lso rec=case script="LSO 15" case=zero-normalise step=after result="<0.000000, 0.000000, 0.000000> <0.000000, 0.000000, 0.000000> <0.000000, 0.000000, 0.000000, 0.500000>"
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 1" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 2" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 3" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 4" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 5" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 6" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 7" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 8" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 9" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 10" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 11" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 12" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 13" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 14" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 15" running=1
+PROBE errors/math-lso rec=revive script="LSO 1" how=reset-then-run
+PROBE errors/math-lso rec=revive script="LSO 2" how=run-then-reset
+PROBE errors/math-lso rec=ping when=after-revive
+PROBE errors/math-lso rec=answer script="LSO 5"
+PROBE errors/math-lso rec=answer script="LSO 1"
+PROBE errors/math-lso rec=answer script="LSO 4"
+PROBE errors/math-lso rec=answer script="LSO 2"
+PROBE errors/math-lso rec=answer script="LSO 3"
+PROBE errors/math-lso rec=answer script="LSO 9"
+PROBE errors/math-lso rec=answer script="LSO 11"
+PROBE errors/math-lso rec=answer script="LSO 7"
+PROBE errors/math-lso rec=answer script="LSO 12"
+PROBE errors/math-lso rec=answer script="LSO 10"
+PROBE errors/math-lso rec=answer script="LSO 13"
+PROBE errors/math-lso rec=answer script="LSO 15"
+PROBE errors/math-lso rec=answer script="LSO 14"
+PROBE errors/math-lso rec=answer script="LSO 6"
+PROBE errors/math-lso rec=answer script="LSO 8"
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 1" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 2" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 3" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 4" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 5" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 6" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 7" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 8" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 9" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 10" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 11" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 12" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 13" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 14" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 15" running=1
+PROBE errors/math-lso rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="Integer division by Zero(script: LSO 1 event: link_message primID:c8b4e259-d594-47be-8d72-5ec6397c4e42 at <120, 128, 27.5>)"
+# debug-channel by=other: from="Object" text="Integer division by Zero(script: LSO 2 event: link_message primID:c8b4e259-d594-47be-8d72-5ec6397c4e42 at <120, 128, 27.5>)"
+# debug-channel by=other: from="Object" text="Float division by zero(script: LSO 3 event: link_message primID:c8b4e259-d594-47be-8d72-5ec6397c4e42 at <120, 128, 27.5>)"
+# debug-channel by=other: from="Object" text="Vector division by zero(script: LSO 4 event: link_message primID:c8b4e259-d594-47be-8d72-5ec6397c4e42 at <120, 128, 27.5>)"
+# debug-channel by=other: from="Object" text="System.OverflowException: Arithmetic operation resulted in an overflow.\n  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger.op_Division (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger i1, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger i2) [0x00002] in <4232b8ace8a34b48b171661be4717e89>:0 \n  at SecondLife.XEngineScript.run (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString zero) [0x00072] in <69b9582e0a7744a1a4d6d81beab0c0f6>:0 \n  at SecondLife.XEngineScript.default_event_link_message (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger sender, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger num, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString msg, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString id) [0x0001d] in <69b9582e0a7744a1a4d6d81beab0c0f6>:0 \n  at (wrapper managed-to-native) System.Reflection.RuntimeMethodInfo.InternalInvoke(System.Reflection.RuntimeMethodInfo,object,object[],System.Exception&)\n  at System.Reflection.Runti"
+# debug-channel by=other: from="Object" text="System.OverflowException: Arithmetic operation resulted in an overflow.\n  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger.op_Modulus (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger i1, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger i2) [0x00002] in <4232b8ace8a34b48b171661be4717e89>:0 \n  at SecondLife.XEngineScript.run (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString zero) [0x00072] in <dbfce0032ab74e7ea752dec5e1e3d097>:0 \n  at SecondLife.XEngineScript.default_event_link_message (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger sender, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger num, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString msg, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString id) [0x0001d] in <dbfce0032ab74e7ea752dec5e1e3d097>:0 \n  at (wrapper managed-to-native) System.Reflection.RuntimeMethodInfo.InternalInvoke(System.Reflection.RuntimeMethodInfo,object,object[],System.Exception&)\n  at System.Reflection.Runtim"
+# debug-channel by=other: from="Object" text="System.Reflection.TargetInvocationException: Exception has been thrown by the target of an invocation. ---> System.DivideByZeroException: Attempted to divide by zero.\n  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llModPow (System.Int32 a, System.Int32 b, System.Int32 c) [0x0000a] in <d09853dcdece4467894564db0ef815df>:0 \n  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llModPow (System.Int32 a, System.Int32 b, System.Int32 c) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0 \n  at SecondLife.XEngineScript.run (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString zero) [0x00071] in <1d9107fb595e4992870c9604935dd0ac>:0 \n  at SecondLife.XEngineScript.default_event_link_message (OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger sender, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLInteger num, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString msg, OpenSim.Region.ScriptEngine.Shared.LSL_Types+LSLString id) [0x0001e] in <1d9107fb595e4992870c9604935dd0ac>"

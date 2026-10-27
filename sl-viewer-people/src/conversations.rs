@@ -109,6 +109,7 @@ use crate::ui_tab::{
 };
 use crate::ui_text::set_node_text;
 use crate::world_api::rlv::swallows_owner_say;
+use crate::world_api::{ScriptChatRoute, script_chat_route};
 use bevy_flair::style::components::ClassList;
 use sl_viewer_ui_core::glyph;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
@@ -2067,7 +2068,7 @@ struct ConversationChrome<'w, 's> {
 #[derive(Debug, bevy::ecs::system::SystemParam)]
 struct RefreshMemo<'s> {
     /// The palette the transcripts were last rendered with.
-    last_palette: Local<'s, Option<[Color; 5]>>,
+    last_palette: Local<'s, Option<[Color; 6]>>,
     /// The alias revision they were last rendered against.
     last_alias_revision: Local<'s, Option<u64>>,
 }
@@ -2115,6 +2116,11 @@ pub(crate) fn ingest_conversation_events(
                         message.chat_type,
                         &message.message,
                     )
+                    && script_chat_route(
+                        facts.settings.as_deref(),
+                        facts.identity.agent_id,
+                        message,
+                    ) == ScriptChatRoute::Chat
                     && !mutes.is_some_and(|mutes| chat_text_muted(mutes.list(), message))
                 {
                     model.push_nearby(
@@ -2932,6 +2938,10 @@ fn refresh_conversations(
             SpeakerLink::None,
             settings.as_deref(),
         ),
+        crate::skin_colors::setting_color(
+            settings.as_deref(),
+            crate::skin_colors::SETTING_CHAT_SCRIPT_ERROR,
+        ),
     ];
     if *memo.last_palette != Some(palette) {
         if memo.last_palette.is_some() {
@@ -3118,8 +3128,18 @@ fn spawn_transcript_line(
     } else {
         line.speaker_link
     };
-    style.plain_color =
-        band.unwrap_or_else(|| transcript_line_color(render.key, colour_of, render.settings));
+    // A script's debug line routed to nearby chat wears the script-error
+    // colour, so it does not read as something the object said.
+    style.plain_color = band.unwrap_or_else(|| {
+        if line.chat_type == Some(ChatType::DebugChannel) {
+            crate::skin_colors::setting_color(
+                render.settings,
+                crate::skin_colors::SETTING_CHAT_SCRIPT_ERROR,
+            )
+        } else {
+            transcript_line_color(render.key, colour_of, render.settings)
+        }
+    });
     spawn_linkified_text(commands, column, &line_text(line, render.you, alias), style);
 }
 

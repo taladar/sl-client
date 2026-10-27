@@ -1,0 +1,109 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE errors/math rec=listening channel=2147483647 dist=19
+PROBE errors/math rec=listening channel=2147483647 dist=21
+PROBE errors/math rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE errors/math rec=case script="Math 1" case=int-div step=before
+# debug-channel: from="Faulty prim" text="Faulty prim [script:Math 1] Script run-time error"
+# debug-channel: from="Faulty prim" text="Math Error"
+PROBE errors/math rec=heard name="Faulty prim" same_owner=1 dist=19.000000 len=49 msg="Faulty prim [script:Math 1] Script run-time error"
+PROBE errors/math rec=heard name="Faulty prim" same_owner=1 dist=19.000000 len=10 msg="Math Error"
+PROBE errors/math rec=case script="Math 2" case=int-mod step=before
+# debug-channel: from="Faulty prim" text="Faulty prim [script:Math 2] Script run-time error"
+# debug-channel: from="Faulty prim" text="Math Error"
+PROBE errors/math rec=heard name="Faulty prim" same_owner=1 dist=19.000000 len=49 msg="Faulty prim [script:Math 2] Script run-time error"
+PROBE errors/math rec=heard name="Faulty prim" same_owner=1 dist=19.000000 len=10 msg="Math Error"
+PROBE errors/math rec=case script="Math 3" case=float-div step=before
+# debug-channel: from="Faulty prim" text="Faulty prim [script:Math 3] Script run-time error"
+# debug-channel: from="Faulty prim" text="Math Error"
+PROBE errors/math rec=heard name="Faulty prim" same_owner=1 dist=19.000000 len=49 msg="Faulty prim [script:Math 3] Script run-time error"
+PROBE errors/math rec=heard name="Faulty prim" same_owner=1 dist=19.000000 len=10 msg="Math Error"
+PROBE errors/math rec=case script="Math 4" case=vector-div step=before
+# debug-channel: from="Faulty prim" text="Faulty prim [script:Math 4] Script run-time error"
+# debug-channel: from="Faulty prim" text="Math Error"
+PROBE errors/math rec=heard name="Faulty prim" same_owner=1 dist=19.000000 len=49 msg="Faulty prim [script:Math 4] Script run-time error"
+PROBE errors/math rec=heard name="Faulty prim" same_owner=1 dist=19.000000 len=10 msg="Math Error"
+PROBE errors/math rec=case script="Math 5" case=rotation-div step=before
+PROBE errors/math rec=case script="Math 5" case=rotation-div step=after result="<0.00000, 0.00000, 0.00000, 0.00000>"
+PROBE errors/math rec=case script="Math 6" case=int-min-div step=before
+PROBE errors/math rec=case script="Math 6" case=int-min-div step=after result="-2147483648"
+PROBE errors/math rec=case script="Math 7" case=int-min-mod step=before
+PROBE errors/math rec=case script="Math 7" case=int-min-mod step=after result="0"
+PROBE errors/math rec=case script="Math 8" case=sqrt-negative step=before
+PROBE errors/math rec=case script="Math 8" case=sqrt-negative step=after result="NaN"
+PROBE errors/math rec=case script="Math 9" case=float-overflow step=before
+PROBE errors/math rec=case script="Math 9" case=float-overflow step=after result="Infinity"
+PROBE errors/math rec=case script="Math 10" case=modpow-zero step=before
+PROBE errors/math rec=case script="Math 10" case=modpow-zero step=after result="0"
+PROBE errors/math rec=case script="Math 11" case=log-zero step=before
+PROBE errors/math rec=case script="Math 11" case=log-zero step=after result="0.000000 0.000000"
+PROBE errors/math rec=case script="Math 12" case=acos-out-of-range step=before
+PROBE errors/math rec=case script="Math 12" case=acos-out-of-range step=after result="NaN NaN"
+PROBE errors/math rec=case script="Math 13" case=pow-nan step=before
+PROBE errors/math rec=case script="Math 13" case=pow-nan step=after result="NaN Infinity"
+PROBE errors/math rec=case script="Math 14" case=inf-nan-casts step=before
+PROBE errors/math rec=case script="Math 14" case=inf-nan-casts step=after result="Infinity -2147483648 NaN -2147483648"
+PROBE errors/math rec=case script="Math 15" case=zero-normalise step=before
+PROBE errors/math rec=case script="Math 15" case=zero-normalise step=after result="<0.00000, 0.00000, 0.00000> <0.00000, 0.00000, 0.00000> <1.00000, 0.00000, 0.00000, 0.00000>"
+PROBE errors/math rec=script-state when=after-faults script="Math 1" running=0
+PROBE errors/math rec=script-state when=after-faults script="Math 2" running=0
+PROBE errors/math rec=script-state when=after-faults script="Math 3" running=0
+PROBE errors/math rec=script-state when=after-faults script="Math 4" running=0
+PROBE errors/math rec=script-state when=after-faults script="Math 5" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 6" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 7" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 8" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 9" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 10" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 11" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 12" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 13" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 14" running=1
+PROBE errors/math rec=script-state when=after-faults script="Math 15" running=1
+PROBE errors/math rec=revive script="Math 1" how=reset-then-run
+PROBE errors/math rec=revive script="Math 2" how=run-then-reset
+PROBE errors/math rec=ping when=after-revive
+PROBE errors/math rec=answer script="Math 9"
+PROBE errors/math rec=answer script="Math 14"
+PROBE errors/math rec=answer script="Math 5"
+PROBE errors/math rec=answer script="Math 12"
+PROBE errors/math rec=answer script="Math 10"
+PROBE errors/math rec=answer script="Math 7"
+PROBE errors/math rec=answer script="Math 11"
+PROBE errors/math rec=answer script="Math 13"
+PROBE errors/math rec=answer script="Math 6"
+PROBE errors/math rec=answer script="Math 8"
+PROBE errors/math rec=answer script="Math 15"
+PROBE errors/math rec=answer script="Math 2"
+PROBE errors/math rec=answer script="Math 1"
+PROBE errors/math rec=script-state when=after-revive script="Math 1" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 2" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 3" running=0
+PROBE errors/math rec=script-state when=after-revive script="Math 4" running=0
+PROBE errors/math rec=script-state when=after-revive script="Math 5" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 6" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 7" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 8" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 9" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 10" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 11" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 12" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 13" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 14" running=1
+PROBE errors/math rec=script-state when=after-revive script="Math 15" running=1
+PROBE errors/math rec=end
+# debug-channel by=other: from="Faulty prim" text="Faulty prim [script:Math 1] Script run-time error"
+# debug-channel by=other: from="Faulty prim" text="Math Error"
+# debug-channel by=other: from="Faulty prim" text="Faulty prim [script:Math 2] Script run-time error"
+# debug-channel by=other: from="Faulty prim" text="Math Error"
+# debug-channel by=other: from="Faulty prim" text="Faulty prim [script:Math 3] Script run-time error"
+# debug-channel by=other: from="Faulty prim" text="Math Error"
+# debug-channel by=other: from="Faulty prim" text="Faulty prim [script:Math 4] Script run-time error"
+# debug-channel by=other: from="Faulty prim" text="Math Error"

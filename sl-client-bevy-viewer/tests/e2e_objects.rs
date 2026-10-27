@@ -51,6 +51,11 @@
 //! has to show a new script under the grid's name for it, lose a row the
 //! grid removed, and stop saying a change is on its way when no listing ever
 //! comes back.
+//!
+//! And a script that faults says so on `DEBUG_CHANNEL`
+//! ([[gridspec-lsl-runtime-errors]]), in each grid's own words: on a live
+//! grid, a script saved from the editor that divides by zero has to open the
+//! Script Errors window on them.
 
 #[cfg(test)]
 mod test {
@@ -1653,6 +1658,91 @@ mod test {
                     ImitatedGrid::OpenSim
                 };
                 a_prims_contents_follow_the_grid(stage, like).await
+            })?;
+        Ok(())
+    }
+
+    /// The name the run-time error test gives its prim.
+    const FAULTY: &str = "Divides By Zero";
+
+    /// A script that divides by zero as it starts: the zero is the prim's
+    /// empty description, so no compiler folds the division away.
+    const DIVIDES_BY_ZERO: &str = "default\n{\n    state_entry()\n    {\n        \
+                                   integer zero = (integer)llGetObjectDesc();\n        \
+                                   llOwnerSay((string)(1 / zero));\n    }\n}\n";
+
+    /// **A run-time error, live** (`SL_E2E_GRID=opensim|aditi`, where the
+    /// avatar stands on land it may build on): a prim's new script is
+    /// replaced in the script editor with one that divides by zero, and the
+    /// grid's report of the fault opens the Script Errors window on the
+    /// grid's own words (`book/src/gridspec/lsl.md` § Run-time errors) —
+    /// Second Life's `Math Error`, OpenSim's division by zero.
+    #[test]
+    fn a_scripts_fault_opens_the_script_errors_window_on_a_live_grid() -> Result<(), TestError> {
+        StageBuilder::new("script_fault_live")
+            .viewer_binary(VIEWER)
+            .viewer("Alpha")
+            .needs(Need::LiveGrid("a grid's own run-time error"))
+            .run(async |stage: &Stage| {
+                let alpha = &stage.viewer("Alpha")?;
+                arrived(alpha).await?;
+                sweep_leftovers(stage, alpha).await?;
+                alpha.press("Ctrl+B").await?;
+                let build = alpha.ui().window("build-tools");
+                let prim_id = rez_named(stage, alpha, &build, None, FAULTY).await?;
+                let _content = build
+                    .get(Locator::role(Role::Tab).name_key("build-tab-content"))
+                    .click()
+                    .await?;
+                let row = build.get(Locator::role(Role::ListItem).name_containing(NEW_SCRIPT));
+                let _made = build
+                    .test_id("contents-button:build-content-new-script")
+                    .click()
+                    .await?;
+                let _listed = alpha.expect(&row).timeout(WAIT).to_be_visible().await?;
+                // A row whose script is still on its way opens nothing.
+                let adding = build.get(Locator::role(Role::ListItem).name_containing(ADDING));
+                let _settled = alpha.expect(&adding).timeout(WAIT).to_be_hidden().await?;
+                let _opened = row.double_click().await?;
+                let body = alpha.ui().test_id("script-body:field");
+                let _shown = alpha.expect(&body).timeout(WAIT).to_be_visible().await?;
+                let _typed = body.fill(DIVIDES_BY_ZERO).await?;
+                let _saved = alpha.ui().button_key("script-save").click().await?;
+
+                let words = if stage.on_grid() == Grid::Aditi {
+                    "Math Error"
+                } else {
+                    "ivision by Zero"
+                };
+                let window = alpha.ui().window("script-errors");
+                let _opened = alpha.expect(&window).timeout(WAIT).to_be_visible().await?;
+                let line =
+                    window.get(Locator::test_id("script-errors-line").name_containing(words));
+                let _reported = alpha.expect(&line).timeout(WAIT).to_be_visible().await?;
+                let tab = window.get(Locator::role(Role::Tab).name_containing(FAULTY));
+                let _tabbed = alpha.expect(&tab).timeout(WAIT).to_be_visible().await?;
+
+                // Both windows stand between the camera and the prim.
+                let _closed = window.button_key("floater-chrome-close").click().await?;
+                let editor = alpha
+                    .ui()
+                    .locator(Locator::role(Role::Window).named(NEW_SCRIPT));
+                let _closed = editor.button_key("floater-chrome-close").click().await?;
+                let _gone = alpha.expect(&editor).timeout(WAIT).to_be_hidden().await?;
+                alpha.press("Escape").await?;
+                alpha.press("Escape").await?;
+                alpha.press("Ctrl+B").await?;
+                let this_prim = alpha
+                    .world()
+                    .locator(WorldLocator::full_id(prim_id))
+                    .timeout(SETTLE);
+                pie(alpha, &this_prim, &DELETE).await?;
+                let _deleted = alpha
+                    .expect_world(&this_prim)
+                    .timeout(SETTLE)
+                    .to_be_detached()
+                    .await?;
+                Ok(())
             })?;
         Ok(())
     }

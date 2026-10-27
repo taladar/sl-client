@@ -159,6 +159,10 @@ How each grid places, scales and turns a prim, what `llGetPrimitiveParams`
 reads back after each `PRIM_*` rule, how a rule list's errors are told,
 linking, and which setter raises which `changed` bit is in
 [Grid Behaviour → LSL scripts](../gridspec/lsl.md#reading-and-writing-the-prim).
+What a run-time error says on each grid, to whom and how far, which
+arithmetic and which out-of-range index faults, how a flood of errors is
+cut short and what becomes of the faulted script is in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#run-time-errors).
 
 Creating a brand-new script goes through `CreateInventoryItem` (carrying the
 language subtype): the **simulator fills a compilable default body** (the LSL

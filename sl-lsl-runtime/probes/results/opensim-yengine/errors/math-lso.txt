@@ -1,0 +1,144 @@
+grid: opensim-yengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 1" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 2" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 3" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 4" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 5" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 6" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 7" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 8" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 9" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 10" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 11" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 12" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 13" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 14" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+# target: script "LSO 15" lsl2
+# chat type=say from="Object" length=14 text="Script running"
+PROBE errors/math-lso rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE errors/math-lso rec=case script="LSO 1" case=int-div step=before
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: LSO 1 event: link_message primID: ca1b5162-abea-4a37-bd2c-921081c6f9b1 at: <120,128,27>) Script must be Reset to re-enable.\n"
+PROBE errors/math-lso rec=case script="LSO 2" case=int-mod step=before
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: LSO 2 event: link_message primID: ca1b5162-abea-4a37-bd2c-921081c6f9b1 at: <120,128,27>) Script must be Reset to re-enable.\n"
+PROBE errors/math-lso rec=case script="LSO 3" case=float-div step=before
+# debug-channel: from="Object" text="YEngine: Division by Zero (script: LSO 3 event: link_message primID: ca1b5162-abea-4a37-bd2c-921081c6f9b1 at: <120,128,27>) Script must be Reset to re-enable.\n"
+PROBE errors/math-lso rec=case script="LSO 4" case=vector-div step=before
+# debug-channel: from="Object" text="YEngine: Vector division by zero (script: LSO 4 event: link_message primID: ca1b5162-abea-4a37-bd2c-921081c6f9b1 at: <120,128,27>) Script must be Reset to re-enable.\n"
+PROBE errors/math-lso rec=case script="LSO 5" case=rotation-div step=before
+PROBE errors/math-lso rec=case script="LSO 5" case=rotation-div step=after result="<0.000000, 0.000000, 0.000000, 1.000000>"
+PROBE errors/math-lso rec=case script="LSO 6" case=int-min-div step=before
+PROBE errors/math-lso rec=case script="LSO 6" case=int-min-div step=after result="-2147483648"
+PROBE errors/math-lso rec=case script="LSO 7" case=int-min-mod step=before
+PROBE errors/math-lso rec=case script="LSO 7" case=int-min-mod step=after result="0"
+PROBE errors/math-lso rec=case script="LSO 8" case=sqrt-negative step=before
+PROBE errors/math-lso rec=case script="LSO 8" case=sqrt-negative step=after result="NaN"
+PROBE errors/math-lso rec=case script="LSO 9" case=float-overflow step=before
+PROBE errors/math-lso rec=case script="LSO 9" case=float-overflow step=after result="10000000000000000000000000000000000000000000000000000000000000000000000000000.000000"
+PROBE errors/math-lso rec=case script="LSO 10" case=modpow-zero step=before
+# owner-say: from="Object" text="[YEngine]: Exception while running 06ac1c8f-40ec-4820-a81c-8f37e6f4a5ed"
+# owner-say: from="Object" text="DivideByZeroException: Attempted to divide by zero."
+# owner-say: from="Object" text="Prim: <Object>, Script: <LSO 10>, Location: Default Region <120,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llModPow (System.Int32 a, System.Int32 b, System.Int32 c) [0x0000a] in <d09853dcdece4467894564db0ef815df>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llModPow (System.Int32 a, System.Int32 b, System.Int32 c) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.run(string)(XMRInstanceSuperType,string)"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default link_message(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.StartEx () [0x00009] in <494689fd7fc54dbc80fad348ad979238>:0"
+PROBE errors/math-lso rec=case script="LSO 11" case=log-zero step=before
+PROBE errors/math-lso rec=case script="LSO 11" case=log-zero step=after result="-Infinity NaN"
+PROBE errors/math-lso rec=case script="LSO 12" case=acos-out-of-range step=before
+PROBE errors/math-lso rec=case script="LSO 12" case=acos-out-of-range step=after result="NaN NaN"
+PROBE errors/math-lso rec=case script="LSO 13" case=pow-nan step=before
+PROBE errors/math-lso rec=case script="LSO 13" case=pow-nan step=after result="NaN Infinity"
+PROBE errors/math-lso rec=case script="LSO 14" case=inf-nan-casts step=before
+PROBE errors/math-lso rec=case script="LSO 14" case=inf-nan-casts step=after result="0.000000 0 0.000000 0"
+PROBE errors/math-lso rec=case script="LSO 15" case=zero-normalise step=before
+PROBE errors/math-lso rec=case script="LSO 15" case=zero-normalise step=after result="<0.000000, 0.000000, 0.000000> <0.000000, 0.000000, 0.000000> <0.000000, 0.000000, 0.000000, 0.500000>"
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 1" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 2" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 3" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 4" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 5" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 6" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 7" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 8" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 9" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 10" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 11" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 12" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 13" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 14" running=1
+PROBE errors/math-lso rec=script-state when=after-faults script="LSO 15" running=1
+PROBE errors/math-lso rec=revive script="LSO 1" how=reset-then-run
+PROBE errors/math-lso rec=revive script="LSO 2" how=run-then-reset
+PROBE errors/math-lso rec=ping when=after-revive
+PROBE errors/math-lso rec=answer script="LSO 1"
+PROBE errors/math-lso rec=answer script="LSO 2"
+PROBE errors/math-lso rec=answer script="LSO 5"
+PROBE errors/math-lso rec=answer script="LSO 6"
+PROBE errors/math-lso rec=answer script="LSO 7"
+PROBE errors/math-lso rec=answer script="LSO 8"
+PROBE errors/math-lso rec=answer script="LSO 9"
+PROBE errors/math-lso rec=answer script="LSO 11"
+PROBE errors/math-lso rec=answer script="LSO 12"
+PROBE errors/math-lso rec=answer script="LSO 13"
+PROBE errors/math-lso rec=answer script="LSO 14"
+PROBE errors/math-lso rec=answer script="LSO 15"
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 1" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 2" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 3" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 4" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 5" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 6" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 7" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 8" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 9" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 10" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 11" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 12" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 13" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 14" running=1
+PROBE errors/math-lso rec=script-state when=after-revive script="LSO 15" running=1
+PROBE errors/math-lso rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: LSO 1 event: link_message primID: ca1b5162-abea-4a37-bd2c-921081c6f9b1 at: <120,128,27>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: LSO 2 event: link_message primID: ca1b5162-abea-4a37-bd2c-921081c6f9b1 at: <120,128,27>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Division by Zero (script: LSO 3 event: link_message primID: ca1b5162-abea-4a37-bd2c-921081c6f9b1 at: <120,128,27>) Script must be Reset to re-enable.\n"
+# debug-channel by=other: from="Object" text="YEngine: Vector division by zero (script: LSO 4 event: link_message primID: ca1b5162-abea-4a37-bd2c-921081c6f9b1 at: <120,128,27>) Script must be Reset to re-enable.\n"

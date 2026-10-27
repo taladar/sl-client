@@ -67,6 +67,7 @@ pub mod notification_persist;
 pub mod payment_notices;
 pub mod region_restart;
 pub mod script_dialog;
+pub mod script_errors;
 pub mod script_permission;
 pub mod system_messages;
 pub mod ui_name_link;

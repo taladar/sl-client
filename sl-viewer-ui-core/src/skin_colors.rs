@@ -55,6 +55,11 @@ pub const SETTING_CHAT_IM: &str = "ChatColorIm";
 /// Colour of system / viewer-notice chat lines (reference `SystemChatColor`).
 pub const SETTING_CHAT_SYSTEM: &str = "ChatColorSystem";
 
+/// Colour of a script's `DEBUG_CHANNEL` lines — its run-time errors and
+/// warnings — wherever they are shown: the Script Errors window, and nearby
+/// chat when they are routed there (reference `ScriptErrorColor`).
+pub const SETTING_CHAT_SCRIPT_ERROR: &str = "ChatColorScriptError";
+
 /// The keyword-alert highlight colour. Registered with the palette now; the
 /// chat keyword-alerts feature (`viewer-chat-keyword-alerts`) is its consumer.
 pub const SETTING_KEYWORD_ALERT: &str = "KeywordAlertColor";
@@ -180,6 +185,12 @@ pub const COLOR_TOKENS: &[ColorTokenDef] = &[
         css_var: "chat-system",
         fallback: [1.0, 1.0, 1.0],
         description_key: "setting-desc-ChatColorSystem",
+    },
+    ColorTokenDef {
+        setting: SETTING_CHAT_SCRIPT_ERROR,
+        css_var: "chat-script-error",
+        fallback: [1.0, 0.25, 0.25],
+        description_key: "setting-desc-ChatColorScriptError",
     },
     ColorTokenDef {
         setting: SETTING_KEYWORD_ALERT,

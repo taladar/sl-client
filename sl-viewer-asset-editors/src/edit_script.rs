@@ -173,8 +173,10 @@ struct ScriptEditorState {
     editable: bool,
     /// The compile backend to request for this window's script.
     target: ScriptTarget,
-    /// The asset id awaited (`FetchAsset` sent), matched on `AssetReceived`.
-    pending_load: Option<Uuid>,
+    /// Whether the source is still awaited (the item fetch sent, matched on
+    /// its `InventoryItemAssetReceived` / `TaskItemAssetReceived` or its
+    /// `TransferFailed`).
+    pending_load: bool,
     /// The source a save in flight put on the wire, or `None` when none is —
     /// matched on the next `ScriptUploaded` / `AssetUploadFailed`, since a save
     /// is user-triggered one at a time. The text is kept because it, and not
@@ -267,11 +269,7 @@ fn open_script(
             continue;
         };
         build_script_window(&mut commands, handle, &open);
-        sl_commands.write(SlCommand(Command::FetchAsset {
-            asset_id: AssetKey::from(open.asset_id),
-            asset_type: AssetType::ScriptText,
-            byte_range: None,
-        }));
+        sl_commands.write(SlCommand(fetch_command(open.source, open.asset_id)));
         // A task script has a run state the save must preserve; query it so the
         // Running checkbox reflects reality rather than a guess.
         if let ScriptSource::Task { task_id, item_id } = open.source
@@ -310,7 +308,7 @@ fn build_script_window(commands: &mut Commands, handle: FloaterHandle, open: &Op
             source: open.source,
             editable: open.editable,
             target: open.target,
-            pending_load: Some(open.asset_id),
+            pending_load: true,
             saving: None,
             body_field: None,
             status: Some(status),
@@ -329,6 +327,55 @@ fn build_script_window(commands: &mut Commands, handle: FloaterHandle, open: &Op
 // Asset received → build the editor.
 // ---------------------------------------------------------------------------
 
+/// The fetch that reads the script at `source`: through the simulator, by the
+/// item — `SimInvItem`, the agent's own inventory or the object's — as the
+/// reference reads it (`LLPreviewLSL::loadAsset`,
+/// `LLLiveLSLEditor::loadAsset`, both through `getInvItemAsset`). Second Life
+/// lists a script's asset id as nil even to its owner
+/// (`book/src/gridspec/lsl.md` § Compiling), so the id cannot be what is
+/// asked for; the simulator finds the asset by the item, and a nil id is
+/// passed on as it came, as the reference passes it.
+fn fetch_command(source: ScriptSource, asset_id: Uuid) -> Command {
+    let asset_id = AssetKey::from(asset_id);
+    match source {
+        ScriptSource::Agent { item_id } => Command::FetchInventoryItemAsset {
+            item_id,
+            asset_id,
+            asset_type: AssetType::ScriptText,
+        },
+        ScriptSource::Task { task_id, item_id } => Command::FetchTaskItemAsset {
+            task: task_id,
+            item_id,
+            asset_id,
+            asset_type: AssetType::ScriptText,
+        },
+    }
+}
+
+/// What `event` says about the source awaited at `source`: its bytes
+/// (`Ok`), its refusal (`Err`), or nothing.
+fn load_of(event: &SlSessionEvent, source: ScriptSource) -> Option<Result<&[u8], ()>> {
+    match (event, source) {
+        (
+            SlSessionEvent::InventoryItemAssetReceived { item, data, .. },
+            ScriptSource::Agent { item_id },
+        ) if *item == item_id => Some(Ok(data)),
+        (
+            SlSessionEvent::TaskItemAssetReceived {
+                task, item, data, ..
+            },
+            ScriptSource::Task { task_id, item_id },
+        ) if *task == task_id && *item == item_id => Some(Ok(data)),
+        (
+            SlSessionEvent::TransferFailed {
+                item: Some(item), ..
+            },
+            ScriptSource::Agent { item_id } | ScriptSource::Task { item_id, .. },
+        ) if *item == item_id => Some(Err(())),
+        _ => None,
+    }
+}
+
 /// Fold the fetched script source into the editor once it arrives: decode the
 /// UTF-8 text, then build the read-only or editable body.
 fn ingest_script_asset(
@@ -345,20 +392,32 @@ fn ingest_script_asset(
         return;
     }
     for (window, mut state) in &mut windows {
-        for event in &frame {
-            let SlSessionEvent::AssetReceived(asset) = &event.0 else {
+        if !state.pending_load {
+            continue;
+        }
+        let source = state.source;
+        let Some(load) = frame.iter().find_map(|event| load_of(&event.0, source)) else {
+            continue;
+        };
+        state.pending_load = false;
+        let content = state.content;
+        {
+            let Ok(data) = load else {
+                warn!("the grid refused the source of script {source:?}");
+                tear_down(&mut commands, &children, content);
+                state.status = Some(spawn_status(
+                    &mut commands,
+                    content,
+                    "script-status-load-failed",
+                    ERROR_COLOR,
+                ));
                 continue;
             };
-            if state.pending_load != Some(asset.id) {
-                continue;
-            }
-            state.pending_load = None;
-            let (content, source) = (state.content, state.source);
 
             // Script source is plain UTF-8 text; a non-UTF-8 byte (a corrupt asset)
             // is shown lossily rather than refused, so the resident sees what is
             // there instead of an opaque error.
-            let text = String::from_utf8_lossy(&asset.data).into_owned();
+            let text = String::from_utf8_lossy(data).into_owned();
 
             let editable = state.editable;
             let running = state.running.unwrap_or(true);
@@ -1113,7 +1172,13 @@ mod tests {
             app.world()
                 .resource::<Messages<SlCommand>>()
                 .iter_current_update_messages()
-                .filter(|command| matches!(command.0, Command::FetchAsset { .. }))
+                .filter(|command| {
+                    matches!(
+                        command.0,
+                        Command::FetchInventoryItemAsset { .. }
+                            | Command::FetchTaskItemAsset { .. }
+                    )
+                })
                 .count()
         }
 

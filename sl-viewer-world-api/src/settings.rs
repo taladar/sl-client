@@ -7,6 +7,7 @@
 //! has to depend on.
 
 use bevy::prelude::*;
+use sl_client_bevy::{AgentKey, ChatMessage, ChatType};
 use sl_viewer_settings::ViewerSettings;
 
 /// Whether the autorespond mode is on (the reference `FSAutorespondMode`).
@@ -132,3 +133,208 @@ pub const MAX_PITCH: f32 = 1.54;
 /// by the presence auto-reply (`sl_viewer_social::PresenceState`), which is why it is
 /// account-scoped like the replies themselves.
 pub const SETTING_AUTORESPONSE_ITEM: &str = "AutoresponseItemUUID";
+
+/// Where a script's `DEBUG_CHANNEL` lines are shown (the reference
+/// `ShowScriptErrors` and `ShowScriptErrorsLocation` together): `"window"` —
+/// the default, the reference's — for the Script Errors window, `"chat"` for
+/// nearby chat, `"nowhere"` for neither. Global.
+pub const SETTING_SCRIPT_ERRORS_SHOW_IN: &str = "ScriptErrorsShowIn";
+
+/// Whether the `DEBUG_CHANNEL` lines of objects somebody else owns are shown
+/// too. Off by default, which is the reference's rule on Second Life: a
+/// script error is its owner's business, and in a crowded region somebody
+/// else's broken content would bury your own. OpenSim sends an OSSL denial
+/// to everybody near the object (`book/src/gridspec/lsl.md` § OSSL), so there
+/// this is what tells them apart. Global.
+pub const SETTING_SCRIPT_ERRORS_FROM_OTHERS: &str = "ScriptErrorsFromOthers";
+
+/// Whether an object's `llOwnerSay` goes to the Script Errors window instead
+/// of nearby chat (Firestorm's `FSllOwnerSayToScriptDebugWindow`). Off by
+/// default. Global.
+pub const SETTING_SCRIPT_ERRORS_OWNER_SAY: &str = "ScriptErrorsOwnerSay";
+
+/// Whether closing the Script Errors window empties it (Firestorm's
+/// `FSScriptDebugWindowClearOnClose`). Off by default. Global.
+pub const SETTING_SCRIPT_ERRORS_CLEAR_ON_CLOSE: &str = "ScriptErrorsClearOnClose";
+
+/// Where a line of nearby chat is shown, as far as the Script Errors window is
+/// concerned ([`script_chat_route`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptChatRoute {
+    /// In nearby chat, as any other line.
+    Chat,
+    /// In the Script Errors window, and not in nearby chat.
+    Window,
+    /// Nowhere.
+    Hidden,
+}
+
+/// Where `message`, heard by the agent `own_agent`, is shown: every surface
+/// that displays nearby chat asks this, so a line the Script Errors window
+/// takes is not also shown in the transcript or the overlay.
+///
+/// A `DEBUG_CHANNEL` line goes where [`SETTING_SCRIPT_ERRORS_SHOW_IN`] says —
+/// unless an object somebody else owns said it and
+/// [`SETTING_SCRIPT_ERRORS_FROM_OTHERS`] is off, which hides it. An owner-say
+/// goes to the window when [`SETTING_SCRIPT_ERRORS_OWNER_SAY`] is on (the grid
+/// sends an owner-say to the owner alone, so it is always the agent's own).
+/// Every other line is chat. A viewer with no settings store shows debug lines
+/// in the window and everything else in chat.
+#[must_use]
+pub fn script_chat_route(
+    settings: Option<&ViewerSettings>,
+    own_agent: Option<AgentKey>,
+    message: &ChatMessage,
+) -> ScriptChatRoute {
+    let store = settings.map(ViewerSettings::store);
+    match message.chat_type {
+        ChatType::DebugChannel => {
+            let own = own_agent.is_some_and(|agent| message.owner_id == Some(agent.uuid()));
+            let others = store
+                .and_then(|store| store.get_bool(SETTING_SCRIPT_ERRORS_FROM_OTHERS).ok())
+                .unwrap_or(false);
+            if !own && !others {
+                return ScriptChatRoute::Hidden;
+            }
+            match store.and_then(|store| store.get_str(SETTING_SCRIPT_ERRORS_SHOW_IN).ok()) {
+                Some("chat") => ScriptChatRoute::Chat,
+                Some("nowhere") => ScriptChatRoute::Hidden,
+                _window => ScriptChatRoute::Window,
+            }
+        }
+        ChatType::Owner
+            if store
+                .and_then(|store| store.get_bool(SETTING_SCRIPT_ERRORS_OWNER_SAY).ok())
+                .unwrap_or(false) =>
+        {
+            ScriptChatRoute::Window
+        }
+        _chat => ScriptChatRoute::Chat,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        SETTING_SCRIPT_ERRORS_FROM_OTHERS, SETTING_SCRIPT_ERRORS_OWNER_SAY,
+        SETTING_SCRIPT_ERRORS_SHOW_IN, ScriptChatRoute, script_chat_route,
+    };
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{
+        AgentKey, ChatAudible, ChatMessage, ChatSource, ChatType, ObjectKey, RegionCoordinates,
+        Uuid,
+    };
+    use sl_settings::{Scope, SettingValue, SettingsStore};
+    use sl_viewer_settings::ViewerSettings;
+
+    /// The agent whose viewer it is.
+    const OWN: u128 = 7;
+
+    /// A settings store with the four Script Errors settings at their
+    /// defaults.
+    fn settings() -> ViewerSettings {
+        let mut settings = ViewerSettings::from_store_for_test(SettingsStore::new());
+        settings.register_in(
+            &["chat"],
+            SETTING_SCRIPT_ERRORS_SHOW_IN,
+            SettingValue::String("window".to_owned()),
+            "",
+        );
+        for name in [
+            SETTING_SCRIPT_ERRORS_FROM_OTHERS,
+            SETTING_SCRIPT_ERRORS_OWNER_SAY,
+        ] {
+            settings.register_in(&["chat"], name, SettingValue::Bool(false), "");
+        }
+        settings
+    }
+
+    /// A line of `chat_type` from an object owned by `owner`.
+    fn line(chat_type: ChatType, owner: u128) -> ChatMessage {
+        ChatMessage {
+            from_name: "Object".to_owned(),
+            source: ChatSource::Object(ObjectKey::from(Uuid::from_u128(3))),
+            owner_id: Some(Uuid::from_u128(owner)),
+            chat_type,
+            audible: ChatAudible::Fully,
+            position: RegionCoordinates::new(1.0, 2.0, 3.0),
+            message: "Math Error".to_owned(),
+        }
+    }
+
+    /// Where `message` goes under `settings`, heard by [`OWN`].
+    fn route(settings: &ViewerSettings, message: &ChatMessage) -> ScriptChatRoute {
+        script_chat_route(
+            Some(settings),
+            Some(AgentKey::from(Uuid::from_u128(OWN))),
+            message,
+        )
+    }
+
+    #[test]
+    fn an_own_objects_debug_line_goes_where_the_preference_says() {
+        let mut settings = settings();
+        let own = line(ChatType::DebugChannel, OWN);
+        assert_eq!(route(&settings, &own), ScriptChatRoute::Window);
+        for (place, expected) in [
+            ("chat", ScriptChatRoute::Chat),
+            ("nowhere", ScriptChatRoute::Hidden),
+            ("window", ScriptChatRoute::Window),
+        ] {
+            settings.set(
+                Scope::Global,
+                SETTING_SCRIPT_ERRORS_SHOW_IN,
+                SettingValue::String(place.to_owned()),
+            );
+            assert_eq!(route(&settings, &own), expected, "{place}");
+        }
+    }
+
+    #[test]
+    fn somebody_elses_debug_line_is_hidden_unless_asked_for() {
+        let mut settings = settings();
+        let theirs = line(ChatType::DebugChannel, 9);
+        assert_eq!(route(&settings, &theirs), ScriptChatRoute::Hidden);
+        settings.set(
+            Scope::Global,
+            SETTING_SCRIPT_ERRORS_FROM_OTHERS,
+            SettingValue::Bool(true),
+        );
+        assert_eq!(route(&settings, &theirs), ScriptChatRoute::Window);
+        let ownerless = ChatMessage {
+            owner_id: None,
+            ..line(ChatType::DebugChannel, 9)
+        };
+        assert_eq!(route(&settings, &ownerless), ScriptChatRoute::Window);
+    }
+
+    #[test]
+    fn an_owner_say_goes_to_the_window_only_when_asked() {
+        let mut settings = settings();
+        let owner_say = line(ChatType::Owner, OWN);
+        assert_eq!(route(&settings, &owner_say), ScriptChatRoute::Chat);
+        settings.set(
+            Scope::Global,
+            SETTING_SCRIPT_ERRORS_OWNER_SAY,
+            SettingValue::Bool(true),
+        );
+        assert_eq!(route(&settings, &owner_say), ScriptChatRoute::Window);
+        assert_eq!(
+            route(&settings, &line(ChatType::Normal, OWN)),
+            ScriptChatRoute::Chat
+        );
+    }
+
+    #[test]
+    fn with_no_settings_a_debug_line_is_the_windows_and_the_rest_is_chat() {
+        let own = Some(AgentKey::from(Uuid::from_u128(OWN)));
+        assert_eq!(
+            script_chat_route(None, own, &line(ChatType::DebugChannel, OWN)),
+            ScriptChatRoute::Window
+        );
+        assert_eq!(
+            script_chat_route(None, own, &line(ChatType::Owner, OWN)),
+            ScriptChatRoute::Chat
+        );
+    }
+}

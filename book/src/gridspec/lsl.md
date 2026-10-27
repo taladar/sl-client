@@ -225,8 +225,8 @@ button's index and label; a text box replies with the text on index 0.
 `e2e_script_dialog` holds it to that on both fake flavours, and since
 2026-10-24 a reply longer than its field is cut to it in `sl-proto`
 rather than failing to encode. The refusals reach the viewer only as
-`DEBUG_CHANNEL` chat, which the roadmap task
-`viewer-script-warning-window` is to show.
+`DEBUG_CHANNEL` chat, which its Script Errors window shows
+([Run-time errors](#run-time-errors)).
 
 ## Sensors, raycasts and touches
 
@@ -337,7 +337,8 @@ chosen values (`drive=touch face=… uv=… st=… at=… normal=… binormal=�
 ### What the viewer does with it
 
 Nothing of a sweep or a ray reaches the viewer; the refusals are
-`DEBUG_CHANNEL` chat, for `viewer-script-warning-window`. A touch's
+`DEBUG_CHANNEL` chat, for the Script Errors window
+([Run-time errors](#run-time-errors)). A touch's
 surface block is the viewer's to fill: since neither grid checks it, what
 a script reads is whatever the viewer picked, so the picking is the whole
 of it: our viewer fills `Command::GrabObject`'s `surface` from its own
@@ -1374,9 +1375,10 @@ Second Life's lists no OpenSim function.
 ### What the viewer does with it
 
 Every message in the tables above reaches the viewer as `DEBUG_CHANNEL` chat
-(`ChatType::DebugChannel`), which the viewer shows as an ordinary line of
-nearby chat; the reference's Script Warning window, which would gather them
-per object, is `viewer-script-warning-window`. A script's compile errors on
+(`ChatType::DebugChannel`), which the viewer's Script Errors window gathers
+per object ([Run-time errors](#run-time-errors)). OpenSim sends a denial to
+everyone near the object, and the window shows another resident's object's
+only when it is set to show others' lines too. A script's compile errors on
 Second Life are the editor's usual error list. The script editor has no
 highlighting yet (`viewer-lsl-editor-highlight`): when it takes its keywords
 from the grid's `LSLSyntax` document, OSSL is highlighted on OpenSim with no
@@ -1845,3 +1847,129 @@ colour, texture and material, the light, the flexible path, hover text, the
 particle system and the texture animation. `llTargetOmega`'s spin is applied
 by the viewer itself from the update's angular velocity. The grid's clamps are
 the grid's: the viewer draws what it is sent.
+
+## Run-time errors
+
+Measured on 2026-10-23 by the probe `errors/runtime-errors` and on
+2026-10-27 by `errors/math`, `errors/math-lso`, `errors/bounds`,
+`errors/bounds-newer` and `errors/flood`, on the same grids. Each case that
+might fault is a script of its own, since a fault stops a script on Second
+Life; a controller sends each its case in turn, reads every script's
+`llGetScriptState`, tries two ways back for a faulted one and pings them
+all. Listeners in other objects hear `DEBUG_CHANNEL` at 10, 19, 21 and 50 m.
+`errors/math-lso` is `errors/math` with the faulters compiled to LSO, which
+only Second Life honours.
+
+### What faults
+
+The cases that fault on some grid; the zeros come from a link message's
+text, so no compiler folds them away.
+
+| case | Second Life, Mono | Second Life, LSO | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- | --- |
+| integer division or modulo by zero | `Math Error` | `Math Error` | `Division by Zero` | `Integer division by Zero` | no scripts |
+| float division by zero | `Math Error` | `Math Error` | `Division by Zero` | `Float division by zero` | no scripts |
+| a vector divided by `0.0` | `Math Error` | `Math Error` | `Vector division by zero` | `Vector division by zero` | no scripts |
+| a rotation divided by `<0, 0, 0, 0>` | `<0, 0, 0, 0>` | the same | `<0, 0, 0, 1>` | the same | no scripts |
+| `-2147483648 / -1`, `% -1` | `-2147483648`, `0` | the same | the same | **throws** `System.OverflowException: Arithmetic operation resulted in an overflow.` and the engine's stack | no scripts |
+| `llSqrt(-1.0)` | `NaN` | `Math Error` | `NaN` | `NaN` | no scripts |
+| `1.0e38 * 1.0e38` | `Infinity` | `Math Error` | `1e76`, written out in 77 digits: OpenSim's floats are doubles | the same | no scripts |
+| `llModPow(2, 3, 0)` | `0` | `0` | throws `DivideByZeroException` (below) | throws `DivideByZeroException` (below) | no scripts |
+| `llLog(0.0)`, `llLog10(-1.0)` | `0.0`, `0.0` | the same | `-Infinity`, `NaN` | the same | no scripts |
+| `llAcos(2.0)`, `llAsin(-2.0)` | `NaN`, `NaN` | `Math Error` | `NaN`, `NaN` | the same | no scripts |
+| `llPow(-1.0, 0.5)`, `llPow(0.0, -1.0)` | `NaN`, `Infinity` | `Math Error` | `NaN`, `Infinity` | the same | no scripts |
+| `(float)"inf"`, `(float)"nan"` and their casts to integer | `Infinity`, `-2147483648`, `NaN`, `-2147483648` | `Math Error` | `0.0` and `0` for all four: neither string parses | the same | no scripts |
+| `llVecNorm(ZERO_VECTOR)`, `llRot2Euler(<0, 0, 0, 0>)`, `llAxes2Rot` of three zero vectors | zero, zero, `<1, 0, 0, 0>` | the same | zero, zero, `<0, 0, 0, 0.5>` | the same | no scripts |
+| unbounded recursion | `Stack-Heap Collision` ([Running out](#running-out)) | the same | the simulator aborts (YEngine with a library call at each level; without one it catches a `StackOverflowException` and says nothing) | the simulator aborts | no scripts |
+
+So Mono faults only on division by zero, where LSO also faults on every
+result that is not a finite number — and Mono hands such a result on as
+`Infinity` or `NaN`.
+
+### What is said, and to whom
+
+| | Second Life (Mono and LSO) | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| a fault | **two** messages on `DEBUG_CHANNEL`: `<object name> [script:<script name>] Script run-time error`, then the error (`Math Error`, `Stack-Heap Collision`); the prefix is the object's name at the time (`Faulty prim [script:Math 1] …` after `llSetObjectName`) | **one**: `YEngine: <error> (script: <name> event: <event> primID: <key> at: <x,y,z>) Script must be Reset to re-enable.` and a newline; the position rounded to whole metres | **one**: `<error>(script: <name> event: <event> primID:<key> at <x, y, z>)` — no space before the bracket, the position as a vector | no scripts |
+| an exception inside a library function (`llModPow`, `llList2ListStrided`, `llListStatistics`, `llInsertString` below) | — | **not on `DEBUG_CHANNEL`**: ten or so owner-say lines (`ChatType::Owner`) to the owner — `[YEngine]: Exception while running <item>`, the exception (`DivideByZeroException: Attempted to divide by zero.`), `Prim: <name>, Script: <name>, Location: <region> <x,y,z>`, `Script must be Reset to re-enable.` and one line per frame of the stack | one `DEBUG_CHANNEL` message holding the .NET exception and its stack: `System.Reflection.TargetInvocationException: Exception has been thrown by the target of an invocation. ---> System.DivideByZeroException: …` | no scripts |
+| a library call refusing its arguments (`llGetScriptState` of a missing script) | one message: `Could not find script 'Nope'.` | one: `llGetScriptState: Can't find script 'Nope'` | the same | no scripts |
+| the range | **said**: a script 19 m away hears both messages, one 21 m away neither; an avatar past 20 m is sent the lines barely audible, with their text left out | a fault reaches every avatar near the object but **no script**, at 19, 21 or 50 m; a refused call is heard by scripts 50 m away | the same | no scripts |
+| the speaker | the prim, by its name; its owner's key in the chat's owner field | the same | the same | no scripts |
+
+### Floods
+
+`errors/flood` makes twelve errors as fast as a script can (a missing
+script's name to `llGetScriptState`, which costs the script a second on
+every grid), asks a second script in the same prim and a script in another
+object of the same owner's for one each after the tenth, then makes one more
+after 10, 30 and 60 seconds of quiet.
+
+| | Second Life | OpenSim (both engines) | fake grid |
+| --- | --- | --- | --- |
+| a run of errors | the first **eight** pass, then `Too many errors... dropping further messages until the flood stops` and nothing more | every one passes | no scripts |
+| whose flood it is | the **object's**: the second script in the same prim is dropped, the other object's error passes | — | no scripts |
+| when errors pass again | dropped after 10 seconds of quiet, passed after 30 | — | no scripts |
+| a fault's two lines | count as two: a fourth fault within the window lost its `Math Error` to the notice | — | no scripts |
+
+### The faulted script
+
+| | Second Life (Mono and LSO) | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| `llGetScriptState` | `0`: stopped | `1`, yet it answers nothing — a link message goes nowhere | `1`, and it runs on: the event ends, the next is handled, in the state it faulted in with its globals | no scripts |
+| `llSetScriptState(…, TRUE)` alone | does not start it | answers nothing still | — | no scripts |
+| `llResetOtherScript`, then `llSetScriptState(…, TRUE)`, or the other way round | running again: it answers | answers again | — | no scripts |
+
+### Indices and strides out of range
+
+`errors/bounds` and `errors/bounds-newer` read and cut a six-element list and
+a six-character string past both ends, in reverse and with strides of zero,
+negative and larger than the list. **Nothing here faults on Second Life**;
+where OpenSim throws, it is an exception inside the library function, said
+as above.
+
+| case | Second Life | OpenSim (both engines) | fake grid |
+| --- | --- | --- | --- |
+| `llList2*` and `llGetListEntryType` at 99 or -99 | the type's zero (`ZERO_ROTATION` for a rotation), `TYPE_INVALID` | the same | no scripts |
+| `llList2Vector` of the string `"<1,2,3>"`, `llList2Rot` of `"<1,2,3,4>"` | `ZERO_VECTOR`, `ZERO_ROTATION`: a string is not converted | converted: `<1, 2, 3>`, `<1, 2, 3, 4>` | no scripts |
+| `llList2Integer` of `1.9`, `llList2Float` of `"1e3"` | `1` (truncated), `1000.0` | `2` (**rounded**), `1.0` (the exponent ignored) | no scripts |
+| `llList2Integer` of `"0x10"`, of `" 7 apples"`, of a vector; `llList2Key` of an integer | `16`, `7`, `0`, `""` | the same | no scripts |
+| `llList2List`, `llListReplaceList`, `llListInsertList`, `llGetSubString`, `llDeleteSubString` past either end and reversed | the documented wrap-around | the same | no scripts |
+| `llDeleteSubList(l, 1, -99)` | `[a]` | `[]` | no scripts |
+| `llList2ListStrided` with a stride of `0`; `llListSort` with `0`, `-1`, `4` or `99`; `llListRandomize` with `0`, `-1`, `4` | the list unchanged (sorted for a sort), six elements | the same | no scripts |
+| `llList2ListStrided` with a stride of `-1` or `99`, or a reversed range | `[a, b, c, d, e, f]`, `[a]`, `[a, c, e]`, `[]` | **throws** `IndexOutOfRangeException` | no scripts |
+| `llListStatistics` of an empty list, an unknown operation, the median of strings | `0.0` each | **throws** `IndexOutOfRangeException` at the median of strings | no scripts |
+| `llListFindList` of an empty pattern | `0`, in an empty list too | `-1` | no scripts |
+| `llInsertString` at 99, -5, -1 | appended, prepended, prepended | **throws** `IndexOutOfRangeException` at a negative index | no scripts |
+| `llParseString2List` with nine separators | uses the first **eight**: `[a, …, h, i9j]` | uses all nine | no scripts |
+| `llParseString2List` with an empty separator or spacer | ignored | the same | no scripts |
+| `llOrd` at 99 or -99; `llChar(-1)`, `llChar(0x110000)`, `llChar(0)` | `0`; U+FFFD, U+FFFD, `""` | the same | no scripts |
+| `llReplaceSubString` with an empty pattern; a count of -1 or 99 | the string unchanged; the last, or every, match | does not compile: `undefined name llReplaceSubString(…)` (YEngine), CS0103 (XEngine) | no scripts |
+| `llList2ListSlice`, `llListFindStrided`, `llListSortStrided` with a stride of zero | `[]`, `0`, the list unchanged | do not compile | no scripts |
+
+### What the viewer does with it
+
+Every `DEBUG_CHANNEL` line reaches the viewer as `ChatType::DebugChannel`
+chat. The reference shows its own objects' lines in its Script Warning
+window (`llfloaterscriptdebug.cpp`) and drops the rest on Second Life;
+Firestorm's OpenSim build keeps every object's, since OpenSim sends an OSSL
+denial to everyone near ([OSSL](#ossl)).
+
+The viewer's **Script Errors** window (Advanced ▸ Script Errors,
+`sl-viewer-notices`' `script_errors`) does the same by default: it takes the
+debug lines of the agent's own objects — told by the chat's owner field —
+opens on the first, and keeps them under an All tab and a tab per object,
+each line stamped with the local time it arrived and a message of several
+lines (XEngine's .NET stack, YEngine's report) a row per line. An object's
+tab is headed by its name, a link to the object inspector (with Show on
+Map), and where it was, and marks the object with a beacon while it is
+shown. Preferences ▸ Chat moves the lines to nearby chat, where they wear
+their own colour (*Script errors*, the reference's `ScriptErrorColor`), or
+nowhere; shows other residents' objects' lines too; sends `llOwnerSay` to
+the window instead of nearby chat; and empties the window when it is closed.
+One rule (`script_chat_route`) decides for the window, the transcript and
+the overlay alike, so a line shows in exactly one of them. A line Second
+Life sends an avatar past say range comes with no text, and the window
+takes nothing from it. No grid names the line a script faulted on, so
+nothing opens the editor there. A YEngine library exception is owner chat,
+not a debug line, so it lands in nearby chat as any `llOwnerSay` does
+(unless that is sent to the window).

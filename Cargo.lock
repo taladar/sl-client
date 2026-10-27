@@ -9826,6 +9826,7 @@ dependencies = [
  "bevy",
  "bevy_flair",
  "fs-err",
+ "jiff",
  "pretty_assertions",
  "serde",
  "serde_json",

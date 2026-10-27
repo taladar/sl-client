@@ -391,6 +391,14 @@ pub const FLOATERS: &[FloaterElement] = &[
         content: crate::edit_script::spawn_script_editor_specimen,
     },
     FloaterElement {
+        id: "script-errors",
+        summary: "Script Errors: what scripts said on DEBUG_CHANNEL, each line stamped with \
+                  the time it arrived, under an All tab and a tab per object, whose name \
+                  links to the object inspector.",
+        spec: crate::script_errors::script_errors_floater_spec,
+        content: crate::script_errors::spawn_script_errors_specimen,
+    },
+    FloaterElement {
         id: "search",
         summary: "Search: the query field over the category tabs and the result list — the \
                   directory surface.",

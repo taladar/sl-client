@@ -219,6 +219,10 @@ const ENV_MODERN_MIDNIGHT_ACTIVE: &str = "env-modern-midnight-active";
 /// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
 const ENV_SHARED_ACTIVE: &str = "env-shared-active";
 
+/// The condition key that holds while the Script Errors window is open — the
+/// check mark on its Advanced menu entry.
+const SCRIPT_ERRORS_OPEN: &str = "script-errors-open";
+
 /// The condition keys that hold while each RLVa floater is open — they drive
 /// the check marks on the RLVa menu's four window entries.
 const RLV_CONSOLE_OPEN: &str = "rlv-console-open";
@@ -697,6 +701,13 @@ static ADVANCED_MENU: MenuDef = MenuDef {
     items: &[
         MenuItemDef::Submenu(&SHORTCUTS_MENU),
         MenuItemDef::Separator,
+        // The Script Errors window (`script_errors`): what scripts said on
+        // `DEBUG_CHANNEL`. It opens itself when a line arrives; this is the
+        // way back to it after closing it.
+        MenuItemDef::Command(
+            MenuCommand::new("menu-bar-script-errors", "toggle-script-errors")
+                .checked_when(SCRIPT_ERRORS_OPEN),
+        ),
         MenuItemDef::Command(
             MenuCommand::new("menu-bar-debug-settings", "toggle-debug-settings")
                 .accel("Ctrl+Alt+Shift+S")
@@ -1068,6 +1079,7 @@ fn update_top_menu_conditions(
     let phototools_open = open(crate::phototools::PHOTOTOOLS_FLOATER_ID);
     let render_settings_open = open(crate::avatar_render_floater::RENDER_SETTINGS_FLOATER_ID);
     let rlv_console_open = open(crate::rlv_console::CONSOLE_FLOATER_ID);
+    let script_errors_open = open(crate::script_errors::SCRIPT_ERRORS_FLOATER_ID);
     let rlv_behaviours_open = open(crate::rlv_behaviours::BEHAVIOURS_FLOATER_ID);
     let rlv_locks_open = open(crate::rlv_locks::LOCKS_FLOATER_ID);
     let rlv_strings_open = open(crate::rlv_strings::STRINGS_FLOATER_ID);
@@ -1218,6 +1230,9 @@ fn update_top_menu_conditions(
     }
     if crate::edit_undo::can_redo(&selection, &edit_tool) {
         wanted.push(CAN_REDO);
+    }
+    if script_errors_open {
+        wanted.push(SCRIPT_ERRORS_OPEN);
     }
     // The four RLVa window check marks.
     for (is_open, condition) in [
@@ -1630,6 +1645,13 @@ fn handle_top_menu_actions(
             "bulk-import-water" => {
                 bulk_import.write(start_bulk_import(sl_client_bevy::SettingsKind::Water));
             }
+            "toggle-script-errors" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::script_errors::SCRIPT_ERRORS_FLOATER_ID,
+                );
+            }
             "toggle-rlv-console" => {
                 toggle_floater(
                     &floaters,
@@ -1957,6 +1979,7 @@ mod tests {
                 "menu-bar-advanced > menu-bar-shortcuts".to_owned(),
                 "toggle-flycam",
             ),
+            ("menu-bar-advanced".to_owned(), "toggle-script-errors"),
             ("menu-bar-advanced".to_owned(), "toggle-debug-settings"),
             ("menu-bar-advanced".to_owned(), "toggle-collect-diagnostics"),
         ];

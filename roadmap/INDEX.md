@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 340 |
+| ready | 338 |
 | blocked | 56 |
 | in-progress | 19 |
-| bugs | 38 |
-| done | 1436 |
+| bugs | 39 |
+| done | 1438 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2077** |
+| **total** | **2078** |
 
 ## ideas (135)
 
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (340)
+## ready (338)
 
 ### protocol
 
@@ -940,8 +940,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Scripts on disk — mirror grid scripts to a directory tree
 - [`viewer-script-queue`](ready/viewer-script-queue.md) — Script queue — mass
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-script-warning-window`](ready/viewer-script-warning-window.md) —
-  Nothing in the viewer shows a script run-time error
 - [`viewer-scripted-followcam-llsetcameraparams`](ready/viewer-scripted-followcam-llsetcameraparams.md)
   — Apply scripted follow-camera parameters (llSetCameraParams)
 - [`viewer-search-maturity-filter`](ready/viewer-search-maturity-filter.md) —
@@ -1153,9 +1151,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-runtime-errors`](ready/gridspec-lsl-runtime-errors.md) — LSL
-  run-time errors on OpenSim and the debug channel in our viewer (blocked by
-  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-strings-math`](ready/gridspec-lsl-strings-math.md) — LSL
   library behaviour on each grid — strings, lists, maths and rotations (blocked
   by `gridspec-lsl-live-differential-runner` (done))
@@ -1420,7 +1415,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Run-time errors where a resident can see them (blocked by
   `server-lsl-vm-execution` (done))
 
-## bugs (38)
+## bugs (39)
 
 ### protocol
 
@@ -1509,6 +1504,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-conformance-cancelled-case-leaves-its-prims`](bugs/test-conformance-cancelled-case-leaves-its-prims.md)
   — A conformance case cancelled by its timeout or a panic leaves its rezzed
   prims in the region
+- [`test-conformance-lsl-probes-teardown-unacked`](bugs/test-conformance-lsl-probes-teardown-unacked.md)
+  — The last derez and both logouts of an OpenSim probe run go unacknowledged
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
@@ -1517,7 +1514,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1436)
+## done (1438)
 
 ### protocol
 
@@ -3332,6 +3329,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-script-permission-experience-card`](done/viewer-script-permission-experience-card.md)
   — Script permission-request experience card (ScriptQuestionExperience)
   (blocked by `viewer-experience-permission-dialog` (done))
+- [`viewer-script-warning-window`](done/viewer-script-warning-window.md) —
+  Nothing in the viewer shows a script run-time error
 - [`viewer-sculpt-sphere-fixture-divergence`](done/viewer-sculpt-sphere-fixture-divergence.md)
   — The catalogue's sculpt sphere is a sphere here and a flat sheet in Firestorm
 - [`viewer-sea-distance-band-hard-seam`](done/viewer-sea-distance-band-hard-seam.md)
@@ -4649,6 +4648,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   LSL probe corpus and per-grid result files
 - [`gridspec-lsl-refreshed-table-probe-steps`](done/gridspec-lsl-refreshed-table-probe-steps.md)
   — Probe steps the refreshed library table unblocks
+- [`gridspec-lsl-runtime-errors`](done/gridspec-lsl-runtime-errors.md) — LSL
+  run-time errors on OpenSim and the debug channel in our viewer (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct
   delivery on each grid
 - [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material

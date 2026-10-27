@@ -50,3 +50,19 @@ Acceptance: the tranche fully implemented; a rotation round-trip test
 (`llEuler2Rot` → `llRot2Euler`) holding to `f32` tolerance over a grid of
 angles; `llFrand` reproducing across two runs of one seed; and the
 axis-order cases checked against a script run on the local OpenSim.
+
+## Measured (gridspec-lsl-runtime-errors, 2026-10-27)
+
+`book/src/gridspec/lsl.md` § Run-time errors, *What faults*: which
+arithmetic results are a run-time error under Mono, LSO and each OpenSim
+engine, and what the others return. For this tranche: `llSqrt` of a
+negative, `llAcos` / `llAsin` out of range, `llPow` giving NaN are `NaN`
+under Mono and both OpenSim engines and a `Math Error` under LSO; `llLog(0)`
+and `llLog10(-1)` are `0.0` on Second Life and `-Infinity` / `NaN` on
+OpenSim; `llModPow(…, 0)` is `0` on Second Life and an exception on OpenSim;
+`llVecNorm(ZERO_VECTOR)` is zero everywhere; `llRot2Euler(<0, 0, 0, 0>)` is
+zero and `llAxes2Rot` of three zero vectors `<1, 0, 0, 0>` on Second Life,
+`<0, 0, 0, 0.5>` on OpenSim; a rotation divided by `<0, 0, 0, 0>` is
+`<0, 0, 0, 0>` there and `<0, 0, 0, 1>` here. Floats are doubles on OpenSim:
+`1e38 * 1e38` is `1e76` there and `Infinity` (Mono) or a `Math Error` (LSO)
+on Second Life.
