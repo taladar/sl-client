@@ -1,0 +1,75 @@
+grid: opensim-xengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# alert text="Notecard updated"
+# notecard "Notes" bytes=14
+# object "Child" scripts=1
+# chat type=say from="Object" length=14 text="Script running"
+PROBE inventory/rez rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE inventory/rez rec=try label=plain
+PROBE inventory/rez rec=called case=plain delay=0.100000
+PROBE inventory/rez rec=object-rez case=plain order=1
+PROBE inventory/rez rec=entry case=plain order=2 start=42
+PROBE inventory/rez rec=on-rez case=plain order=3 param=42 start=42 rezzer_is_me=1 offset=<0.000000,0.000000,1.000000> rot=<0.000000,0.000000,0.000000,1.000000> vel=<0.000000,0.000000,0.000000> die_at_edge=1 is_object_rez=1 child_first=1
+PROBE inventory/rez rec=done case=plain events=3
+PROBE inventory/rez rec=try label=at-root
+PROBE inventory/rez rec=called case=at-root delay=0.100000
+PROBE inventory/rez rec=object-rez case=at-root order=1
+PROBE inventory/rez rec=entry case=at-root order=2 start=-7
+PROBE inventory/rez rec=on-rez case=at-root order=3 param=-7 start=-7 rezzer_is_me=1 offset=<0.000000,0.000000,1.000000> rot=<0.000000,0.000000,0.000000,1.000000> vel=<0.000000,0.000000,0.000000> die_at_edge=1 is_object_rez=1 child_first=1
+PROBE inventory/rez rec=done case=at-root events=3
+PROBE inventory/rez rec=try label=rotation
+PROBE inventory/rez rec=called case=rotation delay=0.100000
+PROBE inventory/rez rec=object-rez case=rotation order=1
+PROBE inventory/rez rec=entry case=rotation order=2 start=0
+PROBE inventory/rez rec=on-rez case=rotation order=3 param=0 start=0 rezzer_is_me=1 offset=<0.000000,0.000000,1.000000> rot=<0.000000,0.000000,0.707000,0.707000> vel=<0.000000,0.000000,0.000000> die_at_edge=1 is_object_rez=1 child_first=1
+PROBE inventory/rez rec=done case=rotation events=3
+PROBE inventory/rez rec=try label=velocity
+PROBE inventory/rez rec=called case=velocity delay=0.100000
+PROBE inventory/rez rec=object-rez case=velocity order=1
+PROBE inventory/rez rec=entry case=velocity order=2 start=1
+PROBE inventory/rez rec=on-rez case=velocity order=3 param=1 start=1 rezzer_is_me=1 offset=<0.000000,0.000000,1.000000> rot=<0.000000,0.000000,0.000000,1.000000> vel=<0.000000,0.000000,0.000000> die_at_edge=1 is_object_rez=1 child_first=1
+PROBE inventory/rez rec=done case=velocity events=3
+PROBE inventory/rez rec=try label=far
+PROBE inventory/rez rec=called case=far delay=0.000000
+PROBE inventory/rez rec=done case=far events=0
+PROBE inventory/rez rec=try label=missing
+# debug-channel: from="Object" text="llRez(AtRoot/Object): Can't find object 'Nope'"
+PROBE inventory/rez rec=called case=missing delay=1.000000
+PROBE inventory/rez rec=done case=missing events=0
+PROBE inventory/rez rec=try label=notecard
+# debug-channel: from="Object" text="llRez(AtRoot/Object): Can't create requested object; object is missing from database"
+PROBE inventory/rez rec=called case=notecard delay=1.000000
+PROBE inventory/rez rec=done case=notecard events=0
+PROBE inventory/rez rec=try label=burst
+PROBE inventory/rez rec=called case=burst calls=20 seconds=2.003000
+PROBE inventory/rez rec=burst-rez param=100
+PROBE inventory/rez rec=burst-rez param=101
+PROBE inventory/rez rec=burst-rez param=102
+PROBE inventory/rez rec=burst-rez param=103
+PROBE inventory/rez rec=burst-rez param=104
+PROBE inventory/rez rec=burst-rez param=105
+PROBE inventory/rez rec=burst-rez param=106
+PROBE inventory/rez rec=burst-rez param=107
+PROBE inventory/rez rec=burst-rez param=108
+PROBE inventory/rez rec=burst-rez param=109
+PROBE inventory/rez rec=burst-rez param=110
+PROBE inventory/rez rec=burst-rez param=111
+PROBE inventory/rez rec=burst-rez param=112
+PROBE inventory/rez rec=burst-rez param=113
+PROBE inventory/rez rec=burst-rez param=114
+PROBE inventory/rez rec=burst-rez param=115
+PROBE inventory/rez rec=burst-rez param=116
+PROBE inventory/rez rec=burst-rez param=117
+PROBE inventory/rez rec=burst-rez param=118
+PROBE inventory/rez rec=burst-rez param=119
+PROBE inventory/rez rec=done case=burst events=0
+PROBE inventory/rez rec=burst object_rez=20 reports=20 distinct=20
+PROBE inventory/rez rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="llRez(AtRoot/Object): Can't find object 'Nope'"
+# debug-channel by=other: from="Object" text="llRez(AtRoot/Object): Can't create requested object; object is missing from database"

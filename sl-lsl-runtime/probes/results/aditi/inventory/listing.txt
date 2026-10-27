@@ -1,0 +1,112 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+# notecard "10" bytes=16
+# notecard "9" bytes=15
+# notecard "Beta" bytes=18
+# notecard "Zed" bytes=17
+# notecard "_under" bytes=20
+# notecard "alpha" bytes=19
+# notecard "élan" bytes=19 named="lan"
+# object "Box" scripts=1
+PROBE inventory/listing rec=helper-entry param=0
+PROBE inventory/listing rec=name case=minus-one value=""
+PROBE inventory/listing rec=name case=past-end value=""
+PROBE inventory/listing rec=name case=all-100 value=""
+PROBE inventory/listing rec=name case=no-type value=""
+PROBE inventory/listing rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE inventory/listing rec=count when=first type=-1 n=10 names="9|10|_under|aaa Helper|alpha|Beta|Box|lan|Probe|Zed"
+PROBE inventory/listing rec=count when=first type=0 n=0 names=""
+PROBE inventory/listing rec=count when=first type=1 n=0 names=""
+PROBE inventory/listing rec=count when=first type=3 n=0 names=""
+PROBE inventory/listing rec=count when=first type=5 n=0 names=""
+PROBE inventory/listing rec=count when=first type=6 n=1 names="Box"
+PROBE inventory/listing rec=count when=first type=7 n=7 names="9|10|_under|alpha|Beta|lan|Zed"
+PROBE inventory/listing rec=count when=first type=10 n=2 names="aaa Helper|Probe"
+PROBE inventory/listing rec=count when=first type=13 n=0 names=""
+PROBE inventory/listing rec=count when=first type=20 n=0 names=""
+PROBE inventory/listing rec=count when=first type=21 n=0 names=""
+PROBE inventory/listing rec=count when=first type=56 n=0 names=""
+PROBE inventory/listing rec=count when=first type=57 n=0 names=""
+PROBE inventory/listing rec=count when=first type=4 n=0 names=""
+PROBE inventory/listing rec=count when=first type=99 n=0 names=""
+PROBE inventory/listing rec=count when=first type=-2 n=0 names=""
+PROBE inventory/listing rec=try label=item-0
+PROBE inventory/listing rec=item name="alpha" type=7 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
+PROBE inventory/listing rec=try label=item-1
+# debug-channel: from="Object" text="No item named 'ALPHA'."
+# debug-channel: from="Object" text="No item named 'ALPHA'."
+# debug-channel: from="Object" text="No item named 'ALPHA'."
+# debug-channel: from="Object" text="No item named 'ALPHA'."
+# debug-channel: from="Object" text="No item named 'ALPHA'."
+# debug-channel: from="Object" text="No item named 'ALPHA'."
+PROBE inventory/listing rec=item name="ALPHA" type=-1 key=null creator=null masks=0,0,0,0,0
+PROBE inventory/listing rec=try label=item-2
+PROBE inventory/listing rec=item name="Box" type=6 key=other creator=owner masks=2147483647,2147483647,0,0,532480
+PROBE inventory/listing rec=try label=item-3
+PROBE inventory/listing rec=item name="Probe" type=10 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
+PROBE inventory/listing rec=try label=item-4
+PROBE inventory/listing rec=item name="aaa Helper" type=10 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
+PROBE inventory/listing rec=try label=item-5
+# debug-channel: from="Object" text="No item named 'élan'."
+# debug-channel: from="Object" text="No item named 'élan'."
+# debug-channel: from="Object" text="Too many errors... dropping further messages until the flood stops"
+PROBE inventory/listing rec=item name="élan" type=-1 key=null creator=null masks=0,0,0,0,0
+PROBE inventory/listing rec=try label=item-6
+PROBE inventory/listing rec=item name="nope" type=-1 key=null creator=null masks=0,0,0,0,0
+PROBE inventory/listing rec=try label=item-7
+PROBE inventory/listing rec=item name="" type=-1 key=null creator=null masks=0,0,0,0,0
+PROBE inventory/listing rec=try label=set-perm-mask
+PROBE inventory/listing rec=item name="alpha" type=7 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
+PROBE inventory/listing rec=script name="Probe" helper=1 self=1 danger=1
+PROBE inventory/listing rec=try label=state-of-none
+PROBE inventory/listing rec=script case=state-of-none value=0
+PROBE inventory/listing rec=try label=stop-helper
+PROBE inventory/listing rec=script case=stopped value=0
+PROBE inventory/listing rec=try label=reset-stopped-helper
+PROBE inventory/listing rec=script case=reset-while-stopped value=0
+PROBE inventory/listing rec=try label=start-helper
+PROBE inventory/listing rec=script case=started value=1
+PROBE inventory/listing rec=try label=reset-running-helper
+PROBE inventory/listing rec=helper-entry param=0
+PROBE inventory/listing rec=try label=reset-none
+PROBE inventory/listing rec=helper-pong num=5
+PROBE inventory/listing rec=try label=set-state-none
+PROBE inventory/listing rec=try label=remove-notecard
+PROBE inventory/listing rec=removed name=Zed n=6
+PROBE inventory/listing rec=try label=remove-none
+PROBE inventory/listing rec=removed name=nope n=9
+PROBE inventory/listing rec=try label=remove-object
+PROBE inventory/listing rec=removed name=Box n=0
+PROBE inventory/listing rec=count when=last type=-1 n=8 names="9|10|_under|aaa Helper|alpha|Beta|lan|Probe"
+PROBE inventory/listing rec=count when=last type=0 n=0 names=""
+PROBE inventory/listing rec=count when=last type=1 n=0 names=""
+PROBE inventory/listing rec=count when=last type=3 n=0 names=""
+PROBE inventory/listing rec=count when=last type=5 n=0 names=""
+PROBE inventory/listing rec=count when=last type=6 n=0 names=""
+PROBE inventory/listing rec=count when=last type=7 n=6 names="9|10|_under|alpha|Beta|lan"
+PROBE inventory/listing rec=count when=last type=10 n=2 names="aaa Helper|Probe"
+PROBE inventory/listing rec=count when=last type=13 n=0 names=""
+PROBE inventory/listing rec=count when=last type=20 n=0 names=""
+PROBE inventory/listing rec=count when=last type=21 n=0 names=""
+PROBE inventory/listing rec=count when=last type=56 n=0 names=""
+PROBE inventory/listing rec=count when=last type=57 n=0 names=""
+PROBE inventory/listing rec=count when=last type=4 n=0 names=""
+PROBE inventory/listing rec=count when=last type=99 n=0 names=""
+PROBE inventory/listing rec=count when=last type=-2 n=0 names=""
+PROBE inventory/listing rec=end
+# debug-channel by=other: from="Object" text="No item named 'ALPHA'."
+# debug-channel by=other: from="Object" text="No item named 'ALPHA'."
+# debug-channel by=other: from="Object" text="No item named 'ALPHA'."
+# debug-channel by=other: from="Object" text="No item named 'ALPHA'."
+# debug-channel by=other: from="Object" text="No item named 'ALPHA'."
+# debug-channel by=other: from="Object" text="No item named 'ALPHA'."
+# debug-channel by=other: from="Object" text="No item named 'élan'."
+# debug-channel by=other: from="Object" text="No item named 'élan'."
+# debug-channel by=other: from="Object" text="Too many errors... dropping further messages until the flood stops"

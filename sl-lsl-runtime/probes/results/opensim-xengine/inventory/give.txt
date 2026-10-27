@@ -1,0 +1,57 @@
+grid: opensim-xengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# alert text="Notecard updated"
+# notecard "Gift" bytes=7
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE inventory/give rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE inventory/give rec=found n=1
+PROBE inventory/give rec=try label=give-notecard
+PROBE inventory/give rec=called label=give-notecard delay=0.001000
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Receiver:10:1"
+PROBE inventory/give rec=try label=give-notecard-again
+PROBE inventory/give rec=called label=give-notecard-again delay=0.000000
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Receiver:10:1"
+PROBE inventory/give rec=try label=give-script
+PROBE inventory/give rec=called label=give-script delay=0.000000
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Passed:10:0|Receiver:10:1"
+PROBE inventory/give rec=try label=give-none
+# debug-channel: from="Object" text="llGiveInventory: Can't find inventory object 'Nope'"
+PROBE inventory/give rec=called label=give-none delay=1.000000
+PROBE inventory/give rec=try label=give-owner
+# im dialog=9 from=owner id=someone name="Object" offline=1 length=62 message="'Gift'. (Object is located at Default Region <120, 128, 27.5…" bucket=1
+PROBE inventory/give rec=called label=give-owner delay=3.008000
+PROBE inventory/give rec=try label=give-list-owner
+# im dialog=9 from=owner id=someone name="Object" offline=0 length=14 message="'Probe folder'" bucket=1
+PROBE inventory/give rec=called label=give-list-owner delay=3.012000
+PROBE inventory/give rec=try label=give-list-prim
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Passed:10:0|Receiver:10:1"
+PROBE inventory/give rec=called label=give-list-prim delay=0.100000
+PROBE inventory/give rec=try label=remote-load
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Loaded:10:0|Passed:10:0|Receiver:10:1"
+PROBE inventory/give rec=loaded param=77 in=Receiver
+PROBE inventory/give rec=called label=remote-load delay=3.000000
+PROBE inventory/give rec=try label=remote-load-wrong-pin
+PROBE inventory/give rec=called label=remote-load-wrong-pin delay=3.000000
+PROBE inventory/give rec=try label=remote-load-stopped
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Loaded:10:0|Passed:10:0|Receiver:10:1"
+PROBE inventory/give rec=receiver-changed change=1 items="Gift:7|Gift 1:7|Gift 2:7|Loaded:10:1|Passed:10:0|Receiver:10:1"
+PROBE inventory/give rec=called label=remote-load-stopped delay=3.001999
+PROBE inventory/give rec=waiting drive=touch by=other
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="llGiveInventory: Can't find inventory object 'Nope'"
+# touch by=other active_group=set surface=none
+PROBE inventory/give rec=try label=give-other
+PROBE inventory/give rec=called label=give-other delay=3.007000
+PROBE inventory/give rec=end
+# im by=other dialog=9 from=owner id=someone name="Object" offline=1 length=62 message="'Gift'. (Object is located at Default Region <120, 128, 27.5…" bucket=1

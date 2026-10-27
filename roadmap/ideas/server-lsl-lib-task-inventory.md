@@ -53,3 +53,32 @@ passes it a start parameter, and the rezzed script reports it back on
 chat; a notecard read returns its lines over `dataserver` in order; a
 `llRemoveInventory` advances the serial and the viewer's Contents
 floater refreshes.
+
+## Measured (gridspec-lsl-task-inventory, 2026-10-27)
+
+The tables are `book/src/gridspec/lsl.md` § Task inventory, giving, rezzing
+and notecards. What the acceptance above should hold to:
+
+- **Order** is by name with case folded, and Second Life compares runs of
+  digits as numbers (`9` before `10`); OpenSim does not. A lookup by name is
+  exact (case matters).
+- **`llRemoveInventory` raises no `changed` in its own prim on Second Life**
+  (OpenSim raises `CHANGED_INVENTORY`); a give into another prim raises it
+  there on both. The contents serial must still advance.
+- **Notecards**: a final newline starts an empty last line (eleven lines for
+  ten and a newline), an empty notecard has one line, line −1 is `EOF`, a
+  line is cut at 1024 bytes on a character boundary, and the answer comes a
+  frame after the 0.1 s forced delay. A missing notecard says
+  `Could not find notecard '…'.` and returns a request key that never
+  answers. `llGetNotecardLineSync` is `NAK` until the notecard has been read.
+- **Rezzing**: `object_rez` reaches the rezzer before the child's report
+  even though the child's `on_rez` ran first; the child runs `on_rez` alone
+  (no `state_entry`), keeps its taken state, and is not `DIE_AT_EDGE`
+  (OpenSim sets it). Past 10 m, or a notecard's name, rezzes nothing,
+  silently. The forced delay is 0.1–0.2 s; twenty in a row all rezzed.
+- **Giving**: a name the target holds already gets `Gift 1`, `Gift 2`; a given
+  script arrives stopped; `llGiveInventoryList` to a prim gives the items one
+  by one; a wrong `llRemoteLoadScriptPin` says `Task '<name>' trying to
+  illegally load script onto task '<name>'!`.
+- **`llResetOtherScript` of a stopped script** leaves it where it was:
+  started again, it carries on without `state_entry` (OpenSim runs it).

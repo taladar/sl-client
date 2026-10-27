@@ -1,0 +1,139 @@
+grid: opensim-yengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# alert text="Notecard updated"
+# notecard "10" bytes=16
+# alert text="Notecard updated"
+# notecard "9" bytes=15
+# alert text="Notecard updated"
+# notecard "Beta" bytes=18
+# alert text="Notecard updated"
+# notecard "Zed" bytes=17
+# alert text="Notecard updated"
+# notecard "_under" bytes=20
+# alert text="Notecard updated"
+# notecard "alpha" bytes=19
+# alert text="Notecard updated"
+# notecard "élan" bytes=19 named="C3 A9 6C 61 6E 00                               ..lan."
+# object "Box" scripts=1
+# chat type=say from="Object" length=14 text="Script running"
+PROBE inventory/listing rec=helper-entry param=0
+# chat type=say from="Object" length=14 text="Script running"
+# owner-say: from="Object" text="[YEngine]: Exception while running da55e368-3a3f-4a54-8846-1bedce571d02"
+# owner-say: from="Object" text="ArgumentOutOfRangeException: Index was out of range. Must be non-negative and less than the size of the collection."
+# owner-say: from="Object" text="Parameter name: index"
+# owner-say: from="Object" text="Prim: <Object>, Script: <Range minus one>, Location: Default Region <122,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at System.Collections.ArrayList.get_Item (System.Int32 index) [0x0000d] in <05f409ab6d2441a18be8832af06032d1>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llGetInventoryName (System.Int32 type, System.Int32 number) [0x000c7] in <d09853dcdece4467894564db0ef815df>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llGetInventoryName (System.Int32 type, System.Int32 number) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default state_entry(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.StartEx () [0x00009] in <494689fd7fc54dbc80fad348ad979238>:0"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE inventory/listing rec=name case=past-end value=""
+# chat type=say from="Object" length=14 text="Script running"
+PROBE inventory/listing rec=name case=all-100 value=""
+# chat type=say from="Object" length=14 text="Script running"
+PROBE inventory/listing rec=name case=no-type value=""
+# chat type=say from="Object" length=14 text="Script running"
+PROBE inventory/listing rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE inventory/listing rec=count when=first type=-1 n=10 names="_under|10|9|aaa Helper|alpha|Beta|Box|C3 A9 6C 61 6E 00                               ..lan.|Probe|Zed"
+PROBE inventory/listing rec=count when=first type=0 n=0 names=""
+PROBE inventory/listing rec=count when=first type=1 n=0 names=""
+PROBE inventory/listing rec=count when=first type=3 n=0 names=""
+PROBE inventory/listing rec=count when=first type=5 n=0 names=""
+PROBE inventory/listing rec=count when=first type=6 n=1 names="Box"
+PROBE inventory/listing rec=count when=first type=7 n=7 names="_under|10|9|alpha|Beta|C3 A9 6C 61 6E 00                               ..lan.|Zed"
+PROBE inventory/listing rec=count when=first type=10 n=2 names="aaa Helper|Probe"
+PROBE inventory/listing rec=count when=first type=13 n=0 names=""
+PROBE inventory/listing rec=count when=first type=20 n=0 names=""
+PROBE inventory/listing rec=count when=first type=21 n=0 names=""
+PROBE inventory/listing rec=count when=first type=56 n=0 names=""
+PROBE inventory/listing rec=count when=first type=57 n=0 names=""
+PROBE inventory/listing rec=count when=first type=4 n=0 names=""
+PROBE inventory/listing rec=count when=first type=99 n=0 names=""
+PROBE inventory/listing rec=count when=first type=-2 n=0 names=""
+PROBE inventory/listing rec=try label=item-0
+PROBE inventory/listing rec=item name="alpha" type=7 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
+PROBE inventory/listing rec=try label=item-1
+# debug-channel: from="Object" text="llGetInventoryCreator: Can't find item ''"
+PROBE inventory/listing rec=item name="ALPHA" type=-1 key=null creator=empty masks=-1,-1,-1,-1,-1
+PROBE inventory/listing rec=try label=item-2
+PROBE inventory/listing rec=item name="Box" type=6 key=other creator=owner masks=2147483647,2147483647,0,0,532480
+PROBE inventory/listing rec=try label=item-3
+PROBE inventory/listing rec=item name="Probe" type=10 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
+PROBE inventory/listing rec=try label=item-4
+PROBE inventory/listing rec=item name="aaa Helper" type=10 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
+PROBE inventory/listing rec=try label=item-5
+# debug-channel: from="Object" text="llGetInventoryCreator: Can't find item ''"
+PROBE inventory/listing rec=item name="élan" type=-1 key=null creator=empty masks=-1,-1,-1,-1,-1
+PROBE inventory/listing rec=try label=item-6
+# debug-channel: from="Object" text="llGetInventoryCreator: Can't find item ''"
+PROBE inventory/listing rec=item name="nope" type=-1 key=null creator=empty masks=-1,-1,-1,-1,-1
+PROBE inventory/listing rec=try label=item-7
+# debug-channel: from="Object" text="llGetInventoryCreator: Can't find item ''"
+PROBE inventory/listing rec=item name="" type=-1 key=null creator=empty masks=-1,-1,-1,-1,-1
+PROBE inventory/listing rec=try label=set-perm-mask
+PROBE inventory/listing rec=item name="alpha" type=7 key=other creator=owner masks=2147483647,2147483647,0,0,2147483647
+PROBE inventory/listing rec=script name="Probe" helper=1 self=1 danger=0
+PROBE inventory/listing rec=try label=state-of-none
+# debug-channel: from="Object" text="llGetScriptState: Can't find script 'nope'"
+PROBE inventory/listing rec=script case=state-of-none value=0
+PROBE inventory/listing rec=try label=stop-helper
+PROBE inventory/listing rec=script case=stopped value=0
+PROBE inventory/listing rec=try label=reset-stopped-helper
+PROBE inventory/listing rec=script case=reset-while-stopped value=0
+PROBE inventory/listing rec=try label=start-helper
+PROBE inventory/listing rec=script case=started value=1
+PROBE inventory/listing rec=helper-entry param=0
+PROBE inventory/listing rec=try label=reset-running-helper
+PROBE inventory/listing rec=helper-pong num=4
+PROBE inventory/listing rec=helper-entry param=0
+PROBE inventory/listing rec=helper-pong num=5
+PROBE inventory/listing rec=try label=reset-none
+# debug-channel: from="Object" text="llResetOtherScript: Can't find script 'nope'"
+PROBE inventory/listing rec=try label=set-state-none
+# debug-channel: from="Object" text="llSetScriptState: Can't find script 'nope'"
+PROBE inventory/listing rec=try label=remove-notecard
+PROBE inventory/listing rec=removed name=Zed n=6
+PROBE inventory/listing rec=changed change=1 step=6
+PROBE inventory/listing rec=try label=remove-none
+PROBE inventory/listing rec=removed name=nope n=9
+PROBE inventory/listing rec=try label=remove-object
+PROBE inventory/listing rec=removed name=Box n=0
+PROBE inventory/listing rec=changed change=1 step=8
+PROBE inventory/listing rec=count when=last type=-1 n=8 names="_under|10|9|aaa Helper|alpha|Beta|C3 A9 6C 61 6E 00                               ..lan.|Probe"
+PROBE inventory/listing rec=count when=last type=0 n=0 names=""
+PROBE inventory/listing rec=count when=last type=1 n=0 names=""
+PROBE inventory/listing rec=count when=last type=3 n=0 names=""
+PROBE inventory/listing rec=count when=last type=5 n=0 names=""
+PROBE inventory/listing rec=count when=last type=6 n=0 names=""
+PROBE inventory/listing rec=count when=last type=7 n=6 names="_under|10|9|alpha|Beta|C3 A9 6C 61 6E 00                               ..lan."
+PROBE inventory/listing rec=count when=last type=10 n=2 names="aaa Helper|Probe"
+PROBE inventory/listing rec=count when=last type=13 n=0 names=""
+PROBE inventory/listing rec=count when=last type=20 n=0 names=""
+PROBE inventory/listing rec=count when=last type=21 n=0 names=""
+PROBE inventory/listing rec=count when=last type=56 n=0 names=""
+PROBE inventory/listing rec=count when=last type=57 n=0 names=""
+PROBE inventory/listing rec=count when=last type=4 n=0 names=""
+PROBE inventory/listing rec=count when=last type=99 n=0 names=""
+PROBE inventory/listing rec=count when=last type=-2 n=0 names=""
+PROBE inventory/listing rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
+# debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
+# debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
+# debug-channel by=other: from="Object" text="llGetInventoryCreator: Can't find item ''"
+# debug-channel by=other: from="Object" text="llGetScriptState: Can't find script 'nope'"
+# debug-channel by=other: from="Object" text="llResetOtherScript: Can't find script 'nope'"
+# debug-channel by=other: from="Object" text="llSetScriptState: Can't find script 'nope'"

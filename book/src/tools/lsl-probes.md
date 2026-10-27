@@ -7,7 +7,10 @@ and the result files are what each grid answered:
 
 - `sl-lsl-runtime/probes/<area>/<probe>.lsl` — a probe of one script, or
   `sl-lsl-runtime/probes/<area>/<probe>/*.lsl` — a probe of several, which
-  run together in one or more prims;
+  run together in one or more prims, beside the `<name>.notecard`s it reads,
+  which the runner puts into prim A under their stems (percent-decoded:
+  `%C3%A9lan.notecard` is `élan`, since the repository takes only ASCII file
+  names);
 - `sl-lsl-runtime/probes/results/<grid>/<area>/<probe>.txt` — one run's
   transcript, for each of `aditi` (Second Life's Mono), `opensim-yengine`,
   `opensim-xengine` and, later, `fake-sl` and `fake-opensim`.
@@ -46,6 +49,7 @@ A probe's id is its path below `probes/` without the extension
 | `bare` | prims that hold no script, comma-separated as `<label>@<east>` or `<label>@<east>/<up>` in metres from prim A — the targets a sensor or a ray is to find; they are rezzed in the order listed, after the script's own prim |
 | `target` | the compile target the script is uploaded for: `mono` (the default) or `lsl2`, Second Life's LSO with its 16 KB; OpenSim ignores the upload's target and compiles every script for the engine its first line picks |
 | `stats` | `active-scripts`: the runner notes the region's active-script count, from the `SimStats` the grid sends the owner's viewer, each time it changes while the probe runs |
+| `object` | the object the script travels in: the runner makes a cube of that name above prim A, saves the scripts that name it in it, running, takes it into the owner's Trash and drops the item into the script's `prim`, before any notecard-reading or other script of the probe is saved; the probe rezzes it. A rezzed object is no probe prim, so its lines are not kept: have it say them on a channel to a script that prints them |
 | `library` | the library the script is written against: `sl` (the default) or `opensim`, Second Life's plus OpenSim's `os*`, `ls*` and `mod*` functions and their constants; the corpus test compiles every script against Second Life's library, and lets a script for OpenSim name what OpenSim adds. The runner uploads it to every grid all the same: Second Life's compile error is its measurement there |
 
 A probe that needs something done to it prints a `waiting` record and
@@ -279,6 +283,21 @@ What has bitten already, and how a probe should be shaped for it:
   hundred calls in its run and a half is measured to the nearest ten. And on
   Second Life a function that builds a new list varies by tens of per cent
   between two runs an hour apart, so time it twice.
+- **An item name that is not ASCII does not survive being made.** Made over
+  UDP (`CreateInventoryItem`, the reference viewer's message too), `élan`
+  becomes `lan` on Second Life and a hex dump of its bytes on OpenSim
+  (`inventory/listing`). Name a probe's notecards in ASCII unless the name is
+  the measurement.
+- **OpenSim throws on an inventory index out of range.** Its
+  `llGetInventoryName(type, -1)` raises an `ArgumentOutOfRangeException`,
+  which stops a YEngine script (`inventory/listing`, whose out-of-range calls
+  have a script each in prim B). OpenSim also lacks `INVENTORY_MATERIAL`, so a
+  probe writes 57.
+- **XEngine starts a rezzed object's scripts again.** A child rezzed from
+  inventory runs `state_entry` before its `on_rez` there, where Second Life
+  and YEngine run `on_rez` alone (`inventory/rez`): a child that must not act
+  on being saved into its object should act in `on_rez` only, and expect
+  `state_entry` too.
 - **The runner is slow back from a trip `away`.** It settles the owner in and
   walks it to the build location before it answers anything, which can take
   half a minute on Second Life; a probe that asks a question right after the
@@ -315,10 +334,14 @@ range of the prims.
 For each probe, in id order, the case rezzes a cube per prim against the
 region's reference primitive (prim A 1 m above it, the others `distance` east
 and `height` above it, the `bare` ones after the prim of the script that lists
-them). It makes each script in its prim under its name with `RezScript`, in save
-order, and uploads the source running, prefixed on OpenSim with the line that
-picks the engine (`//YEngine:` or `//XEngine:`), for the header's `target` (a
-script uploaded for `lsl2` is noted `# target:`). It answers each `waiting`
+them). It puts the probe's notecards into prim A — each made in the owner's
+Trash, saved with its text and dropped into the prim (`# notecard`, with the
+name the grid gave it when that is another) — and each `object` into its prim
+(`# object`). It makes each other script in its prim under its name with
+`RezScript`, in save order, and uploads the source running, prefixed on
+OpenSim with the line that picks the engine (`//YEngine:` or `//XEngine:`),
+for the header's `target` (a script uploaded for `lsl2` is noted
+`# target:`). It answers each `waiting`
 record and notes what it did (`# touch`, `# chat by=other channel=7 text="…"`; a
 touch by the other avatar also says whether that avatar has an active group,
 `active_group=set|none`, which decides what `llDetectedGroup` answers and no
@@ -486,6 +509,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `physics/*`, 2026-10-27: the status flags, the physics material and mass, forces, velocities and impulses, position and rotation targets, `llMoveToTarget` and the look-at functions, keyframed motion, the vehicle setters and motors, and pathfinding characters (Second Life only) — their clamps and their errors | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#status-flags-forces-targets-and-vehicles) | | |
 | `prim/*`, 2026-10-27: `llSetPos` and `llSetRegionPos` and their limits, rotation and scale clamps, the bounding box, every `PRIM_*` rule read back after a set, how a rule list's order, faces, unknown codes and wrong types are treated, the per-face setters, the object's name and description, `llGetObjectDetails`, linking and the link numbers, which setter raises which `changed` bit, and the sound, particle, texture-animation and media calls' errors | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#reading-and-writing-the-prim) | | |
 | `math/*`, `strings/*`, `vm/call-cost-*`, 2026-10-27: the exact precision of float, vector and rotation arithmetic, the rotation helpers and what they do with rotations that are not unit length, rounding, overflow, `llModPow` and `llFrand`, casts between strings and the other types, the string and list library on text outside ASCII, the newer string and list functions, and what 26 functions cost as their argument grows | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#strings-lists-maths-and-rotations) | | |
+| `inventory/*`, 2026-10-27: reading the prim's inventory, its order, names, keys, creators and masks, the script-state calls, `llRemoveInventory`; notecards over the dataserver and their line limits; rezzing and the order of `object_rez` and `on_rez`; giving to a prim and to avatars, and `llRemoteLoadScriptPin`; and Second Life's newer `llGetNotecardLineSync`, `llRezObjectWithParams`, `llDerezObject`, `llGetInventoryDesc` and `llGetInventoryAcquireTime` | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#task-inventory-giving-rezzing-and-notecards) | | |
 | `errors/*`, 2026-10-27: which arithmetic faults under Mono, LSO and each OpenSim engine, what a fault and a library exception say and to whom, the say range, how Second Life cuts a flood of errors short, what brings a faulted script back, and list and string indices and strides out of range | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#run-time-errors) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |

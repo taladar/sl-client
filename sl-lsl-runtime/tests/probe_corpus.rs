@@ -3,7 +3,8 @@
 //!
 //! A probe is one `.lsl` file directly under an area directory
 //! (`probes/<area>/<probe>.lsl`), or a directory of scripts that run together
-//! (`probes/<area>/<probe>/*.lsl`); its id is its path below `probes/`
+//! (`probes/<area>/<probe>/*.lsl`, beside the `*.notecard`s it reads); its
+//! id is its path below `probes/`
 //! without the extension. Every script compiles here (but for the names
 //! OpenSim's library adds, in a script whose header says `library: opensim`),
 //! opens with a header naming its probe, and — in a probe of several — names
@@ -75,10 +76,17 @@ mod tests {
             for entry in entries(&area)? {
                 let id = format!("{area_name}/{}", name_of(&entry, true));
                 if entry.is_dir() {
-                    let scripts: Vec<PathBuf> = entries(&entry)?
-                        .into_iter()
-                        .filter(|path| is_lsl(path))
-                        .collect();
+                    let files = entries(&entry)?;
+                    // Beside its scripts, a probe of several may hold the
+                    // notecards the runner puts into prim A.
+                    if let Some(stray) = files.iter().find(|path| {
+                        !is_lsl(path)
+                            && path.extension().and_then(|ext| ext.to_str()) != Some("notecard")
+                    }) {
+                        return Err(format!("{} is not a script or notecard", stray.display()));
+                    }
+                    let scripts: Vec<PathBuf> =
+                        files.into_iter().filter(|path| is_lsl(path)).collect();
                     if scripts.is_empty() {
                         return Err(format!("{} holds no script", entry.display()));
                     }

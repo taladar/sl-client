@@ -1,0 +1,50 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+# notecard "Lines" bytes=14
+# object "Child" scripts=1
+PROBE inventory/newer rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE inventory/newer rec=item name=Lines desc="sl-conformance lsl-probes" acquired_length=20 acquired_shape="-TZ"
+PROBE inventory/newer rec=item name=Child desc="(No Description)" acquired_length=20 acquired_shape="-TZ"
+PROBE inventory/newer rec=item name=Probe desc="" acquired_length=20 acquired_shape="-TZ"
+# debug-channel: from="Object" text="No item named 'nope'."
+# debug-channel: from="Object" text="No item named 'nope'."
+PROBE inventory/newer rec=item name=nope desc="" acquired_length=0 acquired_shape=""
+PROBE inventory/newer rec=try label=sync-before
+PROBE inventory/newer rec=sync case=before line=0 value=NAK
+PROBE inventory/newer rec=async value="one"
+PROBE inventory/newer rec=try label=sync-0
+PROBE inventory/newer rec=sync case=after line=0 value="one"
+PROBE inventory/newer rec=try label=sync-2
+PROBE inventory/newer rec=sync case=after line=2 value="three"
+PROBE inventory/newer rec=try label=sync-3
+PROBE inventory/newer rec=sync case=after line=3 value=""
+PROBE inventory/newer rec=try label=sync--1
+PROBE inventory/newer rec=sync case=after line=-1 value=EOF
+PROBE inventory/newer rec=try label=sync-none
+# debug-channel: from="Object" text="Could not find notecard 'Nope'."
+PROBE inventory/newer rec=sync case=none line=0 value=NAK
+PROBE inventory/newer rec=try label=rez-with-params
+PROBE inventory/newer rec=object-rez step=0
+PROBE inventory/newer rec=on-rez step=0 param=42 start_length=5 start_head="hello"
+PROBE inventory/newer rec=try label=rez-long-string
+PROBE inventory/newer rec=object-rez step=1
+PROBE inventory/newer rec=on-rez step=1 param=0 start_length=1018 start_head="xxxxxxxx"
+PROBE inventory/newer rec=try label=rez-unknown-option
+# debug-channel: from="Object" text="llRezObjectWithParams Error running rule #2: unknown rule id 999."
+PROBE inventory/newer rec=try label=derez
+PROBE inventory/newer rec=derez case=child result=1
+PROBE inventory/newer rec=try label=derez-again
+PROBE inventory/newer rec=derez case=again result=0
+PROBE inventory/newer rec=try label=derez-null
+PROBE inventory/newer rec=derez case=null result=0
+PROBE inventory/newer rec=end
+# debug-channel by=other: from="Object" text="No item named 'nope'."
+# debug-channel by=other: from="Object" text="No item named 'nope'."
+# debug-channel by=other: from="Object" text="Could not find notecard 'Nope'."

@@ -7,7 +7,11 @@
 //! 1. rezzes a cube per prim the probe names — prim A against the reference
 //!    primitive, every other prim the `distance` its scripts' header gives
 //!    east of A;
-//! 2. makes each script in its prim with [`Command::RezScript`] under the
+//! 2. puts the probe's notecards into prim A (made in the owner's Trash,
+//!    saved and dropped into the prim) and each object its scripts travel in
+//!    into its prim (a cube with those scripts saved in it, taken and
+//!    dropped), then makes each other script in its prim with
+//!    [`Command::RezScript`] under the
 //!    name its header gives (a single-script probe's is `Probe`), in the
 //!    header's save order, and uploads the source running — on OpenSim with
 //!    the first line that picks the engine (`//YEngine:` or `//XEngine:`).
@@ -51,13 +55,15 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use sl_client_tokio::{
-    AgentKey, AssetType, AttachmentMode, AttachmentPoint, ChatAudible, ChatChannel, ChatMessage,
-    ChatSource, ChatType, Command, ControlFlags, DeRezDestination, DisconnectReason, Event,
-    FolderType, InstantMessage, InventoryFolder, InventoryFolderKey, InventoryKey, InventoryType,
-    LindenAmount, MoneyBalance, MoneyTransactionType, Object, ObjectKey, OwnerKey, PrimShape,
-    RegionHandle, RegionLocalObjectId, RestoreItem, RezScriptParams, Rotation, ScopedObjectId,
-    ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
-    SimStatId, SurfaceInfo, TaskInventoryItem, TransactionId, Uuid, Vector, XferListing,
+    AgentKey, AssetType, AssetUpdateLocation, AttachmentMode, AttachmentPoint, ChatAudible,
+    ChatChannel, ChatMessage, ChatSource, ChatType, Command, ControlFlags, DeRezDestination,
+    DisconnectReason, Event, FolderType, InstantMessage, InventoryFolder, InventoryFolderKey,
+    InventoryKey, InventoryType, LindenAmount, MoneyBalance, MoneyTransactionType,
+    NewInventoryItem, Object, ObjectKey, OwnerKey, Permissions, PrimShape, RegionHandle,
+    RegionLocalObjectId, RestoreItem, RezScriptParams, Rotation, ScopedObjectId, ScriptDialog,
+    ScriptPermissionRequest, ScriptPermissions, ScriptTarget, ScriptUploadLocation, SimStatId,
+    SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TransactionId, UpdatableAssetType, Uuid,
+    Vector, WearableType, XferListing,
 };
 use sl_lsl_runtime::probe::{
     Action, By, COMPILE_ERROR_NOTE, Drive, Fetch, Line, PREFIX, ResultFile, Stimulus, Target,
@@ -65,9 +71,12 @@ use sl_lsl_runtime::probe::{
 };
 
 use super::object_rez_derez::rez_params;
+use super::task_inventory::{drop_item, notecard_bytes};
 use crate::context::{Session, StandbyLogin, TestContext, TestFailure, now_rfc3339};
 use crate::grid::Grid;
-use crate::probe_corpus::{Probe, corpus_root, load_corpus, result_path, select};
+use crate::probe_corpus::{
+    Probe, ProbeNotecard, ProbeScript, corpus_root, load_corpus, result_path, select,
+};
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
     REGION_TIMEOUT, REPLY_TIMEOUT, created_item_announcement_observing, is_opensim, is_own,
@@ -514,13 +523,17 @@ impl Transcript {
     }
 
     /// Notes an instant message an object sent the avatar `by` names
-    /// (`llInstantMessage`'s dialog 19), with who the grid says sent it and
+    /// (`llInstantMessage`'s dialog 19, an inventory offer's 9), with who the grid says sent it and
     /// what its id is, as roles.
     fn instant_message(&mut self, by: &str, prims: &HashSet<ObjectKey>, im: &InstantMessage) {
         let from_prim = self.is_probe(prims, ObjectKey::from(im.from_agent_id.uuid()));
         let id_prim = self.is_probe(prims, ObjectKey::from(im.id));
         let dialog = im.dialog.to_u8();
-        if dialog != MESSAGE_FROM_OBJECT && !from_prim && !id_prim {
+        if dialog != MESSAGE_FROM_OBJECT
+            && dialog != TASK_INVENTORY_OFFERED
+            && !from_prim
+            && !id_prim
+        {
             return;
         }
         let role = |is_prim: bool, id: Uuid| {
@@ -856,6 +869,11 @@ fn shown_line(line: &str, parsed: &Line) -> String {
 /// `ImprovedInstantMessage`'s dialog for a message from an object
 /// (`IM_FROM_TASK`), which `llInstantMessage` sends.
 const MESSAGE_FROM_OBJECT: u8 = 19;
+
+/// The dialog of an object's inventory offer (`llGiveInventory` to an
+/// avatar), which a grid may send under the owner's id rather than the
+/// object's.
+const TASK_INVENTORY_OFFERED: u8 = 9;
 
 /// A chat type as a note names it.
 fn chat_type_name(chat_type: ChatType) -> String {
@@ -1265,9 +1283,56 @@ async fn run_probe(
     }
 
     let mut planted = true;
+    let mut watch = Watch {
+        id: &probe.id,
+        prims: &keys,
+        transcript: &mut transcript,
+    };
+    if !probe.notecards.is_empty() {
+        let prim = prims
+            .get("A")
+            .ok_or_else(|| TestFailure::State(format!("{}: no prim A", probe.id)))?;
+        for notecard in &probe.notecards {
+            put_notecard(session, prim, notecard, trash, &mut watch).await?;
+        }
+    }
+    for (object, label) in probe.objects() {
+        let prim = prims
+            .get(&label)
+            .ok_or_else(|| TestFailure::State(format!("{}: no prim {label}", probe.id)))?;
+        let carried: Vec<&ProbeScript> = probe
+            .scripts
+            .iter()
+            .filter(|script| script.header.object.as_deref() == Some(object.as_str()))
+            .collect();
+        if !put_object(
+            session,
+            &PackedObject {
+                name: &object,
+                prim,
+                scripts: &carried,
+                engine,
+                base,
+            },
+            seen,
+            trash,
+            &mut watch,
+        )
+        .await?
+        {
+            planted = false;
+            break;
+        }
+    }
     for script in &probe.scripts {
+        if !planted {
+            break;
+        }
+        if script.header.object.is_some() {
+            continue;
+        }
         if script.header.skipped_on(engine.results_grid()) {
-            transcript.body.push(format!(
+            watch.transcript.body.push(format!(
                 "# skipped: script {} (skip-on: {})",
                 quote(&script.name),
                 engine.results_grid()
@@ -1277,73 +1342,7 @@ async fn run_probe(
         let prim = prims.get(&script.header.prim).ok_or_else(|| {
             TestFailure::State(format!("{}: no prim {}", probe.id, script.header.prim))
         })?;
-        let item = new_script(
-            session,
-            prim,
-            &script.name,
-            &mut Watch {
-                id: &probe.id,
-                prims: &keys,
-                transcript: &mut transcript,
-            },
-        )
-        .await?;
-        if script.header.target == Target::Lsl2 {
-            // The result header names the run's engine; a script uploaded
-            // for another target says so where it was saved.
-            transcript
-                .body
-                .push(format!("# target: script {} lsl2", quote(&script.name)));
-        }
-        let source = format!("{}{}", engine.source_prefix(), script.source);
-        session
-            .send(Command::UploadScript {
-                location: ScriptUploadLocation::TaskInventory {
-                    task_id: prim.full_id,
-                    item_id: item,
-                    running: true,
-                    experience: None,
-                },
-                target: match script.header.target {
-                    Target::Mono => ScriptTarget::Mono,
-                    Target::Lsl2 => ScriptTarget::Lsl2,
-                },
-                source: source.into_bytes(),
-            })
-            .await?;
-        let id = &probe.id;
-        let compiled = session
-            .wait_for(STEP_TIMEOUT, |event| match event {
-                Event::ScriptUploaded {
-                    compiled, errors, ..
-                } => Some(Ok((*compiled, errors.clone()))),
-                Event::AssetUploadFailed { reason } => Some(Err(reason.clone())),
-                _ => {
-                    let _kept = transcript.take(id, &keys, event);
-                    None
-                }
-            })
-            .await?;
-        match compiled {
-            Ok((true, _)) => {}
-            Ok((false, errors)) => {
-                for error in errors {
-                    transcript.body.push(format!(
-                        "{COMPILE_ERROR_NOTE}{}: {}",
-                        quote(&script.name),
-                        quote(&error.raw)
-                    ));
-                }
-                planted = false;
-                break;
-            }
-            Err(reason) => {
-                return Err(TestFailure::Assertion(format!(
-                    "{}: uploading {} failed: {reason}",
-                    probe.id, script.name
-                )));
-            }
-        }
+        planted = plant_script(session, prim, script, engine, &mut watch).await?;
     }
 
     if planted {
@@ -2816,7 +2815,8 @@ async fn listing(
                 None
             }
         })
-        .await?
+        .await
+        .map_err(|failure| in_step(failure, "listing the prim's inventory"))?
         .map_err(|error| {
             TestFailure::Assertion(format!(
                 "the prim's task inventory listing failed to parse: {error}"
@@ -2856,6 +2856,93 @@ async fn new_script(
             }),
         })
         .await?;
+    await_item(session, prim, InventoryType::Script, name, watch).await
+}
+
+/// A wait's timeout as the step of putting an item that timed out.
+fn in_step(failure: TestFailure, step: &str) -> TestFailure {
+    match failure {
+        TestFailure::Timeout(_) => TestFailure::Assertion(format!("timed out {step}")),
+        other => other,
+    }
+}
+
+/// Makes `script` in `prim` under its name and uploads its source running,
+/// for the run's `engine`. Whether it compiled is the answer; a script that
+/// did not has its errors noted.
+async fn plant_script(
+    session: &mut Session,
+    prim: &Object,
+    script: &ProbeScript,
+    engine: Vm,
+    watch: &mut Watch<'_>,
+) -> Result<bool, TestFailure> {
+    let item = new_script(session, prim, &script.name, watch).await?;
+    if script.header.target == Target::Lsl2 {
+        // The result header names the run's engine; a script uploaded
+        // for another target says so where it was saved.
+        watch
+            .transcript
+            .body
+            .push(format!("# target: script {} lsl2", quote(&script.name)));
+    }
+    let source = format!("{}{}", engine.source_prefix(), script.source);
+    session
+        .send(Command::UploadScript {
+            location: ScriptUploadLocation::TaskInventory {
+                task_id: prim.full_id,
+                item_id: item,
+                running: true,
+                experience: None,
+            },
+            target: match script.header.target {
+                Target::Mono => ScriptTarget::Mono,
+                Target::Lsl2 => ScriptTarget::Lsl2,
+            },
+            source: source.into_bytes(),
+        })
+        .await?;
+    let compiled = session
+        .wait_for(STEP_TIMEOUT, |event| match event {
+            Event::ScriptUploaded {
+                compiled, errors, ..
+            } => Some(Ok((*compiled, errors.clone()))),
+            Event::AssetUploadFailed { reason } => Some(Err(reason.clone())),
+            _ => {
+                let _kept = watch.transcript.take(watch.id, watch.prims, event);
+                None
+            }
+        })
+        .await
+        .map_err(|failure| in_step(failure, &format!("compiling script {:?}", script.name)))?;
+    match compiled {
+        Ok((true, _)) => Ok(true),
+        Ok((false, errors)) => {
+            for error in errors {
+                watch.transcript.body.push(format!(
+                    "{COMPILE_ERROR_NOTE}{}: {}",
+                    quote(&script.name),
+                    quote(&error.raw)
+                ));
+            }
+            Ok(false)
+        }
+        Err(reason) => Err(TestFailure::Assertion(format!(
+            "{}: uploading {} failed: {reason}",
+            watch.id, script.name
+        ))),
+    }
+}
+
+/// Waits until `prim`'s listing holds an item of `inv_type` called `name`,
+/// and returns its task item id.
+async fn await_item(
+    session: &mut Session,
+    prim: &Object,
+    inv_type: InventoryType,
+    name: &str,
+    watch: &mut Watch<'_>,
+) -> Result<InventoryKey, TestFailure> {
     let started = Instant::now();
     loop {
         session
@@ -2867,18 +2954,228 @@ async fn new_script(
         let listing = listing(session, prim, watch).await?;
         if let Some(item) = listing
             .iter()
-            .find(|item| item.inv_type == InventoryType::Script && item.name == name)
+            .find(|item| item.inv_type == inv_type && item.name == name)
         {
             return Ok(item.item_id);
         }
         if started.elapsed() >= STEP_TIMEOUT {
             let names: Vec<&str> = listing.iter().map(|item| item.name.as_str()).collect();
             return Err(TestFailure::Assertion(format!(
-                "no script named {name:?} appeared in the prim; it holds {names:?}"
+                "no {inv_type:?} named {name:?} appeared in the prim; it holds {names:?}"
             )));
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
+}
+
+/// Puts `notecard` into `prim`: made in the owner's Trash, saved with its
+/// text and dropped into the prim, as a viewer does it.
+async fn put_notecard(
+    session: &mut Session,
+    prim: &Object,
+    notecard: &ProbeNotecard,
+    trash: InventoryFolderKey,
+    watch: &mut Watch<'_>,
+) -> Result<(), TestFailure> {
+    session
+        .send(Command::CreateInventoryItem(NewInventoryItem {
+            folder_id: trash,
+            transaction_id: Uuid::nil(),
+            next_owner_mask: Permissions::ALL.bits(),
+            asset_type: AssetType::Notecard,
+            inv_type: InventoryType::Notecard,
+            wearable_type: WearableType::Shape,
+            name: notecard.name.clone(),
+            description: "sl-conformance lsl-probes".to_owned(),
+        }))
+        .await?;
+    let mut item = session
+        .wait_for(STEP_TIMEOUT, |event| match event {
+            // By its type, not its name: OpenSim keeps a name that is not
+            // ASCII as a hex dump of its bytes, and the item is listed so.
+            Event::InventoryItemCreated { item, .. }
+                if i32::from(item.inv_type) == InventoryType::Notecard.to_code() =>
+            {
+                Some(item.clone())
+            }
+            other => {
+                let _kept = watch.transcript.take(watch.id, watch.prims, other);
+                None
+            }
+        })
+        .await
+        .map_err(|failure| in_step(failure, &format!("creating notecard {:?}", notecard.name)))?;
+    session
+        .send(Command::UpdateInventoryAsset {
+            location: AssetUpdateLocation::AgentInventory {
+                item_id: item.item_id,
+            },
+            asset_type: UpdatableAssetType::Notecard,
+            data: notecard_bytes(&notecard.text),
+        })
+        .await?;
+    let saved = session
+        .wait_for(STEP_TIMEOUT, |event| match event {
+            Event::AssetUploaded { new_asset, .. } => Some(Ok(*new_asset)),
+            Event::AssetUploadFailed { reason } => Some(Err(reason.clone())),
+            other => {
+                let _kept = watch.transcript.take(watch.id, watch.prims, other);
+                None
+            }
+        })
+        .await
+        .map_err(|failure| in_step(failure, &format!("saving notecard {:?}", notecard.name)))?
+        .map_err(|reason| {
+            TestFailure::Assertion(format!(
+                "{}: saving notecard {:?} failed: {reason}",
+                watch.id, notecard.name
+            ))
+        })?;
+    // The drop's checksum covers the asset the item holds now.
+    item.asset_id = saved;
+    session
+        .send(Command::UpdateTaskInventory {
+            target: prim.scoped_id(),
+            key: TaskInventoryKey::Item,
+            item: Box::new(drop_item(&item, prim.full_id)?),
+        })
+        .await?;
+    let _item = await_item(session, prim, InventoryType::Notecard, &item.name, watch).await?;
+    let renamed = if item.name == notecard.name {
+        String::new()
+    } else {
+        format!(" named={}", quote(&item.name))
+    };
+    watch.transcript.body.push(format!(
+        "# notecard {} bytes={}{renamed}",
+        quote(&notecard.name),
+        notecard.text.len()
+    ));
+    Ok(())
+}
+
+/// An object [`put_object`] makes: the scripts it carries and where it goes.
+struct PackedObject<'a> {
+    /// Its name, which the item in the prim takes.
+    name: &'a str,
+    /// The prim it goes into.
+    prim: &'a Object,
+    /// The scripts it carries, in save order.
+    scripts: &'a [&'a ProbeScript],
+    /// The run's engine.
+    engine: Vm,
+    /// Where prim A was rezzed.
+    base: &'a Vector,
+}
+
+/// How far above prim A an object [`put_object`] makes is rezzed, in metres.
+const PACKING_LIFT_M: f32 = 3.0;
+
+/// Makes the object `packed` names — a cube above prim A, named, with its
+/// scripts saved in it running — takes it into the owner's Trash and drops
+/// the item into its prim. Whether every script compiled is the answer: an
+/// object whose script did not is not taken, and the probe does not run.
+async fn put_object(
+    session: &mut Session,
+    packed: &PackedObject<'_>,
+    seen: &mut HashSet<ScopedObjectId>,
+    trash: InventoryFolderKey,
+    watch: &mut Watch<'_>,
+) -> Result<bool, TestFailure> {
+    let position = Vector {
+        x: packed.base.x,
+        y: packed.base.y,
+        z: packed.base.z + PACKING_LIFT_M,
+    };
+    session
+        .send(Command::RezObject {
+            shape: PrimShape::cube(position),
+            group_id: None,
+        })
+        .await?;
+    let cube = wait_for_own_new_object(session, seen, STEP_TIMEOUT)
+        .await?
+        .map_err(|reason| {
+            TestFailure::Assertion(format!(
+                "{}: the cube for object {:?} was not rezzed: {reason}",
+                watch.id, packed.name
+            ))
+        })?;
+    let _new = seen.insert(cube.scoped_id());
+    session
+        .send(Command::SetObjectName {
+            local_id: cube.scoped_id(),
+            name: packed.name.to_owned(),
+        })
+        .await?;
+    let mut compiled = true;
+    for script in packed.scripts {
+        if script.header.skipped_on(packed.engine.results_grid()) {
+            watch.transcript.body.push(format!(
+                "# skipped: script {} (skip-on: {})",
+                quote(&script.name),
+                packed.engine.results_grid()
+            ));
+            continue;
+        }
+        if !plant_script(session, &cube, script, packed.engine, watch).await? {
+            compiled = false;
+            break;
+        }
+    }
+    session
+        .send(Command::DerezObjects {
+            local_ids: vec![cube.scoped_id()],
+            destination: if compiled {
+                DeRezDestination::TakeIntoAgentInventory(trash)
+            } else {
+                DeRezDestination::Trash(trash)
+            },
+            transaction_id: TransactionId::from(Uuid::new_v4()),
+            group_id: None,
+        })
+        .await?;
+    if !compiled {
+        return Ok(false);
+    }
+    let id = watch.id;
+    let (_how, item) = created_item_announcement_observing(
+        session,
+        MOVE_TIMEOUT,
+        AssetType::Object.to_code(),
+        |event| {
+            let _kept = watch.transcript.take(id, watch.prims, event);
+        },
+    )
+    .await
+    .map_err(|failure| in_step(failure, &format!("taking object {:?}", packed.name)))?;
+    if item.name != packed.name {
+        return Err(TestFailure::Assertion(format!(
+            "{id}: the object taken for {:?} came back as {:?}",
+            packed.name, item.name
+        )));
+    }
+    session
+        .send(Command::UpdateTaskInventory {
+            target: packed.prim.scoped_id(),
+            key: TaskInventoryKey::Item,
+            item: Box::new(drop_item(&item, packed.prim.full_id)?),
+        })
+        .await?;
+    let _item = await_item(
+        session,
+        packed.prim,
+        InventoryType::Object,
+        packed.name,
+        watch,
+    )
+    .await?;
+    watch.transcript.body.push(format!(
+        "# object {} scripts={}",
+        quote(packed.name),
+        packed.scripts.len()
+    ));
+    Ok(true)
 }
 
 /// The Trash folder of a login skeleton, or its root when it has none.

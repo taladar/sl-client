@@ -28,6 +28,10 @@ sl-lsl/tests/corpus/**/*.lsl skipchecks=lsl:::lslint;;;deliberately[[space]]inva
 # rejects as deprecated; calling it is the measurement.
 sl-lsl-runtime/probes/land/ground.lsl skipchecks=lsl:::lslint;;;measures[[space]]the[[space]]deprecated[[space]]llCloud
 
+# The inventory/listing probe measures what each grid does with
+# llSetInventoryPermMask, which lslint rejects as god mode only.
+sl-lsl-runtime/probes/inventory/listing/probe.lsl skipchecks=lsl:::lslint;;;measures[[space]]the[[space]]god-mode[[space]]llSetInventoryPermMask
+
 # The cargo-about license template is a whitespace-significant plain-text
 # template (its output format is machine-parsed by the About floater), not an
 # HTML/glimmer document: prettier's glimmer formatter reflows and breaks the
@@ -102,3 +106,8 @@ sl-lsl-runtime/probes/ossl/errors/deprecated.lsl skipchecks=lsl:::lslint;;;calls
 sl-lsl-runtime/probes/ossl/errors/shout.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
 sl-lsl-runtime/probes/ossl/errors/lightshare.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
 sl-lsl-runtime/probes/ossl/errors/mod.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+
+# A probe's notecards are test data whose whitespace is the measurement (a
+# line with spaces at both ends, a last line with no newline after it): unset
+# git's `whitespace` attribute, which the pre-commit `diff-index --check` obeys.
+sl-lsl-runtime/probes/**/*.notecard -whitespace

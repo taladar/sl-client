@@ -214,6 +214,11 @@ pub struct Header {
     /// `library`: the library the script is written against, `sl` (the
     /// default) or `opensim` ([`Library`]).
     pub library: Library,
+    /// `object`: the name of the object the script travels in — one the
+    /// runner makes, takes into the owner's inventory and puts into the
+    /// script's prim's inventory before the probe's other scripts are saved,
+    /// for the probe to rez. Scripts that name the same object share it.
+    pub object: Option<String>,
 }
 
 /// A prim a [`Header`]'s `bare` key names: one that holds no script.
@@ -296,6 +301,7 @@ impl Header {
                 "target",
                 "stats",
                 "library",
+                "object",
             ]
             .contains(key)
             {
@@ -389,6 +395,7 @@ impl Header {
             target,
             active_scripts,
             library,
+            object: pairs.get("object").map(|name| (*name).to_owned()),
         })
     }
 
@@ -1102,7 +1109,7 @@ mod tests {
             "// probe: errors/runtime-errors\n// script: Div int\n// prim: B\n\
              // order: 3\n// distance: 50\n// height: 99\n// drive: none\n\
              // skip-on: opensim-xengine, fake-sl\n// target: lsl2\n// stats: active-scripts\n\
-             // library: opensim\n//\n// probe: not/this\n",
+             // library: opensim\n// object: Rezzee\n//\n// probe: not/this\n",
         )?;
         assert_eq!(
             header,
@@ -1121,6 +1128,7 @@ mod tests {
                 target: Target::Lsl2,
                 active_scripts: true,
                 library: Library::OpenSim,
+                object: Some("Rezzee".to_owned()),
             }
         );
         assert!(header.skipped_on("fake-sl"));

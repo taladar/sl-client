@@ -2209,3 +2209,94 @@ writing one as text (`llList2CSV`) 25, sorting 55 (`llListSort` grows about
 linearly between 100 and 500 elements); the hashes cost a flat 200–380 µs
 before their per-character part. OpenSim is 10 to 1000 times cheaper
 throughout, and its list copies are constant under YEngine at about 7 µs.
+
+## Task inventory, giving, rezzing and notecards
+
+Measured on 2026-10-27 by the probes `inventory/listing`,
+`inventory/notecards`, `inventory/rez`, `inventory/give` and
+`inventory/newer`, on the same grids. The runner puts what a probe reads into
+prim A before its scripts are saved: each notecard made in the owner's
+inventory, saved with its text and dropped into the prim, and each object a
+cube with its scripts saved in it running, taken and dropped into the prim
+([The LSL probe corpus](../tools/lsl-probes.md)). A rezzed child reports on a
+channel, since only the probe's own prims' owner-says are kept, and dies.
+YEngine and XEngine agree but where a row says otherwise.
+
+### Reading the inventory
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the order of `llGetInventoryName` | by name, case folded, **digits as numbers**: `9`, `10`, `_under`, `aaa Helper`, `alpha`, `Beta`, `Box`, `Probe`, `Zed` | by name, case folded, culture order: `_under`, `10`, `9`, `aaa Helper`, `alpha`, … | no scripts |
+| a name made with an accent (`élan`, `CreateInventoryItem` over UDP) | the accented character dropped: `lan` | **a hex dump of the bytes**: `C3 A9 6C 61 6E 00 …..lan.` | no scripts |
+| a name in another case (`ALPHA`) | not found: the lookup is exact | not found | no scripts |
+| `llGetInventoryName` of −1, past the end, of type `INVENTORY_ALL` at 100, of a type that is none | `""` | `""`, but −1 **throws** (`ArgumentOutOfRangeException`; YEngine stops the script) | no scripts |
+| a missing name's type, key, creator, masks | −1, `NULL_KEY`, `NULL_KEY`, 0 each; `No item named '…'.` for every call but the type, so six lines for one name and then the flood limit | −1, `NULL_KEY`, `""`, −1 each; one line, `llGetInventoryCreator: Can't find item ''` | no scripts |
+| key, creator, masks of the owner's full-permission items | the asset key, the owner, base and owner `0x7FFFFFFF`, group and everyone 0, next owner `0x7FFFFFFF`; the object's next-owner mask `532480` (move, modify, copy, transfer) | the same | no scripts |
+| `llSetInventoryPermMask` | does nothing, says nothing | does nothing, says nothing | no scripts |
+| `llScriptDanger` at the prim | 1 (Mauve) | 0 | no scripts |
+| a script that is not there: `llGetScriptState`, `llResetOtherScript`, `llSetScriptState` | 0, silent | 0, and `llGetScriptState: Can't find script 'nope'` (and the like) on the debug channel | no scripts |
+| a link message to a stopped script | lost | lost | no scripts |
+| `llResetOtherScript` of a stopped script, then `llSetScriptState(…, TRUE)` | stays stopped through the reset; started, it **carries on without `state_entry`** | stays stopped; started, it runs `state_entry` | no scripts |
+| `llResetOtherScript` of a running script with a link message queued | the message is lost with the reset | YEngine delivers it first, then the reset; XEngine loses it | no scripts |
+| `llRemoveInventory` | removes, **no `changed`** in the prim; a missing name is silent | removes and raises `changed(CHANGED_INVENTORY)`; a missing name is silent | no scripts |
+
+### Notecards
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llGetNumberOfNotecardLines` of ten lines and a final newline | **11**: the newline starts an empty last line | 10 | no scripts |
+| of an empty notecard | 1, line 0 `""` | 0, line 0 `EOF` | no scripts |
+| line −1 | `EOF` | `""` | no scripts |
+| a line's limit | **1024 bytes**, cut at a character: 1100 ASCII → 1024 characters, 600 two-byte → 512 | **255 characters** whatever their bytes | no scripts |
+| a line with an emoji | counts it one character | two (UTF-16) | no scripts |
+| spaces at both ends, a tab | kept | kept | no scripts |
+| by the asset key (`llGetInventoryKey`) | read | read | no scripts |
+| a notecard that is not there, a script, `""` | `Could not find notecard '…'.`; the key is a request that never answers | `llGetNotecardLine: Can't find notecard '…'`, `NULL_KEY`, and the call sleeps 1 s | no scripts |
+| the call's forced delay, the answer | 0.1 s; the answer one frame later | 0.1 s; at once | no scripts |
+| ten requests at once | answered in order | answered in order | no scripts |
+| `llGetNotecardLineSync` | `NAK` before the notecard was read, its lines after; −1 `EOF`, past the end `""`; a missing notecard `NAK` and an error | does not compile | no scripts |
+
+### Rezzing
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the order | the rezzer's `object_rez` **arrives first**, though the child's `on_rez` ran before it by the clock | the same | no scripts |
+| the child's script | `on_rez` only, the state as it was taken | YEngine `on_rez` only; **XEngine runs `state_entry` too**, before `on_rez` (it resets the script) | no scripts |
+| start parameter, `llGetStartParameter`, `OBJECT_REZZER_KEY` | as passed, both; the rezzer | the same | no scripts |
+| `llRezAtRoot` of one prim | as `llRezObject` | the same | no scripts |
+| a rotation that is not unit length | normalised | normalised | no scripts |
+| a velocity, the child not physical | 0 | 0 | no scripts |
+| `STATUS_DIE_AT_EDGE` of the child | 0 | **1** | no scripts |
+| 11 m from the rezzer | nothing, silently | nothing, silently, and no forced delay | no scripts |
+| a name that is not there | `Could not find object 'Nope'.`, 1.1 s | `llRez(AtRoot/Object): Can't find object 'Nope'`, 1 s | no scripts |
+| a notecard's name | nothing, silently | `Can't create requested object; object is missing from database`, 1 s | no scripts |
+| the forced delay | 0.1–0.2 s (frame-bound) | 0.1 s | no scripts |
+| twenty in a row | all twenty rezzed, in 3.1 s; no throttle | all twenty, in 2 s | no scripts |
+| `llRezObjectWithParams` | the start parameter and string arrive; a 1100-byte string arrives as 1018 characters; an unknown rule is `Error running rule #2: unknown rule id 999.` and rezzes nothing | does not compile | no scripts |
+| `llDerezObject(child, DEREZ_DIE)` | 1, then 0 for the same child and for `NULL_KEY` | does not compile | no scripts |
+| `llGetInventoryDesc`, `llGetInventoryAcquireTime` | the item's description (`(No Description)` for a taken object, `""` for a script); `YYYY-MM-DDThh:mm:ssZ`; a missing name `""` and an error | do not compile | no scripts |
+
+### Giving
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| a notecard to a prim of the same owner | arrives; `changed(CHANGED_INVENTORY)` there | the same | no scripts |
+| a name the prim holds already | arrives as `Gift 1` (then `Gift 2`) | the same | no scripts |
+| a script | arrives **not running** | the same | no scripts |
+| a name that is not there | `Unable to give inventory: 'No item named 'Nope'.'.` | `llGiveInventory: Can't find inventory object 'Nope'`, 1 s | no scripts |
+| to an avatar | an offer (`TaskInventoryOffered`, dialog 9) under the object owner's id, with the object's name, the item and the place, marked **offline**; 2 s | the same, the place as region and position; 3 s | no scripts |
+| `llGiveInventoryList` to an avatar | an offer of a folder, not offline; 3 s | the same; 3 s | no scripts |
+| `llGiveInventoryList` to a prim | the items arrive one by one, no folder (`Gift 2`); 3 s | the same; 0.1 s | no scripts |
+| `llRemoteLoadScriptPin` with the pin | the script arrives and runs with its start parameter; 3 s | the same | no scripts |
+| with a wrong pin | `Task 'Object' trying to illegally load script onto task 'Receiver'!`; 3 s | nothing, silently; 3 s | no scripts |
+| not running, over a script of that name | replaces it, stopped | YEngine stopped; XEngine **reads as running**, though it prints nothing | no scripts |
+
+### What the viewer does with it
+
+An object's offer is an instant message of dialog 9 on both grids, sent
+under the object owner's id and carrying the object's name. The viewer's
+offer card takes it (`sl-viewer-people`'s `offers_invites`), whether it is
+marked offline or not. A name with more than ASCII is not kept as typed
+when an item is made over UDP `CreateInventoryItem`, the message the
+reference viewer makes items with too; whether such a name survives a rename
+(`UpdateInventoryItem`, or AIS on Second Life) is not measured.

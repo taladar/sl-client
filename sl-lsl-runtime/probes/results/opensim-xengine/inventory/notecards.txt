@@ -1,0 +1,126 @@
+grid: opensim-xengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# alert text="Notecard updated"
+# notecard "Empty" bytes=0
+# alert text="Notecard updated"
+# notecard "Lines" bytes=3451
+# alert text="Notecard updated"
+# notecard "Many" bytes=8890
+# alert text="Notecard updated"
+# notecard "NoNewline" bytes=9
+# chat type=say from="Object" length=14 text="Script running"
+PROBE inventory/notecards rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE inventory/notecards rec=try label="count Lines"
+PROBE inventory/notecards rec=asked label="count Lines" null=0 delay=0.101000
+PROBE inventory/notecards rec=answer label="count Lines" eof=0 length=2 head="10" tail64=MTA= reply=0.003000
+PROBE inventory/notecards rec=try label="count Empty"
+PROBE inventory/notecards rec=asked label="count Empty" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="count Empty" eof=0 length=1 head="0" tail64=MA== reply=0.000000
+PROBE inventory/notecards rec=try label="count NoNewline"
+PROBE inventory/notecards rec=asked label="count NoNewline" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="count NoNewline" eof=0 length=1 head="1" tail64=MQ== reply=0.001000
+PROBE inventory/notecards rec=try label="count Many"
+PROBE inventory/notecards rec=asked label="count Many" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="count Many" eof=0 length=4 head="1000" tail64=MDA= reply=0.000000
+PROBE inventory/notecards rec=try label="Lines -1"
+PROBE inventory/notecards rec=asked label="Lines -1" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines -1" eof=0 length=0 head="" tail64= reply=0.001000
+PROBE inventory/notecards rec=try label="Lines 0"
+PROBE inventory/notecards rec=asked label="Lines 0" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 0" eof=0 length=5 head="first" tail64=c3Q= reply=0.000000
+PROBE inventory/notecards rec=try label="Lines 1"
+PROBE inventory/notecards rec=asked label="Lines 1" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 1" eof=0 length=0 head="" tail64= reply=0.000000
+PROBE inventory/notecards rec=try label="Lines 2"
+PROBE inventory/notecards rec=asked label="Lines 2" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 2" eof=0 length=10 head="  spaces  " tail64=ICA= reply=0.000000
+PROBE inventory/notecards rec=try label="Lines 3"
+PROBE inventory/notecards rec=asked label="Lines 3" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 3" eof=0 length=8 head="tab	here" tail64=cmU= reply=0.000000
+PROBE inventory/notecards rec=try label="Lines 4"
+PROBE inventory/notecards rec=asked label="Lines 4" null=0 delay=0.101000
+PROBE inventory/notecards rec=answer label="Lines 4" eof=0 length=11 head="é😀 unicode" tail64=ZGU= reply=0.000000
+PROBE inventory/notecards rec=try label="Lines 5"
+PROBE inventory/notecards rec=asked label="Lines 5" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 5" eof=0 length=255 head="aaaaaaaaaaaa" tail64=YWE= reply=0.001000
+PROBE inventory/notecards rec=try label="Lines 6"
+PROBE inventory/notecards rec=asked label="Lines 6" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 6" eof=0 length=255 head="bbbbbbbbbbbb" tail64=YmI= reply=0.000000
+PROBE inventory/notecards rec=try label="Lines 7"
+PROBE inventory/notecards rec=asked label="Lines 7" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 7" eof=0 length=255 head="éééééééééééé" tail64=w6nDqQ== reply=0.001000
+PROBE inventory/notecards rec=try label="Lines 8"
+PROBE inventory/notecards rec=asked label="Lines 8" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 8" eof=0 length=255 head="éééééééééééé" tail64=w6nDqQ== reply=0.000000
+PROBE inventory/notecards rec=try label="Lines 9"
+PROBE inventory/notecards rec=asked label="Lines 9" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 9" eof=0 length=4 head="last" tail64=c3Q= reply=0.001000
+PROBE inventory/notecards rec=try label="Lines 10"
+PROBE inventory/notecards rec=asked label="Lines 10" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 10" eof=1 reply=0.010000
+PROBE inventory/notecards rec=try label="Lines 11"
+PROBE inventory/notecards rec=asked label="Lines 11" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Lines 11" eof=1 reply=0.001000
+PROBE inventory/notecards rec=try label="Many 999"
+PROBE inventory/notecards rec=asked label="Many 999" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Many 999" eof=0 length=8 head="line 999" tail64=OTk= reply=0.000000
+PROBE inventory/notecards rec=try label="Many 1000"
+PROBE inventory/notecards rec=asked label="Many 1000" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Many 1000" eof=1 reply=0.001000
+PROBE inventory/notecards rec=try label="Empty 0"
+PROBE inventory/notecards rec=asked label="Empty 0" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Empty 0" eof=1 reply=0.000000
+PROBE inventory/notecards rec=try label="Empty 1"
+PROBE inventory/notecards rec=asked label="Empty 1" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="Empty 1" eof=1 reply=0.000000
+PROBE inventory/notecards rec=try label="NoNewline 0"
+PROBE inventory/notecards rec=asked label="NoNewline 0" null=0 delay=0.101000
+PROBE inventory/notecards rec=answer label="NoNewline 0" eof=0 length=9 head="only line" tail64=bmU= reply=0.000000
+PROBE inventory/notecards rec=try label="NoNewline 1"
+PROBE inventory/notecards rec=asked label="NoNewline 1" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="NoNewline 1" eof=1 reply=0.000000
+PROBE inventory/notecards rec=try label="asset Lines 0"
+PROBE inventory/notecards rec=asked label="asset Lines 0" null=0 delay=0.100000
+PROBE inventory/notecards rec=answer label="asset Lines 0" eof=0 length=5 head="first" tail64=c3Q= reply=0.000000
+PROBE inventory/notecards rec=try label="Nope 0"
+# debug-channel: from="Object" text="llGetNotecardLine: Can't find notecard 'Nope'"
+PROBE inventory/notecards rec=asked label="Nope 0" null=1 delay=1.000000
+PROBE inventory/notecards rec=timeout label="Nope 0"
+PROBE inventory/notecards rec=try label="count Nope"
+# debug-channel: from="Object" text="llGetNumberOfNotecardLines: Can't find notecard 'Nope'"
+PROBE inventory/notecards rec=asked label="count Nope" null=1 delay=1.000000
+PROBE inventory/notecards rec=timeout label="count Nope"
+PROBE inventory/notecards rec=try label="Probe 0"
+# debug-channel: from="Object" text="llGetNotecardLine: Can't find notecard 'Probe'"
+PROBE inventory/notecards rec=asked label="Probe 0" null=1 delay=1.000000
+PROBE inventory/notecards rec=timeout label="Probe 0"
+PROBE inventory/notecards rec=try label="count Probe"
+# debug-channel: from="Object" text="llGetNumberOfNotecardLines: Can't find notecard 'Probe'"
+PROBE inventory/notecards rec=asked label="count Probe" null=1 delay=1.000000
+PROBE inventory/notecards rec=timeout label="count Probe"
+PROBE inventory/notecards rec=try label=" 0"
+# debug-channel: from="Object" text="llGetNotecardLine: Can't find notecard ''"
+PROBE inventory/notecards rec=asked label=" 0" null=1 delay=1.000000
+PROBE inventory/notecards rec=timeout label=" 0"
+PROBE inventory/notecards rec=burst request=0 arrival=1 eof=0 length=5 head="first" tail64=c3Q=
+PROBE inventory/notecards rec=burst request=1 arrival=2 eof=0 length=0 head="" tail64=
+PROBE inventory/notecards rec=burst request=2 arrival=3 eof=0 length=10 head="  spaces  " tail64=ICA=
+PROBE inventory/notecards rec=burst request=3 arrival=4 eof=0 length=8 head="tab	here" tail64=cmU=
+PROBE inventory/notecards rec=burst request=4 arrival=5 eof=0 length=11 head="é😀 unicode" tail64=ZGU=
+PROBE inventory/notecards rec=burst request=5 arrival=6 eof=0 length=255 head="aaaaaaaaaaaa" tail64=YWE=
+PROBE inventory/notecards rec=burst request=6 arrival=7 eof=0 length=255 head="bbbbbbbbbbbb" tail64=YmI=
+PROBE inventory/notecards rec=burst request=7 arrival=8 eof=0 length=255 head="éééééééééééé" tail64=w6nDqQ==
+PROBE inventory/notecards rec=burst request=8 arrival=9 eof=0 length=255 head="éééééééééééé" tail64=w6nDqQ==
+PROBE inventory/notecards rec=burst request=9 arrival=10 eof=0 length=4 head="last" tail64=c3Q=
+PROBE inventory/notecards rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="llGetNotecardLine: Can't find notecard 'Nope'"
+# debug-channel by=other: from="Object" text="llGetNumberOfNotecardLines: Can't find notecard 'Nope'"
+# debug-channel by=other: from="Object" text="llGetNotecardLine: Can't find notecard 'Probe'"
+# debug-channel by=other: from="Object" text="llGetNumberOfNotecardLines: Can't find notecard 'Probe'"
+# debug-channel by=other: from="Object" text="llGetNotecardLine: Can't find notecard ''"

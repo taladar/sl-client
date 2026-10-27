@@ -46,6 +46,19 @@ pub struct ProbeScript {
     pub source: String,
 }
 
+/// A notecard a probe of several scripts reads, from a `<name>.notecard`
+/// beside them: the runner puts it into prim A before any script is saved.
+/// A name that is not ASCII is percent-encoded in the file's name
+/// (`%C3%A9lan.notecard` for `élan`), since the repository takes only ASCII
+/// file names.
+#[derive(Debug)]
+pub struct ProbeNotecard {
+    /// Its inventory name, the file's stem percent-decoded.
+    pub name: String,
+    /// Its text, as the file has it.
+    pub text: String,
+}
+
 /// One probe, read from the corpus, its scripts in save order.
 #[derive(Debug)]
 pub struct Probe {
@@ -53,9 +66,26 @@ pub struct Probe {
     pub id: String,
     /// Its scripts, in the order they are saved.
     pub scripts: Vec<ProbeScript>,
+    /// The notecards it reads, by name.
+    pub notecards: Vec<ProbeNotecard>,
 }
 
 impl Probe {
+    /// The objects its scripts travel in (`object`), each with its prim, in
+    /// the order a script first names it.
+    #[must_use]
+    pub fn objects(&self) -> Vec<(String, String)> {
+        let mut objects: Vec<(String, String)> = Vec::new();
+        for script in &self.scripts {
+            if let Some(object) = &script.header.object
+                && !objects.iter().any(|(known, _)| known == object)
+            {
+                objects.push((object.clone(), script.header.prim.clone()));
+            }
+        }
+        objects
+    }
+
     /// The stimuli its scripts declare they ask for.
     #[must_use]
     pub fn drives(&self) -> Vec<Drive> {
@@ -146,6 +176,31 @@ fn name_of(path: &Path, stem: bool) -> String {
         .unwrap_or_default()
 }
 
+/// `text` with each `%XX` (two hex digits) replaced by that byte, read as
+/// UTF-8; anything else is kept as it is.
+fn percent_decoded(text: &str) -> String {
+    let mut bytes = Vec::with_capacity(text.len());
+    let mut rest = text.as_bytes();
+    while let Some((&first, tail)) = rest.split_first() {
+        let decoded = (first == b'%')
+            .then(|| tail.get(..2))
+            .flatten()
+            .and_then(|hex| std::str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match decoded {
+            Some(byte) => {
+                bytes.push(byte);
+                rest = tail.get(2..).unwrap_or_default();
+            }
+            None => {
+                bytes.push(first);
+                rest = tail;
+            }
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 /// Reads one script and its header.
 fn read_script(path: &Path, multi: bool) -> Result<ProbeScript, CorpusError> {
     let source = fs_err::read_to_string(path)?;
@@ -184,7 +239,18 @@ pub fn load_corpus(root: &Path) -> Result<Vec<Probe>, CorpusError> {
         let area_name = name_of(&area, false);
         for entry in entries(&area)? {
             let id = format!("{area_name}/{}", name_of(&entry, true));
+            let mut notecards = Vec::new();
             let mut scripts = if entry.is_dir() {
+                for path in entries(&entry)? {
+                    if path.is_file()
+                        && path.extension().and_then(|ext| ext.to_str()) == Some("notecard")
+                    {
+                        notecards.push(ProbeNotecard {
+                            name: percent_decoded(&name_of(&path, true)),
+                            text: fs_err::read_to_string(&path)?,
+                        });
+                    }
+                }
                 entries(&entry)?
                     .iter()
                     .filter(|path| is_lsl(path))
@@ -196,7 +262,11 @@ pub fn load_corpus(root: &Path) -> Result<Vec<Probe>, CorpusError> {
                 continue;
             };
             scripts.sort_by_key(|script| script.header.order);
-            probes.push(Probe { id, scripts });
+            probes.push(Probe {
+                id,
+                scripts,
+                notecards,
+            });
         }
     }
     probes.sort_by(|a, b| a.id.cmp(&b.id));
@@ -296,7 +366,15 @@ pub fn compare_results(
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{CorpusError, corpus_root, load_corpus, select};
+    use super::{CorpusError, corpus_root, load_corpus, percent_decoded, select};
+
+    #[test]
+    fn a_notecard_name_is_percent_decoded_from_its_file_name() {
+        assert_eq!(percent_decoded("%C3%A9lan"), "élan");
+        assert_eq!(percent_decoded("alpha"), "alpha");
+        assert_eq!(percent_decoded("100%"), "100%");
+        assert_eq!(percent_decoded("%zz%4"), "%zz%4");
+    }
 
     #[test]
     fn the_corpus_loads_with_every_probe_in_save_order() -> Result<(), String> {

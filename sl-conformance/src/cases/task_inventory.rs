@@ -2081,7 +2081,7 @@ pub(crate) async fn find_object(
 }
 
 /// `text` as a notecard asset (`Linden text version 2`, nothing embedded).
-fn notecard_bytes(text: &str) -> Vec<u8> {
+pub(crate) fn notecard_bytes(text: &str) -> Vec<u8> {
     format!(
         "Linden text version 2\n{{\nLLEmbeddedItems version 1\n{{\ncount 0\n}}\nText length {}\n{}}}\n",
         text.len(),
