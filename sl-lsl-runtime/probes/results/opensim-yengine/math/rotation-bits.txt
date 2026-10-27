@@ -1,0 +1,180 @@
+grid: opensim-yengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE math/rotation-bits rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE math/rotation-bits rec=input case=0 a="<3.000000, 5.000000, 7.000000, 17.000000>" b="<0.220000, 0.260000, 0.380000, 0.860000>"
+PROBE math/rotation-bits rec=input-bits case=0 operand=a x=+12582912:0p-22 y=+10485760:0p-21 z=+14680064:0p-21 s=+8912896:0p-19
+PROBE math/rotation-bits rec=input-bits case=0 operand=b x=+14763950:42949673p-26 y=+8724152:171798692p-25 z=+12750684:85899346p-25 s=+14428405:408021893p-24
+PROBE math/rotation-bits rec=compose case=0 x=+13086228:257698038p-21 y=+8724152:171798692p-20 z=+13421772:429496730p-20 s=+10485759:536870911p-20
+PROBE math/rotation-bits rec=divide case=0 x=-9059696:343597386p-23 y=+9395240:515396072p-25 z=-12750684:85899350p-24 s=+10087301:64424509p-19
+PROBE math/rotation-bits rec=rotate case=0 x=+13978776:199286483p-22 y=+8620133:311814626p-21 z=+15552479:124554051p-21
+PROBE math/rotation-bits rec=unrotate case=0 x=+15133048:446676597p-22 y=+11505814:393419004p-21 z=+13243934:166644732p-21
+PROBE math/rotation-bits rec=dot case=0 value=+9688842:128849019p-21
+PROBE math/rotation-bits rec=cross case=0 x=+10737418:128849008p-27 y=+13421772:429496728p-25 z=-10737418:128849020p-25
+PROBE math/rotation-bits rec=two-products case=0 form=one-expression value=+16441671:365072220p-23
+PROBE math/rotation-bits rec=two-products case=0 form=two-statements value=+16441671:365072220p-23
+PROBE math/rotation-bits rec=three-factors case=0 form=one-expression value=+13841203:107374183p-22
+PROBE math/rotation-bits rec=three-factors case=0 form=two-statements value=+13841203:107374183p-22
+PROBE math/rotation-bits rec=magnitude case=0 value=+9552982:367656p-20
+PROBE math/rotation-bits rec=normalise case=0 x=+11049232:103918428p-25 y=+9207693:265555661p-24 z=+12890770:479152108p-24
+PROBE math/rotation-bits rec=rot-between case=0 x=+9252916:376170738p-30 y=+11566145:470213437p-28 z=-9252916:376170750p-28 s=+16751032:6646256p-24
+PROBE math/rotation-bits rec=angle-between case=0 value=+9401897:138856698p-26
+PROBE math/rotation-bits rec=rot2euler case=0 x=+14076344:234058107p-27 y=+10173284:128573696p-24 z=+12555700:82119953p-24
+PROBE math/rotation-bits rec=euler2rot case=0 x=+12306202:22766555p-24 y=-10736342:470028978p-25 z=-9045607:139707446p-24 s=+8807290:417536204p-25
+PROBE math/rotation-bits rec=axis-angle case=0 x=+9212204:312198318p-26 y=+15353674:162416589p-26 z=+10747572:6317430p-25 s=+15249914:385955144p-24
+PROBE math/rotation-bits rec=rot2axis case=0 x=+11049232:103918428p-25 y=+9207693:265555661p-24 z=+12890770:479152107p-24 angle=+16507423:513933383p-24
+PROBE math/rotation-bits rec=rot2fwd case=0 x=+10102409:340595525p-24 y=+12086811:282867470p-24 z=-11545611:5772806p-25
+PROBE math/rotation-bits rec=input case=1 a="<-0.925000, -0.133000, -0.860000, -0.819000>" b="<-0.151000, 0.654000, -0.752000, -0.554000>"
+PROBE math/rotation-bits rec=input-bits case=1 operand=a x=-15518924:429496730p-24 y=-8925478:489626272p-26 z=-14428405:408021893p-24 s=-13740539:485331305p-24
+PROBE math/rotation-bits rec=input-bits case=1 operand=b x=-10133438:249108103p-26 y=+10972299:141733921p-24 z=-12616466:231928234p-24 s=-9294577:356482285p-24
+PROBE math/rotation-bits rec=compose case=1 x=-14139569:112390724p-29 y=+13931263:158638910p-27 z=+14406268:119984207p-23 s=-16487775:252097400p-26
+PROBE math/rotation-bits rec=divide case=1 x=+8818415:58033598p-23 y=+11695195:508421060p-28 z=-12825862:464337507p-24 s=+9673231:21749714p-23
+PROBE math/rotation-bits rec=rotate case=1 x=+12393475:99910697p-23 y=+14269152:34172824p-25 z=-14376356:31123874p-24
+PROBE math/rotation-bits rec=unrotate case=1 x=+10109146:69242432p-30 y=+14083916:403284372p-23 z=+8861314:529504459p-24
+PROBE math/rotation-bits rec=dot case=1 value=+11734202:523023937p-24
+PROBE math/rotation-bits rec=cross case=1 x=+11114167:216088395p-24 y=-9491542:96550865p-24 z=-10486313:347961071p-24
+PROBE math/rotation-bits rec=two-products case=1 form=one-expression value=+14144669:259312944p-28
+PROBE math/rotation-bits rec=two-products case=1 form=two-statements value=+14144669:259312944p-28
+PROBE math/rotation-bits rec=three-factors case=1 form=one-expression value=-9973330:73158755p-29
+PROBE math/rotation-bits rec=three-factors case=1 form=two-statements value=-9973330:73158755p-29
+PROBE math/rotation-bits rec=magnitude case=1 value=+10653578:212773600p-23
+PROBE math/rotation-bits rec=normalise case=1 x=-12219572:426186784p-24 y=-14055811:161142628p-27 z=-11360900:59605951p-24
+PROBE math/rotation-bits rec=rot-between case=1 x=+9873702:528880536p-25 y=-8432180:399312580p-25 z=-9315924:363518155p-25 s=+14752302:520056965p-24
+PROBE math/rotation-bits rec=angle-between case=1 value=+14183510:105682528p-23
+PROBE math/rotation-bits rec=rot2euler case=1 x=+9859207:368849765p-23 y=+15337890:271967779p-24 z=+16548523:200002747p-24
+PROBE math/rotation-bits rec=euler2rot case=1 x=-12746690:140493907p-25 y=-16082439:28282156p-26 z=-11586319:444409488p-25 s=+13824957:152350586p-24
+PROBE math/rotation-bits rec=axis-angle case=1 x=+13366807:22648814p-26 y=+15375440:402152097p-29 z=+12427517:482476059p-26 s=+16137671:286514611p-24
+PROBE math/rotation-bits rec=rot2axis case=1 x=+12219572:426186782p-24 y=+14055811:161142626p-27 z=+11360900:59605949p-24 angle=+16744155:533205896p-23
+PROBE math/rotation-bits rec=rot2fwd case=1 x=+11300475:174502942p-25 y=+12156617:71515786p-24 z=+10087935:489085420p-24
+PROBE math/rotation-bits rec=input case=2 a="<-0.094000, -0.400000, 0.589000, 0.398000>" b="<-0.512000, 0.149000, 0.050000, 0.750000>"
+PROBE math/rotation-bits rec=input-bits case=2 operand=a x=-12616466:231928234p-27 y=-13421772:429496730p-25 z=+9881780:120259084p-24 s=+13354663:502511173p-25
+PROBE math/rotation-bits rec=input-bits case=2 operand=b x=-8589934:317827580p-24 y=+9999220:395136991p-26 z=+13421772:429496730p-28 s=+12582912:0p-24
+PROBE math/rotation-bits rec=compose case=2 x=-11174632:262508400p-26 y=+15078019:302537488p-28 z=+11416157:155958852p-24 s=+9412756:200523433p-25
+PROBE math/rotation-bits rec=divide case=2 x=+13698261:171626888p-29 y=-11008705:441694437p-24 z=+13626052:97719094p-26 s=+10619239:284807871p-25
+PROBE math/rotation-bits rec=rotate case=2 x=+13845751:306213162p-27 y=+9399785:379292752p-25 z=+9749297:49586600p-24
+PROBE math/rotation-bits rec=unrotate case=2 x=-14772279:51179243p-26 y=-10241962:443036666p-24 z=-10108555:450652712p-27
+PROBE math/rotation-bits rec=dot case=2 value=+9651865:137404595p-29
+PROBE math/rotation-bits rec=cross case=2 x=-14463436:315147520p-27 y=-9961237:63874754p-25 z=-14683822:51745766p-26
+PROBE math/rotation-bits rec=two-products case=2 form=one-expression value=-12317966:110019880p-30
+PROBE math/rotation-bits rec=two-products case=2 form=two-statements value=-12317966:110019880p-30
+PROBE math/rotation-bits rec=three-factors case=2 form=one-expression value=-10335409:161648826p-29
+PROBE math/rotation-bits rec=three-factors case=2 form=two-statements value=-10335409:161648826p-29
+PROBE math/rotation-bits rec=magnitude case=2 value=+12048762:530926602p-24
+PROBE math/rotation-bits rec=normalise case=2 x=-8783855:187995303p-26 y=-9344526:519832993p-24 z=+13759815:515809107p-24
+PROBE math/rotation-bits rec=rot-between case=2 x=-12994534:489211292p-26 y=-8949577:151501898p-24 z=-13192538:77097118p-25 s=+12137366:66297889p-24
+PROBE math/rotation-bits rec=angle-between case=2 value=+9557105:272026664p-22
+PROBE math/rotation-bits rec=rot2euler case=2 x=+14544726:466673095p-24 y=-11576390:310707181p-24 z=+9574506:52202209p-22
+PROBE math/rotation-bits rec=euler2rot case=2 x=-13645396:135732016p-27 y=-11847447:326755459p-26 z=+9834586:518887479p-25 s=+15672053:81191674p-24
+PROBE math/rotation-bits rec=axis-angle case=2 x=-12869139:352686052p-28 y=-13690574:55359937p-26 z=+10079685:98472376p-25 s=+15611327:194599186p-24
+PROBE math/rotation-bits rec=rot2axis case=2 x=-8783855:187995302p-26 y=-9344526:519832993p-24 z=+13759815:515809107p-24 angle=+8931687:350355527p-22
+PROBE math/rotation-bits rec=rot2fwd case=2 x=-8453324:117009907p-24 y=+13539115:313754774p-24 z=+10336079:342318406p-25
+PROBE math/rotation-bits rec=input case=3 a="<-0.922000, 0.336000, 0.529000, 0.146000>" b="<0.751000, -0.373000, 0.391000, 0.189000>"
+PROBE math/rotation-bits rec=input-bits case=3 operand=a x=-15468593:81604379p-24 y=+11274289:81604379p-25 z=+8875147:141733921p-24 s=+9797894:77309411p-26
+PROBE math/rotation-bits rec=input-bits case=3 operand=b x=+12599689:115964116p-24 y=-12515803:73014444p-25 z=+13119782:489626272p-25 s=+12683575:158913789p-26
+PROBE math/rotation-bits rec=compose case=3 x=-13197125:471243812p-25 y=-12561688:441179040p-24 z=+8790858:284979668p-27 s=+10712336:162177965p-24
+PROBE math/rotation-bits rec=divide case=3 x=+12022955:342944556p-28 y=+14692529:253128192p-24 z=+9023793:213545773p-26 s=-9786435:163999031p-24
+PROBE math/rotation-bits rec=rotate case=3 x=-12930200:55171294p-25 y=-9387322:349459432p-27 z=-14915037:160356899p-24
+PROBE math/rotation-bits rec=unrotate case=3 x=-9184390:293376640p-26 y=+8437957:21481982p-24 z=-13753602:165803603p-24
+PROBE math/rotation-bits rec=dot case=3 value=-10249385:431523954p-24
+PROBE math/rotation-bits rec=cross case=3 x=+11029106:492512490p-25 y=+12713455:277935924p-24 z=+12290317:189493956p-27
+PROBE math/rotation-bits rec=two-products case=3 form=one-expression value=-13719568:206158430p-24
+PROBE math/rotation-bits rec=two-products case=3 form=two-statements value=-13719568:206158430p-24
+PROBE math/rotation-bits rec=three-factors case=3 form=one-expression value=-15613131:368514791p-26
+PROBE math/rotation-bits rec=three-factors case=3 form=two-statements value=-15613131:368514791p-26
+PROBE math/rotation-bits rec=magnitude case=3 value=+9351778:35775343p-23
+PROBE math/rotation-bits rec=normalise case=3 x=-13875432:207870331p-24 y=+10113113:220216519p-25 z=+15922133:488916814p-25
+PROBE math/rotation-bits rec=rot-between case=3 x=+11841463:527030769p-25 y=+13649874:284309877p-24 z=+13195569:434290887p-27 s=+15149938:462567066p-25
+PROBE math/rotation-bits rec=angle-between case=3 value=+16595144:505929281p-23
+PROBE math/rotation-bits rec=rot2euler case=3 x=-10003550:32798601p-22 y=-12869604:51103722p-24 z=+8530939:171928215p-23
+PROBE math/rotation-bits rec=euler2rot case=3 x=-12890895:23239055p-25 y=+8697449:95525578p-25 z=+10673232:98954810p-26 s=+14625317:224406627p-24
+PROBE math/rotation-bits rec=axis-angle case=3 x=-10474221:31380972p-27 y=+15268278:458005024p-29 z=+12019225:250292369p-28 s=+16702359:196313518p-24
+PROBE math/rotation-bits rec=rot2axis case=3 x=-13875432:207870330p-24 y=+10113113:220216518p-25 z=+15922133:488916812p-25 angle=+12084414:230934226p-22
+PROBE math/rotation-bits rec=rot2fwd case=3 x=+12705319:526498194p-25 y=-12345737:110481072p-25 z=-14248311:275371763p-24
+PROBE math/rotation-bits rec=input case=4 a="<0.160000, -0.088000, 0.680000, 0.889000>" b="<-0.052000, 0.328000, -0.879000, 0.403000>"
+PROBE math/rotation-bits rec=input-bits case=4 operand=a x=+10737418:128849019p-26 y=-11811160:34359739p-27 z=+11408506:472446403p-24 s=+14914945:12884902p-24
+PROBE math/rotation-bits rec=input-bits case=4 operand=b x=-13958643:382252090p-28 y=+11005853:373662154p-25 z=-14747172:463856468p-24 s=+13522436:51539607p-25
+PROBE math/rotation-bits rec=compose case=4 x=+11001827:88132728p-26 y=+10123237:492134531p-26 z=-9316304:85212150p-24 s=+16662644:210419038p-24
+PROBE math/rotation-bits rec=divide case=4 x=-9389872:134690172p-28 y=-14883135:226808631p-26 z=+9255780:188978562p-23 s=-9282397:217531504p-25
+PROBE math/rotation-bits rec=rotate case=4 x=+16352353:289970628p-28 y=-14561187:192366431p-25 z=+9341003:21069118p-24
+PROBE math/rotation-bits rec=unrotate case=4 x=-11672364:523236691p-26 y=-8866619:37346286p-25 z=+10636560:320366903p-24
+PROBE math/rotation-bits rec=dot case=4 value=-10651921:293810123p-24
+PROBE math/rotation-bits rec=cross case=4 x=-9776956:95794950p-26 y=+14130442:216809950p-27 z=+12859132:45217414p-28
+PROBE math/rotation-bits rec=two-products case=4 form=one-expression value=-9981503:534671889p-28
+PROBE math/rotation-bits rec=two-products case=4 form=two-statements value=-9981503:534671889p-28
+PROBE math/rotation-bits rec=three-factors case=4 form=one-expression value=+12578413:11680938p-34
+PROBE math/rotation-bits rec=three-factors case=4 form=two-statements value=+12578413:11680938p-34
+PROBE math/rotation-bits rec=magnitude case=4 value=+11812685:89652571p-24
+PROBE math/rotation-bits rec=normalise case=4 x=+15250045:214852970p-26 y=-16775049:504773724p-27 z=+16203173:127617986p-24
+PROBE math/rotation-bits rec=rot-between case=4 x=-13006419:321944657p-24 y=+9398961:93177497p-24 z=+8553340:188252153p-25 s=+9531125:221767880p-26
+PROBE math/rotation-bits rec=angle-between case=4 value=+11155872:491456394p-22
+PROBE math/rotation-bits rec=rot2euler case=4 x=+10739188:47687322p-25 y=+12765495:390359378p-28 z=+10890649:440560332p-23
+PROBE math/rotation-bits rec=euler2rot case=4 x=+16279335:209641417p-28 y=-9121426:108200811p-27 z=+11032190:275849p-25 s=+15770619:353951729p-24
+PROBE math/rotation-bits rec=axis-angle case=4 x=+12208527:509221152p-28 y=-13429380:399081995p-29 z=+12971560:507493044p-26 s=+16437770:266906142p-24
+PROBE math/rotation-bits rec=rot2axis case=4 x=+15250045:214852971p-26 y=-16775049:504773725p-27 z=+16203173:127617986p-24 angle=+11238148:82172602p-23
+PROBE math/rotation-bits rec=rot2fwd case=4 x=+9021589:407591749p-25 y=+15405036:503756500p-24 z=+9759619:268176844p-25
+PROBE math/rotation-bits rec=input case=5 a="<-0.664000, -0.766000, -0.882000, 0.536000>" b="<-0.741000, -0.505000, -0.218000, 0.743000>"
+PROBE math/rotation-bits rec=input-bits case=5 operand=a x=-11140071:227633267p-24 y=-12851347:244813135p-24 z=-14797504:274877907p-24 s=+8992587:416611828p-24
+PROBE math/rotation-bits rec=input-bits case=5 operand=b x=-12431917:30064771p-24 y=-8472494:42949673p-24 z=-14629732:188978561p-26 s=+12465471:261993005p-24
+PROBE math/rotation-bits rec=compose case=5 x=-10269434:309718681p-24 y=-11313111:338134185p-23 z=-9057817:317724500p-24 s=-11289086:352462196p-24
+PROBE math/rotation-bits rec=divide case=5 x=-12569423:63531157p-25 y=+14116483:408090616p-26 z=-12931274:60679298p-24 s=+12326036:24601572p-23
+PROBE math/rotation-bits rec=rotate case=5 x=-11856708:535518238p-24 y=-10898779:443329960p-23 z=+16724858:468294646p-25
+PROBE math/rotation-bits rec=unrotate case=5 x=-12869677:270585138p-23 y=+14290666:85264364p-26 z=-12879154:223580732p-26
+PROBE math/rotation-bits rec=dot case=5 value=+8985289:368851792p-23
+PROBE math/rotation-bits rec=cross case=5 x=-9342292:35596690p-25 y=+8536415:146544284p-24 z=-15588449:313051574p-26
+PROBE math/rotation-bits rec=two-products case=5 form=one-expression value=+14744723:209628764p-24
+PROBE math/rotation-bits rec=two-products case=5 form=two-statements value=+14744723:209628764p-24
+PROBE math/rotation-bits rec=three-factors case=5 form=one-expression value=-12646342:408763788p-25
+PROBE math/rotation-bits rec=three-factors case=5 form=two-statements value=-12646342:408763788p-25
+PROBE math/rotation-bits rec=magnitude case=5 value=+11271917:66262533p-23
+PROBE math/rotation-bits rec=normalise case=5 x=-16580975:405338481p-25 y=-9564026:363977190p-24 z=-11012364:494791045p-24
+PROBE math/rotation-bits rec=rot-between case=5 x=-15608689:95941641p-27 y=+14262265:433239305p-26 z=-13022246:383247570p-27 s=+16195842:114114250p-24
+PROBE math/rotation-bits rec=angle-between case=5 value=+9073314:526905583p-23
+PROBE math/rotation-bits rec=rot2euler case=5 x=-13024054:108408276p-23 y=+11280569:414359413p-26 z=-15807325:72509163p-23
+PROBE math/rotation-bits rec=euler2rot case=5 x=-16454075:171985128p-27 y=-15050483:522648848p-25 z=-8863344:124554992p-25 s=+14176591:6344218p-24
+PROBE math/rotation-bits rec=axis-angle case=5 x=-12038236:323832145p-26 y=-13887483:425324037p-26 z=-15990549:119670965p-26 s=+15632739:169623876p-24
+PROBE math/rotation-bits rec=rot2axis case=5 x=-16580975:405338480p-25 y=-9564026:363977190p-24 z=-11012364:494791045p-24 angle=+9992880:505350385p-22
+PROBE math/rotation-bits rec=rot2fwd case=5 x=-10204634:140053635p-25 y=+9202012:24831464p-28 z=+15972181:18196752p-24
+PROBE math/rotation-bits rec=input case=6 a="<-0.282000, 0.768000, 0.915000, -0.698000>" b="<-0.648000, -0.536000, -0.533000, -0.030000>"
+PROBE math/rotation-bits rec=input-bits case=6 operand=a x=-9462349:442381631p-25 y=+12884901:476741370p-24 z=+15351152:343597384p-24 s=-11710496:412316860p-24
+PROBE math/rotation-bits rec=input-bits case=6 operand=b x=-10871635:519691043p-24 y=-8992587:416611828p-24 z=-8942256:68719476p-24 s=-16106127:193273528p-29
+PROBE math/rotation-bits rec=compose case=6 x=+12739544:47553876p-25 y=+9179771:93905165p-23 z=-10208331:513368852p-25 s=+12373985:176712134p-24
+PROBE math/rotation-bits rec=divide case=6 x=-12171803:53223232p-25 y=-9566318:124313534p-23 z=+16732387:149705385p-26 s=-11671355:280822142p-24
+PROBE math/rotation-bits rec=rotate case=6 x=+10155881:311773944p-23 y=-16648775:1617632p-29 z=-12915348:489176032p-27
+PROBE math/rotation-bits rec=unrotate case=6 x=+10074247:361958404p-23 y=+15616597:389242240p-28 z=-11682631:10835968p-26
+PROBE math/rotation-bits rec=dot case=6 value=-12022670:228767138p-24
+PROBE math/rotation-bits rec=cross case=6 x=+10884520:467017572p-27 y=-12469263:74526272p-24 z=+10885326:94626720p-24
+PROBE math/rotation-bits rec=two-products case=6 form=one-expression value=-15362024:148159193p-26
+PROBE math/rotation-bits rec=two-products case=6 form=two-statements value=-15362024:148159193p-26
+PROBE math/rotation-bits rec=three-factors case=6 form=one-expression value=+9418141:389565491p-26
+PROBE math/rotation-bits rec=three-factors case=6 form=two-statements value=+9418141:389565491p-26
+PROBE math/rotation-bits rec=magnitude case=6 value=+10296390:77948550p-23
+PROBE math/rotation-bits rec=normalise case=6 x=-15418208:102047118p-26 y=+10497503:240820670p-24 z=+12506791:117045940p-24
+PROBE math/rotation-bits rec=rot-between case=6 x=+9792713:203483513p-27 y=-11218492:476635222p-24 z=+9793437:486670562p-24 s=+15259170:452773892p-25
+PROBE math/rotation-bits rec=angle-between case=6 value=+8836612:429703551p-22
+PROBE math/rotation-bits rec=rot2euler case=6 x=-16713589:496723910p-24 y=-15461955:15688566p-24 z=-9922293:236076123p-22
+PROBE math/rotation-bits rec=euler2rot case=6 x=+12599432:41880794p-28 y=+13097070:2229519p-25 z=+12020555:323982432p-25 s=+14207326:271443420p-24
+PROBE math/rotation-bits rec=axis-angle case=6 x=+14800924:436596291p-32 y=-10077225:217297552p-30 z=-12006069:177100734p-30 s=+16775328:321365116p-24
+PROBE math/rotation-bits rec=rot2axis case=6 x=+15418208:102047117p-26 y=-10497503:240820669p-24 z=-12506791:117045939p-24 angle=+8839346:228025998p-22
+PROBE math/rotation-bits rec=rot2fwd case=6 x=-14478842:87901038p-25 y=-14393432:20897761p-24 z=+9358391:312510243p-25
+PROBE math/rotation-bits rec=library fn=llSqrt arg=2 value=+11863283:109001677p-23
+PROBE math/rotation-bits rec=library fn=literal arg=0.1 value=+13421772:429496730p-27
+PROBE math/rotation-bits rec=library fn=llSin arg=1 value=+14117540:252251374p-24
+PROBE math/rotation-bits rec=library fn=llCos arg=1 value=+9064768:263521932p-24
+PROBE math/rotation-bits rec=library fn=llTan arg=1 value=+13064482:482272166p-23
+PROBE math/rotation-bits rec=library fn=llAtan2 arg=1,3 value=+10796157:52862689p-25
+PROBE math/rotation-bits rec=library fn=llPow arg=1.1,2.5 value=+10645636:8600357p-23
+PROBE math/rotation-bits rec=library fn=llLog arg=10 value=+9657741:464868630p-22
+PROBE math/rotation-bits rec=library fn=llLog10 arg=1000000 value=+12582912:0p-21
+PROBE math/rotation-bits rec=library fn=llSin arg=1000000 value=-11743833:90757223p-25
+PROBE math/rotation-bits rec=library fn=llAsin arg=0.1 value=+13444243:369326212p-27
+PROBE math/rotation-bits rec=library fn=divide arg=1,3 value=+11184810:357913941p-25
+PROBE math/rotation-bits rec=library fn=PI value=+13176795:0p-22
+PROBE math/rotation-bits rec=library fn=DEG_TO_RAD value=+9370165:0p-29
+PROBE math/rotation-bits rec=library fn=SQRT2 value=+11863283:0p-23
+PROBE math/rotation-bits rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

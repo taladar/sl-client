@@ -1,0 +1,68 @@
+grid: opensim-yengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE vm/call-cost-strings rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE vm/call-cost-strings rec=rate fn=none size=1 calls=32971700 seconds=1.500000 per_second=21981133
+PROBE vm/call-cost-strings rec=rate fn=llStringLength size=1 calls=31217290 seconds=1.500000 per_second=20811527
+PROBE vm/call-cost-strings rec=rate fn=llGetSubString size=1 calls=20715380 seconds=1.500000 per_second=13810253
+PROBE vm/call-cost-strings rec=rate fn=llSubStringIndex size=1 calls=13408180 seconds=1.500000 per_second=8938787
+PROBE vm/call-cost-strings rec=rate fn=llParseString2List size=1 calls=201520 seconds=1.500000 per_second=134347
+PROBE vm/call-cost-strings rec=rate fn=llToUpper size=1 calls=10134890 seconds=1.500000 per_second=6756593
+PROBE vm/call-cost-strings rec=rate fn=llStringToBase64 size=1 calls=7319740 seconds=1.500000 per_second=4879827
+PROBE vm/call-cost-strings rec=rate fn=llMD5String size=1 calls=213900 seconds=1.500000 per_second=142600
+PROBE vm/call-cost-strings rec=rate fn=llSHA1String size=1 calls=744610 seconds=1.500000 per_second=496407
+PROBE vm/call-cost-strings rec=rate fn=llEscapeURL size=1 calls=14906490 seconds=1.500000 per_second=9937660
+PROBE vm/call-cost-strings rec=rate fn=string-plus size=1 calls=12832420 seconds=1.501000 per_second=8549247
+PROBE vm/call-cost-strings rec=rate fn=llInsertString size=1 calls=10166410 seconds=1.500000 per_second=6777607
+PROBE vm/call-cost-strings rec=rate fn=llDeleteSubString size=1 calls=23140410 seconds=1.500000 per_second=15426940
+PROBE vm/call-cost-strings rec=rate fn=llStringTrim size=1 calls=12782410 seconds=1.500000 per_second=8521607
+PROBE vm/call-cost-strings rec=rate fn=none size=10 calls=32751740 seconds=1.500000 per_second=21834493
+PROBE vm/call-cost-strings rec=rate fn=llStringLength size=10 calls=30455850 seconds=1.500000 per_second=20303900
+PROBE vm/call-cost-strings rec=rate fn=llGetSubString size=10 calls=14000130 seconds=1.500000 per_second=9333420
+PROBE vm/call-cost-strings rec=rate fn=llSubStringIndex size=10 calls=9094760 seconds=1.500000 per_second=6063173
+PROBE vm/call-cost-strings rec=rate fn=llParseString2List size=10 calls=184570 seconds=1.500000 per_second=123047
+PROBE vm/call-cost-strings rec=rate fn=llToUpper size=10 calls=6527650 seconds=1.500000 per_second=4351767
+PROBE vm/call-cost-strings rec=rate fn=llStringToBase64 size=10 calls=5598990 seconds=1.500000 per_second=3732660
+PROBE vm/call-cost-strings rec=rate fn=llMD5String size=10 calls=201670 seconds=1.500000 per_second=134447
+PROBE vm/call-cost-strings rec=rate fn=llSHA1String size=10 calls=705720 seconds=1.500000 per_second=470480
+PROBE vm/call-cost-strings rec=rate fn=llEscapeURL size=10 calls=3216130 seconds=1.500000 per_second=2144087
+PROBE vm/call-cost-strings rec=rate fn=string-plus size=10 calls=12213690 seconds=1.500000 per_second=8142460
+PROBE vm/call-cost-strings rec=rate fn=llInsertString size=10 calls=9652300 seconds=1.500000 per_second=6434867
+PROBE vm/call-cost-strings rec=rate fn=llDeleteSubString size=10 calls=11560340 seconds=1.500000 per_second=7706893
+PROBE vm/call-cost-strings rec=rate fn=llStringTrim size=10 calls=12759590 seconds=1.500000 per_second=8506393
+PROBE vm/call-cost-strings rec=rate fn=none size=100 calls=32548840 seconds=1.500000 per_second=21699227
+PROBE vm/call-cost-strings rec=rate fn=llStringLength size=100 calls=29836910 seconds=1.500000 per_second=19891273
+PROBE vm/call-cost-strings rec=rate fn=llGetSubString size=100 calls=13974050 seconds=1.500000 per_second=9316033
+PROBE vm/call-cost-strings rec=rate fn=llSubStringIndex size=100 calls=1883890 seconds=1.500000 per_second=1255927
+PROBE vm/call-cost-strings rec=rate fn=llParseString2List size=100 calls=109670 seconds=1.500000 per_second=73113
+PROBE vm/call-cost-strings rec=rate fn=llToUpper size=100 calls=1563480 seconds=1.500000 per_second=1042320
+PROBE vm/call-cost-strings rec=rate fn=llStringToBase64 size=100 calls=1973890 seconds=1.500000 per_second=1315927
+PROBE vm/call-cost-strings rec=rate fn=llMD5String size=100 calls=196760 seconds=1.500000 per_second=131173
+PROBE vm/call-cost-strings rec=rate fn=llSHA1String size=100 calls=581780 seconds=1.500000 per_second=387853
+PROBE vm/call-cost-strings rec=rate fn=llEscapeURL size=100 calls=656200 seconds=1.501000 per_second=437175
+PROBE vm/call-cost-strings rec=rate fn=string-plus size=100 calls=7298870 seconds=1.500000 per_second=4865913
+PROBE vm/call-cost-strings rec=rate fn=llInsertString size=100 calls=6453100 seconds=1.500000 per_second=4302067
+PROBE vm/call-cost-strings rec=rate fn=llDeleteSubString size=100 calls=7172690 seconds=1.500000 per_second=4781793
+PROBE vm/call-cost-strings rec=rate fn=llStringTrim size=100 calls=12755660 seconds=1.500000 per_second=8503773
+PROBE vm/call-cost-strings rec=rate fn=none size=1000 calls=32165580 seconds=1.500000 per_second=21443720
+PROBE vm/call-cost-strings rec=rate fn=llStringLength size=1000 calls=29670020 seconds=1.500000 per_second=19780013
+PROBE vm/call-cost-strings rec=rate fn=llGetSubString size=1000 calls=13665700 seconds=1.500000 per_second=9110467
+PROBE vm/call-cost-strings rec=rate fn=llSubStringIndex size=1000 calls=211150 seconds=1.500000 per_second=140767
+PROBE vm/call-cost-strings rec=rate fn=llParseString2List size=1000 calls=15570 seconds=1.500000 per_second=10380
+PROBE vm/call-cost-strings rec=rate fn=llToUpper size=1000 calls=180570 seconds=1.500000 per_second=120380
+PROBE vm/call-cost-strings rec=rate fn=llStringToBase64 size=1000 calls=296520 seconds=1.500000 per_second=197680
+PROBE vm/call-cost-strings rec=rate fn=llMD5String size=1000 calls=104290 seconds=1.500000 per_second=69527
+PROBE vm/call-cost-strings rec=rate fn=llSHA1String size=1000 calls=176050 seconds=1.500000 per_second=117367
+PROBE vm/call-cost-strings rec=rate fn=llEscapeURL size=1000 calls=50720 seconds=1.500000 per_second=33813
+PROBE vm/call-cost-strings rec=rate fn=string-plus size=1000 calls=1517220 seconds=1.500000 per_second=1011480
+PROBE vm/call-cost-strings rec=rate fn=llInsertString size=1000 calls=1496280 seconds=1.500000 per_second=997520
+PROBE vm/call-cost-strings rec=rate fn=llDeleteSubString size=1000 calls=1529300 seconds=1.500000 per_second=1019533
+PROBE vm/call-cost-strings rec=rate fn=llStringTrim size=1000 calls=12522700 seconds=1.500000 per_second=8348467
+PROBE vm/call-cost-strings rec=rate fn=none size=0 calls=32652740 seconds=1.500000 per_second=21768493
+PROBE vm/call-cost-strings rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

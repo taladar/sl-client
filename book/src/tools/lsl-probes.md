@@ -261,6 +261,24 @@ What has bitten already, and how a probe should be shaped for it:
 - **Second Life reads some things back late.** `llGetBoundingBox` in the
   event that set the scale is the box of an earlier scale
   (`prim/placement`); read it again a second later.
+- **OpenSim can say half a character.** It counts a string in UTF-16 units,
+  so `llGetSubString` or `llDeleteSubString` of text outside the Basic
+  Multilingual Plane can cut a surrogate pair in half, and the chat line that
+  carries the half is cut off at it (`strings/functions`). Print such text as
+  `llStringToBase64` of it.
+- **XEngine does not compile `-rotation`** (`CS0023`), and a compile error
+  costs the whole script; the case has a probe of its own
+  (`math/negate-rotation`).
+- **A probe printing floats with `(string)` sees seven digits on Second
+  Life.** To tell a float from its neighbour, print its mantissa and exponent
+  found by scaling by two, as `math/rotation-bits` does; and parse the
+  literals you start from on the probe's own grid, since YEngine reads some
+  decimal literals a unit in the last place off the nearest double.
+- **A rate under a hundred calls is coarse.** The `vm/call-cost-*` probes
+  read the clock every ten calls; a function slow enough to make fewer than a
+  hundred calls in its run and a half is measured to the nearest ten. And on
+  Second Life a function that builds a new list varies by tens of per cent
+  between two runs an hour apart, so time it twice.
 - **The runner is slow back from a trip `away`.** It settles the owner in and
   walks it to the build location before it answers anything, which can take
   half a minute on Second Life; a probe that asks a question right after the
@@ -467,6 +485,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `persistence/*`, 2026-10-26: what a running script keeps when its object is taken and rezzed again, and across a restart of its region (OpenSim only): globals, state, permissions, timer, listen, queued events, a sleep in progress, script time, a stopped script beside it, and what runs first | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#persistence) | | |
 | `physics/*`, 2026-10-27: the status flags, the physics material and mass, forces, velocities and impulses, position and rotation targets, `llMoveToTarget` and the look-at functions, keyframed motion, the vehicle setters and motors, and pathfinding characters (Second Life only) — their clamps and their errors | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#status-flags-forces-targets-and-vehicles) | | |
 | `prim/*`, 2026-10-27: `llSetPos` and `llSetRegionPos` and their limits, rotation and scale clamps, the bounding box, every `PRIM_*` rule read back after a set, how a rule list's order, faces, unknown codes and wrong types are treated, the per-face setters, the object's name and description, `llGetObjectDetails`, linking and the link numbers, which setter raises which `changed` bit, and the sound, particle, texture-animation and media calls' errors | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#reading-and-writing-the-prim) | | |
+| `math/*`, `strings/*`, `vm/call-cost-*`, 2026-10-27: the exact precision of float, vector and rotation arithmetic, the rotation helpers and what they do with rotations that are not unit length, rounding, overflow, `llModPow` and `llFrand`, casts between strings and the other types, the string and list library on text outside ASCII, the newer string and list functions, and what 26 functions cost as their argument grows | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#strings-lists-maths-and-rotations) | | |
 | `errors/*`, 2026-10-27: which arithmetic faults under Mono, LSO and each OpenSim engine, what a fault and a library exception say and to whom, the say range, how Second Life cuts a flood of errors short, what brings a faulted script back, and list and string indices and strides out of range | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#run-time-errors) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |

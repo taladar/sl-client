@@ -1,0 +1,44 @@
+grid: opensim-yengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: unknown (no start record)
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+complete: no
+
+# chat type=say from="Object" length=14 text="Script running"
+# compile error in "Probe": "(49,30) Error: undefined constant/function/variable llReplaceSubString(string,string,string,integer)"
+# compile error in "Probe": "(50,34) Error: undefined constant/function/variable llReplaceSubString(string,string,string,integer)"
+# compile error in "Probe": "(51,33) Error: undefined constant/function/variable llReplaceSubString(string,string,string,integer)"
+# compile error in "Probe": "(52,37) Error: undefined constant/function/variable llReplaceSubString(string,string,string,integer)"
+# compile error in "Probe": "(53,46) Error: undefined constant/function/variable llReplaceSubString(string,string,string,integer)"
+# compile error in "Probe": "(54,31) Error: undefined constant/function/variable llReplaceSubString(string,string,string,integer)"
+# compile error in "Probe": "(55,35) Error: undefined constant/function/variable llReplaceSubString(string,string,string,integer)"
+# compile error in "Probe": "(56,33) Error: undefined constant/function/variable llReplaceSubString(string,string,string,integer)"
+# compile error in "Probe": "(58,46) Error: undefined constant/function/variable llList2ListSlice(list,integer,integer,integer,integer)"
+# compile error in "Probe": "(59,52) Error: undefined constant/function/variable llList2ListSlice(list,integer,integer,integer,integer)"
+# compile error in "Probe": "(60,46) Error: undefined constant/function/variable llList2ListSlice(list,integer,integer,integer,integer)"
+# compile error in "Probe": "(61,48) Error: undefined constant/function/variable llList2ListSlice(list,integer,integer,integer,integer)"
+# compile error in "Probe": "(62,47) Error: undefined constant/function/variable llList2ListSlice(list,integer,integer,integer,integer)"
+# compile error in "Probe": "(63,42) Error: undefined constant/function/variable llList2ListSlice(list,integer,integer,integer,integer)"
+# compile error in "Probe": "(64,50) Error: undefined constant/function/variable llListFindStrided(list,list,integer,integer,integer)"
+# compile error in "Probe": "(65,50) Error: undefined constant/function/variable llListFindStrided(list,list,integer,integer,integer)"
+# compile error in "Probe": "(66,57) Error: undefined constant/function/variable llListFindStrided(list,list,integer,integer,integer)"
+# compile error in "Probe": "(67,58) Error: undefined constant/function/variable llListFindStrided(list,list,integer,integer,integer)"
+# compile error in "Probe": "(68,53) Error: undefined constant/function/variable llListFindStrided(list,list,integer,integer,integer)"
+# compile error in "Probe": "(69,54) Error: undefined constant/function/variable llListFindStrided(list,list,integer,integer,integer)"
+# compile error in "Probe": "(71,51) Error: undefined constant/function/variable llListSortStrided(list,integer,integer,integer)"
+# compile error in "Probe": "(72,58) Error: undefined constant/function/variable llListSortStrided(list,integer,integer,integer)"
+# compile error in "Probe": "(73,41) Error: undefined constant/function/variable llListSortStrided(list,integer,integer,integer)"
+# compile error in "Probe": "(74,53) Error: undefined constant/function/variable llListSortStrided(list,integer,integer,integer)"
+# compile error in "Probe": "(75,47) Error: undefined constant/function/variable llListSortStrided(list,integer,integer,integer)"
+# compile error in "Probe": "(81,35) Error: undefined constant/function/variable llComputeHash(string,string)"
+# compile error in "Probe": "(83,45) Error: undefined constant/function/variable llComputeHash(string,string)"
+# compile error in "Probe": "(84,29) Error: undefined constant/function/variable llSHA256String(string)"
+# compile error in "Probe": "(85,34) Error: undefined constant/function/variable llSHA256String(string)"
+# compile error in "Probe": "(90,27) Error: undefined constant/function/variable llHMAC(string,string,string)"
+# compile error in "Probe": "(92,33) Error: undefined constant/function/variable llHMAC(string,string,string)"
+# compile error in "Probe": "(95,46) Error: undefined constant/function/variable llLinear2sRGB(vector)"
+# compile error in "Probe": "(96,53) Error: undefined constant/function/variable llLinear2sRGB(vector)"
+# compile error in "Probe": "(97,46) Error: undefined constant/function/variable llsRGB2Linear(vector)"
+# compile error in "Probe": "(98,51) Error: undefined constant/function/variable llsRGB2Linear(vector)"

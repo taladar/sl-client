@@ -66,3 +66,29 @@ zero and `llAxes2Rot` of three zero vectors `<1, 0, 0, 0>` on Second Life,
 `<0, 0, 0, 0>` there and `<0, 0, 0, 1>` here. Floats are doubles on OpenSim:
 `1e38 * 1e38` is `1e76` there and `Infinity` (Mono) or a `Math Error` (LSO)
 on Second Life.
+
+## Measured (gridspec-lsl-strings-math, 2026-10-27)
+
+`book/src/gridspec/lsl.md` § Strings, lists, maths and rotations
+(*Precision*, *Rotations*, *Numbers*). The axis order agrees across the
+grids for unit input. Where the flavours differ:
+
+- **`llRound` is `floor(x + 0.5)` in float on Second Life**: −0.5 → 0,
+  −2.5 → −2, 0.49999997 → 1. The "half away from zero" above is OpenSim's
+  (−1, −3, 0). Fix the acceptance accordingly.
+- `vector * rotation` by a rotation that is not unit length scales by its
+  squared length on Second Life (`<1,0,0> * <0,0,0,2>` is `<4,0,0>`;
+  by `<0,0,0,0>` `ZERO_VECTOR`); OpenSim normalises first and uses a
+  formula that agrees only for unit rotations (`<1,0,0> * <1,2,3,4>` is
+  `<4,28,−10>` there, `<−25,28,−10>` here).
+- `llAxisAngle2Rot` of a zero or tiny axis is the identity there;
+  `llVecNorm` of `<0,0,1e-7>` is `ZERO_VECTOR` there, a unit vector here.
+- `llEuler2Rot` past a full turn may return the negated quaternion on
+  OpenSim.
+- `llModPow` reads its operands as unsigned 32-bit and is exact on Second
+  Life; OpenSim goes through `Math.Pow` and is wrong past 2^53.
+- `llTan(1e30)` hands the argument back on Second Life; `llPow` and
+  products past the float range are `Infinity` there, doubles here.
+- `-rotation` does not compile under XEngine.
+- Precision (every operator and helper's evaluation order) is in
+  [[server-lsl-memory-sizes]], which owns the change to `ops.rs`.

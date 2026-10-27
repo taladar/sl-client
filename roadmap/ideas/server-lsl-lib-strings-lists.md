@@ -76,3 +76,39 @@ separators on Second Life. OpenSim throws (a run-time error on the script,
 OpenSim compiles none of `llReplaceSubString`, `llList2ListSlice`,
 `llListFindStrided`, `llListSortStrided`; Second Life's answers to an empty
 pattern and strides of zero are in the table.
+
+## Measured (gridspec-lsl-strings-math, 2026-10-27)
+
+`book/src/gridspec/lsl.md` § Strings, lists, maths and rotations has the
+tables (*Casts and conversions*, *Strings*, *The newer string and list
+functions*). What the flavours must differ in:
+
+- **Characters.** Second Life counts code points, OpenSim UTF-16 units: a
+  character outside the Basic Multilingual Plane is one there and two here,
+  in `llStringLength`, `llGetSubString`, `llSubStringIndex`, `llOrd`,
+  `llChar`; OpenSim can hand back half a surrogate pair (`U+FFFD`).
+- **Casts.** Second Life wraps `(integer)"2147483648"` (OpenSim −1), skips
+  every leading white space (OpenSim only spaces), reads hexadecimal floats
+  and `inf` / `nan`, and wants a vector string to start with `<`, taking
+  what follows the third component as junk; OpenSim ignores the brackets
+  and refuses trailing text. A float is written with 7 significant digits
+  by `(string)` but exactly by `llList2CSV` on Second Life; OpenSim writes
+  the double. A key's truth is a well-formed key that is not `NULL_KEY`
+  there, any non-empty string here.
+- **Library.** `llStringTrim` removes only ASCII white space there and
+  answers mode 7 as both ends; `llEscapeURL` escapes `~ - _ .` there;
+  a bad `%` escape empties `llUnescapeURL`'s result; `llBase64ToString`
+  writes `?` for bad UTF-8 and a NUL; `llListSort` of mixed types sorts
+  each type among its own places (descending differently on each grid),
+  OpenSim turns keys into strings; `llListStatistics` counts integers and
+  floats only (OpenSim parses strings and keys); `llListFindList` matches
+  a key and a string of the same text there; `llSubStringIndex("", "")` is
+  0 there, −1 here; case mapping leaves title case and `İ` alone there.
+- **Newer functions**, Second Life only: `llReplaceSubString` replaces
+  left to right without overlap, from the right for a negative count;
+  `llListFindStrided` matches only at a stride's start counted from
+  `start`; `llList2ListSlice` / `llListSortStrided` give `[]` for a stride
+  index past the stride; `llComputeHash` and `llHMAC` take the six digest
+  names in any case and answer `""` to any other.
+- **Cost.** What each call costs as its argument grows is in
+  [[server-lsl-call-cost-sizes]].

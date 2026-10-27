@@ -1,0 +1,36 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE vm/call-cost-newer rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE vm/call-cost-newer rec=rate fn=none size=1 calls=494060 seconds=1.510750 per_second=327030
+PROBE vm/call-cost-newer rec=rate fn=llReplaceSubString size=1 calls=24540 seconds=1.533312 per_second=16005
+PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=1 calls=3920 seconds=1.511265 per_second=2594
+PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=1 calls=7430 seconds=1.511025 per_second=4917
+PROBE vm/call-cost-newer rec=rate fn=llOrd size=1 calls=79470 seconds=1.509732 per_second=52638
+PROBE vm/call-cost-newer rec=rate fn=llHash size=1 calls=81990 seconds=1.510958 per_second=54264
+PROBE vm/call-cost-newer rec=rate fn=none size=10 calls=527200 seconds=1.511701 per_second=348746
+PROBE vm/call-cost-newer rec=rate fn=llReplaceSubString size=10 calls=12080 seconds=1.511712 per_second=7991
+PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=10 calls=3930 seconds=1.511248 per_second=2600
+PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=10 calls=7600 seconds=1.510716 per_second=5031
+PROBE vm/call-cost-newer rec=rate fn=llOrd size=10 calls=42370 seconds=1.511620 per_second=28030
+PROBE vm/call-cost-newer rec=rate fn=llHash size=10 calls=42440 seconds=1.510940 per_second=28088
+PROBE vm/call-cost-newer rec=rate fn=none size=100 calls=521450 seconds=1.511659 per_second=344952
+PROBE vm/call-cost-newer rec=rate fn=llReplaceSubString size=100 calls=2610 seconds=1.511007 per_second=1727
+PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=100 calls=3460 seconds=1.510762 per_second=2290
+PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=100 calls=5450 seconds=1.511244 per_second=3606
+PROBE vm/call-cost-newer rec=rate fn=llOrd size=100 calls=13400 seconds=1.511526 per_second=8865
+PROBE vm/call-cost-newer rec=rate fn=llHash size=100 calls=12310 seconds=1.511457 per_second=8144
+PROBE vm/call-cost-newer rec=rate fn=none size=1000 calls=508110 seconds=1.511027 per_second=336268
+PROBE vm/call-cost-newer rec=rate fn=llReplaceSubString size=1000 calls=330 seconds=1.533570 per_second=215
+PROBE vm/call-cost-newer rec=rate fn=llSHA256String size=1000 calls=1580 seconds=1.511491 per_second=1045
+PROBE vm/call-cost-newer rec=rate fn=llComputeHash size=1000 calls=1310 seconds=1.511226 per_second=867
+PROBE vm/call-cost-newer rec=rate fn=llOrd size=1000 calls=2030 seconds=1.511373 per_second=1343
+PROBE vm/call-cost-newer rec=rate fn=llHash size=1000 calls=1660 seconds=1.510883 per_second=1099
+PROBE vm/call-cost-newer rec=rate fn=none size=0 calls=518340 seconds=1.511396 per_second=342954
+PROBE vm/call-cost-newer rec=end

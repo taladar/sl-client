@@ -1,0 +1,68 @@
+grid: opensim-xengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE vm/call-cost-lists rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE vm/call-cost-lists rec=rate fn=none size=1 calls=558030 seconds=1.500000 per_second=372020
+PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=1 calls=554140 seconds=1.500000 per_second=369427
+PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=1 calls=536300 seconds=1.500000 per_second=357533
+PROBE vm/call-cost-lists rec=rate fn=llListSort size=1 calls=537110 seconds=1.500000 per_second=358073
+PROBE vm/call-cost-lists rec=rate fn=llList2CSV size=1 calls=454620 seconds=1.500000 per_second=303080
+PROBE vm/call-cost-lists rec=rate fn=llDumpList2String size=1 calls=467330 seconds=1.500000 per_second=311553
+PROBE vm/call-cost-lists rec=rate fn=llListFindList size=1 calls=522330 seconds=1.500000 per_second=348220
+PROBE vm/call-cost-lists rec=rate fn=llList2List size=1 calls=527900 seconds=1.500000 per_second=351933
+PROBE vm/call-cost-lists rec=rate fn=llDeleteSubList size=1 calls=551980 seconds=1.500000 per_second=367987
+PROBE vm/call-cost-lists rec=rate fn=llListReplaceList size=1 calls=558200 seconds=1.500000 per_second=372133
+PROBE vm/call-cost-lists rec=rate fn=list-plus size=1 calls=523860 seconds=1.500000 per_second=349240
+PROBE vm/call-cost-lists rec=rate fn=llListStatistics size=1 calls=477250 seconds=1.500000 per_second=318167
+PROBE vm/call-cost-lists rec=rate fn=llCSV2List size=1 calls=512660 seconds=1.500000 per_second=341773
+PROBE vm/call-cost-lists rec=rate fn=llListRandomize size=1 calls=356760 seconds=1.500000 per_second=237840
+PROBE vm/call-cost-lists rec=rate fn=none size=10 calls=557110 seconds=1.500000 per_second=371407
+PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=10 calls=555540 seconds=1.500000 per_second=370360
+PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=10 calls=569940 seconds=1.500000 per_second=379960
+PROBE vm/call-cost-lists rec=rate fn=llListSort size=10 calls=432230 seconds=1.500000 per_second=288153
+PROBE vm/call-cost-lists rec=rate fn=llList2CSV size=10 calls=328990 seconds=1.500000 per_second=219327
+PROBE vm/call-cost-lists rec=rate fn=llDumpList2String size=10 calls=288160 seconds=1.500000 per_second=192107
+PROBE vm/call-cost-lists rec=rate fn=llListFindList size=10 calls=442300 seconds=1.500000 per_second=294867
+PROBE vm/call-cost-lists rec=rate fn=llList2List size=10 calls=508570 seconds=1.500000 per_second=339047
+PROBE vm/call-cost-lists rec=rate fn=llDeleteSubList size=10 calls=510110 seconds=1.500000 per_second=340073
+PROBE vm/call-cost-lists rec=rate fn=llListReplaceList size=10 calls=490140 seconds=1.500000 per_second=326760
+PROBE vm/call-cost-lists rec=rate fn=list-plus size=10 calls=509210 seconds=1.500000 per_second=339473
+PROBE vm/call-cost-lists rec=rate fn=llListStatistics size=10 calls=265370 seconds=1.500000 per_second=176913
+PROBE vm/call-cost-lists rec=rate fn=llCSV2List size=10 calls=279940 seconds=1.500000 per_second=186627
+PROBE vm/call-cost-lists rec=rate fn=llListRandomize size=10 calls=215640 seconds=1.500000 per_second=143760
+PROBE vm/call-cost-lists rec=rate fn=none size=100 calls=564490 seconds=1.500000 per_second=376327
+PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=100 calls=581920 seconds=1.500000 per_second=387947
+PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=100 calls=564040 seconds=1.500000 per_second=376027
+PROBE vm/call-cost-lists rec=rate fn=llListSort size=100 calls=122130 seconds=1.500000 per_second=81420
+PROBE vm/call-cost-lists rec=rate fn=llList2CSV size=100 calls=92960 seconds=1.502000 per_second=61891
+PROBE vm/call-cost-lists rec=rate fn=llDumpList2String size=100 calls=30360 seconds=1.500000 per_second=20240
+PROBE vm/call-cost-lists rec=rate fn=llListFindList size=100 calls=206850 seconds=1.500000 per_second=137900
+PROBE vm/call-cost-lists rec=rate fn=llList2List size=100 calls=431120 seconds=1.500000 per_second=287413
+PROBE vm/call-cost-lists rec=rate fn=llDeleteSubList size=100 calls=427020 seconds=1.500000 per_second=284680
+PROBE vm/call-cost-lists rec=rate fn=llListReplaceList size=100 calls=377200 seconds=1.500000 per_second=251467
+PROBE vm/call-cost-lists rec=rate fn=list-plus size=100 calls=434550 seconds=1.500000 per_second=289700
+PROBE vm/call-cost-lists rec=rate fn=llListStatistics size=100 calls=54130 seconds=1.500000 per_second=36087
+PROBE vm/call-cost-lists rec=rate fn=llCSV2List size=100 calls=30150 seconds=1.500000 per_second=20100
+PROBE vm/call-cost-lists rec=rate fn=llListRandomize size=100 calls=41070 seconds=1.501000 per_second=27362
+PROBE vm/call-cost-lists rec=rate fn=none size=500 calls=568570 seconds=1.500000 per_second=379047
+PROBE vm/call-cost-lists rec=rate fn=llGetListLength size=500 calls=568670 seconds=1.500000 per_second=379113
+PROBE vm/call-cost-lists rec=rate fn=llList2Integer size=500 calls=540670 seconds=1.500000 per_second=360447
+PROBE vm/call-cost-lists rec=rate fn=llListSort size=500 calls=21700 seconds=1.500000 per_second=14467
+PROBE vm/call-cost-lists rec=rate fn=llList2CSV size=500 calls=22350 seconds=1.500000 per_second=14900
+PROBE vm/call-cost-lists rec=rate fn=llDumpList2String size=500 calls=1660 seconds=1.502000 per_second=1105
+PROBE vm/call-cost-lists rec=rate fn=llListFindList size=500 calls=60000 seconds=1.500000 per_second=40000
+PROBE vm/call-cost-lists rec=rate fn=llList2List size=500 calls=286990 seconds=1.500000 per_second=191327
+PROBE vm/call-cost-lists rec=rate fn=llDeleteSubList size=500 calls=309290 seconds=1.500000 per_second=206193
+PROBE vm/call-cost-lists rec=rate fn=llListReplaceList size=500 calls=206980 seconds=1.500000 per_second=137987
+PROBE vm/call-cost-lists rec=rate fn=list-plus size=500 calls=308530 seconds=1.500000 per_second=205687
+PROBE vm/call-cost-lists rec=rate fn=llListStatistics size=500 calls=11050 seconds=1.500000 per_second=7367
+PROBE vm/call-cost-lists rec=rate fn=llCSV2List size=500 calls=2390 seconds=1.503000 per_second=1590
+PROBE vm/call-cost-lists rec=rate fn=llListRandomize size=500 calls=2570 seconds=1.502000 per_second=1711
+PROBE vm/call-cost-lists rec=rate fn=none size=0 calls=583180 seconds=1.500000 per_second=388787
+PROBE vm/call-cost-lists rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

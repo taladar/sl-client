@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 338 |
+| ready | 337 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 39 |
-| done | 1438 |
+| done | 1439 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2078** |
@@ -303,7 +303,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-math-rotations`](ideas/server-lsl-lib-math-rotations.md) —
   Library tranche — maths, vectors and rotations (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
-  `gridspec-lsl-strings-math`)
+  `gridspec-lsl-strings-math` (done))
 - [`server-lsl-lib-money-permissions`](ideas/server-lsl-lib-money-permissions.md)
   — Library tranche — script permissions, money and payment (blocked by
   `server-lsl-vm-execution` (done), `protocol-sim-script-messages`,
@@ -322,7 +322,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-strings-lists`](ideas/server-lsl-lib-strings-lists.md) —
   Library tranche — strings, lists, encoding and hashing (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
-  `gridspec-lsl-strings-math`)
+  `gridspec-lsl-strings-math` (done))
 - [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
   Library tranche — task inventory, giving, rezzing and notecards (blocked by
   `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`,
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (338)
+## ready (337)
 
 ### protocol
 
@@ -1151,9 +1151,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-strings-math`](ready/gridspec-lsl-strings-math.md) — LSL
-  library behaviour on each grid — strings, lists, maths and rotations (blocked
-  by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-task-inventory`](ready/gridspec-lsl-task-inventory.md) — LSL
   library behaviour on each grid — task inventory, giving, rezzing and notecards
   (blocked by `gridspec-lsl-live-differential-runner` (done))
@@ -1514,7 +1511,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1438)
+## done (1439)
 
 ### protocol
 
@@ -4650,6 +4647,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Probe steps the refreshed library table unblocks
 - [`gridspec-lsl-runtime-errors`](done/gridspec-lsl-runtime-errors.md) — LSL
   run-time errors on OpenSim and the debug channel in our viewer (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-strings-math`](done/gridspec-lsl-strings-math.md) — LSL library
+  behaviour on each grid — strings, lists, maths and rotations (blocked by
   `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct
   delivery on each grid

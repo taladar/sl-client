@@ -1973,3 +1973,239 @@ takes nothing from it. No grid names the line a script faulted on, so
 nothing opens the editor there. A YEngine library exception is owner chat,
 not a debug line, so it lands in nearby chat as any `llOwnerSay` does
 (unless that is sent to the window).
+
+## Strings, lists, maths and rotations
+
+Measured on 2026-10-27 by `math/rotation-bits`, `math/rotations`,
+`math/negate-rotation`, `math/functions`, `strings/conversions`,
+`strings/functions`, `strings/unicode`, `strings/newer` and the three
+`vm/call-cost-*` timing probes, on aditi's Mauve and the local OpenSim under
+YEngine and XEngine. Every operand comes out of a list built at run time, so
+no compiler folds it. Where the two engines agree, OpenSim is one column: the
+library is shared (`LSL_Api.cs`, `LSL_Types.cs`), only the compilers differ.
+Out-of-range indices and the cases that fault are
+[Run-time errors](#run-time-errors)'.
+
+### Precision
+
+`math/rotation-bits` prints each result's mantissa and exponent, found by
+scaling by two, so a float can be told from its neighbour; the result was
+then matched against candidate evaluations (each operation rounded to a
+float, everything in double rounded once, products rounded and summed in
+double, and so on). Seven pairs of rotations, the first PyOptimizer's open
+case `<3, 5, 7, 17> * <.22, .26, .38, .86>`, the others chosen where the
+candidates disagree.
+
+| what | Second Life (Mono) | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| a variable, a list element, a vector's or rotation's component | a float: 24 bits | a **double**: 53 bits (`0.1` is the double 0.1) | the same | no scripts |
+| an expression of floats (`a * b + c * d`, `a * b * c`) | evaluated in **double** and rounded to a float only when stored: the same sum split over two statements comes out a bit apart | in double throughout | the same | no scripts |
+| `rotation * rotation`, `vector * rotation`, `vector * vector` (dot) | in double, rounded once at the end: all seven products matched that, five of them nothing else; PyOptimizer's case gives `y` = 8.3199997 (prints as `8.320000`) | in double | the same | no scripts |
+| `rotation / rotation`, `vector / rotation`, `vector % vector` (cross) | **each operation rounded to a float**: `/ rotation` is the product with the conjugate, `vector / rotation` Linden's two-step formula (`llquaternion.cpp`), each product and sum rounded | in double | the same | no scripts |
+| `llSqrt`, `llSin`, `llPow` … | the double result of the float argument, rounded to a float | the double result | the same | no scripts |
+| a decimal literal | the nearest float | **one unit in the last place off** the nearest double for 11 of the 56 literals (`-0.819`, `0.398`, `0.751` …): YEngine's own number parser | the nearest double | no scripts |
+| a float printed by `(string)`, `llList2String`, `llDumpList2String` | rounded to **7 significant digits**, then six decimals: `123456789.0` → `123456800.000000`, `1234567.875` → `1234568.000000` | the double with six decimals: `123456789.000000` | the same | no scripts |
+| a float printed by `llList2CSV` | the float's **exact** value with six decimals: `123456792.000000`, `1e30` → `1000000015047466219876688855040.000000` | the double: `1000000000000000000000000000000.000000` | the same | no scripts |
+| a float past the float range (`3.4e38 * 10`), `(float)"1e39"` | `Infinity` (`inf` in `llList2CSV`) | `3.4e39`, `1e39`: a double | the same | no scripts |
+| negative zero | `-0.000000` from `(string)`, `llList2CSV` and `llList2String`; `0.000000` from `llDumpList2String` | `0.000000` | the same | no scripts |
+| a vector by `(string)` | five decimals (`<1.00000, 0.00000, 123456.70000>`); six inside a list | six | the same | no scripts |
+
+### Rotations
+
+`math/rotations` and `math/negate-rotation`. The axis order agrees: on every
+grid `llEuler2Rot` turns about x, then y, then z, `a * b` applies `a` first,
+and `llRotBetween`, `llAxes2Rot`, `llRot2Fwd` / `Left` / `Up`, `llRot2Axis`,
+`llRot2Angle` and `llAngleBetween` give the same answers for unit input
+(within the six printed decimals). They part over input that is not a unit
+rotation.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llEuler2Rot(<400°, −200°, 1000°>)` | `<−0.549, 0.747, 0.153, 0.342>` | the **negation**, `<0.549, −0.747, −0.153, −0.342>` — the same rotation | no scripts |
+| `llRot2Euler` back from it, and from `<30°, 45°, 60°>` | `<−140, 20, 100>`; `<30, 45.00001, 60.00001>` | `<−140.000004, 19.999999, 99.999993>`; exact | no scripts |
+| the gimbal: `<10°, 90°, 20°>` and `<10°, −90°, 20°>` back | `<0, 90, 30>` and `<0, −90, 10>`: x folded into z | the same, `±90.000001` | no scripts |
+| `vector * rotation` by `<0, 0, 0, 2>` | `<4, 0, 0>`: **scaled by the square of the length** — no normalising | `<1, 0, 0>`: normalised first | no scripts |
+| `vector * rotation`, `vector / rotation` by `<1, 2, 3, 4>` | `<4, 28, −10>`, `<4, −20, 22>` | `<−25, 28, −10>`, `<−25, −20, 22>`: a different formula, which agrees only for unit rotations | no scripts |
+| `vector * <0, 0, 0, 0>` | `ZERO_VECTOR` | the vector unchanged | no scripts |
+| `llAxisAngle2Rot` of a zero axis, of a `1e-7` axis, by 90° | `<0, 0, 0, 1>`, `<0, 0, 0, 1>` | `<0, 0, 0, 0.707107>` (not a unit rotation); `<0, 0, 0.707, 0.707>`: the tiny axis normalised | no scripts |
+| `llAxisAngle2Rot` of an axis of length 2; by 450° | the axis normalised; the negated rotation of 90° | the same | no scripts |
+| `llVecNorm(<0, 0, 1e-7>)` | `ZERO_VECTOR`: too short | `<0, 0, 1>` | no scripts |
+| `llRot2Axis`, `llRot2Angle` of the identity, its negation, `<0, 0, 0, 2>`, `<0, 0, 0, 0>` | zero axis, angle 0 | the same | no scripts |
+| `llRotBetween` of opposite vectors (x and −x) | `<0, 0, 1, 0>`; z and −x `<0, −0.707, 0, 0.707>` | the same | no scripts |
+| `llRotBetween` with a zero vector, or of parallel vectors of different lengths | the identity | the same | no scripts |
+| `llAngleBetween` of a rotation and its negation, or `<0, 0, 0, 2>` | 0 | the same | no scripts |
+| `llAxes2Rot` of x of length 2, of a left-handed set, of skewed axes | `<0, 0, 0, 1.118>`, `<0, 0, 0, 0.707>`, `<0, 0, −0.25, 1>`: not normalised | the same | no scripts |
+| `llRot2Fwd` / `Left` / `Up` of `<1, 2, 3, 4>` | the axes of the normalised rotation | the same | no scripts |
+| `-rotation` | `<−1, −2, −3, −4>` | YEngine the same; **XEngine does not compile it** (`CS0023: The '-' operator cannot be applied to operand of type '…Quaternion'`) | no scripts |
+| `rotation + rotation`, `rotation - rotation` | component by component | the same | no scripts |
+
+### Numbers
+
+`math/functions`.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llRound` of 0.5, 1.5, 2.5 | 1, 2, 3 | the same | no scripts |
+| `llRound` of −0.5, −1.5, −2.5 | **0, −1, −2**: half rounds **up**, `floor(x + 0.5)` | −1, −2, −3: half away from zero | no scripts |
+| `llRound(0.49999997)` | **1**: the `+ 0.5` is done in float | 0 | no scripts |
+| `llRound`, `llFloor`, `llCeil`, `(integer)` of 2147483648, −2147483904, ±1e10 | −2147483648 for all | the same | no scripts |
+| `llAbs` and `-` of −2147483648; `int-max + 1`; `int-min - 1`; `int-max * 2` | wrap: −2147483648, −2147483648, 2147483647, −2 | the same | no scripts |
+| shifts by 32, 33, −1 | the count taken modulo 32: `1 << 32` is 1, `1 << -1` is −2147483648; `>>` is arithmetic | the same | no scripts |
+| `-7 % 3`, `7 % -3`, `-7 / 2` | −1, 1, −3: truncating | the same | no scripts |
+| `llPow(0, 0)`, `(−8, 1/3)`, `(−8, 2)` | 1, NaN, 64 | the same | no scripts |
+| `llPow(1e30, 2)`, `(1e-6, −7)` | `Infinity` | 1e60, 1e42 | no scripts |
+| `llTan(PI_BY_TWO)`, `llTan(1e30)` | −22877330, **1e30** (the argument handed back) | −22877332.43, −0.009332 | no scripts |
+| `llAtan2(0, 0)`, `(0, −1)`, `(−0, −1)` | 0, π, −π | the same | no scripts |
+| `llModPow(-2, 3, 7)`, `(2, -1, 7)`, `(2, 3, -7)` | 1, 1, 8: every operand read as an **unsigned** 32-bit integer | −1, 0, 1 | no scripts |
+| `llModPow(7, 1000000007, 1000000007)`, `(2147483647, 2147483647, 2147483646)`, `(3, 2147483647, 65537)` | 7, 1, 21846: exact | −291172004, −8, −32769: `Math.Pow` in a double, cut to a long | no scripts |
+| `llFrand(1.0)`, `(−1.0)`, `(0.0)` over 2000 draws | in (0, 1), in (−1, 0), always 0; no draw of the first two was 0 | the same | no scripts |
+| `llFabs(-0.0)`, `llSqrt(-0.0)` | `-0.000000` | `0.000000` | no scripts |
+
+### Casts and conversions
+
+`strings/conversions`. A `\t` in a string literal is four spaces on every
+grid, since the compiler writes it so.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `(integer)` of `"0x1F"`, `" +5"`, `"5e2"`, `"  12abc"`, `"1.9"`, `"-1.9"` | 31, 5, 5, 12, 1, −1 | the same | no scripts |
+| `(integer)` of `"-0x1"`, `"+-5"`, `"abc"`, `"0x"`, `"٣"`, `"０７"` | 0 | the same | no scripts |
+| `(integer)"2147483648"`, `"-2147483649"` | −2147483648, 2147483647: wraps | **−1** for both | no scripts |
+| `(integer)` of `"4294967296"`, `"99999999999"`, `"0x100000000"`; `"0xFFFFFFFF"` | −1; −1 | the same | no scripts |
+| `(integer)` of `"    \n7"` | 7: all leading white space skipped | **0**: only spaces | no scripts |
+| `(float)` of `"1e3"`, `".5"`, `"-.5e1"`, `"5."`, `"  1.5x"`, `"1,5"`, `"1e"`, `"1.5e+2"` | 1000, 0.5, −5, 5, 1.5, 1, 1, 150 | the same | no scripts |
+| `(float)` of `"0x1p4"`, `"0x10"` | 16, 16: hexadecimal floats | 0 | no scripts |
+| `(float)` of `"infinity"`, `"-inf"`, `"NaN"`, `"1e39"` | `Infinity`, `-Infinity`, `NaN`, `Infinity` | 0, 0, 0, 1e39 | no scripts |
+| `(float)"1e-50"`, `"e5"` | 0 | the same | no scripts |
+| `(vector)` of `" <1,2,3>"` and `"1,2,3"` | `ZERO_VECTOR`: it must start with `<` | `<1, 2, 3>`: the brackets are ignored | no scripts |
+| `(vector)` of `"<1,2,3> tail"`, `"<1,2,3"`, `"<1,2,3,4>"` | `<1, 2, 3>` | `"<1,2,3> tail"`: `ZERO_VECTOR`; the others `<1, 2, 3>` | no scripts |
+| `(vector)"<1e1,0x10,-.5>"` | `<10, 16, −0.5>` | `ZERO_VECTOR` | no scripts |
+| `(vector)` of `"<1,2>"`, `"<1,2,x>"`, `"<1 2 3>"`, `"<,,>"` | `ZERO_VECTOR` | the same | no scripts |
+| `(rotation)` of a string with three components | `ZERO_ROTATION` | the same | no scripts |
+| `if ((key)s)` | true only for a well-formed key that is not `NULL_KEY` (upper-case hex counts) | true for any string that is not empty | no scripts |
+| `llGetListEntryType` of `(key)"k"` in a list literal | `TYPE_KEY` | **`TYPE_STRING`** | no scripts |
+| `llCSV2List("…, c ,…")` | every element a string, leading spaces trimmed, `"c "` keeps its trailing one; quotes are not special | trailing space trimmed too | no scripts |
+| `llList2CSV` of a vector, of strings with commas | `<1.000000, -0.000002, 123456.703125>`; the strings as they are | `123456.700000` | no scripts |
+
+### Strings
+
+`strings/functions`, `strings/unicode`. **Second Life counts characters in
+code points; OpenSim in UTF-16 units**, so text outside the Basic
+Multilingual Plane (emoji, `𝄞`) is one character there and two here, and
+OpenSim can cut a surrogate pair in half (it then sends `U+FFFD`).
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llStringLength("a𝄞b😀")`; `llSubStringIndex` of `b` in it | 4; 2 | 6; 3 | no scripts |
+| `llGetSubString(…, 1, 1)`, `(…, -1, -1)`; `llDeleteSubString(…, 1, 1)` | `𝄞`, `😀`; `ab😀` | half a pair each (`U+FFFD`); `a`, `U+FFFD`, `b😀` | no scripts |
+| `llChar` of `0x1F600`, `0x10FFFF` | one character | two (a surrogate pair) | no scripts |
+| `llChar` of `0xD800`, `0xDFFF`, `0xFFFE`, `0xFFFF` | `U+FFFD` | `U+FFFD` for the surrogates, the character itself for `0xFFFE` and `0xFFFF` | no scripts |
+| `llOrd("a😀b", 2)`, `(…, 3)` | 98, 0 | 128512 (the pair read from its second half), 98 | no scripts |
+| `llHash` of `""`, `"a"`, `"abc"`, `"é"`, `"😀"`, a sentence | 0, 97, 807794786, 233, 128512, −1927828445 | the same | no scripts |
+| `llToUpper("aäßéÿǅ")`, `llToLower("AÄÉŸǅİ")` | `AÄßÉŸǅ`, `aäéÿǅİ`: title case and `İ` left alone | `ǅ` → `Ǆ`, `İ` → `i`; `ß` kept on both | no scripts |
+| `llStringTrim` | removes ASCII white space only — tab, line feed, vertical tab, form feed, carriage return and space; not a no-break or ideographic space | removes every Unicode white space | no scripts |
+| `llStringTrim` with mode 7 | trims both ends | returns the string unchanged | no scripts |
+| `llEscapeURL` | escapes everything but `A–Z a–z 0–9`: `~ - _ .` too | leaves `~ - _ .` alone (`Uri.EscapeDataString`) | no scripts |
+| `llUnescapeURL("%zz%4%e9%C3%A9%")` | `""`: a bad escape empties the string | the text unchanged but for `%C3%A9` | no scripts |
+| `llUnescapeURL("a+b%20c")`, lower-case hex | `a+b c`; decoded | the same | no scripts |
+| `llBase64ToString` of a byte that is not UTF-8 (`/w==`), of a NUL (`YQBi`) | `?`, `a?b` | `U+FFFD`, a real NUL | no scripts |
+| `llBase64ToString` of `"YWJjZA"` (padding left off), of `"a!b"` | `abcd`; `""` | `""` for both, each with `llBase64ToString: Error decoding string` on the debug channel | no scripts |
+| `llBase64ToInteger` of `"AQ=="`, `"AQAAAAAA"` | 16777216 | the same | no scripts |
+| `llBase64ToInteger("!!!!")` | **a different number each run** (15204949, then 12523626): not a defined value | 0 | no scripts |
+| `llIntegerToBase64(-1)`, `llXorBase64` with a key shorter or longer than the text, or empty | `/////w==`; the key cycled, cut; the text unchanged | the same | no scripts |
+| `llMD5String`, `llSHA1String` of `"abc"`, `"é"` (UTF-8) | the standard digests; MD5 of `"abc:5"` for nonce 5 | the same | no scripts |
+| `llParseString2List("a--b-c", ["-"], ["--"])`; the same with the lists swapped | `[a, b, c]`; `[a, b, -, c]`: a separator wins over a spacer, and the earlier one in a list over a later one (`["b", "bc"]` on `abcabc` gives `[a, ca, c]`) | the same | no scripts |
+| `llParseStringKeepNulls("", [","], [])` | `[""]` | the same | no scripts |
+| `llListSort` of mixed types, ascending | not a total order: each type is sorted among the places it holds, and the places keep their types (`[3, "b", 1.5, "a", 2, <1,0,0>, "B", -1, <0,0,2>]` gives `[-1, "B", 1.5, "a", 2, <1,0,0>, "b", 3, <0,0,2>]`) | the same | no scripts |
+| — descending | `[<0,0,2>, -1, "B", <1,0,0>, 2, "a", 1.5, "b", 3]`: the places do not keep their types | the ascending rule, descending: `[3, "b", 1.5, "a", 2, <0,0,2>, "B", -1, <1,0,0>]` | no scripts |
+| `llListSort` of strings | by code unit: `"", "10", "9", "A", "B", "a", "b", "é"` | the same | no scripts |
+| `llListSort` of vectors; of rotations | by length; rotations left in place | the same | no scripts |
+| `llListSort` of keys and strings | sorted together, each keeping its type | the keys **become strings** | no scripts |
+| `llListStatistics` of `[1, 2.5, "3", (key)"4", <1,2,3>, 4]` | counts the integers and floats only: sum 7.5, count 3 | parses the string and the key as numbers too: sum 14.5, count 5 | no scripts |
+| the geometric mean of `[-1, 4]` | 0 | NaN | no scripts |
+| `llListFindList` of `NULL_KEY` as a string against a key, and back | found: a key and a string match | not found | no scripts |
+| `llListFindList` of `1` among `[1.0, 1]`, `1.0` among `[1, 1.0]`, `"1"` among `[1, "1"]` | 1, 1, 1: the type must match | the same | no scripts |
+| `llSubStringIndex("", "")` | 0 | **−1** | no scripts |
+
+### The newer string and list functions
+
+`strings/newer`: OpenSim compiles none of `llReplaceSubString`,
+`llList2ListSlice`, `llListFindStrided`, `llListSortStrided`,
+`llComputeHash`, `llSHA256String`, `llHMAC`, `llLinear2sRGB` and
+`llsRGB2Linear` (`undefined … function` under YEngine, `CS0103` under
+XEngine); it has `llChar`, `llOrd` and `llHash` (above).
+
+| what | Second Life | fake grid |
+| --- | --- | --- |
+| `llReplaceSubString("aaa-b-aaa", "a", "x", n)` for 0, 2, −2 | every match, the first two, the last two | no scripts |
+| overlapping matches, `"aa"` in `aaa` | left to right, not overlapping: `ya-b-ya`; with −1 the last match from the right: `aaa-b-ay` | no scripts |
+| `llList2ListSlice([1,a,2,b,3,c,4,d], 0, -1, 2, i)` | `i` 1 or −1: `[a, b, c, d]`; `i` past the stride: `[]`; a reversed range (5, 2) wraps: `[1, 2, c, d]` | no scripts |
+| `llListFindStrided` | matches only at a stride's start, counting from `start` (a start of 1 never matches at even indices); negative indices count from the end | no scripts |
+| `llListSortStrided` by a stride index of 1, −1, 0 | sorts by that element; past the stride, `[]`; an odd tail left at the end | no scripts |
+| `llComputeHash` with `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512` | the hex digest; the name is not case sensitive; `md4` or `""` give `""` | no scripts |
+| `llHMAC` | the Base64 HMAC, the same names; an unknown one `""` | no scripts |
+| `llLinear2sRGB`, `llsRGB2Linear` | the standard curves, not clamped: 2 → 1.35326, −1 → −12.92 | no scripts |
+
+### What a call costs
+
+`vm/call-cost-lists`, `vm/call-cost-strings` and `vm/call-cost-newer` time
+each function for a second and a half at four sizes — lists of integers,
+strings of `"ab,"` repeated — reading the clock every ten calls, and an
+empty loop of the same shape as the baseline. The tables give the
+microseconds a call costs above that loop (an empty iteration is about
+2.9 µs on Second Life, 0.05 µs under YEngine and 2.6 µs under XEngine).
+Second Life's lists and strings were timed twice, an hour apart; where the
+runs differ by more than a tenth both are given. The functions that build a
+new list vary most between runs, and a rate under a hundred calls in the
+run and a half (the slowest cells, 500 elements) is coarse by the batch of
+ten.
+
+| function | Second Life, 1, 10, 100, 500 elements | OpenSim YEngine | OpenSim XEngine |
+| --- | --- | --- | --- |
+| `llGetListLength` | 2.5, 2.5, 2.5, 2.5 | 0.00, 0.00, 0.00, 0.00 | 0.06, 0.05, 0.00, 0.00 |
+| `llList2Integer` | 4.2–7.9, 4.2, 4.2, 4.3 | 0.01, 0.01, 0.01, 0.01 | 0.15, 0.00, 0.01, 0.13 |
+| `llListSort` | 168–198, 336, 5288–6664, 27775 | 7.1, 7.4, 16, 69 | 0.14, 0.82, 9.6, 66 |
+| `llList2CSV` | 100, 312, 2454, 12818 | 0.36, 1.5, 12, 56 | 0.65, 1.9, 14, 64 |
+| `llDumpList2String` | 101, 370, 2904–13155, 19605–27024 | 0.21, 1.8, 43, 683 | 0.56, 2.6, 47, 902 |
+| `llListFindList` | 50, 82, 436, 2485–2744 | 0.05, 0.39, 3.6, 18 | 0.22, 0.74, 4.6, 22 |
+| `llList2List` | 160–183, 113–639, 855–974, 6533–9088 | 7.0, 7.0, 7.7, 9.7 | 0.19, 0.30, 0.83, 2.6 |
+| `llDeleteSubList` | 86–786, 101–210, 1141–1887, 5205–7191 | 6.9, 7.0, 7.7, 9.7 | 0.07, 0.29, 0.86, 2.2 |
+| `llListReplaceList` | 63–661, 132–171, 1678–1909, 8895 | 6.8, 7.2, 8.2, 12 | 0.04, 0.41, 1.3, 4.6 |
+| `list + list` | 161–186, 197–261, 1334–1605, 7905 | 7.0, 7.0, 7.6, 9.6 | 0.21, 0.30, 0.80, 2.2 |
+| `llListStatistics` | 29, 55, 398–513, 2700 | 0.25, 2.4, 23, 114 | 0.49, 3.0, 25, 133 |
+| `llCSV2List` | 162, 404, 4383–4923, 18865 | 6.9, 9.4, 48, 622 | 0.28, 2.7, 47, 626 |
+| `llListRandomize` | 171, 366–506, 3353–4648, 18865 | 8.1, 11, 38, 497 | 1.6, 4.3, 34, 582 |
+
+| function | Second Life, 1, 10, 100, 1000 characters | OpenSim YEngine | OpenSim XEngine |
+| --- | --- | --- | --- |
+| `llStringLength` | 15, 30, 101, 676 | 0.00, 0.00, 0.00, 0.00 | 0.00, 0.01, 0.03, 0.02 |
+| `llGetSubString` | 36, 49, 122, 766 | 0.03, 0.06, 0.06, 0.06 | 0.04, 0.01, 0.07, 0.12 |
+| `llSubStringIndex` | 26, 41, 117, 778 | 0.07, 0.12, 0.75, 7.1 | 0.06, 0.30, 0.92, 7.7 |
+| `llParseString2List` | 115–148, 453–611, 3934–4923, 19228–55553 | 7.4, 8.1, 14, 96 | 0.58, 1.2, 7.2, 96 |
+| `llToUpper` | 14, 19–26, 71–86, 506–611 | 0.10, 0.18, 0.91, 8.3 | 0.07, 0.19, 1.0, 9.6 |
+| `llStringToBase64` | 33, 51, 267, 2358 | 0.16, 0.22, 0.71, 5.0 | 0.25, 0.26, 0.78, 5.7 |
+| `llMD5String` | 238, 239, 315, 975 | 7.0, 7.4, 7.6, 14 | 7.7, 8.2, 8.3, 17 |
+| `llSHA1String` | 276, 294, 351, 873 | 2.0, 2.1, 2.5, 8.5 | 2.4, 2.6, 3.0, 9.8 |
+| `llEscapeURL` | 72, 146, 837–1045, 7191–9256 | 0.05, 0.42, 2.2, 30 | 0.09, 0.50, 2.4, 32 |
+| `string + string` | 9.4–11, 11, 34–38, 211 | 0.07, 0.08, 0.16, 0.94 | 0.20, 0.13, 0.29, 1.3 |
+| `llInsertString` | 53, 99, 470, 3800 | 0.10, 0.11, 0.19, 0.96 | 0.09, 0.21, 0.37, 1.3 |
+| `llDeleteSubString` | 33, 79, 460, 3958 | 0.02, 0.08, 0.16, 0.93 | 0.13, 0.11, 0.18, 1.3 |
+| `llStringTrim` | 38, 76, 470, 4006 | 0.07, 0.07, 0.07, 0.07 | 0.01, 0.08, 0.08, 0.19 |
+
+| function | Second Life, 1, 10, 100, 1000 characters | OpenSim |
+| --- | --- | --- |
+| `llReplaceSubString` | 60, 122, 576, 4648 | does not compile |
+| `llSHA256String` | 383, 382, 434, 954 | does not compile |
+| `llComputeHash` | 200, 196, 274, 1150 | does not compile |
+| `llOrd` | 16, 33, 110, 742 | does not compile |
+| `llHash` | 15, 33, 120, 907 | does not compile |
+
+What the numbers say: `llGetListLength` (2.5 µs) and `llList2Integer`
+(4.2 µs) are flat on every grid, so a list is indexed, not walked. On Second
+Life **every string function grows with the string, `llStringLength` and
+`llGetSubString` included** — about 0.65 µs a character; OpenSim answers
+both in constant time. Copying a list costs 13 to 18 µs an element there,
+writing one as text (`llList2CSV`) 25, sorting 55 (`llListSort` grows about
+linearly between 100 and 500 elements); the hashes cost a flat 200–380 µs
+before their per-character part. OpenSim is 10 to 1000 times cheaper
+throughout, and its list copies are constant under YEngine at about 7 µs.

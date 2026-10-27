@@ -52,3 +52,15 @@ and its aditi run is a result file. On 2026-10-23 it measured 511 000/s
 empty, 500 000/s with three operations and 228 000/s calling `llAbs`, the
 rates the flat costs were fitted to. A size probe belongs beside it in
 `probes/vm/`, run with `sl-conformance run --grid aditi lsl-probes`.
+
+## Measured (gridspec-lsl-strings-math, 2026-10-27)
+
+The size probes are committed: `sl-lsl-runtime/probes/vm/call-cost-lists`,
+`call-cost-strings` and `call-cost-newer` time 26 functions at four sizes
+each on aditi (lists and strings twice, the second run committed) and both
+OpenSim engines; the per-call cost above an
+empty loop is tabled in `book/src/gridspec/lsl.md` § *What a call costs*.
+`llGetListLength` and `llList2Integer` are flat; on Mono
+`llStringLength`, `llGetSubString` and `llOrd` grow with the string (about
+0.65 µs a character). Fit the
+slopes from those transcripts. The region's budget half is still open.

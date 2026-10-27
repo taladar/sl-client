@@ -163,6 +163,11 @@ What a run-time error says on each grid, to whom and how far, which
 arithmetic and which out-of-range index faults, how a flood of errors is
 cut short and what becomes of the faulted script is in
 [Grid Behaviour → LSL scripts](../gridspec/lsl.md#run-time-errors).
+How precisely each grid computes with floats, vectors and rotations, how it
+writes a value as a string and reads one back, what its string and list
+functions make of text outside ASCII, and what a call costs as its argument
+grows is in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#strings-lists-maths-and-rotations).
 
 Creating a brand-new script goes through `CreateInventoryItem` (carrying the
 language subtype): the **simulator fills a compilable default body** (the LSL

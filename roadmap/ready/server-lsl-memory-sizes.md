@@ -82,3 +82,28 @@ about 6 500 bytes. Read the cost from `llGetUsedMemory`, never from
 `llGetFreeMemory`, which is a low-water mark there; and expect the reading
 to wander by a few hundred bytes between two reads of nothing (13 598, then
 13 508).
+
+## Rotation arithmetic measured (gridspec-lsl-strings-math, 2026-10-27)
+
+`sl-lsl-runtime/probes/math/rotation-bits.lsl` is the measuring script
+asked for above; its aditi transcript
+(`probes/results/aditi/math/rotation-bits.txt`) holds every component's
+mantissa and exponent for seven pairs of rotations, the `8.32` case first.
+Matched against candidate evaluations (book: `gridspec/lsl.md` §
+*Precision*):
+
+- Mono evaluates an expression of floats in **double** and rounds to a
+  float only when the value is stored: `a * b * c` in one expression and
+  over two statements differ in the last bit.
+- `rotation * rotation`, `vector * rotation` and `vector * vector` (dot):
+  all in double, rounded once. The `8.32` case's `y` is 8.3199997, which
+  `(string)` prints as `8.320000` — so "exactly 8.32" was the printed
+  value, and `compose`'s products-rounded-first formula (`8.320001`) is the
+  one to change.
+- `rotation / rotation` (the product with the conjugate), `vector /
+  rotation` (Linden's two-step `llquaternion.cpp` formula) and `vector %
+  vector`: **each operation rounded to a float** — so `cross`'s current
+  all-double formula is wrong too.
+- Library functions: the double result of the float argument, rounded.
+
+The memory half of this task is still open.
