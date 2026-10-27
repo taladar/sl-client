@@ -1,0 +1,25 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE physics/targets rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE physics/targets rec=targets first_positive=1 steps="1" fired="0" at=21 far_fired=0 not_at=0 first_handle_is=0 target_given=1 ours_is_pos=1
+# animations avatar=other playing=""
+PROBE physics/targets rec=ten-targets steps="1,1,1,1,1,1,1,1,1" fired="2,3,4,5,6,7,8,9" not_at=0
+PROBE physics/targets rec=ranges ranges="0,-1" fired="1" not_at=0
+PROBE physics/targets rec=rot-handles after_position_target=1
+PROBE physics/targets rec=rot-targets steps="1" fired="0" at=21 not_at=0 position_events=0 first_handle_is=0 ours_is_rot=1
+# animations avatar=owner playing=""
+PROBE physics/targets rec=ten-rot-targets fired="2,3,4,5,6,7,8,9" not_at=0
+PROBE physics/targets rec=non-physical call=llMoveToTarget moved=0 turned=0
+PROBE physics/targets rec=non-physical call=llLookAt moved=0 turned=1
+PROBE physics/targets rec=non-physical call=llRotLookAt moved=0 turned=1
+PROBE physics/targets rec=move-to-target tau=0.3 reached=1 seconds=0.689039 dz=0.900604
+PROBE physics/targets rec=move-to-target target=70m-up dz=0.000000 rose=0
+PROBE physics/targets rec=move-to-target tau=0 dz=0.000000 rose=0
+PROBE physics/targets rec=rot-look-at reached=1 seconds=1.355675
+PROBE physics/targets rec=after physics=0 moved=0 turned=0
+PROBE physics/targets rec=end

@@ -1,0 +1,71 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE physics/keyframed rec=try label=types-swapped
+# debug-channel: from="Object" text="Error, expected translation vector in keyframe list."
+PROBE physics/keyframed rec=try label=translation-only-three
+# debug-channel: from="Object" text="Expected delta time in keyframe list."
+PROBE physics/keyframed rec=outcome label=types-swapped moved=0
+PROBE physics/keyframed rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE physics/keyframed rec=outcome label=translation-only-three moved=0
+PROBE physics/keyframed rec=shape shape_type=0
+PROBE physics/keyframed rec=try label=fresh-shape
+# debug-channel: from="Object" text="Error, failed to play animation. Does your linkset exceed the complexity limit for keyframing?"
+PROBE physics/keyframed rec=outcome label=fresh-shape dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=0
+PROBE physics/keyframed rec=try label=forward
+PROBE physics/keyframed rec=outcome label=forward dz=0.433000 dx=0.000000 turned=0 moving_start=1 moving_end=0
+PROBE physics/keyframed rec=try label=short-frame
+# debug-channel: from="Object" text="Delta times must be >0.1s"
+PROBE physics/keyframed rec=outcome label=short-frame dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=1
+PROBE physics/keyframed rec=try label=one-short
+# debug-channel: from="Object" text="Expected delta time in keyframe list."
+PROBE physics/keyframed rec=outcome label=one-short dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=0
+PROBE physics/keyframed rec=try label=two-frames
+PROBE physics/keyframed rec=outcome label=two-frames dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=translation-only
+PROBE physics/keyframed rec=outcome label=translation-only dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=rotation-only
+PROBE physics/keyframed rec=outcome label=rotation-only dz=0.000000 dx=0.000000 turned=1 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=up-and-turn
+PROBE physics/keyframed rec=outcome label=up-and-turn dz=0.500000 dx=0.000000 turned=1 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=unknown-mode
+# debug-channel: from="Object" text="Unknown playback mode."
+PROBE physics/keyframed rec=outcome label=unknown-mode dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=0
+PROBE physics/keyframed rec=try label=unknown-option
+# debug-channel: from="Object" text="Unknown parameter type."
+PROBE physics/keyframed rec=outcome label=unknown-option dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=0
+PROBE physics/keyframed rec=try label=reverse
+PROBE physics/keyframed rec=outcome label=reverse dz=-0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=negative-time
+# debug-channel: from="Object" text="Delta times must be >0.1s"
+PROBE physics/keyframed rec=outcome label=negative-time dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=0
+PROBE physics/keyframed rec=try label=integer-time
+PROBE physics/keyframed rec=outcome label=integer-time dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=fast
+PROBE physics/keyframed rec=outcome label=fast dz=19.999000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=loop
+PROBE physics/keyframed rec=loop step=running mid_dz=0.149971
+PROBE physics/keyframed rec=loop step=paused still=1 mid_dz=0.149971
+PROBE physics/keyframed rec=loop step=played moved_on=1
+PROBE physics/keyframed rec=loop step=stopped mid_dz=0.068203 at_start=0 moved_after_stop=0
+PROBE physics/keyframed rec=try label=set-pos-during
+# debug-channel: from="Object" text="Cannot use a script to move a linkset while it is playing an animation. Stop the animation first."
+PROBE physics/keyframed rec=outcome label=set-pos-during mid_dz=0.400040 rose=1 fell=0 east=0 moving_start=1 moving_end=0
+PROBE physics/keyframed rec=try label=physics-during
+# debug-channel: from="Object" text="Can't enable physics for keyframed objects."
+PROBE physics/keyframed rec=physics-during physics=0
+PROBE physics/keyframed rec=outcome label=physics-during mid_dz=0.400040 rose=1 fell=0 east=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=on-physical
+PROBE physics/keyframed rec=outcome label=on-physical dz=0.011000 dx=0.000000 turned=0 moving_start=0 moving_end=1
+PROBE physics/keyframed rec=try label=play-with-none
+PROBE physics/keyframed rec=outcome label=play-with-none dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=empty-with-none
+PROBE physics/keyframed rec=outcome label=empty-with-none dz=0.000000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=end
+# debug-channel by=other: from="Object" text="Can't enable physics for keyframed objects."

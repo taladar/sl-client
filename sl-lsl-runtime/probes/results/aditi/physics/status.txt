@@ -1,0 +1,52 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE physics/status rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE physics/status rec=fresh physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0 sandbox=0 block_grab=0 die_at_edge=0 return_at_edge=0 cast_shadows=0 block_grab_object=0 prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=mask mask=0 value=0
+PROBE physics/status rec=mask mask=ROTATE_XYZ value=1
+PROBE physics/status rec=mask mask=PHYSICS|ROTATE_X value=1
+PROBE physics/status rec=mask mask=PHANTOM|ROTATE_X value=1
+PROBE physics/status rec=mask mask=2048 value=0
+PROBE physics/status rec=mask mask=-1 value=0
+PROBE physics/status rec=set label=rotate_x value=1 rotate_x=1 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=rotate_x value=0 rotate_x=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+# animations avatar=owner playing=""
+PROBE physics/status rec=set label=rotate_y value=1 rotate_y=1 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=rotate_y value=0 rotate_y=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=rotate_z value=1 rotate_z=1 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=rotate_z value=0 rotate_z=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=phantom value=1 phantom=1 others="" prim_physics=0 prim_phantom=1 prim_temp=0
+PROBE physics/status rec=set label=phantom value=0 phantom=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=sandbox value=1 sandbox=1 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=sandbox value=0 sandbox=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=block_grab value=1 block_grab=1 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=block_grab value=0 block_grab=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=die_at_edge value=1 die_at_edge=1 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=die_at_edge value=0 die_at_edge=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=return_at_edge value=1 return_at_edge=1 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=return_at_edge value=0 return_at_edge=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=cast_shadows value=1 cast_shadows=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=cast_shadows value=0 cast_shadows=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=block_grab_object value=1 block_grab_object=1 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=block_grab_object value=0 block_grab_object=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=phantom-two value=2 phantom=1 others="" prim_physics=0 prim_phantom=1 prim_temp=0
+PROBE physics/status rec=set label=phantom-minus-one value=-1 phantom=1 others="" prim_physics=0 prim_phantom=1 prim_temp=0
+PROBE physics/status rec=set label=phantom-and-block-grab value=1 phantom=1 block_grab=1 others="" prim_physics=0 prim_phantom=1 prim_temp=0
+PROBE physics/status rec=set label=rotate-xyz value=0 rotate_x=0 rotate_y=0 rotate_z=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=volume-detect step=on phantom=1 prim_physics=0 prim_phantom=1 prim_temp=0
+PROBE physics/status rec=volume-detect step=phantom-cleared phantom=1 prim_physics=0 prim_phantom=1 prim_temp=0
+PROBE physics/status rec=volume-detect step=off phantom=0 prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=volume-detect step=off-from-phantom phantom=0 prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=physics value=1 physics=1 others="" prim_physics=1 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=physical-rotate-x value=0 rotate_x=0 others="" prim_physics=1 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=physics-off value=0 physics=0 others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=set label=physics-and-phantom value=1 physics=1 phantom=1 others="" prim_physics=1 prim_phantom=1 prim_temp=0
+PROBE physics/status rec=set label=physics-volume-detect value=1 physics=1 others="" prim_physics=1 prim_phantom=1 prim_temp=0
+PROBE physics/status rec=after others="" prim_physics=0 prim_phantom=0 prim_temp=0
+PROBE physics/status rec=end

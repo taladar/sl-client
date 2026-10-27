@@ -150,7 +150,11 @@ may call there, and what a denial says and to whom, are in
 [Grid Behaviour → LSL scripts](../gridspec/lsl.md#ossl). What a running
 script keeps when its object is taken and rezzed again, or its region
 restarts, is in
-[Grid Behaviour → LSL scripts](../gridspec/lsl.md#persistence).
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#persistence). What each grid
+makes of the status flags, the physics material, forces, targets, keyframed
+motion, vehicles and pathfinding characters — their clamps and their errors —
+is in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#status-flags-forces-targets-and-vehicles).
 
 Creating a brand-new script goes through `CreateInventoryItem` (carrying the
 language subtype): the **simulator fills a compilable default body** (the LSL

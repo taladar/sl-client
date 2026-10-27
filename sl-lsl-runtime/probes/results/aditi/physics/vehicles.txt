@@ -1,0 +1,57 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE physics/vehicles rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE physics/vehicles rec=fresh physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=param-before-type
+PROBE physics/vehicles rec=after label=param-before-type physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-1
+PROBE physics/vehicles rec=after label=type-1 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-2
+PROBE physics/vehicles rec=after label=type-2 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-3
+PROBE physics/vehicles rec=after label=type-3 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-4
+PROBE physics/vehicles rec=after label=type-4 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-5
+PROBE physics/vehicles rec=after label=type-5 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-0
+PROBE physics/vehicles rec=after label=type-0 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type-99
+PROBE physics/vehicles rec=after label=type-99 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=type--1
+PROBE physics/vehicles rec=after label=type--1 physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=unknown-float-param
+# debug-channel: from="Object" text="Unknown vehicle float parameter 999"
+PROBE physics/vehicles rec=try label=unknown-vector-param
+# debug-channel: from="Object" text="Unknown vehicle vector parameter 999"
+PROBE physics/vehicles rec=try label=unknown-rotation-param
+# debug-channel: from="Object" text="Unknown vehicle rotation parameter 999"
+PROBE physics/vehicles rec=try label=float-param-as-vector
+# debug-channel: from="Object" text="Unknown vehicle vector parameter 24"
+PROBE physics/vehicles rec=try label=negative-timescale
+PROBE physics/vehicles rec=try label=huge-timescale
+PROBE physics/vehicles rec=try label=efficiency-above-one
+PROBE physics/vehicles rec=try label=efficiency-below-zero
+PROBE physics/vehicles rec=try label=unknown-flags
+PROBE physics/vehicles rec=after label=params physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=try label=sled-motor
+PROBE physics/vehicles rec=after label=sled-motor physics=1 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=sled-motor dx=1.656887 east=1
+PROBE physics/vehicles rec=type-none speed=0.002617 physics=1
+PROBE physics/vehicles rec=try label=linear-clamp
+# animations avatar=owner playing=""
+PROBE physics/vehicles rec=linear-clamp speed=97.987400 dz=38.462330 up=1 above_30=1
+PROBE physics/vehicles rec=try label=angular-clamp
+PROBE physics/vehicles rec=angular-clamp spin=12.390680 turning=1 above_4pi=0
+PROBE physics/vehicles rec=after label=restored physics=0 rotate_x=1 rotate_y=1 rotate_z=1 phantom=0
+PROBE physics/vehicles rec=end
+# debug-channel by=other: from="Object" text="Unknown vehicle float parameter 999"
+# debug-channel by=other: from="Object" text="Unknown vehicle vector parameter 999"
+# debug-channel by=other: from="Object" text="Unknown vehicle rotation parameter 999"
+# debug-channel by=other: from="Object" text="Unknown vehicle vector parameter 24"

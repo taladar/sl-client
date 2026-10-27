@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 343 |
+| ready | 342 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1433 |
+| done | 1434 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2077** |
@@ -314,7 +314,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-physics-vehicles`](ideas/server-lsl-lib-physics-vehicles.md)
   — Library tranche — status flags, forces, targets and vehicles (blocked by
   `server-lsl-vm-execution` (done), `server-world-collision-and-physics`,
-  `gridspec-lsl-physics-vehicles`)
+  `gridspec-lsl-physics-vehicles` (done))
 - [`server-lsl-lib-prim-state`](ideas/server-lsl-lib-prim-state.md) — Library
   tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
   (done), `server-world-ecs-store`, `server-world-link-sets`,
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (343)
+## ready (342)
 
 ### protocol
 
@@ -1153,9 +1153,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-physics-vehicles`](ready/gridspec-lsl-physics-vehicles.md) —
-  LSL library behaviour on each grid — status flags, forces, targets and
-  vehicles (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-prim-state`](ready/gridspec-lsl-prim-state.md) — LSL library
   behaviour on each grid — reading and writing the prim (blocked by
   `gridspec-lsl-live-differential-runner` (done))
@@ -1525,7 +1522,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1433)
+## done (1434)
 
 ### protocol
 
@@ -4647,6 +4644,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-persistence`](done/gridspec-lsl-persistence.md) — Script state
   across take, rez and region restart on each grid (blocked by
   `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-physics-vehicles`](done/gridspec-lsl-physics-vehicles.md) — LSL
+  library behaviour on each grid — status flags, forces, targets and vehicles
+  (blocked by `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-probe-corpus`](done/gridspec-lsl-probe-corpus.md) — A committed
   LSL probe corpus and per-grid result files
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct

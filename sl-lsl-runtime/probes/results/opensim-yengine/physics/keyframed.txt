@@ -1,0 +1,82 @@
+grid: opensim-yengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE physics/keyframed rec=try label=types-swapped
+# owner-say: from="Object" text="[YEngine]: Exception while running cb93c814-7324-4543-bfb0-3d90707fd433"
+# owner-say: from="Object" text="InvalidCastException: Vector3 expected but Quaternion given"
+# owner-say: from="Object" text="Prim: <Object>, Script: <Swapped>, Location: Default Region <123,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+list.GetVector3Item (System.Int32 itemIndex) [0x00069] in <4232b8ace8a34b48b171661be4717e89>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llSetKeyframedMotion (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list frames, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list options) [0x001fa] in <d09853dcdece4467894564db0ef815df>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llSetKeyframedMotion (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list frames, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list options) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default state_entry(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.ResumeEx () [0x00010] in <494689fd7fc54dbc80fad348ad979238>:0"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE physics/keyframed rec=try label=translation-only-three
+# owner-say: from="Object" text="[YEngine]: Exception while running a2d172c3-6fe9-48df-a515-dd667fa655ea"
+# owner-say: from="Object" text="InvalidCastException: Specified cast is not valid."
+# owner-say: from="Object" text="Prim: <Object>, Script: <Mismatched>, Location: Default Region <126,128,27>"
+# owner-say: from="Object" text="Script must be Reset to re-enable."
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.LSL_Types+list.GetLSLFloatItem (System.Int32 itemIndex) [0x00098] in <4232b8ace8a34b48b171661be4717e89>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.Api.LSL_Api.llSetKeyframedMotion (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list frames, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list options) [0x00281] in <d09853dcdece4467894564db0ef815df>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Shared.ScriptBase.ScriptBaseClass.llSetKeyframedMotion (OpenSim.Region.ScriptEngine.Shared.LSL_Types+list frames, OpenSim.Region.ScriptEngine.Shared.LSL_Types+list options) [0x00001] in <d9ccfe93a15141ee87e03afb3d189fbf>:0"
+# owner-say: from="Object" text="  at (wrapper dynamic-method) System.Object.default state_entry(OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract)"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstAbstract.CallSEH () [0x00050] in <494689fd7fc54dbc80fad348ad979238>:0"
+# owner-say: from="Object" text="  at OpenSim.Region.ScriptEngine.Yengine.XMRInstance.ResumeEx () [0x00010] in <494689fd7fc54dbc80fad348ad979238>:0"
+PROBE physics/keyframed rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE physics/keyframed rec=shape shape_type=0
+PROBE physics/keyframed rec=try label=fresh-shape
+PROBE physics/keyframed rec=outcome label=fresh-shape dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=forward
+PROBE physics/keyframed rec=outcome label=forward dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=short-frame
+PROBE physics/keyframed rec=outcome label=short-frame dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=one-short
+PROBE physics/keyframed rec=outcome label=one-short dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=0
+PROBE physics/keyframed rec=try label=two-frames
+PROBE physics/keyframed rec=outcome label=two-frames dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=translation-only
+PROBE physics/keyframed rec=outcome label=translation-only dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=rotation-only
+PROBE physics/keyframed rec=outcome label=rotation-only dz=0.000000 dx=0.000000 turned=1 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=up-and-turn
+PROBE physics/keyframed rec=outcome label=up-and-turn dz=0.500000 dx=0.000000 turned=1 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=unknown-mode
+PROBE physics/keyframed rec=outcome label=unknown-mode dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=unknown-option
+PROBE physics/keyframed rec=outcome label=unknown-option dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=reverse
+PROBE physics/keyframed rec=outcome label=reverse dz=-0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=negative-time
+PROBE physics/keyframed rec=outcome label=negative-time dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=integer-time
+PROBE physics/keyframed rec=outcome label=integer-time dz=0.500000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=fast
+PROBE physics/keyframed rec=outcome label=fast dz=20.000000 dx=0.000000 turned=0 moving_start=1 moving_end=1
+PROBE physics/keyframed rec=try label=loop
+PROBE physics/keyframed rec=loop step=running mid_dz=0.119717
+PROBE physics/keyframed rec=loop step=paused still=1 mid_dz=0.119717
+PROBE physics/keyframed rec=loop step=played moved_on=1
+PROBE physics/keyframed rec=loop step=stopped mid_dz=0.269999 at_start=0 moved_after_stop=0
+PROBE physics/keyframed rec=try label=set-pos-during
+PROBE physics/keyframed rec=outcome label=set-pos-during mid_dz=0.432306 rose=1 fell=0 east=1 moving_start=1 moving_end=0
+PROBE physics/keyframed rec=try label=physics-during
+PROBE physics/keyframed rec=physics-during physics=1
+PROBE physics/keyframed rec=outcome label=physics-during mid_dz=-0.752295 rose=0 fell=1 east=0 moving_start=1 moving_end=2
+PROBE physics/keyframed rec=try label=on-physical
+PROBE physics/keyframed rec=outcome label=on-physical dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=0
+PROBE physics/keyframed rec=try label=play-with-none
+PROBE physics/keyframed rec=outcome label=play-with-none dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=0
+PROBE physics/keyframed rec=try label=empty-with-none
+PROBE physics/keyframed rec=outcome label=empty-with-none dz=0.000000 dx=0.000000 turned=0 moving_start=0 moving_end=0
+PROBE physics/keyframed rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

@@ -1,0 +1,32 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE physics/character rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# animations avatar=owner playing=""
+PROBE physics/character rec=fresh physics=0 phantom=0 rotate_x=1 rotate_y=1 rotate_z=1 pathfinding_type=0 shape_type=0
+PROBE physics/character rec=closest-nav-point length=1 dist=2.194494
+PROBE physics/character rec=static-path length=1 status=3 last_type=1
+PROBE physics/character rec=try label=navigate-without-character
+# debug-channel: from="Object" text="You must call llCreateCharacter before llNavigateTo."
+PROBE physics/character rec=try label=create
+PROBE physics/character rec=created physics=1 phantom=0 rotate_x=1 rotate_y=1 rotate_z=1 pathfinding_type=2 shape_type=0
+PROBE physics/character rec=try label=update-speed-100
+# debug-channel: from="Object" text="Error: CHARACTER_DESIRED_SPEED 100 larger than max 40"
+PROBE physics/character rec=goal on_navmesh=1 dist=2.969127
+PROBE physics/character rec=try label=navigate
+PROBE physics/character rec=path-update n=1 type=0 reserved=""
+PROBE physics/character rec=path-update n=2 type=1 reserved=""
+# animations avatar=other playing=""
+PROBE physics/character rec=navigated dx=1.269421 east=1 updates=2
+PROBE physics/character rec=try label=stop
+PROBE physics/character rec=try label=unknown-command
+# debug-channel: from="Object" text="Unrecognized character command."
+PROBE physics/character rec=try label=delete
+PROBE physics/character rec=deleted physics=0 phantom=0 rotate_x=1 rotate_y=1 rotate_z=1 pathfinding_type=0 shape_type=0
+PROBE physics/character rec=try label=delete-again
+PROBE physics/character rec=after physics=0 phantom=0 rotate_x=1 rotate_y=1 rotate_z=1 pathfinding_type=0 shape_type=0
+PROBE physics/character rec=end

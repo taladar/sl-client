@@ -181,11 +181,23 @@ What has bitten already, and how a probe should be shaped for it:
   character by character with `llListFindList`.
 - **OpenSim throws where Second Life answers.** Its `llGetParcelFlags` of a
   position outside the region raises a `NullReferenceException` that stops
-  the script (`land/parcel`). Put each call that may throw in a script of
-  its own, saved before the leader, so the rest of the probe still runs.
+  the script (`land/parcel`), and so does an `llSetKeyframedMotion` whose
+  list has the wrong type where it expects a vector, a rotation or a time
+  (`physics/keyframed`). Put each call that may throw in a script of its
+  own, saved before the leader, so the rest of the probe still runs; where
+  the call acts on the whole object, in a prim of its own.
 - **XEngine cannot parse a vector literal followed by an operator.**
   `<a, b, c> - v` is a `syntax error` there (`land/ground`); assign the
   literal first.
+- **A member of a call's result is not LSL.** LSL selects a member of a
+  variable only, so the corpus test rejects `llGetPos().z` as a syntax
+  error; assign the call to a variable first (`physics/forces` keeps a
+  `rise()` helper for it).
+- **OpenSim keeps what a prim is given while it is not physical.** An
+  `llApplyImpulse` or an `llPushObject` of a prim that is not physical does
+  nothing then, and is applied when the prim turns physical a second later
+  (`physics/forces`). A probe that times a physical leg should not
+  follow one that pushed the prim while it was not physical.
 - **Some failures take the region with them.** Unbounded recursion under
   XEngine overflows the simulator's own stack, and the whole OpenSim
   process aborts. So does one under YEngine that calls a library function
@@ -426,6 +438,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `money/*`, 2026-10-26: the pay buttons after `llSetPayPrice`, what the `money` event hears of a payment and which payments a grid takes, `llGiveMoney`, `llTransferLindenDollars` and `transaction_result`, `PERMISSION_DEBIT` from a non-owner, and when a grant lapses | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#script-permissions-money-and-payment) | | |
 | `ossl/*`, 2026-10-26: which OSSL functions an ordinary owner's script may call on OpenSim, by threat level, `Allow_` line or neither, what a denied, failing or deprecated call says, to whom and what it does to the script, and a LightShare and a MOD call; Second Life's compile errors for them | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#ossl) | | |
 | `persistence/*`, 2026-10-26: what a running script keeps when its object is taken and rezzed again, and across a restart of its region (OpenSim only): globals, state, permissions, timer, listen, queued events, a sleep in progress, script time, a stopped script beside it, and what runs first | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#persistence) | | |
+| `physics/*`, 2026-10-27: the status flags, the physics material and mass, forces, velocities and impulses, position and rotation targets, `llMoveToTarget` and the look-at functions, keyframed motion, the vehicle setters and motors, and pathfinding characters (Second Life only) — their clamps and their errors | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#status-flags-forces-targets-and-vehicles) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

@@ -63,3 +63,34 @@ Acceptance: a prim with `STATUS_PHYSICS` falls to the ground and rests;
 `llMoveToTarget` reaches its target within tolerance and raises
 `at_target`; `llVolumeDetect` produces collision events while letting an
 avatar through; and the vehicle decision is recorded with its reason.
+
+## Measured (gridspec-lsl-physics-vehicles, 2026-10-27)
+
+`book/src/gridspec/lsl.md` § Status flags, forces, targets and vehicles has
+the tables; what the flavours must differ in:
+
+- **Status.** `llGetStatus` of several flags is TRUE if any is set on Second
+  Life, 0 on OpenSim. `STATUS_CAST_SHADOWS` cannot be set on Second Life; on
+  OpenSim either value sets it for good.
+- **Material and mass.** An out-of-range term refuses the whole
+  `llSetPhysicsMaterial` call on both, with `ERROR: Failed to set material
+  properties.` on Second Life's debug channel and silently on OpenSim.
+  Second Life's mass follows density (and, late, scale); OpenSim's stays at
+  the rezzed prim's.
+- **Forces.** A local force or torque reads back in the prim's frame on
+  Second Life and in the region's on OpenSim. OpenSim stores impulses and
+  pushes given while not physical and applies them on turning physical.
+- **Targets.** Eight per script on both; a range of 0 is never reached on
+  Second Life and always at the target on OpenSim (`<=` on squares); XEngine
+  runs `not_at_target` beside `at_target`. `llMoveToTarget` past 65 m does
+  not move on Second Life and does on OpenSim. `llLookAt` and `llRotLookAt`
+  turn a prim that is not physical on both.
+- **Keyframed motion.** Second Life refuses, with a debug-channel line each,
+  the default physics shape, frame times under 0.1 s, malformed lists,
+  unknown modes and options, `llSetPos` and physics during a motion; OpenSim
+  plays or silently ignores all of these, and throws on wrong element types.
+  A stop leaves the prim where it is on both.
+- **Vehicles.** Second Life answers unknown parameter codes on the debug
+  channel and nothing else; neither grid clamps the linear motor at 30 m/s.
+- **Characters.** Second Life only (errors and `path_update` codes in the
+  table); OpenSim does not compile a script that names them.

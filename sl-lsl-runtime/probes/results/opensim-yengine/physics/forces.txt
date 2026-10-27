@@ -1,0 +1,35 @@
+grid: opensim-yengine
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE physics/forces rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE physics/forces rec=fresh force="<0.000000, 0.000000, 0.000000>" torque="<0.000000, 0.000000, 0.000000>" vel="<0.000000, 0.000000, 0.000000>" omega="<0.000000, 0.000000, 0.000000>" accel="<0.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=force set=global read="<1.000000, 2.000000, 3.000000>"
+PROBE physics/forces rec=force set=local-turned read="<0.000000, 1.000000, 0.000000>"
+PROBE physics/forces rec=force set=huge read="<1000000.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=force set=zero read="<0.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=torque set=global read="<1.000000, 2.000000, 3.000000>"
+PROBE physics/forces rec=torque set=local-turned read="<0.000000, 1.000000, 0.000000>"
+PROBE physics/forces rec=torque set=huge read="<1000000.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=force-and-torque force="<4.000000, 5.000000, 6.000000>" torque="<7.000000, 8.000000, 9.000000>"
+PROBE physics/forces rec=velocity set=velocity read="<0.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=velocity set=angular read="<0.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=velocity set=impulse read="<0.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=velocity set=rotational-impulse read="<0.000000, 0.000000, 0.000000>" accel="<0.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=non-physical-movers moved=0 turned=0 vel="<0.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=physical step=weightless vel="<0.000000, 0.000000, 4.634827>" rising=1 falling=0
+PROBE physics/forces rec=physical step=weightless-again vel="<0.000000, 0.000000, 0.000000>" rising=0 falling=0
+PROBE physics/forces rec=physical step=on force="<0.000000, 0.000000, 0.250000>"
+PROBE physics/forces rec=physical step=pushed vel="<0.000000, 0.000000, 0.000000>"
+PROBE physics/forces rec=physical step=set-velocity vel_z=0.000000 read_at_once=0
+PROBE physics/forces rec=physical step=velocity-later vel_z=0.485216 rising=1
+PROBE physics/forces rec=physical step=huge-velocity vel_z=0.485216 read_above_100=0
+PROBE physics/forces rec=physical step=impulse mass=1.250000 vel_z=0.000000
+PROBE physics/forces rec=physical step=impulse-later vel_z=0.970431 rising=1
+PROBE physics/forces rec=after physics=0 force="<0.000000, 0.000000, 0.000000>" torque="<0.000000, 0.000000, 0.000000>" moved=0 turned=0
+PROBE physics/forces rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

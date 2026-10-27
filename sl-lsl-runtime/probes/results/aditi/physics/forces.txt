@@ -1,0 +1,35 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+PROBE physics/forces rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE physics/forces rec=fresh force="<0.00000, 0.00000, 0.00000>" torque="<0.00000, 0.00000, 0.00000>" vel="<0.00000, 0.00000, 0.00000>" omega="<0.00000, 0.00000, 0.00000>" accel="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=force set=global read="<1.00000, 2.00000, 3.00000>"
+PROBE physics/forces rec=force set=local-turned read="<1.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=force set=huge read="<1000000.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=force set=zero read="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=torque set=global read="<1.00000, 2.00000, 3.00000>"
+PROBE physics/forces rec=torque set=local-turned read="<1.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=torque set=huge read="<1000000.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=force-and-torque force="<4.00000, 5.00000, 6.00000>" torque="<7.00000, 8.00000, 9.00000>"
+PROBE physics/forces rec=velocity set=velocity read="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=velocity set=angular read="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=velocity set=impulse read="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=velocity set=rotational-impulse read="<0.00000, 0.00000, 0.00000>" accel="<0.00000, 0.00000, 0.00000>"
+PROBE physics/forces rec=non-physical-movers moved=0 turned=0 vel="<0.00000, 0.00000, 0.00000>"
+# animations avatar=other playing=""
+PROBE physics/forces rec=physical step=weightless vel="<0.00000, 0.00000, 0.79222>" rising=1 falling=0
+PROBE physics/forces rec=physical step=weightless-again vel="<0.00000, 0.00000, 0.95936>" rising=1 falling=0
+PROBE physics/forces rec=physical step=on force="<0.00000, 0.00000, 0.25000>"
+PROBE physics/forces rec=physical step=pushed vel="<0.00000, 0.00000, 0.96333>"
+PROBE physics/forces rec=physical step=set-velocity vel_z=0.000000 read_at_once=0
+PROBE physics/forces rec=physical step=velocity-later vel_z=0.948389 rising=1
+PROBE physics/forces rec=physical step=huge-velocity vel_z=0.948389 read_above_100=0
+PROBE physics/forces rec=physical step=impulse mass=1.250000 vel_z=0.088444
+PROBE physics/forces rec=physical step=impulse-later vel_z=0.011701 rising=1
+PROBE physics/forces rec=after physics=0 force="<0.00000, 0.00000, 0.00000>" torque="<0.00000, 0.00000, 0.00000>" moved=0 turned=0
+PROBE physics/forces rec=end
