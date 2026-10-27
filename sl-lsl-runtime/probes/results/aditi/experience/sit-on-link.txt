@@ -1,0 +1,43 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE experience/sit-on-link rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE experience/sit-on-link rec=call step=1 case=link-0 agent=owner link=0 code=-1
+PROBE experience/sit-on-link rec=after step=1 case=link-0 on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=call step=2 case=link-this agent=owner link=-4 code=-1
+PROBE experience/sit-on-link rec=after step=2 case=link-this on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=call step=3 case=link-1 agent=owner link=1 code=-1
+PROBE experience/sit-on-link rec=after step=3 case=link-1 on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=call step=4 case=link-root agent=owner link=1 code=-1
+# animations avatar=owner playing=""
+PROBE experience/sit-on-link rec=after step=4 case=link-root on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=call step=5 case=link-set agent=owner link=-1 code=-1
+# animations avatar=other playing=""
+PROBE experience/sit-on-link rec=after step=5 case=link-set on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=call step=6 case=link-all-others agent=owner link=-2 code=-1
+PROBE experience/sit-on-link rec=after step=6 case=link-all-others on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=call step=7 case=link-all-children agent=owner link=-3 code=-1
+PROBE experience/sit-on-link rec=after step=7 case=link-all-children on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=call step=8 case=link-2 agent=owner link=2 code=-1
+PROBE experience/sit-on-link rec=after step=8 case=link-2 on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=call step=9 case=null-agent agent=none link=0 code=-1
+PROBE experience/sit-on-link rec=after step=9 case=null-agent on_target=none sitting=-1 links=1
+PROBE experience/sit-on-link rec=call step=10 case=unknown-agent agent=nobody link=0 code=-1
+PROBE experience/sit-on-link rec=after step=10 case=unknown-agent on_target=none sitting=-1 links=1
+PROBE experience/sit-on-link rec=call step=11 case=prim-as-agent agent=prim link=0 code=-1
+PROBE experience/sit-on-link rec=after step=11 case=prim-as-agent on_target=none sitting=-1 links=1
+PROBE experience/sit-on-link rec=sit-target step=12 set=1
+PROBE experience/sit-on-link rec=call step=12 case=target-link-0 agent=owner link=0 code=-1
+PROBE experience/sit-on-link rec=after step=12 case=target-link-0 on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=call step=13 case=target-link-2 agent=owner link=2 code=-1
+PROBE experience/sit-on-link rec=after step=13 case=target-link-2 on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=waiting drive=touch by=other
+# touch by=other active_group=none surface=none
+PROBE experience/sit-on-link rec=touch step=14 by=other
+PROBE experience/sit-on-link rec=call step=15 case=other-link-0 agent=other link=0 code=-1
+PROBE experience/sit-on-link rec=after step=15 case=other-link-0 on_target=none sitting=0 links=1
+PROBE experience/sit-on-link rec=end

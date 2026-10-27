@@ -87,3 +87,17 @@ should take each flavour's column. The parts that shape the implementation:
   `HTTP_VERBOSE_THROTTLE` is off; OpenSim's defaults accept 4 and refuse
   silently. A stated tick count in the fake grid's model, per the
   determinism rule.
+- **`HTTP_USER_AGENT`, `HTTP_ACCEPT`, `HTTP_EXTENDED_ERROR`** (Second Life
+  only; OpenSim does not compile them —
+  `gridspec-lsl-refreshed-table-probe-steps`, 2026-10-27): the user agent
+  is appended to the default after a space, the last one given wins, and a
+  value with a space, an empty one or one of 306 characters is a refusal
+  (not a script error); `HTTP_ACCEPT` takes one MIME type (a list, `*/*` and
+  an empty value are refused) and an answer of another type comes back as
+  415 `Unsupported or unknown Content-Type.`; with `HTTP_EXTENDED_ERROR` on,
+  a refusal returns a key and an `http_response` with an RFC 7807 body
+  (471 URL, 472 parameter, 473 custom header, 405 method — texts in the
+  chapter), still with the `DEBUG_CHANNEL` line, and the option list is read
+  in order, so a bad option before the flag is refused as without it.
+  `DEBUG_CHANNEL` complaints flood out after about eleven in thirty seconds
+  (`Too many errors... dropping further messages until the flood stops`).

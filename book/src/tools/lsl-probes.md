@@ -245,7 +245,15 @@ What has bitten already, and how a probe should be shaped for it:
   (`prim/params`); that script is `skip-on: opensim-xengine`. Separately,
   XEngine can stop answering uploads late in a long run (once at the eighth
   of the `prim/*` set): run a large set of probes under XEngine in batches,
-  restarting OpenSim between them.
+  restarting OpenSim between them. It has also left the *first* upload of a
+  run unanswered, minutes after a YEngine run on the same simulator
+  (`experience/sit-on-link`, whose compile error a rerun got at once): a
+  probe whose XEngine transcript holds neither output nor a compile error
+  wants a second run before it is read as a result.
+- **Every script in the prim hears an `http_response`**, the answer to a
+  request another of its scripts sent included. A script that prints
+  answers should print only those to the key its own `llHTTPRequest`
+  returned (`http/options`).
 - **A move past the region's edge can lose the prim on Second Life.**
   `llSetRegionPos` a few metres past an edge with no neighbour moved the
   prim off the region, which returned it to its owner's inventory and ended

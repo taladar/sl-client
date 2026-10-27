@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 341 |
+| ready | 340 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 38 |
-| done | 1435 |
+| done | 1436 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2077** |
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (341)
+## ready (340)
 
 ### protocol
 
@@ -1153,8 +1153,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-refreshed-table-probe-steps`](ready/gridspec-lsl-refreshed-table-probe-steps.md)
-  — Probe steps the refreshed library table unblocks
 - [`gridspec-lsl-runtime-errors`](ready/gridspec-lsl-runtime-errors.md) — LSL
   run-time errors on OpenSim and the debug channel in our viewer (blocked by
   `gridspec-lsl-live-differential-runner` (done))
@@ -1519,7 +1517,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1435)
+## done (1436)
 
 ### protocol
 
@@ -4649,6 +4647,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-lsl-probe-corpus`](done/gridspec-lsl-probe-corpus.md) — A committed
   LSL probe corpus and per-grid result files
+- [`gridspec-lsl-refreshed-table-probe-steps`](done/gridspec-lsl-refreshed-table-probe-steps.md)
+  — Probe steps the refreshed library table unblocks
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct
   delivery on each grid
 - [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material

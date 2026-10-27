@@ -557,15 +557,16 @@ own client.
 ## Experiences and the key-value store
 
 Measured on 2026-10-25 by the probes `experience/no-experience` and
-`experience/powers`, with the same two avatars, on the same grids. Every
+`experience/powers` (and on 2026-10-27 by `experience/sit-on-link`), with
+the same two avatars, on the same grids. Every
 script here was saved into **no experience**: none of our avatars owns,
 administers or contributes to one, and saving a script into an experience
 needs one of the three (creating an experience needs a Premium account —
 [Experiences](experiences.md)). So what follows is what each grid answers a
 script outside every experience, and what the powers an experience widens
 do without one. Granted experience permissions, a key-value store that
-holds anything, `llSitOnLink` and the experience-only reach of
-`llTeleportAgent` are unmeasured.
+holds anything, what `llSitOnLink` does in an experience and the
+experience-only reach of `llTeleportAgent` are unmeasured.
 
 ### The experience functions
 
@@ -579,6 +580,8 @@ holds anything, `llSitOnLink` and the experience-only reach of
 | `llGetExperienceErrorMessage(0 … 18)` | `no error`, `exceeded throttle`, `experiences are disabled`, `invalid parameters`, `operation not permitted`, `script not associated with an experience`, `not found`, `invalid experience`, `experience is disabled`, `experience is suspended`, `unknown error`, `experience data quota exceeded`, `key-value store is disabled`, `key-value store communication failed`, `key doesn't exist`, `retry update`, `experience content rating too high`, `not allowed to run in current location`, `experience permissions request timed out` | — | no scripts |
 | `llGetExperienceErrorMessage` of −1, 19, 20 | `unknown error id` (not code 10's `unknown error`) | — | no scripts |
 | `llRequestExperiencePermissions`, the owner or the other avatar | `experience_permissions_denied` at once, reason **5**, `XP_ERROR_NO_EXPERIENCE` (`script not associated with an experience`); no question to either viewer, no `DEBUG_CHANNEL` complaint, nothing held | — | no scripts |
+| `llSitOnLink`, the owner on every link number a single prim answers to (0, `LINK_THIS`, 1, `LINK_ROOT`, `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN`) and on link 2, which is no prim; with no sit target and with one | **−1**, `SIT_NOT_EXPERIENCE`, every time; nobody sits, nothing reaches either viewer, no `DEBUG_CHANNEL` complaint | does not compile: YEngine `undefined constant/function/variable llSitOnLink(key,integer)`, XEngine ``CS0103: The name `llSitOnLink' does not exist in the current context`` | no scripts |
+| `llSitOnLink` of `NULL_KEY`, a key no avatar has, the prim's own key, or the other avatar | −1 as well: the missing experience is checked **before** the agent and the link, so `SIT_INVALID_AGENT` and `SIT_INVALID_LINK` are never reached | — | no scripts |
 | the seven key-value calls (`llCreateKeyValue`, `llReadKeyValue`, `llUpdateKeyValue`, `llDeleteKeyValue`, `llKeyCountKeyValue`, `llKeysKeyValue`, `llDataSizeKeyValue`) | each returns a request key, and the `dataserver` answers each `"0,5"` within a second, **not in the order called** | — | no scripts |
 
 ### Teleporting an agent and a temporary attachment
@@ -624,8 +627,9 @@ teleport reaches the viewer as an ordinary in-region teleport, the
 ## Outbound HTTP and in-world URLs
 
 Measured on 2026-10-25 by the probes `http/outbound`, `http/throttle` and
-`http/url`, on the same grids; YEngine and XEngine answered every one of
-them alike, so the OpenSim column is both. `http/outbound` sends each
+`http/url` (and on 2026-10-27 by `http/options`), on the same grids;
+YEngine and XEngine answered every one of them alike, so the OpenSim
+column is both. `http/outbound` sends each
 request to the script's **own** in-world URL, so one script is both the
 client and the server and nothing leaves the grid; `http/url` has the
 runner send requests to a script's URL from outside the grid (the `fetch`
@@ -695,6 +699,51 @@ A refusal is `NULL_KEY` from `llHTTPRequest` and a line on
 | `OPTIONS` from outside | 200, `text/plain`, `OK` — **answered by the simulator**, the script never hears it | the script hears it and answers | no scripts |
 | a request the script never answers | **504**, `Timed out waiting for response from internal server.`, after 26 s | **500**, `Script timeout`, after 25 s | no scripts |
 | a request to a released URL | 404, `cap not found: '<key>'` | 404, an HTML `Page not found` | no scripts |
+
+### The user agent, `Accept` and the extended error
+
+Measured on 2026-10-27 by `http/options`, which sends to its own URL as
+`http/outbound` does. OpenSim knows none of the three options:
+`HTTP_USER_AGENT` is an `undefined constant` to YEngine and `CS0103 … does
+not exist in the current context` to XEngine, so the script does not
+compile. The refusals below are each a `NULL_KEY` and a line on
+`DEBUG_CHANNEL`, as in
+[What `llHTTPRequest` accepts](#what-llhttprequest-accepts); none stops
+the script, a user agent with a space included, which the library table
+calls a script error.
+
+| request | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `HTTP_USER_AGENT, "probe-agent/1.0"` | sent; the `user-agent` arrives as the default with the value **appended** after a space: `Second-Life-LSL/<sim version> (https://secondlife.com) probe-agent/1.0` | does not compile | no scripts |
+| — given twice | sent; only the **last** is appended | — | no scripts |
+| — with a space (`probe agent`) | refused: `HTTP_USER_AGENT 'probe agent' is invalid` | — | no scripts |
+| — empty | refused: `HTTP_USER_AGENT '' is invalid` | — | no scripts |
+| — 306 characters | refused, the same, the whole value quoted | — | no scripts |
+| `HTTP_ACCEPT, "application/json"`, answered `text/plain` | sent; the script hears the request and answers, but what comes back is **415**, `Unsupported or unknown Content-Type.` — the simulator replaces the answer | — | no scripts |
+| — answered after `llSetContentType(CONTENT_TYPE_JSON)` | 200, the script's answer | — | no scripts |
+| `HTTP_ACCEPT, "text/plain"` | 200 | — | no scripts |
+| `HTTP_ACCEPT` of two types (`application/json, text/plain`) | refused: `HTTP_ACCEPT: value '…' is invalid.` — one type only | — | no scripts |
+| — `*/*` | refused: `HTTP_ACCEPT: Unsupported mime type '*/*'` | — | no scripts |
+| — empty | refused: `HTTP_ACCEPT: value '' is invalid.` | — | no scripts |
+| `accept` as the receiving script reads it | empty whatever was asked: `llGetHTTPHeader` does not give it | — | no scripts |
+| `HTTP_EXTENDED_ERROR, TRUE`, a request that succeeds or one answered 404 | unchanged: 200 or 404 with the script's body | — | no scripts |
+| — with a request `llHTTPRequest` refuses | **a key**, the same line on `DEBUG_CHANNEL`, and an `http_response` at once whose body is an RFC 7807 JSON object: `detail`, `status`, `title`, `type` (`http://wiki.secondlife.com/wiki/llHTTPRequest`), the status the answer's own | — | no scripts |
+| — not a URL, `ftp://…`, `http://127.0.0.1:1/` | **471**, `llHTTPRequest URL is invalid.`, detail `URL passed to llHTTPRequest is not valid` | — | no scripts |
+| — an unknown option (99) after the flag | **472**, `llHTTPRequest parameter error.`, `Parameter key in position 2 is not recognized.` (the line on `DEBUG_CHANNEL` says `key 2` too, where without the flag it said `key 1`) | — | no scripts |
+| — the unknown option **before** the flag | refused as without it, `NULL_KEY`: the list is read in order and stops at the first bad option | — | no scripts |
+| — a user agent with a space | 472, `Invalid user agent probe agent in position 2` | — | no scripts |
+| — `HTTP_CUSTOM_HEADER` `Host` | **473**, `Invalid custom header in position 2` | — | no scripts |
+| — `HTTP_BODY_MAXLENGTH` 16385 | 472, `Maximum body length must be in the rage (0, 16384] in position 2` (sic) | — | no scripts |
+| — method `FOO` | **405**, `Unrecognized HTTP Method.`, `HTTP method FOO is unsupported at position 2.` | — | no scripts |
+| — a host that does not resolve | 502 with the proxy's HTML `Unknown Host` page, as without the flag: the request was sent, so there is no problem report | — | no scripts |
+| — an `HTTP_ACCEPT` the answer does not meet | 415 with the plain `Unsupported or unknown Content-Type.`, as without the flag | — | no scripts |
+| `HTTP_EXTENDED_ERROR, FALSE` with a URL that is not one | `NULL_KEY`, as with no flag | — | no scripts |
+
+A prim's complaints on `DEBUG_CHANNEL` are cut off when they come fast:
+eleven refusals in about thirty seconds, most 1.2 s apart, ended in `Too many
+errors... dropping further messages until the flood stops`, and the
+complaints after it never came. `http/options` waits four seconds after
+each refusal for that reason.
 
 ### URLs: what a script may hold
 

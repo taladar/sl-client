@@ -73,3 +73,7 @@ Measured from a script in no experience (`book/src/gridspec/lsl.md`
   region's telehub and alerts the avatar; OpenSim lands it at the aim.
 - OpenSim compiles none of the experience functions or events, so the
   OpenSim flavour should refuse them at compile time.
+- `llSitOnLink` outside an experience returns `SIT_NOT_EXPERIENCE` (−1)
+  for every agent and link, before checking either, and sits nobody; it
+  does not compile on OpenSim (`gridspec-lsl-refreshed-table-probe-steps`,
+  2026-10-27).

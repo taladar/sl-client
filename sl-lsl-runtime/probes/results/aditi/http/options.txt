@@ -1,0 +1,99 @@
+grid: aditi
+date: 2026-10-27
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE http/options rec=try label=agent-space
+# debug-channel: from="Object" text="HTTP_USER_AGENT 'probe agent' is invalid"
+PROBE http/options rec=carried-on label=agent-space request=null
+PROBE http/options rec=try label=agent-space-extended
+# debug-channel: from="Object" text="HTTP_USER_AGENT 'probe agent' is invalid"
+PROBE http/options rec=carried-on label=agent-space-extended request=set
+PROBE http/options rec=try-response label=agent-space-extended status=472 length=192 body="{\n   \"detail\" : \"Invalid user agent probe agent in position 2\",\n   \"status\" : 472,\n   \"title\" : \"llHTTPRequest parameter error.\",\n   \"type\" : \"http://wiki.secondlife.com/wiki/llHTTPRequest\"\n}\n"
+PROBE http/options rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE http/options rec=url granted=1
+PROBE http/options rec=sent step=1 case=agent-default request=set
+PROBE http/options rec=inbound step=1 method="GET" user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com)" accept=""
+PROBE http/options rec=response step=1 status=200 metadata="" length=4 body="ok-1"
+PROBE http/options rec=sent step=2 case=agent request=set
+PROBE http/options rec=inbound step=2 method="GET" user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com) probe-agent/1.0" accept=""
+PROBE http/options rec=response step=2 status=200 metadata="" length=4 body="ok-2"
+# debug-channel: from="Object" text="HTTP_USER_AGENT '' is invalid"
+PROBE http/options rec=sent step=3 case=agent-empty request=null
+# debug-channel: from="Object" text="HTTP_USER_AGENT 'probe/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789' is invalid"
+PROBE http/options rec=sent step=4 case=agent-long request=null
+PROBE http/options rec=sent step=5 case=agent-twice request=set
+PROBE http/options rec=inbound step=5 method="GET" user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com) second/2" accept=""
+PROBE http/options rec=response step=5 status=200 metadata="" length=4 body="ok-5"
+PROBE http/options rec=sent step=6 case=accept-json-served-text request=set
+PROBE http/options rec=inbound step=6 method="GET" user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com)" accept=""
+PROBE http/options rec=response step=6 status=415 metadata="" length=36 body="Unsupported or unknown Content-Type."
+PROBE http/options rec=sent step=7 case=accept-json-served-json request=set
+PROBE http/options rec=inbound step=7 method="GET" user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com)" accept=""
+PROBE http/options rec=response step=7 status=200 metadata="" length=8 body="{\"ok\":7}"
+PROBE http/options rec=sent step=8 case=accept-text request=set
+PROBE http/options rec=inbound step=8 method="GET" user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com)" accept=""
+PROBE http/options rec=response step=8 status=200 metadata="" length=4 body="ok-8"
+# debug-channel: from="Object" text="HTTP_ACCEPT: value 'application/json, text/plain' is invalid."
+PROBE http/options rec=sent step=9 case=accept-list request=null
+# debug-channel: from="Object" text="HTTP_ACCEPT: Unsupported mime type '*/*'"
+PROBE http/options rec=sent step=10 case=accept-any request=null
+# debug-channel: from="Object" text="HTTP_ACCEPT: value '' is invalid."
+PROBE http/options rec=sent step=11 case=accept-empty request=null
+PROBE http/options rec=sent step=12 case=extended-ok request=set
+PROBE http/options rec=inbound step=12 method="GET" user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com)" accept=""
+PROBE http/options rec=response step=12 status=200 metadata="" length=5 body="ok-12"
+PROBE http/options rec=sent step=13 case=extended-404 request=set
+PROBE http/options rec=inbound step=13 method="GET" user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com)" accept=""
+PROBE http/options rec=response step=13 status=404 metadata="" length=7 body="missing"
+# debug-channel: from="Object" text="URL passed to llHTTPRequest is not valid"
+PROBE http/options rec=sent step=14 case=extended-not-a-url request=set
+PROBE http/options rec=response step=14 status=471 metadata="" length=187 body="{\n   \"detail\" : \"URL passed to llHTTPRequest is not valid\",\n   \"status\" : 471,\n   \"title\" : \"llHTTPRequest URL is invalid.\",\n   \"type\" : \"http://wiki.secondlife.com/wiki/llHTTPRequest\"\n}\n"
+# debug-channel: from="Object" text="URL passed to llHTTPRequest is not valid"
+PROBE http/options rec=sent step=15 case=extended-ftp request=set
+PROBE http/options rec=response step=15 status=471 metadata="" length=187 body="{\n   \"detail\" : \"URL passed to llHTTPRequest is not valid\",\n   \"status\" : 471,\n   \"title\" : \"llHTTPRequest URL is invalid.\",\n   \"type\" : \"http://wiki.secondlife.com/wiki/llHTTPRequest\"\n}\n"
+# debug-channel: from="Object" text="URL passed to llHTTPRequest is not valid"
+PROBE http/options rec=sent step=16 case=extended-refused-port request=set
+PROBE http/options rec=response step=16 status=471 metadata="" length=187 body="{\n   \"detail\" : \"URL passed to llHTTPRequest is not valid\",\n   \"status\" : 471,\n   \"title\" : \"llHTTPRequest URL is invalid.\",\n   \"type\" : \"http://wiki.secondlife.com/wiki/llHTTPRequest\"\n}\n"
+PROBE http/options rec=sent step=17 case=extended-no-such-host request=set
+PROBE http/options rec=response step=17 status=502 metadata="" length=391 body="<HTML>\n<HEAD>\n<TITLE>Unknown Host</TITLE>\n</HEAD>\n\n<BODY BGCOLOR=\"white\" FGCOLOR=\"black\">\n<H1>Unknown Host</H1>\n<HR>\n\n<FONT FACE=\"Helvetica,Arial\"><B>\nDescription: Unable to locate the server requested ---\nthe server does not have a DNS entry.  Perhaps there is a misspelling\nin the server name, or the server no longer exists.  Double-check the\nname and try again.\n</B></FONT>\n<HR>\n</BODY>\n"
+# debug-channel: from="Object" text="HTTP parameter key 2 is not recognized"
+PROBE http/options rec=sent step=18 case=extended-unknown-option request=set
+PROBE http/options rec=response step=18 status=472 metadata="" length=194 body="{\n   \"detail\" : \"Parameter key in position 2 is not recognized.\",\n   \"status\" : 472,\n   \"title\" : \"llHTTPRequest parameter error.\",\n   \"type\" : \"http://wiki.secondlife.com/wiki/llHTTPRequest\"\n}\n"
+# debug-channel: from="Object" text="HTTP parameter key 1 is not recognized"
+PROBE http/options rec=sent step=19 case=extended-after-unknown-option request=null
+# debug-channel: from="Object" text="HTTP_CUSTOM_HEADER value is an invalid header"
+PROBE http/options rec=sent step=20 case=extended-reserved-header request=set
+PROBE http/options rec=response step=20 status=473 metadata="" length=183 body="{\n   \"detail\" : \"Invalid custom header in position 2\",\n   \"status\" : 473,\n   \"title\" : \"llHTTPRequest parameter error.\",\n   \"type\" : \"http://wiki.secondlife.com/wiki/llHTTPRequest\"\n}\n"
+# debug-channel: from="Object" text="HTTP_BODY_MAXLENGTH value is invalid"
+PROBE http/options rec=sent step=21 case=extended-max-over request=set
+PROBE http/options rec=response step=21 status=472 metadata="" length=212 body="{\n   \"detail\" : \"Maximum body length must be in the rage (0, 16384] in position 2\",\n   \"status\" : 472,\n   \"title\" : \"llHTTPRequest parameter error.\",\n   \"type\" : \"http://wiki.secondlife.com/wiki/llHTTPRequest\"\n}\n"
+# debug-channel: from="Object" text="HTTP method FOO is unsupported"
+PROBE http/options rec=sent step=22 case=extended-unknown-method request=set
+PROBE http/options rec=response step=22 status=405 metadata="" length=188 body="{\n   \"detail\" : \"HTTP method FOO is unsupported at position 2.\",\n   \"status\" : 405,\n   \"title\" : \"Unrecognized HTTP Method.\",\n   \"type\" : \"http://wiki.secondlife.com/wiki/llHTTPRequest\"\n}\n"
+PROBE http/options rec=sent step=23 case=extended-accept-unmet request=set
+PROBE http/options rec=inbound step=23 method="GET" user_agent="Second-Life-LSL/2026-07-24.30110090421 (https://secondlife.com)" accept=""
+PROBE http/options rec=response step=23 status=415 metadata="" length=36 body="Unsupported or unknown Content-Type."
+# debug-channel: from="Object" text="URL passed to llHTTPRequest is not valid"
+PROBE http/options rec=sent step=24 case=extended-off-not-a-url request=null
+PROBE http/options rec=end
+# debug-channel by=other: from="Object" text="HTTP_USER_AGENT 'probe agent' is invalid"
+# debug-channel by=other: from="Object" text="HTTP_USER_AGENT 'probe agent' is invalid"
+# debug-channel by=other: from="Object" text="HTTP_USER_AGENT '' is invalid"
+# debug-channel by=other: from="Object" text="HTTP_USER_AGENT 'probe/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789' is invalid"
+# debug-channel by=other: from="Object" text="HTTP_ACCEPT: value 'application/json, text/plain' is invalid."
+# debug-channel by=other: from="Object" text="HTTP_ACCEPT: Unsupported mime type '*/*'"
+# debug-channel by=other: from="Object" text="HTTP_ACCEPT: value '' is invalid."
+# debug-channel by=other: from="Object" text="URL passed to llHTTPRequest is not valid"
+# debug-channel by=other: from="Object" text="URL passed to llHTTPRequest is not valid"
+# debug-channel by=other: from="Object" text="URL passed to llHTTPRequest is not valid"
+# debug-channel by=other: from="Object" text="HTTP parameter key 2 is not recognized"
+# debug-channel by=other: from="Object" text="HTTP parameter key 1 is not recognized"
+# debug-channel by=other: from="Object" text="HTTP_CUSTOM_HEADER value is an invalid header"
+# debug-channel by=other: from="Object" text="HTTP_BODY_MAXLENGTH value is invalid"
+# debug-channel by=other: from="Object" text="HTTP method FOO is unsupported"
+# debug-channel by=other: from="Object" text="URL passed to llHTTPRequest is not valid"
