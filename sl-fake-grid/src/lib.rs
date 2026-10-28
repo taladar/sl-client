@@ -94,7 +94,7 @@ pub use relays::{
 };
 pub use runtime::{
     CrossingNotice, FakeAgent, FakeGrid, FakeGridBuilder, GridIdentity, LoginNotice, RegionConfig,
-    TeleportNotice,
+    RiddenCrossing, TeleportNotice,
 };
 pub use scenario::{Scenario, SimEventHook, SimHook};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;

@@ -1749,7 +1749,25 @@ pub(crate) fn push_arrival_world(
         y: placement.y(),
         z: placement.z(),
     };
-    let avatar = avatar_prim(world.avatar_local_id, identity, arrival.clone());
+    // An agent that arrives riding something — a vehicle carried over a
+    // border with it — is sent seated on the region's copy from the first, as
+    // both grids send it: there is no moment it stands. The seat goes ahead
+    // of it (it names the region handle as well as the avatar would), so the
+    // client never holds a rider whose parent it has not heard of.
+    let seat = sim
+        .seated_on()
+        .and_then(|on| world.objects.iter().find(|object| object.full_id == on));
+    let avatar = match seat {
+        Some(seat) => {
+            if let Err(error) = send_objects(sim, core::slice::from_ref(seat), now) {
+                tracing::warn!("sending the arriving rider's seat failed: {error}");
+            }
+            let mut avatar = avatar_prim(world.avatar_local_id, identity, SIT_TARGET_OFFSET);
+            avatar.parent_id = seat.local_id;
+            avatar
+        }
+        None => avatar_prim(world.avatar_local_id, identity, arrival.clone()),
+    };
     if let Err(error) = send_objects(sim, &[avatar], now) {
         tracing::warn!("rezzing the arriving avatar failed: {error}");
     }

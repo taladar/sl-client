@@ -726,6 +726,16 @@ async fn move_to(
 /// Creates a script in `seat` that gives it a sit target, and says whether
 /// the grid compiled it.
 async fn plant_sit_target(session: &mut Session, seat: &Object) -> Result<bool, TestFailure> {
+    plant_script(session, seat, SIT_TARGET_SCRIPT).await
+}
+
+/// Creates a script in `seat`, uploads `source` into it as Mono, and says
+/// whether the grid compiled it. The script is given a moment to start.
+pub(crate) async fn plant_script(
+    session: &mut Session,
+    seat: &Object,
+    source: &str,
+) -> Result<bool, TestFailure> {
     let agent = session
         .agent_id()
         .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
@@ -771,7 +781,7 @@ async fn plant_sit_target(session: &mut Session, seat: &Object) -> Result<bool, 
                 experience: None,
             },
             target: ScriptTarget::Mono,
-            source: SIT_TARGET_SCRIPT.as_bytes().to_vec(),
+            source: source.as_bytes().to_vec(),
         })
         .await?;
     let compiled = session

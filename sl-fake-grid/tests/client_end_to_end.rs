@@ -3244,47 +3244,26 @@ mod test {
         Ok(())
     }
 
-    /// Hands the vehicle over the border the way a simulator does: the
-    /// destination receives it — the same full id under its own local id,
-    /// with the other rider aboard when `ridden` — then the region being left
-    /// kills its copy, and the agent is seated on the destination's.
-    async fn hand_the_vehicle_over(
-        source: &FakeAgent,
-        destination: &FakeAgent,
-        ridden: bool,
-    ) -> Result<(), TestError> {
+    /// The vehicle the border scene hands over, as the destination has it:
+    /// the same full id under the east region's own local id, with the other
+    /// rider aboard when `ridden`.
+    fn the_vehicle_crossing(ridden: bool) -> sl_fake_grid::RiddenCrossing {
         use sl_fake_grid::fixtures::border;
         let arriving = border::BorderSide::Arriving;
-        destination
-            .receive_crossing(
-                vec![border::vehicle(arriving).build()],
-                if ridden {
-                    vec![border::rider(arriving)]
-                } else {
-                    Vec::new()
-                },
-            )
-            .await;
         let mut leaving = vec![border::BorderSide::Leaving.vehicle_local_id()];
         if ridden {
             leaving.push(border::BorderSide::Leaving.rider_local_id());
         }
-        source
-            .with_world(|world, sim| {
-                world
-                    .objects
-                    .retain(|object| object.full_id != border::VEHICLE_OBJECT);
-                world.npcs.clear();
-                sim.send_kill_object(&leaving, sim_now())
-            })
-            .await?;
-        destination
-            .seat_on(
-                border::BorderSide::Arriving.vehicle_local_id(),
-                sl_fake_grid::world::SIT_TARGET_OFFSET,
-            )
-            .await;
-        Ok(())
+        sl_fake_grid::RiddenCrossing {
+            vehicle: vec![border::vehicle(arriving).build()],
+            riders: if ridden {
+                vec![border::rider(arriving)]
+            } else {
+                Vec::new()
+            },
+            leaving,
+            seat: arriving.vehicle_local_id(),
+        }
     }
 
     /// The instant a grid-side send is stamped with. The sessions here run on
@@ -3357,7 +3336,7 @@ mod test {
         let source = running.agent.clone();
         let destination = running
             ._grid
-            .cross_agent(
+            .cross_vehicle(
                 &source,
                 "Fake Region East",
                 RegionCoordinates::new(border::MARKER_X, border::MARKER_Y, border::MARKER_Z),
@@ -3366,9 +3345,9 @@ mod test {
                     y: 0.0,
                     z: 0.0,
                 },
+                the_vehicle_crossing(false),
             )
             .await?;
-        hand_the_vehicle_over(&source, &destination, false).await?;
 
         // The vehicle left one region and the rider is aboard the other's copy:
         // same object, the other region's local id.
@@ -3415,9 +3394,9 @@ mod test {
         ride_the_vehicle(&mut running).await?;
 
         let source = running.agent.clone();
-        let destination = running
+        let _destination = running
             ._grid
-            .cross_agent(
+            .cross_vehicle(
                 &source,
                 "Fake Region East",
                 RegionCoordinates::new(border::MARKER_X, border::MARKER_Y, border::MARKER_Z),
@@ -3426,9 +3405,9 @@ mod test {
                     y: 0.0,
                     z: 0.0,
                 },
+                the_vehicle_crossing(true),
             )
             .await?;
-        hand_the_vehicle_over(&source, &destination, true).await?;
 
         // Both riders arrive aboard the destination's copy of the vehicle.
         let agent_id = running.agent.agent_id();
@@ -3453,6 +3432,110 @@ mod test {
                 left && arrived && rider_arrived
             })
             .await?;
+        Ok(())
+    }
+
+    /// **On OpenSim the vehicle crosses first, and the riders arrive seated.**
+    ///
+    /// Measured by `seated-crossing` on the local OpenSim (2026-10-28): the
+    /// destination streams the vehicle down the child circuit ahead of the
+    /// `CrossedRegion`, and the first thing it says of each rider has it
+    /// aboard its own copy — there is no moment a rider stands.
+    #[tokio::test]
+    async fn on_opensim_the_vehicle_crosses_ahead_of_its_riders() -> Result<(), TestError> {
+        a_vehicle_crosses_as_the_grid_hands_it_over(ImitatedGrid::OpenSim, true).await
+    }
+
+    /// **On Second Life the vehicle follows the crossing, and the riders
+    /// still arrive seated.**
+    ///
+    /// Measured by `seated-crossing` on aditi (2026-10-28): the vehicle comes
+    /// after the `CrossedRegion`, with the rider's arrival, and the rider is
+    /// never sent standing.
+    #[tokio::test]
+    async fn on_second_life_the_vehicle_arrives_with_its_riders() -> Result<(), TestError> {
+        a_vehicle_crosses_as_the_grid_hands_it_over(ImitatedGrid::SecondLife, false).await
+    }
+
+    /// The body of the two tests above: a ridden crossing on a grid imitating
+    /// `imitates`, whose vehicle reaches the region entered before the
+    /// crossing exactly when `vehicle_first`.
+    async fn a_vehicle_crosses_as_the_grid_hands_it_over(
+        imitates: ImitatedGrid,
+        vehicle_first: bool,
+    ) -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::border;
+        let mut running = start_configured(ridden_border_grid(true), None, imitates).await?;
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        running
+            .wait_until("the east region's child circuit", |event| match event {
+                Event::GenericMessage(generic) => {
+                    sl_fake_grid::neighbour_marker_region(generic).as_deref()
+                        == Some("Fake Region East")
+                }
+                _ => false,
+            })
+            .await?;
+        ride_the_vehicle(&mut running).await?;
+
+        let source = running.agent.clone();
+        let _destination = running
+            ._grid
+            .cross_vehicle(
+                &source,
+                "Fake Region East",
+                RegionCoordinates::new(border::MARKER_X, border::MARKER_Y, border::MARKER_Z),
+                Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                the_vehicle_crossing(true),
+            )
+            .await?;
+
+        let agent_id = running.agent.agent_id();
+        let aboard = border::BorderSide::Arriving.vehicle_local_id();
+        let mut vehicle_before_crossing = None;
+        let mut crossed = false;
+        let mut own_in_east = Vec::new();
+        let mut rider_aboard = false;
+        running
+            .wait_until("both riders aboard the east region's vehicle", |event| {
+                match event {
+                    Event::RegionChanged { region_handle, .. } if *region_handle == east => {
+                        crossed = true;
+                    }
+                    Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                        if object.region_handle == east =>
+                    {
+                        if object.full_id == border::VEHICLE_OBJECT {
+                            let _first = vehicle_before_crossing.get_or_insert(!crossed);
+                        } else if object.full_id.uuid() == agent_id.uuid() {
+                            own_in_east.push(object.parent_id);
+                        } else if object.local_id == border::BorderSide::Arriving.rider_local_id() {
+                            rider_aboard |= object.parent_id == aboard;
+                        }
+                    }
+                    _other => {}
+                }
+                crossed && rider_aboard && own_in_east.contains(&aboard)
+            })
+            .await?;
+        assert_eq!(
+            vehicle_before_crossing,
+            Some(vehicle_first),
+            "{imitates:?} streams the vehicle to the region entered {} the crossing",
+            if vehicle_first { "before" } else { "after" }
+        );
+        assert_eq!(
+            own_in_east.first(),
+            Some(&aboard),
+            "the rider is sent seated from the first: {own_in_east:?}"
+        );
         Ok(())
     }
 

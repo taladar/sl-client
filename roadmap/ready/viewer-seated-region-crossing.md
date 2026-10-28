@@ -89,3 +89,18 @@ FSRegionCrossingAngleErrorLimit), applied only to sat-upon objects that
 have moved and are outside the 0..256 m region bounds — so smooth
 vehicles extrapolate longer through a crossing and erratic ones stop
 sooner.
+
+## From gridspec-seated-crossing (2026-10-28)
+
+Measured on both grids (`book/src/gridspec/teleport.md` § A seated crossing;
+`sl-conformance run --grid aditi|opensim seated-crossing` steps a scripted
+cube over a border with two avatars aboard): **no** unsit or resit on either
+— each rider is re-sent under the destination's local ids already parented to
+its copy of the vehicle, with no `AvatarSitResponse` — the script keeps
+`PERMISSION_TAKE_CONTROLS | PERMISSION_TRIGGER_ANIMATION` for the same rider,
+asks for nothing again, and re-sends no `ScriptControlChange`; the region
+left sends no `KillObject`. So the permission churn this task worries about
+does not happen on either grid; what is left is the placement across the
+hand-over. The full-stack `a_rider_stays_on_its_vehicle_across_a_border` and
+`an_open_sim_rider_stays_on_its_vehicle_across_a_border` hold the viewer's
+placement to each grid's order through the fake grid's flavours.

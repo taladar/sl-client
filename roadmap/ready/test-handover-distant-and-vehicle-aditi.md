@@ -41,3 +41,12 @@ A crossing without a vehicle now runs live on aditi and OpenSim
 (`sl-conformance run --grid aditi --avatar tertiary region-crossing`: over
 the nearest border and back, `world_reset` false both ways). The vehicle
 half is [[gridspec-seated-crossing]]'s to measure first.
+
+## From gridspec-seated-crossing (2026-10-28)
+
+The vehicle half has a driver now: `sl-conformance run --grid aditi
+seated-crossing` (or `--grid opensim`) rides a scripted cube over a border
+with two avatars aboard — on aditi from a sandbox parcel in Morris into
+Bonifacio — and records both sessions' `RegionChanged`, the vehicle's copies
+and the riders' `ParentID`s. A corner crossing is that case with the
+script's direction made diagonal (`go <1,1,0> N` on its chat channel).

@@ -2702,6 +2702,92 @@ impl FakeGrid {
         })
     }
 
+    /// Carries a vehicle over the border into `region_name` with `agent`
+    /// riding it — [`cross_agent`](Self::cross_agent) for an agent that is
+    /// sitting, in the order the imitated grid hands a vehicle over
+    /// ([`NeighbourViewPolicy::vehicle_handover`](crate::imitates::NeighbourViewPolicy::vehicle_handover)).
+    ///
+    /// The vehicle keeps its full ids and takes the destination's
+    /// region-local ones, which is what a rider's seat has to survive. The
+    /// destination inherits the sit, so the agent's arrival sends it seated;
+    /// the region left forgets the vehicle and sends no kill. An agent that
+    /// holds no child circuit to the destination yet has no session there to
+    /// inherit the sit: it arrives standing, and is seated once the vehicle
+    /// has followed it.
+    ///
+    /// # Errors
+    ///
+    /// As [`cross_agent`](Self::cross_agent).
+    pub async fn cross_vehicle(
+        &self,
+        agent: &FakeAgent,
+        region_name: &str,
+        position: RegionCoordinates,
+        velocity: Vector,
+        ridden: RiddenCrossing,
+    ) -> Result<FakeAgent, Error> {
+        let region = crate::neighbours::region_index(&self.core, region_name)?;
+        let RiddenCrossing {
+            vehicle,
+            riders,
+            leaving,
+            seat,
+        } = ridden;
+        let seat_key = vehicle
+            .iter()
+            .find(|prim| prim.local_id == seat)
+            .map(|prim| prim.full_id);
+        let ahead = self
+            .core
+            .session_of(agent.agent_id, region)
+            .await
+            .map(|shared| FakeAgent {
+                shared,
+                agent_id: agent.agent_id,
+            });
+        let mut owed = Some((vehicle, riders));
+        if let Some(child) = &ahead
+            && let Some((vehicle, riders)) = owed.take()
+        {
+            match self.core.neighbour_policy.vehicle_handover {
+                crate::imitates::VehicleHandover::VehicleFirst => {
+                    child.receive_crossing(vehicle, riders).await;
+                }
+                // Into the region's world unsent: the arrival burst sends it,
+                // ahead of the seated agent.
+                crate::imitates::VehicleHandover::WithArrival => {
+                    child
+                        .with_world(|world, _sim| {
+                            world.objects.extend(vehicle);
+                            world.npcs.extend(riders);
+                        })
+                        .await;
+                }
+            }
+            if let Some(key) = seat_key {
+                child.with_sim(|sim| sim.seat_agent(key)).await;
+            }
+        }
+        let destination = self
+            .cross_agent(agent, region_name, position, velocity)
+            .await?;
+        if let Some((vehicle, riders)) = owed.take() {
+            destination.receive_crossing(vehicle, riders).await;
+            destination
+                .seat_on(seat, crate::world::SIT_TARGET_OFFSET)
+                .await;
+        }
+        agent
+            .with_world(|world, _sim| {
+                world
+                    .objects
+                    .retain(|object| !leaving.contains(&object.local_id));
+                world.npcs.retain(|npc| !leaving.contains(&npc.local_id));
+            })
+            .await;
+        Ok(destination)
+    }
+
     /// Shuts the grid down: the accept loop, every session pump, and every
     /// timer task exit.
     pub fn shutdown(&self) {
@@ -2721,6 +2807,22 @@ impl Drop for FakeGrid {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+/// A vehicle carried over a border with the agent aboard
+/// ([`FakeGrid::cross_vehicle`]).
+#[derive(Debug, Clone)]
+pub struct RiddenCrossing {
+    /// The vehicle's prims as the destination has them: the same full ids,
+    /// the destination's own region-local ids.
+    pub vehicle: Vec<sl_proto::Object>,
+    /// The other riders, seated on the destination's copy.
+    pub riders: Vec<crate::fixtures::NpcFixture>,
+    /// The region-local ids the vehicle and the other riders had in the
+    /// region left, which forgets them.
+    pub leaving: Vec<RegionLocalObjectId>,
+    /// The destination's region-local id of the prim the agent sits on.
+    pub seat: RegionLocalObjectId,
 }
 
 /// A handle onto one live session, for tests and tools to drive the grid

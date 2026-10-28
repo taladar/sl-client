@@ -958,6 +958,29 @@ impl ViewerHarness {
         region_name: &str,
         position: sl_proto::RegionCoordinates,
     ) -> Result<(), TestError> {
+        self.cross(region_name, position, None)
+    }
+
+    /// [`cross_to`](Self::cross_to) riding a vehicle, which the grid hands
+    /// over in its imitated grid's order
+    /// ([`sl_fake_grid::FakeGrid::cross_vehicle`]).
+    pub(crate) fn ride_to(
+        &mut self,
+        region_name: &str,
+        position: sl_proto::RegionCoordinates,
+        ridden: sl_fake_grid::RiddenCrossing,
+    ) -> Result<(), TestError> {
+        self.cross(region_name, position, Some(ridden))
+    }
+
+    /// The body of [`cross_to`](Self::cross_to) and
+    /// [`ride_to`](Self::ride_to).
+    fn cross(
+        &mut self,
+        region_name: &str,
+        position: sl_proto::RegionCoordinates,
+        ridden: Option<sl_fake_grid::RiddenCrossing>,
+    ) -> Result<(), TestError> {
         let handle = self
             .grid
             .region_handle(region_name)
@@ -983,18 +1006,25 @@ impl ViewerHarness {
                 logs,
                 ..
             } = self;
-            let mut crossing = Box::pin(grid.cross_agent(
-                &agent,
-                region_name,
-                position,
-                // Placed, not walking: the fake grid runs no physics, so there
-                // is no momentum to carry over the border.
-                sl_proto::Vector {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-            ));
+            // Placed, not walking: the fake grid runs no physics, so there
+            // is no momentum to carry over the border.
+            let still = sl_proto::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            };
+            let mut crossing: std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<sl_fake_grid::FakeAgent, sl_fake_grid::Error>,
+                        > + '_,
+                >,
+            > = match ridden {
+                Some(ridden) => {
+                    Box::pin(grid.cross_vehicle(&agent, region_name, position, still, ridden))
+                }
+                None => Box::pin(grid.cross_agent(&agent, region_name, position, still)),
+            };
             loop {
                 app.update();
                 // The timeout is built *inside* `block_on`: `tokio::time::timeout`
@@ -2381,10 +2411,27 @@ mod tests {
     /// after. An absolute position would only restate what
     /// [`a_border_crossing_keeps_the_picture_still`] already proves about the
     /// origin; the *relative* one is the seat.
+    ///
+    /// Once per flavour: OpenSim streams the vehicle ahead of the crossing,
+    /// Second Life with the rider's arrival
+    /// ([`sl_fake_grid::imitates::VehicleHandover`]).
     #[test]
     fn a_rider_stays_on_its_vehicle_across_a_border() -> Result<(), TestError> {
+        a_rider_stays_on_its_vehicle(sl_fake_grid::ImitatedGrid::SecondLife)
+    }
+
+    /// [`a_rider_stays_on_its_vehicle_across_a_border`], handed over as
+    /// OpenSim does it.
+    #[test]
+    fn an_open_sim_rider_stays_on_its_vehicle_across_a_border() -> Result<(), TestError> {
+        a_rider_stays_on_its_vehicle(sl_fake_grid::ImitatedGrid::OpenSim)
+    }
+
+    /// The body of the two tests above, against a grid imitating `grid`.
+    fn a_rider_stays_on_its_vehicle(grid: sl_fake_grid::ImitatedGrid) -> Result<(), TestError> {
         use sl_fake_grid::fixtures::border;
-        let mut harness = ViewerHarness::start_in(ridden_border_grid())?;
+        let mut harness =
+            ViewerHarness::start_in_with(ridden_border_grid(), HarnessOptions::imitating(grid))?;
         harness.login()?;
         harness.wait_neighbour(EAST_REGION)?;
 
@@ -2426,34 +2473,19 @@ mod tests {
         };
         let ride_before = rider_offset_px(&mut harness, BorderSide::Leaving)?;
 
-        // Over the border, and the vehicle handed over with its rider.
-        let source = harness.agent()?;
+        // Over the border, and the vehicle handed over with its rider, in the
+        // imitated grid's order.
         let landing = BorderSide::Arriving.vehicle_position();
-        harness.cross_to(
+        harness.ride_to(
             EAST_REGION,
             sl_proto::RegionCoordinates::new(landing.x, landing.y, landing.z),
+            sl_fake_grid::RiddenCrossing {
+                vehicle: vec![border::vehicle(BorderSide::Arriving).build()],
+                riders: Vec::new(),
+                leaving: vec![BorderSide::Leaving.vehicle_local_id()],
+                seat: BorderSide::Arriving.vehicle_local_id(),
+            },
         )?;
-        let destination = harness.agent()?;
-        // The destination receives the vehicle, then the region left kills its
-        // copy: an object is in one region at a time.
-        harness.grid(destination.receive_crossing(
-            vec![border::vehicle(BorderSide::Arriving).build()],
-            Vec::new(),
-        ));
-        harness.grid(async {
-            source
-                .with_world(|world, sim| {
-                    world
-                        .objects
-                        .retain(|object| object.full_id != border::VEHICLE_OBJECT);
-                    sim.send_kill_object(&[BorderSide::Leaving.vehicle_local_id()], source.now())
-                })
-                .await
-        })?;
-        harness.grid(destination.seat_on(
-            BorderSide::Arriving.vehicle_local_id(),
-            sl_fake_grid::world::SIT_TARGET_OFFSET,
-        ));
         harness.wait_event(
             "the agent aboard the destination's vehicle",
             |event| match event {

@@ -2183,9 +2183,25 @@ region-local id, so a viewer that keyed a rider's seat by local id alone
 would lose the seat at the line. `fixtures::border::BorderSide` builds the
 pair: `Leaving` stands the vehicle against its region's east edge,
 `Arriving` against the next region's west edge, a few metres apart across
-one border, same full id and different local ids. `FakeAgent::with_world`
+one border, same full id and different local ids.
+
+`FakeGrid::cross_vehicle(&agent, "Region", position, velocity, ridden)` is
+the hand-over: `cross_agent` for an agent that is sitting, with a
+`RiddenCrossing` naming the vehicle's prims as the destination has them, the
+other riders, the local ids the region left forgets, and the seat. On both
+flavours the destination inherits the sit ahead of the arrival
+(`SimSession::seat_agent`), so the agent's arrival burst sends it seated on
+the destination's copy with the seat ahead of it, and the region left sends
+no kill — as both live grids were measured doing
+([Grid Behaviour → Teleport](../gridspec/teleport.md#a-seated-crossing)).
+When the vehicle comes is the flavour's
+`NeighbourViewPolicy::vehicle_handover`: the OpenSim flavour streams it down
+the child circuit before the `CrossedRegion`, the Second Life one with the
+arrival burst. An agent with no child circuit to the destination yet arrives
+standing and is seated once the vehicle has followed it. `FakeAgent::with_world`
 (mutate a session's fixtures *and* send, under one lock) and
-`FakeAgent::seat_on` are what a test drives the handover with.
+`FakeAgent::seat_on` remain for a test that drives some other hand-over by
+hand.
 
 `border_pair_side(side)` is that half made whole, and is what the
 `border` scene dresses each of a pair's two regions with: this side's

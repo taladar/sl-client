@@ -338,13 +338,52 @@ where it was told. A flight from the same spot crossed the border eight
 metres away in four seconds, so the case flies on Second Life and walks on
 OpenSim.
 
-Not measured: a **seated** crossing — a vehicle carrying its riders over a
-border. Neither grid has a vehicle to hand: it needs a script uploaded into a
-prim and an avatar seated on it, and aditi has yet to answer a sit request
-from this client at all (the roadmap's `gridspec-sit-stand`). Also not
-measured: a crossing that leaves a neighbour out of view (both blocks are two
-by two), a crossing at a corner, and what either grid does when the client
+Not measured: a crossing that leaves a neighbour out of view (both blocks are
+two by two), a crossing at a corner, and what either grid does when the client
 never completes its movement.
+
+### A seated crossing
+
+A vehicle carrying its riders over a border is an **object** handed to the
+neighbour with avatars attached, and every region-local id involved changes at
+the line. Measured on 2026-10-28 by `seated-crossing`: four runs on the local
+OpenSim (XEngine), twelve metres from the block's eastern border, and two on
+aditi, from a sandbox parcel in Morris ten metres from its western border with
+Bonifacio (a two-by-two block of mainland; the Bonifacio side of the line is a
+no-script parcel). The first avatar rezzes a cube beside itself, uploads a
+script into it that gives it a sit target, both avatars sit on it (the second
+where a taken target puts it, [Sitting](movement.md#sitting)), and the script,
+told to on a chat channel, steps the cube over the border with `llSetPos`.
+Both riders' sessions are watched at once; the trace log is where the messages
+no event carries were read.
+
+| behaviour | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| what carries a vehicle over | `llSetPos` to a point past the border, non-physical, riders and all (both runs) | the same (three runs); a physical cube pushed with `llSetVelocity` too (one run). A step that lands *exactly* on the border (x = 256.0) neither moved the cube nor crossed it, and every step after it aimed at the same spot again | the test asks for the hand-over (`FakeGrid::cross_vehicle`) |
+| the order on the wire | each rider's `CrossedRegion` first, the two within a millisecond of each other. Then from the destination: the vehicle's `ObjectUpdate` 75 ms later down one rider's circuit, ahead of its `RegionHandshake` (the third), `AgentMovementComplete` and `HealthMessage` at 0.17 s; for the other rider the vehicle came at 0.34–0.37 s in one message with its own avatar, after a `KillObject` of the ids its avatar had on the child circuit | stepped (three runs), from the destination down the child circuit: an `AgentDataUpdate`, then the vehicle's `ObjectUpdate` 30–60 ms later under the destination's own local id, then — up to 0.1 s after the vehicle — each rider's `CrossedRegion`, `AgentMovementComplete`, and the riders' `ObjectUpdate`s with their `AvatarAppearance` 0.00–0.05 s after the arrival. Pushed (one run): the `AgentDataUpdate` and the `CrossedRegion` 90 ms later, and the vehicle only after the `AgentMovementComplete`, in one burst with the riders | each flavour's order: the OpenSim one streams the vehicle before the crossing, the Second Life one with the arrival burst, ahead of the seated agent |
+| the `CrossedRegion` body | as on foot; `Info.Position` is the vehicle's position in the region entered (254.52 for a cube 1.48 m past a western border), `Info.LookAt` the rider's facing (`1 0 0`, east, for a ride west) | as on foot; `Info.Position` the vehicle's position (1.48 for a cube at 257.48), `Info.LookAt` zero | each flavour's |
+| a kill from the region left | none, for the vehicle or for either rider | none | none, on both flavours |
+| the riders | re-sent under new local ids with the `ParentID` of the destination's copy, both in each rider's view, 0.16–0.25 s after the arrival. No update between showed a rider standing, no `AvatarSitResponse` came, and no teleport event | the same, 0.00–0.05 s after the arrival | sent seated from the first on both flavours |
+| the vehicle's script | carried over running, with both sit-implied permissions (`PERMISSION_TAKE_CONTROLS` and `PERMISSION_TRIGGER_ANIMATION`) for the same rider; nothing asked for again, no `ScriptControlChange` re-sent. `changed(CHANGED_REGION)` came 4.2 s after the arrival, and from then on its half-second timer fired every 3 s (both runs alike) | carried over running, with the same permissions; nothing asked again, no `ScriptControlChange` re-sent; its timer went on at its rate. `changed(CHANGED_REGION)` never reached it, in four runs, although XEngine posts one for a script state that crossed (`ScriptInstance`, `StateSource.PrimCrossing`) | runs no scripts |
+| the region left | stays a child: its `RegionHandshake` comes again 1.3 s after the arrival, as on foot | stays a child | stays a child |
+
+The script that ran on into Bonifacio was in a no-script parcel by then, and
+kept running: it had taken controls, which is what lets a vehicle's script run
+on land that stops scripts. Whether the slow timer is that parcel's doing or
+every seated crossing's is not measured.
+
+Taking the controls once granted came as **three** `ScriptControlChange`
+messages on OpenSim — a release, a release passed on to the agent, and the
+take — where the script made one `llTakeControls` call. Second Life's riders
+wear scripted animation overriders that take controls of their own, so its
+messages there are not the script's alone.
+
+A session's camera decides what Second Life streams to it. The case aims both
+riders' cameras at the seat before the rez: with the camera left at the region
+centre, 120 m away in a busy sandbox, the new cube was not sent to either
+session within thirty seconds while the grid went on streaming the rest of the
+region. The camera's region-local position carries over a border unchanged, so
+the case aims it again at the landing spot when a rider's crossing arrives.
 
 ## Home and landmarks
 

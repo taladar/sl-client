@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 335 |
+| ready | 334 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 39 |
-| done | 1442 |
+| done | 1443 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2079** |
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (335)
+## ready (334)
 
 ### protocol
 
@@ -1154,8 +1154,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-seated-crossing`](ready/gridspec-seated-crossing.md) — A seated
-  crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
   down when Second Life pushes a ban line
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
@@ -1505,7 +1503,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1442)
+## done (1443)
 
 ### protocol
 
@@ -4696,6 +4694,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   flags and limits on each grid
 - [`gridspec-search-directory`](done/gridspec-search-directory.md) — Directory
   search and the avatar picker on each grid
+- [`gridspec-seated-crossing`](done/gridspec-seated-crossing.md) — A seated
+  crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-seed-capabilities`](done/gridspec-seed-capabilities.md) — Which
   capabilities each grid grants from the seed, and to whom
 - [`gridspec-simulator-features`](done/gridspec-simulator-features.md) — The

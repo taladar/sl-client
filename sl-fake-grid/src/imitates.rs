@@ -868,6 +868,14 @@ impl ImitatedGrid {
     /// with a figure per neighbour — 128 m for one sharing an edge, 128·√2 m
     /// for one touching at a corner, from a spot eight metres from two borders
     /// — announces within a second, and retires fifty seconds late.
+    ///
+    /// A **ridden** crossing was measured by `seated-crossing` (2026-10-28):
+    /// on both grids the riders are re-sent already seated on the
+    /// destination's copy of the vehicle, and the region left kills nothing.
+    /// They differ in when the vehicle comes. OpenSim streams a vehicle
+    /// stepped over with `llSetPos` down the child circuit up to a tenth of a
+    /// second *ahead* of the `CrossedRegion`; Second Life sends it after,
+    /// with the rider's arrival.
     #[must_use]
     pub const fn neighbour_policy(self) -> NeighbourViewPolicy {
         match self {
@@ -877,6 +885,7 @@ impl ImitatedGrid {
                 states_region_size: false,
                 crossing_look_at: CrossingLookAt::Facing,
                 handshake_on_crossing: true,
+                vehicle_handover: VehicleHandover::WithArrival,
             },
             Self::OpenSim => NeighbourViewPolicy {
                 reach: NeighbourReach::SquareAroundAvatar {
@@ -888,6 +897,7 @@ impl ImitatedGrid {
                 states_region_size: true,
                 crossing_look_at: CrossingLookAt::FlightVelocity,
                 handshake_on_crossing: false,
+                vehicle_handover: VehicleHandover::VehicleFirst,
             },
         }
     }
@@ -2263,6 +2273,9 @@ pub struct NeighbourViewPolicy {
     /// the child circuit becomes the root. OpenSim's said everything it had
     /// to when the child circuit opened.
     pub handshake_on_crossing: bool,
+    /// How a vehicle carrying the agent is handed over
+    /// ([`FakeGrid::cross_vehicle`](crate::FakeGrid::cross_vehicle)).
+    pub vehicle_handover: VehicleHandover,
 }
 
 impl NeighbourViewPolicy {
@@ -2325,6 +2338,26 @@ pub enum CrossingLookAt {
     /// OpenSim: the agent's horizontal velocity when it crossed flying, and
     /// zero when it walked.
     FlightVelocity,
+}
+
+/// How a vehicle and its riders are handed to the region across a border
+/// ([`NeighbourViewPolicy::vehicle_handover`]).
+///
+/// On both grids the agent arrives already seated on the destination's copy
+/// (the destination inherits the sit with the agent; there is no unsit and
+/// no resit) and the region left sends no `KillObject` — the client drops
+/// its stale copies when the destination's arrive under the same full ids.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VehicleHandover {
+    /// OpenSim, for a vehicle stepped over with `llSetPos`: the destination
+    /// streams the vehicle and the other riders down its child circuit
+    /// *before* the `CrossedRegion` (`SceneObjectGroup.CrossAsync` crosses
+    /// the object, then its avatars).
+    VehicleFirst,
+    /// Second Life: the vehicle comes *after* the `CrossedRegion`, with the
+    /// rider's arrival — 75 ms after it for one rider, in one burst with its
+    /// own seated avatar for the other.
+    WithArrival,
 }
 
 /// The alert a stored Set-Home is answered with on both grids. OpenSim's
@@ -4085,6 +4118,7 @@ mod test {
             sl_view.handshake_on_crossing,
             opensim_view.handshake_on_crossing
         );
+        assert_ne!(sl_view.vehicle_handover, opensim_view.vehicle_handover);
         assert_ne!(
             sl.stock_simulator_features(),
             opensim.stock_simulator_features()
