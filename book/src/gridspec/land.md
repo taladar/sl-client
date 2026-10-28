@@ -10,9 +10,11 @@ Measured on 2026-10-05 on Second Life's beta grid (aditi) and the local OpenSim
 standalone by the conformance cases `parcel-properties`, `parcel-crossing`,
 `parcel-edit`, `parcel-edit-refused`, `parcel-divide-join`,
 `parcel-object-owners`, `parcel-info-dwell`, `parcel-access-list`,
-`parcel-ban-enforcement` and `parcel-ban-line`, and on 2026-10-17 by
-`land-transactions`. Each case holds both grids, and
-both fake-grid flavours, to these answers as `Measured` constants. The aditi
+`parcel-ban-enforcement` and `parcel-ban-line`, on 2026-10-17 by
+`land-transactions` and on 2026-10-28 by `ban-line-trigger`. Each case but the
+last holds both grids, and both fake-grid flavours, to these answers as
+`Measured` constants; `ban-line-trigger` is a probe whose record is the
+measurement. The aditi
 test accounts own no land and there is no known way for a resident to get some
 there (`gridspec-aditi-test-land`), so on Second Life only what a resident
 without land rights sees is measured.
@@ -305,10 +307,11 @@ parcel's edge. Measured on 2026-10-05 by `parcel-access-list` (aditi as a
 resident without land, on a group's sandbox parcel; OpenSim as the estate owner
 and as a resident; both fake flavours), `parcel-ban-enforcement` (OpenSim: the
 estate owner bans a second avatar that holds no estate rights) and
-`parcel-ban-line` (aditi: a resident walks into somebody else's closed parcel).
-The UDP shapes are read from the raw messages: `RUST_LOG=sl_proto::wire=trace`
-logs every inbound message, each block and field, before the session reads
-anything out of it.
+`parcel-ban-line` (aditi: a resident walks into somebody else's closed
+parcel), and on 2026-10-28 by `ban-line-trigger` (aditi: the camera moved round
+one). The UDP shapes are read from the raw messages:
+`RUST_LOG=sl_proto::wire=trace` logs every inbound message, each block and
+field, before the session reads anything out of it.
 
 ### The lists
 
@@ -382,12 +385,53 @@ where the fence goes. The client reads the three ids as
 | behaviour | Second Life | OpenSim | fake grid |
 | --- | --- | --- | --- |
 | transport | event queue | event queue | — |
-| when it is pushed | **not pinned down.** Four records 0.4–0.5 s apart, starting 0.2 s after the arrival push, on two of four logins 7–12 m from the parcel; none on a dozen approaches by air and on foot, refused ones included (`gridspec-sl-ban-line-trigger`) | on every significant movement near a parcel that keeps the avatar out, nearest parcel only (`SendOutNearestBanLine`): one or two before the avatar reaches the line, another each time it is put back | — |
+| when it is pushed | by the agent's **camera**, not its avatar: every 0.53 s for as long as part of the parcel's 50 m column is in the camera's view and within about 20 m of it (below) | on every significant movement near a parcel that keeps the avatar out, nearest parcel only (`SendOutNearestBanLine`): one or two before the avatar reaches the line, another each time it is put back | — |
 | off-switch | — | `ShowParcelBansLines` and `DisableParcelBans` in `[LandManagement]`; never on a tax-free estate | — |
 
+#### What makes Second Life push it
+
+`ban-line-trigger` (aditi, 2026-10-28) moved the camera — the `CameraCenter`
+and `CameraAtAxis` of the agent's `AgentUpdate` — round a 64 m² parcel closed
+by list and group, eight seconds a place, with the avatar standing 100–170 m
+away. The ground under the parcel was at z 21.
+
+| the camera | ban lines |
+| --- | --- |
+| at eye height, looking at the parcel, 21 m or less from its nearest square's centre (19 m from its edge) | one every 0.53 s, the first about a second after the camera got there |
+| the same, 22 m out or further | none |
+| straight over the parcel looking down, up to 68 m above the ground | one every 0.53 s |
+| the same, 70 m up or higher | none |
+| 16 m out and 10 m above the column's top (17 m from its nearest edge), looking at that edge | one every 0.53 s |
+| the same place, looking down at the parcel — the edge out of view | none |
+| 16 m out and 18 m above the column's top (23 m from it), either way | none |
+| 4 m out, turned 75° aside / 90° aside | one every 0.53 s / none |
+| 16 m out, turned 45° aside / 60° aside | one every 0.53 s / none |
+| the session's default, the region's middle (128/128, z 30) | none |
+| 12 m out with a draw distance (`Far`) of 8 m | one every 0.53 s |
+
+So the test is a view of the parcel's column, from the ground to 50 m above it
+(the reference viewer's `PARCEL_HEIGHT`), out to about 20 m — not the
+avatar's distance, the camera's alone, and not the draw distance the agent
+advertises. Nothing in `AgentUpdate` carries a field of view, so the width of
+the view is the grid's own: the turns put its half-angle between about 30° and
+45° to the side. Where the avatar is and what it does — standing, hovering,
+falling, walking into the line — makes no difference: with the camera at the
+region's middle nothing came, and with the camera beside the line it came with
+the avatar 171 m away.
+
+That explains what `parcel-ban-line` saw. Its session left the camera at the
+region's middle for the whole run, so no approach brought a line; the two
+arrivals that did each got four in the first two seconds, which is the
+cadence above cut short. Before a new agent's first `AgentUpdate` is read the
+grid has only the avatar to go by, and an avatar facing the parcel 7–12 m
+away is a camera that sees it. Which way the avatars that got none were facing
+was not recorded, so this part is inferred from the cadence, not measured.
+
 A viewer therefore cannot wait for a ban line to learn that it was refused:
-the alert is the refusal, and on Second Life the line may not come at all. The
-reference viewer works the same way round — a ban line that arrives is kept,
+the alert is the refusal, and on Second Life the line comes only while the
+camera looks at the parcel from close by — a camera that follows its avatar
+usually does, a camera turned away does not. The reference viewer works the
+same way round — a ban line that arrives is kept,
 and it is the "Cannot enter parcel" alert that shows the fence for ten seconds
 (`process_alert_message`, `ShowBanLines` in its collision mode).
 

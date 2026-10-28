@@ -27,9 +27,9 @@ line:
   Second Life, "You are banned from parcel" / "You do not have access to the
   parcel" on OpenSim;
 - OpenSim pushes the line on every significant movement near the parcel;
-  Second Life pushed it on some arrivals and on no approach
-  ([[gridspec-sl-ban-line-trigger]]), so the line may be missing when the
-  refusal comes.
+  Second Life pushes it every 0.53 s while the parcel is in the *camera's*
+  view within about 20 m ([[gridspec-sl-ban-line-trigger]]), so the line is
+  missing when the refusal comes with the camera turned away or pulled back.
 
 ## What to build
 

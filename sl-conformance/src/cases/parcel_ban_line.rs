@@ -42,8 +42,10 @@
 //! `parcel-ban-enforcement` was interrupted, so there the case records
 //! `partial`; it exists for Second Life. The case holds the grid to the
 //! refusal — the alert, and the avatar kept off the parcel — and only records
-//! the ban lines: aditi pushed them on some arrivals beside the parcel and on
-//! no approach, and what decides it is not known.
+//! the ban lines. This session leaves the camera at the region's middle, and
+//! Second Life pushes a ban line only while the camera sees the parcel from
+//! close by ([`super::ban_line_trigger`]), so on aditi the approaches bring
+//! none.
 
 use std::time::{Duration, Instant};
 
@@ -123,9 +125,9 @@ const SEQUENCE_SPAN: i32 = 4000;
 /// back.
 ///
 /// The ban line itself — the parcel record under a collision sequence id —
-/// is recorded and not held to anything: aditi pushed it on two of four
-/// arrivals beside the parcel and on none of a dozen approaches, and what
-/// decides it is not known (`gridspec-sl-ban-line-trigger`).
+/// is recorded and not held to anything: Second Life pushes it by where the
+/// camera is and looks, which this case leaves at the region's middle
+/// ([`super::ban_line_trigger`]).
 const REFUSED: Measured<(bool, bool)> = Measured {
     second_life: (true, false),
     opensim: (true, false),
@@ -351,40 +353,40 @@ impl GridTest for ParcelBanLine {
 }
 
 /// One parcel record the grid pushed, with when and where the avatar was.
-struct Push {
+pub(super) struct Push {
     /// The record.
-    parcel: ParcelInfo,
+    pub(super) parcel: ParcelInfo,
     /// Seconds since the avatar arrived in the region.
-    secs: f64,
+    pub(super) secs: f64,
     /// Where the avatar was when it came.
-    position: Vector,
+    pub(super) position: Vector,
 }
 
 /// Everything the grid said about parcels since the avatar arrived in a
 /// region. One watcher sees the sweep, the flight and the wait after it,
 /// because a ban line is pushed when the grid chooses — on aditi within a
 /// second of an arrival near a closed parcel, while the sweep was still
-/// asking its questions.
-struct Seen {
+/// asking its questions, before the session's first camera was read.
+pub(super) struct Seen {
     /// The avatar's agent id, to pick it out of the object stream.
     agent: Uuid,
     /// When the avatar arrived.
-    arrived: Instant,
+    pub(super) arrived: Instant,
     /// Where the avatar last was.
-    position: Vector,
+    pub(super) position: Vector,
     /// The parcel the flight aims at, once one is picked.
-    target: Option<ParcelInfo>,
+    pub(super) target: Option<ParcelInfo>,
     /// Where the avatar first stood on the target parcel, if it ever did.
-    entered_at: Option<Vector>,
+    pub(super) entered_at: Option<Vector>,
     /// Every parcel record that was not an answer to the sweep.
-    pushes: Vec<Push>,
+    pub(super) pushes: Vec<Push>,
     /// Every alert's text.
-    alerts: Vec<String>,
+    pub(super) alerts: Vec<String>,
 }
 
 impl Seen {
     /// A watcher for an avatar that has just arrived at `position`.
-    fn arriving(agent: Uuid, position: Vector) -> Self {
+    pub(super) fn arriving(agent: Uuid, position: Vector) -> Self {
         Self {
             agent,
             arrived: Instant::now(),
@@ -397,7 +399,7 @@ impl Seen {
     }
 
     /// Records what `event` says.
-    fn note(&mut self, event: &Event) {
+    pub(super) fn note(&mut self, event: &Event) {
         match event {
             Event::ObjectUpdated(object) | Event::ObjectAdded(object)
                 if object.full_id.uuid() == self.agent =>
@@ -442,7 +444,7 @@ impl Seen {
     }
 
     /// The ban lines pushed for the parcel `local_id`.
-    fn ban_lines(&self, local_id: RegionLocalParcelId) -> impl Iterator<Item = &Push> {
+    pub(super) fn ban_lines(&self, local_id: RegionLocalParcelId) -> impl Iterator<Item = &Push> {
         self.pushes.iter().filter(move |push| {
             push.parcel.local_id == local_id && push.parcel.collision().is_some()
         })
@@ -450,7 +452,7 @@ impl Seen {
 
     /// The pushes as the record shows them, repeats folded into a count:
     /// `sequence/local id/result/collision @seconds ×n`.
-    fn describe_pushes(&self) -> String {
+    pub(super) fn describe_pushes(&self) -> String {
         let mut folded: Vec<(String, f64, usize)> = Vec::new();
         for push in &self.pushes {
             let shown = format!(
@@ -480,9 +482,23 @@ impl Seen {
 /// # Errors
 ///
 /// Propagates the wait's failures other than its own expected timeout.
-async fn stand(session: &mut Session, seen: &mut Seen) -> Result<(), TestFailure> {
+pub(super) async fn stand(session: &mut Session, seen: &mut Seen) -> Result<(), TestFailure> {
+    watch(session, seen, LANDING).await
+}
+
+/// Leaves the avatar to whatever it is doing for `window`, showing what
+/// arrives to `seen`.
+///
+/// # Errors
+///
+/// Propagates the wait's failures other than its own expected timeout.
+pub(super) async fn watch(
+    session: &mut Session,
+    seen: &mut Seen,
+    window: Duration,
+) -> Result<(), TestFailure> {
     match session
-        .wait_for(LANDING, |event| {
+        .wait_for(window, |event| {
             seen.note(event);
             None::<()>
         })
@@ -499,7 +515,7 @@ const fn is_sweep_answer(sequence_id: i32) -> bool {
 }
 
 /// How many squares a parcel record's bitmap has set.
-fn squares(parcel: &ParcelInfo) -> u32 {
+pub(super) fn squares(parcel: &ParcelInfo) -> u32 {
     parcel.bitmap.iter().map(|byte| byte.count_ones()).sum()
 }
 
@@ -512,7 +528,7 @@ fn squares(parcel: &ParcelInfo) -> u32 {
 /// a parcel that is open it changes nothing, as an aditi sandbox parcel with
 /// only that flag showed by letting a stranger in. A ban list alone names
 /// individuals, and the test avatar is on nobody's.
-const fn restriction(parcel: &ParcelInfo) -> Option<&'static str> {
+pub(super) const fn restriction(parcel: &ParcelInfo) -> Option<&'static str> {
     let flags = parcel.flags();
     if flags.contains(ParcelFlags::USE_ACCESS_LIST) {
         if flags.contains(ParcelFlags::USE_ACCESS_GROUP) {
@@ -530,19 +546,19 @@ const fn restriction(parcel: &ParcelInfo) -> Option<&'static str> {
 }
 
 /// What a sweep of one region found.
-struct Survey {
+pub(super) struct Survey {
     /// How many parcels the region has.
-    parcels: usize,
+    pub(super) parcels: usize,
     /// How many of them keep strangers out.
-    restricted: usize,
+    pub(super) restricted: usize,
     /// The nearest of those: the parcel, the centre of its nearest square, and
     /// how far that is.
-    picked: Option<(ParcelInfo, Vector, f32)>,
+    pub(super) picked: Option<(ParcelInfo, Vector, f32)>,
 }
 
 impl Survey {
     /// The survey as the record shows it.
-    fn describe(&self) -> String {
+    pub(super) fn describe(&self) -> String {
         format!("{} parcels, {} restricted", self.parcels, self.restricted)
     }
 }
@@ -553,7 +569,7 @@ impl Survey {
 /// # Errors
 ///
 /// Propagates the sweep's failures.
-async fn survey(session: &mut Session, seen: &mut Seen) -> Result<Survey, TestFailure> {
+pub(super) async fn survey(session: &mut Session, seen: &mut Seen) -> Result<Survey, TestFailure> {
     let parcels = sweep(session, seen).await?;
     let restricted: Vec<&ParcelInfo> = parcels
         .iter()
@@ -710,7 +726,7 @@ fn square_metres(square: usize) -> f32 {
 }
 
 /// The centre of the square of `parcel` nearest to `here`, and how far it is.
-fn nearest_square(parcel: &ParcelInfo, here: &Vector) -> Option<(Vector, f32)> {
+pub(super) fn nearest_square(parcel: &ParcelInfo, here: &Vector) -> Option<(Vector, f32)> {
     (0..SQUARES_PER_EDGE * SQUARES_PER_EDGE)
         .filter(|index| bit(&parcel.bitmap, *index))
         .map(|index| {
@@ -728,7 +744,10 @@ fn nearest_square(parcel: &ParcelInfo, here: &Vector) -> Option<(Vector, f32)> {
 /// # Errors
 ///
 /// Propagates the wait's failures.
-async fn own_position(session: &mut Session, agent: Uuid) -> Result<Vector, TestFailure> {
+pub(super) async fn own_position(
+    session: &mut Session,
+    agent: Uuid,
+) -> Result<Vector, TestFailure> {
     session
         .wait_for(LONG_TIMEOUT, |event| match event {
             Event::ObjectAdded(object) | Event::ObjectUpdated(object)

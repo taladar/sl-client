@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 334 |
+| ready | 333 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 39 |
-| done | 1443 |
+| done | 1444 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2079** |
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (334)
+## ready (333)
 
 ### protocol
 
@@ -1154,8 +1154,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
-  down when Second Life pushes a ban line
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
@@ -1503,7 +1501,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1443)
+## done (1444)
 
 ### protocol
 
@@ -4702,6 +4700,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   full SimulatorFeatures map on each grid
 - [`gridspec-sit-stand`](done/gridspec-sit-stand.md) — Sitting and standing:
   placement, refusals and alerts on each grid
+- [`gridspec-sl-ban-line-trigger`](done/gridspec-sl-ban-line-trigger.md) — Pin
+  down when Second Life pushes a ban line
 - [`gridspec-survey`](done/gridspec-survey.md) — Survey — tasks to measure aditi
   and OpenSim and make the fake grid be each
 - [`gridspec-task-inventory`](done/gridspec-task-inventory.md) — Task inventory

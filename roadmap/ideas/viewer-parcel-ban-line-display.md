@@ -81,8 +81,8 @@ from (`book/src/gridspec/land.md` § The ban line). Two corrections:
 - `USE_ACCESS_GROUP` alone closes nothing — it admits the group to a parcel
   `USE_ACCESS_LIST` has closed — so step 2's flag list must start from
   `USE_ACCESS_LIST`, `DENY_ANONYMOUS` and the age flag.
-- On Second Life the proximity push is unreliable in a stronger sense than
-  "current region only": it came on some arrivals beside a closed parcel and on
-  no approach ([[gridspec-sl-ban-line-trigger]]). The fence the reference
+- On Second Life the push follows the camera, not the avatar: every 0.53 s
+  while the parcel is in view within about 20 m of it
+  ([[gridspec-sl-ban-line-trigger]]). The fence the reference
   shows on a refusal is [[viewer-parcel-ban-lines-on-refusal]]; this note
   stays the region-wide idea.

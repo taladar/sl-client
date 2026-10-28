@@ -561,7 +561,7 @@ const fn patch_of(x: f32, y: f32) -> (u32, u32) {
 }
 
 /// A region-local coordinate as a whole metre, clamped into a region.
-const fn metre(value: f32) -> u32 {
+pub(super) const fn metre(value: f32) -> u32 {
     let rounded = value.clamp(0.0, 4095.0).round();
     #[expect(
         clippy::as_conversions,

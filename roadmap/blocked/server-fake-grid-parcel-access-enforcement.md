@@ -33,7 +33,14 @@ push under `-30000` / `-40000` on movement near the parcel, the avatar put
 back outside, a teleport that lands and is then moved, a ban that bites only
 once the avatar moves. The Second Life flavour has the refusal
 (`NOTIFY: Cannot enter parcel: …`), the walking avatar stopped at the line and
-the flying one lifted over it; when it pushes the line is
-[[gridspec-sl-ban-line-trigger]], and a ban proper waits on land.
+the flying one lifted over it, and (since 2026-10-28,
+[[gridspec-sl-ban-line-trigger]]) when it pushes the line: by the agent's
+camera, every 0.53 s while part of the parcel's 50 m column is in the
+camera's view within about 20 m, whatever the avatar does — § What makes
+Second Life push it. The fake grid keeps the camera's centre from
+`AgentUpdate` (`driver.rs`, `camera_at`) but not its look axis, which the
+Second Life flavour needs as well, for a view test (a half-angle of 30–45° to
+the side) and a 0.53 s tick, and must not push on the avatar's movement as the
+OpenSim flavour does. A ban proper waits on land.
 `parcel-ban-enforcement` is the case to add to the offline list once this is
 built.

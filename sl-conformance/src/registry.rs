@@ -225,6 +225,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::parcel_ban_enforcement::ParcelBanEnforcement),
         Box::new(crate::cases::parcel_privacy::ParcelPrivacy),
         Box::new(crate::cases::parcel_ban_line::ParcelBanLine),
+        Box::new(crate::cases::ban_line_trigger::BanLineTrigger),
         Box::new(crate::cases::modify_land::ModifyLand),
         Box::new(crate::cases::parcel_divide_join::ParcelDivideJoin),
         Box::new(crate::cases::parcel_object_owners::ParcelObjectOwners),

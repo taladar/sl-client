@@ -25,6 +25,7 @@ pub mod avatar_presence;
 pub mod avatar_properties;
 pub mod avatar_render_info;
 pub mod baked_texture_upload;
+pub mod ban_line_trigger;
 pub mod calling_card;
 pub mod chat_border;
 pub mod chat_hear_other;
