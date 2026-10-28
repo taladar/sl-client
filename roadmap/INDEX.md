@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 39 |
-| done | 1440 |
+| done | 1441 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2078** |
+| **total** | **2079** |
 
 ## ideas (135)
 
@@ -1137,6 +1137,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
   size-proportional call costs and the region's script budget on aditi
+- [`server-lsl-forced-delays-per-flavour`](ready/server-lsl-forced-delays-per-flavour.md)
+  — Charge each grid flavour's measured forced delays and throttles, not the
+  keyword file's (blocked by `gridspec-lsl-throttles` (done))
 - [`server-lsl-library-unserved-functions`](ready/server-lsl-library-unserved-functions.md)
   — Five functions no served LSLSyntax document lists
 - [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
@@ -1151,9 +1154,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-throttles`](ready/gridspec-lsl-throttles.md) — Forced delays
-  and throttles on each grid (blocked by `gridspec-lsl-live-differential-runner`
-  (done))
 - [`gridspec-lsl-time-timers`](ready/gridspec-lsl-time-timers.md) — LSL time,
   timers and sleep on each grid (blocked by
   `gridspec-lsl-live-differential-runner` (done))
@@ -1508,7 +1508,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1440)
+## done (1441)
 
 ### protocol
 
@@ -4651,6 +4651,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-task-inventory`](done/gridspec-lsl-task-inventory.md) — LSL
   library behaviour on each grid — task inventory, giving, rezzing and notecards
   (blocked by `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-throttles`](done/gridspec-lsl-throttles.md) — Forced delays and
+  throttles on each grid (blocked by `gridspec-lsl-live-differential-runner`
+  (done))
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct
   delivery on each grid
 - [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material

@@ -1,0 +1,53 @@
+grid: opensim-xengine
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE throttle/delays rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE throttle/delays rec=delay fn=llRegionSay seconds=0.002000 least=0.000000 most=0.006000
+PROBE throttle/delays rec=delay fn=llSetColor seconds=0.002000 least=0.000000 most=0.005000
+PROBE throttle/delays rec=delay fn=llSetScale seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llSetLinkPrimitiveParamsFast seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llSetPos seconds=0.200000 least=0.200000 most=0.200000
+PROBE throttle/delays rec=delay fn=llSetRot seconds=0.200000 least=0.200000 most=0.201000
+PROBE throttle/delays rec=delay fn=llSetLocalRot seconds=0.200000 least=0.200000 most=0.200000
+PROBE throttle/delays rec=delay fn=llSetTexture seconds=0.200000 least=0.200000 most=0.200000
+PROBE throttle/delays rec=delay fn=llSetLinkTexture seconds=0.200000 least=0.200000 most=0.200000
+PROBE throttle/delays rec=delay fn=llScaleTexture seconds=0.200000 least=0.200000 most=0.201000
+PROBE throttle/delays rec=delay fn=llOffsetTexture seconds=0.200000 least=0.200000 most=0.200000
+PROBE throttle/delays rec=delay fn=llRotateTexture seconds=0.200000 least=0.200000 most=0.200000
+PROBE throttle/delays rec=delay fn=llSetPrimitiveParams seconds=0.200000 least=0.200000 most=0.200000
+PROBE throttle/delays rec=delay fn=llSetLinkPrimitiveParams seconds=0.200000 least=0.200000 most=0.201000
+PROBE throttle/delays rec=delay fn=llSetRemoteScriptAccessPin seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llAdjustSoundVolume seconds=0.100000 least=0.100000 most=0.100000
+PROBE throttle/delays rec=delay fn=llGetRegionFlags seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llModPow seconds=1.000000 least=1.000000 most=1.000000
+PROBE throttle/delays rec=delay fn=llXorBase64Strings seconds=0.300000 least=0.300000 most=0.300000
+PROBE throttle/delays rec=delay fn=llRequestAgentData seconds=0.100000 least=0.100000 most=0.101000
+PROBE throttle/delays rec=delay fn=llRequestUsername seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llRequestDisplayName seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llRequestSimulatorData seconds=1.000000 least=1.000000 most=1.000000
+PROBE throttle/delays rec=delay fn=llGetParcelPrimOwners seconds=2.000000 least=2.000000 most=2.001000
+PROBE throttle/delays rec=delay fn=llParcelMediaQuery seconds=0.000000 least=0.000000 most=0.001000
+PROBE throttle/delays rec=delay fn=llGetPrimMediaParams seconds=1.000000 least=1.000000 most=1.000000
+PROBE throttle/delays rec=delay fn=llClearPrimMedia seconds=1.001000 least=1.000000 most=1.001000
+PROBE throttle/delays rec=delay fn=llMapDestination seconds=0.000000 least=0.000000 most=0.000000
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=26
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=26
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=26
+PROBE throttle/delays rec=delay fn=llInstantMessage seconds=2.000000 least=2.000000 most=2.001000
+# dialog object="Object" owner="<first> <last>" channel=-7401 message_length=15 message="throttle/delays" buttons="OK" count=1
+# dialog object="Object" owner="<first> <last>" channel=-7401 message_length=15 message="throttle/delays" buttons="OK" count=1
+# dialog object="Object" owner="<first> <last>" channel=-7401 message_length=15 message="throttle/delays" buttons="OK" count=1
+PROBE throttle/delays rec=delay fn=llDialog seconds=1.000000 least=1.000000 most=1.000000
+# dialog object="Object" owner="<first> <last>" channel=-7402 message_length=15 message="throttle/delays" buttons="!!llTextBox!!" count=1
+# dialog object="Object" owner="<first> <last>" channel=-7402 message_length=15 message="throttle/delays" buttons="!!llTextBox!!" count=1
+# dialog object="Object" owner="<first> <last>" channel=-7402 message_length=15 message="throttle/delays" buttons="!!llTextBox!!" count=1
+PROBE throttle/delays rec=delay fn=llTextBox seconds=1.000000 least=1.000000 most=1.001000
+PROBE throttle/delays rec=delay fn=llLoadURL seconds=10.000000 least=10.000000 most=10.000000
+PROBE throttle/delays rec=answers dataserver=12
+PROBE throttle/delays rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

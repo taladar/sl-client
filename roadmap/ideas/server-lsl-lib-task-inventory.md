@@ -82,3 +82,11 @@ and notecards. What the acceptance above should hold to:
   illegally load script onto task '<name>'!`.
 - **`llResetOtherScript` of a stopped script** leaves it where it was:
   started again, it carries on without `state_entry` (OpenSim runs it).
+
+## Measured (gridspec-lsl-throttles, 2026-10-28)
+
+No rez throttle on either grid at 300 `llRezObject` calls in six waves of
+fifty: Second Life rezzed all of them at about 6.3 a second (its 0.1 s forced
+delay reads 0.1–0.4 s a call), OpenSim at exactly 10. `llGiveInventory` to an
+avatar sleeps 2 s on Second Life and 3 s on OpenSim, where the keyword file
+says 0 ([[server-lsl-forced-delays-per-flavour]]).

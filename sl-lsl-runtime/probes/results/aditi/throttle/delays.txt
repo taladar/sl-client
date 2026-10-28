@@ -1,0 +1,53 @@
+grid: aditi
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE throttle/delays rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# animations avatar=other playing=""
+PROBE throttle/delays rec=delay fn=llRegionSay seconds=0.015000 least=0.000000 most=0.044000
+PROBE throttle/delays rec=delay fn=llSetColor seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llSetScale seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llSetLinkPrimitiveParamsFast seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llSetPos seconds=0.207000 least=0.200000 most=0.222000
+PROBE throttle/delays rec=delay fn=llSetRot seconds=0.215000 least=0.200000 most=0.222000
+# animations avatar=owner playing=""
+PROBE throttle/delays rec=delay fn=llSetLocalRot seconds=0.215000 least=0.200000 most=0.222000
+PROBE throttle/delays rec=delay fn=llSetTexture seconds=0.303000 least=0.221000 most=0.466000
+PROBE throttle/delays rec=delay fn=llSetLinkTexture seconds=0.215000 least=0.200000 most=0.223000
+PROBE throttle/delays rec=delay fn=llScaleTexture seconds=0.215000 least=0.200000 most=0.222000
+PROBE throttle/delays rec=delay fn=llOffsetTexture seconds=0.208000 least=0.200000 most=0.222000
+PROBE throttle/delays rec=delay fn=llRotateTexture seconds=0.207000 least=0.200000 most=0.222000
+PROBE throttle/delays rec=delay fn=llSetPrimitiveParams seconds=0.215000 least=0.201000 most=0.222000
+PROBE throttle/delays rec=delay fn=llSetLinkPrimitiveParams seconds=0.208000 least=0.200000 most=0.222000
+PROBE throttle/delays rec=delay fn=llSetRemoteScriptAccessPin seconds=0.200000 least=0.200000 most=0.200000
+PROBE throttle/delays rec=delay fn=llAdjustSoundVolume seconds=0.111000 least=0.110000 most=0.111000
+PROBE throttle/delays rec=delay fn=llGetRegionFlags seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llModPow seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llXorBase64Strings seconds=0.311000 least=0.311000 most=0.312000
+PROBE throttle/delays rec=delay fn=llRequestAgentData seconds=0.111000 least=0.111000 most=0.111000
+PROBE throttle/delays rec=delay fn=llRequestUsername seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llRequestDisplayName seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llRequestSimulatorData seconds=1.008000 least=1.000000 most=1.023000
+PROBE throttle/delays rec=delay fn=llGetParcelPrimOwners seconds=2.001000 least=2.001000 most=2.001000
+PROBE throttle/delays rec=delay fn=llParcelMediaQuery seconds=2.008000 least=2.000000 most=2.022000
+PROBE throttle/delays rec=delay fn=llGetPrimMediaParams seconds=1.008000 least=1.000000 most=1.022000
+PROBE throttle/delays rec=delay fn=llClearPrimMedia seconds=1.000000 least=1.000000 most=1.001000
+PROBE throttle/delays rec=delay fn=llMapDestination seconds=1.008000 least=1.000000 most=1.023000
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=15
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=15
+# im dialog=19 from=owner id=probe name="Object" offline=0 length=15 message="throttle/delays" bucket=15
+PROBE throttle/delays rec=delay fn=llInstantMessage seconds=2.000000 least=2.000000 most=2.001000
+# dialog object="Object" owner="<first> <last>" channel=-7401 message_length=15 message="throttle/delays" buttons="OK" count=1
+# dialog object="Object" owner="<first> <last>" channel=-7401 message_length=15 message="throttle/delays" buttons="OK" count=1
+# dialog object="Object" owner="<first> <last>" channel=-7401 message_length=15 message="throttle/delays" buttons="OK" count=1
+PROBE throttle/delays rec=delay fn=llDialog seconds=1.000000 least=1.000000 most=1.001000
+# dialog object="Object" owner="<first> <last>" channel=-7402 message_length=15 message="throttle/delays" buttons="!!llTextBox!!" count=1
+# dialog object="Object" owner="<first> <last>" channel=-7402 message_length=15 message="throttle/delays" buttons="!!llTextBox!!" count=1
+# dialog object="Object" owner="<first> <last>" channel=-7402 message_length=15 message="throttle/delays" buttons="!!llTextBox!!" count=1
+PROBE throttle/delays rec=delay fn=llTextBox seconds=0.000000 least=0.000000 most=0.000000
+PROBE throttle/delays rec=delay fn=llLoadURL seconds=0.111000 least=0.111000 most=0.112000
+PROBE throttle/delays rec=answers dataserver=12
+PROBE throttle/delays rec=end

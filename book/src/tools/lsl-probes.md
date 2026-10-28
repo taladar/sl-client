@@ -303,6 +303,17 @@ What has bitten already, and how a probe should be shaped for it:
   half a minute on Second Life; a probe that asks a question right after the
   owner returns should wait longer for the answer than it otherwise would
   (`money/lapse`), or its timeout and the late answer cross.
+- **A refused HTTP request counts on Second Life.** After the burst of 25,
+  a script that retries every half second is refused every time, for as long
+  as it retries; twenty seconds of silence reopen the whole allowance
+  (`throttle/http-window`). Back off rather than retry at once.
+- **An error on OpenSim costs the script a second.** Every library error
+  message goes through one function that sleeps 1 s after it, so a probe that
+  provokes errors in a loop runs a second per error there (`throttle/delays`,
+  `throttle/email`), and a timing taken across one includes it.
+- **`llLoadURL` sleeps ten seconds on OpenSim**, against 0.1 s on Second
+  Life (`throttle/delays`); leave it out of a probe that has other things to
+  time.
 
 ## Running
 
@@ -511,6 +522,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `math/*`, `strings/*`, `vm/call-cost-*`, 2026-10-27: the exact precision of float, vector and rotation arithmetic, the rotation helpers and what they do with rotations that are not unit length, rounding, overflow, `llModPow` and `llFrand`, casts between strings and the other types, the string and list library on text outside ASCII, the newer string and list functions, and what 26 functions cost as their argument grows | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#strings-lists-maths-and-rotations) | | |
 | `inventory/*`, 2026-10-27: reading the prim's inventory, its order, names, keys, creators and masks, the script-state calls, `llRemoveInventory`; notecards over the dataserver and their line limits; rezzing and the order of `object_rez` and `on_rez`; giving to a prim and to avatars, and `llRemoteLoadScriptPin`; and Second Life's newer `llGetNotecardLineSync`, `llRezObjectWithParams`, `llDerezObject`, `llGetInventoryDesc` and `llGetInventoryAcquireTime` | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#task-inventory-giving-rezzing-and-notecards) | | |
 | `errors/*`, 2026-10-27: which arithmetic faults under Mono, LSO and each OpenSim engine, what a fault and a library exception say and to whom, the say range, how Second Life cuts a flood of errors short, what brings a faulted script back, and list and string indices and strides out of range | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#run-time-errors) | | |
+| `throttle/*`, 2026-10-28: the forced delay of 31 calls against the documented one, `llEmail` between objects, 300 rezzes, ten seconds of raycasts, floods of chat on channel 0 and on others, and how the HTTP throttle lets go | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#forced-delays-and-throttles) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

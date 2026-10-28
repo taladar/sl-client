@@ -109,3 +109,10 @@ build to. The rows a flavour splits on:
 Life (each replaces the last) and three times on OpenSim; a repeating
 sensor is dropped by a state change on every grid. On Second Life a sensor's
 answer can come after a timer that fired 0.3 s after the call.
+
+## Measured (gridspec-lsl-throttles, 2026-10-28)
+
+`llCastRay` is not throttled on either grid over ten seconds of rays in a
+loop: Second Life cast 1090 a metre-long ray a second and 45 region-crossing
+rays asking for 256 hits, with no `RCERR_*`; OpenSim 14 a second under
+YEngine and about 30 under XEngine, whatever the ray. Nothing to enforce.

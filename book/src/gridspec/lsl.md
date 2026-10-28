@@ -767,6 +767,10 @@ each refusal for that reason.
 | what came back for the accepted ones | 200 each; nothing for a refused one (no 499) | the same | no scripts |
 | one more request 40 s later | accepted, 200 | the same | no scripts |
 
+How the throttle lets go again, and why a script that retries at once stays
+shut out on Second Life, is in
+[HTTP requests: how the throttle lets go](#http-requests-how-the-throttle-lets-go).
+
 ### What the viewer does with it
 
 Nothing: none of this reaches a viewer. A refused request's complaint is an
@@ -2300,3 +2304,130 @@ marked offline or not. A name with more than ASCII is not kept as typed
 when an item is made over UDP `CreateInventoryItem`, the message the
 reference viewer makes items with too; whether such a name survives a rename
 (`UpdateInventoryItem`, or AIS on Second Life) is not measured.
+
+## Forced delays and throttles
+
+Measured on 2026-10-28 by the probes `throttle/delays`, `throttle/email`,
+`throttle/rez`, `throttle/cast-ray`, `throttle/chat` and
+`throttle/http-window`, on the same grids. YEngine and XEngine agree on
+every row but the raycast rate, so they share a column. The local OpenSim
+runs with `ScriptDelayFactor` 1.0, the default, which scales every sleep in
+the OpenSim column. Each delay is the time the call itself took, by
+`llGetTime` before and after, the mean of three calls; on Second Life that
+clock moves in frames (about 0.022 s), so a delay there reads up to a frame
+over its value.
+
+### Forced delays
+
+The documented value is the `sleep` of Linden Lab's keyword file
+(`keywords_lsl_default.xml`), which `sl-lsl-runtime` charges after every
+call today. Each call set what the prim already had, or asked about the
+owner or the region; none of the land calls had the land's rights on
+either grid.
+
+| call | documented | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- | --- |
+| `llRegionSay`, `llSetColor`, `llSetScale`, `llSetLinkPrimitiveParamsFast` | 0 | 0 (a frame once) | 0 | no scripts |
+| `llSetPos`, `llSetRot`, `llSetLocalRot` | 0.2 | 0.2–0.22 | 0.2 | no scripts |
+| `llSetTexture`, `llSetLinkTexture`, `llScaleTexture`, `llOffsetTexture`, `llRotateTexture` | 0.2 | 0.2–0.22; one `llSetTexture` took 0.47 | 0.2 | no scripts |
+| `llSetPrimitiveParams`, `llSetLinkPrimitiveParams` | 0.2 | 0.2–0.22 | 0.2 | no scripts |
+| `llSetRemoteScriptAccessPin` | 0.2 | 0.2 | **0** | no scripts |
+| `llAdjustSoundVolume`, `llRequestAgentData` | 0.1 | 0.11 | 0.1 | no scripts |
+| `llXorBase64Strings` | 0.3 | 0.31 | 0.3 | no scripts |
+| `llGetRegionFlags`, `llRequestUsername`, `llRequestDisplayName` | 0 | 0 | 0 | no scripts |
+| `llModPow` | 0 | 0 | **1.0** | no scripts |
+| `llRequestSimulatorData` | 1.0 | 1.0 | 1.0 | no scripts |
+| `llGetParcelPrimOwners`, without the land's rights | 2.0 | 2.0 | 2.0 | no scripts |
+| `llParcelMediaQuery`, without the land's rights | 2.0 | 2.0 | **0**: it returns before the sleep | no scripts |
+| `llGetPrimMediaParams`, `llClearPrimMedia` | 1.0 | 1.0 | 1.0 | no scripts |
+| `llMapDestination`, outside a touch and not worn (it does nothing) | 1.0 | 1.0 | **0**: it returns before the sleep | no scripts |
+| `llInstantMessage` | 2.0 | 2.0 | 2.0 | no scripts |
+| `llDialog` | 1.0 | 1.0 | 1.0 | no scripts |
+| `llTextBox` | 1.0 | **0** | 1.0 | no scripts |
+| `llLoadURL` | 0.1 | 0.11 | **10.0** | no scripts |
+| `llEmail` | 20.0 | 20.0 | 1.0: the email module is off (below) | no scripts |
+| `llRezObject` ([Rezzing](#rezzing)) | 0.1 | 0.1–0.2 | 0.1 | no scripts |
+| `llGiveInventory` to an avatar ([Giving](#giving)) | 0 | 2 | 3 | no scripts |
+
+**OpenSim sleeps a script for a second whenever a library call reports an
+error.** Its `LSL_Api.Error`, which every such message goes through, ends
+in `Sleep(1000)`. That is the 1 s beside each OpenSim error in the tables
+above (a notecard, an object or an item that is not there), and the 1 s of
+its `llEmail` here; `llGetNextEmail` costs the same second each time it is
+called. Second Life's error messages cost nothing but the call's own delay.
+
+### Email
+
+`throttle/email`: prim A sends prim B two emails, one to
+`<key>@lsl.secondlife.com` and one to the grid's own domain for objects;
+prim B asks for its mail every two seconds.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the forced delay | 20.0 s | 1 s, the error's (`llEmail: Email module not configured`; the module is off by default) | no scripts |
+| to `<key>@lsl.aditi.lindenlab.com` | arrives about 2 s after the send, while the sender still sleeps | — | no scripts |
+| to `<key>@lsl.secondlife.com` | never arrives (not within 80 s): from the beta grid that is the main grid's domain | — | no scripts |
+| the `email` event | the sender `<sender's key>@lsl.aditi.lindenlab.com`; the body six lines, three of headers (`Object-Name: Object`, the region, the position), a blank line, then the message; nothing more waiting | `llGetNextEmail: Email module not configured` | no scripts |
+
+### Rezzing without pause
+
+`throttle/rez`: six waves of fifty `llRezObject` calls in a row, three
+seconds apart, of an object that dies as it is rezzed.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| 300 calls | all 300 rezzed; **no throttle** | all 300 | no scripts |
+| the rate | about 6.3 a second (7.8–8.0 s a wave); the slowest call 0.4 s | 10 a second, 0.1 s each | no scripts |
+
+### Raycasts without pause
+
+`throttle/cast-ray`: `llCastRay` in a loop for ten seconds, twice. The cheap
+ray is a metre long where nothing is; the expensive one crosses the region
+corner to corner at prim A's height, asking for 256 hits and phantoms.
+
+| what | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| the cheap ray | 11 552 rays, 1090 a second; **no `RCERR_*`** | 136, 14 a second | 317, 32 a second | no scripts |
+| the expensive ray | 454 rays, 45 a second; no `RCERR_*` | 142, 14 a second | 283, 28 a second | no scripts |
+
+### Chat without pause
+
+`throttle/chat`: prim A says to prim B, five metres east, where four
+listener scripts share the counting so no event queue fills. Channel 0
+first, then for each of `llRegionSay`, `llSay` and `llRegionSayTo` (prim B)
+a burst of 200 in a row and ten waves of 40 a second apart.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| 25 `llSay` on channel 0 | all heard, in 0.33 s; no call sleeps | all heard, in 4 s: **the 12th and the 24th call sleep 2 s** — more than eleven lines on channel 0 within a second (`llSay`, `llShout`) | no scripts |
+| `llRegionSay`, `llSay`, `llRegionSayTo` on other channels, 600 each | all heard; **no throttle**; a call takes at most a frame | all heard; no throttle; no call sleeps | no scripts |
+
+### HTTP requests: how the throttle lets go
+
+[The throttle](#the-throttle) above measured the burst each grid accepts.
+`throttle/http-window` measures what comes after: one request every half
+second for forty seconds after the burst, then one after each of a series
+of silences, and a burst after the first that is accepted.
+
+| what | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| the burst | 25 accepted | 4 | no scripts |
+| a request every 0.5 s for 40 s after it | **every one refused**: a refused request counts as one, so asking keeps the throttle shut | every second one accepted: one a second | no scripts |
+| silence, then one request | refused after 5, 10 and 15 s of silence, **accepted after 20** | accepted after 5 s | no scripts |
+| a burst after the silence | 25 again (the one and 24 more): the whole allowance | 4 | no scripts |
+
+So Second Life's limit is 25 requests in 20 seconds, counting the refused
+ones, and a script that retries at once stays shut out for as long as it
+keeps trying. OpenSim's is a bucket of 3 that fills by one a second
+(`PrimRequestsBurst`, `PrimRequestsPerSec`), which refusals do not drain.
+
+### What the viewer does with it
+
+Nothing here reaches a viewer but what the calls themselves send. Each
+`llInstantMessage`, `llDialog` and `llTextBox` of `throttle/delays` reached
+the owner once per call on both grids — three dialogs for three calls, none
+held back — and the viewer shows a dialog or a text box as any other
+(`sl-viewer-notices`' `script_dialog`), and an `llLoadURL` as its prompt
+(`load_url`). The 25 channel-0 lines arrived as 25 lines of object chat on
+both grids: neither grid holds a flood back, so collapsing one is the
+viewer's to do (the roadmap's `viewer-anti-spam-filter`).

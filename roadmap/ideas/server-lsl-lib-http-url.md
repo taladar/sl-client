@@ -101,3 +101,12 @@ should take each flavour's column. The parts that shape the implementation:
   in order, so a bad option before the flag is refused as without it.
   `DEBUG_CHANNEL` complaints flood out after about eleven in thirty seconds
   (`Too many errors... dropping further messages until the flood stops`).
+
+## Measured (gridspec-lsl-throttles, 2026-10-28)
+
+How the throttle lets go (`book/src/gridspec/lsl.md` § HTTP requests: how
+the throttle lets go): Second Life allows 25 requests in 20 s and **counts the
+refused ones**, so a script retrying every half second is refused for as long
+as it keeps trying; 20 s of silence (not 15) give the whole 25 back. OpenSim
+refills its bucket of 3 by one a second and refusals do not drain it. The
+throttle per flavour is [[server-lsl-forced-delays-per-flavour]].

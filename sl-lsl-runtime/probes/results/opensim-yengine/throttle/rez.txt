@@ -1,0 +1,25 @@
+grid: opensim-yengine
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# object "Spark" scripts=1
+# chat type=say from="Object" length=14 text="Script running"
+PROBE throttle/rez rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE throttle/rez rec=wave wave=0 calls=50 seconds=5.005000 slowest=0.101000 per_second=10
+PROBE throttle/rez rec=seen after_wave=0 so_far=50
+PROBE throttle/rez rec=wave wave=1 calls=50 seconds=5.005000 slowest=0.101000 per_second=10
+PROBE throttle/rez rec=seen after_wave=1 so_far=100
+PROBE throttle/rez rec=wave wave=2 calls=50 seconds=5.005000 slowest=0.101000 per_second=10
+PROBE throttle/rez rec=seen after_wave=2 so_far=150
+PROBE throttle/rez rec=wave wave=3 calls=50 seconds=5.005000 slowest=0.101000 per_second=10
+PROBE throttle/rez rec=seen after_wave=3 so_far=200
+PROBE throttle/rez rec=wave wave=4 calls=50 seconds=5.006000 slowest=0.101000 per_second=10
+PROBE throttle/rez rec=seen after_wave=4 so_far=250
+PROBE throttle/rez rec=wave wave=5 calls=50 seconds=5.006000 slowest=0.101000 per_second=10
+PROBE throttle/rez rec=seen after_wave=5 so_far=300
+PROBE throttle/rez rec=total calls=300 rezzed=300
+PROBE throttle/rez rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

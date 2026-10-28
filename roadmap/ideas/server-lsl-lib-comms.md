@@ -106,3 +106,14 @@ now, so the dialog leg of this task's acceptance needs no protocol work.
 state change, on every grid; five lines said in one handler, the same or
 different, are five `listen` events in order, and five identical link
 messages five `link_message`s — nothing merges either, anywhere.
+
+## Measured (gridspec-lsl-throttles, 2026-10-28)
+
+`book/src/gridspec/lsl.md` § Forced delays and throttles: neither grid
+throttles `llRegionSay`, `llSay` or `llRegionSayTo` on a channel other than 0
+(600 each, a burst of 200 and ten waves of 40, all heard), and Second Life
+does not throttle channel 0 either (25 in a third of a second). OpenSim
+sleeps a script 2 s before its twelfth `llSay` / `llShout` on channel 0
+within a second. `llInstantMessage` sleeps 2 s and `llDialog` 1 s on both;
+`llTextBox` sleeps 1 s on OpenSim only (0 on Second Life). The delays
+themselves belong to [[server-lsl-forced-delays-per-flavour]].

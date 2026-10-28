@@ -1,0 +1,25 @@
+grid: aditi
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+# object "Spark" scripts=1
+# animations avatar=owner playing=""
+PROBE throttle/rez rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE throttle/rez rec=wave wave=0 calls=50 seconds=7.823000 slowest=0.200000 per_second=6
+PROBE throttle/rez rec=seen after_wave=0 so_far=50
+PROBE throttle/rez rec=wave wave=1 calls=50 seconds=8.031000 slowest=0.411000 per_second=6
+PROBE throttle/rez rec=seen after_wave=1 so_far=100
+PROBE throttle/rez rec=wave wave=2 calls=50 seconds=7.779000 slowest=0.156000 per_second=6
+PROBE throttle/rez rec=seen after_wave=2 so_far=150
+PROBE throttle/rez rec=wave wave=3 calls=50 seconds=8.020000 slowest=0.393000 per_second=6
+PROBE throttle/rez rec=seen after_wave=3 so_far=200
+PROBE throttle/rez rec=wave wave=4 calls=50 seconds=7.779000 slowest=0.157000 per_second=6
+PROBE throttle/rez rec=seen after_wave=4 so_far=250
+PROBE throttle/rez rec=wave wave=5 calls=50 seconds=7.967000 slowest=0.343000 per_second=6
+PROBE throttle/rez rec=seen after_wave=5 so_far=300
+PROBE throttle/rez rec=total calls=300 rezzed=300
+PROBE throttle/rez rec=end

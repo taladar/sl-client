@@ -32,6 +32,10 @@ sl-lsl-runtime/probes/land/ground.lsl skipchecks=lsl:::lslint;;;measures[[space]
 # llSetInventoryPermMask, which lslint rejects as god mode only.
 sl-lsl-runtime/probes/inventory/listing/probe.lsl skipchecks=lsl:::lslint;;;measures[[space]]the[[space]]god-mode[[space]]llSetInventoryPermMask
 
+# The throttle/delays probe times the forced delay of the deprecated
+# llXorBase64Strings, which lslint rejects; calling it is the measurement.
+sl-lsl-runtime/probes/throttle/delays.lsl skipchecks=lsl:::lslint;;;times[[space]]the[[space]]deprecated[[space]]llXorBase64Strings
+
 # The cargo-about license template is a whitespace-significant plain-text
 # template (its output format is machine-parsed by the About floater), not an
 # HTML/glimmer document: prettier's glimmer formatter reflows and breaks the

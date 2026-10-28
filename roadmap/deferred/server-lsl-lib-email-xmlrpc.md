@@ -45,3 +45,15 @@ Acceptance (when unparked): `llEmail` between two objects in one region
 delivered through an in-process mailbox with no SMTP; a `remote_data`
 channel opened, called from a test client and answered, with no network
 beyond loopback.
+
+## Measured (gridspec-lsl-throttles, 2026-10-28)
+
+`book/src/gridspec/lsl.md` § Email: on Second Life `llEmail` sleeps 20 s;
+mail from one object to another in the region arrives about 2 s after the
+send (before the sender wakes) when addressed to the grid's own object domain
+— `lsl.aditi.lindenlab.com` on the beta grid, where `lsl.secondlife.com`
+never arrives. The `email` event's sender is `<key>@<that domain>` and the
+body is three header lines (`Object-Name:`, the region, the position), a
+blank line and the message. OpenSim's email module is off by default, and
+`llEmail` and `llGetNextEmail` each say `Email module not configured` and
+sleep the 1 s every OpenSim error costs.

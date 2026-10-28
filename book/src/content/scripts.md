@@ -168,6 +168,9 @@ writes a value as a string and reads one back, what its string and list
 functions make of text outside ASCII, and what a call costs as its argument
 grows is in
 [Grid Behaviour → LSL scripts](../gridspec/lsl.md#strings-lists-maths-and-rotations).
+What each call's forced delay is on each grid against the documented one,
+and how each grid throttles rezzing, raycasts, chat and HTTP requests, is in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#forced-delays-and-throttles).
 
 Creating a brand-new script goes through `CreateInventoryItem` (carrying the
 language subtype): the **simulator fills a compilable default body** (the LSL

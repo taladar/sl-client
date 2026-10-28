@@ -1,0 +1,113 @@
+grid: opensim-yengine
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE throttle/chat rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE throttle/chat rec=ears found=1
+# chat type=say from="Object" length=7 text="f|0|0|0"
+# chat type=say from="Object" length=7 text="f|0|0|1"
+# chat type=say from="Object" length=7 text="f|0|0|2"
+# chat type=say from="Object" length=7 text="f|0|0|3"
+# chat type=say from="Object" length=7 text="f|0|0|4"
+# chat type=say from="Object" length=7 text="f|0|0|5"
+# chat type=say from="Object" length=7 text="f|0|0|6"
+# chat type=say from="Object" length=7 text="f|0|0|7"
+# chat type=say from="Object" length=7 text="f|0|0|8"
+# chat type=say from="Object" length=7 text="f|0|0|9"
+# chat type=say from="Object" length=8 text="f|0|0|10"
+# chat type=say from="Object" length=8 text="f|0|0|11"
+# chat type=say from="Object" length=8 text="f|0|0|12"
+# chat type=say from="Object" length=8 text="f|0|0|13"
+# chat type=say from="Object" length=8 text="f|0|0|14"
+# chat type=say from="Object" length=8 text="f|0|0|15"
+# chat type=say from="Object" length=8 text="f|0|0|16"
+# chat type=say from="Object" length=8 text="f|0|0|17"
+# chat type=say from="Object" length=8 text="f|0|0|18"
+# chat type=say from="Object" length=8 text="f|0|0|19"
+# chat type=say from="Object" length=8 text="f|0|0|20"
+# chat type=say from="Object" length=8 text="f|0|0|21"
+# chat type=say from="Object" length=8 text="f|0|0|22"
+# chat type=say from="Object" length=8 text="f|0|0|23"
+# chat type=say from="Object" length=8 text="f|0|0|24"
+PROBE throttle/chat rec=flood kind=0 fn=llSay channel=0 calls=25 seconds=4.002000 slow=2 delays="0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,2.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,2.000000,0.000000"
+PROBE throttle/chat rec=heard kind=0 wave=0 count=25
+PROBE throttle/chat rec=flood kind=1 fn=llRegionSay wave=0 calls=200 seconds=0.000000 slowest=0.000000
+PROBE throttle/chat rec=flood kind=1 fn=llRegionSay waves=1-10 calls=400 seconds=0.001000 slowest=0.001000
+PROBE throttle/chat rec=heard kind=1 wave=0 count=200
+PROBE throttle/chat rec=heard kind=1 wave=1 count=40
+PROBE throttle/chat rec=heard kind=1 wave=2 count=40
+PROBE throttle/chat rec=heard kind=1 wave=3 count=40
+PROBE throttle/chat rec=heard kind=1 wave=4 count=40
+PROBE throttle/chat rec=heard kind=1 wave=5 count=40
+PROBE throttle/chat rec=heard kind=1 wave=6 count=40
+PROBE throttle/chat rec=heard kind=1 wave=7 count=40
+PROBE throttle/chat rec=heard kind=1 wave=8 count=40
+PROBE throttle/chat rec=heard kind=1 wave=9 count=40
+PROBE throttle/chat rec=heard kind=1 wave=10 count=40
+PROBE throttle/chat rec=flood kind=2 fn=llSay wave=0 calls=200 seconds=0.000000 slowest=0.000000
+PROBE throttle/chat rec=flood kind=2 fn=llSay waves=1-10 calls=400 seconds=0.002000 slowest=0.001000
+PROBE throttle/chat rec=heard kind=2 wave=0 count=200
+PROBE throttle/chat rec=heard kind=2 wave=1 count=40
+PROBE throttle/chat rec=heard kind=2 wave=2 count=40
+PROBE throttle/chat rec=heard kind=2 wave=3 count=40
+PROBE throttle/chat rec=heard kind=2 wave=4 count=40
+PROBE throttle/chat rec=heard kind=2 wave=5 count=40
+PROBE throttle/chat rec=heard kind=2 wave=6 count=40
+PROBE throttle/chat rec=heard kind=2 wave=7 count=40
+PROBE throttle/chat rec=heard kind=2 wave=8 count=40
+PROBE throttle/chat rec=heard kind=2 wave=9 count=40
+PROBE throttle/chat rec=heard kind=2 wave=10 count=40
+PROBE throttle/chat rec=flood kind=3 fn=llRegionSayTo wave=0 calls=200 seconds=0.000000 slowest=0.000000
+PROBE throttle/chat rec=flood kind=3 fn=llRegionSayTo waves=1-10 calls=400 seconds=0.000000 slowest=0.000000
+PROBE throttle/chat rec=heard kind=3 wave=0 count=200
+PROBE throttle/chat rec=heard kind=3 wave=1 count=40
+PROBE throttle/chat rec=heard kind=3 wave=2 count=40
+PROBE throttle/chat rec=heard kind=3 wave=3 count=40
+PROBE throttle/chat rec=heard kind=3 wave=4 count=40
+PROBE throttle/chat rec=heard kind=3 wave=5 count=40
+PROBE throttle/chat rec=heard kind=3 wave=6 count=40
+PROBE throttle/chat rec=heard kind=3 wave=7 count=40
+PROBE throttle/chat rec=heard kind=3 wave=8 count=40
+PROBE throttle/chat rec=heard kind=3 wave=9 count=40
+PROBE throttle/chat rec=heard kind=3 wave=10 count=40
+PROBE throttle/chat rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=7 text="f|0|0|0"
+# chat by=other type=say from="Object" length=7 text="f|0|0|1"
+# chat by=other type=say from="Object" length=7 text="f|0|0|2"
+# chat by=other type=say from="Object" length=7 text="f|0|0|3"
+# chat by=other type=say from="Object" length=7 text="f|0|0|4"
+# chat by=other type=say from="Object" length=7 text="f|0|0|5"
+# chat by=other type=say from="Object" length=7 text="f|0|0|6"
+# chat by=other type=say from="Object" length=7 text="f|0|0|7"
+# chat by=other type=say from="Object" length=7 text="f|0|0|8"
+# chat by=other type=say from="Object" length=7 text="f|0|0|9"
+# chat by=other type=say from="Object" length=8 text="f|0|0|10"
+# chat by=other type=say from="Object" length=8 text="f|0|0|11"
+# chat by=other type=say from="Object" length=8 text="f|0|0|12"
+# chat by=other type=say from="Object" length=8 text="f|0|0|13"
+# chat by=other type=say from="Object" length=8 text="f|0|0|14"
+# chat by=other type=say from="Object" length=8 text="f|0|0|15"
+# chat by=other type=say from="Object" length=8 text="f|0|0|16"
+# chat by=other type=say from="Object" length=8 text="f|0|0|17"
+# chat by=other type=say from="Object" length=8 text="f|0|0|18"
+# chat by=other type=say from="Object" length=8 text="f|0|0|19"
+# chat by=other type=say from="Object" length=8 text="f|0|0|20"
+# chat by=other type=say from="Object" length=8 text="f|0|0|21"
+# chat by=other type=say from="Object" length=8 text="f|0|0|22"
+# chat by=other type=say from="Object" length=8 text="f|0|0|23"
+# chat by=other type=say from="Object" length=8 text="f|0|0|24"
