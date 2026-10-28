@@ -1,0 +1,14 @@
+grid: aditi
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE time/clocks rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE time/clocks rec=formats timestamp="2026-10-28T09:27:36.407385Z" length=27 fraction_digits=6 ends_z=1 date="2026-10-28" date_is_timestamps=1 unix=1793179656 unix_second_is_timestamps=1 gmt=34056.000000 gmt_whole=1 gmt_is_unix_of_day=1 wall=8856.000000 wall_whole=1 wall_behind_gmt_hours=7 time_of_day=5256.452000 time_of_day_under_4h=1
+PROBE time/clocks rec=get-and-reset reset_reads=0.000000 got=0.510921 then=0.000000 then_is_zero=1
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE time/clocks rec=dilation script=4.956440 real=5.000539 ratio=0.991181 dilation=1.000000 fps=45.019940
+PROBE time/clocks rec=end

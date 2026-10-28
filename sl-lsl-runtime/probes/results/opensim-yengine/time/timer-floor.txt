@@ -1,0 +1,19 @@
+grid: opensim-yengine
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE time/timer-floor rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE time/timer-floor rec=interval asked=0.001000 fired=30 first=0.161000 smallest=0.100000 largest=0.101000 mean=0.100103
+PROBE time/timer-floor rec=interval asked=0.010000 fired=29 first=0.198000 smallest=0.100000 largest=0.101000 mean=0.100143
+PROBE time/timer-floor rec=interval asked=0.020000 fired=29 first=0.200000 smallest=0.100000 largest=0.101000 mean=0.100143
+PROBE time/timer-floor rec=interval asked=0.050000 fired=29 first=0.200000 smallest=0.100000 largest=0.101000 mean=0.100143
+PROBE time/timer-floor rec=interval asked=0.100000 fired=29 first=0.200000 smallest=0.100000 largest=0.101000 mean=0.100143
+PROBE time/timer-floor rec=interval asked=0.200000 fired=15 first=0.200000 smallest=0.200000 largest=0.201000 mean=0.200214
+PROBE time/timer-floor rec=interval asked=0.500000 fired=6 first=0.500000 smallest=0.501000 largest=0.506000 mean=0.502200
+PROBE time/timer-floor rec=interval asked=-1.000000 fired=29 first=0.200000 smallest=0.099000 largest=0.110000 mean=0.101464
+PROBE time/timer-floor rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

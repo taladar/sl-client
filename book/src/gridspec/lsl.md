@@ -2431,3 +2431,105 @@ held back — and the viewer shows a dialog or a text box as any other
 (`load_url`). The 25 channel-0 lines arrived as 25 lines of object chat on
 both grids: neither grid holds a flood back, so collapsing one is the
 viewer's to do (the roadmap's `viewer-anti-spam-filter`).
+
+## Time, timers and sleep
+
+Measured on 2026-10-28 by the probes `time/timer-floor`, `time/timer-phase`,
+`time/timer-rearm`, `time/clocks`, `time/sleep-lengths`,
+`time/sleep-negative` and `time/reset-mid-sleep`, on the same grids, beside
+the corpus's first `time/get-time-frames`, `time/sleep-while-stopped` and
+`events/timer-no-stack` ([The queue, the timer and a state
+change](#the-queue-the-timer-and-a-state-change)). A probe times a timer by
+`llGetTime`, which on Second Life moves in frames of 0.0219–0.0227 s, and a
+sleep by the microseconds of `llGetTimestamp` as well. The local OpenSim
+runs with the default `MinTimerInterval` of each engine: 0.1 s for YEngine
+(`OpenSimDefaults.ini`), 0.5 s for XEngine (unset there, so `LSL_Api`'s
+own).
+
+### The timer's floor
+
+`time/timer-floor`: each interval for three seconds, then -1.0.
+
+| asked | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| 0.001, 0.01, 0.02 s | an event **every second frame**, 0.044 s (68 in three seconds); the first a frame or two after the set | every 0.1 s | every 0.5 s | no scripts |
+| 0.05 s | every two or three frames, 0.050 s on average: the rate is kept to the frame | every 0.1 s | every 0.5 s | no scripts |
+| 0.1, 0.2, 0.5 s | the interval, each event on a frame (0.089–0.112 s apart for 0.1) | the interval | 0.5 s for each | no scripts |
+| -1.0 s | **no event**: a negative interval stops the timer, as 0 does | **the floor**, every 0.1 s | the floor, every 0.5 s | no scripts |
+
+### Drift and phase
+
+`time/timer-phase`: ten events of a 1.0 s timer, then eight of a 0.5 s
+timer whose handler sleeps 0.3 s, then 0.7 s.
+
+| what | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| 1.0 s, ten events | the tenth at 10.009 s: **the phase is kept**, each event on the frame nearest its due time | the tenth at 10.084 s: each gap 1.002–1.010 s, **the error adds up** — the next event is counted from when this one ran | the first at 1.077 s, then every 1.000 s: the phase of the first is kept | no scripts |
+| 0.5 s, the handler sleeping 0.3 s | events at 0.5 s steps (gaps 0.489 and 0.511 by turns): **the phase is kept** | gaps of 0.501–0.516 s, adding up | gaps of 0.500 s | no scripts |
+| 0.5 s, the handler sleeping 0.7 s | **0.755 s apart**: the next event two or three frames after the handler ends, not on the next 0.5 s step | 0.701–0.736 s apart: as the handler ends | 0.700 s apart: as the handler ends | no scripts |
+
+A timer never stacks on any grid (`events/timer-no-stack`): a handler longer
+than the interval delays the next event, and no event is made up for later.
+
+### Setting the timer again
+
+`time/timer-rearm`: when the first event comes, counted from the first set.
+
+| case | Second Life | OpenSim (both engines) | fake grid |
+| --- | --- | --- | --- |
+| 2.0, and 2.0 again a second in | at 3.0: **setting it again restarts the count** | the same | no scripts |
+| 2.0, and 1.5 a second in | at 2.56 | at 2.50–2.52 | no scripts |
+| 1.0, and 2.0 half a second in | at 2.51 | the same | no scripts |
+| 1.0, 0.0 and 1.0 at once | at 1.0 | the same | no scripts |
+| 1.0, a 2 s sleep in which it falls due, then 3.0 | at 2.0: **the event already due still runs**, the new set does not drop it | the same | no scripts |
+| 1.0, the same sleep, then 0.0 | **no event**: stopping the timer drops the one already due | YEngine the same; **XEngine runs it** | no scripts |
+
+### The clocks
+
+`time/clocks`, one reading of each clock in one event.
+
+| clock | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| `llGetTimestamp` | `2026-10-28T09:27:36.407385Z`: 27 characters, **six** fraction digits | `2026-10-28T08:53:45.6802820Z`: 28 characters, **seven** (.NET's `fffffff`) | no scripts |
+| `llGetDate` | the timestamp's date, UTC | the same | no scripts |
+| `llGetUnixTime` | the timestamp's second | the same | no scripts |
+| `llGetGMTclock` | the second of the UTC day, **a whole number** (`34056.000000`) | the same second **with its fraction** | no scripts |
+| `llGetWallclock` | the second of the day in **Pacific time** (7 h behind UTC in October's daylight time), a whole number | the second of the day in **the simulator host's own time zone** (here an hour ahead of UTC), with its fraction | no scripts |
+| `llGetTimeOfDay` | the UTC second of the day modulo four hours, to the millisecond (`5256.452` at `34056`) | the host's local second of the day modulo four hours | no scripts |
+| `llGetAndResetTime` | the time since the last reset (0.511 s after a 0.5 s sleep), and `llGetTime` after it exactly 0 | the same (0.500–0.501 s) | no scripts |
+| `llGetTime` against the timestamp, five busy seconds | 4.956 s against 5.0005 s: two frames behind, with `llGetRegionTimeDilation` 1.0 and `llGetRegionFPS` 45 | equal to the millisecond; `llGetRegionFPS` 55 | no scripts |
+
+`llGetTime` itself counts in frames on Second Life and in milliseconds on
+OpenSim (`time/get-time-frames`; OpenSim rounds it to three places).
+
+### How long a sleep is
+
+`time/sleep-lengths` and `time/sleep-negative`, five sleeps of each length,
+by the timestamp.
+
+| asked | Second Life | OpenSim | fake grid |
+| --- | --- | --- | --- |
+| 0 | no wait, mostly (0.003 ms); one of five took a frame | no wait (0.02–0.06 ms) | no scripts |
+| 0.001, 0.01, 0.02 s | **one frame**, 22 ms | the time asked, plus 0.03–0.1 ms | no scripts |
+| 0.05, 0.1, 0.25 s | **rounded up to whole frames**: 66.8 ms (three), 111 ms (five), 267 ms (twelve) | the time asked | no scripts |
+| -1.0 s | no wait; the event goes on | YEngine no wait; **XEngine throws** an `ArgumentOutOfRangeException` from its `WaitHandle.WaitOne`, shouted on `DEBUG_CHANNEL` as a stack trace (heard by the other avatar too), which ends the event; the script runs on and throws again at the next | no scripts |
+
+### Stopping and resetting a script that sleeps
+
+`time/reset-mid-sleep`, with `time/sleep-while-stopped`: a five-second sleep
+interrupted one second in.
+
+| what | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| `llResetOtherScript` mid-sleep | **at once**: `state_entry` within a frame of the reset, the sleep abandoned | the same | the same | no scripts |
+| stopped a second in, restarted a second later, pinged a second after that | the sleep runs to its end (5 s), then the ping is answered | the same | **the sleeping event is abandoned**: it never wakes, and the ping is answered at once (3 s) | no scripts |
+| reset after that | `state_entry` at once, and the next ping answered | the same | the same | no scripts |
+| `llGetTime` of a script stopped three seconds and restarted | 5.0 a second after the restart: **a stopped script's clock runs on** | the same | the same | no scripts |
+| a sleep stopped and restarted after it would have ended (`time/sleep-while-stopped`) | wakes within a frame of the restart | the same | never wakes | no scripts |
+
+### What the viewer does with it
+
+Nothing: a timer and a sleep send the viewer nothing. The one thing a viewer
+sees is XEngine's negative-sleep stack trace, which arrives as an object's
+`DEBUG_CHANNEL` chat like any other script error ([Run-time
+errors](#run-time-errors)).

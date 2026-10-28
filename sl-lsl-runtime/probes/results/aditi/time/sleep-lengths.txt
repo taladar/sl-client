@@ -1,0 +1,18 @@
+grid: aditi
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE time/sleep-lengths rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE time/sleep-lengths rec=sleep asked=0.000000 mean=4.317000 smallest=0.003000 largest=21.562000 script_mean=4.403200 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.001000 mean=22.024000 smallest=21.780000 largest=22.461000 script_mean=22.108800 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.010000 mean=22.355000 smallest=21.780000 largest=22.759000 script_mean=22.257600 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.020000 mean=22.033000 smallest=21.804000 largest=22.597000 script_mean=22.214000 unit=ms
+# animations avatar=other playing=""
+PROBE time/sleep-lengths rec=sleep asked=0.050000 mean=66.767000 smallest=66.212000 largest=67.444000 script_mean=66.689390 unit=ms
+# animations avatar=owner playing=""
+PROBE time/sleep-lengths rec=sleep asked=0.100000 mean=111.085000 smallest=110.598000 largest=111.573000 script_mean=111.106400 unit=ms
+PROBE time/sleep-lengths rec=sleep asked=0.250000 mean=266.788000 smallest=266.126000 largest=267.331000 script_mean=266.787000 unit=ms
+PROBE time/sleep-lengths rec=end

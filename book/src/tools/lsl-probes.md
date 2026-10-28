@@ -314,6 +314,16 @@ What has bitten already, and how a probe should be shaped for it:
 - **`llLoadURL` sleeps ten seconds on OpenSim**, against 0.1 s on Second
   Life (`throttle/delays`); leave it out of a probe that has other things to
   time.
+- **Second Life's timer and sleep move in frames.** No timer runs more often
+  than every second frame (0.044 s), and a sleep is rounded up to a whole
+  frame, so `llSleep(0.01)` takes 22 ms and `llSleep(0.05)` 67 ms
+  (`time/timer-floor`, `time/sleep-lengths`). Time a sleep by
+  `llGetTimestamp`'s microseconds, not by `llGetTime`.
+- **XEngine throws on a negative sleep.** `llSleep(-1.0)` is an
+  `ArgumentOutOfRangeException` there, which ends the event
+  (`time/sleep-negative`); the other grids return at once. A negative
+  `llSetTimerEvent` stops the timer on Second Life and runs it at the floor
+  on OpenSim (`time/timer-floor`).
 
 ## Running
 
@@ -523,6 +533,7 @@ the reading. The grid tasks (`gridspec-lsl-events`, `-time-timers`,
 | `inventory/*`, 2026-10-27: reading the prim's inventory, its order, names, keys, creators and masks, the script-state calls, `llRemoveInventory`; notecards over the dataserver and their line limits; rezzing and the order of `object_rez` and `on_rez`; giving to a prim and to avatars, and `llRemoteLoadScriptPin`; and Second Life's newer `llGetNotecardLineSync`, `llRezObjectWithParams`, `llDerezObject`, `llGetInventoryDesc` and `llGetInventoryAcquireTime` | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#task-inventory-giving-rezzing-and-notecards) | | |
 | `errors/*`, 2026-10-27: which arithmetic faults under Mono, LSO and each OpenSim engine, what a fault and a library exception say and to whom, the say range, how Second Life cuts a flood of errors short, what brings a faulted script back, and list and string indices and strides out of range | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#run-time-errors) | | |
 | `throttle/*`, 2026-10-28: the forced delay of 31 calls against the documented one, `llEmail` between objects, 300 rezzes, ten seconds of raycasts, floods of chat on channel 0 and on others, and how the HTTP throttle lets go | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#forced-delays-and-throttles) | | |
+| `time/*`, 2026-10-28: the timer's floor and what a negative interval does, drift and phase, setting a timer again, the clocks' formats and time zones, how long a sleep really is, and what a stop or a reset does to a script in the middle of one | read in [Grid Behaviour → LSL scripts](../gridspec/lsl.md#time-timers-and-sleep) | | |
 | `events/other-avatar`, 2026-10-24: a listener on 7 | hears the owner and the other avatar, `key_is_owner` 1 and 0, the name `llKey2Name`'s | the same | the same |
 | — a listener on 8 filtered to the owner | does not hear the other avatar | the same | the same |
 | — the other avatar's touch | `llDetectedType` 3 (`AGENT \| ACTIVE`); `llDetectedGroup` 1, the object's group and the avatar's active group both unset | 1 (`AGENT`); `llDetectedGroup` 0, the avatar's active group set (the object's group compared with the toucher's active group, as OpenSim's source reads) | the same as YEngine |

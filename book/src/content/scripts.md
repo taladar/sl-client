@@ -171,6 +171,10 @@ grows is in
 What each call's forced delay is on each grid against the documented one,
 and how each grid throttles rezzing, raycasts, chat and HTTP requests, is in
 [Grid Behaviour → LSL scripts](../gridspec/lsl.md#forced-delays-and-throttles).
+How often a timer can run on each grid, whether it keeps its phase, what
+setting it again does, what each clock returns, how long a sleep really is
+and what a stop or a reset does to a script in the middle of one is in
+[Grid Behaviour → LSL scripts](../gridspec/lsl.md#time-timers-and-sleep).
 
 Creating a brand-new script goes through `CreateInventoryItem` (carrying the
 language subtype): the **simulator fills a compilable default body** (the LSL

@@ -1,0 +1,31 @@
+grid: opensim-yengine
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+# chat type=say from="Object" length=14 text="Script running"
+PROBE time/reset-mid-sleep rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE time/reset-mid-sleep rec=heard run=none what=entry at=1.048000
+PROBE time/reset-mid-sleep rec=heard run=reset what=sleeping at=0.000000
+PROBE time/reset-mid-sleep rec=control run=reset did=reset at=1.006000
+PROBE time/reset-mid-sleep rec=heard run=reset what=entry at=1.016000
+PROBE time/reset-mid-sleep rec=control run=clock did=stop at=1.005000
+PROBE time/reset-mid-sleep rec=control run=clock did=restart at=4.038000
+PROBE time/reset-mid-sleep rec=control run=clock did=ask-clock at=5.050000
+PROBE time/reset-mid-sleep rec=heard run=clock what=clock at=5.050000 script_time=5.050000
+PROBE time/reset-mid-sleep rec=heard run=ask what=sleeping at=0.000000
+PROBE time/reset-mid-sleep rec=control run=ask did=stop at=1.011000
+PROBE time/reset-mid-sleep rec=control run=ask did=restart at=2.029000
+PROBE time/reset-mid-sleep rec=control run=ask did=ping at=3.027000
+PROBE time/reset-mid-sleep rec=heard run=ask what=woke at=5.000000
+PROBE time/reset-mid-sleep rec=heard run=ask what=pong at=5.000000
+PROBE time/reset-mid-sleep rec=control run=ask did=reset at=10.109000
+PROBE time/reset-mid-sleep rec=heard run=ask what=entry at=10.109000
+PROBE time/reset-mid-sleep rec=control run=ask did=ping at=14.153000
+PROBE time/reset-mid-sleep rec=heard run=ask what=pong at=14.154000
+PROBE time/reset-mid-sleep rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# chat by=other type=say from="Object" length=14 text="Script running"

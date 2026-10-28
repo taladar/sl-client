@@ -1,0 +1,17 @@
+grid: opensim-yengine
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE time/timer-rearm rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE time/timer-rearm rec=first case=same at=3.079000
+PROBE time/timer-rearm rec=first case=shorter at=2.517000
+PROBE time/timer-rearm rec=first case=longer at=2.510000
+PROBE time/timer-rearm rec=first case=zero-then-set at=1.003000
+PROBE time/timer-rearm rec=first case=due-in-sleep at=2.003000
+PROBE time/timer-rearm rec=cancelled case=due-in-sleep-cancel ran=0
+PROBE time/timer-rearm rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

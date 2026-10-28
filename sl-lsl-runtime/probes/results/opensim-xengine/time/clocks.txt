@@ -1,0 +1,14 @@
+grid: opensim-xengine
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE time/clocks rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE time/clocks rec=formats timestamp="2026-10-28T09:08:52.3123760Z" length=28 fraction_digits=7 ends_z=1 date="2026-10-28" date_is_timestamps=1 unix=1793178532 unix_second_is_timestamps=1 gmt=32932.312562 gmt_whole=0 gmt_is_unix_of_day=1 wall=36532.312570 wall_whole=0 wall_behind_gmt_hours=23 time_of_day=7732.312578 time_of_day_under_4h=1
+PROBE time/clocks rec=get-and-reset reset_reads=0.000000 got=0.500000 then=0.000000 then_is_zero=1
+PROBE time/clocks rec=dilation script=5.000000 real=5.000039 ratio=0.999992 dilation=1.000000 fps=54.995193
+PROBE time/clocks rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

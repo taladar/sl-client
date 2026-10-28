@@ -1,0 +1,14 @@
+grid: aditi
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+PROBE time/timer-phase rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+# animations avatar=other playing=""
+PROBE time/timer-phase rec=timers run=plain interval=1.000000 handler_sleeps=0.000000 events=10 last=10.009130 drift=0.009133 times="1.000079, 2.008508, 3.008325, 4.008279, 5.008912, 6.008823, 7.008777, 8.008838, 9.009163, 10.009133" gaps="1.000079, 1.008429, 0.999817, 0.999954, 1.000633, 0.999911, 0.999954, 1.000061, 1.000325, 0.999970"
+PROBE time/timer-phase rec=timers run=busy-short interval=0.500000 handler_sleeps=0.300000 events=8 last=4.000625 drift=0.000625 times="0.511166, 1.000060, 1.511068, 2.000219, 2.511007, 3.000607, 3.511138, 4.000625" gaps="0.511166, 0.488894, 0.511008, 0.489151, 0.510788, 0.489600, 0.510531, 0.489487"
+PROBE time/timer-phase rec=timers run=busy-long interval=0.500000 handler_sleeps=0.700000 events=8 last=5.805131 drift=1.805131 times="0.511165, 1.266144, 2.021507, 2.778272, 3.533626, 4.288844, 5.049576, 5.805131" gaps="0.511165, 0.754979, 0.755363, 0.756765, 0.755354, 0.755218, 0.760732, 0.755555"
+PROBE time/timer-phase rec=end

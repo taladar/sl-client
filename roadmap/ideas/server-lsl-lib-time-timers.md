@@ -48,8 +48,39 @@ careful.
 Acceptance: a timer at 0.5 s fires the expected number of times over a
 known number of ticks; a handler longer than the interval drops ticks
 rather than accumulating them; `llGetUnixTime` returns the same sequence
-across two runs of one seed; and a state change cancels the timer.
+across two runs of one seed; and a state change **keeps** the timer at its
+interval (measured on every grid, `events/state-change`).
 
 Already done by [[server-lsl-state-and-events]]: `llSetTimerEvent` and the
 `timer` event — tick-counted, never stacking, surviving a state change and
 stopped by a reset, each measured on aditi.
+
+## Measured (gridspec-lsl-time-timers, 2026-10-28)
+
+`book/src/gridspec/lsl.md` § Time, timers and sleep. What the tick clock
+has to reproduce per flavour, beyond what the VM does today:
+
+- **The floor.** Second Life runs no timer more often than every second
+  frame (0.044 s); OpenSim clamps to `MinTimerInterval` (YEngine 0.1 s,
+  XEngine 0.5 s). Today any interval rounds up to one tick.
+- **A negative interval** stops the timer on Second Life (the VM's
+  behaviour today) but runs it at the floor on OpenSim.
+- **Phase.** Second Life keeps the phase of the due times (ten 1.0 s events
+  end at 10.009 s), and a handler longer than the interval puts the next
+  event two or three frames after it ends; YEngine counts each interval
+  from when the last event ran, so its error adds up; XEngine keeps the
+  phase of its first event.
+- **Stopping the timer** drops an event already due on Second Life and
+  YEngine; XEngine still runs it. Setting the timer again restarts the
+  count on every grid, and keeps an event already due.
+- **A sleep** rounds up to whole frames on Second Life (`llSleep(0.01)` is
+  one frame); OpenSim sleeps the time asked. A negative sleep returns at
+  once, but on XEngine throws and ends the event.
+- **A stop or reset mid-sleep**: a reset is at once everywhere; a stopped
+  sleep counts on while stopped, except on XEngine, where the sleeping event
+  is abandoned. A stopped script's `llGetTime` runs on.
+- **The clocks' shapes**: `llGetTimestamp` has six fraction digits on Second
+  Life and seven on OpenSim; `llGetGMTclock` and `llGetWallclock` are whole
+  seconds on Second Life; `llGetWallclock` is Pacific time on Second Life
+  and the host's zone on OpenSim; `llGetTimeOfDay` is the (UTC, or OpenSim's
+  local) second of the day modulo four hours.

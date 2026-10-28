@@ -2,7 +2,7 @@
 id: gridspec-lsl-time-timers
 title: LSL time, timers and sleep on each grid
 topic: gridspec
-status: ready
+status: done
 origin: gridspec survey (2026-10-03)
 refs: [gridspec-survey]
 blocked_by: [gridspec-lsl-live-differential-runner]
@@ -45,3 +45,22 @@ Measured by the corpus (`time/*`, `events/timer-no-stack`):
   YEngine alike. On XEngine, stopping a sleeping script ends that event:
   it never wakes. So the "YEngine differs" above is not borne out by
   `time/sleep-while-stopped`.
+
+## Done (2026-10-28)
+
+Seven probes, `time/timer-floor`, `time/timer-phase`, `time/timer-rearm`,
+`time/clocks`, `time/sleep-lengths`, `time/sleep-negative` and
+`time/reset-mid-sleep`, run on aditi, YEngine and XEngine; the reading is
+`book/src/gridspec/lsl.md` § Time, timers and sleep. Second Life's timer
+floor is two frames (0.044 s) and a negative interval stops the timer, where
+OpenSim runs it at `MinTimerInterval`; Second Life keeps a timer's phase,
+YEngine lets the error add up. Setting a timer again restarts the count
+everywhere. A sleep rounds up to whole frames on Second Life, and XEngine
+throws on a negative one. A reset mid-sleep is at once everywhere, and the
+"XEngine restart mid-sleep" question is answered: XEngine abandons a stopped
+sleeping event, so the restarted script answers at once. Timestamps carry
+six fraction digits on Second Life and seven on OpenSim, and
+`llGetWallclock` is Pacific time on Second Life but the host's zone on
+OpenSim. The fake grid's half is in [[server-lsl-lib-time-timers]], whose
+"a state change cancels the timer" acceptance is corrected; the viewer needs
+nothing.

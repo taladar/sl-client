@@ -1,0 +1,19 @@
+grid: aditi
+date: 2026-10-28
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE time/timer-floor rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE time/timer-floor rec=interval asked=0.001000 fired=62 first=0.022796 smallest=0.043792 largest=0.289005 mean=0.048812
+# animations avatar=other playing=""
+# animations avatar=owner playing=""
+PROBE time/timer-floor rec=interval asked=0.010000 fired=68 first=0.044929 smallest=0.043556 largest=0.044976 mean=0.044443
+PROBE time/timer-floor rec=interval asked=0.020000 fired=68 first=0.022033 smallest=0.043878 largest=0.045128 mean=0.044448
+PROBE time/timer-floor rec=interval asked=0.050000 fired=60 first=0.066688 smallest=0.043906 largest=0.067182 mean=0.049723
+PROBE time/timer-floor rec=interval asked=0.100000 fired=30 first=0.111357 smallest=0.088332 largest=0.111870 mean=0.099618
+PROBE time/timer-floor rec=interval asked=0.200000 fired=15 first=0.200354 smallest=0.155541 largest=0.259970 mean=0.200943
+PROBE time/timer-floor rec=interval asked=0.500000 fired=6 first=0.488767 smallest=0.489005 largest=0.511232 mean=0.502265
+PROBE time/timer-floor rec=interval asked=-1.000000 fired=0 first=0.000000 smallest=1000.000000 largest=0.000000 mean=0.000000
+PROBE time/timer-floor rec=end

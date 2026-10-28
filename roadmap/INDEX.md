@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 336 |
+| ready | 335 |
 | blocked | 56 |
 | in-progress | 19 |
 | bugs | 39 |
-| done | 1441 |
+| done | 1442 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2079** |
@@ -330,7 +330,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-lib-time-timers`](ideas/server-lsl-lib-time-timers.md) — Library
   tranche — time, timers and sleeping, on a tick clock (blocked by
   `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
-  `gridspec-lsl-time-timers`)
+  `gridspec-lsl-time-timers` (done))
 - [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
   Script state that survives a take, a rez and a region restart (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done),
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (336)
+## ready (335)
 
 ### protocol
 
@@ -1154,9 +1154,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-time-timers`](ready/gridspec-lsl-time-timers.md) — LSL time,
-  timers and sleep on each grid (blocked by
-  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-seated-crossing`](ready/gridspec-seated-crossing.md) — A seated
   crossing on each grid — a vehicle carrying its riders over a border
 - [`gridspec-sl-ban-line-trigger`](ready/gridspec-sl-ban-line-trigger.md) — Pin
@@ -1508,7 +1505,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1441)
+## done (1442)
 
 ### protocol
 
@@ -4654,6 +4651,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-throttles`](done/gridspec-lsl-throttles.md) — Forced delays and
   throttles on each grid (blocked by `gridspec-lsl-live-differential-runner`
   (done))
+- [`gridspec-lsl-time-timers`](done/gridspec-lsl-time-timers.md) — LSL time,
+  timers and sleep on each grid (blocked by
+  `gridspec-lsl-live-differential-runner` (done))
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct
   delivery on each grid
 - [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material
