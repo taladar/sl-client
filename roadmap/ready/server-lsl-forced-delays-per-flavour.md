@@ -51,3 +51,10 @@ A probe run of `throttle/delays`, `throttle/chat` and `throttle/http-window`
 against each fake flavour, once the fake grid runs scripts, agrees with that
 grid's committed result file under `sl-conformance compare-probes`
 ([[gridspec-infra-fake-flavour-conformance]]).
+
+## From server-lsl-runtime-errors (2026-10-28)
+
+`llGetScriptState` of a missing script already charges its second on every
+flavour (`library/control.rs`, `ctx.sleep(1.0)` beside `ctx.refuse`), since
+aditi measured the same second there. When the outcome-dependent delay lands,
+fold it into that mechanism rather than keep a second path.

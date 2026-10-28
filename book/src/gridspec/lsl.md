@@ -2238,7 +2238,7 @@ YEngine and XEngine agree but where a row says otherwise.
 | key, creator, masks of the owner's full-permission items | the asset key, the owner, base and owner `0x7FFFFFFF`, group and everyone 0, next owner `0x7FFFFFFF`; the object's next-owner mask `532480` (move, modify, copy, transfer) | the same | no scripts |
 | `llSetInventoryPermMask` | does nothing, says nothing | does nothing, says nothing | no scripts |
 | `llScriptDanger` at the prim | 1 (Mauve) | 0 | no scripts |
-| a script that is not there: `llGetScriptState`, `llResetOtherScript`, `llSetScriptState` | 0, silent | 0, and `llGetScriptState: Can't find script 'nope'` (and the like) on the debug channel | no scripts |
+| a script that is not there: `llGetScriptState`, `llResetOtherScript`, `llSetScriptState` | 0, and silent here only because the missing item's six lines above had set off the object's [flood limit](#floods); alone, `Could not find script 'nope'.` ([Run-time errors](#what-is-said-and-to-whom)) | 0, and `llGetScriptState: Can't find script 'nope'` (and the like) on the debug channel | no scripts |
 | a link message to a stopped script | lost | lost | no scripts |
 | `llResetOtherScript` of a stopped script, then `llSetScriptState(…, TRUE)` | stays stopped through the reset; started, it **carries on without `state_entry`** | stays stopped; started, it runs `state_entry` | no scripts |
 | `llResetOtherScript` of a running script with a link message queued | the message is lost with the reset | YEngine delivers it first, then the reset; XEngine loses it | no scripts |

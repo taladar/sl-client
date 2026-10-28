@@ -20,7 +20,9 @@
 //! - [`Host`] — the world, as the library reaches it; [`ScriptCtx`] — the
 //!   calling script, as a library function sees it.
 //! - [`RuntimeError`] / [`Fault`] — what stops a script. An error stops the
-//!   one script and never panics the region.
+//!   one script and never panics the region; the engine says it on
+//!   [`DEBUG_CHANNEL`] in the words of the grid it imitates
+//!   ([`EngineFlavour`]) through [`Host::say`].
 //!
 //! Time is counted in [`Tick`]s, never read from a clock, and budgets in
 //! instructions, never in elapsed time: a script's observable behaviour must
@@ -30,8 +32,10 @@ mod context;
 mod detected;
 mod engine;
 mod fault;
+mod flavour;
 mod host;
 mod instance;
+mod report;
 #[cfg(test)]
 mod tests;
 
@@ -43,8 +47,12 @@ pub use engine::{
     Engine, EngineConfig, REGION_SCRIPT_SHARES, SCRIPT_INSTRUCTIONS_PER_SECOND, TickReport,
 };
 pub use fault::{Fault, RuntimeError};
+pub use flavour::EngineFlavour;
 pub use host::{CallerId, Host};
 pub use instance::{
     Arrival, BACKWARD_JUMP_COST, BUILTIN_CALL_COST, Coalescing, Instance, MAX_CALL_DEPTH,
     MAX_QUEUED, Outcome, PostError, Posted, Slice,
+};
+pub use report::{
+    DEBUG_CHANNEL, FLOOD_LINES, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, Speech, Whereabouts,
 };

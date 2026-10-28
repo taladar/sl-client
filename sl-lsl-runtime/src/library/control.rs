@@ -55,12 +55,27 @@ pub const fn ll_get_start_parameter(ctx: &mut ScriptCtx<'_>) -> Result<i32, Call
 
 /// `llGetScriptState`: whether the script called `name` in this prim is
 /// running — `TRUE` for the caller itself, `FALSE` for a script stopped by
-/// hand or by a run-time error, and `FALSE` for a name that is no script
-/// here.
+/// hand or held by a run-time error (on Second Life; YEngine reads a held
+/// script as running), and `FALSE` for a name that is no script here.
+///
+/// A name that is no script is refused on `DEBUG_CHANNEL` in the flavour's
+/// words and costs the script a second, on every grid (`errors/flood`: twelve
+/// such calls took 12.2 seconds on aditi; OpenSim's `LSL_Api.Error` sleeps a
+/// second).
 ///
 /// # Errors
 ///
 /// None; the signature is the library's.
 pub fn ll_get_script_state(ctx: &mut ScriptCtx<'_>, name: String) -> Result<i32, CallError> {
-    Ok(i32::from(ctx.script_running(&name)))
+    let Some(running) = ctx.script_running(&name) else {
+        let refusal = if ctx.flavour().is_opensim() {
+            format!("llGetScriptState: Can't find script '{name}'")
+        } else {
+            format!("Could not find script '{name}'.")
+        };
+        ctx.refuse(refusal);
+        ctx.sleep(1.0);
+        return Ok(0);
+    };
+    Ok(i32::from(running))
 }

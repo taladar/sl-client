@@ -14,7 +14,7 @@
 use sl_lsl::ast::{BinaryOp, PrefixOp};
 use sl_types::lsl::{Rotation, Vector};
 
-use crate::error::ValueError;
+use crate::error::{Division, ValueError};
 use crate::num::{int_to_float, to_f32};
 use crate::value::{Value, rotation_eq, vector_eq};
 
@@ -263,13 +263,15 @@ fn div(left: &Value, right: &Value) -> Option<Result<Value, ValueError>> {
         (Value::Vector(vector), divisor) => {
             let divisor = number(divisor)?.to_float();
             if divisor == 0.0 {
-                return Some(Err(ValueError::MathError));
+                return Some(Err(ValueError::MathError(Division::Vector)));
             }
             Some(Ok(Value::Vector(scale(vector, divisor, component_div))))
         }
         _ => {
             let result = match (number(left)?, number(right)?) {
-                (_, Number::Integer(0)) => Err(ValueError::MathError),
+                (Number::Integer(_), Number::Integer(0)) => {
+                    Err(ValueError::MathError(Division::Integer))
+                }
                 (Number::Integer(a), Number::Integer(b)) => {
                     Ok(Value::Integer(a.checked_div(b).unwrap_or(a)))
                 }
@@ -277,7 +279,7 @@ fn div(left: &Value, right: &Value) -> Option<Result<Value, ValueError>> {
                     let (a, b) = (a.to_float(), b.to_float());
                     let quotient = a / b;
                     if b == 0.0 || quotient.is_nan() {
-                        Err(ValueError::MathError)
+                        Err(ValueError::MathError(Division::Float))
                     } else {
                         Ok(Value::Float(quotient))
                     }
@@ -306,7 +308,9 @@ fn component_div(component: f32, divisor: f32) -> f32 {
 /// or the vector cross product.
 fn modulo(left: &Value, right: &Value) -> Option<Result<Value, ValueError>> {
     match (left, right) {
-        (Value::Integer(_), Value::Integer(0)) => Some(Err(ValueError::MathError)),
+        (Value::Integer(_), Value::Integer(0)) => {
+            Some(Err(ValueError::MathError(Division::Integer)))
+        }
         (Value::Integer(a), Value::Integer(b)) => {
             Some(Ok(Value::Integer(a.checked_rem(*b).unwrap_or(0))))
         }
@@ -649,16 +653,17 @@ mod tests {
         // fold, because each is a run-time Math Error in Second Life. This
         // is where SL and the roadmap's first draft disagreed ("float
         // division by zero is not" an error) — SL wins.
-        let math_error = Err(ValueError::MathError);
-        assert_eq!(int_op(BinaryOp::Div, 1, 0), math_error);
-        assert_eq!(int_op(BinaryOp::Mod, 5, 0), math_error);
+        let integer = Err(ValueError::MathError(Division::Integer));
+        let float = Err(ValueError::MathError(Division::Float));
+        assert_eq!(int_op(BinaryOp::Div, 1, 0), integer);
+        assert_eq!(int_op(BinaryOp::Mod, 5, 0), integer);
         assert_eq!(
             binary(BinaryOp::Div, Value::Float(1.0), Value::Integer(0)),
-            math_error
+            float
         );
         assert_eq!(
             binary(BinaryOp::Div, Value::Float(1.0), Value::Float(-0.0)),
-            math_error
+            float
         );
         assert_eq!(
             binary(
@@ -666,15 +671,15 @@ mod tests {
                 Value::Float(f32::INFINITY),
                 Value::Float(f32::INFINITY)
             ),
-            math_error
+            float
         );
         assert_eq!(
             binary(BinaryOp::Div, Value::Float(f32::NAN), Value::Integer(1)),
-            math_error
+            float
         );
         assert_eq!(
             binary(BinaryOp::Div, Value::Float(1.0), Value::Float(f32::NAN)),
-            math_error
+            float
         );
         assert_eq!(
             binary(
@@ -682,7 +687,7 @@ mod tests {
                 Value::Vector(vector(1.0, 2.0, 3.0)),
                 Value::Float(0.0)
             ),
-            math_error
+            Err(ValueError::MathError(Division::Vector))
         );
         // …but a vector divided by NaN is not (nan-fcast-vcast-minus0.lsl).
         assert!(matches!(

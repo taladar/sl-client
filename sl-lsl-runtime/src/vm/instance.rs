@@ -16,6 +16,7 @@ use crate::value::{Element, Value};
 use crate::vm::context::{Peers, Request, ScriptCtx, ScriptData, Tick};
 use crate::vm::detected::{Detected, MAX_DETECTED, is_detection_event};
 use crate::vm::fault::{Fault, RuntimeError};
+use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 
 /// Instructions charged for calling a library function, on top of the one the
@@ -155,8 +156,11 @@ pub enum Outcome {
     /// are gone and the initialisers run next, then `default`'s
     /// `state_entry`.
     Reset,
-    /// A run-time error stopped the script. It keeps its state and its
-    /// globals, and is no longer running.
+    /// A run-time error ended the body in progress. What became of the
+    /// script is the flavour's: on Second Life it is stopped and held
+    /// ([`Instance::is_held`]), keeping its state and its globals; on YEngine
+    /// it is held but reads as running; on XEngine it runs on with the next
+    /// event.
     Faulted(Fault),
 }
 
@@ -169,6 +173,10 @@ pub struct Slice {
     /// back-edge at its cost. May exceed the budget by the cost of the one
     /// instruction that crossed it, never by more.
     pub used: u32,
+    /// What library calls of the slice said refusing their arguments
+    /// (`Could not find script 'Nope'.`), in order, for the engine to say on
+    /// `DEBUG_CHANNEL`.
+    pub refusals: Vec<String>,
 }
 
 /// What became of a posted event.
@@ -179,8 +187,8 @@ pub enum Posted {
     /// Dropped: the current state has no handler for it. An event nobody
     /// handles is never queued, so it cannot fire after a later state change.
     NoHandler,
-    /// Dropped: the script is not running. A stopped script receives no
-    /// events at all.
+    /// Dropped: the script is not running, or is held by a run-time error
+    /// until it is reset. Such a script receives no events at all.
     Stopped,
     /// Merged into the same event already queued this tick: a touch's or
     /// collision's detected list grew, or a `changed`'s bits were OR-ed in,
@@ -334,6 +342,9 @@ pub struct Instance {
     state: StateId,
     /// The run flag (`SetScriptRunning`, the contents' Running checkbox).
     running: bool,
+    /// Held by a run-time error: nothing runs, whatever the run flag says,
+    /// until a reset.
+    held: bool,
     /// Events waiting for their handlers, oldest first.
     queue: VecDeque<Queued>,
     /// The body in progress, if any.
@@ -726,6 +737,7 @@ impl Instance {
             globals: Vec::new(),
             state: StateId::DEFAULT,
             running: true,
+            held: false,
             queue: VecDeque::new(),
             activity: None,
             pending_state: None,
@@ -752,6 +764,26 @@ impl Instance {
     #[must_use]
     pub const fn is_running(&self) -> bool {
         self.running
+    }
+
+    /// Whether a run-time error holds the script: it runs nothing and takes
+    /// no events until it is reset, whatever the run flag says.
+    #[must_use]
+    pub const fn is_held(&self) -> bool {
+        self.held
+    }
+
+    /// Whether `llGetScriptState` reads the script as running in `flavour`:
+    /// Second Life reads a held script as stopped even after
+    /// `llSetScriptState(TRUE)` (aditi, 2026-10-23); YEngine reads only the
+    /// run flag, so a held script reads as running though it answers
+    /// nothing.
+    #[must_use]
+    pub const fn reads_running(&self, flavour: EngineFlavour) -> bool {
+        match flavour {
+            EngineFlavour::SecondLife => self.running && !self.held,
+            EngineFlavour::YEngine | EngineFlavour::XEngine => self.running,
+        }
     }
 
     /// The globals' current values, in [`Program::globals`] order.
@@ -793,13 +825,17 @@ impl Instance {
     /// body in progress or an event queued. An idle script costs nothing.
     #[must_use]
     pub fn is_runnable(&self, now: Tick) -> bool {
-        self.running && self.wake <= now && (self.activity.is_some() || !self.queue.is_empty())
+        self.running
+            && !self.held
+            && self.wake <= now
+            && (self.activity.is_some() || !self.queue.is_empty())
     }
 
     /// Set or clear the run flag. Stopping is not resetting: the globals, the
     /// state and a handler in progress are kept, and a restarted script
     /// carries on where it stopped. The event queue is emptied, and a stopped
-    /// script receives no events.
+    /// script receives no events. Setting the flag does not release a script
+    /// a run-time error holds; a reset does, before or after.
     pub fn set_running(&mut self, running: bool) {
         self.running = running;
         if !running {
@@ -811,9 +847,11 @@ impl Instance {
     /// initialisers to run again, the call and operand stacks, the event queue
     /// and any requested state change dropped, any sleep cancelled, and the
     /// state back to `default`, whose `state_entry` runs after the
-    /// initialisers. The timer is stopped and the detected block cleared; the
-    /// run flag and the start parameter are left as they are.
+    /// initialisers. The timer is stopped and the detected block cleared, and
+    /// a script a run-time error held is released; the run flag and the
+    /// start parameter are left as they are.
     pub fn reset(&mut self) {
+        self.held = false;
         self.data = ScriptData {
             start_parameter: self.data.start_parameter,
             ..ScriptData::default()
@@ -920,7 +958,7 @@ impl Instance {
                 });
             }
         }
-        if !self.running {
+        if !self.running || self.held {
             return Ok(Posted::Stopped);
         }
         let Some(handler) = handler_index(&self.program, self.state, event.name) else {
@@ -1043,23 +1081,41 @@ impl Instance {
         peers: Peers<'_>,
     ) -> Slice {
         let mut used = 0_u32;
+        let outcome = self.run_body(caller, now, step, budget, host, peers, &mut used);
+        Slice {
+            outcome,
+            used,
+            refusals: core::mem::take(&mut self.data.refusals),
+        }
+    }
+
+    /// The body of [`Self::run_slice_among`]: run, adding to `used`, and say
+    /// how it ended.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "run_slice_among's parameters plus the counter it reports"
+    )]
+    fn run_body(
+        &mut self,
+        caller: CallerId,
+        now: Tick,
+        step: Duration,
+        budget: u32,
+        host: &mut dyn Host,
+        peers: Peers<'_>,
+        used: &mut u32,
+    ) -> Outcome {
         if !self.is_runnable(now) {
-            return Slice {
-                outcome: Outcome::Idle,
-                used,
-            };
+            return Outcome::Idle;
         }
         if self.activity.is_none()
             && let Err(error) = self.start_next_event()
         {
-            return self.fault(error, None, used);
+            return self.fault(error, None, peers.flavour());
         }
-        while used < budget {
+        while *used < budget {
             let Some(activity) = self.activity.as_mut() else {
-                return Slice {
-                    outcome: Outcome::Idle,
-                    used,
-                };
+                return Outcome::Idle;
             };
             let at = activity.frames.last().map(|frame| (frame.body, frame.pc));
             let mut machine = Machine {
@@ -1074,7 +1130,7 @@ impl Instance {
                 data: &mut self.data,
                 peers,
             };
-            let outcome = match machine.step(&mut used) {
+            return match machine.step(used) {
                 Ok(Flow::Next) => continue,
                 Ok(Flow::BodyDone) => self.finish_body(caller, host),
                 Ok(Flow::Sleep(seconds)) => {
@@ -1086,32 +1142,69 @@ impl Instance {
                     Outcome::Sleeping(self.wake)
                 }
                 Ok(Flow::Reset) => {
+                    // A reset drops the library's state; what the call
+                    // refused before it is still said.
+                    let refusals = core::mem::take(&mut self.data.refusals);
                     self.reset();
+                    self.data.refusals = refusals;
                     Outcome::Reset
                 }
-                Err(error) => return self.fault(error, at, used),
+                Err(error) => self.fault(error, at, peers.flavour()),
             };
-            return Slice { outcome, used };
         }
-        Slice {
-            outcome: Outcome::Yielded,
-            used,
-        }
+        Outcome::Yielded
     }
 
-    /// Stop the script with `error`, raised by the instruction at `at`.
-    fn fault(&mut self, error: RuntimeError, at: Option<(BodyRef, u32)>, used: u32) -> Slice {
+    /// End the body in progress with `error`, raised by the instruction at
+    /// `at`, and do with the script what `flavour`'s engine does: Second
+    /// Life stops and holds it, YEngine holds it with its run flag still
+    /// set, XEngine lets it run on with its next event. Either way the state
+    /// and the globals stay as they were, and a requested state change is
+    /// not carried out.
+    fn fault(
+        &mut self,
+        error: RuntimeError,
+        at: Option<(BodyRef, u32)>,
+        flavour: EngineFlavour,
+    ) -> Outcome {
         let position = at.and_then(|(body, pc)| {
             body_of(&self.program, body)
                 .ok()
                 .and_then(|code| self.program.position(code, CodeOffset(pc)))
         });
+        let event = self.handled_event();
         self.activity = None;
         self.pending_state = None;
-        self.set_running(false);
-        Slice {
-            outcome: Outcome::Faulted(Fault { error, position }),
-            used,
+        match flavour {
+            EngineFlavour::SecondLife => {
+                self.set_running(false);
+                self.held = true;
+            }
+            EngineFlavour::YEngine => {
+                self.queue.clear();
+                self.held = true;
+            }
+            EngineFlavour::XEngine => {}
+        }
+        Outcome::Faulted(Fault {
+            error,
+            position,
+            event,
+        })
+    }
+
+    /// The event whose handler is the bottom body in progress, or [`None`]
+    /// for the global initialisers (or nothing in progress).
+    fn handled_event(&self) -> Option<&'static str> {
+        let bottom = self.activity.as_ref()?.frames.first()?;
+        match bottom.body {
+            BodyRef::Handler { state, index } => self
+                .program
+                .state(state)?
+                .handlers
+                .get(index)
+                .map(|handler| handler.event.name),
+            BodyRef::Init | BodyRef::Function(_) => None,
         }
     }
 

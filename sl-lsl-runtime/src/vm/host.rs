@@ -1,6 +1,7 @@
 //! The boundary between a running script and the world it runs in.
 
 use crate::library::BuiltinId;
+use crate::vm::report::{Speech, Whereabouts};
 
 /// Which script instance is calling, as the host knows it.
 ///
@@ -42,4 +43,16 @@ pub trait Host {
     /// `llGetScriptState(name)` asks about — or [`None`] when the prim's
     /// inventory has no script by that name.
     fn script_named(&self, caller: CallerId, name: &str) -> Option<CallerId>;
+
+    /// The script's object says `speech`. The host hands it to the region's
+    /// chat fan-out: the avatars within [`Speech::to_avatars`] get it as
+    /// chat from the object (on `DEBUG_CHANNEL`, as the viewer's debug
+    /// chat), and the `listen`s within [`Speech::to_scripts`] get it as an
+    /// event. The runtime says a run-time error and a library call's refusal
+    /// this way, already worded and flood-limited.
+    fn say(&mut self, caller: CallerId, speech: &Speech);
+
+    /// Where the script `caller` is, for the words of its error lines and
+    /// the object its flood is counted against.
+    fn whereabouts(&self, caller: CallerId) -> Whereabouts;
 }

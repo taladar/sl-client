@@ -9,11 +9,17 @@ use core::time::Duration;
 
 use crate::bytecode::Program;
 use crate::library::{Event, event};
+use crate::num::ticks_for;
 use crate::value::Value;
 use crate::vm::context::{Peers, Tick};
 use crate::vm::detected::Detected;
+use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::{Arrival, Coalescing, Instance, Outcome, PostError, Posted, Slice};
+use crate::vm::report::{
+    Admission, DEBUG_CHANNEL, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, FloodGate, Speech, fault_lines,
+    fault_reach, refusal_reach,
+};
 
 /// How many instructions one script may run per second of region time, as
 /// charged — a library call and a loop's back-edge cost more than one
@@ -56,6 +62,10 @@ pub struct EngineConfig {
     pub region_budget: u32,
     /// Which queued touch, collision or `changed` a new one merges into.
     pub coalescing: Coalescing,
+    /// Which grid's engine the region imitates where they differ: the words
+    /// and reach of a run-time error, what becomes of the faulted script,
+    /// the flood limit.
+    pub flavour: EngineFlavour,
 }
 
 impl EngineConfig {
@@ -79,6 +89,7 @@ impl EngineConfig {
             script_budget,
             region_budget,
             coalescing: Coalescing::Reference,
+            flavour: EngineFlavour::SecondLife,
         }
     }
 }
@@ -119,6 +130,8 @@ pub struct Engine {
     instances: BTreeMap<CallerId, Instance>,
     /// The instance the previous tick served last.
     last_served: Option<CallerId>,
+    /// Second Life's per-object flood limit on error lines.
+    floods: FloodGate,
 }
 
 impl Engine {
@@ -130,6 +143,7 @@ impl Engine {
             now: Tick(0),
             instances: BTreeMap::new(),
             last_served: None,
+            floods: FloodGate::new(),
         }
     }
 
@@ -251,6 +265,56 @@ impl Engine {
         }
     }
 
+    /// Say on `DEBUG_CHANNEL` what went wrong in `slice` of the instance
+    /// `id`: the refusals of its library calls, then its fault, each line in
+    /// the flavour's words and reach and, on Second Life, through the
+    /// object's flood limit.
+    fn report(&mut self, id: CallerId, slice: &Slice, host: &mut dyn Host) {
+        let flavour = self.config.flavour;
+        let fault = match &slice.outcome {
+            Outcome::Faulted(fault) => Some(fault),
+            Outcome::Idle
+            | Outcome::Yielded
+            | Outcome::Finished
+            | Outcome::Sleeping(_)
+            | Outcome::StateChanged(_)
+            | Outcome::Reset => None,
+        };
+        if slice.refusals.is_empty() && fault.is_none() {
+            return;
+        }
+        let at = host.whereabouts(id);
+        let refused = slice
+            .refusals
+            .iter()
+            .map(|text| (text.clone(), Some(refusal_reach(flavour))));
+        let faulted = fault
+            .map(|fault| fault_lines(flavour, fault, &at))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|text| (text, fault_reach(flavour)));
+        let quiet = ticks_for(FLOOD_QUIET_SECONDS, self.config.step);
+        for (text, to_scripts) in refused.chain(faulted) {
+            let text = match flavour {
+                EngineFlavour::SecondLife => match self.floods.admit(&at.object, self.now, quiet) {
+                    Admission::Pass => text,
+                    Admission::Notice => FLOOD_NOTICE.to_owned(),
+                    Admission::Drop => continue,
+                },
+                EngineFlavour::YEngine | EngineFlavour::XEngine => text,
+            };
+            host.say(
+                id,
+                &Speech {
+                    channel: DEBUG_CHANNEL,
+                    text,
+                    to_avatars: sl_types::chat::ChatVolume::Say,
+                    to_scripts,
+                },
+            );
+        }
+    }
+
     /// Advance one tick and run the region's scripts in it.
     pub fn tick(&mut self, host: &mut dyn Host) -> TickReport {
         self.now = self.now.after(1);
@@ -303,8 +367,9 @@ impl Engine {
                     self.config.step,
                     script_left.min(region_left),
                     host,
-                    Peers::of(&self.instances),
+                    Peers::of(&self.instances, self.config.flavour),
                 );
+                self.report(id, &slice, host);
                 script_left = script_left.saturating_sub(slice.used);
                 region_left = region_left.saturating_sub(slice.used);
                 report.used = report.used.saturating_add(u64::from(slice.used));

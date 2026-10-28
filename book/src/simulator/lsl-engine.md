@@ -341,19 +341,50 @@ scripts-run percentage.
 - **Errors never panic the region.** A `Math Error`, a body Mono refuses
   (`InvalidProgram`), a call to a function nobody wrote
   (`RuntimeError::Unimplemented`), or a broken compiler promise
-  (`RuntimeError::Internal` — a lowering bug, named) stops the one script:
-  it keeps its state and globals and is no longer running, and the `Fault`
-  carries the source position of the instruction that failed. Recursion
-  deeper than `MAX_CALL_DEPTH` is a stack-heap collision until the memory
-  accounting of `server-lsl-memory-and-limits` stops it at the reference's
-  exact depth; that task also bounds the heap, which nothing does yet.
+  (`RuntimeError::Internal` — a lowering bug, named) ends the body in progress
+  of the one script, and the `Fault` carries the source position of the
+  instruction that failed and the event being handled. Recursion deeper than
+  `MAX_CALL_DEPTH` is a stack-heap collision until the memory accounting of
+  `server-lsl-memory-and-limits` stops it at the reference's exact depth; that
+  task also bounds the heap, which nothing does yet.
+- **What becomes of a faulted script is the flavour's**
+  (`EngineConfig::flavour`, an `EngineFlavour`; `server-lsl-runtime-errors`,
+  measured in `gridspec/lsl.md` § Run-time errors). On `SecondLife` it is
+  stopped and *held*: it keeps its state and globals, takes no events, and
+  setting the run flag again does not release it — a reset does, before or
+  after. On `YEngine` it is held with its run flag still set, so it reads as
+  running and answers nothing until a reset. On `XEngine` the event ends and
+  the script runs on with the next one.
+- **The engine says the fault on `DEBUG_CHANNEL`** through `Host::say`, in the
+  flavour's words: Second Life's two lines (`<prim name> [script:<script>]
+  Script run-time error`, then `Math Error` / `Stack-Heap Collision`), which a
+  script within say range hears; YEngine's and XEngine's one line naming the
+  script, the event, the prim's key and its position, which reaches avatars
+  and no script (and nothing at all for a runaway recursion). No grid names
+  the line, so neither does the message; the position stays in the `Fault`
+  for the host's log. The words need what only the host knows — the prim's
+  name and key, the script's name, the position, the object to count a flood
+  against — and `Host::whereabouts` answers it.
+- **A library call refusing its arguments** (`llGetScriptState` of a missing
+  script) words the refusal for the flavour through `ScriptCtx::refuse`
+  (`Could not find script 'Nope'.` against OpenSim's `llGetScriptState: Can't
+  find script 'Nope'`), and the engine says it after the slice; on OpenSim it
+  reaches scripts as a shout. It costs the script a second on every grid.
+- **Second Life limits an object's error lines**: eight in a run pass, the
+  ninth is `Too many errors... dropping further messages until the flood
+  stops`, the rest are dropped until the object has been quiet for twenty
+  seconds (aditi still dropped after ten and passed after thirty; twenty is a
+  decision inside that window). Another object's lines are not affected, and
+  OpenSim has no limit.
 - **One run flag, read where it is kept.** `llGetScriptState(name)` asks the
   host which instance of the caller's prim is called `name`
   (`Host::script_named`) and reads that instance's run flag — the one the
   engine schedules by, a fault clears and the Running checkbox shows — never a
-  copy. The engine lends a script the region's other instances while it runs
-  (`ScriptCtx` sees their flags and nothing else); the caller itself reads as
-  running, and a name that is no script, or has no instance, as stopped.
+  copy, as the flavour reads it (`Instance::reads_running`: on Second Life a
+  held script is stopped whatever its flag). The engine lends a script the
+  region's other instances while it runs (`ScriptCtx` sees their flags and
+  nothing else); the caller itself reads as running, a script with no instance
+  as stopped, and a name that is no script as stopped, refused as above.
 - **`print`** goes to `Host::print`: Second Life writes it to the
   simulator's log, where no resident sees it, so a host logs it and never
   turns it into chat. It is also what the VM's own tests observe.
@@ -513,11 +544,14 @@ runtime never learns what an entity is. Events travel the other way
 through the runtime's own API (`post(instance, event)`), not through this
 trait.
 
-**As built**, the trait holds what the VM itself needs — `print`, and `stubbed`,
-the notice that a stubbed function answered with its type's default — and each
-library tranche adds its own methods. The methods the first tranches need — chat
-and listens, identity, position, hover text, and the seeded randomness and clock
-the determinism rule requires — are enough to fix its shape:
+**As built**, the trait holds what the VM itself needs — `print`; `stubbed`, the
+notice that a stubbed function answered with its type's default; `say`, through
+which the engine speaks a script's error lines (a `Speech`: channel, text, and
+how far avatars and scripts hear it); and `whereabouts`, which names the prim
+and script those lines name — and each library tranche adds its own methods.
+The methods the first tranches need — chat and listens, identity, position,
+hover text, and the seeded randomness and clock the determinism rule requires —
+are enough to fix its shape:
 
 ```rust,ignore
 pub trait Host {

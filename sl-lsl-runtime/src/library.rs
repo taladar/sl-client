@@ -52,7 +52,7 @@ mod tests {
 
     use super::*;
     use crate::value::{Element, Value};
-    use crate::vm::{CallerId, Host, Peers, ScriptCtx, ScriptData, Tick};
+    use crate::vm::{CallerId, Host, Peers, ScriptCtx, ScriptData, Speech, Tick, Whereabouts};
 
     /// A host for calls that never reach it: the dispatch reports stubs
     /// through `Called::stubbed`, and only the VM tells the host.
@@ -67,6 +67,18 @@ mod tests {
 
         fn script_named(&self, _caller: CallerId, _name: &str) -> Option<CallerId> {
             None
+        }
+
+        fn say(&mut self, _caller: CallerId, _speech: &Speech) {}
+
+        fn whereabouts(&self, _caller: CallerId) -> Whereabouts {
+            Whereabouts {
+                object: String::new(),
+                prim: String::new(),
+                name: String::new(),
+                script: String::new(),
+                position: crate::value::ZERO_VECTOR,
+            }
         }
     }
 

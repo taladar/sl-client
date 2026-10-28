@@ -12,6 +12,7 @@ use super::*;
 use crate::bytecode::{Position, StateId};
 use crate::compile;
 use sl_lsl::ast::TypeName;
+use sl_types::chat::ChatVolume;
 
 use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
@@ -32,6 +33,10 @@ struct Recorder {
     left: Vec<(u64, CallerId)>,
     /// The scripts `llGetScriptState` can name, all in one prim.
     scripts: std::collections::BTreeMap<String, CallerId>,
+    /// `(tick, caller, speech)` per line said.
+    said: Vec<(u64, CallerId, Speech)>,
+    /// The object each script is in, by key; `"object-a"` when not listed.
+    objects: std::collections::BTreeMap<CallerId, String>,
 }
 
 impl Host for Recorder {
@@ -50,6 +55,32 @@ impl Host for Recorder {
     fn script_named(&self, _caller: CallerId, name: &str) -> Option<CallerId> {
         self.scripts.get(name).copied()
     }
+
+    fn say(&mut self, caller: CallerId, speech: &Speech) {
+        self.said.push((self.now, caller, speech.clone()));
+    }
+
+    fn whereabouts(&self, caller: CallerId) -> Whereabouts {
+        Whereabouts {
+            object: self
+                .objects
+                .get(&caller)
+                .cloned()
+                .unwrap_or_else(|| "object-a".to_owned()),
+            prim: "fab01e52-3517-4545-be1b-4cbf6d8ace3b".to_owned(),
+            name: "Faulty prim".to_owned(),
+            script: self
+                .scripts
+                .iter()
+                .find(|(_, id)| **id == caller)
+                .map_or_else(|| format!("Script {}", caller.0), |(name, _)| name.clone()),
+            position: sl_types::lsl::Vector {
+                x: 120.0,
+                y: 128.0,
+                z: 27.5,
+            },
+        }
+    }
 }
 
 impl Recorder {
@@ -59,6 +90,15 @@ impl Recorder {
             .iter()
             .filter(|(_, who, _)| *who == caller)
             .map(|(tick, _, text)| (*tick, text.as_str()))
+            .collect()
+    }
+
+    /// The text of every line `caller`'s object said, in order.
+    fn heard(&self, caller: CallerId) -> Vec<&str> {
+        self.said
+            .iter()
+            .filter(|(_, who, _)| *who == caller)
+            .map(|(_, _, speech)| speech.text.as_str())
             .collect()
     }
 
@@ -296,11 +336,12 @@ default {
         Some(vec![
             Outcome::Finished,
             Outcome::Faulted(Fault {
-                error: RuntimeError::MathError,
+                error: RuntimeError::MathError(crate::Division::Integer),
                 position: Some(Position {
                     line: 5,
                     column: 24
                 }),
+                event: Some("state_entry"),
             }),
         ])
     );
@@ -338,18 +379,26 @@ fn get_script_state_reads_the_flag_a_fault_clears() -> Result<(), String> {
     );
     let _none = engine.add(
         B,
-        program("integer zero; default { state_entry() { llSleep(0.2); zero = 1 / zero; } }")?,
+        program("integer zero; default { state_entry() { llSleep(1.5); zero = 1 / zero; } }")?,
     );
-    let _reports = run(&mut engine, &mut host, 6);
+    // Each report asks after a missing script, which costs a second — and
+    // LSL evaluates right to left, so the others are read after it.
+    let _reports = run(&mut engine, &mut host, 30);
     assert_eq!(host.texts(A), vec!["110", "100"]);
-    // Restarted, it reads as running again: one flag, not a copy.
+    // Second Life: setting the run flag again does not release a script a
+    // fault holds…
     engine
         .instance_mut(B)
         .ok_or("no instance")?
         .set_running(true);
     engine.instance_mut(A).ok_or("no instance")?.reset();
-    let _reports = run(&mut engine, &mut host, 1);
-    assert_eq!(host.texts(A), vec!["110", "100", "110"]);
+    let _reports = run(&mut engine, &mut host, 11);
+    assert_eq!(host.texts(A), vec!["110", "100", "100"]);
+    // …a reset does, and it reads as running again: one flag, not a copy.
+    engine.instance_mut(B).ok_or("no instance")?.reset();
+    engine.instance_mut(A).ok_or("no instance")?.reset();
+    let _reports = run(&mut engine, &mut host, 11);
+    assert_eq!(host.texts(A), vec!["110", "100", "100", "110"]);
     Ok(())
 }
 
@@ -1159,5 +1208,412 @@ fn a_later_change_joins_a_queued_one_unless_it_is_next_in_line() -> Result<(), S
         ]
     );
     assert_eq!(host.texts(A), vec!["8", "10"]);
+    Ok(())
+}
+
+/// A region of [`STEP`] ticks imitating `flavour`.
+fn engine_as(flavour: EngineFlavour) -> Engine {
+    let mut config = EngineConfig::for_step(STEP);
+    config.flavour = flavour;
+    Engine::new(config)
+}
+
+/// Post `link_message(0, num, msg, "")` to `id`.
+fn link(engine: &mut Engine, id: CallerId, num: i32, msg: &str) -> Result<Option<Posted>, String> {
+    engine
+        .post(
+            id,
+            named("link_message")?,
+            vec![
+                Value::Integer(0),
+                Value::Integer(num),
+                Value::String(msg.to_owned()),
+                Value::Key(String::new()),
+            ],
+        )
+        .map_err(|error| error.to_string())
+}
+
+/// The `Div int` script of the probe `errors/runtime-errors`: link message 1
+/// divides by its text, 100 asks for the global it set first.
+const DIVIDER: &str = r#"integer g = 1;
+default {
+    link_message(integer sender, integer num, string msg, key id) {
+        if (num == 100) print("g=" + (string)g);
+        else { g = 42; print((string)(1 / (integer)msg)); }
+    }
+}"#;
+
+/// A host whose one script `A` is called `Div int`.
+fn divider_host() -> Recorder {
+    Recorder {
+        scripts: [("Div int".to_owned(), A)].into_iter().collect(),
+        ..Recorder::default()
+    }
+}
+
+#[test]
+fn second_life_says_two_lines_stops_and_holds_the_script_until_a_reset() -> Result<(), String> {
+    let mut engine = engine_as(EngineFlavour::SecondLife);
+    let mut host = divider_host();
+    let _none = engine.add(A, program(DIVIDER)?);
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(link(&mut engine, A, 1, "0")?, Some(Posted::Queued));
+    let _reports = run(&mut engine, &mut host, 1);
+    // aditi, 2026-10-23: the object's name and the script's, then the error.
+    assert_eq!(
+        host.heard(A),
+        vec![
+            "Faulty prim [script:Div int] Script run-time error",
+            "Math Error"
+        ]
+    );
+    assert!(host.said.iter().all(|(_, _, speech)| {
+        speech.channel == DEBUG_CHANNEL
+            && speech.to_avatars == ChatVolume::Say
+            && speech.to_scripts == Some(ChatVolume::Say)
+    }));
+    let instance = engine.instance(A).ok_or("no instance")?;
+    assert!(!instance.is_running());
+    assert!(instance.is_held());
+    assert!(!instance.reads_running(EngineFlavour::SecondLife));
+    assert_eq!(link(&mut engine, A, 100, "")?, Some(Posted::Stopped));
+    // `llSetScriptState(TRUE)` alone: still stopped, still deaf.
+    engine
+        .instance_mut(A)
+        .ok_or("no instance")?
+        .set_running(true);
+    assert!(
+        !engine
+            .instance(A)
+            .ok_or("no instance")?
+            .reads_running(EngineFlavour::SecondLife)
+    );
+    assert_eq!(link(&mut engine, A, 100, "")?, Some(Posted::Stopped));
+    // Reset after it: running again, from scratch.
+    engine.instance_mut(A).ok_or("no instance")?.reset();
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(link(&mut engine, A, 100, "")?, Some(Posted::Queued));
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(host.texts(A), vec!["g=1"]);
+    Ok(())
+}
+
+#[test]
+fn second_life_releases_a_held_script_reset_first_then_started() -> Result<(), String> {
+    let mut engine = engine_as(EngineFlavour::SecondLife);
+    let mut host = divider_host();
+    let _none = engine.add(A, program(DIVIDER)?);
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = link(&mut engine, A, 1, "0")?;
+    let _reports = run(&mut engine, &mut host, 1);
+    engine.instance_mut(A).ok_or("no instance")?.reset();
+    // Reset but not started: the run flag the fault cleared stays clear.
+    assert_eq!(link(&mut engine, A, 100, "")?, Some(Posted::Stopped));
+    engine
+        .instance_mut(A)
+        .ok_or("no instance")?
+        .set_running(true);
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(link(&mut engine, A, 100, "")?, Some(Posted::Queued));
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(host.texts(A), vec!["g=1"]);
+    Ok(())
+}
+
+#[test]
+fn yengine_says_one_line_to_avatars_and_holds_a_script_that_reads_running() -> Result<(), String> {
+    let mut engine = engine_as(EngineFlavour::YEngine);
+    let mut host = divider_host();
+    let _none = engine.add(A, program(DIVIDER)?);
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = link(&mut engine, A, 1, "0")?;
+    let _reports = run(&mut engine, &mut host, 1);
+    // OpenSim YEngine, 2026-10-23, verbatim but for the prim's key.
+    assert_eq!(
+        host.heard(A),
+        vec![
+            "YEngine: Division by Zero (script: Div int event: link_message primID: \
+             fab01e52-3517-4545-be1b-4cbf6d8ace3b at: <120,128,27>) Script must be Reset to \
+             re-enable.\n"
+        ]
+    );
+    assert!(
+        host.said
+            .iter()
+            .all(|(_, _, speech)| speech.to_scripts.is_none())
+    );
+    let instance = engine.instance(A).ok_or("no instance")?;
+    assert!(instance.is_running());
+    assert!(instance.is_held());
+    assert!(instance.reads_running(EngineFlavour::YEngine));
+    assert_eq!(link(&mut engine, A, 100, "")?, Some(Posted::Stopped));
+    engine.instance_mut(A).ok_or("no instance")?.reset();
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = link(&mut engine, A, 100, "")?;
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(host.texts(A), vec!["g=1"]);
+    Ok(())
+}
+
+#[test]
+fn xengine_says_one_line_and_the_script_runs_on_with_its_globals() -> Result<(), String> {
+    let mut engine = engine_as(EngineFlavour::XEngine);
+    let mut host = divider_host();
+    let _none = engine.add(A, program(DIVIDER)?);
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = link(&mut engine, A, 1, "0")?;
+    let _posted = link(&mut engine, A, 100, "")?;
+    let _reports = run(&mut engine, &mut host, 1);
+    // OpenSim XEngine, 2026-10-27: no space before the bracket, the
+    // position as a vector.
+    assert_eq!(
+        host.heard(A),
+        vec![
+            "Integer division by Zero(script: Div int event: link_message \
+             primID:fab01e52-3517-4545-be1b-4cbf6d8ace3b at <120, 128, 27.5>)"
+        ]
+    );
+    let instance = engine.instance(A).ok_or("no instance")?;
+    assert!(instance.is_running());
+    assert!(!instance.is_held());
+    // The event queued behind the fault is handled, in the state it
+    // faulted in, with the global it set before.
+    assert_eq!(host.texts(A), vec!["g=42"]);
+    Ok(())
+}
+
+#[test]
+fn opensim_names_the_kind_of_division() -> Result<(), String> {
+    let source = r"default {
+        link_message(integer sender, integer num, string msg, key id) {
+            if (num == 1) print((string)(1.0 / (float)msg));
+            else print((string)(<1.0, 2.0, 3.0> / (float)msg));
+        }
+    }";
+    let cases = [
+        (EngineFlavour::XEngine, 1, "Float division by zero(script:"),
+        (EngineFlavour::XEngine, 2, "Vector division by zero(script:"),
+        (
+            EngineFlavour::YEngine,
+            1,
+            "YEngine: Division by Zero (script:",
+        ),
+        (
+            EngineFlavour::YEngine,
+            2,
+            "YEngine: Vector division by zero (script:",
+        ),
+        (
+            EngineFlavour::SecondLife,
+            1,
+            "Faulty prim [script:Script 1]",
+        ),
+        (
+            EngineFlavour::SecondLife,
+            2,
+            "Faulty prim [script:Script 1]",
+        ),
+    ];
+    for (flavour, num, start) in cases {
+        let mut engine = engine_as(flavour);
+        let mut host = Recorder::default();
+        let _none = engine.add(A, program(source)?);
+        let _reports = run(&mut engine, &mut host, 1);
+        let _posted = link(&mut engine, A, num, "0")?;
+        let _reports = run(&mut engine, &mut host, 1);
+        let heard = host.heard(A);
+        assert!(
+            heard.first().is_some_and(|line| line.starts_with(start)),
+            "{flavour:?} case {num}: {heard:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn opensim_says_nothing_of_a_runaway_recursion() -> Result<(), String> {
+    let source = "integer deep(integer depth) { return deep(depth + 1) + 1; }
+        default { state_entry() { print((string)deep(0)); } }";
+    for flavour in [EngineFlavour::YEngine, EngineFlavour::XEngine] {
+        let mut engine = engine_as(flavour);
+        let mut host = Recorder::default();
+        let _none = engine.add(A, program(source)?);
+        let reports = run(&mut engine, &mut host, 4);
+        assert!(reports.iter().any(|report| {
+            outcomes(report, A).iter().any(|outcome| {
+                matches!(
+                    outcome,
+                    Outcome::Faulted(Fault {
+                        error: RuntimeError::StackHeapCollision,
+                        ..
+                    })
+                )
+            })
+        }));
+        assert!(host.heard(A).is_empty(), "{flavour:?}");
+    }
+    let mut engine = engine_as(EngineFlavour::SecondLife);
+    let mut host = Recorder::default();
+    let _none = engine.add(A, program(source)?);
+    let _reports = run(&mut engine, &mut host, 4);
+    assert_eq!(
+        host.heard(A),
+        vec![
+            "Faulty prim [script:Script 1] Script run-time error",
+            "Stack-Heap Collision"
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_missing_script_is_refused_in_the_flavours_words_and_costs_a_second() -> Result<(), String> {
+    let source = r#"default { state_entry() {
+        print((string)llGetScriptState("Nope"));
+        print("after");
+    } }"#;
+    let cases = [
+        (
+            EngineFlavour::SecondLife,
+            "Could not find script 'Nope'.",
+            ChatVolume::Say,
+        ),
+        (
+            EngineFlavour::YEngine,
+            "llGetScriptState: Can't find script 'Nope'",
+            ChatVolume::Shout,
+        ),
+        (
+            EngineFlavour::XEngine,
+            "llGetScriptState: Can't find script 'Nope'",
+            ChatVolume::Shout,
+        ),
+    ];
+    for (flavour, text, reach) in cases {
+        let mut engine = engine_as(flavour);
+        let mut host = Recorder::default();
+        let _none = engine.add(A, program(source)?);
+        let _reports = run(&mut engine, &mut host, 12);
+        assert_eq!(host.heard(A), vec![text], "{flavour:?}");
+        assert!(
+            host.said
+                .iter()
+                .all(|(_, _, speech)| speech.to_scripts == Some(reach)),
+            "{flavour:?}"
+        );
+        // The script goes on a second after the call, with its answer.
+        assert_eq!(host.from(A), vec![(11, "0"), (11, "after")], "{flavour:?}");
+        assert!(
+            engine
+                .instance(A)
+                .ok_or("no instance")?
+                .reads_running(flavour)
+        );
+    }
+    Ok(())
+}
+
+/// Twelve refusals as fast as the script can, then one after 10 seconds of
+/// quiet and one after 25 more: the probe `errors/flood`.
+const FLOODER: &str = r#"integer i;
+default { state_entry() {
+    for (i = 1; i <= 12; ++i) llGetScriptState("Nope " + (string)i);
+    llSleep(10.0);
+    llGetScriptState("Later 1");
+    llSleep(25.0);
+    llGetScriptState("Later 2");
+    print("done");
+} }"#;
+
+#[test]
+fn second_life_drops_an_objects_error_lines_in_a_flood_until_it_quiets() -> Result<(), String> {
+    let mut engine = engine_as(EngineFlavour::SecondLife);
+    let mut host = Recorder {
+        objects: [(B, "object-b".to_owned())].into_iter().collect(),
+        ..Recorder::default()
+    };
+    let _none = engine.add(A, program(FLOODER)?);
+    // A script in another object of the same owner's, mid-flood.
+    let _none = engine.add(
+        B,
+        program(r#"default { state_entry() { llSleep(10.5); llGetScriptState("Other"); } }"#)?,
+    );
+    let _reports = run(&mut engine, &mut host, 520);
+    assert_eq!(host.texts(A), vec!["done"]);
+    let mut expected: Vec<String> = (1..=8)
+        .map(|i| format!("Could not find script 'Nope {i}'."))
+        .collect();
+    expected.push(FLOOD_NOTICE.to_owned());
+    expected.push("Could not find script 'Later 2'.".to_owned());
+    assert_eq!(host.heard(A), expected);
+    assert_eq!(host.heard(B), vec!["Could not find script 'Other'."]);
+    Ok(())
+}
+
+#[test]
+fn opensim_passes_every_error_line() -> Result<(), String> {
+    let mut engine = engine_as(EngineFlavour::YEngine);
+    let mut host = Recorder::default();
+    let _none = engine.add(A, program(FLOODER)?);
+    let _reports = run(&mut engine, &mut host, 520);
+    assert_eq!(host.heard(A).len(), 14);
+    Ok(())
+}
+
+#[test]
+fn a_script_listening_on_debug_channel_hears_a_fault_and_the_region_ticks_on() -> Result<(), String>
+{
+    // The acceptance of `server-lsl-runtime-errors`, through a stand-in for
+    // the region's chat fan-out: every line said that scripts hear is handed
+    // to B's `listen`.
+    let mut engine = engine_as(EngineFlavour::SecondLife);
+    let mut host = divider_host();
+    let _none = engine.add(A, program(DIVIDER)?);
+    let _none = engine.add(
+        B,
+        program(
+            r#"default { listen(integer channel, string name, key id, string message) {
+                print((string)channel + " " + message);
+            } }"#,
+        )?,
+    );
+    let _reports = run(&mut engine, &mut host, 1);
+    let _posted = link(&mut engine, A, 1, "0")?;
+    let _reports = run(&mut engine, &mut host, 1);
+    let heard: Vec<Speech> = host
+        .said
+        .iter()
+        .filter(|(_, _, speech)| speech.to_scripts.is_some())
+        .map(|(_, _, speech)| speech.clone())
+        .collect();
+    for speech in heard {
+        let _posted = engine
+            .post(
+                B,
+                named("listen")?,
+                vec![
+                    Value::Integer(speech.channel),
+                    Value::String("Faulty prim".to_owned()),
+                    Value::Key("fab01e52-3517-4545-be1b-4cbf6d8ace3b".to_owned()),
+                    Value::String(speech.text),
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    let _reports = run(&mut engine, &mut host, 1);
+    assert_eq!(
+        host.texts(B),
+        vec![
+            "2147483647 Faulty prim [script:Div int] Script run-time error",
+            "2147483647 Math Error"
+        ]
+    );
+    assert!(
+        !engine
+            .instance(A)
+            .ok_or("no instance")?
+            .reads_running(EngineFlavour::SecondLife)
+    );
     Ok(())
 }

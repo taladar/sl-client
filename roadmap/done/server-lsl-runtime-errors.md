@@ -2,7 +2,7 @@
 id: server-lsl-runtime-errors
 title: Run-time errors where a resident can see them
 topic: server
-status: in-progress
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 3
 blocked_by: [server-lsl-vm-execution]
@@ -301,3 +301,47 @@ flavours must differ in:
 So the acceptance above ("one `DEBUG_CHANNEL` message naming the script and
 the line") is the OpenSim shape; the Second Life flavour sends two lines and
 names no line number.
+
+## Done (2026-10-28)
+
+Built in `sl-lsl-runtime` to the measured shapes above, per flavour
+(`EngineConfig::flavour`, a new `EngineFlavour`: `SecondLife`, `YEngine`,
+`XEngine`; book `simulator/lsl-engine.md` § As built: the VM):
+
+- **One error path.** `Engine::tick` hands every fault, and every refusal a
+  library call words through `ScriptCtx::refuse`, to `Host::say` as a
+  `Speech` on `DEBUG_CHANNEL`, worded for the flavour (`vm/report.rs`). The
+  words need the prim's name and key, the script's name and the position,
+  which `Host::whereabouts` answers. `ValueError::MathError` /
+  `RuntimeError::MathError` now carry the kind of division, which OpenSim's
+  engines name; `Fault` carries the event being handled. No grid names the
+  line, so the message does not; `Fault::position` keeps it for the host's log.
+- **Reach.** Second Life: say range to avatars and scripts. OpenSim: a fault
+  reaches avatars and no script; a refusal reaches scripts as a shout. A
+  runaway recursion says nothing on OpenSim.
+- **The script afterwards.** Second Life stops and *holds* it
+  (`Instance::is_held`): the run flag set again does not release it, a reset
+  does, before or after. YEngine holds it with the flag still set, so
+  `llGetScriptState` reads 1 (`Instance::reads_running`). XEngine ends the
+  event and runs on.
+- **Floods** (Second Life only): eight lines an object, then the notice, then
+  nothing until twenty seconds of quiet — a decision inside the measured 10 to
+  30 s window.
+- **`llGetScriptState` of a missing script** is refused in the flavour's words
+  and costs a second (aditi: twelve took 12.2 s). The `inventory/listing`
+  row that called it silent on Second Life was the flood limit, already set
+  off by that probe's missing-item lines; the book row says so now.
+
+Acceptance: `vm/tests.rs` — a script dividing by zero says the flavour's lines
+and stops (reads stopped), the other scripts tick on, and a second script's
+`listen` receives both lines through a stand-in for the chat fan-out. The real
+fan-out is [[server-fake-grid-script-engine-wiring]]'s (`Host::say` onto
+[[server-world-chat-routing]], as `ChatType::DebugChannel` on that channel).
+The viewer half already exists: the Script Errors window (`sl-viewer-notices`'
+`script_errors`, from `gridspec-lsl-runtime-errors`).
+
+Not here, and not this task's: what faults per flavour beyond the division
+kinds (LSO's non-finite results, XEngine's `INT_MIN / -1`, OpenSim's
+library-function exceptions and their owner-say / .NET-stack words) is the
+value model and library per flavour, which this runtime does not imitate
+(it is Second Life's Mono throughout; OpenSim's floats are doubles).

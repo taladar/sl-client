@@ -53,6 +53,6 @@ pub mod vm;
 
 pub use cast::cast;
 pub use compiler::{CompileError, CompileErrorKind, compile};
-pub use error::ValueError;
+pub use error::{Division, ValueError};
 pub use ops::{binary, prefix};
 pub use value::{Element, NULL_KEY, Value, ZERO_ROTATION, ZERO_VECTOR};

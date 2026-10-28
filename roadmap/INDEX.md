@@ -14,9 +14,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 135 |
 | ready | 333 |
 | blocked | 56 |
-| in-progress | 19 |
+| in-progress | 18 |
 | bugs | 39 |
-| done | 1444 |
+| done | 1445 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2079** |
@@ -1344,7 +1344,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-voice`](blocked/gridspec-voice.md) — Voice provisioning and
   signalling on each grid (blocked by `viewer-voice-audio`)
 
-## in-progress (19)
+## in-progress (18)
 
 ### viewer
 
@@ -1395,12 +1395,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
-
-### server
-
-- [`server-lsl-runtime-errors`](in-progress/server-lsl-runtime-errors.md) —
-  Run-time errors where a resident can see them (blocked by
-  `server-lsl-vm-execution` (done))
 
 ## bugs (39)
 
@@ -1501,7 +1495,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1444)
+## done (1445)
 
 ### protocol
 
@@ -4516,6 +4510,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `server-lsl-architecture` (done))
 - [`server-lsl-library-table-refresh`](done/server-lsl-library-table-refresh.md)
   — The vendored library document lacks 50 current functions
+- [`server-lsl-runtime-errors`](done/server-lsl-runtime-errors.md) — Run-time
+  errors where a resident can see them (blocked by `server-lsl-vm-execution`
+  (done))
 - [`server-lsl-state-and-events`](done/server-lsl-state-and-events.md) — The
   event and state machine — 35 events and the rules around them (blocked by
   `server-lsl-vm-execution` (done))

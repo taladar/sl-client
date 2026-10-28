@@ -16,9 +16,10 @@ use sl_lsl::ast::{BinaryOp, PrefixOp, TypeName};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ValueError {
     /// Division or modulo by zero, or a float division whose result is not a
-    /// number — the reference's `Math Error`.
+    /// number — the reference's `Math Error`, with which kind of division it
+    /// was, since OpenSim's engines name it.
     #[error("Math Error")]
-    MathError,
+    MathError(Division),
     /// A cast the compiler rejects, such as `(integer)` of a key.
     #[error("cannot cast {from:?} to {to:?}")]
     Cast {
@@ -45,4 +46,17 @@ pub enum ValueError {
         /// The operand's type.
         operand: TypeName,
     },
+}
+
+/// Which kind of division raised a [`ValueError::MathError`]. Second Life
+/// calls every one `Math Error`; OpenSim's engines tell them apart (`Integer
+/// division by Zero`, `Float division by zero`, `Vector division by zero`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Division {
+    /// An integer divided, or taken modulo, by integer zero.
+    Integer,
+    /// A division with a float on either side.
+    Float,
+    /// A vector divided by a zero scalar.
+    Vector,
 }

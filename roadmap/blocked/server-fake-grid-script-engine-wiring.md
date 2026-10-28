@@ -74,3 +74,15 @@ take-and-rez, no memory accounting. Decide here whether the wiring takes an
 engine knob on `FakeOpensim` (so a fake run can be held to either column) or
 stays YEngine-only; a fake run is compared against `opensim-yengine` until
 then.
+
+## From server-lsl-runtime-errors (2026-10-28)
+
+The runtime now speaks a script's error lines itself: implement `Host::say`
+onto the region's chat fan-out (a `Speech` on `DEBUG_CHANNEL` reaches the
+viewer as `ChatType::DebugChannel` from the prim, its owner in the owner
+field; `to_scripts: None` means no `listen` hears it) and
+`Host::whereabouts` (the prim's name and key, the link set's key for the flood
+count, the script's inventory name, the prim's region position). Set
+`EngineConfig::flavour` from the grid's flavour: `SecondLife` for a
+Second-Life-flavoured grid, `YEngine` (the local OpenSim's engine) for an
+OpenSim one.

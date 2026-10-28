@@ -1,7 +1,7 @@
 //! Run-time errors: what stops a script.
 
 use crate::bytecode::Position;
-use crate::error::ValueError;
+use crate::error::{Division, ValueError};
 use crate::library::{BuiltinId, CallError};
 
 /// Why a script stopped with an error.
@@ -13,9 +13,10 @@ use crate::library::{BuiltinId, CallError};
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RuntimeError {
     /// Division or modulo by zero, or a float quotient that is not a number
-    /// — the reference's `Math Error`.
+    /// — the reference's `Math Error`, with the kind of division, which
+    /// OpenSim's engines name.
     #[error("Math Error")]
-    MathError,
+    MathError(Division),
     /// The body is one Mono refuses to load (the value of `integer *=
     /// float` used), so it fails before its first line, as on the grid.
     #[error("System.InvalidProgramException: Invalid IL code")]
@@ -37,7 +38,7 @@ pub enum RuntimeError {
 impl From<ValueError> for RuntimeError {
     fn from(error: ValueError) -> Self {
         match error {
-            ValueError::MathError => Self::MathError,
+            ValueError::MathError(division) => Self::MathError(division),
             other @ (ValueError::Cast { .. }
             | ValueError::Binary { .. }
             | ValueError::Prefix { .. }) => Self::Internal(other.to_string()),
@@ -64,6 +65,11 @@ pub struct Fault {
     /// What went wrong.
     pub error: RuntimeError,
     /// The source position of the instruction that failed, when the source
-    /// map has one.
+    /// map has one. No grid tells a resident the line, so the error lines
+    /// leave it out; it is here for the host's own log.
     pub position: Option<Position>,
+    /// The event whose handler was running — `link_message`, `state_entry`
+    /// — or [`None`] for the global initialisers. OpenSim's error line
+    /// names it.
+    pub event: Option<&'static str>,
 }

@@ -6,6 +6,7 @@ use core::time::Duration;
 
 use crate::num::ticks_for;
 use crate::vm::detected::Detected;
+use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::Instance;
 
@@ -44,6 +45,9 @@ pub(crate) struct ScriptData {
     pub(crate) timer: Option<Timer>,
     /// `llGetStartParameter`: what the object was rezzed with.
     pub(crate) start_parameter: i32,
+    /// What library calls said refusing their arguments, worded for the
+    /// flavour, waiting for the engine to say them on `DEBUG_CHANNEL`.
+    pub(crate) refusals: Vec<String>,
 }
 
 /// A control-flow effect a library function asks the VM for. The VM acts on
@@ -57,27 +61,51 @@ pub(crate) enum Request {
 }
 
 /// The region's other scripts, as a library function may see them: their run
-/// flags, and nothing else (`llGetScriptState`).
+/// flags, and nothing else (`llGetScriptState`) — and which grid's engine the
+/// region imitates.
 ///
 /// The engine runs one instance at a time with the rest lent here, so a
 /// script reads the very flag the engine schedules by — the one a run-time
 /// error clears and the contents' Running checkbox shows — never a copy.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Peers<'run>(Option<&'run BTreeMap<CallerId, Instance>>);
+pub(crate) struct Peers<'run> {
+    /// The instances of the engine, less the one running; [`None`] outside
+    /// an engine.
+    instances: Option<&'run BTreeMap<CallerId, Instance>>,
+    /// The flavour the region imitates.
+    flavour: EngineFlavour,
+}
 
 impl<'run> Peers<'run> {
-    /// No other scripts: an instance run on its own, outside an engine.
-    pub(crate) const NONE: Self = Self(None);
+    /// No other scripts: an instance run on its own, outside an engine, as
+    /// on Second Life.
+    pub(crate) const NONE: Self = Self {
+        instances: None,
+        flavour: EngineFlavour::SecondLife,
+    };
 
-    /// The instances of an engine, less the one running.
-    pub(crate) const fn of(instances: &'run BTreeMap<CallerId, Instance>) -> Self {
-        Self(Some(instances))
+    /// The instances of an engine imitating `flavour`, less the one running.
+    pub(crate) const fn of(
+        instances: &'run BTreeMap<CallerId, Instance>,
+        flavour: EngineFlavour,
+    ) -> Self {
+        Self {
+            instances: Some(instances),
+            flavour,
+        }
     }
 
-    /// Whether the instance `id` names is running; [`None`] when there is no
-    /// such instance.
+    /// The flavour the region imitates.
+    pub(crate) const fn flavour(self) -> EngineFlavour {
+        self.flavour
+    }
+
+    /// Whether the instance `id` names reads as running in this flavour;
+    /// [`None`] when there is no such instance.
     fn is_running(self, id: CallerId) -> Option<bool> {
-        self.0?.get(&id).map(Instance::is_running)
+        self.instances?
+            .get(&id)
+            .map(|instance| instance.reads_running(self.flavour))
     }
 }
 
@@ -171,15 +199,29 @@ impl<'host> ScriptCtx<'host> {
     }
 
     /// `llGetScriptState`: whether the script called `name` in the caller's
-    /// prim is running. The caller itself is, since it is running this; a
-    /// name the host does not know as a script, or a script with no instance
-    /// in the region, is not.
-    pub fn script_running(&mut self, name: &str) -> bool {
-        match self.host.script_named(self.caller, name) {
-            Some(id) if id == self.caller => true,
-            Some(id) => self.peers.is_running(id).unwrap_or(false),
-            None => false,
+    /// prim reads as running in the region's flavour, or [`None`] when the
+    /// prim has no script by that name. The caller itself is running, since
+    /// it is running this; a script with no instance in the region is not.
+    pub fn script_running(&mut self, name: &str) -> Option<bool> {
+        match self.host.script_named(self.caller, name)? {
+            id if id == self.caller => Some(true),
+            id => Some(self.peers.is_running(id).unwrap_or(false)),
         }
+    }
+
+    /// The grid's engine the region imitates, for a function whose answer or
+    /// words differ between them.
+    #[must_use]
+    pub const fn flavour(&self) -> EngineFlavour {
+        self.peers.flavour()
+    }
+
+    /// Refuse the call's arguments with `text`, worded for the
+    /// [`Self::flavour`]: the engine says it on `DEBUG_CHANNEL` once the
+    /// slice is over, through the same flood limit as a run-time error. The
+    /// call itself carries on and returns its answer.
+    pub fn refuse(&mut self, text: String) {
+        self.data.refusals.push(text);
     }
 
     /// Suspend the script for `seconds` once the function returns. A
