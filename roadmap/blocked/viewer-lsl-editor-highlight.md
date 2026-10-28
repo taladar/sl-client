@@ -108,3 +108,11 @@ Two things to know before this is built:
   `osListenRegex` and every `mod*` function, which compile and run. So OSSL
   colours as the document says, not as the region behaves; a denial shows
   only at run time, as `DEBUG_CHANNEL` chat ([[viewer-script-warning-window]]).
+
+## Offline check (from server-fake-grid-lsl-syntax, 2026-10-28)
+
+The fake grid now serves each flavour's live document
+([[server-fake-grid-lsl-syntax]]), so the acceptance check that the editor
+colours and completes from the grid's table can run offline: a viewer logged
+into `sl-fake-grid` gets Linden's document on the Second Life flavour and
+OpenSim's, with its `os*` functions, on the OpenSim one.

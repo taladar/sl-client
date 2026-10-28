@@ -130,7 +130,7 @@ All fourteen are **held**, by name and kind.
 | `MaxAgentGroupsPremium` | integer | 70 | 60 | each flavour's |
 | `MaxMaterialsPerTransaction` | integer | 50 | 50 | 50 |
 | `RenderMaterialsCapability` | **real** | 4 | 3 | each flavour's |
-| `LSLSyntaxId` | uuid | *per region*: one id per simulator version | one id, the first line of `bin/ScriptSyntax.xml` | **not sent** by either flavour |
+| `LSLSyntaxId` | uuid | *per region*: one id per simulator version | one id, the first line of `bin/ScriptSyntax.xml` | each flavour's, beside its grid's document |
 
 `RenderMaterialsCapability` is, despite its name, a rate: how many
 `RenderMaterials` requests a second the region accepts. It is a real on
@@ -158,7 +158,7 @@ All seventeen are **held**, and so is their absence on OpenSim.
 | `DeadReckoningDistance` | real | 20 | 20 |
 | `DeadReckoningTime` | real | 1 | 1 |
 | `HostName` | string | the simulator host, `simhost-….aditi.secondlife.io` | `simhost-fake.sl-fake-grid.invalid` |
-| `LSLSyntaxVersion` | string | *per region*: `0.6.12` (sandbox), `0.6.13` (mainland) | **not sent** |
+| `LSLSyntaxVersion` | string | *per region*: `0.6.12` (sandbox), `0.6.13` (mainland) | `0.6.12`, the version advertised beside the vendored document |
 
 `GLTFEnabled` is the one switch Second Life sends *off*: a key that is
 there to be read as `false`, where OpenSim's absence of it reads as `None`.
@@ -222,10 +222,23 @@ re-encode to exactly what was parsed, kind for kind.
 
 `ImitatedGrid::stock_simulator_features` is each flavour's column, and the
 fake grid puts its own addresses, names, currency symbol and voice backend
-into it. The one thing left out is the script syntax: a region advertises
-`LSLSyntaxId` beside a syntax document it serves, and the fake grid serves
-none yet (`server-fake-grid-lsl-syntax`). A scenario that sets a feature
-document of its own replaces the flavour's.
+into it. The script syntax goes in beside the document it names
+(`ImitatedGrid::lsl_syntax`): the Second Life flavour serves Linden's document
+as aditi served it on 2026-10-26 (`sl-lsl-runtime/keywords_lsl_default.xml`,
+the same copy the script engine's library table is built from) under the id
+and version advertised for it there, and the OpenSim flavour serves its
+vendored `ScriptSyntax.xml` (`sl-fake-grid/lsl-syntax/`) the way OpenSim does:
+the id from the first line, every later line trimmed and joined, comment lines
+dropped. Both are the live documents rather than one rendered from the
+engine's table, because a viewer's editor is built from what the grid serves,
+gaps included (OpenSim's lists no `mod*` function and every `os*` function
+whatever the region denies). `FakeGridBuilder::lsl_syntax` overrides it: a
+document rendered from a table (`LslSyntaxDocument::from_table`, named by a
+hash of its text so the id follows the content), one at a schema version a
+viewer must refuse (`LslSyntaxDocument::at_schema_version`), or none at all
+(`LslSyntaxPolicy::Withhold`: no id, no capability). A scenario that sets a
+feature document of its own replaces the flavour's, and keeps any syntax id it
+names.
 
 ## What the fake grid does with it
 

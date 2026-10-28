@@ -21,6 +21,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sl_types::chat::ChatChannel;
@@ -237,6 +238,7 @@ use crate::types::{
 use crate::types::{Event, EventId, InventoryListing};
 use sl_wire::AbuseReport;
 use sl_wire::RegionFlags;
+use sl_wire::build_lsl_syntax_document;
 use sl_wire::combine_uuids;
 use sl_wire::messages::{
     AbortXfer, AbortXferXferIDBlock, AssetUploadComplete, AssetUploadCompleteAssetBlockBlock,
@@ -3593,9 +3595,11 @@ pub struct SimSession {
     /// `lsl_syntax_id` is owned by [`SimSession::set_lsl_syntax`] so the
     /// advertised id always matches the served `LSLSyntax` document.
     simulator_features: SimulatorFeatures,
-    /// The LSL syntax document the `LSLSyntax` capability serves.
-    /// Driver-populated ([`SimSession::set_lsl_syntax`]).
-    lsl_syntax: LslSyntax,
+    /// The LSL syntax document the `LSLSyntax` capability serves, rendered
+    /// once, and the id advertised for it; [`None`] serves an empty table.
+    /// Driver-populated ([`SimSession::set_lsl_syntax`],
+    /// [`SimSession::set_lsl_syntax_document`]).
+    lsl_syntax: Option<(Uuid, Arc<str>)>,
     /// The environment settings the `ExtEnvironment` capability serves and
     /// updates, keyed by parcel id (`-1` = the region entry, seeded at
     /// construction and never removed; a parcel without its own entry falls
@@ -3885,7 +3889,7 @@ impl SimSession {
             agent_wearables: (0, Vec::new()),
             library_inventory: SimInventoryTree::default(),
             simulator_features: SimulatorFeatures::default(),
-            lsl_syntax: LslSyntax::default(),
+            lsl_syntax: None,
             environments: BTreeMap::from([(-1, EnvironmentSettings::default_region())]),
             object_costs: BTreeMap::new(),
             object_physics: BTreeMap::new(),
@@ -4618,10 +4622,14 @@ impl SimSession {
     }
 
     /// Replaces the feature document the `SimulatorFeatures` capability
-    /// serves. `lsl_syntax_id` is subsequently overwritten by
-    /// [`SimSession::set_lsl_syntax`], which owns the consistency invariant
-    /// between the advertised id and the served `LSLSyntax` document.
-    pub fn set_simulator_features(&mut self, features: SimulatorFeatures) {
+    /// serves. Once a syntax document is set ([`SimSession::set_lsl_syntax`],
+    /// [`SimSession::set_lsl_syntax_document`]) its id replaces the
+    /// document's `lsl_syntax_id`, whichever was set first, so the advertised
+    /// id always names the served `LSLSyntax` document.
+    pub fn set_simulator_features(&mut self, mut features: SimulatorFeatures) {
+        if let Some((id, _document)) = &self.lsl_syntax {
+            features.lsl_syntax_id = Some(*id);
+        }
         self.simulator_features = features;
     }
 
@@ -4635,14 +4643,24 @@ impl SimSession {
     /// advertises its id in the feature document's `lsl_syntax_id`, keeping
     /// the two capabilities consistent (the client re-fetches `LSLSyntax`
     /// keyed on that id).
-    pub fn set_lsl_syntax(&mut self, syntax_id: Uuid, syntax: LslSyntax) {
-        self.simulator_features.lsl_syntax_id = Some(syntax_id);
-        self.lsl_syntax = syntax;
+    pub fn set_lsl_syntax(&mut self, syntax_id: Uuid, syntax: &LslSyntax) {
+        self.set_lsl_syntax_document(syntax_id, build_lsl_syntax_document(syntax).into());
     }
 
-    /// The LSL syntax document the `LSLSyntax` capability serves.
-    pub(crate) const fn lsl_syntax(&self) -> &LslSyntax {
-        &self.lsl_syntax
+    /// Replaces the LSL syntax document the `LSLSyntax` capability serves
+    /// with `document`, served byte for byte, and advertises `syntax_id` for
+    /// it as [`SimSession::set_lsl_syntax`] does — for a grid that serves a
+    /// document as the live grid wrote it rather than as a table renders, or
+    /// one shared by every session without a copy.
+    pub fn set_lsl_syntax_document(&mut self, syntax_id: Uuid, document: Arc<str>) {
+        self.simulator_features.lsl_syntax_id = Some(syntax_id);
+        self.lsl_syntax = Some((syntax_id, document));
+    }
+
+    /// The LSL syntax document the `LSLSyntax` capability serves, or [`None`]
+    /// when none was set.
+    pub(crate) fn lsl_syntax_document(&self) -> Option<&str> {
+        self.lsl_syntax.as_ref().map(|(_id, document)| &**document)
     }
 
     /// Stores (or replaces) the environment served for

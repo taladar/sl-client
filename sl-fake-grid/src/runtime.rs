@@ -35,6 +35,7 @@ use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory, UploadAnnounce
 use crate::map_tiles::MapTileStore;
 use crate::neighbours::NeighbourPolicy;
 use crate::scenario::Scenario;
+use crate::script_syntax::LslSyntaxPolicy;
 use crate::terrain::TerrainFixture;
 use crate::time::{Now, system_clock};
 use crate::uploads::UpdateCompletionItem;
@@ -494,6 +495,9 @@ pub(crate) struct GridCore {
     /// serves ([`ImitatedGrid::stock_simulator_features`]), before this grid's
     /// own addresses and names go into it.
     pub(crate) stock_features: SimulatorFeatures,
+    /// The script syntax every region advertises and serves
+    /// ([`ImitatedGrid::lsl_syntax`]).
+    pub(crate) lsl_syntax: LslSyntaxPolicy,
     /// The subscription packages the login response describes, when this grid
     /// describes any ([`account_entitlements`](Self::account_entitlements)).
     pub(crate) packages: BTreeMap<String, sl_proto::AccountBenefits>,
@@ -1057,6 +1061,16 @@ impl GridCore {
             features.voice_server_type = sim.voice().advertised_server_type().map(str::to_owned);
             sim.set_simulator_features(features);
         }
+        // The script syntax goes in after the feature document, which it
+        // writes its id into — unless the scenario advertised one of its own.
+        if let LslSyntaxPolicy::Serve(document) = &self.lsl_syntax
+            && sim.simulator_features().lsl_syntax_id.is_none()
+        {
+            let mut features = sim.simulator_features().clone();
+            features.lsl_syntax_version = document.version().map(str::to_owned);
+            sim.set_simulator_features(features);
+            sim.set_lsl_syntax_document(document.id(), document.shared_text());
+        }
 
         let base_url: url::Url =
             format!("http://127.0.0.1:{}/sim/{seq}", self.http_port).parse()?;
@@ -1082,6 +1096,11 @@ impl GridCore {
             // it at all — a name it never served is simply already absent.
             for name in self.withheld_capabilities {
                 let _withheld = caps.withhold(name);
+            }
+            // A region with no syntax to serve registers no handler for it
+            // (OpenSim's `SimulatorFeaturesModule.RegisterCaps`).
+            if self.lsl_syntax == LslSyntaxPolicy::Withhold {
+                let _withheld = caps.withhold(sl_proto::CAP_LSL_SYNTAX);
             }
             for name in &region.config.withheld_caps {
                 if !caps.withhold(name) {
@@ -1666,6 +1685,9 @@ pub struct FakeGridBuilder {
     /// Whether `SimulatorFeatures` carries the `OpenSimExtras` block, or
     /// `None` to follow [`imitates`](Self::imitates).
     open_sim_extras: Option<bool>,
+    /// The script syntax every region advertises and serves, or `None` to
+    /// follow [`imitates`](Self::imitates).
+    lsl_syntax: Option<LslSyntaxPolicy>,
     /// The spatial-voice backend every region serves, or `None` to follow
     /// [`imitates`](Self::imitates).
     voice_backend: Option<VoiceBackend>,
@@ -1715,6 +1737,13 @@ impl std::fmt::Debug for FakeGridBuilder {
             .field("honor_options", &self.honor_options)
             .field("object_assets", &self.object_assets)
             .field("open_sim_extras", &self.open_sim_extras)
+            .field(
+                "lsl_syntax",
+                &self.lsl_syntax.as_ref().map(|policy| match policy {
+                    LslSyntaxPolicy::Serve(document) => Some(document.id()),
+                    LslSyntaxPolicy::Withhold => None,
+                }),
+            )
             .field("voice_backend", &self.voice_backend)
             .field("legacy_udp_inventory", &self.legacy_udp_inventory)
             .field("inventory_announcement", &self.inventory_announcement)
@@ -1786,6 +1815,7 @@ impl FakeGridBuilder {
             object_assets: None,
             honor_options: None,
             open_sim_extras: None,
+            lsl_syntax: None,
             voice_backend: None,
             legacy_udp_inventory: None,
             update_completion_item: None,
@@ -1926,6 +1956,18 @@ impl FakeGridBuilder {
     #[must_use]
     pub const fn open_sim_extras(mut self, advertise: bool) -> Self {
         self.open_sim_extras = Some(advertise);
+        self
+    }
+
+    /// Overrides the script syntax every region advertises and serves, which
+    /// otherwise follows [`imitates`](Self::imitates): each grid's own
+    /// document under the id it advertised for it. A test of how a viewer
+    /// copes with no syntax, or with a document it must refuse, sets
+    /// [`LslSyntaxPolicy::Withhold`] or a
+    /// [`LslSyntaxDocument::at_schema_version`](crate::LslSyntaxDocument::at_schema_version).
+    #[must_use]
+    pub fn lsl_syntax(mut self, policy: LslSyntaxPolicy) -> Self {
+        self.lsl_syntax = Some(policy);
         self
     }
 
@@ -2336,6 +2378,9 @@ impl FakeGridBuilder {
                 .open_sim_extras
                 .unwrap_or_else(|| self.imitates.advertises_open_sim_extras()),
             stock_features: self.imitates.stock_simulator_features(),
+            lsl_syntax: self
+                .lsl_syntax
+                .unwrap_or_else(|| self.imitates.lsl_syntax()),
             account_entitlements: self.imitates.describes_account_entitlements(),
             login_fields: self.imitates.login_fields(),
             login_refusals: self.imitates.login_refusals(),

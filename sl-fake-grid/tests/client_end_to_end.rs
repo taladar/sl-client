@@ -7521,4 +7521,167 @@ mod test {
             item: task_item(item),
         }
     }
+
+    /// What a client learned of its region's script syntax on arrival.
+    struct SyntaxArrival {
+        /// The `SimulatorFeatures` reply.
+        features: sl_proto::SimulatorFeatures,
+        /// Whether the seed granted the `LSLSyntax` capability.
+        granted: bool,
+        /// The table the client decoded, or the reason it refused the
+        /// document; [`None`] when it fetched nothing.
+        document: Option<Result<sl_proto::LslSyntax, String>>,
+    }
+
+    /// Logs a client into a grid imitating `imitates`, its script syntax
+    /// overridden by `policy`, and waits for what it learns of the syntax:
+    /// the feature document, the capability map and — when `fetches` — the
+    /// decoded document or the decode failure the client reports.
+    async fn arrive_for_syntax(
+        imitates: ImitatedGrid,
+        policy: Option<sl_fake_grid::LslSyntaxPolicy>,
+        fetches: bool,
+    ) -> Result<SyntaxArrival, TestError> {
+        let mut builder = FakeGridBuilder::new()
+            .account(AccountConfig::new("Test", "User", "password"))
+            .imitates(imitates)
+            .region(RegionConfig::default())
+            .event_queue_hold(Duration::from_secs(2));
+        if let Some(policy) = policy {
+            builder = builder.lsl_syntax(policy);
+        }
+        let grid = builder.start().await?;
+        let mut client = Client::connect(LoginParams {
+            login_uri: grid.login_uri(),
+            request: LoginRequest::new(
+                "Test",
+                "User",
+                "password",
+                StartLocation::Last,
+                "sl-fake-grid-e2e",
+                "0.0",
+            ),
+        })
+        .await?;
+        client.set_diagnostics(true);
+        let (caps_tx, mut caps_rx) = mpsc::channel(4);
+        client.set_caps_reporter(caps_tx);
+        let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, mut diag_rx) = mpsc::channel(256);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+
+        let caps = tokio::time::timeout(WAIT, caps_rx.recv())
+            .await?
+            .ok_or("no capability map")?;
+        let mut features = None;
+        let mut document = None;
+        let deadline = whole_wait();
+        while features.is_none() || (fetches && document.is_none()) {
+            tokio::select! {
+                event = tokio::time::timeout_at(deadline, event_rx.recv()) => {
+                    match event?.ok_or("client event stream ended early")? {
+                        Event::SimulatorFeatures(reply) => features = Some(*reply),
+                        Event::LslSyntax(syntax) => document = Some(Ok(*syntax)),
+                        _other => {}
+                    }
+                }
+                diagnostic = tokio::time::timeout_at(deadline, diag_rx.recv()) => {
+                    if let sl_proto::Diagnostic::CapsDecodeFailed { message, reason } =
+                        diagnostic?.ok_or("the diagnostics stream ended early")?
+                        && message == "LSLSyntax"
+                    {
+                        document = Some(Err(reason.unwrap_or_default()));
+                    }
+                }
+            }
+        }
+        drop(command_tx);
+        run.abort();
+        Ok(SyntaxArrival {
+            features: features.ok_or("no SimulatorFeatures")?,
+            granted: caps.contains_key("LSLSyntax"),
+            document,
+        })
+    }
+
+    /// The table a viewer decodes from `document`.
+    fn decoded(
+        document: &sl_fake_grid::LslSyntaxDocument,
+    ) -> Result<sl_proto::LslSyntax, TestError> {
+        Ok(sl_wire::parse_lsl_syntax(&sl_wire::parse_llsd_xml(
+            document.text(),
+        )?)?)
+    }
+
+    /// **Each flavour advertises and serves its live grid's script syntax.** A
+    /// Second-Life-flavoured region names Linden's document by the id and
+    /// version aditi advertised for it, an OpenSim-flavoured one its
+    /// `ScriptSyntax.xml` by the id on its first line and no version, and the
+    /// client fetches each over `LSLSyntax` and decodes exactly the table the
+    /// document holds — the `os*` functions on OpenSim's alone.
+    #[tokio::test]
+    async fn each_flavour_serves_its_grids_script_syntax() -> Result<(), TestError> {
+        for (imitates, document) in [
+            (
+                ImitatedGrid::SecondLife,
+                sl_fake_grid::LslSyntaxDocument::second_life(),
+            ),
+            (
+                ImitatedGrid::OpenSim,
+                sl_fake_grid::LslSyntaxDocument::open_sim(),
+            ),
+        ] {
+            let arrival = arrive_for_syntax(imitates, None, true).await?;
+            assert!(arrival.granted, "{imitates:?}");
+            assert_eq!(arrival.features.lsl_syntax_id, Some(document.id()));
+            assert_eq!(
+                arrival.features.lsl_syntax_version.as_deref(),
+                document.version()
+            );
+            let syntax = arrival
+                .document
+                .ok_or("no document")?
+                .map_err(|reason| format!("{imitates:?}: refused: {reason}"))?;
+            assert_eq!(
+                syntax.function("osGetSimulatorVersion").is_some(),
+                imitates == ImitatedGrid::OpenSim
+            );
+            assert_eq!(syntax, decoded(&document)?, "{imitates:?}");
+        }
+        Ok(())
+    }
+
+    /// A region with no syntax to serve advertises no id and grants no
+    /// capability, and one serving a document at a schema version the client
+    /// does not implement is refused by name while the session carries on.
+    #[tokio::test]
+    async fn a_region_without_a_usable_syntax_is_survived() -> Result<(), TestError> {
+        let withheld = arrive_for_syntax(
+            ImitatedGrid::OpenSim,
+            Some(sl_fake_grid::LslSyntaxPolicy::Withhold),
+            false,
+        )
+        .await?;
+        assert!(!withheld.granted);
+        assert_eq!(withheld.features.lsl_syntax_id, None);
+        assert_eq!(withheld.features.lsl_syntax_version, None);
+
+        let future = sl_fake_grid::LslSyntaxDocument::at_schema_version(3);
+        let refused = arrive_for_syntax(
+            ImitatedGrid::SecondLife,
+            Some(sl_fake_grid::LslSyntaxPolicy::Serve(future.clone())),
+            true,
+        )
+        .await?;
+        assert_eq!(refused.features.lsl_syntax_id, Some(future.id()));
+        assert_eq!(refused.features.lsl_syntax_version, None);
+        let reason = refused
+            .document
+            .ok_or("no document")?
+            .err()
+            .ok_or("a version-3 document was accepted")?;
+        assert!(reason.contains("version"), "{reason}");
+        Ok(())
+    }
 }

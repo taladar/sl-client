@@ -527,10 +527,15 @@ clients re-fetch).
   via `build_simulator_features_response`. Its `lsl_syntax_id` is owned by
   `SimSession::set_lsl_syntax`, which stores the syntax document **and**
   advertises its id — the two caps can never drift apart (the client keys
-  its `LSLSyntax` re-fetch on that id).
-- **`LSLSyntax`** (bodyless GET) serves the stored language document via
-  `build_lsl_syntax_document`, stamped with the schema version the client's
-  parser insists on.
+  its `LSLSyntax` re-fetch on that id); a feature document set afterwards
+  keeps the served document's id.
+- **`LSLSyntax`** (bodyless GET) serves the stored language document:
+  rendered once by `build_lsl_syntax_document`, stamped with the schema
+  version the client's parser insists on, from a table
+  (`SimSession::set_lsl_syntax`), or a document served byte for byte as a
+  live grid wrote it (`SimSession::set_lsl_syntax_document`, which the fake
+  grid uses to serve each grid's own). With neither set it serves an empty
+  table.
 - **`ExtEnvironment`** routes on method. GET answers the stored
   `EnvironmentSettings` for the `?parcelid=` query (absent or `-1` = the
   region entry, seeded at construction; a parcel without its own entry

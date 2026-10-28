@@ -28,6 +28,10 @@ extend-exclude = [
   # Linden's own LSLSyntax document, vendored byte-for-byte as the library
   # table's source (sl-lsl-runtime/README.md): its tooltips are Linden's prose.
   "sl-lsl-runtime/keywords_lsl_default.xml",
+  # OpenSim's own LSLSyntax document and its licence, vendored verbatim as the
+  # fake grid's OpenSim flavour serves it (sl-fake-grid/lsl-syntax/README.md).
+  "sl-fake-grid/lsl-syntax/ScriptSyntax.xml",
+  "sl-fake-grid/lsl-syntax/LICENSE-OpenSim.txt",
 ]
 
 [default]

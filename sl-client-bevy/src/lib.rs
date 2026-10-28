@@ -1910,8 +1910,10 @@ fn advance_running(
                 {
                     lsl_syntax.last_id = Some(id);
                     if let Some(cached) = lsl_syntax.cache.load(id) {
+                        tracing::info!(%id, "grid LSL syntax definition from the disk cache");
                         deliver(&caps.events_tx, (CAP_LSL_SYNTAX.to_owned(), cached));
                     } else if let Some(url) = caps.map.get(CAP_LSL_SYNTAX).cloned() {
+                        tracing::info!(%id, "fetching the grid LSL syntax definition");
                         let events_tx = caps.events_tx.clone();
                         let cache = lsl_syntax.cache.clone();
                         crate::log_context::spawn_thread(move || {

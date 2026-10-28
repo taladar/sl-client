@@ -115,3 +115,11 @@ sl-lsl-runtime/probes/ossl/errors/mod.lsl skipchecks=lsl:::lslint;;;calls[[space
 # line with spaces at both ends, a last line with no newline after it): unset
 # git's `whitespace` attribute, which the pre-commit `diff-index --check` obeys.
 sl-lsl-runtime/probes/**/*.notecard -whitespace
+
+# OpenSim's own LSLSyntax document (sl-fake-grid/lsl-syntax/README.md), served
+# by the fake grid's OpenSim flavour exactly as OpenSim reads it: vendored
+# upstream content, not ours to reformat: it keeps upstream's mixed
+# indentation (a space before a tab), and its licence text its trailing
+# whitespace, for the same reason the font licences do.
+sl-fake-grid/lsl-syntax/ScriptSyntax.xml skipchecks=xml;;;vendored[[space]]upstream[[space]]content -whitespace
+sl-fake-grid/lsl-syntax/LICENSE-OpenSim.txt -whitespace

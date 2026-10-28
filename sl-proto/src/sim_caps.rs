@@ -3632,12 +3632,16 @@ impl SimCaps {
     }
 
     /// Serves the bodyless `LSLSyntax` GET: the session's stored syntax
-    /// document ([`SimSession::set_lsl_syntax`]). Wrong method → `405`.
+    /// document ([`SimSession::set_lsl_syntax`]), or an empty table when none
+    /// was set. Wrong method → `405`.
     fn dispatch_lsl_syntax(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
         if request.method != "GET" {
             return CapsResponse::method_not_allowed();
         }
-        CapsResponse::llsd_xml(build_lsl_syntax_document(sim.lsl_syntax()))
+        CapsResponse::llsd_xml(sim.lsl_syntax_document().map_or_else(
+            || build_lsl_syntax_document(&sl_wire::LslSyntax::default()),
+            str::to_owned,
+        ))
     }
 
     /// Serves the `ExtEnvironment` EEP surface. GET answers the stored

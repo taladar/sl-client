@@ -725,7 +725,13 @@ impl ViewerAppBuilder {
             } else {
                 ChatLogConfig::default()
             },
-            directories: ClientDirectories::default(),
+            // The grid's `LSLSyntax` document is the grid's, not an avatar's, so
+            // it is cached by its id under the cache root itself, beside the
+            // asset caches; the per-avatar directories come from `account_dirs`.
+            directories: ClientDirectories {
+                shared_cache_dir: paths.resolved_cache_root(),
+                ..ClientDirectories::default()
+            },
             account_dirs,
             // Cache the inventory tree per avatar (agent tree + Library).
             inventory_cache_config: InventoryCacheConfig {

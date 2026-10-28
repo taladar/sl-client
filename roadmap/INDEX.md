@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 333 |
+| ready | 332 |
 | blocked | 56 |
 | in-progress | 18 |
 | bugs | 39 |
-| done | 1445 |
+| done | 1447 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2079** |
+| **total** | **2080** |
 
 ## ideas (135)
 
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (333)
+## ready (332)
 
 ### protocol
 
@@ -1101,8 +1101,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-inventory-persists-across-logins`](ready/server-fake-grid-inventory-persists-across-logins.md)
   — Fake grid — keep an account's inventory, versions included, from one login
   to the next (blocked by `gridspec-inventory-fetch` (done))
-- [`server-fake-grid-lsl-syntax`](ready/server-fake-grid-lsl-syntax.md) — Fake
-  grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-material-edits`](ready/server-fake-grid-material-edits.md)
   — Fake grid — apply legacy and PBR material edits and push overrides
 - [`server-fake-grid-mesh-upload-cost`](ready/server-fake-grid-mesh-upload-cost.md)
@@ -1495,7 +1493,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1445)
+## done (1447)
 
 ### protocol
 
@@ -2540,6 +2538,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-pass`](done/viewer-lsl-semantic-pass.md) — LSL semantic
   pass — types, arity, undefined symbols, reachability (blocked by
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
+- [`viewer-lsl-syntax-cache-never-enabled`](done/viewer-lsl-syntax-cache-never-enabled.md)
+  — The viewer never caches the grid's LSLSyntax document on disk
 - [`viewer-material-swatch-sphere-preview`](done/viewer-material-swatch-sphere-preview.md)
   — Render a material-on-a-sphere preview for the PBR material swatch
 - [`viewer-media-prim-browser`](done/viewer-media-prim-browser.md) —
@@ -4493,6 +4493,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-login-response-sections`](done/server-fake-grid-login-response-sections.md)
   — The fake grid's login response lacks the sections and scalars the live grids
   send
+- [`server-fake-grid-lsl-syntax`](done/server-fake-grid-lsl-syntax.md) — Fake
+  grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-object-undo`](done/server-fake-grid-object-undo.md) — Fake
   grid — keep an object's edit history for Undo / Redo
 - [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)

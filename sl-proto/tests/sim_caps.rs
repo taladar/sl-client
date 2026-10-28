@@ -3401,7 +3401,7 @@ mod test {
                 god_mode: false,
             },
         );
-        sim.set_lsl_syntax(uuid::Uuid::from_u128(SYNTAX_ID), syntax);
+        sim.set_lsl_syntax(uuid::Uuid::from_u128(SYNTAX_ID), &syntax);
 
         sim.set_region_id(uuid::Uuid::from_u128(0x1e6));
         sim.set_environment(EnvironmentSettings {

@@ -40,6 +40,7 @@ pub mod relays;
 mod render_info;
 pub mod runtime;
 pub mod scenario;
+pub mod script_syntax;
 pub mod social;
 mod task_contents;
 mod teleport;
@@ -97,6 +98,7 @@ pub use runtime::{
     RiddenCrossing, TeleportNotice,
 };
 pub use scenario::{Scenario, SimEventHook, SimHook};
+pub use script_syntax::{LslSyntaxDocument, LslSyntaxPolicy};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};

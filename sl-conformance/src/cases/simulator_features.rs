@@ -24,10 +24,10 @@
 //! by name, so the table in `book/src/gridspec/region-arrival.md` cannot go
 //! stale quietly. The values are recorded, not held: most are a region's own.
 //!
-//! It runs on **both** fake flavours and holds each to the grid it says it
-//! is, but for the script syntax: a live region advertises an `LSLSyntaxId`
-//! (and Second Life its version) beside a syntax document it serves, and the
-//! fake grid serves none.
+//! It runs on **both** fake flavours and holds each to the whole of the grid
+//! it says it is, the script syntax included: each flavour serves its live
+//! grid's syntax document and advertises its `LSLSyntaxId` (and on Second Life
+//! its `LSLSyntaxVersion`).
 //! `1av`, `[both, fake]`.
 
 use std::collections::BTreeMap;
@@ -44,10 +44,6 @@ use crate::support::{REGION_TIMEOUT, count_metric, secs_metric};
 
 /// How long to wait for the `SimulatorFeatures` reply.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// The keys the fake grid leaves out of either flavour's reply: the script
-/// syntax a region may only advertise beside a document it serves.
-const FAKE_GRID_OMITS: &[&str] = &["LSLSyntaxId", "LSLSyntaxVersion"];
 
 /// Every key each grid's reply carries, by dotted path, with its LLSD kind.
 const ADVERTISED: Measured<&[(&str, &str)]> = Measured {
@@ -160,12 +156,7 @@ fn check_advertised(
     grid: Grid,
     advertised: &BTreeMap<String, &'static str>,
 ) -> Result<(), TestFailure> {
-    let expected: BTreeMap<&str, &str> = ADVERTISED
-        .on(grid)
-        .iter()
-        .filter(|(key, _kind)| !(grid.is_fake() && FAKE_GRID_OMITS.contains(key)))
-        .copied()
-        .collect();
+    let expected: BTreeMap<&str, &str> = ADVERTISED.on(grid).iter().copied().collect();
     let mut differences: Vec<String> = Vec::new();
     for (key, kind) in &expected {
         match advertised.get(*key) {

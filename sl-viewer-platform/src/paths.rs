@@ -489,6 +489,9 @@ const PURGE_KIND_DIRS: &[&str] = &[
     "envcache",
     "soundcache",
     "maptiles",
+    // The grid's `LSLSyntax` documents by id (`sl-client-common`'s
+    // `lsl_syntax_cache`, rooted here by the viewer); a purge refetches.
+    "lsl-syntax",
 ];
 
 /// The testable purge core: deletes every [`PURGE_KIND_DIRS`] subdirectory of
@@ -573,7 +576,12 @@ mod tests {
         let root = tempdir();
         // A populated cache tree: two kind dirs with content, the per-avatar
         // accounts tree, and the purge marker.
-        for dir in ["texturecache/0", "meshcache/a", "accounts/grid/avatar"] {
+        for dir in [
+            "texturecache/0",
+            "meshcache/a",
+            "lsl-syntax",
+            "accounts/grid/avatar",
+        ] {
             fs_err::create_dir_all(root.join(dir)).expect("seed dir");
         }
         fs_err::write(root.join("texturecache/0/x.asset"), b"x").expect("seed file");
@@ -584,6 +592,7 @@ mod tests {
         // The caches and the marker are gone; the accounts tree survives.
         assert!(!root.join("texturecache").exists());
         assert!(!root.join("meshcache").exists());
+        assert!(!root.join("lsl-syntax").exists());
         assert!(!root.join(PURGE_MARKER_FILE).exists());
         assert!(root.join("accounts/grid/avatar").exists());
 

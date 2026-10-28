@@ -21,6 +21,7 @@
 //! | a taken object's asset ([`ObjectAssetPolicy`]) | withheld: nil id, an unfetchable Linden-text body | served: minted id, a `<SceneObjectGroup>` XML body under it |
 //! | the login response's `options` list ([`honor_options`](crate::FakeGridBuilder::honor_options)) | honoured: the response is trimmed to what was asked for | ignored: every field is sent |
 //! | the `OpenSimExtras` block in `SimulatorFeatures` ([`advertises_open_sim_extras`](ImitatedGrid::advertises_open_sim_extras)) | absent | sent, carrying the grid's map-tile and currency-helper URLs |
+//! | the script syntax, `LSLSyntaxId` and the `LSLSyntax` capability ([`lsl_syntax`](ImitatedGrid::lsl_syntax)) | Linden's document as aditi served it on 2026-10-26, with its id and `LSLSyntaxVersion` `0.6.12` | `bin/ScriptSyntax.xml` trimmed and joined as OpenSim serves it, with the id on its first line and no version |
 //! | the rest of `SimulatorFeatures` ([`stock_simulator_features`](ImitatedGrid::stock_simulator_features)) | 29 keys: the PBR, mirror and pathfinding switches, the estate and group limits, the dead-reckoning pair, the host's name, a 2048 px texture limit, four material requests a second | 14 keys and the 24 of `OpenSimExtras`: the grid's name and limits, the simulator's frame rate, `ExportSupported` as a string; five empty `menus`; no texture limit, three material requests a second |
 //! | the spatial-voice backend ([`VoiceBackend`]) | WebRTC, named two ways: `SimulatorFeatures.VoiceServerType` and the `RequiredVoiceVersion` push — **not** the login `voice-config`, which aditi does not send even when asked (2026-10-04) | none: a stock region loads no voice module, and nothing is advertised |
 //! | how the `AttachmentResources` answer is labelled ([`attachment_resources_label`](ImitatedGrid::attachment_resources_label)) | `application/llsd+xml` | `text/html;charset=UTF-8`: the handler states none, and the HTTP server's default stands |
@@ -212,6 +213,7 @@ use crate::inventory::{
     InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncement, UploadAnnouncements,
 };
 use crate::login_sections::LoginSections;
+use crate::script_syntax::{LslSyntaxDocument, LslSyntaxPolicy};
 use crate::uploads::UpdateCompletionItem;
 use crate::voice::VoiceBackend;
 
@@ -996,7 +998,8 @@ impl ImitatedGrid {
     /// knows them: the `OpenSimExtras` addresses and grid names, the currency
     /// symbol, the voice backend (`VoiceServerType`), and the script syntax
     /// (`LSLSyntaxId`, with Second Life's `LSLSyntaxVersion`), which a region
-    /// may only advertise beside a syntax document it serves.
+    /// advertises beside the syntax document it serves
+    /// ([`lsl_syntax`](Self::lsl_syntax)).
     #[must_use]
     pub fn stock_simulator_features(self) -> sl_proto::SimulatorFeatures {
         let shared = sl_proto::SimulatorFeatures {
@@ -1078,6 +1081,20 @@ impl ImitatedGrid {
                 ..shared
             },
         }
+    }
+
+    /// The script syntax this grid's regions advertise and serve: each grid's
+    /// own document, byte for byte, under the id it advertised for it — Second
+    /// Life's with its `LSLSyntaxVersion`, OpenSim's `ScriptSyntax.xml` with
+    /// none (see the [`script_syntax`](crate::script_syntax) module docs for why the
+    /// live documents rather than one rendered from the script engine's
+    /// table).
+    #[must_use]
+    pub fn lsl_syntax(self) -> LslSyntaxPolicy {
+        LslSyntaxPolicy::Serve(match self {
+            Self::SecondLife => LslSyntaxDocument::second_life(),
+            Self::OpenSim => LslSyntaxDocument::open_sim(),
+        })
     }
 
     /// Whether this grid's `SimulatorFeatures` carries the `OpenSimExtras`

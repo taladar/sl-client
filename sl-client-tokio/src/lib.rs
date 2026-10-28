@@ -897,8 +897,13 @@ impl Client {
                         {
                             last_lsl_syntax_id = Some(id);
                             if let Some(cached) = lsl_syntax_cache.load(id) {
+                                tracing::info!(
+                                    %id,
+                                    "grid LSL syntax definition from the disk cache"
+                                );
                                 deliver(&caps_tx, (CAP_LSL_SYNTAX.to_owned(), cached)).await;
                             } else if let Some(url) = caps.get(CAP_LSL_SYNTAX).cloned() {
+                                tracing::info!(%id, "fetching the grid LSL syntax definition");
                                 tokio::spawn(fetch_lsl_syntax(
                                     url,
                                     id,
