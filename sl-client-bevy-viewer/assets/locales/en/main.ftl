@@ -1181,6 +1181,23 @@ script-status-save-failed = Save failed.
 script-error-at = Line { $line }, column { $column }: { $message }
 script-error-at-line = Line { $line }: { $message }
 script-error-nopos = { $message }
+script-find = Search / Replace…
+script-go-to-line = Go to line…
+
+# The code editor's Search / Replace and Go to Line windows
+# (sl-viewer-ui-widgets ui_code_editor), after the reference's
+# floater_search_replace.xml and floater_goto_line.xml.
+find-replace-title = Search / Replace
+find-replace-search = Search
+find-replace-replace = Replace
+find-replace-case-insensitive = Case Insensitive
+find-replace-search-up = Search Up
+find-replace-search-button = Search
+find-replace-replace-button = Replace
+find-replace-replace-all-button = Replace All
+go-to-line-title = Go to Line
+go-to-line-label = Go to line
+go-to-line-ok = OK
 
 ## The inventory gallery (viewer-inventory-gallery).
 
@@ -5562,6 +5579,7 @@ script-dialog-textbox-name = Reply
 # What the notecard and script editors' body fields are called.
 notecard-body-name = Notecard text
 script-body-name = Script text
+code-editor-specimen-name = Source code
 # What the colour picker's channel sliders are called: the words their
 # one-letter captions abbreviate.
 color-picker-red-name = Red

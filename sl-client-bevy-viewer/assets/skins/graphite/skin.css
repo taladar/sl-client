@@ -149,6 +149,11 @@
 
   /* Structure: splitters, scroll troughs and the two handles that run in one. */
   --divider: #576887;
+  /* The code editor: the caret's line, a find match, the gutter, its numbers. */
+  --caret-line: #ffffff0f;
+  --find-match: #fad16659;
+  --gutter-bg: #00000026;
+  --line-number: #737885;
   --track-bg: #1f242e;
   --scrollbar-thumb: #667a99;
   --slider-thumb: #bfc7d9;

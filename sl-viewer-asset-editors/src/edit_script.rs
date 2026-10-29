@@ -10,39 +10,34 @@
 //! [`ScriptCompileError`]s) as [`SlSessionEvent::ScriptUploaded`]. This module
 //! surfaces that outcome as a status line and a diagnostics list.
 //!
-//! # What this surface does today, and what waits on the rich-text widget
+//! # The editor
 //!
-//! The reference viewer's script editor is **syntax-highlighted** with a gutter,
-//! line numbers, brace matching and a clickable error list that jumps the caret
-//! to the offending line. All of that needs the per-range-coloured, undo-capable
-//! text widget tracked by `viewer-lsl-editor-widget` (a `parley::PlainEditor`
-//! fork), which is not yet built — Bevy 0.19's editable text takes **one style
-//! for the whole buffer**. Until it lands, this editor:
+//! The source is edited in the **code editor** (`ui_code_editor`): monospace and
+//! unwrapped, with a line-number gutter, the caret's line washed, undo and redo
+//! (`Ctrl+Z` / `Ctrl+Y`), Search / Replace (`Ctrl+F`, `F3` to repeat) and Go to
+//! Line (`Ctrl+G`) — the last two also as buttons beside Save, where the
+//! reference has them in its Edit menu. The compile diagnostics are listed
+//! under it, and **a click on one puts the caret on the line and column it
+//! names**, the reference's error-list jump.
 //!
-//! - edits the source in the reusable multi-line field ([`crate::ui_text_input`],
-//!   a stock `EditableText`) — no colour, no gutter, no go-to-line yet;
-//! - renders the compile diagnostics as a **listed** error report (each entry's
-//!   line / column / message) below the body rather than as caret jumps;
-//! - saves back to **agent** inventory over `UpdateScriptAgent` or, for a script
-//!   opened from a prim's contents, to that object's **task** inventory over
-//!   `UpdateScriptTask` — one [`Command::UploadScript`] whose [`ScriptSource`]
-//!   picks the capability.
+//! Saving goes back to **agent** inventory over `UpdateScriptAgent` or, for a
+//! script opened from a prim's contents, to that object's **task** inventory over
+//! `UpdateScriptTask` — one [`Command::UploadScript`] whose [`ScriptSource`] picks
+//! the capability.
 //!
 //! Deferred to their own tasks: syntax colour, brace match, folding and the
 //! states/events outline (`viewer-lsl-editor-highlight`, which drives the
-//! widget's per-range colour from the LSL lexer); a monospace editing font,
-//! line-number gutter and clickable go-to-line (`viewer-lsl-editor-widget`);
-//! and the Firestorm preprocessor (`viewer-lsl-editor-save-compile` keeps it
-//! out of v1).
+//! editor's style classes from the LSL lexer), and the Firestorm preprocessor
+//! (`viewer-lsl-editor-save-compile` keeps it out of v1).
 //!
 //! # Read-only when you cannot modify
 //!
 //! Editability is gated on the item's owner mask carrying `MODIFY` (the
 //! reference's `LLPreviewLSL::canModify`). For a script inside a prim it is the
 //! two-level rule — the object's modify **and** the item's own modify bit. A
-//! no-modify script opens as a read-only text block with a note and no Save
-//! button, so its source is never presented as editable when a save would be
-//! refused.
+//! no-modify script opens in a **read-only** code editor with a note and no
+//! Save button: it can be read, searched and copied, and never presented as
+//! editable when a save would be refused.
 //!
 //! # Not silently starting or stopping a running script
 //!
@@ -87,8 +82,9 @@ use sl_client_bevy::{
 };
 
 use crate::asset_editor::{
-    DIM_COLOR, ERROR_COLOR, EditedText, FONT_SIZE, LABEL_COLOR, SaveEditorWindow, UnsavedWork,
-    set_status, spawn_body_field, spawn_note, spawn_save_button, spawn_status, tear_down,
+    CONTROL_BACKGROUND, CONTROL_BORDER, DIM_COLOR, ERROR_COLOR, EditedText, FONT_SIZE, LABEL_COLOR,
+    SaveEditorWindow, UnsavedWork, set_status, spawn_note, spawn_save_button, spawn_status,
+    tear_down,
 };
 use crate::floater::{
     Floater, FloaterCaps, FloaterHandle, FloaterKey, FloaterSpec, FloaterSystems, KeyedFloaterOpen,
@@ -101,6 +97,10 @@ use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::{ERROR_TEXT_CLASS, text_meaning, text_role};
+use sl_viewer_ui_core::ui_spawn::{self, ButtonSpec, UiLabel};
+use sl_viewer_ui_widgets::ui_code_editor::{
+    CodeEditorGoTo, CodeEditorSpec, OpenFindReplace, OpenGoToLine, spawn_code_editor,
+};
 
 /// The body field's height, in visible text lines — what the window opens at,
 /// being content-driven. It is a *starting* size, not a cap: the body fills, so
@@ -111,12 +111,6 @@ const BODY_VISIBLE_LINES: f32 = 22.0;
 /// pixels — about five rows, enough to read the first errors without the list
 /// taking the window away from the script it is complaining about.
 const DIAGNOSTICS_HEIGHT: f32 = 96.0;
-
-/// The read-only body block's viewport height, in logical pixels.
-const READONLY_BODY_HEIGHT: f32 = 380.0;
-
-/// The read-only body block's width bound, in logical pixels.
-const READONLY_BODY_WIDTH: f32 = 520.0;
 
 // ---------------------------------------------------------------------------
 // Messages.
@@ -510,20 +504,22 @@ fn populate_editor(
         spawn_note(commands, content, "script-readonly-note", font_size);
     }
 
-    let body_field = if editable {
-        Some(spawn_body_field(
-            commands,
-            content,
-            text,
-            "script-body",
-            "script-body-name",
-            BODY_VISIBLE_LINES,
+    // A no-modify script gets the same editor, read-only: it can still be
+    // read, searched and copied.
+    let editor = spawn_code_editor(
+        commands,
+        content,
+        &CodeEditorSpec {
+            initial: text.to_owned(),
+            tab_index: 1,
             font_size,
-        ))
-    } else {
-        spawn_readonly_body(commands, content, text, font_size);
-        None
-    };
+            visible_lines: BODY_VISIBLE_LINES,
+            read_only: !editable,
+            name_key: Some("script-body-name"),
+            ..CodeEditorSpec::new("script-body")
+        },
+    );
+    let body_field = editable.then_some(editor.field);
 
     let running_check = (editable && source.is_task())
         .then(|| spawn_running_toggle(commands, content, running, font_size));
@@ -555,6 +551,16 @@ fn populate_editor(
             ))
             .id();
         let _save = spawn_save_button(commands, bar, "script-save", "script-save", font_size);
+        // The reference's Edit menu entries for the two windows, as buttons:
+        // the keys are the editor's own, these are for finding them.
+        spawn_editor_button(commands, bar, editor.field, EditorButton::Find, font_size);
+        spawn_editor_button(
+            commands,
+            bar,
+            editor.field,
+            EditorButton::GoToLine,
+            font_size,
+        );
         let status = commands
             .spawn((
                 Text::default(),
@@ -820,9 +826,23 @@ fn report_script_save(
                     // close. A *failed compile* still stored the source (the
                     // simulator saves and then compiles), so this is not gated
                     // on `compiled`.
-                    let rows: Vec<String> = errors
+                    let rows: Vec<(String, Option<ErrorTarget>)> = errors
                         .iter()
-                        .map(|error| error_line(&translator, error, &stored))
+                        .map(|error| {
+                            let target =
+                                state
+                                    .body_field
+                                    .zip(error.line)
+                                    .map(|(field, line)| ErrorTarget {
+                                        field,
+                                        line: usize::try_from(line).unwrap_or(usize::MAX),
+                                        column: error
+                                            .character_column(&stored)
+                                            .and_then(|column| usize::try_from(column).ok())
+                                            .unwrap_or(1),
+                                    });
+                            (error_line(&translator, error, &stored), target)
+                        })
                         .collect();
                     if let Some(edited) = edited.as_mut() {
                         edited.saved = stored;
@@ -847,8 +867,8 @@ fn report_script_save(
                     }
                     if let Some(container) = state.errors {
                         tear_down(&mut commands, &children, container);
-                        for row in rows {
-                            spawn_error_row(&mut commands, container, row, FONT_SIZE);
+                        for (row, target) in rows {
+                            spawn_error_row(&mut commands, container, row, target, FONT_SIZE);
                         }
                     }
                 }
@@ -876,26 +896,6 @@ fn report_script_save(
 // ---------------------------------------------------------------------------
 // Content builders.
 // ---------------------------------------------------------------------------
-
-/// Spawn the read-only body: a bounded, clipped block showing the script source
-/// in a monospace font (no caret, no edit).
-fn spawn_readonly_body(commands: &mut Commands, parent: Entity, text: &str, font_size: f32) {
-    commands
-        .spawn((
-            Node {
-                max_width: Val::Px(READONLY_BODY_WIDTH),
-                max_height: Val::Px(READONLY_BODY_HEIGHT),
-                overflow: Overflow::clip(),
-                ..column(Val::Px(2.0))
-            },
-            ChildOf(parent),
-        ))
-        .with_child((
-            Text::new(text.to_owned()),
-            UiFont::Mono.at(font_size),
-            text_role(LABEL_COLOR),
-        ));
-}
 
 /// Spawn the Running toggle for a task script — the shared checkbox widget.
 /// Toggling it flips the run state carried into the next Save of the window it
@@ -986,15 +986,121 @@ fn error_line(translator: &Translator, error: &ScriptCompileError, source: &str)
     }
 }
 
+/// Where a compile diagnostic's row takes the caret: the editor's field and the
+/// 1-based line and column the error names.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+struct ErrorTarget {
+    /// The editor's field.
+    field: Entity,
+    /// The line the error is on.
+    line: usize,
+    /// The column, in characters; 1 when the grid gave none.
+    column: usize,
+}
+
 /// Spawn one compile-diagnostic row showing `line` (see [`error_line`]) under
-/// the diagnostics list `parent`.
-fn spawn_error_row(commands: &mut Commands, parent: Entity, line: String, font_size: f32) {
-    commands.spawn((
+/// the diagnostics list `parent` — a row that, when the error names a line,
+/// takes the caret there on a click.
+fn spawn_error_row(
+    commands: &mut Commands,
+    parent: Entity,
+    line: String,
+    target: Option<ErrorTarget>,
+    font_size: f32,
+) {
+    let mut row = commands.spawn((
         Text::new(line),
         UiFont::Mono.at(font_size),
         text_meaning(ERROR_COLOR, ERROR_TEXT_CLASS),
         ChildOf(parent),
     ));
+    if let Some(target) = target {
+        row.insert((target, Pickable::default()))
+            .observe(on_error_row_press);
+    }
+}
+
+/// A diagnostic row was clicked: put the caret where its error is.
+fn on_error_row_press(
+    press: On<Pointer<Press>>,
+    targets: Query<&ErrorTarget>,
+    mut go_to: MessageWriter<CodeEditorGoTo>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    let Ok(target) = targets.get(press.entity) else {
+        return;
+    };
+    go_to.write(CodeEditorGoTo {
+        field: target.field,
+        line: target.line,
+        column: target.column,
+    });
+}
+
+/// Which of the editor's windows a bar button opens.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorButton {
+    /// Search / Replace.
+    Find,
+    /// Go to Line.
+    GoToLine,
+}
+
+/// The field a bar button opens its window over.
+#[derive(Component, Debug, Clone, Copy)]
+struct EditorButtonField(Entity);
+
+/// Spawn a bar button that opens one of the editor's windows over `field`.
+fn spawn_editor_button(
+    commands: &mut Commands,
+    parent: Entity,
+    field: Entity,
+    which: EditorButton,
+    font_size: f32,
+) {
+    let key = match which {
+        EditorButton::Find => "script-find",
+        EditorButton::GoToLine => "script-go-to-line",
+    };
+    let button = ui_spawn::spawn_button(
+        commands,
+        parent,
+        ButtonSpec::bordered(UiLabel::key(key), key)
+            .tab_index(2)
+            .colors(CONTROL_BACKGROUND, CONTROL_BORDER)
+            .label_color(LABEL_COLOR)
+            .font_size(font_size),
+    )
+    .button;
+    commands
+        .entity(button)
+        .insert((which, EditorButtonField(field)))
+        .observe(on_editor_button);
+}
+
+/// A bar button was pressed: open its window over the editor.
+fn on_editor_button(
+    press: On<Pointer<Press>>,
+    buttons: Query<(&EditorButton, &EditorButtonField)>,
+    mut find: MessageWriter<OpenFindReplace>,
+    mut go_to: MessageWriter<OpenGoToLine>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    let Ok((which, field)) = buttons.get(press.entity) else {
+        return;
+    };
+    match which {
+        EditorButton::Find => {
+            find.write(OpenFindReplace { field: field.0 });
+        }
+        EditorButton::GoToLine => {
+            go_to.write(OpenGoToLine { field: field.0 });
+        }
+    }
 }
 
 /// Scroll the bounded diagnostics list with the mouse wheel (its own
@@ -1062,6 +1168,7 @@ pub fn spawn_script_editor_specimen(
             commands,
             errors,
             cx.text("Line 5, column 9: syntax error"),
+            None,
             cx.font_size,
         );
     }

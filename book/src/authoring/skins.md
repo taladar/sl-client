@@ -174,6 +174,9 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--tile-hover` | the wash under the pointer on a dense grid's tile (an emoji cell) |
 | `--inline-item-bg` / `--inline-item-bg-hover` | an item embedded in notecard prose, at rest and under the pointer |
 | `--inline-item-text` / `--inline-item-text-readonly` | that item's icon and name, in a writable notecard and a read-only one (`.sk-inline-item-text`) |
+| `--caret-line` | the wash behind the line the caret is on, in a code editor that has focus — a tint of the field's well, drawn under the glyphs |
+| `--find-match` | the wash behind every match of an open Search / Replace window's query |
+| `--gutter-bg` / `--line-number` | a code editor's line-number column and its numbers |
 | `--marker-selected` | the selected keyframe on the day-cycle timeline (a colour of its own because it sits on a sky gradient) |
 | `--check-bg` / `--check-border` | a checkbox's box, unchecked |
 | `--check-bg-checked` / `--check-border-checked` | the same box, checked |
@@ -335,6 +338,10 @@ the stock look rather than to black.
 | `.sk-image-well` | the box a snapshot or thumbnail sits in (About Landmark's), shown as a scrim while it has none |
 | `.sk-inline-item` | an item embedded in notecard prose, with its `:hover`; wears `.sk-read-only` in a read-only notecard |
 | `.sk-inline-item-text` | that item's icon and name |
+| `.sk-caret-line` | the box behind the caret's line in a code editor |
+| `.sk-find-match` | the box behind a find match in a code editor |
+| `.sk-code-gutter` | a code editor's line-number column, ruled off from the text in `--divider` |
+| `.sk-line-number` | one number in that column |
 | `.sk-day-marker` | a keyframe marker on the day-cycle timeline; `.sk-selected` when selected |
 | `.sk-teleport-title` / `.sk-teleport-arrived` / `.sk-teleport-failed` | the teleport-progress title, and the two outcomes it ends in |
 | `.sk-presence-online` / `.sk-presence-offline` | a friend's presence dot |
@@ -374,12 +381,12 @@ the stock look rather than to black.
 | `.sk-divider` / `.sk-divider-grip` / `.sk-column-resizer` | a pane splitter, its nub, a table column's drag handle |
 | `.sk-list-row` / `.sk-table-row` | one row of a scroll list, plus its `:hover`; worn with `.sk-stripe` on every other row and `.sk-selected` when selected |
 | `.sk-field` | an editable text field's box, plus `:focus` and `:disabled` |
-| `.sk-read-only` | worn with `.sk-field` / `.sk-text-field`: a field that can be read and copied but not changed |
+| `.sk-read-only` | worn with `.sk-field` / `.sk-text-field` / `.sk-field-box`: a field that can be read and copied but not changed |
 | `.sk-field-placeholder` | a field's prompt while it is empty, and a search box's leading glyph |
 | `.sk-list-surface` | a scroll list's face — and the scope inside which the text roles re-root onto the field family (see *Chrome and data surfaces*) |
 | `.sk-text-field` | the caret / selection colours of **every** editor (stamped automatically) |
 | `.sk-search-field` / `.sk-search-clear` | the shared search box and its `×` button |
-| `.sk-field-box` | any other box around a bare editor — the chat bar and every chat input; the search box's well, focus face and ring, with `.sk-focus-within` stamped while its field has focus |
+| `.sk-field-box` | any other box around a bare editor — the chat bar and every chat input, a rich-text field (a notecard's body) and a code editor; the search box's well, focus face and ring, with `.sk-focus-within` stamped while its field has focus and `.sk-read-only` while its field is read-only |
 | `.sk-toolbar-bar` / `.sk-toolbar-button` / `.sk-toolbar-label` | the bottom toolbar strip, its buttons — `:checked` while the floater a button toggles is open, `:active` held down, `:checked:active` both, `:disabled` for a target that has not landed — and their labels, which the button's states reach as descendant rules |
 | `.sk-toast` / `.sk-toast-text` | a notification toast card and its text |
 | `.sk-toast-tip` / `.sk-toast-notify` / `.sk-toast-alert` / `.sk-toast-modal` | worn with `.sk-toast`: its kind, which frames the card |

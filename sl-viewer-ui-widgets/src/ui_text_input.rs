@@ -127,7 +127,9 @@ use bevy::ui::UiSystems;
 use bevy_flair::style::components::ClassList;
 
 use sl_viewer_ui_core::semantic::{Role, Semantic};
-use sl_viewer_ui_core::skin::{READ_ONLY_CLASS, SkinTextCaret, set_state_class};
+use sl_viewer_ui_core::skin::{
+    FOCUS_WITHIN_CLASS, READ_ONLY_CLASS, SkinTextCaret, set_state_class,
+};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column, row};
 use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip};
@@ -651,6 +653,69 @@ pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInpu
     field.id()
 }
 
+/// The skin class on a container that wears the well of the **bare** field
+/// inside it — the box around a rich-text field or a code editor.
+const FIELD_BOX_CLASS: &str = "sk-field-box";
+
+/// A container that wears the well of the bare field inside it: the field
+/// draws no chrome of its own, and the box takes the background, the bevel and
+/// the field's states.
+///
+/// Why a field would hand its well to a container: something has to be drawn
+/// *between* the well and the glyphs (a rich-text field's underlay, behind its
+/// text), or *beside* the field inside the same well (a code editor's gutter).
+/// Neither fits on a node that paints its own background.
+///
+/// What the field used to say with its own classes it now says through this:
+/// `reflect_field_box_state` puts [`FOCUS_WITHIN_CLASS`] on the box while the
+/// field has focus and [`READ_ONLY_CLASS`] while it is a [`ReadOnlyField`], so
+/// `.sk-field-box.sk-focus-within` and `.sk-field-box.sk-read-only` light and
+/// grey it the way `.sk-field:focus` and `.sk-field.sk-read-only` light and
+/// grey a decorated field.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct FieldBox {
+    /// The bare field the box is the well of.
+    pub field: Entity,
+}
+
+/// Make `container` the well of the bare `field` inside it: the field's border,
+/// background and bevel, and the [`FieldBox`] that keeps its states in step.
+pub fn decorate_field_box(commands: &mut Commands, container: Entity, field: Entity) {
+    let fallback = SkinPalette::default();
+    commands
+        .entity(container)
+        .insert((
+            FieldBox { field },
+            BorderColor::all(fallback.control_border),
+            BackgroundColor(fallback.field_bg),
+            ClassList::new_with_classes([FIELD_BOX_CLASS]),
+        ))
+        .entry::<Node>()
+        .and_modify(|mut node| node.border = UiRect::all(Val::Px(FIELD_BORDER_WIDTH)));
+}
+
+/// Light a [`FieldBox`] while its field has focus and grey it while the field is
+/// read-only. Writes only on a real change.
+fn reflect_field_box_state(
+    focus: Res<InputFocus>,
+    mut boxes: Query<(&FieldBox, &mut ClassList)>,
+    read_only: Query<(), With<ReadOnlyField>>,
+) {
+    let focused = focus.get();
+    for (field_box, mut classes) in &mut boxes {
+        set_state_class(
+            &mut classes,
+            FOCUS_WITHIN_CLASS,
+            focused == Some(field_box.field),
+        );
+        set_state_class(
+            &mut classes,
+            READ_ONLY_CLASS,
+            read_only.contains(field_box.field),
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Caret visibility (R28): skin-driven colour, reference blink envelope,
 // overwrite mode.
@@ -994,8 +1059,14 @@ impl Plugin for TextInputPlugin {
                 install_caret_style,
                 toggle_overwrite_mode,
                 reflect_read_only_field,
+                reflect_field_box_state,
             ),
         );
+        // Every field may keep an undo history, so every host of fields can
+        // walk one.
+        if !app.is_plugin_added::<crate::ui_text_history::TextHistoryPlugin>() {
+            app.add_plugins(crate::ui_text_history::TextHistoryPlugin);
+        }
         app.add_systems(
             PostUpdate,
             (

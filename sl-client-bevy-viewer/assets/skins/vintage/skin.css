@@ -133,6 +133,12 @@
   --field-text: #000000;
   --field-text-disabled: #00000040;
   --field-text-readonly: #e6e6e6;
+  /* The code editor's washes and gutter sit on that light sage well, where
+   * the fallback's white tints would vanish: dark tints instead. */
+  --caret-line: #0000000f;
+  --find-match: #c2947d80;
+  --gutter-bg: #0000000d;
+  --line-number: #5c5c5c;
   --field-placeholder: #666666;
   --list-bg: #c8cfcc;
   /* MenuDefaultBgColor: Vintage floats its menus in opaque black. */

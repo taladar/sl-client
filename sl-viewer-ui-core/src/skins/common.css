@@ -814,6 +814,33 @@
   color: var(--inline-item-text-readonly);
 }
 
+/* The code editor (sl-viewer-ui-widgets ui_code_editor). The caret line and a
+ * find match are boxes in the rich-text field's underlay — behind the glyphs,
+ * which is why they are boxes at all: a styled range is a glyph run, and a run
+ * has no background (ui_rich_text `RichTextBackdrop`). */
+.sk-caret-line {
+  background-color: var(--caret-line);
+}
+
+.sk-find-match {
+  background-color: var(--find-match);
+}
+
+/* The line-number column: inside the editor's well, set off from the text by
+ * the rule a splitter draws. Its numbers are data about the text, not
+ * chrome, so they take no chrome shadow. */
+.sk-code-gutter {
+  background-color: var(--gutter-bg);
+  /* `border-color`, not `border-right-color`: the gutter's only border is its
+   * right one, and a side colour is a bevel's to choose. */
+  border-color: var(--divider);
+}
+
+.sk-line-number {
+  color: var(--line-number);
+  text-shadow: none;
+}
+
 /* A pie slice's caption, in its three roles. The pie *disc* is a shader rather
  * than a node and keeps taking its three colours through the material's params
  * — the one piece of this widget a selector genuinely cannot reach. The
@@ -1484,6 +1511,14 @@
   outline-color: var(--focus-ring);
   outline-width: var(--focus-ring-width);
   outline-offset: var(--focus-ring-offset);
+}
+
+/* A box whose field is read-only — a rich-text field or a code editor wears
+ * its well on the box, so the box is what says it (`FieldBox`). After the
+ * focused rule, for the reason `.sk-field.sk-read-only` comes after
+ * `.sk-field:focus`: a read-only field still takes focus. */
+.sk-field-box.sk-read-only {
+  background-color: var(--field-bg-readonly);
 }
 
 /* ...so the editor inside it does NOT ring. Both rules above the search box

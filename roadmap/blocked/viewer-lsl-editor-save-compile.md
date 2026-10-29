@@ -4,7 +4,7 @@ title: LSL editor save — upload/compile round-trip and error list
 topic: viewer
 status: blocked
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-lsl-script-editor
-blocked_by: [viewer-lsl-editor-widget]
+blocked_by: [viewer-lsl-editor-highlight]
 refs: [viewer-lsl-diagnostics, viewer-prim-inventory-editing]
 ---
 
@@ -84,12 +84,12 @@ Done:
 
 Still to do (each needs [[viewer-lsl-editor-widget]] or its own task):
 
-- **Clickable error list that jumps the caret** — needs the widget's
-  go-to-line; today the diagnostics are listed, not clickable.
-- **Syntax colour, gutter/line numbers, brace match, a monospace *editing*
-  font** — the editable field is the plain Sans widget with one whole-buffer
-  style; colour is [[viewer-lsl-editor-highlight]] and the rest is the widget
-  itself. (The read-only block is already monospace.)
+- ~~Clickable error list that jumps the caret~~ — done with
+  [[viewer-lsl-editor-widget]] (2026-10-29): a diagnostic row puts the caret
+  on its line and column.
+- ~~Gutter/line numbers, a monospace editing font~~ — done with the widget;
+  the body is the code editor, read-only for a no-modify script.
+- **Syntax colour, brace match** — [[viewer-lsl-editor-highlight]].
 - The Firestorm preprocessor stays out of v1 as planned
   ([[viewer-lsl-preprocessor]]).
 

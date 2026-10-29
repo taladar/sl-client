@@ -1286,10 +1286,17 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
         ],
     },
     ElementContract {
+        element: "code-editor",
+        nodes: &[NodeContract::inert("code-editor:field")],
+    },
+    ElementContract {
         element: "script-editor",
         nodes: &[
             NodeContract::inert("script-body:field"),
             NodeContract::inert("script-save"),
+            // The two open the editor's windows by message, not by `UiAction`.
+            NodeContract::inert("script-find"),
+            NodeContract::inert("script-go-to-line"),
             // The Running box is the live window's: it ticks and clears (the
             // run state it feeds is the window's, and a specimen sits in none).
             NodeContract::new(SCRIPT_RUNNING, &SCRIPT_RUNNING_ROWS),

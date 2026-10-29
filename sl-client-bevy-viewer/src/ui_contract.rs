@@ -306,6 +306,8 @@ pub(crate) fn install_element_hosting(app: &mut App) {
         crate::chat_input::ChatInputPlugin,
         crate::local_chat_input::LocalChatInputPlugin,
         crate::ui_trackball::TrackballPlugin,
+        // The code editor's specimens write its messages (a go-to, a find).
+        crate::ui_code_editor::CodeEditorPlugin,
     ));
     install_list_widgets(app);
     // The messages whose *writers* are attached by a spawn but whose

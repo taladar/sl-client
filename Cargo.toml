@@ -434,6 +434,13 @@ unescaped_backticks = "deny"
 #    properties scoped to a byte range (a link's colour, a hidden marker). The
 #    layout builders model both already; `PlainEditor` simply owns its builder.
 #    Used by `sl-viewer-ui-widgets`' rich-text field.
+# 5. laying a `PlainEditor` out a paragraph at a time: each paragraph's broken
+#    layout is kept and reused while its text, styles and boxes are unchanged,
+#    and the paragraphs are joined into the one layout the caret works on — a
+#    keystroke in a 64 KB script re-shapes one line instead of all 2,700 (about
+#    20 ms down to 2–8 ms, `sl-viewer-ui-widgets/tests/editor_relayout.rs`).
+#    Edits now also move the range styles and inline boxes with the text, which
+#    is what lets the relayout an edit forces reuse everything after it.
 #
 # 2 and 3 are submitted upstream (see roadmap/deferred/viewer-ui-text-parley-pr-*).
 # **Drop this patch** and return to a plain crates.io parley once `bevy_text`
@@ -707,8 +714,8 @@ bevy_utils = { git = "https://github.com/taladar/bevy.git", rev = "d9cc76e46d149
 bevy_window = { git = "https://github.com/taladar/bevy.git", rev = "d9cc76e46d14967d5b94fca7ec5ecbff43b75df2" }
 bevy_winit = { git = "https://github.com/taladar/bevy.git", rev = "d9cc76e46d14967d5b94fca7ec5ecbff43b75df2" }
 bevy_world_serialization = { git = "https://github.com/taladar/bevy.git", rev = "d9cc76e46d14967d5b94fca7ec5ecbff43b75df2" }
-fontique = { git = "https://github.com/taladar/parley.git", rev = "c09599ff507f49e5f383850e6b1e52674e4c654f" }
-parley = { git = "https://github.com/taladar/parley.git", rev = "c09599ff507f49e5f383850e6b1e52674e4c654f" }
+fontique = { git = "https://github.com/taladar/parley.git", rev = "a50a7c334575e89d31de7bc24d79172065ddea79" }
+parley = { git = "https://github.com/taladar/parley.git", rev = "a50a7c334575e89d31de7bc24d79172065ddea79" }
 
 naga = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
 # Fork of wgpu 29.0.4 (github.com/taladar/wgpu, branch

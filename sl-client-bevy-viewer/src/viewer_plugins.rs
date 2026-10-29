@@ -524,6 +524,10 @@ impl Plugin for ViewerEditPlugins {
         // whose ranges can be styled. Registered before its consumers so a
         // field spawned at start-up already has its systems.
         app.add_plugins(sl_viewer_ui_widgets::ui_rich_text::RichTextPlugin);
+        // The code editor over it (viewer-lsl-editor-widget): the gutter, the
+        // keys, go-to-line and the Search / Replace and Go to Line windows the
+        // script editor's body is built with.
+        app.add_plugins(sl_viewer_ui_widgets::ui_code_editor::CodeEditorPlugin);
         // The notecard viewer & editor floater (viewer-notecard-editor): open a
         // notecard from inventory, read it, edit its text when the item is
         // modifiable, and save it back to agent inventory. Its embedded items

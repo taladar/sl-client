@@ -2,7 +2,7 @@
 id: viewer-lsl-editor-highlight
 title: LSL editor highlighting — colour, folding, brace match, outline
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-lsl-script-editor
 blocked_by: [viewer-lsl-editor-widget, viewer-lsl-lexer]
 refs: [protocol-lsl-syntax, viewer-ui-skin-tokens,

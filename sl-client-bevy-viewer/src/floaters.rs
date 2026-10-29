@@ -195,6 +195,20 @@ pub const FLOATERS: &[FloaterElement] = &[
         content: crate::experiences_floater::spawn_experiences_specimen,
     },
     FloaterElement {
+        id: "find-replace",
+        summary: "Search / Replace: the code editor's find window — the search and replace \
+                  fields, Case Insensitive and Search Up, and Search, Replace and Replace All. \
+                  Bound to the editor that opened it.",
+        spec: crate::ui_code_editor::find_replace_floater_spec,
+        content: crate::ui_code_editor::spawn_find_replace_specimen,
+    },
+    FloaterElement {
+        id: "go-to-line",
+        summary: "Go to Line: the code editor's line-number prompt and its OK button.",
+        spec: crate::ui_code_editor::go_to_line_floater_spec,
+        content: crate::ui_code_editor::spawn_go_to_line_specimen,
+    },
+    FloaterElement {
         id: "group-picker",
         summary: "Choose Group: the agent's own groups over an optional \"none\" row, and the \
                   OK / Cancel reply row every set-group control is written against.",

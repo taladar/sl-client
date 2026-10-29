@@ -2,7 +2,7 @@
 id: viewer-lsl-editor-widget
 title: LSL editor widget — a parley PlainEditor fork with coloured ranges
 topic: viewer
-status: ready
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-lsl-script-editor
 blocked_by: [viewer-ui-text-foundation, viewer-ui-text-input-widget]
 refs: [viewer-ui-skin-tokens, viewer-notecard-editor, viewer-notecard-inline-items]
@@ -94,3 +94,81 @@ undo/redo, a gutter and line numbers, current-line highlight, find/replace and
 go-to-line, plus the benchmark of a 64 KB buffer against `PlainEditor`'s
 whole-buffer relayout — which the notecard, whose bodies are small, never had to
 answer.
+
+## Done (2026-10-29)
+
+The editor is `sl-viewer-ui-widgets`' `ui_code_editor`, over the rich-text
+field, and the script editor's body is one (read-only scripts too, which can
+now be searched and copied in the same editor rather than a static block).
+
+- **Undo / redo** (`ui_text_history`): `Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z` on
+  any field carrying an `EditHistory` — every rich-text field, so the notecard
+  editor has undo too. It records the buffer's *difference* after each frame's
+  edits rather than hooking each kind of edit, so a paste, an IME commit, the
+  overwrite mode and a Replace All are all undoable without knowing about each
+  other. A run of typing (or of deleting) with no pause over a second and no
+  line break is one step.
+- **Per-range style, not colour.** A `RichTextClass` may name a **skin
+  class** (`RichTextClass::skinned`): its section node wears the class and the
+  cascade resolves it — colour, underline, and the `font-weight` /
+  `font-style` the field reads back into the run, so bold keywords and italic
+  comments are a stylesheet's decision.
+- **Ranges get boxes — answered once, for both questions.** A field now has an
+  **underlay** behind its glyphs, and `RichTextBackdrop`s (a byte range plus a
+  skin class) are drawn there, one box per laid-out line the range touches,
+  coloured by the cascade's `background-color`. The caret line is the same
+  mechanism (`--caret-line`), and so are find matches (`--find-match`, through
+  `RichTextMarks`, which a widget writes beside the consumer's content). Only
+  what is on screen gets a box. For anything to sit between the well and the
+  glyphs the well had to move off the field: a rich-text field now wears it on
+  its root, a `FieldBox` that stamps `.sk-focus-within` / `.sk-read-only` from
+  its field (new `.sk-field-box.sk-read-only` rule).
+- **Gutter and line numbers**, placed from parley's own lines so they stay
+  level with the text through scrolling and a taller fallback glyph; wheel
+  scrolling over text and gutter; monospace and unwrapped.
+- **Find / replace** — the reference's Search / Replace window (Search,
+  Replace, Replace All, Case Insensitive, Search Up), `Ctrl+F` / `Ctrl+H`, `F3`
+  / `Shift+F3` to repeat, seeded from a one-line selection; every match on
+  screen is washed while the window is up. **Go to line**: `CodeEditorGoTo`
+  for callers, `Ctrl+G` and a Go to Line window for the resident, and the
+  script editor's compile errors are clickable and jump the caret to the line
+  and column they name. Both windows are also buttons beside Save.
+- Tokens `--caret-line`, `--find-match`, `--gutter-bg`, `--line-number` in the
+  fallback sheet and every skin (dark tints in Vintage's light well).
+
+### The benchmark, and what it led to
+
+`sl-viewer-ui-widgets/tests/editor_relayout.rs` (ignored timings, run by hand
+in release). `PlainEditor` relaid the whole buffer out on every keystroke,
+linear in its size — 5.4 ms at 16 KB, 11 ms at 32 KB, **22 ms** at the 64 KB
+script limit with a style on every token, over a 60 Hz frame.
+
+So the per-line fallback the task anticipated was done, but inside the parley
+fork rather than as a list of line layouts (which would have meant writing the
+multi-line caret, selection and hit testing parley already has): the editor
+keeps each paragraph's broken layout keyed by its text and the styles, boxes and
+preedit rebased to it, re-shapes only the paragraphs an edit touched, and joins
+them into the one `Layout` everything else works on (fork item 5 in the root
+`Cargo.toml`). Edits also move the range styles and inline boxes with the text;
+without that the relayout an edit forces saw every later paragraph as
+restyled. Tests in the fork compare every line, glyph, box and caret position
+against a whole layout, through edits. A keystroke now, with the highlighter's
+ranges recomputed over the whole buffer:
+
+| script | lines | plain | highlighted | first layout |
+| --- | --- | --- | --- | --- |
+| 16 KB | 677 | 0.14 ms | 0.64 ms | 15 ms |
+| 32 KB | 1,366 | 0.27 ms | 1.3 ms | 26 ms |
+| 64 KB | 2,731 | 0.76 ms | 3.6 ms | 52 ms |
+
+Text needing bidi resolution (an Arabic or Hebrew comment or string) still lays
+out whole: parley resolves bidi over the whole text with one base level, which
+a paragraph laid out alone cannot reproduce. Not timed: Bevy's own pass over
+the finished glyphs on each change.
+
+### Not done here
+
+- A **scrollbar** for a scrolled text field: [[viewer-text-field-scrollbar]]
+  (the editor scrolls by wheel and by the caret).
+- `Tab` inserting indentation, auto-indent, brace match, folding and the
+  colours themselves: [[viewer-lsl-editor-highlight]].

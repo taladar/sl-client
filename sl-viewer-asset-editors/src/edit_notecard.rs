@@ -553,6 +553,7 @@ fn populate_editor(
                 color: style.link_color,
                 underline: true,
                 clickable: true,
+                skin_class: None,
             }],
             // Nothing captions the body, so it is named outright.
             name_key: Some("notecard-body-name"),

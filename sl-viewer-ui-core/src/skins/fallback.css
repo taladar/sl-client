@@ -282,6 +282,16 @@
   --inline-item-bg-hover: #475c85d9;
   --inline-item-text: #85adf2;
   --inline-item-text-readonly: #85adf2;
+
+  /* A code editor: the line the caret is on, every match of an open search,
+   * the line-number column and its numbers. The two washes sit BEHIND the
+   * glyphs (the rich-text field's underlay), so they are translucent tints of
+   * the field's own well rather than fills that would need a text colour of
+   * their own. */
+  --caret-line: #ffffff0f;
+  --find-match: #fad16659;
+  --gutter-bg: #00000026;
+  --line-number: #737885;
   --surface-radius: 6px;
   --control-radius: 4px;
 }

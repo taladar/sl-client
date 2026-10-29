@@ -126,11 +126,20 @@ pub const ELEMENTS: &[UiElement] = &[
         spawn: crate::edit_notecard::spawn_notecard_reader_specimen,
     },
     UiElement {
+        id: "code-editor",
+        summary: "The code editor (`crate::ui_code_editor`, viewer-lsl-editor-widget): the \
+                  rich-text field set up for source — monospace and unwrapped, in a well with \
+                  a line-number gutter, undo, the caret's line washed, Search / Replace and Go \
+                  to Line. The script editor's body is one.",
+        spawn: crate::ui_code_editor::spawn_code_editor_specimen,
+    },
+    UiElement {
         id: "script-editor",
-        summary: "The LSL script editor's content (viewer-lsl-editor-save-compile): an editable \
-                  multi-line body, a Running toggle, a Save & Compile button, and a sample \
-                  compile-diagnostic row. The live floater (`crate::edit_script`) fetches, \
-                  uploads and compiles; here it is static so its layout is swept.",
+        summary: "The LSL script editor's content (viewer-lsl-editor-save-compile): the code \
+                  editor holding the source, a Running toggle, Save & Compile with the Search / \
+                  Replace and Go to Line buttons beside it, and a sample compile-diagnostic \
+                  row. The live floater (`crate::edit_script`) fetches, uploads and compiles; \
+                  here it is static so its layout is swept.",
         spawn: crate::edit_script::spawn_script_editor_specimen,
     },
     UiElement {

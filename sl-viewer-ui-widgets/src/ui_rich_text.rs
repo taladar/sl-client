@@ -76,14 +76,20 @@
 
 use core::ops::Range;
 
+use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::{ComputedTextBlock, EditableText, EditableTextSystems, TextBrush, TextEntity};
 use bevy::ui::{UiSystems, widget::TextScroll};
 use parley::{Cursor, InlineBox, InlineBoxKind, PositionedLayoutItem, StyleProperty};
 
-use sl_viewer_ui_core::ui_element::{ContentMayOverflow, TextMayClip};
+use bevy_flair::style::components::ClassList;
+use parley::{Affinity, Selection};
 
-use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_core::ui_element::{ContentMayOverflow, TextMayClip};
+use sl_viewer_ui_core::ui_font::UiFont;
+
+use crate::ui_text_history::EditHistory;
+use crate::ui_text_input::{TextInputKind, TextInputSpec, decorate_field_box, spawn_text_input};
 
 /// The width an object's box reserves before the object has ever been laid out,
 /// as a multiple of the field's font size. The real width arrives on the next
@@ -113,19 +119,52 @@ const MIN_FIELD_WIDTH: f32 = 360.0;
 // ---------------------------------------------------------------------------
 
 /// One style class a [`RichTextRange`] can name: a colour, and whether the
-/// renderer underlines the run.
+/// renderer underlines the run — or a **skin class** that lets the stylesheet
+/// decide both, and more.
 ///
 /// A class is a *class*, not a span: a notecard has one "link" class however
 /// many links its body holds, and a script editor one class per token kind.
+///
+/// # Resolved here, or by the cascade
+///
+/// A class with no [`skin_class`](Self::skin_class) is drawn in the colour and
+/// underline it carries, which is what a notecard's links want (they share the
+/// colour of every other name link in the viewer). A class **with** one puts
+/// that class on its section node and lets the stylesheet resolve it like any
+/// text node: `color`, `text-decoration-line` / `-color`, and — because the
+/// section's `font-weight` and `font-style` are read back into the run —
+/// **bold and italic too**. That is what a syntax scheme needs: whether a
+/// keyword is bold or a comment italic is the skin's decision, not the
+/// editor's (`viewer-lsl-editor-highlight` § Where the colours live). The
+/// colour and underline it carries are then only what the run wears before the
+/// sheet has been applied.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RichTextClass {
-    /// The colour glyphs in this class are drawn in.
+    /// The colour glyphs in this class are drawn in — or, for a skinned class,
+    /// drawn in until the stylesheet has resolved it.
     pub color: Color,
     /// Whether runs in this class are underlined.
     pub underline: bool,
     /// Whether a press inside a range of this class raises
     /// [`RichTextRangeActivated`] — what makes a link a link.
     pub clickable: bool,
+    /// The skin class the stylesheet resolves this class by, or `None` for a
+    /// class drawn as it is declared.
+    pub skin_class: Option<&'static str>,
+}
+
+impl RichTextClass {
+    /// A class the stylesheet resolves through `skin_class`, drawn in
+    /// `fallback` until it has.
+    #[must_use]
+    pub const fn skinned(skin_class: &'static str, fallback: Color) -> Self {
+        Self {
+            color: fallback,
+            underline: false,
+            clickable: false,
+            skin_class: Some(skin_class),
+        }
+    }
 }
 
 /// How one byte range of the buffer is drawn.
@@ -165,8 +204,26 @@ pub struct RichTextObject {
     pub index: usize,
 }
 
+/// A byte range drawn **with a box behind it**: a find match, a matched brace,
+/// a highlighted region.
+///
+/// The one thing a [`RichTextRange`] cannot carry. A range's look is resolved
+/// onto a glyph run, and a run is not a node — `background-color` maps to a
+/// node's `BackgroundColor`, which a run has no place for. So a backdrop is a
+/// node of its own, one per laid-out line the range touches, placed in the
+/// field's **underlay** behind the glyphs, and its colour is the cascade's:
+/// [`class`](Self::class) goes on the node, and the stylesheet gives it a
+/// `background-color` like any other box.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RichTextBackdrop {
+    /// The byte range the box sits behind.
+    pub range: Range<usize>,
+    /// The skin class of the box.
+    pub class: &'static str,
+}
+
 /// What a rich-text field lays out beyond its plain buffer: the objects in the
-/// flow and the styled ranges over it.
+/// flow, the styled ranges over it, and the boxes behind it.
 ///
 /// The consumer owns this and rewrites it whenever the buffer changes. Rewriting
 /// it with the same content is free — the widget compares before it invalidates
@@ -177,6 +234,20 @@ pub struct RichTextContent {
     pub objects: Vec<RichTextObject>,
     /// The styled ranges, in any order.
     pub ranges: Vec<RichTextRange>,
+    /// The boxes drawn behind ranges, in any order.
+    pub backdrops: Vec<RichTextBackdrop>,
+}
+
+/// Boxes a **widget built over the field** draws behind its text, apart from
+/// the consumer's [`RichTextContent`] — the code editor's find matches.
+///
+/// Apart because the content has one owner: the consumer rewrites it whenever
+/// the buffer changes, and a find match written into it would be erased by the
+/// next keystroke's highlighting. Drawn under the content's own backdrops.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+pub struct RichTextMarks {
+    /// The boxes, in any order.
+    pub backdrops: Vec<RichTextBackdrop>,
 }
 
 /// A rich-text field's configuration, on the field entity itself.
@@ -186,9 +257,31 @@ pub struct RichTextField {
     pub root: Entity,
     /// The clipping overlay the objects are positioned within.
     pub overlay: Entity,
+    /// The clipping layer **behind** the glyphs that backdrops and the caret
+    /// line are drawn in.
+    pub underlay: Entity,
     /// The style classes [`RichTextStyle::Class`] indexes.
     pub classes: Vec<RichTextClass>,
+    /// Whether the line the caret is on is washed while the field has focus.
+    pub caret_line: bool,
 }
+
+/// The skin class of the caret line's wash (`--caret-line`).
+pub const CARET_LINE_CLASS: &str = "sk-caret-line";
+
+/// The bold and italic a skinned class's section resolved to, as last handed
+/// to parley — what tells the model sync that the stylesheet changed a class's
+/// face, so the runs have to be restyled.
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+struct RichTextSectionFaces {
+    /// One per class, in class order: its resolved weight and style.
+    faces: Vec<(FontWeight, FontStyle)>,
+}
+
+/// One box in a field's underlay: a backdrop's line fragment or the caret
+/// line, recycled from frame to frame.
+#[derive(Component, Debug, Clone, Copy)]
+struct RichTextUnderlayBox;
 
 /// The inert nodes a field's brush sections resolve against, one per class.
 ///
@@ -237,6 +330,11 @@ pub struct RichTextRangeActivated {
 
 /// Everything a rich-text field is built from.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is an independent switch a consumer sets by name with struct-update syntax; \
+              grouping them into enums would name states nobody asks for"
+)]
 pub struct RichTextSpec {
     /// The prefix of the field's node [`Name`], for the gallery and a test's
     /// lookups.
@@ -259,13 +357,24 @@ pub struct RichTextSpec {
     pub fill: bool,
     /// Whether the buffer is protected from modification.
     pub read_only: bool,
-    /// Whether the field draws its own border and background.
+    /// Whether the field draws its own border and background — on its **root**,
+    /// so the underlay sits between the well and the glyphs (see
+    /// [`spawn_rich_text`]). A field set into a box that carries the chrome
+    /// itself (the code editor's, which frames its gutter too) says `false`.
     pub decorated: bool,
     /// The style classes the content's ranges name.
     pub classes: Vec<RichTextClass>,
     /// The Fluent key of what the field is called, for a field with no caption
     /// beside it; see [`crate::ui_text_input::TextInputSpec::name_key`].
     pub name_key: Option<&'static str>,
+    /// The face the text is set in.
+    pub font: UiFont,
+    /// Whether long lines wrap at the field's edge (prose) or run on and
+    /// scroll sideways (code, whose lines are not sentences).
+    pub wrap: bool,
+    /// Whether the line the caret is on is washed while the field has focus
+    /// ([`CARET_LINE_CLASS`]).
+    pub caret_line: bool,
 }
 
 /// The query a field's section sync reads, named so the widget's systems stay
@@ -299,11 +408,14 @@ impl RichTextSpec {
             decorated: true,
             classes: Vec::new(),
             name_key: None,
+            font: UiFont::Sans,
+            wrap: true,
+            caret_line: false,
         }
     }
 }
 
-/// The three entities a rich-text field is made of.
+/// The four entities a rich-text field is made of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RichTextHandle {
     /// The outer node: the field's parent, which the field sizes.
@@ -313,11 +425,13 @@ pub struct RichTextHandle {
     /// The overlay the objects are drawn in — the parent every object entity
     /// must be spawned under ([`spawn_rich_text_object`] takes it).
     pub overlay: Entity,
+    /// The underlay the backdrops are drawn in, behind the glyphs.
+    pub underlay: Entity,
 }
 
 /// Spawn a rich-text field under `parent`.
 ///
-/// Three nodes, and the split is load-bearing. The **root** hugs the field and
+/// Four nodes, and the split is load-bearing. The **root** hugs the field and
 /// does not clip: `overflow: clip` zeroes a box's automatic minimum size (CSS,
 /// and taffy with it), so a clipping root stops being pushed out by the field
 /// inside it and collapses to whatever its own parent allots — in a
@@ -326,6 +440,17 @@ pub struct RichTextHandle {
 /// positioned at inset zero, so it fills the root's padding box exactly while
 /// contributing nothing to its size. An object on a line the field has scrolled
 /// past is then cut at the field's edge, the way the glyphs on that line are.
+///
+/// The **underlay** is the overlay's twin on the other side of the glyphs, and
+/// it is why a decorated field wears its well on the **root** rather than on
+/// the field itself. `bevy_ui` paints siblings in tree order and a node's
+/// background before its text, so nothing can come *between* a field's
+/// background and its glyphs — but a node spawned before a field with no
+/// background of its own is painted after the root's well and before the
+/// field's glyphs, which is exactly where a find match's box or the caret line
+/// belongs. The root is a [`FieldBox`](crate::ui_text_input::FieldBox), so it
+/// still lights when the field has focus and greys when it is read-only, as the
+/// field itself used to.
 pub fn spawn_rich_text(
     commands: &mut Commands,
     parent: Entity,
@@ -352,6 +477,32 @@ pub fn spawn_rich_text(
             ChildOf(parent),
         ))
         .id();
+    // Spawned **before** the field, which is what puts it under the glyphs; see
+    // above. Never takes the pointer: a press belongs to the text over it.
+    let underlay = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            Pickable::IGNORE,
+            TextMayClip {
+                reason: "a rich-text field scrolls its text to follow the caret, so a backdrop \
+                         on a line it has scrolled past is cut at the field's edge by design",
+            },
+            ContentMayOverflow {
+                reason: "the backdrops are absolutely positioned from the text layout, not by \
+                         taffy, so this node's content size answers a question nobody asked",
+            },
+            Name::new(format!("{}:rich-text-underlay", spec.element)),
+            ChildOf(root),
+        ))
+        .id();
     let field = spawn_text_input(
         commands,
         root,
@@ -360,13 +511,21 @@ pub fn spawn_rich_text(
             font_size: spec.font_size,
             visible_lines: spec.visible_lines,
             tab_index: spec.tab_index,
-            decorated: spec.decorated,
+            // Always bare: the well is the root's — see above.
+            decorated: false,
             fill: spec.fill,
             read_only: spec.read_only,
             name_key: spec.name_key,
             ..TextInputSpec::new(spec.element, TextInputKind::Multiline)
         },
     );
+    commands.entity(field).insert(spec.font.at(spec.font_size));
+    if !spec.wrap {
+        commands.entity(field).insert(TextLayout::no_wrap());
+    }
+    if spec.decorated {
+        decorate_field_box(commands, root, field);
+    }
 
     let overlay = commands
         .spawn((
@@ -405,15 +564,22 @@ pub fn spawn_rich_text(
         RichTextField {
             root,
             overlay,
+            underlay,
             classes: spec.classes.clone(),
+            caret_line: spec.caret_line,
         },
         RichTextContent::default(),
         RichTextSections::default(),
+        RichTextSectionFaces::default(),
+        // Every rich-text field can be undone: the notecard as much as the
+        // script, and neither has a reason to be the one that cannot.
+        EditHistory::default(),
     ));
     RichTextHandle {
         root,
         field,
         overlay,
+        underlay,
     }
 }
 
@@ -489,6 +655,16 @@ fn sync_rich_text_sections(mut fields: SectionFields, mut commands: Commands) {
             if class.underline {
                 section.insert(Underline);
             }
+            // A skinned class is resolved by the cascade: the class names it,
+            // and the `TextFont` is somewhere for its `font-weight` and
+            // `font-style` to land, which `sync_rich_text_model` reads back
+            // into the run.
+            if let Some(skin_class) = class.skin_class {
+                section.insert((
+                    ClassList::new_with_classes([skin_class]),
+                    TextFont::default(),
+                ));
+            }
             sections.entities.push(section.id());
         }
         // **The hidden section, last and always present.** A hidden range is
@@ -532,17 +708,50 @@ fn sync_rich_text_sections(mut fields: SectionFields, mut commands: Commands) {
 /// Both halves are compared with what the editor holds first, so handing over
 /// an unchanged model costs two comparisons, no relayout and no change flag —
 /// which is what lets the consumer rewrite the model on every keystroke without
-/// thinking about it.
+/// thinking about it. The range styles are not even rebuilt unless the model,
+/// the classes or a class's resolved face changed: a highlighted script hands
+/// over ten thousand ranges, and re-deriving them on every idle frame would be
+/// the editor's whole frame budget spent saying nothing has moved.
+#[expect(
+    clippy::type_complexity,
+    reason = "the field query is the model, its configuration, the cache of resolved faces \
+              and the editor the model is handed to — the four move together"
+)]
 fn sync_rich_text_model(
     mut fields: Query<(
-        &RichTextField,
-        &RichTextContent,
+        Ref<RichTextField>,
+        Ref<RichTextContent>,
+        &RichTextSections,
+        &mut RichTextSectionFaces,
         &TextFont,
         &mut EditableText,
     )>,
     objects: Query<&ComputedNode>,
+    section_fonts: Query<&TextFont, With<RichTextSectionOf>>,
 ) {
-    for (config, content, font, mut editable) in &mut fields {
+    for (config, content, sections, mut faces, font, mut editable) in &mut fields {
+        // Section 0 is the field; class `i` is section `i + 1`.
+        let resolved = RichTextSectionFaces {
+            faces: config
+                .classes
+                .iter()
+                .enumerate()
+                .map(|(index, class)| {
+                    class
+                        .skin_class
+                        .and_then(|_skin| sections.entities.get(index.saturating_add(1)))
+                        .and_then(|section| section_fonts.get(*section).ok())
+                        .map_or((FontWeight::NORMAL, FontStyle::Normal), |section| {
+                            (section.weight, section.style)
+                        })
+                })
+                .collect(),
+        };
+        let faces_changed = *faces != resolved;
+        if faces_changed {
+            *faces = resolved;
+        }
+        let restyle = faces_changed || content.is_changed() || config.is_changed();
         // The model is handed over without marking the field changed every
         // frame, and flagged changed only when it actually differs from what
         // the editor holds: the editable-text layout pass visits a field only
@@ -579,48 +788,66 @@ fn sync_rich_text_model(
             editor.set_inline_boxes(boxes);
         }
 
-        let smoothing = font.font_smoothing;
-        let styles = content
-            .ranges
-            .iter()
-            .flat_map(|styled| {
-                let range = styled.range.clone();
-                match styled.style {
-                    // **Two properties, not one.** The zero font size is what
-                    // takes the character's advance away; the transparent brush
-                    // is what makes it invisible. Relying on the size alone left
-                    // a zero-size glyph for the renderer to emit a quad for, and
-                    // what that quad samples is a rasteriser's business at a
-                    // degenerate size — not something a widget should bet a
-                    // blank screen area on.
-                    RichTextStyle::Hidden => vec![
-                        (range.clone(), StyleProperty::FontSize(0.0)),
-                        (
-                            range,
-                            StyleProperty::Brush(TextBrush::new(
-                                hidden_section_index(config.classes.len()),
-                                smoothing,
-                            )),
-                        ),
-                    ],
-                    RichTextStyle::Class(class) => vec![(
-                        range,
-                        StyleProperty::Brush(TextBrush::new(
-                            section_index(class, config.classes.len()),
-                            smoothing,
-                        )),
-                    )],
-                }
-            })
-            .collect::<Vec<_>>();
-        if editor.range_styles() != styles.as_slice() {
-            model_changed = true;
-            editor.set_range_styles(styles);
+        if restyle {
+            let styles = range_styles(&content.ranges, &faces.faces, font.font_smoothing);
+            if editor.range_styles() != styles.as_slice() {
+                model_changed = true;
+                editor.set_range_styles(styles);
+            }
         }
         if model_changed {
             editable.set_changed();
         }
     }
+}
+
+/// The parley range styles a field's `ranges` come to, given each class's
+/// resolved face (`faces`, in class order).
+///
+/// A class is a brush — the section that colours it — plus, for a class the
+/// stylesheet made bold or italic, the weight and style themselves: those are
+/// properties of the *run*, which parley shapes, not of the brush, which only
+/// the renderer reads.
+fn range_styles(
+    ranges: &[RichTextRange],
+    faces: &[(FontWeight, FontStyle)],
+    smoothing: FontSmoothing,
+) -> Vec<(Range<usize>, StyleProperty<'static, TextBrush>)> {
+    let declared = faces.len();
+    let mut styles = Vec::with_capacity(ranges.len());
+    for styled in ranges {
+        let range = styled.range.clone();
+        match styled.style {
+            // **Two properties, not one.** The zero font size is what takes
+            // the character's advance away; the transparent brush is what
+            // makes it invisible. Relying on the size alone left a zero-size
+            // glyph for the renderer to emit a quad for, and what that quad
+            // samples is a rasteriser's business at a degenerate size — not
+            // something a widget should bet a blank screen area on.
+            RichTextStyle::Hidden => {
+                styles.push((range.clone(), StyleProperty::FontSize(0.0)));
+                styles.push((
+                    range,
+                    StyleProperty::Brush(TextBrush::new(hidden_section_index(declared), smoothing)),
+                ));
+            }
+            RichTextStyle::Class(class) => {
+                if let Some((weight, style)) = faces.get(class) {
+                    if *weight != FontWeight::NORMAL {
+                        styles.push((range.clone(), StyleProperty::FontWeight((*weight).into())));
+                    }
+                    if *style != FontStyle::Normal {
+                        styles.push((range.clone(), StyleProperty::FontStyle((*style).into())));
+                    }
+                }
+                styles.push((
+                    range,
+                    StyleProperty::Brush(TextBrush::new(section_index(class, declared), smoothing)),
+                ));
+            }
+        }
+    }
+    styles
 }
 
 /// The brush section index a class maps to: section 0 is the field's own
@@ -765,6 +992,215 @@ fn place_rich_text_objects(
                 object_node.left = left;
                 object_node.top = top;
                 object_node.position_type = PositionType::Absolute;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The finished layout → the underlay's boxes.
+// ---------------------------------------------------------------------------
+
+/// The most boxes one field's underlay draws. Backdrops off screen are never
+/// drawn at all, so this is reached only by a screen full of one-letter find
+/// matches — where a box per match would cost more than it shows.
+const MAX_UNDERLAY_BOXES: usize = 512;
+
+/// The byte range of the lines a field shows: from the start of the first line
+/// any part of which is in view to the end of the last. Code outside it is never
+/// given a box, which is what keeps a find over a 64 KB script to the matches on
+/// screen.
+fn visible_bytes<B: parley::Brush>(
+    layout: &parley::Layout<B>,
+    top: f32,
+    bottom: f32,
+) -> Range<usize> {
+    let mut start = None;
+    let mut end = 0;
+    for line in layout.lines() {
+        let metrics = line.metrics();
+        if metrics.block_max_coord < top {
+            continue;
+        }
+        if metrics.block_min_coord > bottom {
+            break;
+        }
+        let range = line.text_range();
+        start.get_or_insert(range.start);
+        end = range.end;
+    }
+    start.unwrap_or(0)..end
+}
+
+/// The rectangles, in the field's text space, that a backdrop over `range`
+/// covers — one per laid-out line it touches. An offset that is out of the
+/// buffer or inside a character draws nothing rather than breaking the layout.
+fn backdrop_rects<B: parley::Brush>(
+    layout: &parley::Layout<B>,
+    text: &str,
+    range: &Range<usize>,
+) -> Vec<Rect> {
+    let valid = |index: usize| index <= text.len() && text.is_char_boundary(index);
+    if range.start >= range.end || !valid(range.start) || !valid(range.end) {
+        return Vec::new();
+    }
+    let selection = Selection::new(
+        Cursor::from_byte_index(layout, range.start, Affinity::Downstream),
+        Cursor::from_byte_index(layout, range.end, Affinity::Upstream),
+    );
+    let mut rects = Vec::new();
+    selection.geometry_with(layout, |bounds, _line| {
+        rects.push(Rect::new(
+            narrow(bounds.x0),
+            narrow(bounds.y0),
+            narrow(bounds.x1),
+            narrow(bounds.y1),
+        ));
+    });
+    rects
+}
+
+/// One of parley's `f64` geometry coordinates as the `f32` a UI rectangle
+/// holds.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    reason = "a text layout's coordinates are screen-sized, nowhere near where narrowing to f32 \
+              loses anything that shows, and std has no lossless conversion for it"
+)]
+pub(crate) const fn narrow(coordinate: f64) -> f32 {
+    coordinate as f32
+}
+
+/// Draw each field's backdrops and its caret line as boxes in its underlay,
+/// behind the glyphs.
+///
+/// Runs after the layout and its scroll, like [`place_rich_text_objects`], and
+/// carries a rectangle from the text's space to the underlay's the same way.
+/// Boxes are recycled rather than respawned — a typed character moves the caret
+/// line every keystroke — and a box with nothing to draw is undisplayed, not
+/// despawned, for the same reason.
+#[expect(
+    clippy::type_complexity,
+    reason = "the field query is the model and the layout, plus the three facts about where \
+              the field sits on screen that place a box over it"
+)]
+fn place_rich_text_underlays(
+    fields: Query<(
+        Entity,
+        &RichTextField,
+        &RichTextContent,
+        Option<&RichTextMarks>,
+        &EditableText,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &TextScroll,
+    )>,
+    focus: Res<InputFocus>,
+    layers: Query<(&ComputedNode, &UiGlobalTransform, Option<&Children>)>,
+    mut boxes: Query<(&mut Node, &mut ClassList), With<RichTextUnderlayBox>>,
+    mut commands: Commands,
+) {
+    for (entity, config, content, marks, editable, node, transform, scroll) in &fields {
+        let Ok((underlay_node, underlay_transform, existing)) = layers.get(config.underlay) else {
+            continue;
+        };
+        let existing: Vec<Entity> = existing
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|child| boxes.contains(*child))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let Some(layout) = editable.editor.try_layout() else {
+            continue;
+        };
+        let Some(underlay_inverse) = underlay_transform.try_inverse() else {
+            continue;
+        };
+        let inverse_scale = node.inverse_scale_factor();
+        let text_box = node.content_box();
+        let text_origin = Vec2::new(text_box.min.x - scroll.0.x, text_box.min.y - scroll.0.y);
+        let underlay_box = underlay_node.padding_box();
+        // Text space → field → world → underlay, as an object makes the trip.
+        let to_underlay = |point: Vec2| {
+            let in_field = Vec2::new(text_origin.x + point.x, text_origin.y + point.y);
+            let in_world = transform.affine().transform_point2(in_field);
+            let local = underlay_inverse.transform_point2(in_world);
+            Vec2::new(
+                (local.x - underlay_box.min.x) * inverse_scale,
+                (local.y - underlay_box.min.y) * inverse_scale,
+            )
+        };
+
+        let mut wanted: Vec<(Rect, &'static str)> = Vec::new();
+        if config.caret_line
+            && focus.get() == Some(entity)
+            && let Some(caret) = editable.editor.cursor_geometry(1.0)
+        {
+            // The whole width of the well, not just the text's: a wash that
+            // stopped at the last glyph would read as a selection.
+            let top = to_underlay(Vec2::new(0.0, narrow(caret.y0))).y;
+            let bottom = to_underlay(Vec2::new(0.0, narrow(caret.y1))).y;
+            let width = underlay_box.width() * inverse_scale;
+            wanted.push((Rect::new(0.0, top, width, bottom), CARET_LINE_CLASS));
+        }
+        let marked = marks.map_or(&[][..], |marks| marks.backdrops.as_slice());
+        if !(content.backdrops.is_empty() && marked.is_empty()) {
+            let visible = visible_bytes(layout, scroll.0.y, scroll.0.y + text_box.height());
+            let text = editable.editor.raw_text();
+            // The widget's marks first, so the consumer's boxes (spawned later,
+            // so painted later) sit over them.
+            for backdrop in marked.iter().chain(&content.backdrops) {
+                if backdrop.range.end < visible.start || backdrop.range.start > visible.end {
+                    continue;
+                }
+                for rect in backdrop_rects(layout, text, &backdrop.range) {
+                    let min = to_underlay(rect.min);
+                    let max = to_underlay(rect.max);
+                    wanted.push((Rect::from_corners(min, max), backdrop.class));
+                }
+            }
+        }
+        wanted.truncate(MAX_UNDERLAY_BOXES);
+
+        for (index, (rect, class)) in wanted.iter().enumerate() {
+            let placed = Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(rect.min.x),
+                top: Val::Px(rect.min.y),
+                width: Val::Px(rect.width()),
+                height: Val::Px(rect.height()),
+                ..default()
+            };
+            let classes = ClassList::new_with_classes([*class]);
+            if let Some(entity) = existing.get(index)
+                && let Ok((mut box_node, mut box_classes)) = boxes.get_mut(*entity)
+            {
+                if *box_node != placed {
+                    *box_node = placed;
+                }
+                if *box_classes != classes {
+                    *box_classes = classes;
+                }
+            } else {
+                commands.spawn((
+                    placed,
+                    classes,
+                    // Transparent until the stylesheet gives the class a fill.
+                    BackgroundColor(Color::NONE),
+                    RichTextUnderlayBox,
+                    Pickable::IGNORE,
+                    ChildOf(config.underlay),
+                ));
+            }
+        }
+        for surplus in existing.iter().skip(wanted.len()) {
+            if let Ok((mut box_node, _classes)) = boxes.get_mut(*surplus)
+                && box_node.display != Display::None
+            {
+                box_node.display = Display::None;
             }
         }
     }
@@ -958,6 +1394,7 @@ impl Plugin for RichTextPlugin {
                     // After the layout *and* its scroll, so the positions read
                     // back are final.
                     place_rich_text_objects.after(UiSystems::PostLayout),
+                    place_rich_text_underlays.after(UiSystems::PostLayout),
                 )
                     .chain(),
             )
@@ -1227,11 +1664,13 @@ mod tests {
                 color: Color::srgb(0.1, 0.2, 0.3),
                 underline: true,
                 clickable: true,
+                skin_class: None,
             },
             RichTextClass {
                 color: Color::srgb(0.4, 0.5, 0.6),
                 underline: false,
                 clickable: false,
+                skin_class: None,
             },
         ];
         let declared = classes.len();
@@ -1384,6 +1823,7 @@ mod tests {
                     index: 99,
                 }],
                 ranges: Vec::new(),
+                backdrops: Vec::new(),
             });
         settle(&mut app);
         settle(&mut app);
@@ -1444,6 +1884,7 @@ mod tests {
                 color: Color::srgb(0.4, 0.6, 1.0),
                 underline: true,
                 clickable: true,
+                skin_class: None,
             }],
         );
         let start = text.find(link).ok_or("no link in the fixture")?;
@@ -1456,6 +1897,7 @@ mod tests {
                     range: range.clone(),
                     style: RichTextStyle::Class(0),
                 }],
+                backdrops: Vec::new(),
             });
         settle(&mut app);
 
@@ -1501,6 +1943,7 @@ mod tests {
                 color: Color::srgb(0.4, 0.6, 1.0),
                 underline: true,
                 clickable: true,
+                skin_class: None,
             }],
         );
         let field_box = {
@@ -1523,6 +1966,206 @@ mod tests {
                 .get(),
             Some(handle.field),
             "a press on the field's own text did not reach the field"
+        );
+        Ok(())
+    }
+
+    /// **`Ctrl+Z` takes typing back and `Ctrl+Y` puts it back** — every
+    /// rich-text field keeps a history.
+    #[test]
+    fn ctrl_z_undoes_typing_and_ctrl_y_redoes_it() -> Result<(), TestError> {
+        use crate::ui_test::interact::{tap, with_modifier};
+        use bevy::input::keyboard::Key;
+
+        let (mut app, handle) = field_app("", Vec::new());
+        focus(&mut app, handle.field);
+        type_str(&mut app, "abc");
+        settle(&mut app);
+        let value = |app: &App| {
+            app.world()
+                .get::<EditableText>(handle.field)
+                .map(|field| field.value().to_string())
+        };
+        assert_eq!(value(&app).as_deref(), Some("abc"));
+
+        with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+            tap(app, KeyCode::KeyZ, Key::Character("z".into()));
+        });
+        settle(&mut app);
+        assert_eq!(
+            value(&app).as_deref(),
+            Some(""),
+            "a run of typing is one step"
+        );
+
+        with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+            tap(app, KeyCode::KeyY, Key::Character("y".into()));
+        });
+        settle(&mut app);
+        assert_eq!(value(&app).as_deref(), Some("abc"));
+        Ok(())
+    }
+
+    /// **A skinned class puts its skin class on its section**, with a font for
+    /// the stylesheet's weight and style to land in.
+    #[test]
+    fn a_skinned_class_is_resolved_by_its_section() -> Result<(), TestError> {
+        use bevy_flair::style::components::ClassList;
+
+        let (mut app, handle) = field_app(
+            "default",
+            vec![RichTextClass::skinned("sk-test-keyword", Color::WHITE)],
+        );
+        let root = app
+            .world()
+            .get::<ChildOf>(handle.field)
+            .ok_or("the field has no parent")?
+            .parent();
+        let skinned = app
+            .world_mut()
+            .query::<(&ChildOf, &ClassList, &TextFont)>()
+            .iter(app.world())
+            .filter(|(parent, classes, _font)| {
+                parent.parent() == root && classes.contains("sk-test-keyword")
+            })
+            .count();
+        assert_eq!(
+            skinned, 1,
+            "the class's section does not wear its skin class"
+        );
+        Ok(())
+    }
+
+    /// **A class the stylesheet made bold styles its runs bold**: the weight is
+    /// a property of the run parley shapes, beside the brush.
+    #[test]
+    fn a_bold_class_adds_a_weight_to_its_runs() {
+        use super::range_styles;
+        use bevy::text::{FontSmoothing, FontStyle, FontWeight};
+        use parley::StyleProperty;
+
+        let ranges = [RichTextRange {
+            range: 0..7,
+            style: RichTextStyle::Class(0),
+        }];
+        let styles = range_styles(
+            &ranges,
+            &[(FontWeight::BOLD, FontStyle::Normal)],
+            FontSmoothing::default(),
+        );
+        assert!(styles.iter().any(|(range, property)| *range == (0..7)
+            && matches!(property, StyleProperty::FontWeight(weight) if weight.value() > 600.0)));
+        assert!(
+            styles
+                .iter()
+                .any(|(_range, property)| matches!(property, StyleProperty::Brush(_)))
+        );
+        let plain = range_styles(
+            &ranges,
+            &[(FontWeight::NORMAL, FontStyle::Normal)],
+            FontSmoothing::default(),
+        );
+        assert_eq!(plain.len(), 1, "a plain class is its brush alone");
+    }
+
+    /// The visible boxes in a field's underlay, with their classes.
+    fn underlay_boxes(app: &App, handle: RichTextHandle) -> Vec<(String, Rect)> {
+        use bevy_flair::style::components::ClassList;
+
+        let mut found = Vec::new();
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(handle.underlay)
+            .map(|children| children.iter().collect())
+            .unwrap_or_default();
+        for child in children {
+            let world = app.world();
+            let (Some(node), Some(classes), Some(computed), Some(transform)) = (
+                world.get::<Node>(child),
+                world.get::<ClassList>(child),
+                world.get::<ComputedNode>(child),
+                world.get::<UiGlobalTransform>(child),
+            ) else {
+                continue;
+            };
+            if node.display == Display::None {
+                continue;
+            }
+            let class = format!("{classes:?}");
+            found.push((class, crate::ui_test::border_box(computed, transform)));
+        }
+        found
+    }
+
+    /// **A backdrop is a box behind its range**, inside the field.
+    #[test]
+    fn a_backdrop_draws_a_box_behind_its_range() -> Result<(), TestError> {
+        let (mut app, handle) = field_app("find me here", Vec::new());
+        if let Some(mut content) = app.world_mut().get_mut::<RichTextContent>(handle.field) {
+            content.backdrops.push(super::RichTextBackdrop {
+                range: 5..7,
+                class: "sk-test-match",
+            });
+        }
+        settle(&mut app);
+        settle(&mut app);
+        let boxes = underlay_boxes(&app, handle);
+        assert_eq!(
+            boxes.len(),
+            1,
+            "one range on one line is one box: {boxes:?}"
+        );
+        let (class, rect) = boxes.first().ok_or("no box")?;
+        assert!(class.contains("sk-test-match"));
+        assert!(rect.width() > 0.0 && rect.height() > 0.0);
+        let field = {
+            let world = app.world();
+            crate::ui_test::border_box(
+                world.get::<ComputedNode>(handle.field).ok_or("no node")?,
+                world
+                    .get::<UiGlobalTransform>(handle.field)
+                    .ok_or("no transform")?,
+            )
+        };
+        assert!(
+            field.contains(rect.center()),
+            "the box {rect:?} is not over the field {field:?}"
+        );
+        Ok(())
+    }
+
+    /// **The caret line is washed while the field has focus, and only then.**
+    #[test]
+    fn the_caret_line_shows_while_focused() -> Result<(), TestError> {
+        let mut app = InteractionTest::new().build();
+        app.add_plugins(RichTextPlugin);
+        settle(&mut app);
+        let root = spawn_under_root(&mut app, fixture_column());
+        let handle = {
+            let mut commands = app.world_mut().commands();
+            spawn_rich_text(
+                &mut commands,
+                root,
+                &RichTextSpec {
+                    initial: "one\ntwo".to_owned(),
+                    caret_line: true,
+                    ..RichTextSpec::new("rich-text-caret-line")
+                },
+            )
+        };
+        app.world_mut().flush();
+        settle(&mut app);
+        assert!(underlay_boxes(&app, handle).is_empty());
+
+        focus(&mut app, handle.field);
+        settle(&mut app);
+        settle(&mut app);
+        let boxes = underlay_boxes(&app, handle);
+        assert_eq!(boxes.len(), 1, "{boxes:?}");
+        assert!(
+            boxes
+                .first()
+                .is_some_and(|(class, _rect)| class.contains(super::CARET_LINE_CLASS))
         );
         Ok(())
     }

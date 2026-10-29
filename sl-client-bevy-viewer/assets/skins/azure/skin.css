@@ -119,6 +119,11 @@
 
   /* Structure */
   --divider: #2f5f8f;
+  /* The code editor: the caret's line, a find match, the gutter, its numbers. */
+  --caret-line: #ffffff0f;
+  --find-match: #ffd16659;
+  --gutter-bg: #00000026;
+  --line-number: #6f89a4;
   --track-bg: #0b1f33;
   --scrollbar-thumb: #3f7aa8;
   --slider-thumb: #cfe4f7;

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 332 |
-| blocked | 56 |
+| ready | 334 |
+| blocked | 54 |
 | in-progress | 18 |
 | bugs | 39 |
-| done | 1447 |
+| done | 1448 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2080** |
+| **total** | **2081** |
 
 ## ideas (135)
 
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (332)
+## ready (334)
 
 ### protocol
 
@@ -699,9 +699,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
   (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
-- [`viewer-lsl-editor-widget`](ready/viewer-lsl-editor-widget.md) — LSL editor
-  widget — a parley PlainEditor fork with coloured ranges (blocked by
-  `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))
+- [`viewer-lsl-editor-highlight`](ready/viewer-lsl-editor-highlight.md) — LSL
+  editor highlighting — colour, folding, brace match, outline (blocked by
+  `viewer-lsl-editor-widget` (done), `viewer-lsl-lexer` (done))
 - [`viewer-material-save-to-object`](ready/viewer-material-save-to-object.md) —
   Save a PBR material into an object's inventory
 - [`viewer-media-playback-policies`](ready/viewer-media-playback-policies.md) —
@@ -940,6 +940,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Scripts on disk — mirror grid scripts to a directory tree
 - [`viewer-script-queue`](ready/viewer-script-queue.md) — Script queue — mass
   recompile / reset / run-state (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-script-recovery`](ready/viewer-script-recovery.md) — Unsaved-script
+  recovery (blocked by `viewer-lsl-editor-widget` (done))
 - [`viewer-scripted-followcam-llsetcameraparams`](ready/viewer-scripted-followcam-llsetcameraparams.md)
   — Apply scripted follow-camera parameters (llSetCameraParams)
 - [`viewer-search-maturity-filter`](ready/viewer-search-maturity-filter.md) —
@@ -997,6 +999,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Persist the land-height cache to disk (ground floor available at login)
 - [`viewer-text-field-context-menu`](ready/viewer-text-field-context-menu.md) —
   Text-field edit context menu (cut / copy / paste / select all)
+- [`viewer-text-field-scrollbar`](ready/viewer-text-field-scrollbar.md) —
+  Scrollbar for a scrolled multi-line text field
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -1155,7 +1159,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (56)
+## blocked (54)
 
 ### viewer
 
@@ -1183,12 +1187,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-login-screen`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
-- [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
-  editor highlighting — colour, folding, brace match, outline (blocked by
-  `viewer-lsl-editor-widget`, `viewer-lsl-lexer` (done))
 - [`viewer-lsl-editor-save-compile`](blocked/viewer-lsl-editor-save-compile.md)
   — LSL editor save — upload/compile round-trip and error list (blocked by
-  `viewer-lsl-editor-widget`)
+  `viewer-lsl-editor-highlight`)
 - [`viewer-mesh-lod-decimation`](blocked/viewer-mesh-lod-decimation.md) — LOD
   decimation via meshoptimizer (blocked by `viewer-mesh-gltf-import`)
 - [`viewer-mesh-physics-vhacd`](blocked/viewer-mesh-physics-vhacd.md) — Physics
@@ -1238,8 +1239,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-script-mirror-upload-watch`](blocked/viewer-script-mirror-upload-watch.md)
   — Scripts on disk — file watch, headless upload, three-way sync (blocked by
   `viewer-script-mirror-download`)
-- [`viewer-script-recovery`](blocked/viewer-script-recovery.md) — Unsaved-script
-  recovery (blocked by `viewer-lsl-editor-widget`)
 - [`viewer-snapshot-to-inventory`](blocked/viewer-snapshot-to-inventory.md) —
   Save a snapshot to inventory (as a texture) (blocked by
   `viewer-snapshot-floater` (done), `viewer-image-upload`)
@@ -1493,7 +1492,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1447)
+## done (1448)
 
 ### protocol
 
@@ -2518,6 +2517,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-differential-testing`](done/viewer-lsl-differential-testing.md) —
   LSL differential testing — a tailslide diagnostics oracle (blocked by
   `viewer-lsl-semantic-pass` (done))
+- [`viewer-lsl-editor-widget`](done/viewer-lsl-editor-widget.md) — LSL editor
+  widget — a parley PlainEditor fork with coloured ranges (blocked by
+  `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))
 - [`viewer-lsl-lexer`](done/viewer-lsl-lexer.md) — LSL lexer — the logos token
   stream (sl-lsl)
 - [`viewer-lsl-lsp-diagnostics-nav`](done/viewer-lsl-lsp-diagnostics-nav.md) —
