@@ -253,7 +253,11 @@ fn comment_fold(source: &str, span: &Range<usize>) -> Option<Fold> {
 }
 
 /// The outline of the script whose code tokens (comments left out) are `code`.
-fn outline(source: &str, code: &[&SpannedToken], syntax: &LslSyntax) -> Vec<OutlineItem> {
+pub(crate) fn outline(
+    source: &str,
+    code: &[&SpannedToken],
+    syntax: &LslSyntax,
+) -> Vec<OutlineItem> {
     let mut items: Vec<OutlineItem> = Vec::new();
     let mut depth = 0_usize;
     // The state being read, while inside one.

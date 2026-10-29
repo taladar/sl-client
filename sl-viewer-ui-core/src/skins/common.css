@@ -863,6 +863,25 @@
   text-shadow: none;
 }
 
+/* The code editor's help (ui_code_assist): the completion list wears the
+ * drop-down list's face, so a plain entry reads in the field family's text as
+ * a list's does; the selected entry's signature under it is muted like the
+ * line numbers; and the argument being typed in a signature tip is marked in
+ * the accent. */
+.sk-code-assist-list .sk-text {
+  color: var(--field-text);
+  text-shadow: none;
+}
+
+.sk-code-assist-detail {
+  color: var(--line-number);
+  text-shadow: none;
+}
+
+.sk-code-assist-active {
+  color: var(--accent);
+}
+
 /* Syntax colour: one class per highlight capture, each read from its
  * --syntax-* token. Colour only — a skin that wants bold keywords or italic
  * comments says so here, and the editor reads the weight and style back. The

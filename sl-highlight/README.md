@@ -15,6 +15,9 @@ language owns.
 - **Brackets** — every bracket with its partner, for brace matching.
 - **Folds** — the ranges an editor can collapse.
 - **Outline** — the named things a file is made of, for a jump list.
+- **Assist** — what an editor offers while a file is typed: completions, a
+  call's signature and a symbol's description, in the Language Server
+  Protocol's shapes, through a `CodeAssist` trait a language implements.
 
 Like `sl-lsl`, `sl-notecard` and the other pure crates it is **Bevy-free and
 I/O-free**, and it has no dependencies at all: a language crate depends on it,

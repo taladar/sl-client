@@ -33,7 +33,10 @@
 //!   window is open.
 //! - from a language's [`CodeHighlighter`](crate::ui_code_syntax::CodeHighlighter),
 //!   **syntax colour, brace matching and folding**, and with or without one,
-//!   **auto-indent and `Tab`** ([`crate::ui_code_syntax`]).
+//!   **auto-indent and `Tab`** ([`crate::ui_code_syntax`]);
+//! - from a language's
+//!   [`CodeAssistant`](crate::ui_code_assist::CodeAssistant), **completion,
+//!   signature help and hover tips** ([`crate::ui_code_assist`]).
 //!
 //! The text is set in the monospace face and does not wrap, because code is not
 //! prose: an indented block has to line up, and a long line is read by
@@ -92,6 +95,7 @@ use crate::text_search::{
     SearchQuery, find_all, find_next, find_previous, line_column_offset, line_count, replace_all,
 };
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
+use crate::ui_code_assist::{attach_code_assist, observe_hover};
 use crate::ui_code_syntax::{
     CodeFold, CodeSyntax, FOLD_TOGGLE_CLASS, FoldAction, on_code_tab, syntax_classes,
 };
@@ -335,6 +339,8 @@ pub fn spawn_code_editor(
         ))
         .observe(on_code_scroll)
         .observe(on_code_tab);
+    attach_code_assist(commands, text.field, text.overlay, spec.font_size);
+    observe_hover(commands, text.field);
     commands.entity(gutter).observe(on_gutter_scroll);
     CodeEditorHandle {
         root,
@@ -1633,6 +1639,11 @@ pub fn spawn_go_to_line_specimen(commands: &mut Commands, parent: Entity, cx: El
 
 /// The plugin owning the code editor: its gutter, its keys, go-to and the
 /// Search / Replace and Go to Line windows.
+///
+/// **Requires the i18n string half**, as the menus do: the help's tips word
+/// their notes through a `sl_viewer_ui_core::i18n::Translator`, so an app that
+/// adds this plugin without `ViewerI18nPlugin` or `i18n::install_untranslated`
+/// fails its first frame with a `Resource does not exist` validation error.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CodeEditorPlugin;
 
@@ -1646,6 +1657,7 @@ impl Plugin for CodeEditorPlugin {
             app.add_plugins(crate::floater::FloaterPlugin);
         }
         crate::ui_code_syntax::register(app);
+        crate::ui_code_assist::register(app);
         app.add_message::<CodeEditorGoTo>()
             .add_message::<OpenFindReplace>()
             .add_message::<OpenGoToLine>()
@@ -1702,6 +1714,7 @@ mod tests {
     /// editor holding [`SCRIPT`].
     fn editor_app() -> (App, CodeEditorHandle) {
         let mut app = InteractionTest::new().build();
+        sl_viewer_ui_core::i18n::install_untranslated(&mut app);
         app.add_plugins((FloaterPlugin, CodeEditorPlugin));
         settle(&mut app);
         let column = spawn_under_root(

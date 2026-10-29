@@ -1035,7 +1035,7 @@ fn visible_bytes<B: parley::Brush>(
 /// The rectangles, in the field's text space, that a backdrop over `range`
 /// covers — one per laid-out line it touches. An offset that is out of the
 /// buffer or inside a character draws nothing rather than breaking the layout.
-fn backdrop_rects<B: parley::Brush>(
+pub(crate) fn backdrop_rects<B: parley::Brush>(
     layout: &parley::Layout<B>,
     text: &str,
     range: &Range<usize>,

@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 336 |
+| ready | 335 |
 | blocked | 53 |
 | in-progress | 18 |
 | bugs | 39 |
-| done | 1449 |
+| done | 1450 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2083** |
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (336)
+## ready (335)
 
 ### protocol
 
@@ -699,8 +699,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
   (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
-- [`viewer-lsl-editor-completion`](ready/viewer-lsl-editor-completion.md) — LSL
-  editor autocomplete and signature help from the grid's table
 - [`viewer-lsl-editor-save-compile`](ready/viewer-lsl-editor-save-compile.md) —
   LSL editor save — upload/compile round-trip and error list (blocked by
   `viewer-lsl-editor-highlight` (done))
@@ -1493,7 +1491,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1449)
+## done (1450)
 
 ### protocol
 
@@ -2518,6 +2516,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-differential-testing`](done/viewer-lsl-differential-testing.md) —
   LSL differential testing — a tailslide diagnostics oracle (blocked by
   `viewer-lsl-semantic-pass` (done))
+- [`viewer-lsl-editor-completion`](done/viewer-lsl-editor-completion.md) — LSL
+  editor autocomplete and signature help from the grid's table
 - [`viewer-lsl-editor-highlight`](done/viewer-lsl-editor-highlight.md) — LSL
   editor highlighting — colour, folding, brace match, outline (blocked by
   `viewer-lsl-editor-widget` (done), `viewer-lsl-lexer` (done))

@@ -48,11 +48,16 @@
 //!   each token's capture in tree-sitter's vocabulary, the bracket pairs, the
 //!   folds and the outline, in `sl-highlight`'s language-neutral model, read off
 //!   the token stream and the grid's table.
+//! - [`help`] — the **editor's help** while a script is typed
+//!   ([`help::LslAssist`]): completions by where the caret is, the signature
+//!   of the call it is in and a symbol's description under the pointer, from the
+//!   grid's table and the script's own declarations.
 //! - [`types`] — the **compile-time type table**: which operator/operand
 //!   combinations and casts are legal and what each produces, shared by the
 //!   semantic pass and the `sl-lsl-runtime` lowering.
 
 pub mod ast;
+pub mod help;
 pub mod highlight;
 pub mod lexer;
 pub mod parser;

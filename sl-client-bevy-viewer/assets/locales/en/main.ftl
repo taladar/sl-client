@@ -1185,6 +1185,11 @@ script-find = Search / Replace…
 script-go-to-line = Go to line…
 script-outline = Jump to…
 script-outline-name = Outline
+# The code editor's signature and hover tips: what else is worth knowing about
+# a library function.
+code-assist-sleep = Sleeps { $seconds } s after each call
+code-assist-deprecated = Deprecated
+code-assist-god-mode = Only a grid god may use this
 
 # The code editor's Search / Replace and Go to Line windows
 # (sl-viewer-ui-widgets ui_code_editor), after the reference's

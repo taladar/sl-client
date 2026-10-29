@@ -60,6 +60,7 @@ use sl_highlight::{BracketKind, Capture, CodeStructure, Fold};
 use sl_viewer_ui_core::skin_palette::SkinPalette;
 use sl_viewer_ui_core::ui_font::UiFont;
 
+use crate::ui_code_assist::{CodeAssistState, accept_on_tab};
 use crate::ui_code_editor::CodeEditor;
 use crate::ui_rich_text::{
     RichTextBackdrop, RichTextClass, RichTextContent, RichTextField, RichTextMarks, RichTextObject,
@@ -308,7 +309,7 @@ const fn remap(header: usize, changed: &Range<usize>, inserted: usize) -> Option
     clippy::type_complexity,
     reason = "the field query is the editor, its language, what it knows and what it draws"
 )]
-fn highlight_code_editors(
+pub(crate) fn highlight_code_editors(
     mut fields: Query<(
         Entity,
         &mut EditableText,
@@ -696,7 +697,7 @@ fn closer_edits(text: &str, caret: usize, structure: &CodeStructure) -> Option<V
 /// Only a lone edit is rewritten — the common case of one key in a frame —
 /// because the offsets it is worked out from are the buffer's before *any* of
 /// the frame's edits; two keys in one frame type plainly.
-fn indent_code_keystrokes(
+pub(crate) fn indent_code_keystrokes(
     mut fields: Query<
         (&mut EditableText, &CodeEditor, Option<&CodeSyntax>),
         Without<ReadOnlyField>,
@@ -731,16 +732,27 @@ fn indent_code_keystrokes(
 ///
 /// An entity observer on the field, so it runs before the window's tab
 /// navigation the key would otherwise bubble up to — and stops it there. A
-/// read-only editor lets `Tab` move focus on, as any field does.
+/// read-only editor lets `Tab` move focus on, as any field does. While the
+/// completion list is open, `Tab` accepts its entry instead
+/// ([`crate::ui_code_assist`]).
 pub(crate) fn on_code_tab(
     mut event: On<FocusedInput<KeyboardInput>>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut fields: Query<(&mut EditableText, &CodeEditor, &mut CodeSyntax), Without<ReadOnlyField>>,
+    mut fields: Query<
+        (
+            &mut EditableText,
+            &CodeEditor,
+            &mut CodeSyntax,
+            Option<&mut CodeAssistState>,
+        ),
+        Without<ReadOnlyField>,
+    >,
 ) {
     if event.input.logical_key != Key::Tab {
         return;
     }
-    let Ok((mut editable, editor, mut syntax)) = fields.get_mut(event.focused_entity) else {
+    let Ok((mut editable, editor, mut syntax, assist)) = fields.get_mut(event.focused_entity)
+    else {
         return;
     };
     event.propagate(false);
@@ -749,6 +761,9 @@ pub(crate) fn on_code_tab(
     }
     let held = ChordModifiers::read(&keys);
     if held.ctrl || held.alt {
+        return;
+    }
+    if !held.shift && accept_on_tab(assist.map(Mut::into_inner)) {
         return;
     }
     let selection = editable.editor.raw_selection().text_range();

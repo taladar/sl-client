@@ -16,6 +16,9 @@
 //! - [`folds`] — [`Fold`]: a range an editor can collapse, and the rule for
 //!   cutting one out of a bracketed block so its closing line stays visible.
 //! - [`OutlineItem`] — the named parts of a file, nested.
+//! - [`help`] — what an editor offers while the file is typed: completions,
+//!   a call's [`Signature`], a symbol's [`Hover`], through a language's
+//!   [`CodeAssist`].
 //!
 //! Every offset is a **byte offset** into the source the structure was made
 //! from, on a character boundary — what an editor's buffer is indexed by.
@@ -23,12 +26,17 @@
 pub mod brackets;
 pub mod capture;
 pub mod folds;
+pub mod help;
 
 use core::ops::Range;
 
 pub use brackets::{Bracket, BracketKind, BracketPairs};
 pub use capture::Capture;
 pub use folds::Fold;
+pub use help::{
+    CodeAssist, Completion, Completions, Hover, MatchTier, Note, Parameter, Signature, match_tier,
+    rank,
+};
 
 /// One highlighted range of the source.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

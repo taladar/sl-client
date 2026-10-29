@@ -39,6 +39,11 @@
 //! Above the editor, an **outline** lists the script's globals, functions,
 //! states and their event handlers; picking one puts the caret on its name.
 //!
+//! The same table drives the editor's **help** (`ui_code_assist`, from
+//! `sl_lsl::help`): completions of the library and the script's own names as
+//! a word is typed, the signature of the call the caret is in with its sleep
+//! cost, and a description of the word under the pointer.
+//!
 //! Deferred to its own task: the Firestorm preprocessor
 //! (`viewer-lsl-editor-save-compile` keeps it out of v1).
 //!
@@ -89,6 +94,7 @@ use bevy::ui::Checked;
 use bevy::ui_widgets::ValueChange;
 use sl_highlight::{OutlineItem, OutlineKind};
 use sl_lsl::LslSyntax;
+use sl_lsl::help::LslAssist;
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
@@ -115,6 +121,7 @@ use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::{ERROR_TEXT_CLASS, text_meaning, text_role};
 use sl_viewer_ui_core::ui_spawn::{self, ButtonSpec, UiLabel};
 use sl_viewer_ui_widgets::text_search::{line_of, line_start};
+use sl_viewer_ui_widgets::ui_code_assist::CodeAssistant;
 use sl_viewer_ui_widgets::ui_code_editor::{
     CodeEditorGoTo, CodeEditorSpec, OpenFindReplace, OpenGoToLine, spawn_code_editor,
 };
@@ -206,8 +213,8 @@ fn track_grid_lsl_syntax(mut events: MessageReader<SlEvent>, mut grid: ResMut<Gr
 #[derive(Component, Debug, Clone, Copy)]
 struct ScriptBody;
 
-/// Hand every script body the LSL highlighter over the grid's table — a new
-/// body as it appears, and every body again when the table changes.
+/// Hand every script body the LSL highlighter and help over the grid's table —
+/// a new body as it appears, and every body again when the table changes.
 fn highlight_script_bodies(
     grid: Res<GridLslSyntax>,
     bodies: Query<(Entity, Has<CodeHighlighter>), With<ScriptBody>>,
@@ -218,11 +225,10 @@ fn highlight_script_bodies(
             continue;
         }
         let syntax = Arc::clone(&grid.0);
-        commands
-            .entity(body)
-            .insert(CodeHighlighter::new(move |source: &str| {
-                sl_lsl::highlight::structure(source, &syntax)
-            }));
+        commands.entity(body).insert((
+            CodeAssistant::new(LslAssist::new(Arc::clone(&syntax))),
+            CodeHighlighter::new(move |source: &str| sl_lsl::highlight::structure(source, &syntax)),
+        ));
     }
 }
 

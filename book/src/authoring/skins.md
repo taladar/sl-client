@@ -405,6 +405,9 @@ the stock look rather than to black.
 | `.sk-bracket-match` / `.sk-bracket-unmatched` | the box behind the bracket pair at the caret, and behind an unpaired bracket |
 | `.sk-fold-placeholder` | the `⋯` box a folded block is drawn as; a click unfolds it |
 | `.sk-fold-toggle` | a fold's toggle in the gutter, beside the line the fold starts on |
+| `.sk-code-assist-list` | a code editor's completion list, beside `.sk-combo-list`; re-roots a plain entry's `.sk-text` to `--field-text` |
+| `.sk-code-assist-detail` | the selected completion's signature under the list |
+| `.sk-code-assist-active` | the argument being typed, in a signature tip |
 | `.sk-day-marker` | a keyframe marker on the day-cycle timeline; `.sk-selected` when selected |
 | `.sk-teleport-title` / `.sk-teleport-arrived` / `.sk-teleport-failed` | the teleport-progress title, and the two outcomes it ends in |
 | `.sk-presence-online` / `.sk-presence-offline` | a friend's presence dot |
