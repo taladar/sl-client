@@ -24,6 +24,11 @@ bevy_flair = { version = "0.8.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
+# The highlighter's language-neutral structure and the LSL one that fills it
+# in. Both pure; already in the closure through sl-client-bevy (sl-lsl) and
+# sl-viewer-ui-widgets (sl-highlight).
+sl-highlight = { workspace = true }
+sl-lsl = { workspace = true }
 sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
 sl-types = { workspace = true }
 sl-viewer-intents = { workspace = true }

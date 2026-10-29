@@ -1292,6 +1292,9 @@ pub(crate) const CONTRACTS: &[ElementContract] = &[
     ElementContract {
         element: "script-editor",
         nodes: &[
+            // The outline jumps by message, and its entries are the live
+            // window's: the specimen's combo holds only its prompt.
+            NodeContract::inert("script-outline:combo"),
             NodeContract::inert("script-body:field"),
             NodeContract::inert("script-save"),
             // The two open the editor's windows by message, not by `UiAction`.

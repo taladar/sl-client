@@ -44,11 +44,16 @@
 //!   errors) turned into `rustc`-grade output — a caret under the source line,
 //!   an edit-distance "did you mean…?" against the real library, and the grid's
 //!   own signature quoted back on a type error.
+//! - [`highlight`] — the **editor's view** of a script ([`highlight::structure`]):
+//!   each token's capture in tree-sitter's vocabulary, the bracket pairs, the
+//!   folds and the outline, in `sl-highlight`'s language-neutral model, read off
+//!   the token stream and the grid's table.
 //! - [`types`] — the **compile-time type table**: which operator/operand
 //!   combinations and casts are legal and what each produces, shared by the
 //!   semantic pass and the `sl-lsl-runtime` lowering.
 
 pub mod ast;
+pub mod highlight;
 pub mod lexer;
 pub mod parser;
 pub mod render;

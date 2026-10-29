@@ -1,0 +1,24 @@
+[package]
+name = "sl-highlight"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Language-neutral source structure for Second Life / OpenSim script editors — highlight captures in tree-sitter's vocabulary, bracket pairs, folds and an outline — shared by the LSL highlighter and any later one"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["editor", "highlighting", "lsl", "opensim", "secondlife"]
+categories = ["game-development", "text-editors"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

@@ -9081,6 +9081,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-highlight"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+]
+
+[[package]]
 name = "sl-j2c-encode"
 version = "0.1.0"
 dependencies = [
@@ -9124,6 +9131,7 @@ dependencies = [
  "fs-err",
  "logos",
  "pretty_assertions",
+ "sl-highlight",
 ]
 
 [[package]]
@@ -9509,6 +9517,8 @@ dependencies = [
  "bevy_flair",
  "pretty_assertions",
  "sl-client-bevy",
+ "sl-highlight",
+ "sl-lsl",
  "sl-notecard",
  "sl-types",
  "sl-viewer-intents",
@@ -10182,6 +10192,7 @@ dependencies = [
  "bevy_flair",
  "parley",
  "pretty_assertions",
+ "sl-highlight",
  "sl-settings",
  "sl-viewer-settings",
  "sl-viewer-testkit",

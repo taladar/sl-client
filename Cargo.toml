@@ -20,6 +20,7 @@ members = [
   "sl-emoji",
   "sl-fake-grid",
   "sl-gst",
+  "sl-highlight",
   "sl-j2c-encode",
   "sl-l10n",
   "sl-llsd",
@@ -139,6 +140,7 @@ sl-avatar = { path = "sl-avatar", version = "0.1.0" }
 sl-client-bevy = { path = "sl-client-bevy", version = "0.1.0" }
 sl-client-common = { path = "sl-client-common", version = "0.1.0" }
 sl-client-tokio = { path = "sl-client-tokio", version = "0.1.0" }
+sl-highlight = { path = "sl-highlight", version = "0.1.0" }
 sl-llsd = { path = "sl-llsd", version = "0.1.0" }
 sl-lsl = { path = "sl-lsl", version = "0.1.0" }
 sl-lsl-runtime = { path = "sl-lsl-runtime", version = "0.1.0" }

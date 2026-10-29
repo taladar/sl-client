@@ -25,9 +25,21 @@
 //! `UpdateScriptTask` — one [`Command::UploadScript`] whose [`ScriptSource`] picks
 //! the capability.
 //!
-//! Deferred to their own tasks: syntax colour, brace match, folding and the
-//! states/events outline (`viewer-lsl-editor-highlight`, which drives the
-//! editor's style classes from the LSL lexer), and the Firestorm preprocessor
+//! # Highlighting and the outline
+//!
+//! The editor is coloured, brace-matched, folded and auto-indented by the code
+//! editor (`ui_code_syntax`) from the **LSL highlighter**
+//! (`sl_lsl::highlight::structure`), which this module hands it as a
+//! [`CodeHighlighter`]. Words are coloured by the **grid's own table** —
+//! [`GridLslSyntax`], kept from the `LSLSyntax` document the session fetches —
+//! so a function the grid adds colours with no change here, and OpenSim's
+//! `os*` functions colour on OpenSim. When the table arrives (or changes, on a
+//! grid that serves another), every open script is coloured again.
+//!
+//! Above the editor, an **outline** lists the script's globals, functions,
+//! states and their event handlers; picking one puts the caret on its name.
+//!
+//! Deferred to its own task: the Firestorm preprocessor
 //! (`viewer-lsl-editor-save-compile` keeps it out of v1).
 //!
 //! # Read-only when you cannot modify
@@ -70,9 +82,13 @@
 //! Reference (Firestorm, read-only): `llpreviewscript`, `llscripteditor`,
 //! `llfloaterscriptdebug`.
 
+use std::sync::Arc;
+
 use bevy::prelude::*;
 use bevy::ui::Checked;
 use bevy::ui_widgets::ValueChange;
+use sl_highlight::{OutlineItem, OutlineKind};
+use sl_lsl::LslSyntax;
 
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
 use bevy::text::EditableText;
@@ -98,8 +114,13 @@ use crate::ui_font::UiFont;
 use sl_viewer_ui_core::scrollbar::{ScrollTarget, spawn_scrollbar};
 use sl_viewer_ui_core::skin::{ERROR_TEXT_CLASS, text_meaning, text_role};
 use sl_viewer_ui_core::ui_spawn::{self, ButtonSpec, UiLabel};
+use sl_viewer_ui_widgets::text_search::{line_of, line_start};
 use sl_viewer_ui_widgets::ui_code_editor::{
     CodeEditorGoTo, CodeEditorSpec, OpenFindReplace, OpenGoToLine, spawn_code_editor,
+};
+use sl_viewer_ui_widgets::ui_code_syntax::{CodeHighlighter, CodeSyntax};
+use sl_viewer_ui_widgets::ui_combo::{
+    ComboChanged, ComboSelection, ComboSpec, SetComboOptions, spawn_named_combo,
 };
 
 /// The body field's height, in visible text lines — what the window opens at,
@@ -131,6 +152,15 @@ impl Plugin for EditScriptPlugin {
     /// script is open, so `open_script` spawns the instance and builds its
     /// content. The per-window systems are gated on there being a window.
     fn build(&self, app: &mut App) {
+        app.init_resource::<GridLslSyntax>().add_systems(
+            Update,
+            (
+                track_grid_lsl_syntax,
+                highlight_script_bodies,
+                (sync_script_outlines, jump_to_outline_item).chain(),
+            )
+                .chain(),
+        );
         app.add_message::<OpenScript>().add_systems(
             Update,
             (
@@ -151,6 +181,136 @@ impl Plugin for EditScriptPlugin {
             )
                 .chain(),
         );
+    }
+}
+
+/// The grid's LSL library — its functions, constants, events and keywords — as
+/// the `LSLSyntax` capability last served it, for the script editor to colour
+/// by. Empty until the session has fetched it (or read it from its cache); the
+/// grammar's own keywords colour without it.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct GridLslSyntax(pub Arc<LslSyntax>);
+
+/// Keep [`GridLslSyntax`] at the table the session last decoded.
+fn track_grid_lsl_syntax(mut events: MessageReader<SlEvent>, mut grid: ResMut<GridLslSyntax>) {
+    for event in events.read() {
+        if let SlSessionEvent::LslSyntax(syntax) = &event.0
+            && *grid.0 != **syntax
+        {
+            grid.0 = Arc::new((**syntax).clone());
+        }
+    }
+}
+
+/// A script window's code editor field.
+#[derive(Component, Debug, Clone, Copy)]
+struct ScriptBody;
+
+/// Hand every script body the LSL highlighter over the grid's table — a new
+/// body as it appears, and every body again when the table changes.
+fn highlight_script_bodies(
+    grid: Res<GridLslSyntax>,
+    bodies: Query<(Entity, Has<CodeHighlighter>), With<ScriptBody>>,
+    mut commands: Commands,
+) {
+    for (body, highlighted) in &bodies {
+        if highlighted && !grid.is_changed() {
+            continue;
+        }
+        let syntax = Arc::clone(&grid.0);
+        commands
+            .entity(body)
+            .insert(CodeHighlighter::new(move |source: &str| {
+                sl_lsl::highlight::structure(source, &syntax)
+            }));
+    }
+}
+
+/// A script window's outline: the combo, the field it jumps in, and where each
+/// of its entries lands.
+#[derive(Component, Debug, Clone)]
+struct ScriptOutline {
+    /// The editor's field.
+    field: Entity,
+    /// The labels the combo was last given, the prompt first.
+    labels: Vec<String>,
+    /// The byte offset each entry after the prompt jumps to.
+    targets: Vec<usize>,
+}
+
+/// The outline's entries, flattened: a label and where it jumps to.
+fn outline_entries(items: &[OutlineItem], entries: &mut Vec<(String, usize)>) {
+    for item in items {
+        let label = match item.kind {
+            OutlineKind::State if item.name == "default" => item.name.clone(),
+            OutlineKind::State => format!("state {}", item.name),
+            // Under its state, as the source nests it.
+            OutlineKind::Event => format!("    {}()", item.name),
+            OutlineKind::Function => format!("{}()", item.name),
+            OutlineKind::Variable => item.name.clone(),
+        };
+        entries.push((label, item.name_range.start));
+        outline_entries(&item.children, entries);
+    }
+}
+
+/// Keep every outline combo's entries at its script's outline.
+fn sync_script_outlines(
+    mut outlines: Query<(Entity, &mut ScriptOutline)>,
+    syntaxes: Query<&CodeSyntax>,
+    translator: Translator,
+    mut options: MessageWriter<SetComboOptions>,
+) {
+    for (combo, mut outline) in &mut outlines {
+        let Ok(syntax) = syntaxes.get(outline.field) else {
+            continue;
+        };
+        let mut entries = Vec::new();
+        outline_entries(&syntax.structure().outline, &mut entries);
+        let mut labels = vec![translator.get("script-outline")];
+        labels.extend(entries.iter().map(|(label, _target)| label.clone()));
+        if outline.labels == labels {
+            continue;
+        }
+        outline.targets = entries.into_iter().map(|(_label, target)| target).collect();
+        outline.labels.clone_from(&labels);
+        options.write(SetComboOptions::new(combo, labels));
+    }
+}
+
+/// Put the caret on the outline entry the resident picked, and set the combo
+/// back to its prompt so the same entry can be picked again.
+fn jump_to_outline_item(
+    mut changes: MessageReader<ComboChanged>,
+    mut outlines: Query<(&ScriptOutline, &mut ComboSelection)>,
+    texts: Query<&EditableText>,
+    mut jumps: MessageWriter<CodeEditorGoTo>,
+) {
+    for change in changes.read() {
+        let Ok((outline, mut selection)) = outlines.get_mut(change.combo) else {
+            continue;
+        };
+        selection.active = 0;
+        let Some(target) = change
+            .active
+            .checked_sub(1)
+            .and_then(|entry| outline.targets.get(entry))
+        else {
+            continue;
+        };
+        let Ok(editable) = texts.get(outline.field) else {
+            continue;
+        };
+        let text = editable.editor.raw_text();
+        let line = line_of(text, *target);
+        let column = line_start(text, line)
+            .and_then(|start| text.get(start..*target))
+            .map_or(1, |before| before.chars().count().saturating_add(1));
+        jumps.write(CodeEditorGoTo {
+            field: outline.field,
+            line,
+            column,
+        });
     }
 }
 
@@ -504,6 +664,34 @@ fn populate_editor(
         spawn_note(commands, content, "script-readonly-note", font_size);
     }
 
+    // The outline sits over the editor, filled in once the highlighter has
+    // read the script. Its labels are the script's own names, so they are
+    // literal — a name read as a Fluent key could come out as a sentence — and
+    // the prompt is translated where the names are filled in.
+    let outline_row = commands
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                ..row(Val::Px(8.0))
+            },
+            Name::new("script-outline-row"),
+            ChildOf(content),
+        ))
+        .id();
+    let outline = spawn_named_combo(
+        commands,
+        outline_row,
+        &ComboSpec {
+            element: "script-outline",
+            labels: &["…".to_owned()],
+            active: 0,
+            tab_index: 1,
+            font_size,
+            translate_labels: false,
+        },
+        "script-outline-name",
+    );
+
     // A no-modify script gets the same editor, read-only: it can still be
     // read, searched and copied.
     let editor = spawn_code_editor(
@@ -520,6 +708,12 @@ fn populate_editor(
         },
     );
     let body_field = editable.then_some(editor.field);
+    commands.entity(editor.field).insert(ScriptBody);
+    commands.entity(outline).insert(ScriptOutline {
+        field: editor.field,
+        labels: Vec::new(),
+        targets: Vec::new(),
+    });
 
     let running_check = (editable && source.is_task())
         .then(|| spawn_running_toggle(commands, content, running, font_size));

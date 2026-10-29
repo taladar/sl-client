@@ -175,7 +175,8 @@ mod test {
     ///
     /// The **fallback** sheet is checked too, because a skin is allowed to
     /// define only what it changes and that one is what everything else rests
-    /// on.
+    /// on. The `--syntax-*` scheme is the one group only the fallback has to
+    /// define: a syntax scheme is a choice apart from a skin.
     #[test]
     fn every_token_common_css_reads_is_defined_by_every_skin() -> Result<(), TestError> {
         let common = common_css()?;
@@ -206,9 +207,16 @@ mod test {
         );
 
         let mut missing = Vec::new();
-        for sheet in sheets {
+        for (place, sheet) in sheets.into_iter().enumerate() {
             let css = fs_err::read_to_string(&sheet)?;
             for token in &used {
+                // The syntax scheme is its own group, which a skin may leave
+                // to the fallback (`viewer-lsl-editor-highlight` § Where the
+                // colours live) — only the fallback, the first sheet, has to
+                // define it.
+                if place > 0 && token.starts_with("syntax-") {
+                    continue;
+                }
                 if !css.contains(&format!("--{token}:")) {
                     missing.push(format!("{}: --{token}", sheet.display()));
                 }

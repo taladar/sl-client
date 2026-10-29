@@ -5,7 +5,8 @@
 //! ```text
 //! box (.sk-field-box)              — the well, framing the gutter too
 //! ├─ gutter (.sk-code-gutter)      — line numbers, scrolled with the text
-//! │  └─ number (.sk-line-number) …   one per visible line, recycled
+//! │  ├─ number (.sk-line-number) …   one per visible line, recycled
+//! │  └─ toggle (.sk-fold-toggle) …   one per visible fold header, recycled
 //! └─ rich text root                — crate::ui_rich_text, bare, unwrapped, mono
 //!    ├─ underlay                   — the caret line, find matches, backdrops
 //!    ├─ field                      — the EditableText
@@ -30,6 +31,9 @@
 //!   down, case-insensitive or not, replace one or all — the reference's
 //!   *Search / Replace* window — with every match on screen washed while the
 //!   window is open.
+//! - from a language's [`CodeHighlighter`](crate::ui_code_syntax::CodeHighlighter),
+//!   **syntax colour, brace matching and folding**, and with or without one,
+//!   **auto-indent and `Tab`** ([`crate::ui_code_syntax`]).
 //!
 //! The text is set in the monospace face and does not wrap, because code is not
 //! prose: an indented block has to line up, and a long line is read by
@@ -88,9 +92,11 @@ use crate::text_search::{
     SearchQuery, find_all, find_next, find_previous, line_column_offset, line_count, replace_all,
 };
 use crate::ui_checkbox::{CheckboxSpec, spawn_checkbox};
+use crate::ui_code_syntax::{
+    CodeFold, CodeSyntax, FOLD_TOGGLE_CLASS, FoldAction, on_code_tab, syntax_classes,
+};
 use crate::ui_rich_text::{
-    RichTextBackdrop, RichTextClass, RichTextHandle, RichTextMarks, RichTextSpec, narrow,
-    spawn_rich_text,
+    RichTextBackdrop, RichTextHandle, RichTextMarks, RichTextSpec, narrow, spawn_rich_text,
 };
 use crate::ui_text_history::ChordModifiers;
 use crate::ui_text_input::{
@@ -117,6 +123,15 @@ const MONO_ADVANCE_EM: f32 = 0.61;
 
 /// The room either side of the numbers in the gutter, in logical pixels.
 const GUTTER_PADDING: f32 = 6.0;
+
+/// The fold toggles' column, as a fraction of the font size.
+const FOLD_COLUMN_EM: f32 = 0.9;
+
+/// What a fold toggle shows for an open fold and a folded one.
+const FOLD_OPEN_GLYPH: &str = "▾";
+
+/// What a fold toggle shows for a folded fold.
+const FOLD_CLOSED_GLYPH: &str = "▸";
 
 /// How many lines one notch of the wheel scrolls — the reference's
 /// `LLTextEditor` scroll step.
@@ -147,9 +162,9 @@ pub struct CodeEditorSpec {
     pub visible_lines: f32,
     /// Whether the source may be read, selected and copied but not changed.
     pub read_only: bool,
-    /// The style classes the content's ranges name — a highlighter's token
-    /// kinds, each normally [`RichTextClass::skinned`].
-    pub classes: Vec<RichTextClass>,
+    /// One level of indentation: what `Tab` inserts and `Enter` after an
+    /// opening bracket adds.
+    pub indent: &'static str,
     /// The Fluent key of what the editor is called.
     pub name_key: Option<&'static str>,
 }
@@ -165,7 +180,7 @@ impl CodeEditorSpec {
             font_size: 14.0,
             visible_lines: 20.0,
             read_only: false,
-            classes: Vec::new(),
+            indent: "    ",
             name_key: None,
         }
     }
@@ -195,6 +210,28 @@ pub struct CodeEditor {
     digits: usize,
     /// The last search, which `F3` repeats.
     last_search: Option<LastSearch>,
+    /// The boxes the open find window wants behind its matches, which the
+    /// bracket marks are drawn with (`ui_code_syntax`).
+    find_marks: Vec<RichTextBackdrop>,
+    /// One level of indentation.
+    indent: &'static str,
+}
+
+impl CodeEditor {
+    /// The font size the editor's text is set at.
+    pub(crate) const fn font_size(&self) -> f32 {
+        self.font_size
+    }
+
+    /// The boxes the open find window wants behind its matches.
+    pub(crate) fn find_marks(&self) -> &[RichTextBackdrop] {
+        &self.find_marks
+    }
+
+    /// One level of indentation.
+    pub(crate) const fn indent_unit(&self) -> &'static str {
+        self.indent
+    }
 }
 
 /// A search the resident made, kept so `F3` can make it again.
@@ -209,6 +246,16 @@ struct LastSearch {
 /// One line number in a gutter, recycled as the text scrolls.
 #[derive(Component, Debug, Clone, Copy)]
 struct GutterNumber;
+
+/// One fold toggle in a gutter, recycled as the text scrolls: the fold it
+/// toggles, or none while it is not shown.
+#[derive(Component, Debug, Clone, Copy)]
+struct GutterFoldToggle {
+    /// The editor's field.
+    field: Entity,
+    /// The header of the fold it toggles.
+    header: Option<usize>,
+}
 
 /// Spawn a code editor under `parent`.
 pub fn spawn_code_editor(
@@ -263,7 +310,7 @@ pub fn spawn_code_editor(
             read_only: spec.read_only,
             // The box frames the gutter as well, so the well is its.
             decorated: false,
-            classes: spec.classes.clone(),
+            classes: syntax_classes(),
             name_key: spec.name_key,
             font: UiFont::Mono,
             wrap: false,
@@ -280,10 +327,14 @@ pub fn spawn_code_editor(
                 font_size: spec.font_size,
                 digits,
                 last_search: None,
+                find_marks: Vec::new(),
+                indent: spec.indent,
             },
             RichTextMarks::default(),
+            CodeSyntax::default(),
         ))
-        .observe(on_code_scroll);
+        .observe(on_code_scroll)
+        .observe(on_code_tab);
     commands.entity(gutter).observe(on_gutter_scroll);
     CodeEditorHandle {
         root,
@@ -301,34 +352,44 @@ fn gutter_digits(lines: usize) -> usize {
     usize::try_from(digits).map_or(MIN_GUTTER_DIGITS, |digits| digits.max(MIN_GUTTER_DIGITS))
 }
 
-/// The gutter's width for `digits` digits at `font_size`, in logical pixels.
+/// The gutter's width for `digits` digits at `font_size`, in logical pixels:
+/// the fold toggles' column, then the numbers.
 fn gutter_width(font_size: f32, digits: usize) -> f32 {
     let digits = u16::try_from(digits).map_or_else(|_wide| f32::from(u16::MAX), f32::from);
-    digits * font_size * MONO_ADVANCE_EM + GUTTER_PADDING * 2.0
+    fold_column(font_size) + digits * font_size * MONO_ADVANCE_EM + GUTTER_PADDING * 2.0
+}
+
+/// The width of the gutter's fold-toggle column at `font_size`.
+fn fold_column(font_size: f32) -> f32 {
+    font_size * FOLD_COLUMN_EM
 }
 
 // ---------------------------------------------------------------------------
 // The gutter.
 // ---------------------------------------------------------------------------
 
-/// Number the lines a code editor shows, level with the text.
+/// Number the lines a code editor shows, level with the text, and put a fold
+/// toggle beside each line a fold starts on.
 ///
 /// The numbers are placed from parley's own lines, not from a line height times
 /// an index: a fallback font's taller glyph grows its line, and a number placed
 /// by arithmetic would drift off its line from there down. Only a laid-out line
 /// that *starts* a line of the source gets a number, so a wrapped line (which
-/// this editor does not make, but the gutter does not assume) is numbered once.
+/// this editor does not make, but the gutter does not assume) is numbered once,
+/// and a line folded away — laid out at no height — gets none.
 #[expect(
     clippy::type_complexity,
     reason = "the field query is the editor's state, its layout and where it sits on screen"
 )]
 fn sync_code_gutters(
     mut fields: Query<(
+        Entity,
         &mut CodeEditor,
         &EditableText,
         &ComputedNode,
         &UiGlobalTransform,
         &TextScroll,
+        Option<&CodeSyntax>,
     )>,
     mut gutters: Query<
         (
@@ -337,12 +398,23 @@ fn sync_code_gutters(
             &UiGlobalTransform,
             Option<&Children>,
         ),
-        Without<GutterNumber>,
+        (Without<GutterNumber>, Without<GutterFoldToggle>),
     >,
-    mut numbers: Query<(&mut Node, &mut Text), (With<GutterNumber>, Without<CodeEditor>)>,
+    mut numbers: Query<
+        (&mut Node, &mut Text),
+        (
+            With<GutterNumber>,
+            Without<CodeEditor>,
+            Without<GutterFoldToggle>,
+        ),
+    >,
+    mut toggles: Query<
+        (&mut Node, &mut Text, &mut GutterFoldToggle),
+        (Without<GutterNumber>, Without<CodeEditor>),
+    >,
     mut commands: Commands,
 ) {
-    for (mut editor, editable, node, transform, scroll) in &mut fields {
+    for (field, mut editor, editable, node, transform, scroll, syntax) in &mut fields {
         let Some(layout) = editable.editor.try_layout() else {
             continue;
         };
@@ -365,6 +437,17 @@ fn sync_code_gutters(
                     .collect()
             })
             .unwrap_or_default();
+        let existing_toggles: Vec<Entity> = children
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|child| toggles.contains(*child))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // The folds of the text as laid out — a structure a frame stale is
+        // not used, so a toggle never names a fold the text no longer has.
+        let folds = syntax.filter(|syntax| syntax.source() == text);
         let Some(gutter_inverse) = gutter_transform.try_inverse() else {
             continue;
         };
@@ -373,8 +456,10 @@ fn sync_code_gutters(
         let gutter_top = gutter_computed.padding_box().min.y;
         let top = scroll.0.y;
         let bottom = scroll.0.y + text_box.height();
+        let font_size = editor.font_size;
 
         let mut placed = 0_usize;
+        let mut placed_toggles = 0_usize;
         let mut line_number = 1_usize;
         let mut counted_to = 0_usize;
         for line in layout.lines() {
@@ -391,7 +476,7 @@ fn sync_code_gutters(
             if metrics.block_min_coord > bottom {
                 break;
             }
-            if !starts_line {
+            if !starts_line || metrics.line_height <= 0.0 {
                 continue;
             }
             // Counted from where the last count stopped, so a screen of
@@ -408,13 +493,13 @@ fn sync_code_gutters(
             );
             let in_world = transform.affine().transform_point2(in_field);
             let local = gutter_inverse.transform_point2(in_world);
-            let number_top = Val::Px((local.y - gutter_top) * inverse_scale);
+            let row_top = Val::Px((local.y - gutter_top) * inverse_scale);
             let label = line_number.to_string();
             if let Some(entity) = existing.get(placed)
                 && let Ok((mut number_node, mut number_text)) = numbers.get_mut(*entity)
             {
-                if number_node.top != number_top || number_node.display != Display::Flex {
-                    number_node.top = number_top;
+                if number_node.top != row_top || number_node.display != Display::Flex {
+                    number_node.top = row_top;
                     number_node.display = Display::Flex;
                 }
                 if number_text.0 != label {
@@ -424,13 +509,13 @@ fn sync_code_gutters(
                 commands.spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(GUTTER_PADDING),
+                        left: Val::Px(GUTTER_PADDING + fold_column(font_size)),
                         right: Val::Px(GUTTER_PADDING),
-                        top: number_top,
+                        top: row_top,
                         ..default()
                     },
                     Text::new(label),
-                    UiFont::Mono.at(editor.font_size),
+                    UiFont::Mono.at(font_size),
                     TextLayout::justify(Justify::Right).with_no_wrap(),
                     TextColor(SkinPalette::default().text_muted),
                     ClassList::new_with_classes([LINE_NUMBER_CLASS]),
@@ -440,6 +525,62 @@ fn sync_code_gutters(
                 ));
             }
             placed = placed.saturating_add(1);
+
+            let fold = folds.and_then(|syntax| {
+                syntax
+                    .structure()
+                    .folds
+                    .iter()
+                    .find(|fold| range.contains(&fold.header))
+                    .map(|fold| (fold.header, syntax.folded().contains(&fold.header)))
+            });
+            let Some((header, folded)) = fold else {
+                continue;
+            };
+            let glyph = if folded {
+                FOLD_CLOSED_GLYPH
+            } else {
+                FOLD_OPEN_GLYPH
+            };
+            if let Some(entity) = existing_toggles.get(placed_toggles)
+                && let Ok((mut toggle_node, mut toggle_text, mut toggle)) = toggles.get_mut(*entity)
+            {
+                if toggle_node.top != row_top || toggle_node.display != Display::Flex {
+                    toggle_node.top = row_top;
+                    toggle_node.display = Display::Flex;
+                }
+                if toggle_text.0 != glyph {
+                    glyph.clone_into(&mut toggle_text.0);
+                }
+                if toggle.header != Some(header) {
+                    toggle.header = Some(header);
+                }
+            } else {
+                commands
+                    .spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(GUTTER_PADDING * 0.5),
+                            width: Val::Px(fold_column(font_size)),
+                            top: row_top,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        Text::new(glyph),
+                        UiFont::Sans.at(font_size),
+                        TextLayout::justify(Justify::Center).with_no_wrap(),
+                        TextColor(SkinPalette::default().text_muted),
+                        ClassList::new_with_classes([FOLD_TOGGLE_CLASS]),
+                        GutterFoldToggle {
+                            field,
+                            header: Some(header),
+                        },
+                        Name::new("code-fold-toggle"),
+                        ChildOf(editor.gutter),
+                    ))
+                    .observe(on_fold_toggle_click);
+            }
+            placed_toggles = placed_toggles.saturating_add(1);
         }
         for surplus in existing.iter().skip(placed) {
             if let Ok((mut number_node, _text)) = numbers.get_mut(*surplus)
@@ -448,6 +589,32 @@ fn sync_code_gutters(
                 number_node.display = Display::None;
             }
         }
+        for surplus in existing_toggles.iter().skip(placed_toggles) {
+            if let Ok((mut toggle_node, _text, mut toggle)) = toggles.get_mut(*surplus)
+                && toggle_node.display != Display::None
+            {
+                toggle_node.display = Display::None;
+                toggle.header = None;
+            }
+        }
+    }
+}
+
+/// A click on a gutter's fold toggle folds or unfolds its fold.
+fn on_fold_toggle_click(
+    mut click: On<Pointer<Click>>,
+    toggles: Query<&GutterFoldToggle>,
+    mut folds: MessageWriter<CodeFold>,
+) {
+    let Ok(toggle) = toggles.get(click.entity) else {
+        return;
+    };
+    click.propagate(false);
+    if let Some(header) = toggle.header {
+        folds.write(CodeFold {
+            field: toggle.field,
+            action: FoldAction::Toggle(header),
+        });
     }
 }
 
@@ -621,7 +788,8 @@ struct RepeatSearch {
 }
 
 /// A code editor's own chords: `Ctrl+F` / `Ctrl+H` for Search / Replace,
-/// `Ctrl+G` for Go to Line, `F3` / `Shift+F3` to find again.
+/// `Ctrl+G` for Go to Line, `F3` / `Shift+F3` to find again, and
+/// `Ctrl+Shift+[` / `Ctrl+Shift+]` to fold and unfold at the caret.
 ///
 /// A focused text field takes every chord before the menus see it
 /// (`menu_accel`), so these cannot collide with a menu's accelerator.
@@ -632,6 +800,7 @@ fn on_code_editor_key(
     mut find: MessageWriter<OpenFindReplace>,
     mut go_to: MessageWriter<OpenGoToLine>,
     mut repeat: MessageWriter<RepeatSearch>,
+    mut folds: MessageWriter<CodeFold>,
 ) {
     if !event.input.state.is_pressed() {
         return;
@@ -643,6 +812,19 @@ fn on_code_editor_key(
     let ChordModifiers { ctrl, shift, alt } = ChordModifiers::read(&keys);
     if alt {
         return;
+    }
+    // The brackets are read by position, not by character: with `Shift` held
+    // the key labelled `[` types `{` on most layouts.
+    if ctrl && shift {
+        let action = match event.input.key_code {
+            KeyCode::BracketLeft => Some(FoldAction::FoldAtCaret),
+            KeyCode::BracketRight => Some(FoldAction::UnfoldAtCaret),
+            _ => None,
+        };
+        if let Some(action) = action {
+            folds.write(CodeFold { field, action });
+            return;
+        }
     }
     match &event.input.logical_key {
         Key::F3 if !ctrl => {
@@ -1208,9 +1390,9 @@ fn mark_find_matches(
     windows: Query<(&FindReplaceWindow, &UiPanelShown)>,
     texts: Query<Ref<EditableText>>,
     checked: Query<(), With<Checked>>,
-    mut marks: Query<(Entity, &mut RichTextMarks), With<CodeEditor>>,
+    mut editors: Query<(Entity, &mut CodeEditor)>,
 ) {
-    for (field, mut field_marks) in &mut marks {
+    for (field, mut editor) in &mut editors {
         let window = windows
             .iter()
             .find(|(window, shown)| window.field == field && shown.0)
@@ -1230,8 +1412,8 @@ fn mark_find_matches(
             )
         });
         let wanted = wanted.unwrap_or_default();
-        if field_marks.backdrops != wanted {
-            field_marks.backdrops = wanted;
+        if editor.find_marks != wanted {
+            editor.find_marks = wanted;
         }
     }
 }
@@ -1463,6 +1645,7 @@ impl Plugin for CodeEditorPlugin {
         if !app.is_plugin_added::<crate::floater::FloaterPlugin>() {
             app.add_plugins(crate::floater::FloaterPlugin);
         }
+        crate::ui_code_syntax::register(app);
         app.add_message::<CodeEditorGoTo>()
             .add_message::<OpenFindReplace>()
             .add_message::<OpenGoToLine>()
@@ -1499,8 +1682,9 @@ mod tests {
     };
     use crate::floater::FloaterPlugin;
     use crate::text_search::line_column_offset;
-    use crate::ui_rich_text::RichTextMarks;
-    use crate::ui_test::interact::{InteractionTest, focus, tap, with_modifier};
+    use crate::ui_code_syntax::{CodeFold, CodeHighlighter, FoldAction};
+    use crate::ui_rich_text::{RichTextContent, RichTextMarks, RichTextStyle};
+    use crate::ui_test::interact::{InteractionTest, focus, tap, type_str, with_modifier};
     use crate::ui_test::{settle, spawn_under_root};
     use bevy::input::keyboard::Key;
     use bevy::input_focus::InputFocus;
@@ -1755,6 +1939,158 @@ mod tests {
                 .backdrops
                 .iter()
                 .all(|backdrop| backdrop.class == FIND_MATCH_CLASS)
+        );
+        Ok(())
+    }
+
+    /// A stand-in language: `llSay` is a library function, and every bracket
+    /// pairs, with each multi-line `{ }` folding.
+    fn toy_structure(text: &str) -> sl_highlight::CodeStructure {
+        use crate::text_search::{SearchQuery, find_all};
+        use sl_highlight::{Bracket, BracketKind, BracketPairs, Capture, Fold, Highlight};
+        let brackets = BracketPairs::new(text.char_indices().filter_map(|(index, character)| {
+            BracketKind::of(character).map(|(kind, open)| Bracket {
+                range: index..index.saturating_add(1),
+                kind,
+                open,
+            })
+        }));
+        let folds = brackets
+            .pairs()
+            .iter()
+            .filter(|pair| pair.kind == BracketKind::Curly)
+            .filter_map(|pair| {
+                Fold::between(text, pair.open.start, pair.open.end, pair.close.start)
+            })
+            .collect();
+        sl_highlight::CodeStructure {
+            highlights: find_all(text, SearchQuery::new("llSay", true))
+                .into_iter()
+                .map(|range| Highlight::new(range, Capture::FunctionBuiltin))
+                .collect(),
+            brackets,
+            folds,
+            outline: Vec::new(),
+        }
+    }
+
+    /// [`editor_app`] with the stand-in language on the editor.
+    fn highlighted_app() -> (App, CodeEditorHandle) {
+        let (mut app, handle) = editor_app();
+        app.world_mut()
+            .entity_mut(handle.field)
+            .insert(CodeHighlighter::new(toy_structure));
+        settle(&mut app);
+        (app, handle)
+    }
+
+    /// The ranges the field's content draws in `style`.
+    fn ranges_in(
+        app: &App,
+        field: Entity,
+        style: RichTextStyle,
+    ) -> Result<Vec<core::ops::Range<usize>>, TestError> {
+        Ok(app
+            .world()
+            .get::<RichTextContent>(field)
+            .ok_or("the field lost its content")?
+            .ranges
+            .iter()
+            .filter(|range| range.style == style)
+            .map(|range| range.range.clone())
+            .collect())
+    }
+
+    /// The line numbers the gutter shows, top to bottom.
+    fn gutter_labels(app: &mut App) -> Vec<String> {
+        let mut shown: Vec<(f32, String)> = app
+            .world_mut()
+            .query_filtered::<(&Text, &UiGlobalTransform, &Node), With<GutterNumber>>()
+            .iter(app.world())
+            .filter(|(_text, _transform, node)| node.display != Display::None)
+            .map(|(text, transform, _node)| (transform.translation.y, text.0.clone()))
+            .collect();
+        shown.sort_by(|a, b| a.0.total_cmp(&b.0));
+        shown.into_iter().map(|(_y, label)| label).collect()
+    }
+
+    /// **The language's ranges are drawn in their capture's class, and follow
+    /// the buffer in the frame it changes.**
+    #[test]
+    fn highlights_follow_the_buffer() -> Result<(), TestError> {
+        let (mut app, handle) = highlighted_app();
+        let builtin = RichTextStyle::Class(sl_highlight::Capture::FunctionBuiltin.index());
+        assert_eq!(
+            ranges_in(&app, handle.field, builtin)?,
+            vec![14..19, 33..38]
+        );
+        app.world_mut().write_message(CodeEditorGoTo {
+            field: handle.field,
+            line: 1,
+            column: 1,
+        });
+        settle(&mut app);
+        type_str(&mut app, "x");
+        assert_eq!(
+            ranges_in(&app, handle.field, builtin)?,
+            vec![15..20, 34..39]
+        );
+        Ok(())
+    }
+
+    /// **A fold hides its lines behind a box, the gutter skips them, and a
+    /// second toggle brings them back** — the buffer never changes.
+    #[test]
+    fn a_fold_hides_its_lines_and_unfolds() -> Result<(), TestError> {
+        let (mut app, handle) = highlighted_app();
+        assert_eq!(gutter_labels(&mut app), vec!["1", "2", "3", "4", "5"]);
+        let header = SCRIPT.find('{').ok_or("no block")?;
+        app.world_mut().write_message(CodeFold {
+            field: handle.field,
+            action: FoldAction::Toggle(header),
+        });
+        settle(&mut app);
+        let closing = SCRIPT.rfind('\n').ok_or("one line")?.saturating_add(1);
+        assert_eq!(
+            ranges_in(&app, handle.field, RichTextStyle::Hidden)?,
+            vec![header.saturating_add(1)..closing]
+        );
+        assert_eq!(gutter_labels(&mut app), vec!["1", "2", "5"]);
+        assert_eq!(text_of(&app, handle.field)?, SCRIPT);
+        app.world_mut().write_message(CodeFold {
+            field: handle.field,
+            action: FoldAction::Toggle(header),
+        });
+        settle(&mut app);
+        assert!(ranges_in(&app, handle.field, RichTextStyle::Hidden)?.is_empty());
+        assert_eq!(gutter_labels(&mut app), vec!["1", "2", "3", "4", "5"]);
+        Ok(())
+    }
+
+    /// **`Tab` indents and keeps the keyboard; `Enter` carries the line's
+    /// indentation down.**
+    #[test]
+    fn tab_and_enter_indent() -> Result<(), TestError> {
+        let (mut app, handle) = highlighted_app();
+        app.world_mut().write_message(CodeEditorGoTo {
+            field: handle.field,
+            line: 3,
+            column: 99,
+        });
+        settle(&mut app);
+        tap(&mut app, KeyCode::Enter, Key::Enter);
+        settle(&mut app);
+        let line_end = line_column_offset(SCRIPT, 3, 99);
+        let mut wanted = SCRIPT.to_owned();
+        wanted.insert_str(line_end, "\n    ");
+        assert_eq!(text_of(&app, handle.field)?, wanted);
+        tap(&mut app, KeyCode::Tab, Key::Tab);
+        settle(&mut app);
+        wanted.insert_str(line_end.saturating_add(5), "    ");
+        assert_eq!(text_of(&app, handle.field)?, wanted);
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            Some(handle.field)
         );
         Ok(())
     }

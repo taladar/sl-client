@@ -14,6 +14,9 @@
 //!   and
 //!   [`ui_rich_text`] — the text field whose flow carries objects (a notecard's
 //!   embedded items) and whose ranges can be styled.
+//! - [`ui_code_editor`], [`ui_code_syntax`] — the code editor over that field,
+//!   and the colour, folds, brace match and indent it draws from a language's
+//!   structure; [`text_search`], [`ui_text_history`] — find / replace and undo.
 //! - [`ui_tab`], [`ui_table`] — tab strips and the sortable, virtualized table.
 //! - [`settings_binding`] — the two-way binding that makes a control read and
 //!   write a settings-store value directly.
@@ -53,6 +56,7 @@ pub mod settings_binding;
 pub mod text_search;
 pub mod ui_checkbox;
 pub mod ui_code_editor;
+pub mod ui_code_syntax;
 pub mod ui_color_picker;
 pub mod ui_combo;
 pub mod ui_radio;

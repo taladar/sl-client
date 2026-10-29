@@ -302,6 +302,29 @@ fn mark_open_combos(
 /// [`ComboSelection`] (the source of truth a consumer reads / writes) and a
 /// [`ComboChanged`] on each user pick.
 pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) -> Entity {
+    spawn_combo_named(commands, parent, spec, None)
+}
+
+/// [`spawn_combo`] for a combo whose entries cannot name it — a jump list
+/// whose prompt is a placeholder, whose entries are the document's own words:
+/// a screen reader says the Fluent key `name_key`'s text, then the entry.
+pub fn spawn_named_combo(
+    commands: &mut Commands,
+    parent: Entity,
+    spec: &ComboSpec,
+    name_key: &'static str,
+) -> Entity {
+    spawn_combo_named(commands, parent, spec, Some(name_key))
+}
+
+/// The combo [`spawn_combo`] and [`spawn_named_combo`] build, named by its
+/// entry or by `name_key`.
+fn spawn_combo_named(
+    commands: &mut Commands,
+    parent: Entity,
+    spec: &ComboSpec,
+    name_key: Option<&'static str>,
+) -> Entity {
     let active = spec.resolved_active();
     let anchor = commands
         .spawn((
@@ -348,9 +371,11 @@ pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) ->
     seed_value_text(commands, value, spec, active);
     // Named by what it shows — a combo has no caption of its own; the label
     // beside it in a form row is a separate node.
-    commands
-        .entity(anchor)
-        .insert(Semantic::new(Role::Combobox).value_from(value));
+    let semantic = Semantic::new(Role::Combobox).value_from(value);
+    commands.entity(anchor).insert(match name_key {
+        Some(key) => semantic.name_key(key),
+        None => semantic,
+    });
 
     commands.spawn((
         // The arrow is the skin's `glyph::DROP_DOWN` mark. It wears the same

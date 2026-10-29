@@ -292,6 +292,36 @@
   --find-match: #fad16659;
   --gutter-bg: #00000026;
   --line-number: #737885;
+  /* The bracket pair at the caret, a bracket nothing pairs, and the box a
+   * folded block is drawn as — washes too, for the same reason. */
+  --bracket-match: #ffffff2e;
+  --bracket-unmatched: #f4474766;
+  --fold-placeholder: #ffffff1f;
+
+  /* The syntax scheme: one colour per highlight capture (tree-sitter's names,
+   * `.` written `-`). Its own group, not part of the skin's palette — a skin
+   * MAY ship a scheme that suits its well (a light skin has to) and need not
+   * otherwise, so these are the scheme every skin that does not gets: a dark
+   * one, for the dark wells most skins have. */
+  --syntax-comment: #6a9955;
+  --syntax-string: #ce9178;
+  --syntax-string-escape: #d7ba7d;
+  --syntax-number: #b5cea8;
+  --syntax-keyword: #569cd6;
+  --syntax-type: #4ec9b0;
+  --syntax-function: #dcdcaa;
+  --syntax-function-builtin: #e2c08d;
+  --syntax-function-event: #c586c0;
+  --syntax-constant: #9cdcfe;
+  --syntax-constant-builtin: #4fc1ff;
+  --syntax-label: #c8c8c8;
+  --syntax-namespace: #86c691;
+  --syntax-operator: #d4d4d4;
+  --syntax-punctuation-bracket: #d4d4d4;
+  --syntax-punctuation-delimiter: #d4d4d4;
+  --syntax-punctuation-special: #c586c0;
+  --syntax-error: #f44747;
+  --syntax-deprecated: #a0a0a0;
   --surface-radius: 6px;
   --control-radius: 4px;
 }

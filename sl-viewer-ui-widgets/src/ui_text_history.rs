@@ -351,7 +351,7 @@ fn record_edit_history(
 
 /// Make each field's pending undo or redo, after the frame's edits and before
 /// they are recorded — so the walk itself is never recorded as a new step.
-fn apply_history_requests(
+pub(crate) fn apply_history_requests(
     mut fields: Query<(&mut EditableText, &mut EditHistory, Has<ReadOnlyField>)>,
     mut font_cx: ResMut<FontCx>,
     mut layout_cx: ResMut<LayoutCx>,

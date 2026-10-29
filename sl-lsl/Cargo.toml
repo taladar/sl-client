@@ -17,6 +17,7 @@ exclude = { workspace = true }
 
 [dependencies]
 logos = { version = "0.13.0" }
+sl-highlight = { workspace = true }
 
 [dev-dependencies]
 fs-err = { workspace = true }

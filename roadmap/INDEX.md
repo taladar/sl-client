@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 334 |
-| blocked | 54 |
+| ready | 336 |
+| blocked | 53 |
 | in-progress | 18 |
 | bugs | 39 |
-| done | 1448 |
+| done | 1449 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2081** |
+| **total** | **2083** |
 
 ## ideas (135)
 
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (334)
+## ready (336)
 
 ### protocol
 
@@ -699,9 +699,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   select, saved credentials, MFA (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-lookat-faithful`](ready/viewer-lookat-faithful.md) — Faithful look-at
   (LLHUDEffectLookAt) (blocked by `viewer-camera-third-person-orbit` (done))
-- [`viewer-lsl-editor-highlight`](ready/viewer-lsl-editor-highlight.md) — LSL
-  editor highlighting — colour, folding, brace match, outline (blocked by
-  `viewer-lsl-editor-widget` (done), `viewer-lsl-lexer` (done))
+- [`viewer-lsl-editor-completion`](ready/viewer-lsl-editor-completion.md) — LSL
+  editor autocomplete and signature help from the grid's table
+- [`viewer-lsl-editor-save-compile`](ready/viewer-lsl-editor-save-compile.md) —
+  LSL editor save — upload/compile round-trip and error list (blocked by
+  `viewer-lsl-editor-highlight` (done))
 - [`viewer-material-save-to-object`](ready/viewer-material-save-to-object.md) —
   Save a PBR material into an object's inventory
 - [`viewer-media-playback-policies`](ready/viewer-media-playback-policies.md) —
@@ -986,6 +988,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-support-group-version-tags`](ready/viewer-support-group-version-tags.md)
   — Support-group chat version tags (send + display) (blocked by
   `viewer-about-floater` (done))
+- [`viewer-syntax-scheme-choice`](ready/viewer-syntax-scheme-choice.md) — Choose
+  a code editor syntax scheme apart from the skin
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
 - [`viewer-task-inventory-open-and-save-back`](ready/viewer-task-inventory-open-and-save-back.md)
@@ -1159,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (54)
+## blocked (53)
 
 ### viewer
 
@@ -1187,9 +1191,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-login-screen`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
-- [`viewer-lsl-editor-save-compile`](blocked/viewer-lsl-editor-save-compile.md)
-  — LSL editor save — upload/compile round-trip and error list (blocked by
-  `viewer-lsl-editor-highlight`)
 - [`viewer-mesh-lod-decimation`](blocked/viewer-mesh-lod-decimation.md) — LOD
   decimation via meshoptimizer (blocked by `viewer-mesh-gltf-import`)
 - [`viewer-mesh-physics-vhacd`](blocked/viewer-mesh-physics-vhacd.md) — Physics
@@ -1492,7 +1493,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1448)
+## done (1449)
 
 ### protocol
 
@@ -2517,6 +2518,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-differential-testing`](done/viewer-lsl-differential-testing.md) —
   LSL differential testing — a tailslide diagnostics oracle (blocked by
   `viewer-lsl-semantic-pass` (done))
+- [`viewer-lsl-editor-highlight`](done/viewer-lsl-editor-highlight.md) — LSL
+  editor highlighting — colour, folding, brace match, outline (blocked by
+  `viewer-lsl-editor-widget` (done), `viewer-lsl-lexer` (done))
 - [`viewer-lsl-editor-widget`](done/viewer-lsl-editor-widget.md) — LSL editor
   widget — a parley PlainEditor fork with coloured ranges (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))

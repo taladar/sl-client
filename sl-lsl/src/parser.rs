@@ -1281,7 +1281,7 @@ const fn is_expr_stop(token: Token) -> bool {
 
 /// Whether an identifier word is a reserved LSL keyword that cannot appear as a
 /// value in operand position (a type keyword or a control keyword).
-fn is_reserved_word(word: &str) -> bool {
+pub(crate) fn is_reserved_word(word: &str) -> bool {
     TypeName::from_keyword(word).is_some()
         || matches!(
             word,

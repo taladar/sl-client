@@ -2,7 +2,7 @@
 id: viewer-lsl-editor-save-compile
 title: LSL editor save — upload/compile round-trip and error list
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-lsl-script-editor
 blocked_by: [viewer-lsl-editor-highlight]
 refs: [viewer-lsl-diagnostics, viewer-prim-inventory-editing]

@@ -124,6 +124,9 @@
   --find-match: #ffd16659;
   --gutter-bg: #00000026;
   --line-number: #6f89a4;
+  --bracket-match: #ffffff2e;
+  --bracket-unmatched: #f4474766;
+  --fold-placeholder: #ffffff1f;
   --track-bg: #0b1f33;
   --scrollbar-thumb: #3f7aa8;
   --slider-thumb: #cfe4f7;

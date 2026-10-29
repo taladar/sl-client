@@ -139,6 +139,30 @@
   --find-match: #c2947d80;
   --gutter-bg: #0000000d;
   --line-number: #5c5c5c;
+  --bracket-match: #0000002e;
+  --bracket-unmatched: #cd313159;
+  --fold-placeholder: #0000001a;
+  /* A light well wants a light-well syntax scheme: the fallback's is for dark
+   * ones, and its pale yellows vanish on sage. */
+  --syntax-comment: #2e6b1f;
+  --syntax-string: #a31515;
+  --syntax-string-escape: #c43c00;
+  --syntax-number: #116644;
+  --syntax-keyword: #0000c8;
+  --syntax-type: #1d6b80;
+  --syntax-function: #6b4a00;
+  --syntax-function-builtin: #7a2e00;
+  --syntax-function-event: #8a00a8;
+  --syntax-constant: #001080;
+  --syntax-constant-builtin: #00589c;
+  --syntax-label: #3a3a3a;
+  --syntax-namespace: #1d6b3a;
+  --syntax-operator: #000000;
+  --syntax-punctuation-bracket: #000000;
+  --syntax-punctuation-delimiter: #000000;
+  --syntax-punctuation-special: #8a00a8;
+  --syntax-error: #c80000;
+  --syntax-deprecated: #6e6e6e;
   --field-placeholder: #666666;
   --list-bg: #c8cfcc;
   /* MenuDefaultBgColor: Vintage floats its menus in opaque black. */

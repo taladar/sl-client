@@ -1363,6 +1363,16 @@ fn dispatch_rich_text_range_clicks(
 // Plugin.
 // ---------------------------------------------------------------------------
 
+/// The rich-text field's system sets, for a widget built over it to order
+/// itself against.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RichTextSystems {
+    /// Hands each field's content (its styled ranges, objects and backdrops) to
+    /// parley — after the frame's edits, before the layout. A widget that
+    /// writes a field's [`RichTextContent`] for this frame runs before it.
+    Model,
+}
+
 /// The plugin owning the rich-text field's model sync, placement and guards.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RichTextPlugin;
@@ -1389,6 +1399,7 @@ impl Plugin for RichTextPlugin {
                     // buffer parley lays out are the same text; before the
                     // layout, so this frame's boxes are in this frame's flow.
                     sync_rich_text_model
+                        .in_set(RichTextSystems::Model)
                         .after(EditableTextSystems)
                         .before(UiSystems::PostLayout),
                     // After the layout *and* its scroll, so the positions read

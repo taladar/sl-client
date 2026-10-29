@@ -841,6 +841,108 @@
   text-shadow: none;
 }
 
+/* The brace match and the folds (ui_code_syntax): the pair at the caret and an
+ * unpaired bracket are underlay boxes like a find match; a folded block is a
+ * box in the text's flow; a fold toggle sits in the gutter beside its line. */
+.sk-bracket-match {
+  background-color: var(--bracket-match);
+}
+
+.sk-bracket-unmatched {
+  background-color: var(--bracket-unmatched);
+}
+
+.sk-fold-placeholder {
+  background-color: var(--fold-placeholder);
+  color: var(--line-number);
+  border-radius: 3px;
+}
+
+.sk-fold-toggle {
+  color: var(--line-number);
+  text-shadow: none;
+}
+
+/* Syntax colour: one class per highlight capture, each read from its
+ * --syntax-* token. Colour only — a skin that wants bold keywords or italic
+ * comments says so here, and the editor reads the weight and style back. The
+ * glyph runs are not nodes, so these take no shadow to remove. */
+.sk-syntax-comment {
+  color: var(--syntax-comment);
+}
+
+.sk-syntax-string {
+  color: var(--syntax-string);
+}
+
+.sk-syntax-string-escape {
+  color: var(--syntax-string-escape);
+}
+
+.sk-syntax-number {
+  color: var(--syntax-number);
+}
+
+.sk-syntax-keyword {
+  color: var(--syntax-keyword);
+}
+
+.sk-syntax-type {
+  color: var(--syntax-type);
+}
+
+.sk-syntax-function {
+  color: var(--syntax-function);
+}
+
+.sk-syntax-function-builtin {
+  color: var(--syntax-function-builtin);
+}
+
+.sk-syntax-function-event {
+  color: var(--syntax-function-event);
+}
+
+.sk-syntax-constant {
+  color: var(--syntax-constant);
+}
+
+.sk-syntax-constant-builtin {
+  color: var(--syntax-constant-builtin);
+}
+
+.sk-syntax-label {
+  color: var(--syntax-label);
+}
+
+.sk-syntax-namespace {
+  color: var(--syntax-namespace);
+}
+
+.sk-syntax-operator {
+  color: var(--syntax-operator);
+}
+
+.sk-syntax-punctuation-bracket {
+  color: var(--syntax-punctuation-bracket);
+}
+
+.sk-syntax-punctuation-delimiter {
+  color: var(--syntax-punctuation-delimiter);
+}
+
+.sk-syntax-punctuation-special {
+  color: var(--syntax-punctuation-special);
+}
+
+.sk-syntax-error {
+  color: var(--syntax-error);
+}
+
+.sk-syntax-deprecated {
+  color: var(--syntax-deprecated);
+}
+
 /* A pie slice's caption, in its three roles. The pie *disc* is a shader rather
  * than a node and keeps taking its three colours through the material's params
  * — the one piece of this widget a selector genuinely cannot reach. The

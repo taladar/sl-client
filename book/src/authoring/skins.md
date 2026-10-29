@@ -177,6 +177,8 @@ Defined by every skin's `skin.css`, consumed by `common.css`:
 | `--caret-line` | the wash behind the line the caret is on, in a code editor that has focus — a tint of the field's well, drawn under the glyphs |
 | `--find-match` | the wash behind every match of an open Search / Replace window's query |
 | `--gutter-bg` / `--line-number` | a code editor's line-number column and its numbers |
+| `--bracket-match` / `--bracket-unmatched` | the wash behind the bracket pair at a code editor's caret, and behind a bracket nothing pairs |
+| `--fold-placeholder` | the box a folded block of code is drawn as, in the text's flow |
 | `--marker-selected` | the selected keyframe on the day-cycle timeline (a colour of its own because it sits on a sky gradient) |
 | `--check-bg` / `--check-border` | a checkbox's box, unchecked |
 | `--check-bg-checked` / `--check-border-checked` | the same box, checked |
@@ -268,6 +270,64 @@ checked against the real stylesheets at build time
 (`tests/shipped_skins.rs`), so a token a skin forgets fails the test rather
 than showing up as one widget in the wrong colour.
 
+### The syntax scheme
+
+A code editor colours each token by its **highlight capture** — tree-sitter's
+vocabulary (`keyword`, `function.builtin`, …), written with `-` for `.` in the
+token and class names. The language decides the capture (the LSL highlighter
+reads the grid's own function table), so a scheme written once colours every
+language the editor learns.
+
+The scheme is **its own group**: a skin may define it and need not. Every skin
+that does not gets the fallback sheet's dark scheme; a skin with a light well
+has to ship one of its own (Vintage does). Each class sets only `color`, so a
+skin that wants bold keywords or italic comments adds `font-weight` /
+`font-style` to the class — the editor reads them back into the run.
+
+| Token | Capture | Colours |
+|---|---|---|
+| `--syntax-comment` | `comment` | line and block comments |
+| `--syntax-string` | `string` | string literals |
+| `--syntax-string-escape` | `string.escape` | an escape inside one (`\n`, `\"`) |
+| `--syntax-number` | `number` | numeric literals |
+| `--syntax-keyword` | `keyword` | control flow and the declaring words (`if`, `state`, `jump`) |
+| `--syntax-type` | `type` | type names (`integer`, `vector`) |
+| `--syntax-function` | `function` | the script's own functions, defined or called |
+| `--syntax-function-builtin` | `function.builtin` | the grid's library functions (`llSay`, `osGetRegionSize`) |
+| `--syntax-function-event` | `function.event` | event handlers (`touch_start`) |
+| `--syntax-constant` | `constant` | the script's own constants |
+| `--syntax-constant-builtin` | `constant.builtin` | the grid's library constants (`TRUE`, `PI`) |
+| `--syntax-label` | `label` | jump labels |
+| `--syntax-namespace` | `namespace` | state names |
+| `--syntax-operator` | `operator` | operators |
+| `--syntax-punctuation-bracket` | `punctuation.bracket` | brackets of every kind |
+| `--syntax-punctuation-delimiter` | `punctuation.delimiter` | `,` `;` `.` |
+| `--syntax-punctuation-special` | `punctuation.special` | the `@` before a label |
+| `--syntax-error` | `error` | input that is no token at all |
+| `--syntax-deprecated` | — | a deprecated library symbol, whatever its capture |
+
+| Class | Reads |
+|---|---|
+| `.sk-syntax-comment` | `--syntax-comment` |
+| `.sk-syntax-string` | `--syntax-string` |
+| `.sk-syntax-string-escape` | `--syntax-string-escape` |
+| `.sk-syntax-number` | `--syntax-number` |
+| `.sk-syntax-keyword` | `--syntax-keyword` |
+| `.sk-syntax-type` | `--syntax-type` |
+| `.sk-syntax-function` | `--syntax-function` |
+| `.sk-syntax-function-builtin` | `--syntax-function-builtin` |
+| `.sk-syntax-function-event` | `--syntax-function-event` |
+| `.sk-syntax-constant` | `--syntax-constant` |
+| `.sk-syntax-constant-builtin` | `--syntax-constant-builtin` |
+| `.sk-syntax-label` | `--syntax-label` |
+| `.sk-syntax-namespace` | `--syntax-namespace` |
+| `.sk-syntax-operator` | `--syntax-operator` |
+| `.sk-syntax-punctuation-bracket` | `--syntax-punctuation-bracket` |
+| `.sk-syntax-punctuation-delimiter` | `--syntax-punctuation-delimiter` |
+| `.sk-syntax-punctuation-special` | `--syntax-punctuation-special` |
+| `.sk-syntax-error` | `--syntax-error` |
+| `.sk-syntax-deprecated` | `--syntax-deprecated` |
+
 ### The role palette — skinning what a selector cannot reach
 
 Most of the tokens above are consumed the ordinary way: a rule in `common.css`
@@ -342,6 +402,9 @@ the stock look rather than to black.
 | `.sk-find-match` | the box behind a find match in a code editor |
 | `.sk-code-gutter` | a code editor's line-number column, ruled off from the text in `--divider` |
 | `.sk-line-number` | one number in that column |
+| `.sk-bracket-match` / `.sk-bracket-unmatched` | the box behind the bracket pair at the caret, and behind an unpaired bracket |
+| `.sk-fold-placeholder` | the `⋯` box a folded block is drawn as; a click unfolds it |
+| `.sk-fold-toggle` | a fold's toggle in the gutter, beside the line the fold starts on |
 | `.sk-day-marker` | a keyframe marker on the day-cycle timeline; `.sk-selected` when selected |
 | `.sk-teleport-title` / `.sk-teleport-arrived` / `.sk-teleport-failed` | the teleport-progress title, and the two outcomes it ends in |
 | `.sk-presence-online` / `.sk-presence-offline` | a friend's presence dot |
