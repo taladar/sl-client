@@ -375,10 +375,12 @@ scripts-run percentage.
   (`RuntimeError::Unimplemented`), or a broken compiler promise
   (`RuntimeError::Internal` — a lowering bug, named) ends the body in progress
   of the one script, and the `Fault` carries the source position of the
-  instruction that failed and the event being handled. Recursion deeper than
-  `MAX_CALL_DEPTH` is a stack-heap collision until the memory accounting of
-  `server-lsl-memory-and-limits` stops it at the reference's exact depth; that
-  task also bounds the heap, which nothing does yet.
+  instruction that failed and the event being handled. Running out of memory
+  is a fault too — a stack-heap collision on Mono, an `OutOfHeapException` on
+  YEngine — and so is a runaway allocation where the grid sets no limit
+  (`RuntimeError::HostMemory`): see *As built: memory* below.
+  `MAX_CALL_DEPTH` is only the backstop for OpenSim's engines, whose
+  recursion takes the simulator down at no depth anyone measured.
 - **What becomes of a faulted script is the flavour's**
   (`EngineConfig::flavour`, an `EngineFlavour`; `server-lsl-runtime-errors`,
   measured in `gridspec/lsl.md` § Run-time errors). On `SecondLife` it is
@@ -395,8 +397,11 @@ scripts-run percentage.
   and no script (and nothing at all for a runaway recursion). No grid names
   the line, so neither does the message; the position stays in the `Fault`
   for the host's log. The words need what only the host knows — the prim's
-  name and key, the script's name, the position, the object to count a flood
-  against — and `Host::whereabouts` answers it.
+  name and key, the script's name and item key, the region, the position, the
+  object to count a flood against — and `Host::whereabouts` answers it.
+  YEngine's exhausted heap is the exception: it is told to the owner alone
+  (`Host::owner_say`), four lines naming the item, the exception with its
+  three numbers, the prim, script and place, and that a reset is needed.
 - **A library call refusing its arguments** (`llGetScriptState` of a missing
   script) words the refusal for the flavour through `ScriptCtx::refuse`
   (`Could not find script 'Nope'.` against OpenSim's `llGetScriptState: Can't
@@ -420,6 +425,54 @@ scripts-run percentage.
 - **`print`** goes to `Host::print`: Second Life writes it to the
   simulator's log, where no resident sees it, so a host logs it and never
   turns it into chat. It is also what the VM's own tests observe.
+
+### As built: memory
+
+A Rust VM has no natural 16 KB limit, and that is a problem rather than a
+relief: content reads its memory (`llGetFreeMemory() < 2000`) and runs out
+where the grid it was written for runs out. So every instance accounts its
+memory as its flavour's engine does (`vm::memory`, on top of the per-value
+costs of `value::memory`; the measurements are `gridspec/lsl.md` § Memory and
+limits):
+
+- **What a script reads.** On Mono `llGetUsedMemory` is the script's code and
+  what its globals reach — never a local, an argument or a frame —
+  `llGetFreeMemory` the limit less the most used since the limit was set (a
+  low-water mark), and `llSetMemoryLimit` takes anything from the current use
+  to 65 536 and restarts the mark. On YEngine the reading is the heap
+  tracker's — globals and the strings and lists in locals — against a 1 MiB
+  heap, and `llSetMemoryLimit` is always `FALSE`. XEngine answers 65 536 to
+  every read. `llScriptProfiler(PROFILE_SCRIPT_MEMORY)` and `llGetSPMaxMemory`
+  record the most used while profiling, on Mono.
+- **Two parts are models, and say so.** Mono's code is not ours to measure —
+  the runtime runs its own bytecode — so it is costed as a constant, a cost
+  per function or handler and a cost per instruction, fitted to eight probe
+  scripts' first readings on aditi (all within 300 bytes, about the grid's own
+  wander). Mono's stack never shows in a reading yet collides, so a frame
+  costs a fixed amount plus its slots toward the collision only, fitted to the
+  depths aditi's recursions reached at the default limit.
+- **Where a script runs out** is checked where memory grows — a global or a
+  local stored, a call made, a value made that alone could never fit —
+  which is what makes aditi's list collide at its measured length although
+  appending copies the list. Mono stops and holds the script with its two
+  `Stack-Heap Collision` lines; YEngine follows its own source
+  (`XMRInstArrays.PopString`'s check of a global's growth, and
+  `UpdateLocalsHeapUse`'s of the locals) and leaves the script reading as
+  running; and wherever a grid sets no limit, a script past 64 MiB stops with
+  the runtime's own `HostMemory` rather than exhaust the machine.
+- **The region's view.** `Engine::usage` and `Engine::top_scripts` give each
+  script's `OBJECT_SCRIPT_MEMORY` figure (its limit, running or not, on Second
+  Life; a flat 16 384 a running script on OpenSim) and its script time — the
+  instructions it was charged, averaged over thirty seconds of ticks and
+  converted at the scheduler's rate — busiest first; `Engine::active_scripts`
+  is `SimStats`' `ActiveScripts` (an average of the running scripts on Second
+  Life, the scripts present on OpenSim). Reporting them through
+  `LandStatRequest`, `llGetObjectDetails` and `SimStats` is the fake grid's,
+  once it runs the engine (`server-fake-grid-script-engine-wiring`).
+- **Not modelled:** Second Life's LSO and its 16 KB, since the fake grid
+  compiles every script from source; and the garbage Mono's readings carry,
+  which is why a reading here sits a couple of hundred bytes under aditi's and
+  a recursion under a lowered limit stops shallower than aditi's.
 
 ### As built: events and states
 
@@ -579,8 +632,9 @@ trait.
 **As built**, the trait holds what the VM itself needs — `print`; `stubbed`, the
 notice that a stubbed function answered with its type's default; `say`, through
 which the engine speaks a script's error lines (a `Speech`: channel, text, and
-how far avatars and scripts hear it); and `whereabouts`, which names the prim
-and script those lines name — and each library tranche adds its own methods.
+how far avatars and scripts hear it); `owner_say`, which tells the owner alone
+what YEngine reports that way; and `whereabouts`, which names the prim and
+script those lines name — and each library tranche adds its own methods.
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:

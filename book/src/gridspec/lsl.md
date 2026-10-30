@@ -1148,7 +1148,7 @@ transcripts.
 | a local or an argument | **0**, of any type: not even a fresh string held only by a local shows | a local string 2 a character, a local list its elements; any other local, and any argument, 0 | no scripts |
 | a call frame, 32 deep | 0 | 0 | no scripts |
 | a global declared holding its default | integer, float or key 20; string 34; list 56; vector 60; rotation 64 | integer 4, float 8, vector 24, rotation 32; string, key or list 0 | no scripts |
-| a character of a string literal in the code | 2 | — (the literal's global, 2 a character) | no scripts |
+| a character of a string literal a global is initialised with | 2 — the literal's or the global's, which no reading tells apart | 2, the global's | no scripts |
 | a script that only reads its memory and says it | 4 456 | 32 | no scripts |
 
 A character is a UTF-16 code unit on both grids: U+00E9 and U+20AC cost what
@@ -1158,7 +1158,11 @@ nothing and answers `65536` to every read.
 So Second Life's Mono counts what the script's globals reach — a list's
 boxes, a string's characters — and its code, but no value on the stack; a
 recursion still collides (§ Running out), so the stack is checked
-elsewhere. YEngine's numbers are its heap tracker's own
+elsewhere. The literal row cannot say whether the two bytes a character are
+the code's or the global's: eight probe scripts' first readings fit a code
+model with no charge for literals as well as one with it, so `sl-lsl-runtime`
+charges the global's value and costs the code by its size alone
+(`vm::memory`). YEngine's numbers are its heap tracker's own
 (`XMRHeapTracker.Size`, `LSL_List.Size`), which charges a string in a list
 half what it charges the same string anywhere else.
 

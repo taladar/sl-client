@@ -2,7 +2,7 @@
 //! deliberate stubs. Add a function here when it is written; the
 //! registration will not compile unless its signature is the table's.
 
-use crate::library::{control, detection, lists, math};
+use crate::library::{control, detection, lists, math, usage};
 
 crate::registry! {
     implemented {
@@ -30,6 +30,12 @@ crate::registry! {
         LlDetectedTouchBinormal => detection::ll_detected_touch_binormal,
         LlSleep => control::ll_sleep,
         LlGetScriptState => control::ll_get_script_state,
+        LlGetUsedMemory => usage::ll_get_used_memory,
+        LlGetFreeMemory => usage::ll_get_free_memory,
+        LlGetMemoryLimit => usage::ll_get_memory_limit,
+        LlSetMemoryLimit => usage::ll_set_memory_limit,
+        LlScriptProfiler => usage::ll_script_profiler,
+        LlGetSPMaxMemory => usage::ll_get_sp_max_memory,
     }
     stubbed {}
 }

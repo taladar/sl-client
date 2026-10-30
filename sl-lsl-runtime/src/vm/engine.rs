@@ -15,10 +15,12 @@ use crate::vm::context::{Peers, Tick};
 use crate::vm::detected::Detected;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
-use crate::vm::instance::{Arrival, Coalescing, Instance, Outcome, PostError, Posted, Slice};
+use crate::vm::instance::{
+    Arrival, Coalescing, Instance, LOAD_WINDOW_SECONDS, Outcome, PostError, Posted, Slice,
+};
 use crate::vm::report::{
     Admission, DEBUG_CHANNEL, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, FloodGate, Speech, fault_lines,
-    fault_reach, refusal_reach,
+    fault_reach, owner_lines, refusal_reach,
 };
 
 /// How many instructions one script may run per second of region time, as
@@ -140,6 +142,23 @@ pub struct Engine {
     last_served: Option<CallerId>,
     /// Second Life's per-object flood limit on error lines.
     floods: FloodGate,
+    /// How many scripts have been running a tick, averaged over
+    /// [`LOAD_WINDOW_SECONDS`]: Second Life's active-script count.
+    active: f64,
+}
+
+/// One script's line in the region's top-scripts report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScriptUsage {
+    /// The script.
+    pub id: CallerId,
+    /// What it adds to its object's script memory
+    /// ([`Instance::script_memory`]).
+    pub memory: u32,
+    /// The script time it has been taking each second, averaged over the
+    /// last [`LOAD_WINDOW_SECONDS`]: its load at
+    /// [`SCRIPT_INSTRUCTIONS_PER_SECOND`].
+    pub time: Duration,
 }
 
 impl Engine {
@@ -152,6 +171,7 @@ impl Engine {
             instances: BTreeMap::new(),
             last_served: None,
             floods: FloodGate::new(),
+            active: 0.0,
         }
     }
 
@@ -171,7 +191,51 @@ impl Engine {
     /// returning — any instance that had it. It runs its initialisers and
     /// `default`'s `state_entry` from the next tick.
     pub fn add(&mut self, id: CallerId, program: Arc<Program>) -> Option<Instance> {
-        self.instances.insert(id, Instance::new(program))
+        self.instances
+            .insert(id, Instance::with_flavour(program, self.config.flavour))
+    }
+
+    /// What the script `id` costs the region: its script memory and the time
+    /// it has been taking; [`None`] when there is no such instance.
+    #[must_use]
+    pub fn usage(&self, id: CallerId) -> Option<ScriptUsage> {
+        let instance = self.instances.get(&id)?;
+        let ticks_per_second =
+            Duration::from_secs(1).as_secs_f64() / self.config.step.as_secs_f64();
+        let rate = f64::from(u32::try_from(SCRIPT_INSTRUCTIONS_PER_SECOND).unwrap_or(u32::MAX));
+        let seconds = instance.load() * ticks_per_second / rate;
+        Some(ScriptUsage {
+            id,
+            memory: instance.script_memory(self.config.flavour),
+            time: Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO),
+        })
+    }
+
+    /// The region's top-scripts report: every script's [`ScriptUsage`], the
+    /// one taking the most time first, a tie in the order of their ids.
+    #[must_use]
+    pub fn top_scripts(&self) -> Vec<ScriptUsage> {
+        let mut usage: Vec<ScriptUsage> = self
+            .instances
+            .keys()
+            .filter_map(|id| self.usage(*id))
+            .collect();
+        usage.sort_by(|a, b| b.time.cmp(&a.time).then(a.id.cmp(&b.id)));
+        usage
+    }
+
+    /// The region's active-script count, as its `SimStats` `ActiveScripts`
+    /// says it: on Second Life the scripts running, averaged over
+    /// [`LOAD_WINDOW_SECONDS`] (a fractional figure); on OpenSim every script
+    /// in the region, running or not (`memory/object`, 2026-10-26).
+    #[must_use]
+    pub fn active_scripts(&self) -> f64 {
+        match self.config.flavour {
+            EngineFlavour::SecondLife => self.active,
+            EngineFlavour::YEngine | EngineFlavour::XEngine => {
+                f64::from(u32::try_from(self.instances.len()).unwrap_or(u32::MAX))
+            }
+        }
     }
 
     /// Remove an instance, returning it.
@@ -292,6 +356,12 @@ impl Engine {
             return;
         }
         let at = host.whereabouts(id);
+        for line in fault
+            .map(|fault| owner_lines(flavour, fault, &at))
+            .unwrap_or_default()
+        {
+            host.owner_say(id, &line);
+        }
         let refused = slice
             .refusals
             .iter()
@@ -384,6 +454,7 @@ impl Engine {
                     Peers::of(&self.instances, self.config.flavour),
                 );
                 self.report(id, &slice, host);
+                instance.charge(slice.used);
                 instance.overdraw(slice.used.saturating_sub(script_left));
                 script_left = script_left.saturating_sub(slice.used);
                 region_left = region_left.saturating_sub(u64::from(slice.used));
@@ -398,7 +469,22 @@ impl Engine {
             }
             let _none = self.instances.insert(id, instance);
         }
+        self.settle();
         report
+    }
+
+    /// Fold the tick into every script's load and the active-script count.
+    fn settle(&mut self) {
+        let weight = (self.config.step.as_secs_f64() / LOAD_WINDOW_SECONDS).min(1.0);
+        let flavour = self.config.flavour;
+        let mut running = 0_u32;
+        for instance in self.instances.values_mut() {
+            instance.settle(weight);
+            if instance.reads_running(flavour) {
+                running = running.saturating_add(1);
+            }
+        }
+        self.active += (f64::from(running) - self.active) * weight;
     }
 }
 

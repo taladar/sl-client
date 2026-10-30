@@ -15,12 +15,13 @@
 //! a fresh string held only by a local. A value held in a list is a
 //! reference into the list plus the value as an object of its own; a list of
 //! one shared string literal holds the literal once and a reference per
-//! element ([`MONO_REFERENCE`]), which a value model without object identity
-//! cannot see — every element here is costed as a value of its own. The
-//! whole of `llGetUsedMemory` also counts the script's code (each character
-//! of a string literal 2 bytes), which is not a value's and is not here: a
-//! script that only reads its memory and says it once used 4 456 bytes on
-//! aditi.
+//! element ([`MONO_REFERENCE`]). The value model has no object identity, so
+//! [`Literals`] stands in for it: an element whose text is one of the
+//! script's string literals is taken to *be* that literal, paid for once in
+//! its list. The whole of `llGetUsedMemory` also counts the script's code,
+//! which is not a value's and is not here (`vm`'s memory accounting models
+//! it): a script that only reads its memory and says it once used 4 456
+//! bytes on aditi.
 //!
 //! A string's length is counted in UTF-16 code units, as .NET counts one:
 //! U+00E9 and U+20AC, two and three bytes in UTF-8, each cost what an ASCII
@@ -30,6 +31,8 @@
 //! XEngine counts nothing: every memory function answers 65 536 there, and
 //! every cost here is 0.
 
+use std::collections::BTreeSet;
+
 use sl_lsl::ast::TypeName;
 
 use crate::value::{Element, Value};
@@ -38,6 +41,11 @@ use crate::vm::EngineFlavour;
 /// The memory limit a script starts with, `llGetMemoryLimit`'s answer: 65 536
 /// bytes on Second Life's Mono and on both OpenSim engines.
 pub const MEMORY_LIMIT: u32 = 0x0001_0000;
+
+/// YEngine: the heap a script's values may hold, `[YEngine] ScriptHeapSize`'s
+/// default of 1 024 KiB. `llGetFreeMemory` is this less what is used; a store
+/// past it is an `OutOfHeapException`.
+pub const YENGINE_HEAP: u32 = 0x0010_0000;
 
 /// Mono: what a reference to a value costs — a list's slot for one element.
 /// A list of one shared string pays the string once and this per element.
@@ -72,6 +80,38 @@ pub enum Holder {
     Local,
     /// A function's parameter, holding what its caller passed.
     Argument,
+}
+
+/// The string literals of a script, standing in for the object identity the
+/// value model does not have: on Mono a list element whose text is one of
+/// them is taken to be that literal, which every element holding it shares.
+///
+/// A string the script computed that happens to equal a literal is taken for
+/// it too, and so costs a reference where Mono would pay a copy; content
+/// rarely builds a literal's text by hand.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Literals(BTreeSet<String>);
+
+impl Literals {
+    /// The string literals among `constants`, a program's literal pool.
+    #[must_use]
+    pub fn of(constants: &[Value]) -> Self {
+        Self(
+            constants
+                .iter()
+                .filter_map(|constant| match constant {
+                    Value::String(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect(),
+        )
+    }
+
+    /// Whether `text` is one of the literals.
+    #[must_use]
+    pub fn contains(&self, text: &str) -> bool {
+        self.0.contains(text)
+    }
 }
 
 /// What `text` costs at `per_unit` bytes a UTF-16 code unit.
@@ -115,21 +155,30 @@ pub const fn global_cost(ty: TypeName, flavour: EngineFlavour) -> u32 {
 
 /// What holding `value` in `holder` costs in `flavour` over holding
 /// its type's default there; a global's whole cost is this plus
-/// [`global_cost`].
+/// [`global_cost`]. `literals` are the script's string literals, which a
+/// Mono list shares ([`Literals`]).
 ///
 /// - **Mono**: a global string 2 bytes a UTF-16 unit; a global list 64
-///   once it holds anything, plus each element's
-///   [`element_cost`]; a global key nothing, whatever its text
-///   (an empty key and a 36-character one read alike); a number, vector
-///   or rotation nothing over the declaration. A local or an argument
-///   costs nothing at all.
+///   once it holds anything, plus each element's [`element_cost`] — but an
+///   element holding one of the `literals` pays the literal only the first
+///   time the list holds it, and a reference after; a global key nothing,
+///   whatever its text (an empty key and a 36-character one read alike); a
+///   number, vector or rotation nothing over the declaration. A local or an
+///   argument costs nothing at all.
 /// - **YEngine**: a global string or key 2 bytes a UTF-16 unit, a global
 ///   list its elements'; a local string 2 a unit and a local list its
 ///   elements', where a local number, vector, rotation or key costs
-///   nothing; an argument nothing beyond what its caller holds.
+///   nothing; an argument nothing beyond what its caller holds. A string
+///   that is empty or all white space costs nothing (`HeapTrackerString.Size`
+///   uses `string.IsNullOrWhiteSpace`).
 /// - **XEngine**: nothing.
 #[must_use]
-pub fn value_cost(value: &Value, flavour: EngineFlavour, holder: Holder) -> u32 {
+pub fn value_cost(
+    value: &Value,
+    flavour: EngineFlavour,
+    holder: Holder,
+    literals: &Literals,
+) -> u32 {
     let elements = |list: &[Element]| {
         list.iter().fold(0_u32, |sum, element| {
             sum.saturating_add(element_cost(element, flavour))
@@ -137,16 +186,37 @@ pub fn value_cost(value: &Value, flavour: EngineFlavour, holder: Holder) -> u32 
     };
     match (flavour, holder, value) {
         (EngineFlavour::SecondLife, Holder::Global, Value::List(list)) if !list.is_empty() => {
-            MONO_LIST.saturating_add(elements(list))
+            MONO_LIST.saturating_add(mono_elements(list, literals))
         }
-        (EngineFlavour::SecondLife, Holder::Global, Value::String(text))
-        | (EngineFlavour::YEngine, Holder::Global, Value::String(text) | Value::Key(text))
-        | (EngineFlavour::YEngine, Holder::Local, Value::String(text)) => per_unit(text, 2),
+        (EngineFlavour::SecondLife, Holder::Global, Value::String(text)) => per_unit(text, 2),
+        (EngineFlavour::YEngine, Holder::Global, Value::String(text) | Value::Key(text))
+        | (EngineFlavour::YEngine, Holder::Local, Value::String(text)) => {
+            if text.chars().all(char::is_whitespace) {
+                0
+            } else {
+                per_unit(text, 2)
+            }
+        }
         (EngineFlavour::YEngine, Holder::Global | Holder::Local, Value::List(list)) => {
             elements(list)
         }
         _ => 0,
     }
+}
+
+/// Mono: the elements of one list, each literal it holds paid once and a
+/// reference every later time.
+fn mono_elements(list: &[Element], literals: &Literals) -> u32 {
+    let mut shared: BTreeSet<&str> = BTreeSet::new();
+    list.iter().fold(0_u32, |sum, element| {
+        let cost = match element {
+            Element::String(text) if literals.contains(text) && !shared.insert(text) => {
+                MONO_REFERENCE
+            }
+            other => element_cost(other, EngineFlavour::SecondLife),
+        };
+        sum.saturating_add(cost)
+    })
 }
 
 /// What `element` costs as one element of a list in `flavour`.

@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 135 |
-| ready | 333 |
+| ideas | 136 |
+| ready | 332 |
 | blocked | 53 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1454 |
+| done | 1455 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2087** |
+| **total** | **2088** |
 
-## ideas (135)
+## ideas (136)
 
 ### protocol
 
@@ -331,6 +331,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tranche — time, timers and sleeping, on a tick clock (blocked by
   `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
   `gridspec-lsl-time-timers` (done))
+- [`server-lsl-lso-memory`](ideas/server-lsl-lso-memory.md) — Run an
+  LSO-targeted script in LSO's 16 KB, as Second Life does
 - [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
   Script state that survives a take, a rez and a region restart (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done),
@@ -356,7 +358,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (333)
+## ready (332)
 
 ### protocol
 
@@ -1139,10 +1141,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-lsl-memory-and-limits`](ready/server-lsl-memory-and-limits.md) —
-  Script memory and limits, because scripts observe them (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-memory-sizes` (done),
-  `gridspec-lsl-memory-limits` (done))
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
   store for the region, in place of a Vec of objects
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
@@ -1496,7 +1494,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1454)
+## done (1455)
 
 ### protocol
 
@@ -4529,6 +4527,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The vendored library document lacks 50 current functions
 - [`server-lsl-library-unserved-functions`](done/server-lsl-library-unserved-functions.md)
   — Five functions no served LSLSyntax document lists
+- [`server-lsl-memory-and-limits`](done/server-lsl-memory-and-limits.md) —
+  Script memory and limits, because scripts observe them (blocked by
+  `server-lsl-vm-execution` (done), `server-lsl-memory-sizes` (done),
+  `gridspec-lsl-memory-limits` (done))
 - [`server-lsl-memory-sizes`](done/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
 - [`server-lsl-runtime-errors`](done/server-lsl-runtime-errors.md) — Run-time

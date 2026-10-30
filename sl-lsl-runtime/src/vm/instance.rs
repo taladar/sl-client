@@ -20,6 +20,7 @@ use crate::vm::detected::{Detected, MAX_DETECTED, is_detection_event};
 use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
+use crate::vm::memory::{Memory, Stack, frame_cost};
 
 /// Instructions charged for calling a library function, on top of the one the
 /// `CallBuiltin` instruction itself costs (book chapter
@@ -48,10 +49,15 @@ pub const BACKWARD_JUMP_COST: u32 = 512;
 /// The deepest the call stack may grow. A frame costs a Mono script at least
 /// sixteen bytes of its 64 KiB, so no script can recurse deeper than this on
 /// the grid; past it the script stops with a stack-heap collision rather than
-/// growing the host's memory without bound. The memory accounting of
-/// `server-lsl-memory-and-limits` is what will stop it at the reference's
-/// exact depth.
+/// growing the host's memory without bound. Mono's memory accounting stops a
+/// recursion well before it (`vm::memory`'s stack model); this is the
+/// backstop for OpenSim's engines, whose recursion takes the simulator down
+/// rather than stopping at a depth anyone measured.
 pub const MAX_CALL_DEPTH: usize = 4096;
+
+/// What one running script adds to its object's `OBJECT_SCRIPT_MEMORY` on
+/// OpenSim, whatever it holds: both engines answer a flat 16 384.
+pub const OPENSIM_SCRIPT_MEMORY: u32 = 0x4000;
 
 /// The most events a script's queue holds; one posted past it is dropped.
 /// Second Life's documented limit.
@@ -286,6 +292,12 @@ struct Frame {
     pc: u32,
     /// The body's parameters and locals.
     locals: Vec<Value>,
+    /// What each local, as stored, holds toward running out
+    /// ([`Memory::local_cost`]); a parameter counts nothing until it is
+    /// stored to, holding what its caller holds.
+    costs: Vec<u32>,
+    /// What the frame itself costs toward running out ([`frame_cost`]).
+    cost: u32,
 }
 
 /// The body in progress: the call stack and the operand stack.
@@ -299,6 +311,25 @@ struct Activity {
     /// above its caller's). A float on it may still be a double
     /// ([`Operand`]).
     stack: Vec<Operand>,
+    /// What the frames and their locals hold toward running out, all
+    /// together.
+    held: Stack,
+}
+
+impl Activity {
+    /// A body with `frame` at the bottom of its call stack.
+    fn new(phase: Phase, frame: Frame) -> Self {
+        let held = Stack {
+            frames: frame.cost,
+            locals: 0,
+        };
+        Self {
+            phase,
+            frames: vec![frame],
+            stack: Vec::new(),
+            held,
+        }
+    }
 }
 
 /// An event waiting for its handler.
@@ -364,7 +395,21 @@ pub struct Instance {
     /// operation that cost more than was left, a join of a long list — and
     /// owed out of the shares of the ticks that follow.
     overdraft: u32,
+    /// What the script's memory holds and may hold, as its grid counts it.
+    memory: Memory,
+    /// Instructions charged in the tick under way, for [`Self::load`].
+    charged: u64,
+    /// The instructions the script runs a tick, averaged over
+    /// [`LOAD_WINDOW_SECONDS`] of ticks: its share of the region's script
+    /// time.
+    load: f64,
 }
+
+/// How many seconds of ticks a script's load and the region's active-script
+/// count are averaged over. The reference's top-scripts report averages its
+/// script times over a window too; its length is not measured, and thirty
+/// seconds is a decision.
+pub const LOAD_WINDOW_SECONDS: f64 = 30.0;
 
 /// The body a [`BodyRef`] names.
 fn body_of(program: &Program, body: BodyRef) -> Result<&Body, RuntimeError> {
@@ -385,8 +430,13 @@ fn internal(what: impl Into<String>) -> RuntimeError {
 }
 
 /// A frame for `body`, its parameters filled from `args` and every other
-/// local at its type's default.
-fn new_frame(program: &Program, body: BodyRef, args: Vec<Value>) -> Result<Frame, RuntimeError> {
+/// local at its type's default, costed as `flavour` costs a frame.
+fn new_frame(
+    program: &Program,
+    body: BodyRef,
+    args: Vec<Value>,
+    flavour: EngineFlavour,
+) -> Result<Frame, RuntimeError> {
     let code = body_of(program, body)?;
     let params = usize::try_from(code.params).unwrap_or(usize::MAX);
     if args.len() != params {
@@ -405,7 +455,9 @@ fn new_frame(program: &Program, body: BodyRef, args: Vec<Value>) -> Result<Frame
     Ok(Frame {
         body,
         pc: 0,
+        costs: vec![0; locals.len()],
         locals,
+        cost: frame_cost(code, flavour),
     })
 }
 
@@ -530,13 +582,20 @@ struct Machine<'run> {
     data: &'run mut ScriptData,
     /// The region's other scripts.
     peers: Peers<'run>,
+    /// The script's memory accounting.
+    memory: &'run mut Memory,
 }
 
 impl Machine<'_> {
     /// Execute one instruction, adding what it costs to `used`.
     fn step(&mut self, used: &mut u32) -> Result<Flow, RuntimeError> {
         let program = self.program;
-        let Activity { frames, stack, .. } = &mut *self.activity;
+        let Activity {
+            frames,
+            stack,
+            held,
+            ..
+        } = &mut *self.activity;
         let frame = frames
             .last_mut()
             .ok_or_else(|| internal("no frame to execute"))?;
@@ -574,10 +633,18 @@ impl Machine<'_> {
             ),
             Instr::StoreLocal(slot) => {
                 let value = pop(stack)?;
+                let cost = self.memory.local_cost(&value);
+                let at = index(slot.0);
                 *frame
                     .locals
-                    .get_mut(index(slot.0))
+                    .get_mut(at)
                     .ok_or_else(|| internal(format!("no local {}", slot.0)))? = value;
+                let before = held.locals;
+                if let Some(old) = frame.costs.get_mut(at) {
+                    held.locals = before.saturating_sub(*old).saturating_add(cost);
+                    *old = cost;
+                }
+                self.memory.store_local(before, *held)?;
             }
             Instr::LoadGlobal(slot) => stack.push(
                 self.globals
@@ -588,10 +655,13 @@ impl Machine<'_> {
             ),
             Instr::StoreGlobal(slot) => {
                 let value = pop(stack)?;
-                *self
+                let at = index(slot.0);
+                let global = self
                     .globals
-                    .get_mut(index(slot.0))
-                    .ok_or_else(|| internal(format!("no global {}", slot.0)))? = value;
+                    .get_mut(at)
+                    .ok_or_else(|| internal(format!("no global {}", slot.0)))?;
+                self.memory.store_global(at, &value, *held)?;
+                *global = value;
             }
             Instr::GetMember(component) => {
                 let aggregate = pop(stack)?;
@@ -604,7 +674,11 @@ impl Machine<'_> {
             }
             Instr::Cast(ty) => {
                 let operand = pop_operand(stack)?;
-                stack.push(operand::cast(operand, ty)?);
+                let result = operand::cast(operand, ty)?;
+                if let Operand::Value(value) = &result {
+                    self.memory.made(value)?;
+                }
+                stack.push(result);
             }
             Instr::Binary(op) => {
                 let left = pop_operand(stack)?;
@@ -612,6 +686,7 @@ impl Machine<'_> {
                 let result = operand::binary(op, left, right)?;
                 if let Operand::Value(value) = &result {
                     *used = used.saturating_add(cost::operator(op, value));
+                    self.memory.made(value)?;
                 }
                 stack.push(result);
             }
@@ -643,7 +718,9 @@ impl Machine<'_> {
                     .into_iter()
                     .flatten()
                     .collect();
-                stack.push(Value::List(elements).into());
+                let list = Value::List(elements);
+                self.memory.made(&list)?;
+                stack.push(list.into());
             }
             Instr::CallBuiltin(id) => {
                 let descriptor = id.descriptor();
@@ -656,6 +733,7 @@ impl Machine<'_> {
                     &mut *self.host,
                     &mut *self.data,
                     self.peers,
+                    (&mut *self.memory, *held),
                 );
                 let called = library::call(id, &mut ctx, args)?;
                 let request = ctx.take_request();
@@ -663,6 +741,7 @@ impl Machine<'_> {
                     self.host.stubbed(self.caller, id);
                 }
                 if let Some(value) = called.value {
+                    self.memory.made(&value)?;
                     stack.push(value.into());
                 }
                 let forced = f64::from(descriptor.sleep);
@@ -680,12 +759,19 @@ impl Machine<'_> {
                 if frames.len() >= MAX_CALL_DEPTH {
                     return Err(RuntimeError::StackHeapCollision);
                 }
-                frames.push(new_frame(program, body, args)?);
+                let callee = new_frame(program, body, args, self.memory.flavour())?;
+                let deeper = Stack {
+                    frames: held.frames.saturating_add(callee.cost),
+                    locals: held.locals,
+                };
+                self.memory.call(deeper)?;
+                *held = deeper;
+                frames.push(callee);
             }
-            Instr::Return => return Ok(Self::leave(frames, stack, None)),
+            Instr::Return => return Ok(Self::leave(frames, stack, held, None)),
             Instr::ReturnValue => {
                 let value = pop(stack)?;
-                return Ok(Self::leave(frames, stack, Some(value)));
+                return Ok(Self::leave(frames, stack, held, Some(value)));
             }
             Instr::Jump(target) => Self::jump(frame, target, used),
             Instr::JumpIfFalse(target) => {
@@ -710,7 +796,7 @@ impl Machine<'_> {
                         .map(Value::default_of),
                     BodyRef::Init | BodyRef::Handler { .. } => None,
                 };
-                return Ok(Self::leave(frames, stack, yielded));
+                return Ok(Self::leave(frames, stack, held, yielded));
             }
             Instr::Print => match pop(stack)? {
                 Value::String(text) => self.host.print(self.caller, &text),
@@ -736,10 +822,21 @@ impl Machine<'_> {
         frame.pc = target.0;
     }
 
-    /// Leave the executing body, handing `value` to the caller if there is
-    /// one.
-    fn leave(frames: &mut Vec<Frame>, stack: &mut Vec<Operand>, value: Option<Value>) -> Flow {
-        let _left = frames.pop();
+    /// Leave the executing body, releasing what its frame held and handing
+    /// `value` to the caller if there is one.
+    fn leave(
+        frames: &mut Vec<Frame>,
+        stack: &mut Vec<Operand>,
+        held: &mut Stack,
+        value: Option<Value>,
+    ) -> Flow {
+        if let Some(left) = frames.pop() {
+            held.frames = held.frames.saturating_sub(left.cost);
+            held.locals = left
+                .costs
+                .iter()
+                .fold(held.locals, |locals, cost| locals.saturating_sub(*cost));
+        }
         if frames.is_empty() {
             stack.clear();
             return Flow::BodyDone;
@@ -753,9 +850,17 @@ impl Machine<'_> {
 
 impl Instance {
     /// A fresh instance of `program`, running, about to run its global
-    /// initialisers and then `default`'s `state_entry`.
+    /// initialisers and then `default`'s `state_entry`, its memory counted as
+    /// Second Life's Mono counts it.
     #[must_use]
     pub fn new(program: Arc<Program>) -> Self {
+        Self::with_flavour(program, EngineFlavour::SecondLife)
+    }
+
+    /// [`Self::new`], its memory counted as `flavour`'s engine counts it.
+    #[must_use]
+    pub fn with_flavour(program: Arc<Program>, flavour: EngineFlavour) -> Self {
+        let memory = Memory::new(&program, flavour);
         let mut instance = Self {
             program,
             globals: Vec::new(),
@@ -768,6 +873,9 @@ impl Instance {
             wake: Tick::default(),
             data: ScriptData::default(),
             overdraft: 0,
+            memory,
+            charged: 0,
+            load: 0.0,
         };
         instance.reset();
         instance
@@ -790,6 +898,62 @@ impl Instance {
     /// Owe `instructions` charged past this tick's share, out of the next.
     pub(crate) const fn overdraw(&mut self, instructions: u32) {
         self.overdraft = self.overdraft.saturating_add(instructions);
+    }
+
+    /// Count `instructions` charged to the script in the tick under way.
+    pub(crate) fn charge(&mut self, instructions: u32) {
+        self.charged = self.charged.saturating_add(u64::from(instructions));
+    }
+
+    /// The tick is over: fold what it charged into [`Self::load`], `weight`
+    /// being one tick's share of the averaging window.
+    pub(crate) fn settle(&mut self, weight: f64) {
+        let charged = f64::from(u32::try_from(self.charged).unwrap_or(u32::MAX));
+        self.load += (charged - self.load) * weight;
+        self.charged = 0;
+    }
+
+    /// The instructions the script has been running a tick, averaged over the
+    /// last [`LOAD_WINDOW_SECONDS`]: what the region's top-scripts report
+    /// ranks it by.
+    #[must_use]
+    pub const fn load(&self) -> f64 {
+        self.load
+    }
+
+    /// What `llGetUsedMemory` would answer now, between two slices.
+    #[must_use]
+    pub fn used_memory(&self) -> u32 {
+        self.memory.used(
+            self.activity
+                .as_ref()
+                .map(|activity| activity.held)
+                .unwrap_or_default(),
+        )
+    }
+
+    /// `llGetMemoryLimit`: `65536`, or what `llSetMemoryLimit` set on Mono.
+    #[must_use]
+    pub const fn memory_limit(&self) -> u32 {
+        self.memory.limit()
+    }
+
+    /// What the script adds to its object's `OBJECT_SCRIPT_MEMORY` in
+    /// `flavour`: on Second Life its limit, running or not; on OpenSim 16 384
+    /// while it reads as running, nothing stopped (`memory/object`,
+    /// 2026-10-26).
+    #[must_use]
+    pub const fn script_memory(&self, flavour: EngineFlavour) -> u32 {
+        match flavour {
+            EngineFlavour::SecondLife => self.memory.limit(),
+            EngineFlavour::YEngine | EngineFlavour::XEngine => {
+                if self.reads_running(flavour) {
+                    OPENSIM_SCRIPT_MEMORY
+                } else {
+                    0
+                }
+            }
+        }
     }
 
     /// The compiled script.
@@ -910,21 +1074,15 @@ impl Instance {
         self.queue.clear();
         self.pending_state = None;
         self.wake = Tick::default();
-        self.activity = Some(Activity {
-            phase: Phase::Init,
-            frames: vec![Frame {
-                body: BodyRef::Init,
-                pc: 0,
-                locals: self
-                    .program
-                    .init
-                    .locals
-                    .iter()
-                    .map(|local| Value::default_of(local.ty))
-                    .collect(),
-            }],
-            stack: Vec::new(),
-        });
+        self.memory.reset();
+        self.activity = new_frame(
+            &self.program,
+            BodyRef::Init,
+            Vec::new(),
+            self.memory.flavour(),
+        )
+        .ok()
+        .map(|frame| Activity::new(Phase::Init, frame));
     }
 
     /// Offer the script an event with no detected block.
@@ -1173,6 +1331,7 @@ impl Instance {
                 host: &mut *host,
                 data: &mut self.data,
                 peers,
+                memory: &mut self.memory,
             };
             return match machine.step(used) {
                 Ok(Flow::Next) => continue,
@@ -1270,11 +1429,10 @@ impl Instance {
             state: self.state,
             index: handler,
         };
-        self.activity = Some(Activity {
-            phase: Phase::Event,
-            frames: vec![new_frame(&self.program, body, args)?],
-            stack: Vec::new(),
-        });
+        self.activity = Some(Activity::new(
+            Phase::Event,
+            new_frame(&self.program, body, args, self.memory.flavour())?,
+        ));
         Ok(())
     }
 
@@ -1283,12 +1441,8 @@ impl Instance {
     fn start_transition_handler(&mut self, state: StateId, event: &str, phase: Phase) -> bool {
         let started = handler_index(&self.program, state, event)
             .map(|index| BodyRef::Handler { state, index })
-            .and_then(|body| new_frame(&self.program, body, Vec::new()).ok())
-            .map(|frame| Activity {
-                phase,
-                frames: vec![frame],
-                stack: Vec::new(),
-            });
+            .and_then(|body| new_frame(&self.program, body, Vec::new(), self.memory.flavour()).ok())
+            .map(|frame| Activity::new(phase, frame));
         let is_started = started.is_some();
         if is_started {
             self.data.detected.clear();

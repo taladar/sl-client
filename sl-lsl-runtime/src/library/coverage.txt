@@ -27,3 +27,9 @@ implemented llDetectedVel
 implemented llGetScriptState
 implemented llGetStartParameter
 implemented llSetTimerEvent
+implemented llGetFreeMemory
+implemented llGetMemoryLimit
+implemented llGetSPMaxMemory
+implemented llGetUsedMemory
+implemented llScriptProfiler
+implemented llSetMemoryLimit

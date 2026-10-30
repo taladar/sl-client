@@ -19,6 +19,8 @@
 //!   ([`EngineConfig`]).
 //! - [`Host`] — the world, as the library reaches it; [`ScriptCtx`] — the
 //!   calling script, as a library function sees it.
+//! - [`memory`] — a script's memory as its grid counts it: what the memory
+//!   functions answer and where the script runs out.
 //! - [`RuntimeError`] / [`Fault`] — what stops a script. An error stops the
 //!   one script and never panics the region; the engine says it on
 //!   [`DEBUG_CHANNEL`] in the words of the grid it imitates
@@ -36,6 +38,7 @@ mod fault;
 mod flavour;
 mod host;
 mod instance;
+pub mod memory;
 mod report;
 #[cfg(test)]
 mod tests;
@@ -45,15 +48,18 @@ pub(crate) use context::{Peers, ScriptData};
 pub use context::{ScriptCtx, Tick};
 pub use detected::{DETECTION_EVENTS, Detected, MAX_DETECTED, Touch, is_detection_event};
 pub use engine::{
-    Engine, EngineConfig, REGION_SCRIPT_SHARES, SCRIPT_INSTRUCTIONS_PER_SECOND, TickReport,
+    Engine, EngineConfig, REGION_SCRIPT_SHARES, SCRIPT_INSTRUCTIONS_PER_SECOND, ScriptUsage,
+    TickReport,
 };
 pub use fault::{Fault, RuntimeError};
 pub use flavour::EngineFlavour;
 pub use host::{CallerId, Host};
 pub use instance::{
-    Arrival, BACKWARD_JUMP_COST, BUILTIN_CALL_COST, Coalescing, Instance, MAX_CALL_DEPTH,
-    MAX_QUEUED, Outcome, PostError, Posted, Slice,
+    Arrival, BACKWARD_JUMP_COST, BUILTIN_CALL_COST, Coalescing, Instance, LOAD_WINDOW_SECONDS,
+    MAX_CALL_DEPTH, MAX_QUEUED, OPENSIM_SCRIPT_MEMORY, Outcome, PostError, Posted, Slice,
 };
+#[cfg(test)]
+pub(crate) use memory::{Memory, Stack};
 pub use report::{
     DEBUG_CHANNEL, FLOOD_LINES, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, Speech, Whereabouts,
 };

@@ -30,6 +30,7 @@ pub mod lists;
 pub mod math;
 mod registry;
 pub mod table;
+pub mod usage;
 
 pub use dispatch::{
     CallError, Called, FromArgs, FromValue, Handler, IntoReturn, Key, Signature, Status, invoke,
@@ -54,7 +55,9 @@ mod tests {
 
     use super::*;
     use crate::value::{Element, Value};
-    use crate::vm::{CallerId, Host, Peers, ScriptCtx, ScriptData, Speech, Tick, Whereabouts};
+    use crate::vm::{
+        CallerId, Host, Memory, Peers, ScriptCtx, ScriptData, Speech, Stack, Tick, Whereabouts,
+    };
 
     /// A host for calls that never reach it: the dispatch reports stubs
     /// through `Called::stubbed`, and only the VM tells the host.
@@ -73,12 +76,16 @@ mod tests {
 
         fn say(&mut self, _caller: CallerId, _speech: &Speech) {}
 
+        fn owner_say(&mut self, _caller: CallerId, _text: &str) {}
+
         fn whereabouts(&self, _caller: CallerId) -> Whereabouts {
             Whereabouts {
                 object: String::new(),
                 prim: String::new(),
                 name: String::new(),
                 script: String::new(),
+                item: String::new(),
+                region: String::new(),
                 position: crate::value::ZERO_VECTOR,
             }
         }
@@ -300,6 +307,7 @@ mod tests {
     fn calls_are_checked_against_the_table() {
         let mut host = Unreached;
         let mut data = ScriptData::default();
+        let mut memory = Memory::bare();
         let mut ctx = ScriptCtx::new(
             CallerId(1),
             Tick(0),
@@ -307,6 +315,7 @@ mod tests {
             &mut host,
             &mut data,
             Peers::NONE,
+            (&mut memory, Stack::default()),
         );
         assert_eq!(
             call(BuiltinId::LlAbs, &mut ctx, vec![Value::Integer(-3)]),
@@ -366,6 +375,7 @@ mod tests {
     fn a_stub_checks_its_arguments_and_returns_the_default() {
         let mut host = Unreached;
         let mut data = ScriptData::default();
+        let mut memory = Memory::bare();
         let mut ctx = ScriptCtx::new(
             CallerId(1),
             Tick(0),
@@ -373,6 +383,7 @@ mod tests {
             &mut host,
             &mut data,
             Peers::NONE,
+            (&mut memory, Stack::default()),
         );
         assert_eq!(
             with_stubs::call(BuiltinId::LlGetPos, &mut ctx, vec![]),

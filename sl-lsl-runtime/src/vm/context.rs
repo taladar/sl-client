@@ -9,6 +9,7 @@ use crate::vm::detected::Detected;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::Instance;
+use crate::vm::memory::{Memory, Stack};
 
 /// A heartbeat tick of the region: the unit every script-visible time is
 /// counted in. A script's time is never read from a clock — sleeps, and later
@@ -134,6 +135,10 @@ pub struct ScriptCtx<'host> {
     /// What the function asked the VM to do after it returns; the last
     /// request wins, except that a reset is never replaced by a sleep.
     request: Option<Request>,
+    /// The script's memory accounting.
+    memory: &'host mut Memory,
+    /// What the script's call stack holds as the call is made.
+    stack: Stack,
 }
 
 impl<'host> ScriptCtx<'host> {
@@ -145,6 +150,7 @@ impl<'host> ScriptCtx<'host> {
         host: &'host mut dyn Host,
         data: &'host mut ScriptData,
         peers: Peers<'host>,
+        (memory, stack): (&'host mut Memory, Stack),
     ) -> Self {
         Self {
             caller,
@@ -154,6 +160,8 @@ impl<'host> ScriptCtx<'host> {
             data,
             peers,
             request: None,
+            memory,
+            stack,
         }
     }
 
@@ -214,6 +222,41 @@ impl<'host> ScriptCtx<'host> {
     #[must_use]
     pub const fn flavour(&self) -> EngineFlavour {
         self.peers.flavour()
+    }
+
+    /// `llGetUsedMemory`: what the script uses as its grid counts it.
+    #[must_use]
+    pub const fn used_memory(&self) -> u32 {
+        self.memory.used(self.stack)
+    }
+
+    /// `llGetFreeMemory`: Mono's limit less the most the script has used
+    /// since it was set; YEngine's heap less what it uses now.
+    #[must_use]
+    pub const fn free_memory(&self) -> u32 {
+        self.memory.free(self.stack)
+    }
+
+    /// `llGetMemoryLimit`.
+    #[must_use]
+    pub const fn memory_limit(&self) -> u32 {
+        self.memory.limit()
+    }
+
+    /// `llSetMemoryLimit`: whether the grid took `limit`.
+    pub fn set_memory_limit(&mut self, limit: i32) -> bool {
+        self.memory.set_limit(limit, self.stack)
+    }
+
+    /// `llScriptProfiler`: start or stop recording the most memory used.
+    pub fn profile(&mut self, flags: i32) {
+        self.memory.profile(flags, self.stack);
+    }
+
+    /// `llGetSPMaxMemory`: the most memory used while profiling.
+    #[must_use]
+    pub fn profiled_memory(&self) -> u32 {
+        self.memory.profiled()
     }
 
     /// Refuse the call's arguments with `text`, worded for the

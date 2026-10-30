@@ -4,9 +4,7 @@ use pretty_assertions::assert_eq;
 use sl_lsl::ast::TypeName;
 use sl_types::lsl::{Rotation, Vector};
 
-use super::{
-    Holder, MEMORY_LIMIT, MONO_LIST, MONO_REFERENCE, element_cost, global_cost, value_cost,
-};
+use super::{Holder, Literals, MEMORY_LIMIT, element_cost, global_cost, value_cost};
 use crate::probe::Line;
 use crate::value::{Element, Value};
 use crate::vm::EngineFlavour;
@@ -26,6 +24,15 @@ fn lines(transcript: &str) -> Vec<Line> {
         .lines()
         .filter_map(|line| Line::parse(line).ok())
         .collect()
+}
+
+/// The literal the probe puts in every element of its shared-string list.
+const SHARED: &str = "abcdefgh";
+
+/// The probe's string literals, as far as the rows need them: the one its
+/// shared-string list holds.
+fn literals() -> Literals {
+    Literals::of(&[Value::String(SHARED.to_owned())])
 }
 
 /// The field `key` of `line`.
@@ -94,7 +101,7 @@ fn element(line: &Line, kind: &str, index: u32) -> Result<Element, String> {
             s: 1.0,
         }),
         "key" => Element::Key(UUID.to_owned()),
-        "shared-string" => Element::String("abcdefgh".to_owned()),
+        "shared-string" => Element::String(SHARED.to_owned()),
         "string" => Element::String(text(field(line, "class")?, number(line, "length")?)),
         other => return Err(format!("an element of kind {other}")),
     })
@@ -142,7 +149,7 @@ fn type_named(kind: &str) -> Result<TypeName, String> {
 fn modelled(line: &Line, flavour: EngineFlavour) -> Result<Option<u32>, String> {
     let four = |value: Option<Value>, holder| {
         value.map_or(0, |value| {
-            value_cost(&value, flavour, holder).saturating_mul(4)
+            value_cost(&value, flavour, holder, &literals()).saturating_mul(4)
         })
     };
     Ok(Some(match line.rec.as_str() {
@@ -152,23 +159,22 @@ fn modelled(line: &Line, flavour: EngineFlavour) -> Result<Option<u32>, String> 
             let elements = (0..count)
                 .map(|index| element(line, kind, index))
                 .collect::<Result<Vec<_>, _>>()?;
-            match elements.first() {
-                // One literal shared by every element: the string once and
-                // a reference for each of the rest.
-                Some(first) if kind == "shared-string" && flavour == EngineFlavour::SecondLife => {
-                    MONO_LIST
-                        .saturating_add(element_cost(first, flavour))
-                        .saturating_add(MONO_REFERENCE.saturating_mul(count.saturating_sub(1)))
-                }
-                _ => value_cost(&Value::List(elements), flavour, Holder::Global),
-            }
+            // One literal shared by every element is the string once and a
+            // reference for each of the rest, which the literals tell.
+            value_cost(&Value::List(elements), flavour, Holder::Global, &literals())
         }
         "text" => value_cost(
             &Value::String(text(field(line, "class")?, number(line, "length")?)),
             flavour,
             Holder::Global,
+            &literals(),
         ),
-        "global-key" => value_cost(&Value::Key(UUID.to_owned()), flavour, Holder::Global),
+        "global-key" => value_cost(
+            &Value::Key(UUID.to_owned()),
+            flavour,
+            Holder::Global,
+            &literals(),
+        ),
         "local" => four(sample(field(line, "kind")?), Holder::Local),
         "argument" => four(sample(field(line, "kind")?), Holder::Argument),
         // A call frame costs nothing anywhere.
@@ -199,8 +205,7 @@ fn check(transcript: &str, flavour: EngineFlavour) -> Result<u32, String> {
     assert_eq!(number(limit, "value")?, MEMORY_LIMIT, "{flavour:?}");
 
     // Each Globals script against Globals none: 32 globals, and the two
-    // bytes a character its own name costs as a string (the code's literal
-    // on Mono, its KIND global's value on YEngine).
+    // bytes a character its own name costs as the value of its KIND global.
     let used = |kind: &str| -> Result<i64, String> {
         let line = lines
             .iter()
@@ -271,7 +276,8 @@ fn a_mono_key_costs_a_uuid_in_a_list_and_nothing_more_in_a_global() {
         value_cost(
             &Value::Key(UUID.to_owned()),
             EngineFlavour::SecondLife,
-            Holder::Global
+            Holder::Global,
+            &Literals::default()
         ),
         0
     );
@@ -279,7 +285,8 @@ fn a_mono_key_costs_a_uuid_in_a_list_and_nothing_more_in_a_global() {
         value_cost(
             &Value::Key(UUID.to_owned()),
             EngineFlavour::YEngine,
-            Holder::Global
+            Holder::Global,
+            &Literals::default()
         ),
         72
     );

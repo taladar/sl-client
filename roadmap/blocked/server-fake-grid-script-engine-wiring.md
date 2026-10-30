@@ -86,3 +86,25 @@ count, the script's inventory name, the prim's region position). Set
 `EngineConfig::flavour` from the grid's flavour: `SecondLife` for a
 Second-Life-flavoured grid, `YEngine` (the local OpenSim's engine) for an
 OpenSim one.
+
+## From server-lsl-memory-and-limits (2026-10-30)
+
+Three more `Host` methods' worth of wiring, and the region-level view:
+
+- **`Host::owner_say`** tells the object's owner alone (`llOwnerSay`'s
+  reach). YEngine's exhausted heap is reported this way, four lines;
+  `Whereabouts` now also carries the script's item key (`item`) and the
+  region's name (`region`) for them.
+- **The top-scripts report.** `LandStatRequest`'s top scripts are answered
+  from `ObjectCost` fixtures today, "because a fake region cannot measure".
+  Once scripts run, answer it from `Engine::top_scripts` — each script's
+  `OBJECT_SCRIPT_MEMORY` figure and its time (`ScriptUsage`), busiest
+  first, summed per object — and keep the fixture as the fall-back for an
+  object with no scripts, and for a scenario that states a cost it wants in
+  the report (the comment on `SceneFixtures::object_costs`).
+- **`SimStats`' `ActiveScripts`** is `Engine::active_scripts` (Second Life's
+  running average, OpenSim's count of scripts present); the fake grid sends
+  `0` today. `llGetObjectDetails`' `OBJECT_SCRIPT_MEMORY`,
+  `OBJECT_SCRIPT_TIME` and the script counts belong to
+  `server-lsl-lib-prim-state`, from the same `ScriptUsage` and the
+  instances' run flags.

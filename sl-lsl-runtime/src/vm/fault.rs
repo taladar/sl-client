@@ -21,10 +21,29 @@ pub enum RuntimeError {
     /// float` used), so it fails before its first line, as on the grid.
     #[error("System.InvalidProgramException: Invalid IL code")]
     InvalidProgram,
-    /// The call stack grew past what any script's memory could hold — a
-    /// runaway recursion. The reference calls this a stack-heap collision.
+    /// Mono's script ran out of memory: its heap and its stack together past
+    /// its limit, or a call stack past what any script could hold.
     #[error("Stack-Heap Collision")]
     StackHeapCollision,
+    /// YEngine's script stored more than its heap holds
+    /// (`XMRInstAbstract`'s `OutOfHeapException`), with the engine's own
+    /// three numbers: what it held before, after, and the heap.
+    #[error("OutOfHeapException: oldtotal={old_total}, newtotal={new_total}, limit={limit}")]
+    OutOfHeap {
+        /// The engine's `oldtotal`: `0` for a global, the locals' total before
+        /// the store for a local.
+        old_total: u32,
+        /// The engine's `newtotal`: a global's growth, or the locals' total
+        /// after the store.
+        new_total: u32,
+        /// The heap, `ScriptHeapSize`.
+        limit: u32,
+    },
+    /// The script held more than this host allows a script where its grid
+    /// sets no limit (XEngine; a value YEngine has not yet stored). This
+    /// runtime's own backstop, not a grid's error.
+    #[error("script memory past this host's limit of 64 MiB")]
+    HostMemory,
     /// A library function this runtime has neither implemented nor stubbed.
     #[error("{} is not implemented by this grid", .0.descriptor().name)]
     Unimplemented(BuiltinId),

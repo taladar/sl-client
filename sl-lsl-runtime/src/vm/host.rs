@@ -52,6 +52,12 @@ pub trait Host {
     /// this way, already worded and flood-limited.
     fn say(&mut self, caller: CallerId, speech: &Speech);
 
+    /// The script's object tells its owner `text` and nobody else, wherever
+    /// in the region the owner is — `llOwnerSay`'s reach. The runtime tells an
+    /// owner this way what YEngine reports to the owner alone (an exhausted
+    /// heap).
+    fn owner_say(&mut self, caller: CallerId, text: &str);
+
     /// Where the script `caller` is, for the words of its error lines and
     /// the object its flood is counted against.
     fn whereabouts(&self, caller: CallerId) -> Whereabouts;

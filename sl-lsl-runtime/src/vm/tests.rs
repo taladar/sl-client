@@ -17,6 +17,7 @@ use sl_types::chat::ChatVolume;
 use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
 
+mod memory;
 mod precision;
 
 /// A tenth of a second: ten ticks to the second, so `llSleep(2.0)` is twenty.
@@ -39,6 +40,8 @@ struct Recorder {
     said: Vec<(u64, CallerId, Speech)>,
     /// The object each script is in, by key; `"object-a"` when not listed.
     objects: std::collections::BTreeMap<CallerId, String>,
+    /// `(tick, caller, text)` per line told the owner alone.
+    told: Vec<(u64, CallerId, String)>,
 }
 
 impl Host for Recorder {
@@ -62,6 +65,10 @@ impl Host for Recorder {
         self.said.push((self.now, caller, speech.clone()));
     }
 
+    fn owner_say(&mut self, caller: CallerId, text: &str) {
+        self.told.push((self.now, caller, text.to_owned()));
+    }
+
     fn whereabouts(&self, caller: CallerId) -> Whereabouts {
         Whereabouts {
             object: self
@@ -76,6 +83,8 @@ impl Host for Recorder {
                 .iter()
                 .find(|(_, id)| **id == caller)
                 .map_or_else(|| format!("Script {}", caller.0), |(name, _)| name.clone()),
+            item: "d9cbb4b7-206e-45c2-8c9a-7429643962ac".to_owned(),
+            region: "Default Region".to_owned(),
             position: sl_types::lsl::Vector {
                 x: 120.0,
                 y: 128.0,
