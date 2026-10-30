@@ -17,6 +17,8 @@ use sl_types::chat::ChatVolume;
 use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
 
+mod precision;
+
 /// A tenth of a second: ten ticks to the second, so `llSleep(2.0)` is twenty.
 const STEP: Duration = Duration::from_millis(100);
 

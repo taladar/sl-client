@@ -45,6 +45,7 @@ pub mod error;
 pub mod format;
 pub mod library;
 mod num;
+mod operand;
 pub mod ops;
 pub mod parse;
 pub mod probe;

@@ -2,7 +2,7 @@
 id: server-lsl-float-expression-precision
 title: Round a float expression once, where Mono stores it, not at every operator
 topic: server
-status: ready
+status: done
 origin: server-lsl-memory-sizes (2026-10-30)
 refs: [server-lsl-memory-sizes, server-lsl-value-model, server-lsl-compiler-ir,
   gridspec-lsl-strings-math]
@@ -43,3 +43,34 @@ VM rather than in `ops.rs`.
 The `two-products` and `three-factors` rows of the aditi transcript, both
 forms, are reproduced bit for bit by running the probe's own expressions in
 the VM, and each newly measured rounding point has a row of its own.
+
+## Done (2026-10-30)
+
+A new probe, `math/float-rounding`, asked every place a float can go whether
+Mono rounds it there, with a residual detector (`1.1 * 1.3` is exact in
+double and not a float; taken less the stored product it leaves a residual
+where the value arrived unrounded and 0 where it was rounded). Run on aditi
+and both OpenSim engines; the book's `gridspec/lsl.md` § Precision has the
+row. On Mono:
+
+- **kept in double**: `+ - * /` of floats (a quotient too), unary `-`, the
+  dot product inside a longer expression, an integer converted to `float`
+  (`(float)16777217` and `16777217 * 1.0` are exact), a `(float)` cast, the
+  value of `=`, `+=` and `++`, so a comparison and a condition read the
+  double (`if (1e-30 * 1e-20)` is taken). Double, not x87 extended.
+- **rounded**: a store into a variable or a component, a user or library
+  function's argument, a return value (user and library), a list element
+  (`[x]` and `l += x`), a vector or rotation component being built, the
+  factor of `vector * float`, and the operand of `(integer)` and `(string)`.
+
+`sl-lsl-runtime` has a private `Operand` (`src/operand.rs`): the VM's
+operand stack holds a `Value` or an unrounded `f64`, the operators,
+prefixes, casts and conditional jumps above take it as it is, and every
+other pop rounds it. `Value::Float` stays an `f32`; `ops::binary` is
+unchanged. Tests in `vm/tests/precision.rs` run the probes' own expressions
+in the VM and compare the printed bits with the aditi transcripts:
+`math/rotation-bits`' `input-bits`, `two-products` and `three-factors` rows
+(both forms, all seven cases) and 33 of `math/float-rounding`'s 36 rows. The
+three left out (`library-return`, `list-element`, `list-append`) need
+`llSqrt` / `llList2Float`, which the runtime does not have yet, and hold by
+construction (a library result is a `Value`, a list element an `Element`).

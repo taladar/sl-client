@@ -91,7 +91,11 @@ grids for unit input. Where the flavours differ:
   products past the float range are `Infinity` there, doubles here.
 - `-rotation` does not compile under XEngine.
 - Precision: the operators are Second Life's to the bit since
-  [[server-lsl-memory-sizes]]; a longer float expression's rounding is
-  [[server-lsl-float-expression-precision]]. The library helpers here
+  [[server-lsl-memory-sizes]], and a longer float expression's rounding
+  since [[server-lsl-float-expression-precision]] (an argument is rounded
+  before a library function sees it, its result is a float). Once
+  `llSqrt` and `llList2Float` exist, add `math/float-rounding`'s
+  `library-return`, `list-element` and `list-append` rows to the VM replay
+  in `vm/tests/precision.rs`. The library helpers here
   compute the double result of the float argument and round it once
   (`math/rotation-bits`' `library` rows).

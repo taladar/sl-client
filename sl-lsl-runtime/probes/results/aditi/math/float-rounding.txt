@@ -1,0 +1,47 @@
+grid: aditi
+date: 2026-10-30
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+PROBE math/float-rounding rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE math/float-rounding rec=input a=+9227469:0p-23 b=+10905190:0p-23 r=+11995709:0p-23
+PROBE math/float-rounding rec=point name=expression value=+8724152:0p-48
+PROBE math/float-rounding rec=point name=local value=0
+PROBE math/float-rounding rec=point name=quotient value=0
+PROBE math/float-rounding rec=point name=user-argument value=0
+# animations avatar=other playing=""
+PROBE math/float-rounding rec=point name=user-return value=0
+PROBE math/float-rounding rec=point name=library-argument value=0
+PROBE math/float-rounding rec=point name=library-return value=0
+PROBE math/float-rounding rec=point name=negation value=-8724152:0p-48
+PROBE math/float-rounding rec=point name=list-element value=0
+PROBE math/float-rounding rec=point name=list-append value=0
+PROBE math/float-rounding rec=point name=vector-component value=0
+PROBE math/float-rounding rec=point name=rotation-component value=0
+PROBE math/float-rounding rec=point name=member-store value=0
+PROBE math/float-rounding rec=point name=cast-float value=+8724152:0p-48
+PROBE math/float-rounding rec=point name=cast-integer value=3
+PROBE math/float-rounding rec=point name=cast-string value=4.052999
+PROBE math/float-rounding rec=point name=equal value=0
+PROBE math/float-rounding rec=point name=not-equal value=1
+PROBE math/float-rounding rec=point name=greater value=1
+PROBE math/float-rounding rec=point name=condition value=1
+PROBE math/float-rounding rec=point name=assignment-value value=+8724152:0p-48
+PROBE math/float-rounding rec=point name=compound value=+15351153:0p-23
+PROBE math/float-rounding rec=point name=compound-one-expression value=+15351153:0p-23
+PROBE math/float-rounding rec=point name=compound-two-statements value=+15351152:0p-23
+PROBE math/float-rounding rec=point name=compound-value value=+8724152:0p-48
+PROBE math/float-rounding rec=point name=increment-value value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=increment-stored value=0
+PROBE math/float-rounding rec=point name=add-assign-value value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=integer-operand value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=integer-cast value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=integer-stored value=0
+PROBE math/float-rounding rec=point name=vector-scale value=+9596567:0p-26 rounded=+9596567:0p-26
+PROBE math/float-rounding rec=point name=dot-in-expression value=+8724152:0p-47
+PROBE math/float-rounding rec=point name=overflow-and-back value=+13234890:0p76
+PROBE math/float-rounding rec=point name=extended value=+8388608:0p-23
+PROBE math/float-rounding rec=end
+# animations avatar=owner playing=""

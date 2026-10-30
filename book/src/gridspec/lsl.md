@@ -2042,12 +2042,17 @@ then matched against candidate evaluations (each operation rounded to a
 float, everything in double rounded once, products rounded and summed in
 double, and so on). Seven pairs of rotations, the first PyOptimizer's open
 case `<3, 5, 7, 17> * <.22, .26, .38, .86>`, the others chosen where the
-candidates disagree.
+candidates disagree. `math/float-rounding` (2026-10-30) then asked every
+place a value can go whether it rounds there: `1.1 * 1.3` is exact in
+double and not a float, so a value that reaches the place unrounded and is
+then taken less the stored product leaves a residual, and a rounded one
+leaves 0.
 
 | what | Second Life (Mono) | OpenSim YEngine | OpenSim XEngine | fake grid |
 | --- | --- | --- | --- | --- |
 | a variable, a list element, a vector's or rotation's component | a float: 24 bits | a **double**: 53 bits (`0.1` is the double 0.1) | the same | no scripts |
 | an expression of floats (`a * b + c * d`, `a * b * c`) | evaluated in **double** and rounded to a float only when stored: the same sum split over two statements comes out a bit apart | in double throughout | the same | no scripts |
+| where a float expression is rounded (`math/float-rounding`) | **rounded** when stored into a variable or a component, passed to a user or library function, returned, put in a list (`[x]`, `l += x`) or a vector or rotation being built, as the factor of `vector * float`, and by `(integer)` (`(integer)(1.4999996 * 2.0000005)` is 3) and `(string)` (`(string)(1.05 * 3.86)` is `4.052999`); **kept in double** by `/` and the other operators, unary `-`, the dot product inside a longer expression, a `(float)` cast, a comparison (`a * b == R` is false where `R` holds the stored product), a condition (`if (1e-30 * 1e-20)` is taken), the value of `=`, `+=` and `++` (`++` of 16777216.0 is 16777217 until stored) and an integer met by a float (`(float)16777217` and `16777217 * 1.0` are exact); `1e30 * 1e30 / 1e30` is `1e30`. Double, not x87's 64-bit mantissa: `1 + 2^-24 + 2^-60` is 1 | every value a double, so nothing to round; `(integer)` gives 2, `(string)` `4.053000`, the comparison is true | the same | no scripts |
 | `rotation * rotation`, `vector * rotation`, `vector * vector` (dot) | in double, rounded once at the end: all seven products matched that, five of them nothing else; PyOptimizer's case gives `y` = 8.3199997 (prints as `8.320000`) | in double | the same | no scripts |
 | `rotation / rotation`, `vector / rotation`, `vector % vector` (cross) | **each operation rounded to a float**: `/ rotation` is the product with the conjugate, `vector / rotation` Linden's two-step formula (`llquaternion.cpp`), each product and sum rounded | in double | the same | no scripts |
 | `llSqrt`, `llSin`, `llPow` … | the double result of the float argument, rounded to a float | the double result | the same | no scripts |

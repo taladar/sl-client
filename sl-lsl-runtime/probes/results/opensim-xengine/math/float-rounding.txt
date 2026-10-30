@@ -1,0 +1,47 @@
+grid: opensim-xengine
+date: 2026-10-30
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: XEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE math/float-rounding rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE math/float-rounding rec=input a=+9227468:429496730p-23 b=+10905190:214748365p-23 r=+11995709:236223202p-23
+PROBE math/float-rounding rec=point name=expression value=0
+PROBE math/float-rounding rec=point name=local value=0
+PROBE math/float-rounding rec=point name=quotient value=0
+PROBE math/float-rounding rec=point name=user-argument value=0
+PROBE math/float-rounding rec=point name=user-return value=0
+PROBE math/float-rounding rec=point name=library-argument value=0
+PROBE math/float-rounding rec=point name=library-return value=0
+PROBE math/float-rounding rec=point name=negation value=0
+PROBE math/float-rounding rec=point name=list-element value=0
+PROBE math/float-rounding rec=point name=list-append value=0
+PROBE math/float-rounding rec=point name=vector-component value=0
+PROBE math/float-rounding rec=point name=rotation-component value=0
+PROBE math/float-rounding rec=point name=member-store value=0
+PROBE math/float-rounding rec=point name=cast-float value=0
+PROBE math/float-rounding rec=point name=cast-integer value=2
+PROBE math/float-rounding rec=point name=cast-string value=4.053000
+PROBE math/float-rounding rec=point name=equal value=1
+PROBE math/float-rounding rec=point name=not-equal value=0
+PROBE math/float-rounding rec=point name=greater value=0
+PROBE math/float-rounding rec=point name=condition value=1
+PROBE math/float-rounding rec=point name=assignment-value value=0
+PROBE math/float-rounding rec=point name=compound value=+15351152:343597384p-23
+PROBE math/float-rounding rec=point name=compound-one-expression value=+15351152:343597384p-23
+PROBE math/float-rounding rec=point name=compound-two-statements value=+15351152:343597384p-23
+PROBE math/float-rounding rec=point name=compound-value value=0
+PROBE math/float-rounding rec=point name=increment-value value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=increment-stored value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=add-assign-value value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=integer-operand value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=integer-cast value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=integer-stored value=+8388608:0p-23
+PROBE math/float-rounding rec=point name=vector-scale value=+9596567:296352744p-26 rounded=+9596567:296352744p-26
+PROBE math/float-rounding rec=point name=dot-in-expression value=0
+PROBE math/float-rounding rec=point name=overflow-and-back value=+13234889:429952235p76
+PROBE math/float-rounding rec=point name=extended value=+8388608:268435457p-23
+PROBE math/float-rounding rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

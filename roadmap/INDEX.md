@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 334 |
+| ready | 333 |
 | blocked | 53 |
 | in-progress | 18 |
 | bugs | 39 |
-| done | 1452 |
+| done | 1453 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2084** |
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (334)
+## ready (333)
 
 ### protocol
 
@@ -1139,8 +1139,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-lsl-float-expression-precision`](ready/server-lsl-float-expression-precision.md)
-  — Round a float expression once, where Mono stores it, not at every operator
 - [`server-lsl-library-unserved-functions`](ready/server-lsl-library-unserved-functions.md)
   — Five functions no served LSLSyntax document lists
 - [`server-lsl-memory-and-limits`](ready/server-lsl-memory-and-limits.md) —
@@ -1493,7 +1491,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1452)
+## done (1453)
 
 ### protocol
 
@@ -4517,6 +4515,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-compiler-ir`](done/server-lsl-compiler-ir.md) — Lower the LSL
   syntax tree to something executable (blocked by `server-lsl-architecture`
   (done), `server-lsl-value-model` (done))
+- [`server-lsl-float-expression-precision`](done/server-lsl-float-expression-precision.md)
+  — Round a float expression once, where Mono stores it, not at every operator
 - [`server-lsl-library-surface-table`](done/server-lsl-library-surface-table.md)
   — One generated table for the library, and a coverage harness over it (blocked
   by `server-lsl-architecture` (done))

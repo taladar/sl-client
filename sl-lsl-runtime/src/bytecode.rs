@@ -13,7 +13,9 @@
 //!   where a `float` is wanted, a `string` assigned to a `key`, the integer
 //!   side of `1 + 2.5`: each is an explicit [`Instr::Cast`]. The VM's only
 //!   type rules are the ones [`crate::cast()`] and [`crate::binary()`] apply
-//!   to the values they are handed.
+//!   to the values they are handed — save that the VM keeps a float operand
+//!   in double between operators and rounds it where Mono does (the book
+//!   chapter `simulator/lsl-engine.md`, § 1).
 //! - **Every program is well typed.** The operand stack holds exactly the
 //!   types the instructions expect, and is empty at every statement boundary,
 //!   so a jump between any two statements is sound.

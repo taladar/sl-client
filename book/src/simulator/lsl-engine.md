@@ -92,9 +92,21 @@ evaluates a float expression; `rotation / rotation`, `vector / rotation`
 (Linden's two-step formula) and the cross product round every operation to
 a float. PyOptimizer's open case, `<3,5,7,17> * <.22,.26,.38,.86>`, has a
 `y` of the float nearest `8.32` that way, where its products-rounded-first
-formula gives `8.320001`. What is not yet Mono's is a float expression
-compiled from several operators: Mono rounds it once when it is stored,
-the VM at every operator (`server-lsl-float-expression-precision`).
+formula gives `8.320001`.
+
+A float expression of several operators is Mono's too: evaluated in double
+and rounded to a float only where the value leaves the expression
+(`math/float-rounding`, every row on aditi). The VM's operand stack holds a
+float either as a stored `f32` or as an unrounded `f64` (the runtime's
+private `Operand`): `+ - * /` of floats, unary `-`, the dot product, `++`,
+`--`, an integer converted to `float` and a `(float)` cast produce the
+double; comparisons, a condition and the value of an assignment read it as
+it is; and every other consumer — a store, an argument to a user or library
+function, a return value, a list element, a vector or rotation component,
+the factor of `vector * float`, an `(integer)` or `(string)` cast — rounds
+it on the way. `Value::Float` stays an `f32`, since every stored float is
+one; `ops::binary`, which takes values, keeps rounding each operation and is
+what a single operator on stored floats gives anyway.
 
 A rule is written once, in the half it belongs to. Operators on the
 `sl-types` vector and rotation are free functions in the runtime, never

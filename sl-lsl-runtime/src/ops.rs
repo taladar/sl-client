@@ -1,7 +1,10 @@
 //! LSL's operators on values.
 //!
 //! Integers **wrap** at 32 bits and floats are **`f32`**; a mixed
-//! `integer op float` promotes the integer first. Vector and rotation
+//! `integer op float` promotes the integer first. Each operator here rounds
+//! its float result: what one operator on stored floats gives. A longer
+//! expression is evaluated in double between its operators and rounded where
+//! Mono rounds it, which the VM's operand stack does on top of these. Vector and rotation
 //! operators are free functions here, never `impl Mul` on the `sl-types`
 //! structs, because rotation composition is in Linden's order — the reverse
 //! of the textbook (and glam's) product — and that should be spelled out
@@ -358,11 +361,15 @@ fn less(left: &Value, right: &Value) -> Option<bool> {
 /// a float expression (`math/rotation-bits` on aditi: all seven cases; one
 /// in seven differs if each operation is rounded instead).
 fn dot(a: &Vector, b: &Vector) -> f32 {
-    to_f32(
-        f64::from(a.x) * f64::from(b.x)
-            + f64::from(a.y) * f64::from(b.y)
-            + f64::from(a.z) * f64::from(b.z),
-    )
+    to_f32(dot_unrounded(a, b))
+}
+
+/// The dot product before its rounding: what the rest of an expression it
+/// stands in goes on with (`math/float-rounding`'s `dot-in-expression`).
+pub(crate) fn dot_unrounded(a: &Vector, b: &Vector) -> f64 {
+    f64::from(a.x) * f64::from(b.x)
+        + f64::from(a.y) * f64::from(b.y)
+        + f64::from(a.z) * f64::from(b.z)
 }
 
 /// `vector % vector`: the cross product with **every operation rounded to

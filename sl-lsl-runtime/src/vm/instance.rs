@@ -12,6 +12,7 @@ use sl_types::lsl::{Rotation, Vector};
 use crate::bytecode::{Body, CodeOffset, Component, FunctionId, Instr, Program, StateId};
 use crate::library::{self, Event};
 use crate::num::ticks_for;
+use crate::operand::{self, Operand};
 use crate::value::{Element, Value};
 use crate::vm::context::{Peers, Request, ScriptCtx, ScriptData, Tick};
 use crate::vm::cost;
@@ -295,8 +296,9 @@ struct Activity {
     /// The call stack; the last frame is executing.
     frames: Vec<Frame>,
     /// The operand stack, shared by every frame (a frame's operands sit
-    /// above its caller's).
-    stack: Vec<Value>,
+    /// above its caller's). A float on it may still be a double
+    /// ([`Operand`]).
+    stack: Vec<Operand>,
 }
 
 /// An event waiting for its handler.
@@ -416,15 +418,21 @@ fn handler_index(program: &Program, state: StateId, event: &str) -> Option<usize
         .position(|handler| handler.event.name == event)
 }
 
-/// The top operand.
-fn pop(stack: &mut Vec<Value>) -> Result<Value, RuntimeError> {
+/// The top operand as it is.
+fn pop_operand(stack: &mut Vec<Operand>) -> Result<Operand, RuntimeError> {
     stack
         .pop()
         .ok_or_else(|| internal("operand stack underflow"))
 }
 
-/// The top operand, which must be a float.
-fn pop_float(stack: &mut Vec<Value>) -> Result<f32, RuntimeError> {
+/// The top operand as a value, a double rounded to a float: what a store, an
+/// argument and every other consumer that is not an operator takes.
+fn pop(stack: &mut Vec<Operand>) -> Result<Value, RuntimeError> {
+    pop_operand(stack).map(Operand::round)
+}
+
+/// The top operand, which must be a float, rounded.
+fn pop_float(stack: &mut Vec<Operand>) -> Result<f32, RuntimeError> {
     match pop(stack)? {
         Value::Float(float) => Ok(float),
         other => Err(internal(format!(
@@ -434,13 +442,17 @@ fn pop_float(stack: &mut Vec<Value>) -> Result<f32, RuntimeError> {
     }
 }
 
-/// The top `count` operands, deepest first.
-fn pop_n(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
+/// The top `count` operands, deepest first, each rounded.
+fn pop_n(stack: &mut Vec<Operand>, count: usize) -> Result<Vec<Value>, RuntimeError> {
     let at = stack
         .len()
         .checked_sub(count)
         .ok_or_else(|| internal("operand stack underflow"))?;
-    Ok(stack.split_off(at))
+    Ok(stack
+        .split_off(at)
+        .into_iter()
+        .map(Operand::round)
+        .collect())
 }
 
 /// `slot` as an index.
@@ -539,7 +551,8 @@ impl Machine<'_> {
                 program
                     .constant(id)
                     .cloned()
-                    .ok_or_else(|| internal(format!("no constant #{}", id.0)))?,
+                    .ok_or_else(|| internal(format!("no constant #{}", id.0)))?
+                    .into(),
             ),
             Instr::Pop => {
                 let _discarded = pop(stack)?;
@@ -556,7 +569,8 @@ impl Machine<'_> {
                     .locals
                     .get(index(slot.0))
                     .cloned()
-                    .ok_or_else(|| internal(format!("no local {}", slot.0)))?,
+                    .ok_or_else(|| internal(format!("no local {}", slot.0)))?
+                    .into(),
             ),
             Instr::StoreLocal(slot) => {
                 let value = pop(stack)?;
@@ -569,7 +583,8 @@ impl Machine<'_> {
                 self.globals
                     .get(index(slot.0))
                     .cloned()
-                    .ok_or_else(|| internal(format!("no global {}", slot.0)))?,
+                    .ok_or_else(|| internal(format!("no global {}", slot.0)))?
+                    .into(),
             ),
             Instr::StoreGlobal(slot) => {
                 let value = pop(stack)?;
@@ -580,40 +595,42 @@ impl Machine<'_> {
             }
             Instr::GetMember(component) => {
                 let aggregate = pop(stack)?;
-                stack.push(Value::Float(get_member(&aggregate, component)?));
+                stack.push(Value::Float(get_member(&aggregate, component)?).into());
             }
             Instr::SetMember(component) => {
                 let aggregate = pop(stack)?;
                 let to = pop_float(stack)?;
-                stack.push(set_member(aggregate, component, to)?);
+                stack.push(set_member(aggregate, component, to)?.into());
             }
             Instr::Cast(ty) => {
-                let value = pop(stack)?;
-                stack.push(crate::cast(value, ty)?);
+                let operand = pop_operand(stack)?;
+                stack.push(operand::cast(operand, ty)?);
             }
             Instr::Binary(op) => {
-                let left = pop(stack)?;
-                let right = pop(stack)?;
-                let value = crate::binary(op, left, right)?;
-                *used = used.saturating_add(cost::operator(op, &value));
-                stack.push(value);
+                let left = pop_operand(stack)?;
+                let right = pop_operand(stack)?;
+                let result = operand::binary(op, left, right)?;
+                if let Operand::Value(value) = &result {
+                    *used = used.saturating_add(cost::operator(op, value));
+                }
+                stack.push(result);
             }
             Instr::Prefix(op) => {
-                let operand = pop(stack)?;
-                stack.push(crate::prefix(op, operand)?);
+                let operand = pop_operand(stack)?;
+                stack.push(operand::prefix(op, operand)?);
             }
             Instr::BuildVector => {
                 let z = pop_float(stack)?;
                 let y = pop_float(stack)?;
                 let x = pop_float(stack)?;
-                stack.push(Value::Vector(Vector { x, y, z }));
+                stack.push(Value::Vector(Vector { x, y, z }).into());
             }
             Instr::BuildRotation => {
                 let s = pop_float(stack)?;
                 let z = pop_float(stack)?;
                 let y = pop_float(stack)?;
                 let x = pop_float(stack)?;
-                stack.push(Value::Rotation(Rotation { x, y, z, s }));
+                stack.push(Value::Rotation(Rotation { x, y, z, s }).into());
             }
             Instr::BuildList(count) => {
                 let elements = pop_n(stack, index(count))?
@@ -626,7 +643,7 @@ impl Machine<'_> {
                     .into_iter()
                     .flatten()
                     .collect();
-                stack.push(Value::List(elements));
+                stack.push(Value::List(elements).into());
             }
             Instr::CallBuiltin(id) => {
                 let descriptor = id.descriptor();
@@ -646,7 +663,7 @@ impl Machine<'_> {
                     self.host.stubbed(self.caller, id);
                 }
                 if let Some(value) = called.value {
-                    stack.push(value);
+                    stack.push(value.into());
                 }
                 let forced = f64::from(descriptor.sleep);
                 return Ok(match request {
@@ -672,12 +689,12 @@ impl Machine<'_> {
             }
             Instr::Jump(target) => Self::jump(frame, target, used),
             Instr::JumpIfFalse(target) => {
-                if !pop(stack)?.is_true() {
+                if !pop_operand(stack)?.is_true() {
                     Self::jump(frame, target, used);
                 }
             }
             Instr::JumpIfTrue(target) => {
-                if pop(stack)?.is_true() {
+                if pop_operand(stack)?.is_true() {
                     Self::jump(frame, target, used);
                 }
             }
@@ -721,14 +738,14 @@ impl Machine<'_> {
 
     /// Leave the executing body, handing `value` to the caller if there is
     /// one.
-    fn leave(frames: &mut Vec<Frame>, stack: &mut Vec<Value>, value: Option<Value>) -> Flow {
+    fn leave(frames: &mut Vec<Frame>, stack: &mut Vec<Operand>, value: Option<Value>) -> Flow {
         let _left = frames.pop();
         if frames.is_empty() {
             stack.clear();
             return Flow::BodyDone;
         }
         if let Some(value) = value {
-            stack.push(value);
+            stack.push(value.into());
         }
         Flow::Next
     }
