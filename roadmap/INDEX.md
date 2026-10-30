@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 53 |
 | in-progress | 18 |
 | bugs | 39 |
-| done | 1451 |
+| done | 1452 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2083** |
+| **total** | **2084** |
 
 ## ideas (135)
 
@@ -1139,13 +1139,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-lsl-forced-delays-per-flavour`](ready/server-lsl-forced-delays-per-flavour.md)
-  — Charge each grid flavour's measured forced delays and throttles, not the
-  keyword file's (blocked by `gridspec-lsl-throttles` (done))
+- [`server-lsl-float-expression-precision`](ready/server-lsl-float-expression-precision.md)
+  — Round a float expression once, where Mono stores it, not at every operator
 - [`server-lsl-library-unserved-functions`](ready/server-lsl-library-unserved-functions.md)
   — Five functions no served LSLSyntax document lists
-- [`server-lsl-memory-sizes`](ready/server-lsl-memory-sizes.md) — Measure Second
-  Life's per-value memory costs and rotation arithmetic on aditi
+- [`server-lsl-memory-and-limits`](ready/server-lsl-memory-and-limits.md) —
+  Script memory and limits, because scripts observe them (blocked by
+  `server-lsl-vm-execution` (done), `server-lsl-memory-sizes` (done),
+  `gridspec-lsl-memory-limits` (done))
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
   store for the region, in place of a Vec of objects
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
@@ -1302,10 +1303,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-scripted-scenario`](blocked/server-fake-grid-scripted-scenario.md)
   — A scripts scenario — one prim per scripted behaviour (blocked by
   `server-fake-grid-script-engine-wiring`)
-- [`server-lsl-memory-and-limits`](blocked/server-lsl-memory-and-limits.md) —
-  Script memory and limits, because scripts observe them (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-memory-sizes`,
-  `gridspec-lsl-memory-limits` (done))
+- [`server-lsl-forced-delays-per-flavour`](blocked/server-lsl-forced-delays-per-flavour.md)
+  — Charge each grid flavour's measured forced delays and throttles, not the
+  keyword file's (blocked by `gridspec-lsl-throttles` (done),
+  `server-lsl-lib-comms`, `server-lsl-lib-http-url`,
+  `server-lsl-lib-task-inventory`, `server-lsl-lib-math-rotations`,
+  `server-lsl-lib-land-region-env`, `server-lsl-lib-prim-state`,
+  `server-fake-grid-script-engine-wiring`)
 - [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
   agent never moves — AgentUpdate is decoded and ignored (blocked by
   `server-world-heartbeat`, `gridspec-neighbours-crossing` (done),
@@ -1489,7 +1493,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1451)
+## done (1452)
 
 ### protocol
 
@@ -4518,6 +4522,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `server-lsl-architecture` (done))
 - [`server-lsl-library-table-refresh`](done/server-lsl-library-table-refresh.md)
   — The vendored library document lacks 50 current functions
+- [`server-lsl-memory-sizes`](done/server-lsl-memory-sizes.md) — Measure Second
+  Life's per-value memory costs and rotation arithmetic on aditi
 - [`server-lsl-runtime-errors`](done/server-lsl-runtime-errors.md) — Run-time
   errors where a resident can see them (blocked by `server-lsl-vm-execution`
   (done))

@@ -1,0 +1,176 @@
+grid: aditi
+date: 2026-10-30
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=owner playing=""
+# animations avatar=other playing=""
+PROBE memory/sizes rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE memory/sizes rec=limit value=65536
+PROBE memory/sizes rec=noise deltas=0,0,0,0,0
+PROBE memory/sizes rec=list kind=integer count=0 deltas=0,0,0
+PROBE memory/sizes rec=list kind=integer count=1 deltas=80,80,650
+PROBE memory/sizes rec=list kind=integer count=2 deltas=96,80,96
+PROBE memory/sizes rec=list kind=integer count=3 deltas=112,112,112
+PROBE memory/sizes rec=list kind=integer count=4 deltas=128,128,-66
+PROBE memory/sizes rec=list kind=integer count=8 deltas=192,192,192
+PROBE memory/sizes rec=list kind=integer count=16 deltas=320,320,320
+PROBE memory/sizes rec=list kind=integer count=32 deltas=576,650,576
+PROBE memory/sizes rec=list kind=integer count=64 deltas=1008,1088,1184
+PROBE memory/sizes rec=list kind=integer count=128 deltas=2016,2192,2128
+PROBE memory/sizes rec=list kind=integer count=256 deltas=4064,4240,4250
+PROBE memory/sizes rec=list kind=float count=0 deltas=0,0,0
+PROBE memory/sizes rec=list kind=float count=1 deltas=80,80,80
+PROBE memory/sizes rec=list kind=float count=2 deltas=96,96,96
+PROBE memory/sizes rec=list kind=float count=3 deltas=112,424,112
+PROBE memory/sizes rec=list kind=float count=4 deltas=128,128,128
+PROBE memory/sizes rec=list kind=float count=8 deltas=192,106,192
+PROBE memory/sizes rec=list kind=float count=16 deltas=320,320,422
+PROBE memory/sizes rec=list kind=float count=32 deltas=576,576,576
+PROBE memory/sizes rec=list kind=float count=64 deltas=1088,986,1190
+PROBE memory/sizes rec=list kind=float count=128 deltas=2016,2192,2128
+PROBE memory/sizes rec=list kind=float count=256 deltas=4034,4326,4246
+PROBE memory/sizes rec=list kind=vector count=0 deltas=-208,0,0
+PROBE memory/sizes rec=list kind=vector count=1 deltas=88,88,88
+PROBE memory/sizes rec=list kind=vector count=2 deltas=112,280,112
+PROBE memory/sizes rec=list kind=vector count=3 deltas=136,136,136
+PROBE memory/sizes rec=list kind=vector count=4 deltas=80,160,160
+PROBE memory/sizes rec=list kind=vector count=8 deltas=256,336,256
+PROBE memory/sizes rec=list kind=vector count=16 deltas=448,448,464
+PROBE memory/sizes rec=list kind=vector count=32 deltas=832,816,832
+PROBE memory/sizes rec=list kind=vector count=64 deltas=1520,1680,1616
+PROBE memory/sizes rec=list kind=vector count=128 deltas=3372,3216,3224
+PROBE memory/sizes rec=list kind=vector count=256 deltas=6200,6376,6224
+PROBE memory/sizes rec=list kind=rotation count=0 deltas=0,0,0
+PROBE memory/sizes rec=list kind=rotation count=1 deltas=92,92,92
+PROBE memory/sizes rec=list kind=rotation count=2 deltas=120,120,120
+PROBE memory/sizes rec=list kind=rotation count=3 deltas=148,148,148
+PROBE memory/sizes rec=list kind=rotation count=4 deltas=176,176,176
+PROBE memory/sizes rec=list kind=rotation count=8 deltas=288,288,396
+PROBE memory/sizes rec=list kind=rotation count=16 deltas=512,512,512
+PROBE memory/sizes rec=list kind=rotation count=32 deltas=960,960,960
+PROBE memory/sizes rec=list kind=rotation count=64 deltas=1948,1936,1872
+PROBE memory/sizes rec=list kind=rotation count=128 deltas=3432,3820,3664
+PROBE memory/sizes rec=list kind=rotation count=256 deltas=7106,7312,7340
+PROBE memory/sizes rec=list kind=key count=1 deltas=166,166,166
+PROBE memory/sizes rec=list kind=key count=2 deltas=268,268,268
+PROBE memory/sizes rec=list kind=key count=4 deltas=442,472,472
+PROBE memory/sizes rec=list kind=key count=16 deltas=1696,1776,1696
+PROBE memory/sizes rec=list kind=key count=64 deltas=6592,6896,6608
+PROBE memory/sizes rec=list kind=key count=128 deltas=13344,13282,13136
+PROBE memory/sizes rec=list kind=shared-string count=1 deltas=98,98,98
+PROBE memory/sizes rec=list kind=shared-string count=2 deltas=102,446,102
+PROBE memory/sizes rec=list kind=shared-string count=4 deltas=110,110,110
+PROBE memory/sizes rec=list kind=shared-string count=16 deltas=158,158,158
+PROBE memory/sizes rec=list kind=shared-string count=64 deltas=614,350,446
+PROBE memory/sizes rec=list kind=shared-string count=256 deltas=1022,1220,1134
+PROBE memory/sizes rec=list kind=string class=ascii length=1 count=1 deltas=392,84,84
+PROBE memory/sizes rec=list kind=string class=ascii length=1 count=2 deltas=104,104,104
+PROBE memory/sizes rec=list kind=string class=ascii length=1 count=4 deltas=144,144,144
+PROBE memory/sizes rec=list kind=string class=ascii length=1 count=16 deltas=162,464,384
+PROBE memory/sizes rec=list kind=string class=ascii length=1 count=64 deltas=1208,1424,1416
+PROBE memory/sizes rec=list kind=string class=ascii length=1 count=256 deltas=4898,5362,5200
+PROBE memory/sizes rec=list kind=string class=ascii length=4 count=1 deltas=90,90,90
+PROBE memory/sizes rec=list kind=string class=ascii length=4 count=16 deltas=208,480,520
+PROBE memory/sizes rec=list kind=string class=ascii length=4 count=64 deltas=1710,1808,1744
+PROBE memory/sizes rec=list kind=string class=ascii length=4 count=256 deltas=6546,6800,6818
+PROBE memory/sizes rec=list kind=string class=ascii length=16 count=1 deltas=114,114,114
+PROBE memory/sizes rec=list kind=string class=ascii length=16 count=16 deltas=938,864,1006
+PROBE memory/sizes rec=list kind=string class=ascii length=16 count=64 deltas=3066,3446,3178
+PROBE memory/sizes rec=list kind=string class=ascii length=16 count=256 deltas=12768,12944,12880
+PROBE memory/sizes rec=list kind=string class=two-byte length=4 count=1 deltas=90,90,90
+PROBE memory/sizes rec=list kind=string class=two-byte length=4 count=16 deltas=480,762,480
+PROBE memory/sizes rec=list kind=string class=two-byte length=4 count=64 deltas=1648,1808,1766
+PROBE memory/sizes rec=list kind=string class=two-byte length=4 count=256 deltas=6860,6800,6824
+PROBE memory/sizes rec=list kind=string class=three-byte length=4 count=1 deltas=90,90,90
+PROBE memory/sizes rec=list kind=string class=three-byte length=4 count=16 deltas=480,770,480
+PROBE memory/sizes rec=list kind=string class=three-byte length=4 count=64 deltas=1648,1742,1744
+PROBE memory/sizes rec=list kind=string class=three-byte length=4 count=256 deltas=6712,6800,6648
+PROBE memory/sizes rec=text class=ascii length=1 deltas=2,82,2
+PROBE memory/sizes rec=text class=ascii length=2 deltas=4,4,4
+PROBE memory/sizes rec=text class=ascii length=3 deltas=-18,6,6
+PROBE memory/sizes rec=text class=ascii length=4 deltas=8,8,8
+PROBE memory/sizes rec=text class=ascii length=5 deltas=10,10,10
+PROBE memory/sizes rec=text class=ascii length=6 deltas=12,12,12
+PROBE memory/sizes rec=text class=ascii length=7 deltas=14,14,14
+PROBE memory/sizes rec=text class=ascii length=8 deltas=16,16,16
+PROBE memory/sizes rec=text class=ascii length=9 deltas=18,18,18
+PROBE memory/sizes rec=text class=ascii length=10 deltas=-4,20,20
+PROBE memory/sizes rec=text class=ascii length=11 deltas=22,46,22
+PROBE memory/sizes rec=text class=ascii length=12 deltas=24,24,96
+PROBE memory/sizes rec=text class=ascii length=13 deltas=26,26,26
+PROBE memory/sizes rec=text class=ascii length=14 deltas=28,28,28
+PROBE memory/sizes rec=text class=ascii length=15 deltas=30,-86,30
+PROBE memory/sizes rec=text class=ascii length=16 deltas=32,32,32
+PROBE memory/sizes rec=text class=ascii length=17 deltas=34,34,34
+PROBE memory/sizes rec=text class=ascii length=32 deltas=64,64,64
+PROBE memory/sizes rec=text class=ascii length=64 deltas=128,128,280
+PROBE memory/sizes rec=text class=ascii length=128 deltas=256,256,256
+PROBE memory/sizes rec=text class=ascii length=256 deltas=512,512,512
+PROBE memory/sizes rec=text class=two-byte length=1 deltas=-74,2,2
+PROBE memory/sizes rec=text class=three-byte length=1 deltas=2,2,2
+PROBE memory/sizes rec=text class=two-byte length=2 deltas=4,4,4
+PROBE memory/sizes rec=text class=three-byte length=2 deltas=4,4,4
+PROBE memory/sizes rec=text class=two-byte length=3 deltas=6,6,6
+PROBE memory/sizes rec=text class=three-byte length=3 deltas=6,6,6
+PROBE memory/sizes rec=text class=two-byte length=4 deltas=8,8,8
+PROBE memory/sizes rec=text class=three-byte length=4 deltas=8,8,8
+PROBE memory/sizes rec=text class=two-byte length=16 deltas=32,78,32
+PROBE memory/sizes rec=text class=three-byte length=16 deltas=32,32,32
+PROBE memory/sizes rec=text class=two-byte length=64 deltas=48,128,128
+PROBE memory/sizes rec=text class=three-byte length=64 deltas=128,128,128
+PROBE memory/sizes rec=text class=two-byte length=256 deltas=512,512,512
+PROBE memory/sizes rec=text class=three-byte length=256 deltas=512,512,340
+PROBE memory/sizes rec=global-key from=generated deltas=0,0,0
+PROBE memory/sizes rec=global-key from=cast deltas=0,116,0
+PROBE memory/sizes rec=global-key from=null deltas=-222,0,0
+PROBE memory/sizes rec=local kind=none count=4 deltas=0,0,0
+PROBE memory/sizes rec=local kind=integer count=4 deltas=-18,0,0
+PROBE memory/sizes rec=local kind=float count=4 deltas=216,0,0
+PROBE memory/sizes rec=local kind=vector count=4 deltas=0,0,268
+PROBE memory/sizes rec=local kind=rotation count=4 deltas=0,0,0
+PROBE memory/sizes rec=local kind=string count=4 deltas=44,34,0
+PROBE memory/sizes rec=local kind=key count=4 deltas=-236,80,0
+PROBE memory/sizes rec=local kind=list count=4 deltas=-80,0,0
+PROBE memory/sizes rec=argument kind=none count=4 deltas=0,0,0
+PROBE memory/sizes rec=argument kind=integer count=4 deltas=0,0,0
+PROBE memory/sizes rec=argument kind=float count=4 deltas=-212,0,0
+PROBE memory/sizes rec=argument kind=vector count=4 deltas=0,0,0
+PROBE memory/sizes rec=argument kind=rotation count=4 deltas=0,0,0
+PROBE memory/sizes rec=argument kind=string count=4 deltas=0,0,0
+PROBE memory/sizes rec=argument kind=key count=4 deltas=0,0,52
+PROBE memory/sizes rec=argument kind=list count=4 deltas=0,0,0
+PROBE memory/sizes rec=frames depth=0 deltas=0,0,0
+PROBE memory/sizes rec=frames depth=1 deltas=0,0,96
+PROBE memory/sizes rec=frames depth=2 deltas=0,0,0
+PROBE memory/sizes rec=frames depth=4 deltas=0,0,0
+PROBE memory/sizes rec=frames depth=8 deltas=-96,0,0
+PROBE memory/sizes rec=frames depth=16 deltas=0,0,0
+PROBE memory/sizes rec=frames depth=32 deltas=56,0,0
+PROBE memory/sizes rec=globals kind=rotation count=32 used=6512,6512
+PROBE memory/sizes rec=globals kind=key count=32 used=5094,5094
+PROBE memory/sizes rec=globals kind=integer count=32 used=5102,5102
+PROBE memory/sizes rec=globals kind=string count=32 used=5548,5548
+PROBE memory/sizes rec=globals kind=list count=32 used=6248,6248
+PROBE memory/sizes rec=globals kind=float count=32 used=5098,5098
+PROBE memory/sizes rec=globals kind=vector count=32 used=6380,6380
+PROBE memory/sizes rec=globals kind=none count=32 used=4456,4456
+PROBE memory/sizes rec=globals kind=rotation count=32 used=6512,6512
+PROBE memory/sizes rec=globals kind=key count=32 used=5094,5094
+PROBE memory/sizes rec=globals kind=integer count=32 used=5102,5102
+PROBE memory/sizes rec=globals kind=string count=32 used=5548,5548
+PROBE memory/sizes rec=globals kind=list count=32 used=6248,6248
+PROBE memory/sizes rec=globals kind=float count=32 used=5098,5098
+PROBE memory/sizes rec=globals kind=vector count=32 used=6380,6380
+PROBE memory/sizes rec=globals kind=none count=32 used=4456,4456
+PROBE memory/sizes rec=globals kind=rotation count=32 used=6512,6512
+PROBE memory/sizes rec=globals kind=key count=32 used=5094,5094
+PROBE memory/sizes rec=globals kind=integer count=32 used=5102,5102
+PROBE memory/sizes rec=globals kind=string count=32 used=5548,5548
+PROBE memory/sizes rec=globals kind=list count=32 used=6248,6248
+PROBE memory/sizes rec=globals kind=float count=32 used=5098,5098
+PROBE memory/sizes rec=globals kind=vector count=32 used=6380,6380
+PROBE memory/sizes rec=globals kind=none count=32 used=4456,4456
+PROBE memory/sizes rec=end

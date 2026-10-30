@@ -1079,9 +1079,10 @@ Measured on 2026-10-26 by the probes `memory/budget`, `memory/budget-lso`,
 `memory/recursion`, `memory/collision` and `memory/object`, on the same
 grids. A probe script marked `target: lsl2` is compiled to LSO on Second
 Life; OpenSim ignores the upload's target, so there the LSO twins run as
-every other script does and answer alike. The exact per-value costs Second
-Life charges are for the task `server-lsl-memory-sizes` to pin down; the
-numbers here are what the probes saw on the way.
+every other script does and answer alike. The exact per-value costs are
+`memory/sizes`' ([What a value costs, exactly](#what-a-value-costs-exactly),
+measured on 2026-10-30); the first table of costs below is what the earlier
+probes saw on the way.
 
 ### The memory functions
 
@@ -1109,6 +1110,49 @@ string per character.
 | a character of a string | 2, whether one, two or three bytes in UTF-8 (U+00E9, U+20AC) | 1 024 ASCII or two-byte characters stayed within the earlier low-water mark; 1 024 three-byte ones lowered it by 2 899 | 2, whatever the character | no scripts |
 
 XEngine counts nothing: every read is `65536`.
+
+### What a value costs, exactly
+
+`memory/sizes` reads `llGetUsedMemory` into locals immediately around one
+thing — a global list growing from empty to a count of fresh values, a
+global string or key taking a value, a function holding four locals or
+taking four arguments, a recursion some calls deep — three times over, and
+prints the three differences. Eight more scripts in the prim each declare 32
+globals of one type and read themselves, against one that declares none.
+On aditi most rows read the same number at least twice; a row of a hundred
+values or more rarely repeats, wandering by up to 160 bytes either side,
+and the model below sits within that. `sl-lsl-runtime`'s
+`value::memory` holds the costs, and its test holds them to all three
+transcripts.
+
+| what | Second Life, Mono | OpenSim YEngine | fake grid |
+| --- | --- | --- | --- |
+| a list, once it holds anything, over an empty one | 64 | 0 | no scripts |
+| an integer in a list | 16: a 4-byte reference and the boxed value | 4 | no scripts |
+| a float in a list | 16 | 8 (a double) | no scripts |
+| a vector in a list | 24 | 32 | no scripts |
+| a rotation in a list | 28 | 64 | no scripts |
+| a key (a UUID) in a list | 102 | 36: a byte a character | no scripts |
+| a string of *n* characters in a list | 18 + 2*n* | *n* | no scripts |
+| one literal string in every element | the string once, then 4 an element | *n* every element | no scripts |
+| a global string, over `""` | 2 a character | 2 a character | no scripts |
+| a global key, over an empty key | **0**: a UUID costs what an empty key does | 72: 2 a character | no scripts |
+| a local or an argument | **0**, of any type: not even a fresh string held only by a local shows | a local string 2 a character, a local list its elements; any other local, and any argument, 0 | no scripts |
+| a call frame, 32 deep | 0 | 0 | no scripts |
+| a global declared holding its default | integer, float or key 20; string 34; list 56; vector 60; rotation 64 | integer 4, float 8, vector 24, rotation 32; string, key or list 0 | no scripts |
+| a character of a string literal in the code | 2 | — (the literal's global, 2 a character) | no scripts |
+| a script that only reads its memory and says it | 4 456 | 32 | no scripts |
+
+A character is a UTF-16 code unit on both grids: U+00E9 and U+20AC cost what
+`a` costs. Every grid's `llGetMemoryLimit` starts at `65536`; XEngine counts
+nothing and answers `65536` to every read.
+
+So Second Life's Mono counts what the script's globals reach — a list's
+boxes, a string's characters — and its code, but no value on the stack; a
+recursion still collides (§ Running out), so the stack is checked
+elsewhere. YEngine's numbers are its heap tracker's own
+(`XMRHeapTracker.Size`, `LSL_List.Size`), which charges a string in a list
+half what it charges the same string anywhere else.
 
 ### `llSetMemoryLimit`
 

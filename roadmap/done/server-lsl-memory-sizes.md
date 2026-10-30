@@ -2,10 +2,11 @@
 id: server-lsl-memory-sizes
 title: Measure Second Life's per-value memory costs and rotation arithmetic on aditi
 topic: server
-status: ready
+status: done
 origin: user review of server-lsl-value-model (2026-09-27)
 points: 5
-refs: [server-lsl-memory-and-limits, server-lsl-value-model]
+refs: [server-lsl-memory-and-limits, server-lsl-value-model,
+  server-lsl-float-expression-precision]
 ---
 
 Context: [context/lsl.md](../context/lsl.md).
@@ -107,3 +108,36 @@ Matched against candidate evaluations (book: `gridspec/lsl.md` §
 - Library functions: the double result of the float argument, rounded.
 
 The memory half of this task is still open.
+
+## Done (2026-10-30)
+
+**Memory.** A new probe, `memory/sizes` (`sl-lsl-runtime/probes/memory/sizes/`:
+the measuring script and eight `Globals <type>` scripts), read
+`llGetUsedMemory` into locals around each type in each context, three times
+a row, on aditi and both OpenSim engines; the transcripts are committed and
+the book's `gridspec/lsl.md` § What a value costs, exactly, tabulates them.
+`sl-lsl-runtime`'s `value::memory` is the cost function, per
+`EngineFlavour`: `value_cost(value, flavour, Holder)` (global, local,
+argument), `element_cost(element, flavour)` (a list element),
+`global_cost(type, flavour)` (a declared global), `MEMORY_LIMIT`,
+`MONO_REFERENCE`. Its test holds it to every row of all three transcripts:
+exactly wherever two of a row's three aditi reads agree (55 of the 78 list
+rows and every other row), and within 200 bytes of the median where a row of
+a hundred values or more never repeats (the largest miss is 162, inside the
+few hundred bytes a read wanders by). The empty-ish baseline (a script that
+only reads and reports) is 4 456 bytes on aditi, the limit 65 536 everywhere.
+
+What the model cannot see, for [[server-lsl-memory-and-limits]]: Mono
+counts a list of one shared literal once plus 4 a reference, and the value
+model has no object identity; and Mono counts the script's code (2 bytes a
+character of a string literal, more per declaration), which a different
+compiler cannot reproduce byte for byte.
+
+**Rotations.** `ops.rs` now reproduces all 42 measured components of
+`math/rotation-bits` bit for bit (test
+`rotation_and_vector_arithmetic_matches_aditi_to_the_bit`): `compose` and
+`dot` in double rounded once, `rotate` unchanged (it already was), and a new
+`divide`, `unrotate` (Linden's two steps) and `cross` rounding every
+operation to a float. The `8.32` case is the float nearest 8.32. Mono's
+rounding of a longer float expression only when it is stored is a compiler
+and VM change, split out as [[server-lsl-float-expression-precision]].

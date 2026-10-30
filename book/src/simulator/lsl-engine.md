@@ -84,11 +84,17 @@ and the first draft of the task guessed them:
 - **`!`, `~`, `&&` and `||` take only integers**; `&&` and `||` evaluate
   both operands (right to left, as every operator does).
 
-One known divergence remains, recorded in the test: Second Life composes
-`<3,5,7,17> * <.22,.26,.38,.86>` with a `y` of exactly `8.32`, while the
-formula PyOptimizer uses — each product rounded to `f32`, summed in
-double — gives `8.320001`, and no summation order tried reproduces
-Second Life's value.
+The vector and rotation operators are Second Life's to the bit, held to
+`math/rotation-bits`' aditi transcript (seven pairs, every component):
+`rotation * rotation`, `vector * rotation` and the dot product are
+evaluated in double from the float components and rounded once, as Mono
+evaluates a float expression; `rotation / rotation`, `vector / rotation`
+(Linden's two-step formula) and the cross product round every operation to
+a float. PyOptimizer's open case, `<3,5,7,17> * <.22,.26,.38,.86>`, has a
+`y` of the float nearest `8.32` that way, where its products-rounded-first
+formula gives `8.320001`. What is not yet Mono's is a float expression
+compiled from several operators: Mono rounds it once when it is stored,
+the VM at every operator (`server-lsl-float-expression-precision`).
 
 A rule is written once, in the half it belongs to. Operators on the
 `sl-types` vector and rotation are free functions in the runtime, never

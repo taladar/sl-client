@@ -2,9 +2,12 @@
 id: server-lsl-forced-delays-per-flavour
 title: Charge each grid flavour's measured forced delays and throttles, not the keyword file's
 topic: server
-status: ready
+status: blocked
 origin: gridspec-lsl-throttles (2026-10-28)
-blocked_by: [gridspec-lsl-throttles]
+blocked_by: [gridspec-lsl-throttles, server-lsl-lib-comms,
+  server-lsl-lib-http-url, server-lsl-lib-task-inventory,
+  server-lsl-lib-math-rotations, server-lsl-lib-land-region-env,
+  server-lsl-lib-prim-state, server-fake-grid-script-engine-wiring]
 refs: [server-lsl-vm-execution, server-lsl-lib-comms, server-lsl-lib-http-url,
   server-lsl-lib-task-inventory, server-lsl-lib-detection-sensors,
   server-lsl-lib-email-xmlrpc, gridspec-infra-fake-flavour-conformance]
@@ -58,3 +61,13 @@ grid's committed result file under `sl-conformance compare-probes`
 flavour (`library/control.rs`, `ctx.sleep(1.0)` beside `ctx.refuse`), since
 aditi measured the same second there. When the outcome-dependent delay lands,
 fold it into that mechanism rather than keep a second path.
+
+## Blocked until its calls exist (2026-10-30)
+
+Picked up and put back: the runtime implemented none of the calls this task
+re-times (`llTextBox`, `llLoadURL`, `llGiveInventory`, `llModPow`,
+`llSetRemoteScriptAccessPin`, `llParcelMediaQuery`, `llMapDestination`,
+`llSay`/`llShout`, `llHTTPRequest`), so a per-flavour table, an outcome hook
+and both throttles would have had no consumer, and the acceptance needs the
+fake grid to run scripts. It waits on the tranches that add those calls and
+on [[server-fake-grid-script-engine-wiring]].

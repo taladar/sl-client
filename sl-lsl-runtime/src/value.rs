@@ -1,4 +1,7 @@
-//! LSL's seven value types as one enum, and the flat list element.
+//! LSL's seven value types as one enum, and the flat list element — and, in
+//! [`memory`], what each costs against a script's memory on each grid.
+
+pub mod memory;
 
 use sl_lsl::ast::TypeName;
 use sl_types::lsl::{Rotation, Vector};

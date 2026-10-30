@@ -255,11 +255,9 @@ fn mul(left: &Value, right: &Value) -> Option<Value> {
 fn div(left: &Value, right: &Value) -> Option<Result<Value, ValueError>> {
     match (left, right) {
         (Value::Vector(vector), Value::Rotation(rotation)) => {
-            Some(Ok(Value::Vector(rotate(vector, &conjugate(rotation)))))
+            Some(Ok(Value::Vector(unrotate(vector, rotation))))
         }
-        (Value::Rotation(a), Value::Rotation(b)) => {
-            Some(Ok(Value::Rotation(compose(a, &conjugate(b)))))
-        }
+        (Value::Rotation(a), Value::Rotation(b)) => Some(Ok(Value::Rotation(divide(a, b)))),
         (Value::Vector(vector), divisor) => {
             let divisor = number(divisor)?.to_float();
             if divisor == 0.0 {
@@ -355,44 +353,27 @@ fn less(left: &Value, right: &Value) -> Option<bool> {
     }
 }
 
-/// The sum of `terms` rounded once, as Python's `math.fsum` gives it: a
-/// compensated (Neumaier) sum in `f64`, which is exact for the three exact
-/// products of a dot product in all but pathological cancellations.
-fn compensated_sum(terms: &[f64]) -> f64 {
-    let mut sum = 0.0_f64;
-    let mut compensation = 0.0_f64;
-    for term in terms {
-        let next = sum + term;
-        compensation += if sum.abs() >= term.abs() {
-            (sum - next) + term
-        } else {
-            (term - next) + sum
-        };
-        sum = next;
-    }
-    sum + compensation
-}
-
-/// `vector * vector`: the dot product. The component products are exact in
-/// `f64`, summed with one rounding and then rounded to `f32` (PyOptimizer's
-/// `fsum`).
+/// `vector * vector`: the dot product, evaluated in `f64` from the `f32`
+/// components left to right and rounded to `f32` once — Mono's evaluation of
+/// a float expression (`math/rotation-bits` on aditi: all seven cases; one
+/// in seven differs if each operation is rounded instead).
 fn dot(a: &Vector, b: &Vector) -> f32 {
-    to_f32(compensated_sum(&[
-        f64::from(a.x) * f64::from(b.x),
-        f64::from(a.y) * f64::from(b.y),
-        f64::from(a.z) * f64::from(b.z),
-    ]))
+    to_f32(
+        f64::from(a.x) * f64::from(b.x)
+            + f64::from(a.y) * f64::from(b.y)
+            + f64::from(a.z) * f64::from(b.z),
+    )
 }
 
-/// `vector % vector`: the cross product, each component computed in `f64`
-/// and rounded to `f32` once.
+/// `vector % vector`: the cross product with **every operation rounded to
+/// `f32`** — Second Life computes it in the library, not as a float
+/// expression (`math/rotation-bits`: all seven cases; evaluating in `f64`
+/// matches three).
 fn cross(a: &Vector, b: &Vector) -> Vector {
-    let (ax, ay, az) = (f64::from(a.x), f64::from(a.y), f64::from(a.z));
-    let (bx, by, bz) = (f64::from(b.x), f64::from(b.y), f64::from(b.z));
     Vector {
-        x: to_f32(ay * bz - az * by),
-        y: to_f32(az * bx - ax * bz),
-        z: to_f32(ax * by - ay * bx),
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
     }
 }
 
@@ -409,7 +390,9 @@ const fn conjugate(rotation: &Rotation) -> Rotation {
 
 /// `vector * rotation`: the vector rotated by the rotation, `q v q*`,
 /// expanded and evaluated in `f64` from the `f32` components, then rounded
-/// to `f32` (PyOptimizer's `mul`). The rotation is not normalised first.
+/// to `f32` (PyOptimizer's `mul`) — what Mono does with it too
+/// (`math/rotation-bits` on aditi: all seven cases). The rotation is not
+/// normalised first.
 fn rotate(vector: &Vector, rotation: &Rotation) -> Vector {
     let (a0, a1, a2) = (
         f64::from(vector.x),
@@ -443,19 +426,52 @@ fn rotate(vector: &Vector, rotation: &Rotation) -> Vector {
 /// the Hamilton product `right ⊗ left` — the reverse of what glam's
 /// `left * right` means.
 ///
-/// Each partial product is rounded to `f32`, the four summed in `f64` and
-/// rounded once more (PyOptimizer's `mul`). Second Life itself is known to
-/// round at least one case differently: `<3,5,7,17> * <.22,.26,.38,.86>` has
-/// a `y` of exactly `8.32` there and `8.320001` here, a difference neither
-/// oracle reproduces.
+/// Each component is evaluated in `f64` from the `f32` components, left to
+/// right, and rounded to `f32` once, as Mono evaluates a float expression
+/// (`math/rotation-bits` on aditi: all seven cases). PyOptimizer's open case,
+/// `<3, 5, 7, 17> * <.22, .26, .38, .86>`, comes out with `y` the float
+/// nearest `8.32` (`8.3199997`); rounding each product first, the oracles'
+/// formula, gave `8.320001`.
 fn compose(left: &Rotation, right: &Rotation) -> Rotation {
     let (a, b) = (left, right);
-    let term = |x: f32, y: f32| f64::from(x * y);
+    let term = |x: f32, y: f32| f64::from(x) * f64::from(y);
     Rotation {
         x: to_f32(term(a.x, b.s) + term(a.s, b.x) + term(a.z, b.y) - term(a.y, b.z)),
         y: to_f32(term(a.y, b.s) - term(a.z, b.x) + term(a.s, b.y) + term(a.x, b.z)),
         z: to_f32(term(a.z, b.s) + term(a.y, b.x) - term(a.x, b.y) + term(a.s, b.z)),
         s: to_f32(term(a.s, b.s) - term(a.x, b.x) - term(a.y, b.y) - term(a.z, b.z)),
+    }
+}
+
+/// `left / right` on rotations: `left` composed with the conjugate of
+/// `right`, in the operand order of Linden's `llquaternion.cpp` and with
+/// **every operation rounded to `f32`** (`math/rotation-bits` on aditi: all
+/// seven cases; the same products in [`compose`]'s order match two).
+fn divide(left: &Rotation, right: &Rotation) -> Rotation {
+    let (a, b) = (left, &conjugate(right));
+    Rotation {
+        x: b.s * a.x + b.x * a.s + b.y * a.z - b.z * a.y,
+        y: b.s * a.y + b.y * a.s + b.z * a.x - b.x * a.z,
+        z: b.s * a.z + b.z * a.s + b.x * a.y - b.y * a.x,
+        s: b.s * a.s - b.x * a.x - b.y * a.y - b.z * a.z,
+    }
+}
+
+/// `vector / rotation`: the vector rotated by the conjugate in Linden's
+/// two steps (`llquaternion.cpp`'s `LLVector3 * LLQuaternion`: the product
+/// `q v`, then that times `q*`), with **every operation rounded to `f32`**
+/// (`math/rotation-bits` on aditi: all seven cases; in `f64` it matches none).
+/// The rotation is not normalised first.
+fn unrotate(vector: &Vector, rotation: &Rotation) -> Vector {
+    let (a, q) = (vector, &conjugate(rotation));
+    let rw = -q.x * a.x - q.y * a.y - q.z * a.z;
+    let rx = q.s * a.x + q.y * a.z - q.z * a.y;
+    let ry = q.s * a.y + q.z * a.x - q.x * a.z;
+    let rz = q.s * a.z + q.x * a.y - q.y * a.x;
+    Vector {
+        x: -rw * q.x + rx * q.s - ry * q.z + rz * q.y,
+        y: -rw * q.y + ry * q.s - rz * q.x + rx * q.z,
+        z: -rw * q.z + rz * q.s - rx * q.y + ry * q.x,
     }
 }
 
@@ -810,11 +826,14 @@ mod tests {
                 q(),
                 Value::Vector(vector(2.643_2, 3.857_6, 5.304)),
             ),
+            // Linden's two steps rounded at each operation, as aditi
+            // computes `vector / rotation`: y is a bit under the oracles'
+            // all-double 3.72.
             (
                 BinaryOp::Div,
                 v345(),
                 q(),
-                Value::Vector(vector(3.4, 3.72, 4.96)),
+                Value::Vector(vector(3.4, 3.719_999_8, 4.96)),
             ),
             (
                 BinaryOp::Mul,
@@ -822,14 +841,14 @@ mod tests {
                 Value::Rotation(rotation(1.0, 0.0, 0.0, 0.0)),
                 Value::Rotation(rotation(6.8, -6.4, 3.2, -1.6)),
             ),
-            // Second Life reports y = 8.32 exactly here; both oracles'
-            // formula gives 8.320001 (the FIXME in operators.lsl). Recorded
-            // as a known divergence: we match PyOptimizer.
+            // The FIXME in PyOptimizer's operators.lsl: Second Life's y is
+            // the float nearest 8.32 (`math/rotation-bits` on aditi), where
+            // the oracles' products-rounded-first formula gives 8.320001.
             (
                 BinaryOp::Mul,
                 Value::Rotation(rotation(3.0, 5.0, 7.0, 17.0)),
                 q(),
-                Value::Rotation(rotation(6.24, 8.320_001, 12.8, 10.0)),
+                Value::Rotation(rotation(6.24, 8.32, 12.8, 10.0)),
             ),
             (
                 BinaryOp::Div,
@@ -883,7 +902,7 @@ mod tests {
         assert!(close(&rotated, &stepwise), "{rotated:?} vs {stepwise:?}");
         assert!(close(&rotated, &vector(0.0, 0.0, 1.0)), "{rotated:?}");
         // Dividing by a rotation undoes it.
-        let back = rotate(&rotated, &conjugate(&composed));
+        let back = unrotate(&rotated, &composed);
         assert!(close(&back, &unit_x), "{back:?}");
     }
 
@@ -1043,5 +1062,107 @@ mod tests {
             prefix(PrefixOp::PreInc, Value::Integer(i32::MAX)),
             Ok(Value::Integer(i32::MIN))
         );
+    }
+
+    /// A float as `math/rotation-bits` prints it: `0`, or
+    /// `<sign><hi>:<lo>p<exp>`, the value `(hi + lo / 2^29) * 2^exp`. On
+    /// Second Life `lo` is always 0 and `hi` below 2^24, so the value is an
+    /// exact `f32`.
+    fn from_bits(text: &str) -> Result<f32, String> {
+        if text == "0" {
+            return Ok(0.0);
+        }
+        let (sign, rest) = text.split_at_checked(1).ok_or_else(|| text.to_owned())?;
+        let (mantissa, exponent) = rest.split_once('p').ok_or_else(|| text.to_owned())?;
+        let (hi, lo) = mantissa.split_once(':').ok_or_else(|| text.to_owned())?;
+        if lo != "0" {
+            return Err(format!("{text} is not a float"));
+        }
+        let hi: u32 = hi.parse().map_err(|error| format!("{text}: {error}"))?;
+        let exponent: i32 = exponent
+            .parse()
+            .map_err(|error| format!("{text}: {error}"))?;
+        let magnitude = f64::from(hi) * 2.0_f64.powi(exponent);
+        let value = to_f32(magnitude);
+        if f64::from(value).to_bits() != magnitude.to_bits() {
+            return Err(format!("{text} does not fit a float"));
+        }
+        Ok(if sign == "-" { -value } else { value })
+    }
+
+    /// The fields `keys` of `line`, each read with [`from_bits`].
+    fn components(line: &crate::probe::Line, keys: &[&str]) -> Result<Vec<f32>, String> {
+        keys.iter()
+            .map(|key| {
+                line.field(key)
+                    .ok_or_else(|| format!("no {key} in {line:?}"))
+                    .and_then(from_bits)
+            })
+            .collect()
+    }
+
+    /// A rotation's components, in the probe's order.
+    fn rotation_parts(r: &Rotation) -> Vec<f32> {
+        vec![r.x, r.y, r.z, r.s]
+    }
+
+    /// A vector's components, in the probe's order.
+    fn vector_parts(v: &Vector) -> Vec<f32> {
+        vec![v.x, v.y, v.z]
+    }
+
+    #[test]
+    fn rotation_and_vector_arithmetic_matches_aditi_to_the_bit() -> Result<(), String> {
+        let transcript = include_str!("../probes/results/aditi/math/rotation-bits.txt");
+        let lines: Vec<crate::probe::Line> = transcript
+            .lines()
+            .filter_map(|line| crate::probe::Line::parse(line).ok())
+            .collect();
+        let find = |rec: &str, case: &str, operand: Option<&str>| {
+            lines
+                .iter()
+                .find(|line| {
+                    line.rec == rec
+                        && line.field("case") == Some(case)
+                        && line.field("operand") == operand
+                })
+                .ok_or_else(|| format!("no {rec} for case {case}"))
+        };
+        let xyzs = ["x", "y", "z", "s"];
+        let xyz = ["x", "y", "z"];
+        let mut checked = 0_u32;
+        for case in 0..7_u8 {
+            let case = case.to_string();
+            let operand = |name| -> Result<Rotation, String> {
+                let parts = components(find("input-bits", &case, Some(name))?, &xyzs)?;
+                let [x, y, z, s] = parts.as_slice() else {
+                    return Err(format!("{parts:?}"));
+                };
+                Ok(rotation(*x, *y, *z, *s))
+            };
+            let (a, b) = (operand("a")?, operand("b")?);
+            let (v, w) = (vector(a.x, a.y, a.z), vector(b.x, b.y, b.z));
+            let results = [
+                ("compose", rotation_parts(&compose(&a, &b)), &xyzs[..]),
+                ("divide", rotation_parts(&divide(&a, &b)), &xyzs[..]),
+                ("rotate", vector_parts(&rotate(&v, &b)), &xyz[..]),
+                ("unrotate", vector_parts(&unrotate(&v, &b)), &xyz[..]),
+                ("dot", vec![dot(&v, &w)], &["value"][..]),
+                ("cross", vector_parts(&cross(&v, &w)), &xyz[..]),
+            ];
+            for (rec, ours, keys) in results {
+                let aditi = components(find(rec, &case, None)?, keys)?;
+                let bits =
+                    |parts: &[f32]| parts.iter().map(|part| part.to_bits()).collect::<Vec<_>>();
+                assert_eq!(
+                    bits(&ours),
+                    bits(&aditi),
+                    "{rec} of case {case}: {ours:?} against {aditi:?}"
+                );
+                checked = checked.saturating_add(1);
+            }
+        }
+        assert_eq!(checked, 42);
+        Ok(())
     }
 }

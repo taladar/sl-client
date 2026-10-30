@@ -2,7 +2,7 @@
 id: server-lsl-memory-and-limits
 title: Script memory and limits, because scripts observe them
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-lsl-vm-execution, server-lsl-memory-sizes,
@@ -85,3 +85,25 @@ it changes here:
   script on OpenSim; the region's `ActiveScripts` stat is a fractional
   average of the running scripts on Second Life and the count of scripts
   present, stopped or not, on OpenSim. The fake grid sends `0` today.
+
+## From server-lsl-memory-sizes (2026-10-30)
+
+The cost function is `sl-lsl-runtime`'s `value::memory`, per flavour
+(`book/src/gridspec/lsl.md` § What a value costs, exactly). Three things to
+decide here that it leaves open:
+
+- **Code.** Mono's `llGetUsedMemory` includes the script's code: a script
+  that only reads its memory and says it uses 4 456 bytes, each character of
+  a string literal costs 2, a declared global 20 to 64. The fake grid
+  compiles to its own bytecode, so the base has to be a model (a constant
+  plus per-literal and per-declaration terms fitted to the corpus' scripts),
+  stated as one rather than passed off as exact.
+- **Shared literals.** Mono counts one string literal put in every element
+  of a list once, then `MONO_REFERENCE` (4) an element; the value model
+  copies. Exact accounting needs the literal's identity (an `Rc<str>` for
+  constants, or a literal id on `Element::String`).
+- **The stack.** No local, argument or call frame shows in Mono's
+  `llGetUsedMemory`, yet recursion collides and a lowered limit cuts the
+  depth (§ Running out): the collision check counts something the reading
+  does not. YEngine counts a local string or list in its heap; XEngine
+  counts nothing.

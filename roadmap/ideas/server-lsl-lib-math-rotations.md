@@ -90,5 +90,8 @@ grids for unit input. Where the flavours differ:
 - `llTan(1e30)` hands the argument back on Second Life; `llPow` and
   products past the float range are `Infinity` there, doubles here.
 - `-rotation` does not compile under XEngine.
-- Precision (every operator and helper's evaluation order) is in
-  [[server-lsl-memory-sizes]], which owns the change to `ops.rs`.
+- Precision: the operators are Second Life's to the bit since
+  [[server-lsl-memory-sizes]]; a longer float expression's rounding is
+  [[server-lsl-float-expression-precision]]. The library helpers here
+  compute the double result of the float argument and round it once
+  (`math/rotation-bits`' `library` rows).
