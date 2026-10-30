@@ -198,6 +198,10 @@ pub struct SceneFixtures {
     /// viewers, where the live grids disagree. Second Life's unless the
     /// grid's flavour says otherwise.
     pub(crate) relays: crate::relays::RelayPolicy,
+    /// How the region answers a script upload, where the live grids
+    /// disagree ([`crate::script_compile`]). Second Life's unless the grid's
+    /// flavour says otherwise.
+    pub(crate) scripts: crate::script_compile::CompilePolicy,
     /// How the region passes local chat on, where the live grids disagree.
     /// Second Life's unless the grid's flavour says otherwise.
     pub(crate) chat: crate::chat::ChatPolicy,
@@ -524,6 +528,11 @@ pub struct TaskInventory {
     /// answered from. The fake grid runs no script; this is the state a
     /// viewer's Running checkbox reads and writes.
     pub running: BTreeSet<InventoryKey>,
+    /// The scripts among them whose last upload did not compile on a grid
+    /// that then keeps no instance of them (OpenSim): a `GetScriptRunning`
+    /// about one of them is not answered
+    /// ([`FailedScript::NoInstance`](crate::script_compile::FailedScript::NoInstance)).
+    pub uncompiled: BTreeSet<InventoryKey>,
 }
 
 impl TaskInventory {
@@ -536,6 +545,7 @@ impl TaskInventory {
             items,
             experiences: BTreeMap::new(),
             running: BTreeSet::new(),
+            uncompiled: BTreeSet::new(),
         }
     }
 
@@ -565,6 +575,7 @@ impl TaskInventory {
         let index = self.items.iter().position(|held| held.item_id == item_id)?;
         let _experience = self.experiences.remove(&item_id);
         let _was_running = self.running.remove(&item_id);
+        let _was_uncompiled = self.uncompiled.remove(&item_id);
         self.serial = self.serial.saturating_add(1);
         Some(self.items.remove(index))
     }
@@ -733,6 +744,7 @@ impl SceneFixtures {
             linking: crate::imitates::LinkPolicy::default(),
             contents: crate::imitates::ContentsPolicy::default(),
             relays: crate::relays::RelayPolicy::default(),
+            scripts: crate::script_compile::CompilePolicy::default(),
             chat: crate::chat::ChatPolicy::default(),
             region_info: crate::imitates::RegionInfoPolicy::default(),
             links: crate::link_sets::LinkSets::default(),

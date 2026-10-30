@@ -1426,6 +1426,35 @@ impl ImitatedGrid {
         }
     }
 
+    /// How this grid answers a script upload — measured by the
+    /// `script-compile` census on aditi and the local OpenSim (2026-10-25,
+    /// `book/src/gridspec/lsl.md` § Compiling), and applied by
+    /// [`crate::script_compile`].
+    ///
+    /// Second Life compiles every upload, answers one error at the token
+    /// after the fault, stops a script that did not compile, and names the
+    /// stored asset. OpenSim compiles as YEngine — every error, at the fault —
+    /// compiles no agent-inventory upload, leaves a script that did not
+    /// compile without an instance, and names the item's own id.
+    #[must_use]
+    pub const fn script_compile_policy(self) -> crate::script_compile::CompilePolicy {
+        use crate::script_compile::{CompilePolicy, FailedScript, ScriptCompiler, TaskNewAsset};
+        match self {
+            Self::SecondLife => CompilePolicy {
+                compiler: ScriptCompiler::SecondLife,
+                compiles_agent_uploads: true,
+                failed_script: FailedScript::Stopped,
+                task_new_asset: TaskNewAsset::StoredAsset,
+            },
+            Self::OpenSim => CompilePolicy {
+                compiler: ScriptCompiler::YEngine,
+                compiles_agent_uploads: false,
+                failed_script: FailedScript::NoInstance,
+                task_new_asset: TaskNewAsset::ItemId,
+            },
+        }
+    }
+
     /// How this grid passes a viewer's effects and sounds on to the other
     /// viewers — measured by the `effects-sounds` conformance case on aditi
     /// and the local OpenSim (2026-10-13, `book/src/gridspec/avatars.md`

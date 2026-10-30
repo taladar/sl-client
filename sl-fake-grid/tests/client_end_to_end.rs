@@ -1155,7 +1155,13 @@ mod test {
             })
             .await?;
         assert_eq!(serial, 1);
-        assert_eq!(items, vec![script.clone()]);
+        assert_eq!(
+            items,
+            vec![
+                script.clone(),
+                sl_fake_grid::scenario::stock_broken_script_item()
+            ]
+        );
 
         let asset_id = script.asset_id.ok_or("stock script has no asset id")?;
         running
@@ -1197,6 +1203,155 @@ mod test {
             })
             .await?;
         assert_eq!(status, sl_proto::TransferStatus::UnknownSource);
+        Ok(())
+    }
+
+    /// Uploads `source` over `UpdateScriptTask` to the stock scripted object's
+    /// `item`, running, and returns the answer: `compiled`, the errors, and the
+    /// asset it names.
+    async fn upload_task_script(
+        running: &mut Running,
+        item: sl_types::key::InventoryKey,
+        source: &[u8],
+    ) -> Result<
+        (
+            bool,
+            Vec<sl_client_tokio::ScriptCompileError>,
+            Option<uuid::Uuid>,
+        ),
+        TestError,
+    > {
+        running
+            .commands
+            .send(Command::UploadScript {
+                location: sl_client_tokio::ScriptUploadLocation::TaskInventory {
+                    task_id: sl_fake_grid::scenario::stock_scripted_object(),
+                    item_id: item,
+                    running: true,
+                    experience: None,
+                },
+                target: sl_client_tokio::ScriptTarget::Mono,
+                source: source.to_vec(),
+            })
+            .await?;
+        running
+            .wait_for(|event| match event {
+                Event::ScriptUploaded {
+                    compiled,
+                    errors,
+                    new_asset,
+                    ..
+                } => Some((*compiled, errors.clone(), *new_asset)),
+                _ => None,
+            })
+            .await
+    }
+
+    /// Asks whether the stock scripted object's `item` runs, and returns the
+    /// answer — `None` when the grid answers nothing before a listing asked
+    /// for after it arrives.
+    async fn script_running(
+        running: &mut Running,
+        item: sl_types::key::InventoryKey,
+    ) -> Result<Option<bool>, TestError> {
+        let task = sl_fake_grid::scenario::stock_scripted_object();
+        running
+            .commands
+            .send(Command::RequestScriptRunning {
+                object_id: task,
+                item_id: item,
+            })
+            .await?;
+        // The listing is asked for after the question and answered on the same
+        // circuit, so an answer the grid was going to give is in front of it.
+        running
+            .commands
+            .send(Command::FetchTaskInventory {
+                target: sl_client_tokio::ScopedObjectId::new(
+                    running.circuit,
+                    sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+                ),
+                held_serial: None,
+            })
+            .await?;
+        let mut answer = None;
+        running
+            .wait_until("the run state, then the listing", |event| match event {
+                Event::ScriptRunning {
+                    item_id,
+                    running: runs,
+                    ..
+                } if *item_id == item => {
+                    answer = Some(*runs);
+                    false
+                }
+                Event::TaskInventoryContents { task: got, .. } => *got == task,
+                _other => false,
+            })
+            .await?;
+        Ok(answer)
+    }
+
+    /// A script upload is compiled as the imitated grid compiles it: the
+    /// stock broken script's source is refused with the grid's error at the
+    /// grid's place, stored all the same, and leaves the script stopped
+    /// (Second Life) or without an instance (OpenSim); a clean source then
+    /// compiles and runs. `book/src/gridspec/lsl.md` § Compiling.
+    #[tokio::test]
+    async fn a_script_upload_is_compiled_as_the_imitated_grid_compiles_it() -> Result<(), TestError>
+    {
+        let item = sl_fake_grid::scenario::stock_broken_script_item().item_id;
+        let broken = sl_fake_grid::scenario::STOCK_BROKEN_SCRIPT_BODY;
+        let clean = sl_fake_grid::scenario::STOCK_SCRIPT_BODY;
+        for (grid, first_error, raw_start, after_failure) in [
+            (
+                ImitatedGrid::SecondLife,
+                (5, 21),
+                "(4, 20) : ERROR : ",
+                Some(false),
+            ),
+            (ImitatedGrid::OpenSim, (5, 21), "(4,20) Error: ", None),
+        ] {
+            let mut running = start_configured(vec![RegionConfig::default()], None, grid).await?;
+            let (compiled, errors, new_asset) =
+                upload_task_script(&mut running, item, broken).await?;
+            assert!(!compiled, "{grid:?}: a missing expression compiled");
+            let error = errors.first().ok_or("a failed compile named no error")?;
+            assert_eq!(
+                (error.line, error.column),
+                (Some(first_error.0), Some(first_error.1)),
+                "{grid:?}: {error:?}"
+            );
+            assert!(
+                error.raw.starts_with(raw_start),
+                "{grid:?}: {:?}",
+                error.raw
+            );
+            if grid == ImitatedGrid::OpenSim {
+                assert_eq!(
+                    new_asset,
+                    Some(item.uuid()),
+                    "OpenSim names the item's own id"
+                );
+            } else {
+                assert_ne!(new_asset, Some(item.uuid()));
+            }
+            assert_eq!(
+                script_running(&mut running, item).await?,
+                after_failure,
+                "{grid:?}: the run state after a failed compile"
+            );
+
+            let (compiled, errors, _new_asset) =
+                upload_task_script(&mut running, item, clean).await?;
+            assert!(compiled, "{grid:?}: {errors:?}");
+            assert!(errors.is_empty(), "{grid:?}: {errors:?}");
+            assert_eq!(
+                script_running(&mut running, item).await?,
+                Some(true),
+                "{grid:?}: a clean upload asked to run runs"
+            );
+        }
         Ok(())
     }
 

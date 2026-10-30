@@ -243,6 +243,10 @@ pub fn default_assets() -> sl_proto::InMemoryAssetSource {
         AssetKey::from(uuid::Uuid::from_u128(SCRIPT_ASSET)),
         STOCK_SCRIPT_BODY.to_vec(),
     );
+    let _previous = assets.insert(
+        AssetKey::from(uuid::Uuid::from_u128(BROKEN_SCRIPT_ASSET)),
+        STOCK_BROKEN_SCRIPT_BODY.to_vec(),
+    );
     assets
 }
 
@@ -429,6 +433,10 @@ pub const STOCK_SCRIPTED_OBJECT_LOCAL_ID: RegionLocalObjectId = RegionLocalObjec
 const SCRIPT_ITEM: u128 = 0xFE11;
 /// The stock script item's asset id.
 const SCRIPT_ASSET: u128 = 0xFE21;
+/// The stock script item that does not compile, inside the scripted object.
+const BROKEN_SCRIPT_ITEM: u128 = 0xFE12;
+/// The asset id of the script that does not compile.
+const BROKEN_SCRIPT_ASSET: u128 = 0xFE22;
 /// The stock task-inventory serial.
 const SCRIPTED_OBJECT_SERIAL: i16 = 1;
 /// The stock named `Xfer` file.
@@ -438,6 +446,11 @@ pub const STOCK_XFER_FILE_BODY: &[u8] = b"Welcome to the fake grid.\n";
 /// The stock script item's source text.
 pub const STOCK_SCRIPT_BODY: &[u8] =
     b"default\n{\n    state_entry()\n    {\n        llSay(0, \"Hello, fake grid!\");\n    }\n}\n";
+/// The source of the stock script that does not compile: a missing
+/// expression on line 5, so that a Save of it in a viewer's editor is answered
+/// with the compile error, and a viewer's error list has something to show.
+pub const STOCK_BROKEN_SCRIPT_BODY: &[u8] =
+    b"default\n{\n    state_entry()\n    {\n        integer x = ;\n    }\n}\n";
 /// The stock estate covenant notecard body.
 pub const STOCK_COVENANT_BODY: &[u8] = b"Fake grid covenant: be excellent to each other.\n";
 /// The stock flat terrain height, in metres.
@@ -449,7 +462,7 @@ pub fn stock_scripted_object() -> ObjectKey {
     ObjectKey::from(uuid::Uuid::from_u128(SCRIPTED_OBJECT))
 }
 
-/// The stock script item (the one entry of the scripted object's task
+/// The stock script item (the first entry of the scripted object's task
 /// inventory, whose source is [`STOCK_SCRIPT_BODY`]).
 #[must_use]
 pub fn stock_script_item() -> TaskInventoryItem {
@@ -478,6 +491,19 @@ pub fn stock_script_item() -> TaskInventoryItem {
         name: "Hello Script".to_owned(),
         description: String::new(),
         creation_date: 1_700_000_000,
+    }
+}
+
+/// The stock script that does not compile ([`STOCK_BROKEN_SCRIPT_BODY`]),
+/// the scripted object's second item: the fixture a Save's error path is
+/// exercised on, offline and by anyone opening it in a viewer.
+#[must_use]
+pub fn stock_broken_script_item() -> TaskInventoryItem {
+    TaskInventoryItem {
+        item_id: InventoryKey::from(uuid::Uuid::from_u128(BROKEN_SCRIPT_ITEM)),
+        asset_id: Some(AssetKey::from(uuid::Uuid::from_u128(BROKEN_SCRIPT_ASSET))),
+        name: "Broken Script".to_owned(),
+        ..stock_script_item()
     }
 }
 
@@ -556,7 +582,10 @@ pub fn default_world() -> SceneFixtures {
     ));
     world.add_task_inventory(
         STOCK_SCRIPTED_OBJECT_LOCAL_ID,
-        TaskInventory::stated(SCRIPTED_OBJECT_SERIAL, vec![stock_script_item()]),
+        TaskInventory::stated(
+            SCRIPTED_OBJECT_SERIAL,
+            vec![stock_script_item(), stock_broken_script_item()],
+        ),
     );
     // The object holds a script, so the region's top-scripts report is about
     // it. What that script *costs* is a thing a fake region cannot measure and
@@ -941,12 +970,12 @@ mod test {
         // water plane textures, five wearable layer textures, four body parts,
         // the four wearables Second Life's placeholder outfit names and
         // twelve UI sounds — the library — plus one body per seeded
-        // inventory class and the stock scripted object's script, and nothing
-        // else: a stock scenario's store is the library and what its own items
-        // name, not a fixture dump.
+        // inventory class and the stock scripted object's two scripts, and
+        // nothing else: a stock scenario's store is the library and what its
+        // own items name, not a fixture dump.
         let library = 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5 + 4 + 4 + sl_proto::BUILTIN_UI_SOUNDS.len();
         let seeded = sl_test_assets::inventory::seeded_assets()?.len();
-        assert_eq!(assets.len(), library + seeded + 1);
+        assert_eq!(assets.len(), library + seeded + 2);
         Ok(())
     }
 

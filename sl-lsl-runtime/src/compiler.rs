@@ -136,7 +136,52 @@ impl fmt::Display for CompileError {
 
 impl core::error::Error for CompileError {}
 
-/// Compile LSL `source`.
+/// Whose compiler [`compile_for`] imitates, where the grids' compilers
+/// disagree about what compiles.
+///
+/// What each grid accepts was measured by the `script-compile` census
+/// (`book/src/gridspec/lsl.md` § Compiling). Only what a grid was measured
+/// to accept or refuse differently is modelled here; everything else is
+/// Second Life's rule on both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum Dialect {
+    /// Second Life's compiler (Mono and LSO refuse the same sources).
+    #[default]
+    SecondLife,
+    /// OpenSim's YEngine, its default engine and the one a fake grid that
+    /// imitates OpenSim runs. It compiles a function that can end without a
+    /// `return` (the value is the type's default), and it has no
+    /// `llClearExperiencePermissions` or `llGetExperienceList`, which Second
+    /// Life still compiles though it serves no document listing them.
+    OpenSim,
+}
+
+impl Dialect {
+    /// Whether a function with a return type must return on every path.
+    #[must_use]
+    pub const fn requires_return_on_every_path(self) -> bool {
+        matches!(self, Self::SecondLife)
+    }
+
+    /// Whether this compiler knows the library function `name` that the
+    /// library table carries. OpenSim was measured refusing two of the
+    /// functions Second Life compiles from no served document
+    /// (`keywords_lsl_unserved.xml`); which of the rest of the table it lacks
+    /// is not measured, so the rest compile.
+    #[must_use]
+    pub fn has_builtin(self, name: &str) -> bool {
+        match self {
+            Self::SecondLife => true,
+            Self::OpenSim => !OPENSIM_UNDEFINED.contains(&name),
+        }
+    }
+}
+
+/// The library functions OpenSim's engines refuse as undefined, both measured
+/// on the local OpenSim 0.9.2.1 under YEngine and XEngine (2026-10-30).
+const OPENSIM_UNDEFINED: &[&str] = &["llClearExperiencePermissions", "llGetExperienceList"];
+
+/// Compile LSL `source` as Second Life does.
 ///
 /// # Errors
 ///
@@ -144,6 +189,15 @@ impl core::error::Error for CompileError {}
 /// only the first syntax error, as the grid reports; otherwise every error
 /// the lowering found.
 pub fn compile(source: &str) -> Result<Program, Vec<CompileError>> {
+    compile_for(source, Dialect::SecondLife)
+}
+
+/// Compile LSL `source` as `dialect`'s grid does.
+///
+/// # Errors
+///
+/// As [`compile`]: the compile errors, in source order.
+pub fn compile_for(source: &str, dialect: Dialect) -> Result<Program, Vec<CompileError>> {
     let text = Source::new(source);
     let error = |kind, span: Range<usize>, message: String| CompileError {
         kind,
@@ -161,5 +215,5 @@ pub fn compile(source: &str) -> Result<Program, Vec<CompileError>> {
         )]);
     }
 
-    lower::lower(&parsed.script, text)
+    lower::lower(&parsed.script, text, dialect)
 }

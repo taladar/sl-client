@@ -77,7 +77,9 @@ What is missing is the middle:
   reach a script.
 - A script upload is accepted and the completion answers
   `compiled: Some(true)` unconditionally, with the comment "a real grid
-  would run the compiler".
+  would run the compiler". (Since 2026-10-30 the fake grid compiles every
+  upload as the imitated grid does:
+  [[server-fake-grid-script-compile-on-upload]].)
 - The `LSLSyntax` capability serves whatever `SimSession::lsl_syntax()`
   holds, and the fake grid never sets it — an empty document.
 

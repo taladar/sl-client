@@ -1747,6 +1747,98 @@ mod test {
         Ok(())
     }
 
+    /// The name the compile test gives its prim.
+    const COMPILED: &str = "Compiles On Save";
+
+    /// A script missing an expression: the `;` at column 39 is where both
+    /// grids place the fault. One line, because the editor types what a
+    /// person types — an `Enter` with the completion list open accepts the
+    /// completion — and indents each new line itself.
+    const MISSING_EXPRESSION: &str = "default { state_entry() { integer x = ; } }";
+
+    /// A script that compiles.
+    const COMPILES: &str = "default { state_entry() { } }";
+
+    /// A prim's new script is saved from the editor with a missing
+    /// expression: the grid's compile refuses it, the editor says the compile
+    /// failed and lists the error at line 1, column 39; saved again fixed, it
+    /// says saved and lists nothing (`book/src/gridspec/lsl.md` § Compiling).
+    async fn a_failed_compile_is_listed_in_the_editor(stage: &Stage) -> Result<(), BodyError> {
+        let alpha = &stage.viewer("Alpha")?;
+        arrived(alpha).await?;
+        sweep_leftovers(stage, alpha).await?;
+        alpha.press("Ctrl+B").await?;
+        let build = alpha.ui().window("build-tools");
+        let stock = Some(alpha.world().object_named(UNNAMED).node().await?.full_id);
+        let _prim_id = rez_named(stage, alpha, &build, stock, COMPILED).await?;
+        let _content = build
+            .get(Locator::role(Role::Tab).name_key("build-tab-content"))
+            .click()
+            .await?;
+        let row = build.get(Locator::role(Role::ListItem).name_containing(NEW_SCRIPT));
+        let _made = build
+            .test_id("contents-button:build-content-new-script")
+            .click()
+            .await?;
+        let _listed = alpha.expect(&row).timeout(WAIT).to_be_visible().await?;
+        let adding = build.get(Locator::role(Role::ListItem).name_containing(ADDING));
+        let _settled = alpha.expect(&adding).timeout(WAIT).to_be_hidden().await?;
+        let _opened = row.double_click().await?;
+        let editor = alpha
+            .ui()
+            .locator(Locator::role(Role::Window).named(NEW_SCRIPT));
+        let body = editor.test_id("script-body:field");
+        let _shown = alpha.expect(&body).timeout(WAIT).to_be_visible().await?;
+
+        let _typed = body.fill(MISSING_EXPRESSION).await?;
+        let _saved = editor.button_key("script-save").click().await?;
+        let failed = editor.get(Locator::role(Role::Text).name_key("script-status-compile-failed"));
+        let _failed = alpha.expect(&failed).timeout(WAIT).to_be_visible().await?;
+        // The row is the compiler's message after the position.
+        let error = editor.get(Locator::role(Role::Text).name_containing("expected an expression"));
+        let _listed = alpha.expect(&error).timeout(WAIT).to_be_visible().await?;
+        // Without the isolation marks Fluent puts around each placeable.
+        let said: String = error
+            .text()
+            .await?
+            .unwrap_or_default()
+            .chars()
+            .filter(|character| !matches!(character, '\u{2068}' | '\u{2069}'))
+            .collect();
+        if !said.starts_with("Line 1, column 39: ") {
+            return Err(format!("the error is listed as {said:?}").into());
+        }
+
+        let _typed = body.fill(COMPILES).await?;
+        let _saved = editor.button_key("script-save").click().await?;
+        let saved = editor.get(Locator::role(Role::Text).name_key("script-status-saved"));
+        let _saved = alpha.expect(&saved).timeout(WAIT).to_be_visible().await?;
+        let _cleared = alpha.expect(&error).timeout(WAIT).to_be_hidden().await?;
+        let _closed = editor.button_key("floater-chrome-close").click().await?;
+        let _gone = alpha.expect(&editor).timeout(WAIT).to_be_hidden().await?;
+        Ok(())
+    }
+
+    /// **A failed compile, on each fake flavour**: the fake grid compiles a
+    /// save as the grid it imitates — Second Life's one error at the token
+    /// its parser stood on, column in bytes; YEngine's at the fault, in
+    /// characters — and the editor lists it at the same line and column.
+    #[test]
+    fn a_failed_compile_is_listed_in_the_editor_on_each_fake_flavour() -> Result<(), TestError> {
+        for (flavour, name) in [
+            (ImitatedGrid::SecondLife, "compile_second_life"),
+            (ImitatedGrid::OpenSim, "compile_open_sim"),
+        ] {
+            StageBuilder::new(name)
+                .viewer_binary(VIEWER)
+                .viewer("Alpha")
+                .needs(Need::Content("the stock scene's unnamed box, to rez on"))
+                .configure_grid(move |grid| grid.imitates(flavour))
+                .run(async |stage: &Stage| a_failed_compile_is_listed_in_the_editor(stage).await)?;
+        }
+        Ok(())
+    }
+
     // ---- Attachments ------------------------------------------------------
 
     /// The name the attachment test gives its prim.

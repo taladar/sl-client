@@ -2251,6 +2251,7 @@ impl FakeGridBuilder {
                 fixtures.linking = self.imitates.link_policy();
                 fixtures.contents = self.imitates.contents_policy();
                 fixtures.relays = self.imitates.relay_policy();
+                fixtures.scripts = self.imitates.script_compile_policy();
                 fixtures.chat = self.imitates.chat_policy();
                 fixtures.region_info = self.imitates.region_info_policy();
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));

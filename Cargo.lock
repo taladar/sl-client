@@ -9051,6 +9051,8 @@ dependencies = [
  "sl-avatar",
  "sl-bake",
  "sl-client-tokio",
+ "sl-lsl",
+ "sl-lsl-runtime",
  "sl-mesh",
  "sl-notecard",
  "sl-object-asset",

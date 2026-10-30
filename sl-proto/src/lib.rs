@@ -163,7 +163,8 @@ pub use sim_bake::{BakedItem, BakedOutfit, BakedSlot, WEARABLE_TYPE_COUNT};
 pub use sim_caps::{
     CapHandler, CapsDispatch, CapsRequest, CapsResponse, CopyFromNotecardAnswer, DisplayNameStyle,
     HomeLocationOutcome, HomeLocationStyle, LLSD_XML_CONTENT_TYPE, LlsdLabel, ModifyRegionOutcome,
-    SimCaps, UntrustedMessageOutcome, UntrustedMessageStyle,
+    ScriptUploadAnswer, SimCaps, UntrustedMessageOutcome, UntrustedMessageStyle, UploadedScript,
+    UploadedScriptItem,
 };
 pub use sim_experiences::SimExperiences;
 pub use sim_groups::{

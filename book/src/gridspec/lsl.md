@@ -361,9 +361,22 @@ aditi's Mauve under the `mono`, `lsl2` and `luau` targets; OpenSim is
 fault on line 5 of the script is on line 6 of what was uploaded. The census
 holds both grids to every answer below.
 
-The fake grid compiles nothing yet: it answers every script upload
-`compiled` with no errors. Compiling on the way through, with these answers,
-is `server-fake-grid-script-compile-on-upload`.
+The fake grid compiles every upload on the way through, as the grid it
+imitates does (`sl_fake_grid::script_compile`, since 2026-10-30): Second
+Life's one error at the token its parser stood on, with the column in bytes;
+YEngine's every error at the fault — the OpenSim flavour runs YEngine, its
+default engine, whatever engine a source's first line picks. It stores the
+source either way, stops a script that did not compile (OpenSim: leaves it
+without an instance), and names the item's own id as an OpenSim task
+upload's `new_asset`. The messages are the compiler's own, which say more
+than either grid's. The census still runs on live grids only, because it
+listens to the scripts it uploads and the fake grid runs none yet; the
+`script-compile` case's tests hold the fake grid's answers to every
+`compiled`, error count and first-error position below, and list where they
+still differ: YEngine's follow-on syntax errors, its unterminated string,
+LSL2's 16 KB, and one column of Second Life's unterminated string. Second
+Life's Luau target is answered with an error saying the fake grid has no
+Luau compiler.
 
 ### The answer
 
@@ -426,7 +439,7 @@ stopped script with the broken source, which the next open shows.
 The library table `sl-lsl-runtime` compiles against is the document Second
 Life serves plus those five, from its `keywords_lsl_unserved.xml`; the
 fake grid's OpenSim flavour should refuse the two experience functions
-when it compiles on upload.
+when it compiles on upload, and does.
 
 ### What the viewer does with it
 

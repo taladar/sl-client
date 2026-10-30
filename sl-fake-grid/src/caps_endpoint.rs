@@ -90,6 +90,13 @@ pub(crate) async fn dispatch_caps(
                 drop(world);
                 return response;
             }
+            // The compiler is the grid's, and what a compile does to the
+            // script is the region's.
+            CapsDispatch::ScriptUpload(upload) => {
+                let world = Arc::clone(&shared.state.lock().await.world);
+                let answer = crate::script_compile::answer_upload(&mut world.lock(), &upload);
+                return SimCaps::script_upload_response(&answer);
+            }
             CapsDispatch::ScriptMetadata { task, item } => {
                 let world = Arc::clone(&shared.state.lock().await.world);
                 let script = world.lock().script_experience(task, item);

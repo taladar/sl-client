@@ -208,8 +208,12 @@ pub(crate) fn answer_contents_write(
             let local_id = world.local_id_of(*object_id)?;
             let contents = world.task_inventories.get(&local_id)?;
             let item = InventoryKey::from(*item_id);
-            // A script the prim does not hold is not answered.
+            // A script the prim does not hold is not answered, nor one with no
+            // instance (OpenSim's, after an upload that did not compile).
             let _held = contents.items.iter().find(|held| held.item_id == item)?;
+            if contents.uncompiled.contains(&item) {
+                return Some(Vec::new());
+            }
             let running = contents.running.contains(&item);
             if let Err(error) = sim.send_script_running_reply(*object_id, *item_id, running, now) {
                 tracing::warn!("answering a script's run state failed: {error}");

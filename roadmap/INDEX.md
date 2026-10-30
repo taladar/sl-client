@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 136 |
+| ideas | 138 |
 | ready | 332 |
 | blocked | 53 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1455 |
+| done | 1456 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2088** |
+| **total** | **2091** |
 
-## ideas (136)
+## ideas (138)
 
 ### protocol
 
@@ -333,6 +333,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-time-timers` (done))
 - [`server-lsl-lso-memory`](ideas/server-lsl-lso-memory.md) — Run an
   LSO-targeted script in LSO's 16 KB, as Second Life does
+- [`server-lsl-luau-compiler`](ideas/server-lsl-luau-compiler.md) — Compile the
+  Luau target as Second Life does
 - [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
   Script state that survives a take, a rez and a region restart (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done),
@@ -357,6 +359,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
+- [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
+  — Measure which library functions OpenSim's engines compile
 
 ## ready (332)
 
@@ -1106,6 +1110,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-group-chat`](ready/server-fake-grid-group-chat.md) — Fake
   grid — group chat sessions and conferences (blocked by
   `gridspec-group-chat-and-conference` (done))
+- [`server-fake-grid-hide-script-asset-ids`](ready/server-fake-grid-hide-script-asset-ids.md)
+  — Hide a script's asset id from task listings and inventory fetches, as Second
+  Life does
 - [`server-fake-grid-inventory-persists-across-logins`](ready/server-fake-grid-inventory-persists-across-logins.md)
   — Fake grid — keep an account's inventory, versions included, from one login
   to the next (blocked by `gridspec-inventory-fetch` (done))
@@ -1135,9 +1142,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-parcel-on-movement`](ready/server-fake-grid-parcel-on-movement.md)
   — Fake grid — push the parcel an agent walks onto, and serve parcel
   environments
-- [`server-fake-grid-script-compile-on-upload`](ready/server-fake-grid-script-compile-on-upload.md)
-  — A script upload is accepted and never compiled (blocked by
-  `server-lsl-compiler-ir` (done), `gridspec-lsl-compile` (done))
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
@@ -1494,7 +1498,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1455)
+## done (1456)
 
 ### protocol
 
@@ -4506,6 +4510,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   grid — serve each flavour's LSL syntax document and advertise its id
 - [`server-fake-grid-object-undo`](done/server-fake-grid-object-undo.md) — Fake
   grid — keep an object's edit history for Undo / Redo
+- [`server-fake-grid-script-compile-on-upload`](done/server-fake-grid-script-compile-on-upload.md)
+  — A script upload is accepted and never compiled (blocked by
+  `server-lsl-compiler-ir` (done), `gridspec-lsl-compile` (done))
 - [`server-fake-grid-top-objects-report`](done/server-fake-grid-top-objects-report.md)
   — Fake grid — a top-objects report with rows in it, and a return that finds
   them

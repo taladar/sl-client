@@ -811,6 +811,88 @@ pub enum CapsDispatch {
     /// rejects. The driver applies its set-home rule and answers with
     /// [`SimCaps::home_location_response`].
     HomeLocation(Option<sl_wire::HomeLocationRequest>),
+    /// A script upload, stored: what the item now holds is `source`, and the
+    /// answer carries whether it compiled. The compiler is the grid's, so the
+    /// driver compiles it, applies what a compile does to the script, and
+    /// answers with [`SimCaps::script_upload_response`].
+    ScriptUpload(UploadedScript),
+}
+
+/// A script upload the session has stored, for the driver to compile
+/// ([`CapsDispatch::ScriptUpload`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UploadedScript {
+    /// The script item the upload was for, and what the request said.
+    pub item: UploadedScriptItem,
+    /// The source, as uploaded.
+    pub source: Vec<u8>,
+    /// The asset the source was stored as.
+    pub new_asset: crate::AssetKey,
+    /// The item the completion names, by the session's
+    /// [`set_update_completion_names_item`](SimSession::set_update_completion_names_item).
+    pub new_inventory_item: Option<InventoryKey>,
+}
+
+impl UploadedScript {
+    /// The answer a grid with no compiler would give — `compiled`, no
+    /// errors, the stored asset — for a driver that compiles nothing.
+    #[must_use]
+    pub const fn compiled_unchecked(&self) -> ScriptUploadAnswer {
+        ScriptUploadAnswer {
+            new_asset: self.new_asset.uuid(),
+            new_inventory_item: self.new_inventory_item,
+            compiled: true,
+            errors: Vec::new(),
+            inventory_flags: None,
+        }
+    }
+}
+
+/// Which script an [`UploadedScript`] is, and the request that named it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UploadedScriptItem {
+    /// A script in a prim (`UpdateScriptTask`).
+    Task(sl_wire::UpdateScriptTaskRequest),
+    /// A script in the agent's inventory (`UpdateScriptAgent`).
+    Agent(sl_wire::UpdateScriptAgentRequest),
+}
+
+impl UploadedScriptItem {
+    /// The compile target the request named (`mono`, `lsl2`, `luau`, …).
+    #[must_use]
+    pub fn target(&self) -> &str {
+        match self {
+            Self::Task(request) => &request.target,
+            Self::Agent(request) => &request.target,
+        }
+    }
+
+    /// The script item.
+    #[must_use]
+    pub const fn item_id(&self) -> InventoryKey {
+        match self {
+            Self::Task(request) => request.item_id,
+            Self::Agent(request) => request.item_id,
+        }
+    }
+}
+
+/// What a driver answers a [`CapsDispatch::ScriptUpload`] with
+/// ([`SimCaps::script_upload_response`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptUploadAnswer {
+    /// The id the answer names as `new_asset`: the stored asset on Second
+    /// Life, the item's own id for a task upload on OpenSim.
+    pub new_asset: Uuid,
+    /// The item the answer names, if any.
+    pub new_inventory_item: Option<InventoryKey>,
+    /// Whether the source compiled.
+    pub compiled: bool,
+    /// The compile errors, each as the grid words it.
+    pub errors: Vec<String>,
+    /// The item's inventory flags, when the upload changed them (a Luau
+    /// script's subtype).
+    pub inventory_flags: Option<u32>,
 }
 
 /// What a driver answers a [`CapsDispatch::UntrustedMessage`] with.
@@ -1333,9 +1415,7 @@ impl SimCaps {
                     Some(CapHandler::ProductInfo) => {
                         CapsDispatch::Response(self.dispatch_product_info(request))
                     }
-                    Some(CapHandler::AssetUpload) => {
-                        CapsDispatch::Response(self.dispatch_caps_upload(sim, request, name))
-                    }
+                    Some(CapHandler::AssetUpload) => self.dispatch_caps_upload(sim, request, name),
                     Some(CapHandler::AvatarAppearance) => CapsDispatch::Response(
                         Self::dispatch_update_avatar_appearance(sim, request),
                     ),
@@ -2324,84 +2404,127 @@ impl SimCaps {
     /// and push
     /// [`ServerEvent::CapsAssetUploaded`](crate::ServerEvent::CapsAssetUploaded),
     /// and answers `{ state: "complete", new_asset, new_inventory_item? }` —
-    /// plus `{ compiled, errors }` for a script upload. A bytes-POST to a
-    /// ticket with nothing parked (never issued, or already completed) answers
-    /// `400`; any other sub-path answers `404`. Wrong method → `405`, an
-    /// unparsable metadata body → `400`.
+    /// except a script upload, whose answer carries the compile result: that
+    /// is handed to the driver as [`CapsDispatch::ScriptUpload`], since the
+    /// compiler is the grid's. A bytes-POST to a ticket with nothing parked
+    /// (never issued, or already completed) answers `400`; any other sub-path
+    /// answers `404`. Wrong method → `405`, an unparsable metadata body →
+    /// `400`.
     fn dispatch_caps_upload(
         &self,
         sim: &mut SimSession,
         request: &CapsRequest<'_>,
         cap_name: &'static str,
-    ) -> CapsResponse {
+    ) -> CapsDispatch {
         if cap_name == CAP_NEW_FILE_AGENT_INVENTORY && self.new_file_policy != NewFilePolicy::Plain
         {
-            return self.dispatch_new_file(sim, request);
+            return CapsDispatch::Response(self.dispatch_new_file(sim, request));
         }
         if request.method != "POST" {
-            return CapsResponse::method_not_allowed();
+            return CapsDispatch::Response(CapsResponse::method_not_allowed());
         }
         match cap_sub_path(request.path) {
             None => {
                 let Some(metadata) = Self::parse_upload_metadata(cap_name, request.body) else {
-                    return CapsResponse::bad_request();
+                    return CapsDispatch::Response(CapsResponse::bad_request());
                 };
                 let ticket = sim.park_caps_upload(cap_name, metadata);
                 let uploader = self.upload_uploader_url(cap_name, ticket);
-                CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
-                    state: "upload".to_owned(),
-                    uploader: Some(uploader.to_string()),
-                    ..AssetUploadResponse::default()
-                }))
+                CapsDispatch::Response(CapsResponse::llsd_xml(build_asset_upload_response(
+                    &AssetUploadResponse {
+                        state: "upload".to_owned(),
+                        uploader: Some(uploader.to_string()),
+                        ..AssetUploadResponse::default()
+                    },
+                )))
             }
             Some(sub_path) if upload_ticket(sub_path).is_some() => {
                 let Some(metadata) = upload_ticket(sub_path)
                     .and_then(|ticket| sim.take_caps_upload(cap_name, ticket))
                 else {
-                    return CapsResponse::bad_request();
+                    return CapsDispatch::Response(CapsResponse::bad_request());
                 };
-                let is_script = metadata.is_script();
-                // An upload that *creates* an item reports the permissions it
-                // was granted, as both real grids do (`BunchOfCaps` copies its
-                // three `m_*Mask` fields into every completion). This grid
-                // grants what was asked for; the fields are what stop a client
-                // from having to assume that, since a real grid need not.
-                let granted = match &metadata {
-                    CapsUploadMetadata::NewFileInventory(new_file) => {
-                        Some(UploadGrantedPermissions {
-                            next_owner: Permissions::from_bits(new_file.next_owner_mask),
-                            group: Permissions::from_bits(new_file.group_mask),
-                            everyone: Permissions::from_bits(new_file.everyone_mask),
-                        })
-                    }
-                    _other => None,
-                };
-                let mut data = request.body.to_vec();
-                if matches!(
-                    &metadata,
-                    CapsUploadMetadata::UpdateAgentItem { cap, .. }
-                        if cap == crate::UpdatableAssetType::Notecard.cap()
-                ) && sim.inventory_dialect() == crate::InventoryDialect::SecondLife
-                {
-                    data = match crate::sim_notecard::second_life_body(sim, data) {
-                        Ok(kept) => kept,
-                        Err(refusal) => return refusal,
-                    };
-                }
-                let (new_asset, new_inventory_item) = sim.complete_caps_upload(metadata, data);
-                CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
-                    state: "complete".to_owned(),
-                    new_asset: Some(new_asset.uuid()),
-                    new_inventory_item: new_inventory_item.map(|item| item.uuid()),
-                    // A script upload reports the compile result; the sim server
-                    // "compiles" cleanly (a real grid would run the compiler).
-                    compiled: is_script.then_some(true),
-                    granted,
-                    ..AssetUploadResponse::default()
-                }))
+                Self::complete_caps_upload(sim, metadata, request.body)
             }
-            Some(_) => CapsResponse::not_found(),
+            Some(_) => CapsDispatch::Response(CapsResponse::not_found()),
         }
+    }
+
+    /// Step 2 of [`dispatch_caps_upload`](Self::dispatch_caps_upload): stores
+    /// `body` under the parked `metadata` and answers — or, for a script,
+    /// hands the answer to the driver.
+    fn complete_caps_upload(
+        sim: &mut SimSession,
+        metadata: CapsUploadMetadata,
+        body: &[u8],
+    ) -> CapsDispatch {
+        let script = match &metadata {
+            CapsUploadMetadata::UpdateScriptTask(request) => {
+                Some(UploadedScriptItem::Task(request.clone()))
+            }
+            CapsUploadMetadata::UpdateScriptAgent(request) => {
+                Some(UploadedScriptItem::Agent(request.clone()))
+            }
+            _other => None,
+        };
+        // An upload that *creates* an item reports the permissions it was
+        // granted, as both real grids do (`BunchOfCaps` copies its three
+        // `m_*Mask` fields into every completion). This grid grants what was
+        // asked for; the fields are what stop a client from having to assume
+        // that, since a real grid need not.
+        let granted = match &metadata {
+            CapsUploadMetadata::NewFileInventory(new_file) => Some(UploadGrantedPermissions {
+                next_owner: Permissions::from_bits(new_file.next_owner_mask),
+                group: Permissions::from_bits(new_file.group_mask),
+                everyone: Permissions::from_bits(new_file.everyone_mask),
+            }),
+            _other => None,
+        };
+        let mut data = body.to_vec();
+        if matches!(
+            &metadata,
+            CapsUploadMetadata::UpdateAgentItem { cap, .. }
+                if cap == crate::UpdatableAssetType::Notecard.cap()
+        ) && sim.inventory_dialect() == crate::InventoryDialect::SecondLife
+        {
+            data = match crate::sim_notecard::second_life_body(sim, data) {
+                Ok(kept) => kept,
+                Err(refusal) => return CapsDispatch::Response(refusal),
+            };
+        }
+        let (new_asset, new_inventory_item) = sim.complete_caps_upload(metadata, data);
+        if let Some(item) = script {
+            return CapsDispatch::ScriptUpload(UploadedScript {
+                item,
+                source: body.to_vec(),
+                new_asset,
+                new_inventory_item,
+            });
+        }
+        CapsDispatch::Response(CapsResponse::llsd_xml(build_asset_upload_response(
+            &AssetUploadResponse {
+                state: "complete".to_owned(),
+                new_asset: Some(new_asset.uuid()),
+                new_inventory_item: new_inventory_item.map(|item| item.uuid()),
+                granted,
+                ..AssetUploadResponse::default()
+            },
+        )))
+    }
+
+    /// The answer to a [`CapsDispatch::ScriptUpload`]: the completion with
+    /// the compile result the driver's compiler gave.
+    #[must_use]
+    pub fn script_upload_response(answer: &ScriptUploadAnswer) -> CapsResponse {
+        CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
+            state: "complete".to_owned(),
+            new_asset: Some(answer.new_asset),
+            new_inventory_item: answer.new_inventory_item.map(|item| item.uuid()),
+            compiled: Some(answer.compiled),
+            errors: answer.errors.clone(),
+            inventory_flags: answer.inventory_flags,
+            ..AssetUploadResponse::default()
+        }))
     }
 
     /// Serves `MeshUploadFlag`.

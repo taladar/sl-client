@@ -777,7 +777,11 @@ The stock scenario's world is one region-wide public parcel
 allowed) and the stock scripted object as a 1 m box at
 `STOCK_SCRIPTED_OBJECT_POSITION`, holding the stock script item in its task
 inventory — so the listing describes an object a viewer can actually see
-and click, and the two are stated in one place.
+and click, and the two are stated in one place. Beside it the box holds
+"Broken Script" (`stock_broken_script_item`, `STOCK_BROKEN_SCRIPT_BODY`), a
+missing expression on line 5: open it in a viewer and Save, and the answer
+is the compile error, which is how the editor's error list is exercised
+offline.
 
 ### The write path
 
@@ -834,6 +838,18 @@ change what it holds, and all three are answered against the region world:
   serial moves, and who is sent the prim, its record and a listing reply
   nobody asked for, is each flavour's (`ImitatedGrid::contents_policy`, as
   measured in [Grid Behaviour → Building](../gridspec/building.md#contents)).
+- **A script save** (`UpdateScriptTask`, `UpdateScriptAgent`; the
+  `script_compile` module). The session stores the source, as every grid
+  does whether or not it compiles, and hands the upload to the driver
+  (`CapsDispatch::ScriptUpload`), which compiles it with
+  `sl_lsl_runtime::compile_for` as the imitated grid compiles
+  (`ImitatedGrid::script_compile_policy`): Second Life's one error at the
+  token its parser stood on, YEngine's every error at the fault, each in
+  its grid's form. A failed compile stops the script (OpenSim: leaves it
+  without an instance, so `GetScriptRunning` goes unanswered); a clean one
+  runs it as the save asked. OpenSim compiles no agent-inventory upload and
+  names the item's own id as a task upload's `new_asset`. What each grid
+  answers is in [Grid Behaviour → LSL](../gridspec/lsl.md#compiling).
 - **The `RequestTaskInventory` and `GetMetadata` capabilities**, on the
   Second-Life flavour. `SimCaps` reads the request and hands it to the
   driver (`CapsDispatch::TaskInventory` / `ScriptMetadata`), because the

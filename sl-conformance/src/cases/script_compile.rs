@@ -41,8 +41,12 @@
 //!
 //! What each live grid was measured to answer is written up in
 //! `book/src/gridspec/lsl.md` § Compiling and held below. `1av`, live grids
-//! only: the fake grid compiles nothing yet
-//! (`server-fake-grid-script-compile-on-upload`).
+//! only: the fake grid compiles every upload as the grid it imitates
+//! (`sl_fake_grid::script_compile`), but runs no script yet, and half the
+//! census listens to the script it uploaded
+//! (`server-fake-grid-script-engine-wiring`). Until it can, the tests below
+//! hold the fake grid's compiler to every compile answer the tables record
+//! for the sources the census uploads, offline.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -3176,11 +3180,202 @@ fn hold(grid: Grid, metrics: &Metrics) -> Result<(), TestFailure> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::{
-        BROKEN, Backend, LUAU, UNSERVED, large_code_source, sized_source, valid_source,
-        without_uuids,
+        Answer, BROKEN, Backend, LUAU, OPENSIM, SECOND_LIFE, SIZES, UNSERVED, large_code_source,
+        sized_source, valid_source, without_uuids,
     };
+    use crate::grid::Grid;
+    use crate::metrics::Metrics;
     use pretty_assertions::assert_eq;
+    use sl_client_tokio::{AssetKey, ScriptCompileError, Uuid};
+    use sl_fake_grid::{ImitatedGrid, ScriptCompiler};
+
+    /// Where the fake grid's compiler is known to answer a census source
+    /// otherwise than the grid it imitates, by metric, and why. Every other
+    /// `compiled`, `errors_count` and `error_0_at` the census measured for a
+    /// source it compiles is held by
+    /// [`the_fake_grid_compiles_the_census_sources_as_measured`].
+    const KNOWN_DEVIATIONS: &[(&str, &str)] = &[
+        (
+            "lsl2_large_code_compiled",
+            "LSL2 refuses 60 KB of string constants: an LSO script has 16 KB, which the fake \
+             grid does not model (server-lsl-lso-memory)",
+        ),
+        (
+            "lsl2_large_code_errors_count",
+            "the same: LSL2 answered 1203 errors of no position",
+        ),
+        (
+            "lsl2_unterminated_string_error_0_at",
+            "Second Life places the fault one column left of the `;` after the name; its lexer \
+             seems not to count the unmatched `\"`, which one reading cannot settle",
+        ),
+        (
+            "mono_unterminated_string_error_0_at",
+            "the same as under LSL2",
+        ),
+        (
+            "yengine_crlf_errors_count",
+            "YEngine's parser recovers from a syntax error and reports the follow-on errors it \
+             drags (three for one missing expression); the fake grid's stops at the first",
+        ),
+        (
+            "yengine_multibyte_column_errors_count",
+            "the same follow-on errors",
+        ),
+        ("yengine_syntax_errors_count", "the same follow-on errors"),
+        (
+            "yengine_tab_column_errors_count",
+            "the same follow-on errors",
+        ),
+        (
+            "yengine_two_syntax_errors_errors_count",
+            "the same follow-on errors",
+        ),
+        (
+            "yengine_unterminated_string_error_0_at",
+            "YEngine reads an unterminated string to the end of the source and fails there \
+             (`invalid operator`); the fake grid's lexer ends it and reads the rest as names",
+        ),
+    ];
+
+    /// The compiler, the compile target and whether agent uploads compile, of
+    /// the fake grid imitating `backend`'s grid — `None` for a backend it
+    /// does not imitate (XEngine: the fake grid runs YEngine, OpenSim's
+    /// default; and Second Life's Luau, which it has no compiler for).
+    fn imitation(backend: Backend) -> Option<(ScriptCompiler, &'static str, bool)> {
+        let grid = match backend {
+            Backend::Mono | Backend::Lsl2 => ImitatedGrid::SecondLife,
+            Backend::YEngine => ImitatedGrid::OpenSim,
+            Backend::XEngine | Backend::Luau => return None,
+        };
+        let policy = grid.script_compile_policy();
+        Some((
+            policy.compiler,
+            backend.target().to_wire(),
+            policy.compiles_agent_uploads,
+        ))
+    }
+
+    /// Records what the fake grid answers `source` under `backend`'s key and
+    /// `leg`, as the census records a live answer.
+    fn record(
+        metrics: &mut Metrics,
+        backend: Backend,
+        (compiler, target, compiles): (ScriptCompiler, &str, bool),
+        leg: &str,
+        source: &str,
+    ) {
+        let grid = if compiler == ScriptCompiler::SecondLife {
+            Grid::Aditi
+        } else {
+            Grid::Opensim
+        };
+        let prefixed = format!("{}{source}", backend.prefix(grid));
+        let asset = AssetKey::from(Uuid::from_u128(0xA55E7));
+        let outcome = if compiles {
+            sl_fake_grid::compile_source(compiler, target, prefixed.as_bytes(), asset)
+        } else {
+            sl_fake_grid::CompileOutcome {
+                compiled: true,
+                errors: Vec::new(),
+                language: sl_client_tokio::ScriptLanguage::Lsl,
+            }
+        };
+        let key = |field: &str| format!("{}_{leg}_{field}", backend.key());
+        metrics.set(&key("compiled"), outcome.compiled);
+        metrics.set(&key("errors_count"), outcome.errors.len().to_string());
+        if let Some(first) = outcome.errors.first() {
+            let parsed = ScriptCompileError::parse(first);
+            let at = match (parsed.line, parsed.column) {
+                (Some(line), Some(column)) => format!("line {line} column {column}"),
+                (Some(line), None) => format!("line {line}"),
+                (None, _) => "nowhere".to_owned(),
+            };
+            metrics.set(&key("error_0_at"), at);
+        }
+    }
+
+    /// The fake grid's compiler answers every source the census uploads as
+    /// the grid it imitates was measured to — whether it compiled, how many
+    /// errors and where the first one is — but for [`KNOWN_DEVIATIONS`], which
+    /// must stay exactly the sources it still answers otherwise.
+    #[test]
+    fn the_fake_grid_compiles_the_census_sources_as_measured() {
+        let mut metrics = Metrics::new();
+        for backend in [Backend::Mono, Backend::Lsl2, Backend::YEngine] {
+            let Some(imitation) = imitation(backend) else {
+                continue;
+            };
+            let task = (imitation.0, imitation.1, true);
+            for leg in BROKEN.iter().chain(UNSERVED) {
+                record(&mut metrics, backend, task, leg.name, leg.source);
+            }
+            for version in ["v1", "v2_stopped", "v3_running", "v3_again"] {
+                let source = valid_source(backend, version.split('_').next().unwrap_or(version));
+                record(&mut metrics, backend, task, version, &source);
+            }
+            for (name, size) in SIZES {
+                record(&mut metrics, backend, task, name, &sized_source(*size));
+            }
+            record(
+                &mut metrics,
+                backend,
+                task,
+                "large_code",
+                &large_code_source(),
+            );
+            let first = BROKEN.first().map_or("", |broken| broken.source);
+            record(&mut metrics, backend, imitation, "agent_syntax", first);
+            let valid = "default\n{\n    state_entry()\n    {\n    }\n}\n";
+            record(&mut metrics, backend, imitation, "agent_valid", valid);
+        }
+        let mut deviations = BTreeMap::new();
+        for (key, expected) in SECOND_LIFE.iter().chain(OPENSIM) {
+            let held = ["_compiled", "_errors_count", "_error_0_at"]
+                .iter()
+                .any(|field| key.ends_with(field));
+            if !held {
+                continue;
+            }
+            let Some(value) = metrics.get(key) else {
+                continue;
+            };
+            if !expected.is(value) {
+                let _previous =
+                    deviations.insert(*key, format!("{value:?}, measured {expected:?}"));
+            }
+        }
+        // An error a source no longer draws is recorded as no `error_0_at`.
+        for (key, expected) in SECOND_LIFE.iter().chain(OPENSIM) {
+            if key.ends_with("_error_0_at")
+                && !matches!(expected, Answer::Any)
+                && metrics.get(key).is_none()
+                && imitated_key(key)
+            {
+                let _previous = deviations.insert(*key, format!("none, measured {expected:?}"));
+            }
+        }
+        let known: Vec<&str> = KNOWN_DEVIATIONS.iter().map(|(key, _why)| *key).collect();
+        let found: Vec<&str> = deviations.keys().copied().collect();
+        assert_eq!(found, known, "deviations: {deviations:#?}");
+    }
+
+    /// Whether `key` is one of the legs [`record`] compiles.
+    fn imitated_key(key: &str) -> bool {
+        let backend = ["mono_", "lsl2_", "yengine_"]
+            .iter()
+            .find_map(|prefix| key.strip_prefix(prefix));
+        backend.is_some_and(|rest| {
+            BROKEN
+                .iter()
+                .chain(UNSERVED)
+                .any(|leg| rest.starts_with(&format!("{}_", leg.name)))
+                || rest.starts_with("agent_")
+        })
+    }
 
     /// `source` compiles under our own compiler, or the error says why.
     fn compiles(what: &str, source: &str) -> Result<(), String> {

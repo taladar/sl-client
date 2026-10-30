@@ -75,7 +75,8 @@ mod test {
         parse_experience_status, parse_seed_response, stamp_remote_parcel_request,
     };
     use sl_proto::{
-        InterestListMode, InterestListReply, build_interest_list_request, parse_interest_list_reply,
+        CAP_UPDATE_SCRIPT_TASK, InterestListMode, InterestListReply, ScriptUploadAnswer,
+        UploadedScriptItem, build_interest_list_request, parse_interest_list_reply,
     };
     use sl_wire::PROPERTY_PRIVATE;
     use sl_wire::{
@@ -90,10 +91,10 @@ mod test {
         build_object_media_navigate_request, build_object_media_update_request,
         build_render_materials_put_request, build_render_materials_request, build_send_user_report,
         build_update_avatar_appearance_request, build_update_item_asset_request,
-        build_update_script_agent_request, build_update_task_item_asset_request,
-        build_upload_baked_texture_request, display_names_query, parse_agent_preferences,
-        parse_asset_upload_response, parse_display_names, parse_llsd_xml,
-        parse_render_materials_response,
+        build_update_script_agent_request, build_update_script_task_request,
+        build_update_task_item_asset_request, build_upload_baked_texture_request,
+        display_names_query, parse_agent_preferences, parse_asset_upload_response,
+        parse_display_names, parse_llsd_xml, parse_render_materials_response,
     };
 
     /// A boxed test error.
@@ -145,6 +146,12 @@ mod test {
         match caps.dispatch(sim, request) {
             CapsDispatch::Response(response) => {
                 Ok((response.status, String::from_utf8(response.body.clone())?))
+            }
+            // A script upload's answer is the driver's compiler's; these tests
+            // drive no compiler, so the answer is a clean compile.
+            CapsDispatch::ScriptUpload(upload) => {
+                let response = SimCaps::script_upload_response(&upload.compiled_unchecked());
+                Ok((response.status, String::from_utf8(response.body)?))
             }
             other => Err(format!("unexpected {other:?}").into()),
         }
@@ -2025,6 +2032,61 @@ mod test {
             },
             other => return Err(format!("expected CapsAssetUploaded, got {other:?}").into()),
         }
+        Ok(())
+    }
+
+    /// A script upload is handed to the driver with the source it stored and
+    /// the request that named the item, and is answered with what the
+    /// driver's compiler said — a failed compile included.
+    #[test]
+    fn a_script_upload_is_answered_by_the_drivers_compiler() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x5c12));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x5c13));
+        let path = granted_cap_path(&caps, CAP_UPDATE_SCRIPT_TASK)?;
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &post(
+                &path,
+                &build_update_script_task_request(task, item, true, "mono", None),
+            ),
+        )?;
+        assert_eq!(status, 200);
+        let uploader: url::Url = parse_asset_upload_response(&reply)?
+            .uploader
+            .ok_or("no uploader url")?
+            .parse()?;
+        let source = b"default { state_entry() { integer x = ; } }";
+        let CapsDispatch::ScriptUpload(upload) =
+            caps.dispatch(&mut sim, &raw_post(uploader.path(), source))
+        else {
+            return Err("a script upload was answered without its compile".into());
+        };
+        assert_eq!(upload.source, source);
+        assert_eq!(upload.item.item_id(), item);
+        assert_eq!(upload.item.target(), "mono");
+        let UploadedScriptItem::Task(request) = &upload.item else {
+            return Err(format!("expected a task script, got {:?}", upload.item).into());
+        };
+        assert_eq!(request.task_id, task);
+        assert!(request.is_script_running);
+        let answer = ScriptUploadAnswer {
+            compiled: false,
+            errors: vec!["(0, 37) : ERROR : Syntax error\n".to_owned()],
+            ..upload.compiled_unchecked()
+        };
+        let response = SimCaps::script_upload_response(&answer);
+        let completion = parse_asset_upload_response(&String::from_utf8(response.body)?)?;
+        assert_eq!(completion.state, "complete");
+        assert_eq!(completion.compiled, Some(false));
+        assert_eq!(completion.errors, answer.errors);
+        assert_eq!(completion.new_asset, Some(upload.new_asset.uuid()));
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::CapsAssetUploaded { .. })
+        ));
         Ok(())
     }
 

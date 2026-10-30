@@ -37,7 +37,7 @@ use sl_lsl::ast::{
 };
 use sl_lsl::types;
 
-use super::{CompileError, CompileErrorKind as Kind, literal};
+use super::{CompileError, CompileErrorKind as Kind, Dialect, literal};
 use crate::bytecode::{
     Body, CodeOffset, Component, ConstId, Function, FunctionId, Global, GlobalSlot, Handler, Instr,
     Local, LocalSlot, Program, Source, State, StateId,
@@ -45,9 +45,14 @@ use crate::bytecode::{
 use crate::library::{self, BuiltinId, ConstantValue};
 use crate::value::Value;
 
-/// Lower a parsed script that the semantic pass accepted.
-pub(super) fn lower(script: &Script, source: Source) -> Result<Program, Vec<CompileError>> {
-    let mut lowerer = Lowerer::new(&source);
+/// Lower a parsed script that the semantic pass accepted, by `dialect`'s
+/// rules.
+pub(super) fn lower(
+    script: &Script,
+    source: Source,
+    dialect: Dialect,
+) -> Result<Program, Vec<CompileError>> {
+    let mut lowerer = Lowerer::new(&source, dialect);
     lowerer.script(script);
     let Lowerer {
         mut errors,
@@ -223,6 +228,8 @@ impl BodyBuilder {
 struct Lowerer<'source> {
     /// The source, for error positions.
     source: &'source Source,
+    /// Whose compiler the lowering imitates.
+    dialect: Dialect,
     /// The errors found so far.
     errors: Vec<CompileError>,
     /// The global variables.
@@ -245,9 +252,10 @@ struct Lowerer<'source> {
 
 impl<'source> Lowerer<'source> {
     /// A lowerer with nothing lowered yet.
-    fn new(source: &'source Source) -> Self {
+    fn new(source: &'source Source, dialect: Dialect) -> Self {
         Self {
             source,
+            dialect,
             errors: Vec::new(),
             globals: Vec::new(),
             constants: Vec::new(),
@@ -269,6 +277,11 @@ impl<'source> Lowerer<'source> {
             span: span.clone(),
             position: self.source.position(span.start),
         });
+    }
+
+    /// The library function `name`, if this dialect's compiler knows it.
+    fn builtin(&self, name: &str) -> Option<&'static library::Builtin> {
+        library::builtin(name).filter(|_builtin| self.dialect.has_builtin(name))
     }
 
     /// A length as a bytecode index, or an error when it does not fit.
@@ -389,7 +402,7 @@ impl<'source> Lowerer<'source> {
                     name.name
                 ),
             );
-        } else if place == DefinedIn::Global && library::builtin(&name.name).is_some() {
+        } else if place == DefinedIn::Global && self.builtin(&name.name).is_some() {
             self.error(
                 Kind::AlreadyDefined,
                 &name.span,
@@ -471,7 +484,10 @@ impl<'source> Lowerer<'source> {
         self.current.name.clone_from(&func.name.name);
         self.params(&func.params);
         self.block(&func.body);
-        if ret.is_some() && !func.body.statements.last().is_some_and(always_returns) {
+        if ret.is_some()
+            && self.dialect.requires_return_on_every_path()
+            && !func.body.statements.last().is_some_and(always_returns)
+        {
             // Second Life points at the body's closing brace (measured on
             // aditi, 2026-09-27; tailslide points at the name instead).
             self.error(
@@ -1244,7 +1260,7 @@ impl<'source> Lowerer<'source> {
                     id.name
                 )
             }
-            None if library::builtin(&id.name).is_some() => {
+            None if self.builtin(&id.name).is_some() => {
                 format!(
                     "`{}` is a library function, not a variable; call it with `()`",
                     id.name
@@ -1427,7 +1443,7 @@ impl<'source> Lowerer<'source> {
                         ret: None,
                     });
                 (Target::User(id), signature.params, signature.ret)
-            } else if let Some(builtin) = library::builtin(&callee.name) {
+            } else if let Some(builtin) = self.builtin(&callee.name) {
                 (
                     Target::Builtin(builtin.id),
                     builtin.args.iter().map(|arg| arg.ty).collect(),

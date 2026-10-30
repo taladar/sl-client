@@ -108,3 +108,27 @@ Three more `Host` methods' worth of wiring, and the region-level view:
   `OBJECT_SCRIPT_TIME` and the script counts belong to
   `server-lsl-lib-prim-state`, from the same `ScriptUsage` and the
   instances' run flags.
+
+## From server-fake-grid-script-compile-on-upload (2026-10-30)
+
+The fake grid compiles every script upload (`sl_fake_grid::script_compile`,
+`CapsDispatch::ScriptUpload`) and records what the compile leaves of the
+script in the prim's `TaskInventory`: `running` as the upload asked after a
+clean compile, removed after a failed one, and on the OpenSim flavour the
+item in `uncompiled` (no instance, `GetScriptRunning` unanswered). It keeps
+no `Program`: nothing runs it. Once the engine is wired:
+
+- **A save is the recompile, and the instance restarts.** A clean upload
+  replaces the item's instance with one of the new program and runs
+  `state_entry` when the upload asked it to run (`v3_again` in the census:
+  the same source over a running script restarts it on every grid); a
+  failed one ends the instance — stopped on Second Life, gone on OpenSim.
+  `answer_upload` is the place: it has the compile result and the world.
+- **Compile once.** `answer_upload` compiles with
+  `sl_lsl_runtime::compile_for`; hand that `Program` to the engine rather
+  than compiling the stored source a second time, and compile a fixture's
+  script (which nobody uploaded) when its prim is loaded.
+- **Run the `script-compile` census offline.** Its legs listen to the script
+  they upload (`*_heard`, `*_after_running`), which is why it is live-only
+  today; its tests hold the fake grid's compile answers meanwhile. Once
+  scripts run, add it to `OFFLINE_CASES` for both flavours.

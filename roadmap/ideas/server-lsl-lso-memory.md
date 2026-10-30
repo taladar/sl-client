@@ -34,3 +34,15 @@ Two things before it can be built:
   after each value from a freshly reset script, would give the exact costs
   the accounting needs; until then an LSO model would be a guess, which the
   memory task's rule ("exact, not approximated") forbids.
+
+## From server-fake-grid-script-compile-on-upload (2026-10-30)
+
+The compile on upload exists now (`sl_fake_grid::script_compile`), but it
+keeps no program and so no target: an `lsl2` upload compiles exactly as a
+`mono` one. Carrying the target (`UploadedScriptItem::target`) to the
+instance belongs with the engine wiring
+([[server-fake-grid-script-engine-wiring]]). The census's one compile answer
+LSL2 gives differently is `large_code` — 600 functions of 100-character
+strings, refused with 1203 errors of no position, where Mono compiles it —
+and `script-compile`'s `KNOWN_DEVIATIONS` lists it until LSO's 16 KB is
+modelled at compile time too.

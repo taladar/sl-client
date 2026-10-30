@@ -185,6 +185,16 @@ stages and stops at the first that fails:
 The editor's semantic pass (`sl_lsl::analyze`) is not a stage. It is
 conservative by design, and everything it reports the lowering reports too.
 
+`compile_for(source, Dialect)` compiles as another grid's compiler where
+the two were measured to disagree (the `script-compile` census,
+[Grid Behaviour → LSL](../gridspec/lsl.md#compiling)): `Dialect::OpenSim`
+is YEngine, which compiles a
+function that can end without a `return` (the lowering's fall-off `return`
+of the type's default then runs) and knows neither
+`llClearExperiencePermissions` nor `llGetExperienceList`. Which of the rest
+of the library OpenSim lacks is unmeasured, so the rest compiles. The fake
+grid compiles every script upload this way (`sl_fake_grid::script_compile`).
+
 The `Program` (module `bytecode`) holds the globals, a literal pool, one
 `Body` for the global initialisers, one per user function and one per event
 handler. A body lists its locals — parameters first, one slot per

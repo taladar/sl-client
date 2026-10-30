@@ -40,6 +40,7 @@ pub mod relays;
 mod render_info;
 pub mod runtime;
 pub mod scenario;
+pub mod script_compile;
 pub mod script_syntax;
 pub mod social;
 mod task_contents;
@@ -98,6 +99,9 @@ pub use runtime::{
     RiddenCrossing, TeleportNotice,
 };
 pub use scenario::{Scenario, SimEventHook, SimHook};
+pub use script_compile::{
+    CompileOutcome, CompilePolicy, FailedScript, ScriptCompiler, TaskNewAsset, compile_source,
+};
 pub use script_syntax::{LslSyntaxDocument, LslSyntaxPolicy};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};

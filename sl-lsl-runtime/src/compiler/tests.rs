@@ -553,3 +553,49 @@ fn messages_say_what_is_wrong() {
         "(0, 10): ERROR : the `touch_start` event takes (integer num_detected), not (string)"
     );
 }
+
+/// OpenSim's dialect compiles a function that can end without a `return`, as
+/// YEngine does, and gives it the type's default; Second Life's refuses it.
+#[test]
+fn opensim_compiles_a_path_without_a_return() {
+    let source = script("integer f() { if (TRUE) return 1; }", "        f();");
+    assert_eq!(
+        errors(&source),
+        vec![(Kind::MissingReturn, 1, 35)],
+        "Second Life refuses it at the closing brace"
+    );
+    assert!(
+        super::compile_for(&source, super::Dialect::OpenSim).is_ok(),
+        "YEngine compiles it"
+    );
+}
+
+/// The two experience functions no served document lists compile on Second
+/// Life and are undefined on OpenSim; the other three unserved functions
+/// compile on both, as measured.
+#[test]
+fn opensim_lacks_the_two_unserved_experience_functions() {
+    let undefined = |body: &str| {
+        super::compile_for(&script("", body), super::Dialect::OpenSim)
+            .err()
+            .map(|errors| errors.iter().map(|error| error.kind).collect::<Vec<_>>())
+    };
+    for body in [
+        "        llClearExperiencePermissions(NULL_KEY);",
+        "        list l = llGetExperienceList(NULL_KEY);",
+    ] {
+        assert_eq!(errors(&script("", body)), vec![], "Second Life: {body}");
+        assert_eq!(
+            undefined(body),
+            Some(vec![Kind::Undefined]),
+            "OpenSim: {body}"
+        );
+    }
+    for body in [
+        "        llPointAt(<1.0, 2.0, 3.0>);",
+        "        llStopPointAt();",
+        "        llRemoteLoadScript(NULL_KEY, \"x\", FALSE, 0);",
+    ] {
+        assert_eq!(undefined(body), None, "OpenSim: {body}");
+    }
+}

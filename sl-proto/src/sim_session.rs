@@ -3730,14 +3730,6 @@ pub enum CapsUploadMetadata {
 }
 
 impl CapsUploadMetadata {
-    /// Whether this upload compiles a script — its completion reply carries the
-    /// `{ compiled, errors }` result the client folds into
-    /// [`Event::ScriptUploaded`](crate::Event::ScriptUploaded).
-    #[must_use]
-    pub(crate) const fn is_script(&self) -> bool {
-        matches!(self, Self::UpdateScriptAgent(_) | Self::UpdateScriptTask(_))
-    }
-
     /// The inventory item this upload replaces the asset of, when it replaces
     /// one rather than creating one.
     ///
