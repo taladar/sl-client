@@ -347,10 +347,12 @@ pick, in region metres (`world_test`'s
 
 ## Compiling
 
-Measured on 2026-10-24 and 25 by the conformance case `script-compile`
+Measured on 2026-10-24 and 25 (and on 2026-10-30 for the five functions no
+served document lists) by the conformance case `script-compile`
 (`sl-conformance run --grid aditi|opensim script-compile`): it uploads a
 valid script to a prim, then sixteen broken sources over it, each with its
-fault at a known place, sources of growing size, and a broken and a valid
+fault at a known place, one call each to five functions, sources of growing
+size, and a broken and a valid
 one to a script in the agent's inventory; it records every answer verbatim
 and reads the stored source back over the UDP transfer. Second Life is
 aditi's Mauve under the `mono`, `lsl2` and `luau` targets; OpenSim is
@@ -416,9 +418,15 @@ stopped script with the broken source, which the next open shows.
 | the same source again over the running script | answered; the script restarts (`state_entry` again) | the same | stored and restarted, but the upload is **never answered**, and each such upload keeps one of OpenSim's HTTP handlers — after a few, every later upload is refused (`error sending request`) |
 | sources of 65 000, 66 000, 262 200 bytes and 1 MiB (a comment) | all compile; no limit up to 1 MiB (the reference editor stops at 262 144 characters) | the same | the same |
 | 600 functions returning 100-character strings | Mono compiles, then `Stack-Heap Collision` at start (one run of two sent both `DEBUG_CHANNEL` lines empty); **LSL2 refuses** it with 1203 errors of no position (`Function Args: (null)`, `Local List: (null)`) | compiles | compiles |
+| one call each to `llPointAt`, `llStopPointAt`, `llRemoteLoadScript`, `llClearExperiencePermissions` and `llGetExperienceList` — in tailslide's `builtins.txt`, in no `LSLSyntax` document Second Life serves | **all five compile**, under Mono and LSL2 | the first three compile; the two experience functions do not: `(5,8) Error: undefined constant/function/variable llClearExperiencePermissions(string)` | the first three compile; the two experience functions do not: `` (5,8): Error CS0103: The name `llClearExperiencePermissions' does not exist in the current context `` |
 | an agent-inventory upload (`UpdateScriptAgent`) | compiled like a task's: the same errors | **not compiled**: `compiled` true for a broken source | the same as YEngine |
 | the `lsl2` target | the LSL2 (LSO) compiler, the same messages | ignored | ignored |
 | the `luau` target | the Luau compiler: `:2: Expected identifier when parsing expression, got '='`, a **one-based** line, no column; the item's subtype becomes Luau; LSL source under it compiles, since `default { state_entry() … }` happens to parse as Lua, and fails as it starts: `lua_script:3: attempt to call a nil value` | ignored: Luau source is read as LSL and refused, the subtype stays LSL | — |
+
+The library table `sl-lsl-runtime` compiles against is the document Second
+Life serves plus those five, from its `keywords_lsl_unserved.xml`; the
+fake grid's OpenSim flavour should refuse the two experience functions
+when it compiles on upload.
 
 ### What the viewer does with it
 

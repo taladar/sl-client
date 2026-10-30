@@ -19,17 +19,21 @@
 //!   rejection fails the test; a script tailslide rejects and we compile is
 //!   reported, as is an error on a line tailslide did not name.
 //!
-//! Two false rejections are known and reported apart rather than failed:
+//! One false rejection is known and reported apart rather than failed:
+//! **the parser's depth ceiling** — `sl-lsl` stops at 128 nested levels
+//! where tailslide's heap-stacked parser goes on (its
+//! `parserstackdepth2.lsl`); `sl-lsl`'s differential test sets it apart the
+//! same way.
 //!
-//! - **The parser's depth ceiling** — `sl-lsl` stops at 128 nested levels
-//!   where tailslide's heap-stacked parser goes on (its
-//!   `parserstackdepth2.lsl`); `sl-lsl`'s differential test sets it apart
-//!   the same way.
-//! - **Functions missing from the library table.** The table is the
-//!   `LSLSyntax` document Second Life serves, which leaves out five
-//!   functions tailslide's `builtins.txt` lists (`llPointAt`,
-//!   `llStopPointAt`, `llRemoteLoadScript`, `llClearExperiencePermissions`,
-//!   `llGetExperienceList`). A call to one is undefined here.
+//! A script whose only errors are calls to functions tailslide's
+//! `builtins.txt` lists and the library table does not is reported apart
+//! too, as "not in the library table". None is expected: the table is the
+//! `LSLSyntax` document Second Life serves plus the five functions it leaves
+//! out and the grid still compiles (`llPointAt`, `llStopPointAt`,
+//! `llRemoteLoadScript`, `llClearExperiencePermissions`,
+//! `llGetExperienceList`, measured on aditi by `script-compile`), from the
+//! crate's `keywords_lsl_unserved.xml`. A script that lands there names a
+//! function a later document dropped.
 //!
 //! And one error sits on a different line by design: "Not all code paths
 //! return a value" is reported at the function's closing brace, where Second

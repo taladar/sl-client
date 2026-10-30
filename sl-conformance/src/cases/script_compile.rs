@@ -22,11 +22,13 @@
 //!    script runs (`GetScriptRunning`), whether v1 still answers or was
 //!    restarted, and which source the item holds now, read back over the
 //!    UDP transfer;
-//! 4. uploads source of growing size (`SIZES`) for the limit, and one
+//! 4. uploads one call each to the five functions no served `LSLSyntax`
+//!    document lists (`UNSERVED`), for whether the grid still compiles them;
+//! 5. uploads source of growing size (`SIZES`) for the limit, and one
 //!    whose constants are large;
-//! 5. uploads a valid script with `is_script_running` false, then true, and
+//! 6. uploads a valid script with `is_script_running` false, then true, and
 //!    then the same source again over the running script;
-//! 6. makes a script in the agent's inventory and uploads a broken then a
+//! 7. makes a script in the agent's inventory and uploads a broken then a
 //!    valid source over `UpdateScriptAgent`.
 //!
 //! XEngine answers no upload to a script that holds a running instance, and
@@ -158,9 +160,8 @@ impl Backend {
     }
 }
 
-/// One broken source, and where its fault is (one-based, in the source
-/// without an engine line).
-struct Broken {
+/// One source a leg uploads, by the leg's name.
+struct Leg {
     /// The leg's name in the metrics.
     name: &'static str,
     /// The source.
@@ -169,85 +170,85 @@ struct Broken {
 
 /// The LSL sources that do not compile, each with one fault (or three, for
 /// `three_errors`). The fault's place is in the comment beside it, one-based.
-const BROKEN: &[Broken] = &[
+const BROKEN: &[Leg] = &[
     // A missing expression: the `;` at 5:21.
-    Broken {
+    Leg {
         name: "syntax",
         source: "default\n{\n    state_entry()\n    {\n        integer x = ;\n    }\n}\n",
     },
     // A string assigned to an integer: the `"a"` at 5:21.
-    Broken {
+    Leg {
         name: "type_mismatch",
         source: "default\n{\n    state_entry()\n    {\n        integer x = \"a\";\n    }\n}\n",
     },
     // An undeclared name: `y` at 5:9.
-    Broken {
+    Leg {
         name: "undeclared",
         source: "default\n{\n    state_entry()\n    {\n        y = 1;\n    }\n}\n",
     },
     // A function nobody defined: `llNope` at 5:9.
-    Broken {
+    Leg {
         name: "unknown_function",
         source: "default\n{\n    state_entry()\n    {\n        llNope();\n    }\n}\n",
     },
     // A path without a return: the function's closing brace at 4:1.
-    Broken {
+    Leg {
         name: "missing_return",
         source: "integer f()\n{\n    if (TRUE) return 1;\n}\ndefault\n{\n    state_entry()\n    {\n    }\n}\n",
     },
     // A global declared twice: the second `x` at 2:9.
-    Broken {
+    Leg {
         name: "duplicate_global",
         source: "integer x;\ninteger x;\ndefault\n{\n    state_entry()\n    {\n    }\n}\n",
     },
     // Three semantic faults: 5:21, 6:9 and 7:9.
-    Broken {
+    Leg {
         name: "three_errors",
         source: "default\n{\n    state_entry()\n    {\n        integer x = \"a\";\n        y = 1;\n        llNope();\n    }\n}\n",
     },
     // Two syntax faults: 5:21 and 6:21.
-    Broken {
+    Leg {
         name: "two_syntax_errors",
         source: "default\n{\n    state_entry()\n    {\n        integer x = ;\n        integer z = ;\n    }\n}\n",
     },
     // Nothing at all.
-    Broken {
+    Leg {
         name: "empty",
         source: "",
     },
     // A state but no `default`.
-    Broken {
+    Leg {
         name: "no_default",
         source: "state other\n{\n    state_entry()\n    {\n    }\n}\n",
     },
     // A string that never ends, from 5:20.
-    Broken {
+    Leg {
         name: "unterminated_string",
         source: "default\n{\n    state_entry()\n    {\n        string s = \"abc;\n    }\n}\n",
     },
     // Three two-byte characters before the fault: the `;` at character 39,
     // byte 42 of line 5.
-    Broken {
+    Leg {
         name: "multibyte_column",
         source: "default\n{\n    state_entry()\n    {\n        string s = \"äöü\"; integer x = ;\n    }\n}\n",
     },
     // Two tabs before the fault: the `;` at character 15 of line 5.
-    Broken {
+    Leg {
         name: "tab_column",
         source: "default\n{\n    state_entry()\n    {\n\t\tinteger x = ;\n    }\n}\n",
     },
     // `syntax` with CR LF line ends: the `;` at 5:21.
-    Broken {
+    Leg {
         name: "crlf",
         source: "default\r\n{\r\n    state_entry()\r\n    {\r\n        integer x = ;\r\n    }\r\n}\r\n",
     },
     // A jump to a label that is not there: `nowhere` at 5:14.
-    Broken {
+    Leg {
         name: "unknown_label",
         source: "default\n{\n    state_entry()\n    {\n        jump nowhere;\n    }\n}\n",
     },
     // A state change to a state that is not there: `other` at 5:15.
-    Broken {
+    Leg {
         name: "unknown_state",
         source: "default\n{\n    state_entry()\n    {\n        state other;\n    }\n}\n",
     },
@@ -256,22 +257,50 @@ const BROKEN: &[Broken] = &[
 /// The Luau target's sources: a valid body, a broken one (`local x =` with
 /// nothing after it, line 1), one broken mid-line (the second `=` at 2:11),
 /// and the valid LSL script.
-const LUAU: &[Broken] = &[
-    Broken {
+const LUAU: &[Leg] = &[
+    Leg {
         name: "luau_valid",
         source: "-- sl-conformance script-compile\nlocal n = 1\n",
     },
-    Broken {
+    Leg {
         name: "luau_syntax",
         source: "local x =\n",
     },
-    Broken {
+    Leg {
         name: "luau_syntax_mid",
         source: "local a = 1\nlocal b = = 2\nlocal c = 3\n",
     },
-    Broken {
+    Leg {
         name: "lsl_source",
         source: "default\n{\n    state_entry()\n    {\n    }\n}\n",
+    },
+];
+
+/// One call each to the five functions tailslide's `builtins.txt` lists and
+/// no `LSLSyntax` document Second Life serves does — whether the grid still
+/// compiles them decides whether our library table carries them. The call
+/// sits in a `touch_start` nobody raises, so a script that compiles runs
+/// nothing.
+const UNSERVED: &[Leg] = &[
+    Leg {
+        name: "unserved_point_at",
+        source: "default\n{\n    touch_start(integer n)\n    {\n        llPointAt(<1.0, 2.0, 3.0>);\n    }\n}\n",
+    },
+    Leg {
+        name: "unserved_stop_point_at",
+        source: "default\n{\n    touch_start(integer n)\n    {\n        llStopPointAt();\n    }\n}\n",
+    },
+    Leg {
+        name: "unserved_remote_load_script",
+        source: "default\n{\n    touch_start(integer n)\n    {\n        llRemoteLoadScript(NULL_KEY, \"x\", FALSE, 0);\n    }\n}\n",
+    },
+    Leg {
+        name: "unserved_clear_experience_permissions",
+        source: "default\n{\n    touch_start(integer n)\n    {\n        llClearExperiencePermissions(NULL_KEY);\n    }\n}\n",
+    },
+    Leg {
+        name: "unserved_get_experience_list",
+        source: "default\n{\n    touch_start(integer n)\n    {\n        llOwnerSay(llList2CSV(llGetExperienceList(NULL_KEY)));\n    }\n}\n",
     },
 ];
 
@@ -596,7 +625,14 @@ impl Run<'_> {
         }
         self.ping("broken_after").await?;
 
-        // 3. Sizes.
+        // 3. The functions no served document lists.
+        for leg in UNSERVED {
+            let _answered = self
+                .step(cube, &mut held, leg.name, leg.source, true)
+                .await?;
+        }
+
+        // 4. Sizes.
         for (name, size) in SIZES {
             let source = sized_source(*size);
             let _answered = self.step(cube, &mut held, name, &source, true).await?;
@@ -608,7 +644,7 @@ impl Run<'_> {
         self.listen().await?;
         self.record_heard("large_code");
 
-        // 4. The running flag of a valid upload.
+        // 5. The running flag of a valid upload.
         let v2 = valid_source(self.backend, "v2");
         let _answered = self.step(cube, &mut held, "v2_stopped", &v2, false).await?;
         self.read_source(cube, &held, "v2_stopped", &[("v2", &v2)])
@@ -626,7 +662,7 @@ impl Run<'_> {
         let key = self.key("v3_running", "after_running");
         self.metrics.set(&key, running);
 
-        // 5. The same valid source again, over the running script.
+        // 6. The same valid source again, over the running script.
         let _answered = self.step(cube, &mut held, "v3_again", &v3, true).await?;
         self.listen().await?;
         self.record_heard("v3_again");
@@ -1537,6 +1573,37 @@ const SECOND_LIFE: &[(&str, Answer)] = &[
     ("lsl2_unknown_state_new_asset", Answer::Text("another")),
     ("lsl2_unknown_state_running_echo", Answer::Text("true")),
     ("lsl2_unknown_state_upload", Answer::Text("answered")),
+    (
+        "lsl2_unserved_clear_experience_permissions_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "lsl2_unserved_clear_experience_permissions_errors_count",
+        Answer::Text("0"),
+    ),
+    (
+        "lsl2_unserved_get_experience_list_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "lsl2_unserved_get_experience_list_errors_count",
+        Answer::Text("0"),
+    ),
+    ("lsl2_unserved_point_at_compiled", Answer::Flag(true)),
+    ("lsl2_unserved_point_at_errors_count", Answer::Text("0")),
+    (
+        "lsl2_unserved_remote_load_script_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "lsl2_unserved_remote_load_script_errors_count",
+        Answer::Text("0"),
+    ),
+    ("lsl2_unserved_stop_point_at_compiled", Answer::Flag(true)),
+    (
+        "lsl2_unserved_stop_point_at_errors_count",
+        Answer::Text("0"),
+    ),
     ("lsl2_unterminated_string_compiled", Answer::Flag(false)),
     (
         "lsl2_unterminated_string_error_0",
@@ -1912,6 +1979,37 @@ const SECOND_LIFE: &[(&str, Answer)] = &[
     ("mono_unknown_state_new_asset", Answer::Text("another")),
     ("mono_unknown_state_running_echo", Answer::Text("true")),
     ("mono_unknown_state_upload", Answer::Text("answered")),
+    (
+        "mono_unserved_clear_experience_permissions_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "mono_unserved_clear_experience_permissions_errors_count",
+        Answer::Text("0"),
+    ),
+    (
+        "mono_unserved_get_experience_list_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "mono_unserved_get_experience_list_errors_count",
+        Answer::Text("0"),
+    ),
+    ("mono_unserved_point_at_compiled", Answer::Flag(true)),
+    ("mono_unserved_point_at_errors_count", Answer::Text("0")),
+    (
+        "mono_unserved_remote_load_script_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "mono_unserved_remote_load_script_errors_count",
+        Answer::Text("0"),
+    ),
+    ("mono_unserved_stop_point_at_compiled", Answer::Flag(true)),
+    (
+        "mono_unserved_stop_point_at_errors_count",
+        Answer::Text("0"),
+    ),
     ("mono_unterminated_string_compiled", Answer::Flag(false)),
     (
         "mono_unterminated_string_error_0",
@@ -2375,6 +2473,60 @@ const OPENSIM: &[(&str, Answer)] = &[
     ),
     ("xengine_unknown_state_running_echo", Answer::Text("true")),
     ("xengine_unknown_state_upload", Answer::Text("answered")),
+    (
+        "xengine_unserved_clear_experience_permissions_compiled",
+        Answer::Flag(false),
+    ),
+    (
+        "xengine_unserved_clear_experience_permissions_error_0",
+        Answer::Text(
+            "(5,8): Error CS0103: The name `llClearExperiencePermissions' does not exist in the current context\n",
+        ),
+    ),
+    (
+        "xengine_unserved_clear_experience_permissions_error_0_at",
+        Answer::Text("line 6 column 9"),
+    ),
+    (
+        "xengine_unserved_clear_experience_permissions_errors_count",
+        Answer::Text("1"),
+    ),
+    (
+        "xengine_unserved_get_experience_list_compiled",
+        Answer::Flag(false),
+    ),
+    (
+        "xengine_unserved_get_experience_list_error_0",
+        Answer::Text(
+            "(5,30): Error CS0103: The name `llGetExperienceList' does not exist in the current context\n",
+        ),
+    ),
+    (
+        "xengine_unserved_get_experience_list_error_0_at",
+        Answer::Text("line 6 column 31"),
+    ),
+    (
+        "xengine_unserved_get_experience_list_errors_count",
+        Answer::Text("1"),
+    ),
+    ("xengine_unserved_point_at_compiled", Answer::Flag(true)),
+    ("xengine_unserved_point_at_errors_count", Answer::Text("0")),
+    (
+        "xengine_unserved_remote_load_script_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "xengine_unserved_remote_load_script_errors_count",
+        Answer::Text("0"),
+    ),
+    (
+        "xengine_unserved_stop_point_at_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "xengine_unserved_stop_point_at_errors_count",
+        Answer::Text("0"),
+    ),
     ("xengine_unterminated_string_compiled", Answer::Flag(false)),
     (
         "xengine_unterminated_string_error_0",
@@ -2867,6 +3019,60 @@ const OPENSIM: &[(&str, Answer)] = &[
     ),
     ("yengine_unknown_state_running_echo", Answer::Text("true")),
     ("yengine_unknown_state_upload", Answer::Text("answered")),
+    (
+        "yengine_unserved_clear_experience_permissions_compiled",
+        Answer::Flag(false),
+    ),
+    (
+        "yengine_unserved_clear_experience_permissions_error_0",
+        Answer::Text(
+            "(5,8) Error: undefined constant/function/variable llClearExperiencePermissions(string)",
+        ),
+    ),
+    (
+        "yengine_unserved_clear_experience_permissions_error_0_at",
+        Answer::Text("line 6 column 9"),
+    ),
+    (
+        "yengine_unserved_clear_experience_permissions_errors_count",
+        Answer::Text("1"),
+    ),
+    (
+        "yengine_unserved_get_experience_list_compiled",
+        Answer::Flag(false),
+    ),
+    (
+        "yengine_unserved_get_experience_list_error_0",
+        Answer::Text(
+            "(5,30) Error: undefined constant/function/variable llGetExperienceList(string)",
+        ),
+    ),
+    (
+        "yengine_unserved_get_experience_list_error_0_at",
+        Answer::Text("line 6 column 31"),
+    ),
+    (
+        "yengine_unserved_get_experience_list_errors_count",
+        Answer::Text("1"),
+    ),
+    ("yengine_unserved_point_at_compiled", Answer::Flag(true)),
+    ("yengine_unserved_point_at_errors_count", Answer::Text("0")),
+    (
+        "yengine_unserved_remote_load_script_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "yengine_unserved_remote_load_script_errors_count",
+        Answer::Text("0"),
+    ),
+    (
+        "yengine_unserved_stop_point_at_compiled",
+        Answer::Flag(true),
+    ),
+    (
+        "yengine_unserved_stop_point_at_errors_count",
+        Answer::Text("0"),
+    ),
     ("yengine_unterminated_string_compiled", Answer::Flag(false)),
     (
         "yengine_unterminated_string_error_0",
@@ -2971,7 +3177,8 @@ fn hold(grid: Grid, metrics: &Metrics) -> Result<(), TestFailure> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BROKEN, Backend, LUAU, large_code_source, sized_source, valid_source, without_uuids,
+        BROKEN, Backend, LUAU, UNSERVED, large_code_source, sized_source, valid_source,
+        without_uuids,
     };
     use pretty_assertions::assert_eq;
 
@@ -2983,7 +3190,8 @@ mod tests {
     }
 
     /// Every broken source fails our own compiler, and the valid ones pass
-    /// it — a leg that measures nothing costs a live run.
+    /// it — a leg that measures nothing costs a live run. The unserved
+    /// functions' calls compile, as they do on Second Life.
     #[test]
     fn the_sources_are_what_they_claim() -> Result<(), String> {
         for broken in BROKEN {
@@ -2997,6 +3205,9 @@ mod tests {
             }
         }
         compiles("large_code", &large_code_source())?;
+        for leg in UNSERVED {
+            compiles(leg.name, leg.source)?;
+        }
         for leg in LUAU.iter().filter(|leg| leg.name == "lsl_source") {
             compiles(leg.name, leg.source)?;
         }

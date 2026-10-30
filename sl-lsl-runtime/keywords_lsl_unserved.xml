@@ -1,0 +1,148 @@
+<?xml version="1.0"?>
+<!-- Library functions Second Life still compiles that no LSLSyntax document it
+serves lists (measured by sl-conformance's script-compile census on aditi).
+Signatures and argument names from tailslide's builtins.txt, the forced delay
+from LSL PyOptimizer's fndata.txt, the energy every served function carries.
+build.rs merges these into the library table; one that turns up in
+keywords_lsl_default.xml stops the build, and goes from here. -->
+<llsd>
+  <map>
+    <key>functions</key>
+    <map>
+      <key>llClearExperiencePermissions</key>
+      <map>
+        <key>arguments</key>
+        <array>
+          <map>
+            <key>agent</key>
+            <map>
+              <key>tooltip</key>
+              <string>UUID of the agent.</string>
+              <key>type</key>
+              <string>key</string>
+            </map>
+          </map>
+        </array>
+        <key>energy</key>
+        <real>10.0</real>
+        <key>return</key>
+        <string>void</string>
+        <key>sleep</key>
+        <real>0.0</real>
+        <key>tooltip</key>
+        <string>Clears the experience permissions agent granted to the script's experience.</string>
+      </map>
+      <key>llGetExperienceList</key>
+      <map>
+        <key>arguments</key>
+        <array>
+          <map>
+            <key>agent</key>
+            <map>
+              <key>tooltip</key>
+              <string>UUID of the agent.</string>
+              <key>type</key>
+              <string>key</string>
+            </map>
+          </map>
+        </array>
+        <key>energy</key>
+        <real>10.0</real>
+        <key>return</key>
+        <string>list</string>
+        <key>sleep</key>
+        <real>0.0</real>
+        <key>tooltip</key>
+        <string>Returns the experiences agent has granted permissions to.</string>
+      </map>
+      <key>llPointAt</key>
+      <map>
+        <key>arguments</key>
+        <array>
+          <map>
+            <key>pos</key>
+            <map>
+              <key>tooltip</key>
+              <string>Position to point at, in region coordinates.</string>
+              <key>type</key>
+              <string>vector</string>
+            </map>
+          </map>
+        </array>
+        <key>energy</key>
+        <real>10.0</real>
+        <key>return</key>
+        <string>void</string>
+        <key>sleep</key>
+        <real>0.0</real>
+        <key>tooltip</key>
+        <string>Makes the avatar that owns the object point at pos.</string>
+      </map>
+      <key>llRemoteLoadScript</key>
+      <map>
+        <key>arguments</key>
+        <array>
+          <map>
+            <key>target</key>
+            <map>
+              <key>tooltip</key>
+              <string>UUID of the target prim.</string>
+              <key>type</key>
+              <string>key</string>
+            </map>
+          </map>
+          <map>
+            <key>name</key>
+            <map>
+              <key>tooltip</key>
+              <string>Name of the script in the prim's inventory.</string>
+              <key>type</key>
+              <string>string</string>
+            </map>
+          </map>
+          <map>
+            <key>running</key>
+            <map>
+              <key>tooltip</key>
+              <string>Boolean. Whether the copied script runs.</string>
+              <key>type</key>
+              <string>integer</string>
+            </map>
+          </map>
+          <map>
+            <key>start_param</key>
+            <map>
+              <key>tooltip</key>
+              <string>Start parameter passed to the copied script.</string>
+              <key>type</key>
+              <string>integer</string>
+            </map>
+          </map>
+        </array>
+        <key>deprecated</key>
+        <boolean>true</boolean>
+        <key>energy</key>
+        <real>10.0</real>
+        <key>return</key>
+        <string>void</string>
+        <key>sleep</key>
+        <real>3.0</real>
+        <key>tooltip</key>
+        <string>The predecessor of llRemoteLoadScriptPin, without the PIN.</string>
+      </map>
+      <key>llStopPointAt</key>
+      <map>
+        <key>arguments</key>
+        <undef/>
+        <key>energy</key>
+        <real>10.0</real>
+        <key>return</key>
+        <string>void</string>
+        <key>sleep</key>
+        <real>0.0</real>
+        <key>tooltip</key>
+        <string>Stops the pointing llPointAt started.</string>
+      </map>
+    </map>
+  </map>
+</llsd>

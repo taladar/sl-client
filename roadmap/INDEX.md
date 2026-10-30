@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 333 |
 | blocked | 53 |
 | in-progress | 18 |
-| bugs | 39 |
-| done | 1453 |
+| bugs | 41 |
+| done | 1454 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2084** |
+| **total** | **2087** |
 
 ## ideas (135)
 
@@ -1139,8 +1139,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-lsl-library-unserved-functions`](ready/server-lsl-library-unserved-functions.md)
-  — Five functions no served LSLSyntax document lists
 - [`server-lsl-memory-and-limits`](ready/server-lsl-memory-and-limits.md) —
   Script memory and limits, because scripts observe them (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-memory-sizes` (done),
@@ -1155,6 +1153,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
+- [`gridspec-lsl-unserved-experience-probe-steps`](ready/gridspec-lsl-unserved-experience-probe-steps.md)
+  — Probe llClearExperiencePermissions and llGetExperienceList outside an
+  experience
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
@@ -1392,7 +1393,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (39)
+## bugs (41)
 
 ### protocol
 
@@ -1442,6 +1443,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A left click sends a grab and a degrab to a prim that takes no touch
 - [`viewer-live-opensim-world-renders-white`](bugs/viewer-live-opensim-world-renders-white.md)
   — The world renders all white at times on the live OpenSim grid
+- [`viewer-lsl-editor-flags-unserved-functions`](bugs/viewer-lsl-editor-flags-unserved-functions.md)
+  — The script editor marks five functions Second Life compiles as undefined
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1485,13 +1488,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The last derez and both logouts of an OpenSim probe run go unacknowledged
 - [`test-conformance-object-asset-format-fails-under-load`](bugs/test-conformance-object-asset-format-fails-under-load.md)
   — object_asset_format fails only in a full-workspace run, and fails early
+- [`test-conformance-script-compile-xengine-cold-start`](bugs/test-conformance-script-compile-xengine-cold-start.md)
+  — script-compile fails its XEngine legs on a freshly started OpenSim
 - [`test-fake-grid-tests-stop-reading-client-events`](bugs/test-fake-grid-tests-stop-reading-client-events.md)
   — Fake-grid integration tests stop reading the client's events and can stall
   it
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1453)
+## done (1454)
 
 ### protocol
 
@@ -4522,6 +4527,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `server-lsl-architecture` (done))
 - [`server-lsl-library-table-refresh`](done/server-lsl-library-table-refresh.md)
   — The vendored library document lacks 50 current functions
+- [`server-lsl-library-unserved-functions`](done/server-lsl-library-unserved-functions.md)
+  — Five functions no served LSLSyntax document lists
 - [`server-lsl-memory-sizes`](done/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
 - [`server-lsl-runtime-errors`](done/server-lsl-runtime-errors.md) — Run-time

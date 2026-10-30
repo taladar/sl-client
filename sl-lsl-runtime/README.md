@@ -76,10 +76,19 @@ that carries everything the table needs: tailslide's `builtins.txt` has no
 energy, sleep or descriptions, and OpenSim's `bin/ScriptSyntax.xml` has no
 energy or sleep either and adds OpenSim's `os*` functions. It is also the
 format the grid serves, so the table and the served document cannot disagree
-about what a field means. It leaves out five functions `builtins.txt` lists:
-`llPointAt`, `llStopPointAt`, `llRemoteLoadScript`,
-`llClearExperiencePermissions` and `llGetExperienceList`; whether the grid
-still compiles them is `server-lsl-library-unserved-functions`.
+about what a field means.
+
+It leaves out five functions `builtins.txt` lists, and Second Life still
+compiles all five, under Mono and LSL2 (measured on aditi on 2026-10-30 by
+`sl-conformance`'s `script-compile` census): `llPointAt`, `llStopPointAt`,
+`llRemoteLoadScript`, `llClearExperiencePermissions` and
+`llGetExperienceList`. They come from `keywords_lsl_unserved.xml`, a document
+of the same format holding only a `functions` map, kept apart so that a
+refresh of the served document stays a copy: signatures and argument names
+from tailslide's `builtins.txt`, the 3-second delay of `llRemoteLoadScript`
+from LSL PyOptimizer's `fndata.txt`, and the energy of 10 every served
+function carries. `build.rs` merges the two and stops if a function is in
+both — the grid serves it again, and its supplement entry should go.
 
 The document spells a character no XML text can carry as an escape behind two
 backslashes — `\\n` in `EOF` and `NAK`, `\\x15` in `NAK`, `\\ufdd0` …
@@ -87,7 +96,8 @@ backslashes — `\\n` in `EOF` and `NAK`, `\\x15` in `NAK`, `\\ufdd0` …
 escape stops the build rather than being misread. To update the file, replace
 it and let the tests say what moved: a test decodes the same file through
 `sl-wire`'s independent `LSLSyntax` decoder and compares every function, event
-and constant with the generated table.
+and constant with the generated table (the supplement's functions apart, which
+another test holds to tailslide's signatures).
 
 The oracles are LSL PyOptimizer's `lslopt/lslbasefuncs.py` and its
 `unit_tests/expr.suite` expected outputs, which were measured against Second

@@ -3,7 +3,9 @@
 //!
 //! **The table** is generated at build time from the vendored
 //! `keywords_lsl_default.xml` — Linden Lab's own `LSLSyntax` document as
-//! Second Life serves it (provenance in the crate `README.md`). It yields one
+//! Second Life serves it — and `keywords_lsl_unserved.xml`, the five
+//! functions the grid compiles and that document leaves out (provenance of
+//! both in the crate `README.md`). It yields one
 //! [`BuiltinId`] and one [`Builtin`] descriptor per function (name, typed
 //! parameters, return type, forced sleep, energy, flags, description), every
 //! [`Constant`] with its typed value, and every [`Event`] with its
@@ -165,6 +167,40 @@ mod tests {
         assert_eq!(constant("default"), None);
     }
 
+    /// The functions the grid compiles and serves no document for are in the
+    /// table with the signatures tailslide's `builtins.txt` gives them, and
+    /// in no served document.
+    #[test]
+    fn the_unserved_functions_have_tailslides_signatures() -> Result<(), String> {
+        use TypeName::{Integer, Key, List, String as Text, Vector as Vec3};
+        let expected: [(&str, &[TypeName], Option<TypeName>, f32); 5] = [
+            ("llClearExperiencePermissions", &[Key], None, 0.0),
+            ("llGetExperienceList", &[Key], Some(List), 0.0),
+            ("llPointAt", &[Vec3], None, 0.0),
+            (
+                "llRemoteLoadScript",
+                &[Key, Text, Integer, Integer],
+                None,
+                3.0,
+            ),
+            ("llStopPointAt", &[], None, 0.0),
+        ];
+        let syntax = decoded()?;
+        let mut unserved = unserved()?;
+        unserved.sort();
+        let names: Vec<&str> = expected.iter().map(|(name, ..)| *name).collect();
+        assert_eq!(unserved, names);
+        for (name, args, ret, sleep) in expected {
+            assert!(!syntax.functions.contains_key(name), "{name} is served");
+            let descriptor = builtin(name).ok_or(name)?;
+            let ours: Vec<TypeName> = descriptor.args.iter().map(|arg| arg.ty).collect();
+            assert_eq!(ours, args, "{name}");
+            assert_eq!(descriptor.ret, ret, "{name}");
+            assert_eq!(descriptor.sleep.to_bits(), sleep.to_bits(), "{name}");
+        }
+        Ok(())
+    }
+
     /// The vendored document, as `sl-wire`'s independent `LSLSyntax`
     /// decoder reads it.
     fn decoded() -> Result<sl_lsl::LslSyntax, String> {
@@ -173,11 +209,31 @@ mod tests {
         sl_wire::parse_lsl_syntax(&document).map_err(|error| error.to_string())
     }
 
+    /// The names of the functions `keywords_lsl_unserved.xml` adds.
+    fn unserved() -> Result<Vec<String>, String> {
+        let source = include_str!("../keywords_lsl_unserved.xml");
+        let document = sl_wire::parse_llsd_xml(source).map_err(|error| error.to_string())?;
+        let functions = document
+            .get("functions")
+            .and_then(sl_wire::Llsd::as_map)
+            .ok_or("the supplement has no functions map")?;
+        Ok(functions.keys().cloned().collect())
+    }
+
+    /// The served document's part of the table, function by function — the
+    /// supplement's functions are in no served document to compare with.
     #[test]
     fn the_generated_table_matches_an_independent_decoder() -> Result<(), String> {
         let syntax = decoded()?;
-        assert_eq!(syntax.functions.len(), BUILTINS.len());
-        for descriptor in &BUILTINS {
+        let unserved = unserved()?;
+        assert_eq!(
+            syntax.functions.len().saturating_add(unserved.len()),
+            BUILTINS.len()
+        );
+        for descriptor in BUILTINS
+            .iter()
+            .filter(|descriptor| !unserved.iter().any(|name| name == descriptor.name))
+        {
             let function = syntax
                 .functions
                 .get(descriptor.name)

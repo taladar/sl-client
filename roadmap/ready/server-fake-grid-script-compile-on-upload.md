@@ -85,3 +85,12 @@ backend: `mono_*`/`lsl2_*`/`luau_*` on Second Life, `yengine_*`/`xengine_*`/
   fetches even to its owner; OpenSim lists it.
 - XEngine's never-answered upload over a running script is an OpenSim bug,
   not a behaviour to imitate.
+
+## From server-lsl-library-unserved-functions (2026-10-30)
+
+The library table now carries `llPointAt`, `llStopPointAt`,
+`llRemoteLoadScript`, `llClearExperiencePermissions` and
+`llGetExperienceList`, which Second Life compiles and serves no document
+for. Both OpenSim engines refuse the two experience functions as undefined
+(`book/src/gridspec/lsl.md` § Running, re-uploading, sizes, targets), so
+`FakeOpensim` should compile against a table without them.
