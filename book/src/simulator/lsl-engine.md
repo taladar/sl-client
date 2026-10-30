@@ -619,7 +619,22 @@ from the sketch above:
 - **The pure functions are generic over the context**
   (`fn ll_abs<C>(_ctx: &mut C, …)`) and ignore it, so their tests pass
   `&mut ()`; `call` itself takes the concrete `ScriptCtx`, and a function
-  that needs it (`llSleep`, `llResetScript`) names it.
+  that needs it (`llSleep`, `llResetScript`) names it. A pure function whose
+  answer differs between the grids is generic over `PureCtx` instead, which
+  `ScriptCtx` implements: the flavour the region imitates, and a refusal on
+  `DEBUG_CHANNEL` (with the second's sleep OpenSim's `Error` costs). Its tests
+  pass a bare context of either flavour.
+- **OpenSim's library throws where Second Life's answers.** A function
+  ported from `LSL_Api.cs` that throws there (`llInsertString` past the end,
+  `llList2ListStrided` of a one-element range past the list, the median of a
+  list with no number, `llList2Integer` of a float past the integer's range)
+  returns `CallError::Exception`, which faults the script as
+  `RuntimeError::Exception`: YEngine tells the owner, as it does an exhausted
+  heap; XEngine says the .NET exception on `DEBUG_CHANNEL`.
+- **A call costs its argument's size.** On top of the flat call, a string or
+  list function is charged what aditi measured it to cost at its argument's
+  length (`vm::cost`, from `vm/call-cost-*`): on Second Life every string
+  function grows with the string, `llStringLength` included.
 
 **`ScriptCtx`, not `&mut Vm`.** A library function sees the calling
 instance through a narrow context — which script is calling, the current
@@ -643,8 +658,9 @@ trait.
 notice that a stubbed function answered with its type's default; `say`, through
 which the engine speaks a script's error lines (a `Speech`: channel, text, and
 how far avatars and scripts hear it); `owner_say`, which tells the owner alone
-what YEngine reports that way; and `whereabouts`, which names the prim and
-script those lines name — and each library tranche adds its own methods.
+what YEngine reports that way; `whereabouts`, which names the prim and
+script those lines name; and `random_bits`, the region's seeded draw
+`llListRandomize` shuffles by — and each library tranche adds its own methods.
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:
@@ -693,7 +709,7 @@ pub trait Host {
 
     /// 32 raw bits from the grid's seeded minter; llFrand, llGenerateKey
     /// and llListRandomize shape them in the runtime.
-    fn random_bits(&mut self) -> u32;
+    fn random_bits(&mut self, caller: CallerId) -> u32;
     /// Seconds since the epoch, from the grid's injected clock
     /// (llGetUnixTime), never the machine's.
     fn unix_time(&self) -> i64;

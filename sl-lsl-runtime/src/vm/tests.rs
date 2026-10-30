@@ -19,6 +19,7 @@ use crate::value::Value;
 
 mod memory;
 mod precision;
+mod strings;
 
 /// A tenth of a second: ten ticks to the second, so `llSleep(2.0)` is twenty.
 const STEP: Duration = Duration::from_millis(100);
@@ -42,6 +43,8 @@ struct Recorder {
     objects: std::collections::BTreeMap<CallerId, String>,
     /// `(tick, caller, text)` per line told the owner alone.
     told: Vec<(u64, CallerId, String)>,
+    /// The state of the xorshift the random draws come from.
+    draws: u32,
 }
 
 impl Host for Recorder {
@@ -91,6 +94,21 @@ impl Host for Recorder {
                 z: 27.5,
             },
         }
+    }
+
+    fn random_bits(&mut self, _caller: CallerId) -> u32 {
+        // xorshift32 from a fixed seed: a region's draws are a function of
+        // its seed.
+        let mut state = if self.draws == 0 {
+            0x9E37_79B9
+        } else {
+            self.draws
+        };
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        self.draws = state;
+        state
     }
 }
 
@@ -1690,9 +1708,9 @@ fn measured_costs(transcript: &str) -> Vec<(String, u64, f64)> {
 }
 
 /// A script that runs `body` `count` times in a loop, with a global list
-/// `L` of `size` integers, `P = [-1]`, and a global string `S` of `size`
-/// characters, all written out as initialisers so filling them costs no
-/// joins.
+/// `L` of `size` integers, `P = [-1]`, `C` the `llList2CSV` of `L`, and a
+/// global string `S` of `size` characters, all written out as initialisers
+/// so filling them costs no joins.
 fn call_cost_script(size: u64, count: u32, body: &str) -> String {
     let elements: Vec<String> = (0..size).map(|element| element.to_string()).collect();
     let text: String = "ab,"
@@ -1701,17 +1719,18 @@ fn call_cost_script(size: u64, count: u32, body: &str) -> String {
         .take(usize::try_from(size).unwrap_or(0))
         .collect();
     format!(
-        "list L = [{}]; list P = [-1]; list r; string S = \"{text}\"; string s; integer n;
+        "list L = [{list}]; list P = [-1]; list r; string C = \"{list}\"; string S = \"{text}\";
+        string s; integer n; float f;
         default {{ state_entry() {{
             integer j;
             for (j = 0; j < {count}; ++j) {{ {body} }}
         }} }}",
-        elements.join(", ")
+        list = elements.join(", ")
     )
 }
 
 #[test]
-fn joins_and_flat_calls_cost_what_they_cost_on_aditi() -> Result<(), String> {
+fn joins_and_library_calls_cost_what_they_cost_on_aditi() -> Result<(), String> {
     const CALLS: u32 = 10;
     let lists = measured_costs(include_str!(
         "../../probes/results/aditi/vm/call-cost-lists.txt"
@@ -1719,13 +1738,64 @@ fn joins_and_flat_calls_cost_what_they_cost_on_aditi() -> Result<(), String> {
     let strings = measured_costs(include_str!(
         "../../probes/results/aditi/vm/call-cost-strings.txt"
     ));
+    let newer = measured_costs(include_str!(
+        "../../probes/results/aditi/vm/call-cost-newer.txt"
+    ));
+    // The probes' own loop bodies.
     let bodies = [
         ("llGetListLength", "n = llGetListLength(L);"),
+        ("llList2Integer", "n = llList2Integer(L, -1);"),
+        ("llListSort", "r = llListSort(L, 1, TRUE);"),
+        ("llList2CSV", "s = llList2CSV(L);"),
+        ("llDumpList2String", "s = llDumpList2String(L, \",\");"),
+        ("llListFindList", "n = llListFindList(L, P);"),
+        ("llList2List", "r = llList2List(L, 0, -1);"),
+        ("llDeleteSubList", "r = llDeleteSubList(L, 0, 0);"),
+        ("llListReplaceList", "r = llListReplaceList(L, P, 0, 0);"),
         ("list-plus", "r = L + P;"),
+        (
+            "llListStatistics",
+            "f = llListStatistics(LIST_STAT_SUM, L);",
+        ),
+        ("llCSV2List", "r = llCSV2List(C);"),
+        ("llListRandomize", "r = llListRandomize(L, 1);"),
+        ("llStringLength", "n = llStringLength(S);"),
+        ("llGetSubString", "s = llGetSubString(S, -1, -1);"),
+        ("llSubStringIndex", "n = llSubStringIndex(S, \"#\");"),
+        (
+            "llParseString2List",
+            "r = llParseString2List(S, [\",\"], []);",
+        ),
+        ("llToUpper", "s = llToUpper(S);"),
+        ("llStringToBase64", "s = llStringToBase64(S);"),
+        ("llMD5String", "s = llMD5String(S, 0);"),
+        ("llSHA1String", "s = llSHA1String(S);"),
+        ("llEscapeURL", "s = llEscapeURL(S);"),
         ("string-plus", "s = S + \"x\";"),
+        ("llInsertString", "s = llInsertString(S, 0, \"x\");"),
+        ("llDeleteSubString", "s = llDeleteSubString(S, 0, 0);"),
+        ("llStringTrim", "s = llStringTrim(S, STRING_TRIM);"),
+        (
+            "llReplaceSubString",
+            "s = llReplaceSubString(S, \",\", \";\", 0);",
+        ),
+        ("llSHA256String", "s = llSHA256String(S);"),
+        ("llComputeHash", "s = llComputeHash(S, \"sha256\");"),
+        ("llOrd", "n = llOrd(S, -1);"),
+        ("llHash", "n = llHash(S);"),
+    ];
+    // The committed runs' outliers `vm::cost` leaves out: each far from the
+    // other run of the same cell (book: 4.2–7.9, 113–639, 63–661 µs).
+    let outliers = [
+        ("llList2Integer", 1),
+        ("llList2List", 10),
+        ("llListReplaceList", 1),
     ];
     let mut checked = 0_u32;
-    for (function, size, aditi) in lists.iter().chain(&strings) {
+    for (function, size, aditi) in lists.iter().chain(&strings).chain(&newer) {
+        if outliers.contains(&(function.as_str(), *size)) {
+            continue;
+        }
         let Some((_, body)) = bodies.iter().find(|(name, _)| name == function) else {
             continue;
         };
@@ -1742,8 +1812,8 @@ fn joins_and_flat_calls_cost_what_they_cost_on_aditi() -> Result<(), String> {
         );
         checked = checked.saturating_add(1);
     }
-    // Four sizes of each.
-    assert_eq!(checked, 12);
+    // Four sizes of each, but the outliers.
+    assert_eq!(checked, 31 * 4 - 3);
     Ok(())
 }
 

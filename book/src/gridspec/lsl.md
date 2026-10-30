@@ -2009,10 +2009,10 @@ as above.
 | `llList2List`, `llListReplaceList`, `llListInsertList`, `llGetSubString`, `llDeleteSubString` past either end and reversed | the documented wrap-around | the same | no scripts |
 | `llDeleteSubList(l, 1, -99)` | `[a]` | `[]` | no scripts |
 | `llList2ListStrided` with a stride of `0`; `llListSort` with `0`, `-1`, `4` or `99`; `llListRandomize` with `0`, `-1`, `4` | the list unchanged (sorted for a sort), six elements | the same | no scripts |
-| `llList2ListStrided` with a stride of `-1` or `99`, or a reversed range | `[a, b, c, d, e, f]`, `[a]`, `[a, c, e]`, `[]` | **throws** `IndexOutOfRangeException` | no scripts |
+| `llList2ListStrided` with a stride of `-1` or `99`, a reversed range (`4, 1`), a range past the end (`99, 100`) | `[a, b, c, d, e, f]`, `[a]`, `[a, c, e]`, `[]` | **throws** `IndexOutOfRangeException` at the range past the end: a range that starts and ends on one index past the list reads the element there (`LSL_Api.llList2ListStrided`); the other three, by its source, are `[f, e, d, c, b, a]`, `[a]` and `[a, e]` — the throw ended the line before they were printed | no scripts |
 | `llListStatistics` of an empty list, an unknown operation, the median of strings | `0.0` each | **throws** `IndexOutOfRangeException` at the median of strings | no scripts |
 | `llListFindList` of an empty pattern | `0`, in an empty list too | `-1` | no scripts |
-| `llInsertString` at 99, -5, -1 | appended, prepended, prepended | **throws** `IndexOutOfRangeException` at a negative index | no scripts |
+| `llInsertString` at 99, -5, -1 | appended, prepended, prepended | **throws** `IndexOutOfRangeException` at 99: an index at or past the end reads the character there before it is checked (`LSL_Api.llInsertString`); a negative index counts from the end | no scripts |
 | `llParseString2List` with nine separators | uses the first **eight**: `[a, …, h, i9j]` | uses all nine | no scripts |
 | `llParseString2List` with an empty separator or spacer | ignored | the same | no scripts |
 | `llOrd` at 99 or -99; `llChar(-1)`, `llChar(0x110000)`, `llChar(0)` | `0`; U+FFFD, U+FFFD, `""` | the same | no scripts |
@@ -2201,7 +2201,7 @@ OpenSim can cut a surrogate pair in half (it then sends `U+FFFD`).
 | `llListSort` of keys and strings | sorted together, each keeping its type | the keys **become strings** | no scripts |
 | `llListStatistics` of `[1, 2.5, "3", (key)"4", <1,2,3>, 4]` | counts the integers and floats only: sum 7.5, count 3 | parses the string and the key as numbers too: sum 14.5, count 5 | no scripts |
 | the geometric mean of `[-1, 4]` | 0 | NaN | no scripts |
-| `llListFindList` of `NULL_KEY` as a string against a key, and back | found: a key and a string match | not found | no scripts |
+| `llListFindList` of `NULL_KEY` as a string in `[(key)NULL_KEY, NULL_KEY]`, and as a key in `[NULL_KEY, (key)NULL_KEY]` | 1 and 1: only the element of the same type matches | 0 and 0: a key and a string of the same text are one | no scripts |
 | `llListFindList` of `1` among `[1.0, 1]`, `1.0` among `[1, 1.0]`, `"1"` among `[1, "1"]` | 1, 1, 1: the type must match | the same | no scripts |
 | `llSubStringIndex("", "")` | 0 | **−1** | no scripts |
 
@@ -2218,8 +2218,8 @@ XEngine); it has `llChar`, `llOrd` and `llHash` (above).
 | `llReplaceSubString("aaa-b-aaa", "a", "x", n)` for 0, 2, −2 | every match, the first two, the last two | no scripts |
 | overlapping matches, `"aa"` in `aaa` | left to right, not overlapping: `ya-b-ya`; with −1 the last match from the right: `aaa-b-ay` | no scripts |
 | `llList2ListSlice([1,a,2,b,3,c,4,d], 0, -1, 2, i)` | `i` 1 or −1: `[a, b, c, d]`; `i` past the stride: `[]`; a reversed range (5, 2) wraps: `[1, 2, c, d]` | no scripts |
-| `llListFindStrided` | matches only at a stride's start, counting from `start` (a start of 1 never matches at even indices); negative indices count from the end | no scripts |
-| `llListSortStrided` by a stride index of 1, −1, 0 | sorts by that element; past the stride, `[]`; an odd tail left at the end | no scripts |
+| `llListFindStrided` | matches only at a stride's start, counting from `start` (a start of 1 never matches at even indices); negative indices count from the end; a stride of 0 searches as 1 | no scripts |
+| `llListSortStrided` by a stride index of 1, −1, 0 | sorts by that element; past the stride, `[]`; a list whose length is no multiple of the stride is left as it is | no scripts |
 | `llComputeHash` with `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512` | the hex digest; the name is not case sensitive; `md4` or `""` give `""` | no scripts |
 | `llHMAC` | the Base64 HMAC, the same names; an unknown one `""` | no scripts |
 | `llLinear2sRGB`, `llsRGB2Linear` | the standard curves, not clamped: 2 → 1.35326, −1 → −12.92 | no scripts |

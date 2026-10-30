@@ -123,15 +123,26 @@ pub(crate) fn fault_lines(flavour: EngineFlavour, fault: &Fault, at: &Whereabout
             })
             .into_iter()
             .collect(),
-        EngineFlavour::XEngine => opensim_error(flavour, &fault.error)
-            .map(|what| {
-                cut(format!(
-                    "{what}(script: {} event: {event} primID:{} at <{}, {}, {}>)",
-                    at.script, at.prim, at.position.x, at.position.y, at.position.z,
-                ))
-            })
-            .into_iter()
-            .collect(),
+        // XEngine says a .NET exception out of the library as `FormatException`
+        // words it — the exception wrapped in the reflection call's — with no
+        // `(script: …)` after it (`ScriptInstance.EventProcessor`). The stack
+        // trace that follows on the grid, a line a frame of its own C#, is
+        // left out.
+        EngineFlavour::XEngine => match &fault.error {
+            RuntimeError::Exception { exception, .. } => vec![cut(format!(
+                "System.Reflection.TargetInvocationException: Exception has been thrown by \
+                 the target of an invocation. ---> System.{exception}"
+            ))],
+            error => opensim_error(flavour, error)
+                .map(|what| {
+                    cut(format!(
+                        "{what}(script: {} event: {event} primID:{} at <{}, {}, {}>)",
+                        at.script, at.prim, at.position.x, at.position.y, at.position.z,
+                    ))
+                })
+                .into_iter()
+                .collect(),
+        },
     }
 }
 
@@ -151,8 +162,15 @@ fn opensim_error(flavour: EngineFlavour, error: &RuntimeError) -> Option<String>
         (_, RuntimeError::MathError(Division::Integer | Division::Float)) => {
             Some("Division by Zero".to_owned())
         }
-        // An exhausted heap is told to the owner instead ([`owner_lines`]).
-        (_, RuntimeError::StackHeapCollision | RuntimeError::OutOfHeap { .. }) => None,
+        // An exhausted heap, and on YEngine an exception out of the library,
+        // is told to the owner instead ([`owner_lines`]); XEngine's exception
+        // has its own words ([`fault_lines`]).
+        (
+            _,
+            RuntimeError::StackHeapCollision
+            | RuntimeError::OutOfHeap { .. }
+            | RuntimeError::Exception { .. },
+        ) => None,
         (
             _,
             other @ (RuntimeError::InvalidProgram
@@ -165,13 +183,17 @@ fn opensim_error(flavour: EngineFlavour, error: &RuntimeError) -> Option<String>
 
 /// The lines a fault tells the script's owner alone in `flavour`, in order,
 /// for a fault reported that way rather than on `DEBUG_CHANNEL`: YEngine's
-/// `OutOfHeapException` (`memory/collision`, 2026-10-26) — the item, the
+/// `OutOfHeapException` (`memory/collision`, 2026-10-26) and an exception
+/// out of a library function (`errors/bounds`, 2026-10-27) — the item, the
 /// exception, where, and that a reset is needed. YEngine sends the engine's
 /// stack trace after them, a line a frame of its own C#, which is left out.
 #[must_use]
 pub(crate) fn owner_lines(flavour: EngineFlavour, fault: &Fault, at: &Whereabouts) -> Vec<String> {
     match (flavour, &fault.error) {
-        (EngineFlavour::YEngine, error @ RuntimeError::OutOfHeap { .. }) => vec![
+        (
+            EngineFlavour::YEngine,
+            error @ (RuntimeError::OutOfHeap { .. } | RuntimeError::Exception { .. }),
+        ) => vec![
             format!("[YEngine]: Exception while running {}", at.item),
             error.to_string(),
             format!(

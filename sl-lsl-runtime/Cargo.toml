@@ -15,7 +15,16 @@ publish = { workspace = true }
 
 exclude = { workspace = true }
 
+[package.metadata.cargo-machete]
+# `md-5` is used as `md5` (its library name), which cargo-machete does not
+# match to the package name.
+ignored = ["md-5"]
+
 [dependencies]
+hmac = { workspace = true }
+md-5 = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
 sl-lsl = { workspace = true }
 sl-types = { workspace = true }
 thiserror = { workspace = true }

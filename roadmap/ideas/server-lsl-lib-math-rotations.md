@@ -94,8 +94,16 @@ grids for unit input. Where the flavours differ:
   [[server-lsl-memory-sizes]], and a longer float expression's rounding
   since [[server-lsl-float-expression-precision]] (an argument is rounded
   before a library function sees it, its result is a float). Once
-  `llSqrt` and `llList2Float` exist, add `math/float-rounding`'s
-  `library-return`, `list-element` and `list-append` rows to the VM replay
-  in `vm/tests/precision.rs`. The library helpers here
+  `llSqrt` exists, add `math/float-rounding`'s `library-return` row to the
+  VM replay in `vm/tests/precision.rs` (the `list-element` and
+  `list-append` rows went in with `llList2Float`,
+  [[server-lsl-lib-strings-lists]]).
+- `llLinear2sRGB` and `llsRGB2Linear` are done
+  ([[server-lsl-lib-strings-lists]], `library/math.rs`).
+- A pure function whose answer differs by grid is generic over
+  `library::PureCtx`; an OpenSim throw (`llModPow(…, 0)`'s
+  `DivideByZeroException`) is a `CallError::Exception` — add the variant to
+  `library::Exception`; the reports per engine are already there.
+- The library helpers here
   compute the double result of the float argument and round it once
   (`math/rotation-bits`' `library` rows).

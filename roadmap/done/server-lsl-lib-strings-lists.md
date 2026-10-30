@@ -2,7 +2,7 @@
 id: server-lsl-lib-strings-lists
 title: Library tranche — strings, lists, encoding and hashing
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-lsl-library-surface-table,
   gridspec-lsl-strings-math]
@@ -70,9 +70,11 @@ and stops at the exponent (1.0). `llDeleteSubList(l, 1, -99)` keeps `[a]`
 on Second Life and nothing on OpenSim; `llListFindList` of an empty pattern
 is 0 there and -1 here; `llParseString2List` uses only the first eight
 separators on Second Life. OpenSim throws (a run-time error on the script,
-[[server-lsl-runtime-errors]]) where Second Life answers:
-`llList2ListStrided` with a stride of -1 or 99 or a reversed range,
-`llListStatistics`' median of strings, `llInsertString` at a negative index.
+[[server-lsl-runtime-errors]]) where Second Life answers: `llList2ListStrided`
+of a one-element range past the list, `llListStatistics`' median of strings,
+`llInsertString` at an index past the end. (This read "a stride of -1 or 99
+or a reversed range" and "at a negative index" until the replays below
+showed which call of each line threw; the book is corrected.)
 OpenSim compiles none of `llReplaceSubString`, `llList2ListSlice`,
 `llListFindStrided`, `llListSortStrided`; Second Life's answers to an empty
 pattern and strides of zero are in the table.
@@ -120,3 +122,58 @@ functions*). What the flavours must differ in:
   grows with the string, `llStringLength` and `llGetSubString` included.
   Extend `joins_and_flat_calls_cost_what_they_cost_on_aditi` (in
   `vm/tests.rs`) to each function as it lands.
+
+## Done (2026-10-30)
+
+All 52 functions of the tranche (51 new beside `llGetListLength`) are
+implemented in `sl-lsl-runtime` (`library/strings.rs`, `lists.rs`,
+`encoding.rs`), each answering as the
+region's flavour does where the grids were measured to part: Second Life's
+from PyOptimizer, OpenSim's ported from `LSL_Api.cs` / `LSL_Types.list`
+(including its throws, its statistics — the range is max ÷ min there — its
+pivot sort and its `UUID.TryParse` view of strings and keys). Coverage is 83
+implemented of 524. Supporting pieces: a `PureCtx` trait the pure functions
+are generic over (flavour, a refusal, OpenSim's second of sleep after one);
+`text.rs`, which counts in code points or UTF-16 units by flavour;
+`range.rs`, both grids' index arithmetic; `CallError::Exception` /
+`RuntimeError::Exception`, which YEngine tells the owner and XEngine says on
+`DEBUG_CHANNEL` (`OverflowException` too, for OpenSim's `llList2Integer` of a
+float past the range); `Host::random_bits` and `ScriptCtx::random_below` for
+`llListRandomize`'s seeded shuffle; and `vm::cost::call`, which charges each
+call its measured cost at its argument's size.
+
+**Proof.** `vm/tests/strings.rs` runs the probes' own scripts in the VM
+(`llOwnerSay` as `print`, the region queries written in) and holds every line
+they print to the transcripts: `strings/functions`, `strings/conversions`,
+`strings/unicode` and `strings/newer` on aditi; `strings/functions` and
+`strings/unicode` on YEngine and XEngine; all 18 `errors/bounds` cases on the
+three and the 4 `errors/bounds-newer` cases on aditi, with the owner lines
+YEngine tells and the debug line XEngine says for the three that throw. The
+named deviations: `llBase64ToInteger("!!!!")`, a different number each run
+on aditi, is 0 here; and bounds cases 1–3 on OpenSim print a vector with
+`(string)`, which writes five decimals here (the value model is Second
+Life's) and six there. `joins_and_library_calls_cost_what_they_cost_on_aditi`
+holds 121 of the 124 timed cells within 5 % — the three left out are the
+committed runs' outliers (book ranges 4.2–7.9, 113–639, 63–661 µs) — and
+`math/float-rounding`'s `list-element` and `list-append` rows are now in the
+precision replay.
+
+The replays found three answers the oracles had wrong:
+`llList2ListSlice` of a reversed range strides each of its two pieces from
+its own start (`[1, 2, c, d]`, not `[1, 2, 4]`); `llListFindStrided` with a
+stride of 0 searches as 1 (PyOptimizer: −1); and OpenSim's
+`Uri.UnescapeDataString` writes a kept bad escape in upper case. They also
+corrected five book rows (OpenSim's throws above, `llListFindList` of a key
+against a string, which only OpenSim matches, and the odd-length
+`llListSortStrided`, which is left as it is).
+
+**Decisions beyond the measurements.** A function the cost probes did not
+time is charged as the timed one doing the same work (`llToLower` as
+`llToUpper`, the other single reads as `llList2Integer`, `llHMAC` as
+`llComputeHash`, …; the list is in `vm::cost::library_cost`). The deprecated
+`llXorBase64Strings` / `llXorBase64StringsCorrect` and the unmeasured
+`llListFindListNext` follow PyOptimizer on every grid. `llLinear2sRGB` and
+`llsRGB2Linear` (maths, but measured by `strings/newer`) are implemented too
+so the probe replays whole. OpenSim's `llListSort` of a list of one type
+uses a stable sort where .NET's `Array.Sort` is not; equal keys can only
+differ in order there.

@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 138 |
+| ideas | 137 |
 | ready | 332 |
 | blocked | 53 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1456 |
+| done | 1457 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2091** |
 
-## ideas (138)
+## ideas (137)
 
 ### protocol
 
@@ -319,10 +319,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tranche — reading and writing the prim (blocked by `server-lsl-vm-execution`
   (done), `server-world-ecs-store`, `server-world-link-sets`,
   `server-world-update-scheduling`, `gridspec-lsl-prim-state` (done))
-- [`server-lsl-lib-strings-lists`](ideas/server-lsl-lib-strings-lists.md) —
-  Library tranche — strings, lists, encoding and hashing (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
-  `gridspec-lsl-strings-math` (done))
 - [`server-lsl-lib-task-inventory`](ideas/server-lsl-lib-task-inventory.md) —
   Library tranche — task inventory, giving, rezzing and notecards (blocked by
   `server-lsl-vm-execution` (done), `server-fake-grid-script-engine-wiring`,
@@ -1498,7 +1494,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1456)
+## done (1457)
 
 ### protocol
 
@@ -4527,6 +4523,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `server-lsl-value-model` (done))
 - [`server-lsl-float-expression-precision`](done/server-lsl-float-expression-precision.md)
   — Round a float expression once, where Mono stores it, not at every operator
+- [`server-lsl-lib-strings-lists`](done/server-lsl-lib-strings-lists.md) —
+  Library tranche — strings, lists, encoding and hashing (blocked by
+  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
+  `gridspec-lsl-strings-math` (done))
 - [`server-lsl-library-surface-table`](done/server-lsl-library-surface-table.md)
   — One generated table for the library, and a coverage harness over it (blocked
   by `server-lsl-architecture` (done))

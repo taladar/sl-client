@@ -3,11 +3,15 @@
 
 /// The script engine a region imitates.
 ///
-/// The value model and the library are Second Life's whatever this says; the
-/// flavour decides only what the grids were measured to do differently with
-/// a script that goes wrong (book chapter `gridspec/lsl.md`, § Run-time
-/// errors): the words of a run-time error and who hears them, whether the
-/// faulted script stops, and the flood limit on its error lines.
+/// The value model is Second Life's whatever this says — OpenSim's doubles
+/// are not modelled, so a float is an `f32` and `(string)` writes Second
+/// Life's digits on every grid. The flavour decides what the grids were
+/// measured to do differently (book chapter `gridspec/lsl.md`): with a
+/// script that goes wrong (§ Run-time errors) — the words of a run-time
+/// error and who hears them, whether the faulted script stops, the flood
+/// limit on its error lines; how a script's memory is counted (§ Memory and
+/// limits); and the library functions whose answers differ (§ Strings,
+/// lists, maths and rotations), OpenSim's ported from its `LSL_Api.cs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum EngineFlavour {
     /// Second Life's Mono. A fault stops the script and says two lines that

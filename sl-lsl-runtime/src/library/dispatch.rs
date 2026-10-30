@@ -62,6 +62,56 @@ pub enum CallError {
     /// Error`).
     #[error(transparent)]
     Value(#[from] ValueError),
+    /// The function threw, as OpenSim's library does where Second Life's
+    /// answers (book chapter `gridspec/lsl.md`, § *Indices and strides out of
+    /// range*): a run-time error of the script, told in each engine's words.
+    #[error("{id:?} threw {exception}")]
+    Exception {
+        /// The function that threw.
+        id: BuiltinId,
+        /// What it threw.
+        exception: Exception,
+    },
+}
+
+/// A .NET exception OpenSim's library throws out of a function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Exception {
+    /// `System.IndexOutOfRangeException`: an index past an array's end —
+    /// `llList2ListStrided` of a range that starts and ends past the list,
+    /// `llInsertString` at or past the end, the median of a list with no
+    /// number in it, `llBase64ToInteger` of a string too short to read.
+    IndexOutOfRange,
+    /// `System.OverflowException` from `Convert.ToInt32`: `llList2Integer` of
+    /// a float past the integer's range, or NaN.
+    Overflow,
+}
+
+impl Exception {
+    /// The exception's class name, without its namespace.
+    #[must_use]
+    pub const fn class(self) -> &'static str {
+        match self {
+            Self::IndexOutOfRange => "IndexOutOfRangeException",
+            Self::Overflow => "OverflowException",
+        }
+    }
+
+    /// The exception's message.
+    #[must_use]
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::IndexOutOfRange => "Index was outside the bounds of the array.",
+            Self::Overflow => "Value was either too large or too small for an Int32.",
+        }
+    }
+}
+
+impl core::fmt::Display for Exception {
+    /// `<class>: <message>`, as YEngine reports it.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}: {}", self.class(), self.message())
+    }
 }
 
 /// A Rust type that stands for one LSL argument type.

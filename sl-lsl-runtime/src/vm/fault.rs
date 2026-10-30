@@ -2,7 +2,7 @@
 
 use crate::bytecode::Position;
 use crate::error::{Division, ValueError};
-use crate::library::{BuiltinId, CallError};
+use crate::library::{BuiltinId, CallError, Exception};
 
 /// Why a script stopped with an error.
 ///
@@ -44,6 +44,16 @@ pub enum RuntimeError {
     /// runtime's own backstop, not a grid's error.
     #[error("script memory past this host's limit of 64 MiB")]
     HostMemory,
+    /// A library function threw, as OpenSim's do where Second Life's answer
+    /// ([`CallError::Exception`]). The words are YEngine's: the class and the
+    /// message.
+    #[error("{exception}")]
+    Exception {
+        /// The function that threw.
+        function: BuiltinId,
+        /// What it threw.
+        exception: Exception,
+    },
     /// A library function this runtime has neither implemented nor stubbed.
     #[error("{} is not implemented by this grid", .0.descriptor().name)]
     Unimplemented(BuiltinId),
@@ -70,6 +80,10 @@ impl From<CallError> for RuntimeError {
         match error {
             CallError::Missing(id) => Self::Unimplemented(id),
             CallError::Value(value) => value.into(),
+            CallError::Exception { id, exception } => Self::Exception {
+                function: id,
+                exception,
+            },
             other @ (CallError::Arity { .. } | CallError::Argument { .. }) => {
                 Self::Internal(other.to_string())
             }

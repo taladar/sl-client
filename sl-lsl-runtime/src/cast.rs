@@ -10,7 +10,7 @@ use crate::value::{Element, Value};
 
 /// Text up to its first NUL: a cast out of a string or key stops there
 /// (PyOptimizer's `zstr`), since the reference's strings are NUL-terminated.
-fn until_nul(text: String) -> String {
+pub(crate) fn until_nul(text: String) -> String {
     match text.find('\0') {
         Some(end) => text.get(..end).unwrap_or_default().to_owned(),
         None => text,

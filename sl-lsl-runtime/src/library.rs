@@ -25,20 +25,115 @@
 pub mod control;
 pub mod detection;
 pub mod dispatch;
+mod dotnet;
+pub mod encoding;
 mod generated;
 pub mod lists;
 pub mod math;
+mod range;
 mod registry;
+pub mod strings;
 pub mod table;
+mod text;
 pub mod usage;
 
 pub use dispatch::{
-    CallError, Called, FromArgs, FromValue, Handler, IntoReturn, Key, Signature, Status, invoke,
-    stub,
+    CallError, Called, Exception, FromArgs, FromValue, Handler, IntoReturn, Key, Signature, Status,
+    invoke, stub,
 };
 pub use generated::{BUILTINS, BuiltinId, CONSTANTS, EVENTS, signatures};
 pub use registry::{call, status};
 pub use table::{Argument, Builtin, Constant, ConstantValue, Event, builtin, constant, event};
+
+use crate::vm::{EngineFlavour, ScriptCtx};
+
+/// What a library function that touches nothing of the world sees of its
+/// caller: which grid's engine the region imitates, where the grids answer
+/// differently (book chapter `gridspec/lsl.md`, § Strings, lists, maths and
+/// rotations), and a way to refuse its arguments in that grid's words — which
+/// on OpenSim also costs the script a second (`LSL_Api.Error`).
+///
+/// The pure tranches are generic over it, so a test calls them with a
+/// `bare::Bare` context of any flavour and the VM with the calling script's
+/// [`ScriptCtx`].
+pub trait PureCtx {
+    /// The grid's engine the region imitates.
+    fn flavour(&self) -> EngineFlavour;
+
+    /// Refuse the call's arguments with `text` on `DEBUG_CHANNEL`; the call
+    /// carries on and returns its answer.
+    fn refuse(&mut self, text: String);
+
+    /// Suspend the script for `seconds` once the call returns.
+    fn sleep(&mut self, seconds: f32);
+}
+
+impl PureCtx for ScriptCtx<'_> {
+    fn flavour(&self) -> EngineFlavour {
+        ScriptCtx::flavour(self)
+    }
+
+    fn refuse(&mut self, text: String) {
+        ScriptCtx::refuse(self, text);
+    }
+
+    fn sleep(&mut self, seconds: f32) {
+        ScriptCtx::sleep(self, seconds);
+    }
+}
+
+/// A context for calling the pure tranches outside a VM.
+#[cfg(test)]
+pub(crate) mod bare {
+    use super::PureCtx;
+    use crate::vm::EngineFlavour;
+
+    /// A flavour and the refusals said under it.
+    #[derive(Debug, Default)]
+    pub(crate) struct Bare {
+        /// The flavour the calls are made under.
+        pub(crate) flavour: EngineFlavour,
+        /// What the calls refused, in order.
+        pub(crate) refusals: Vec<String>,
+        /// The seconds the calls asked to sleep, in all.
+        pub(crate) slept: f32,
+    }
+
+    impl Bare {
+        /// No refusals yet, under `flavour`.
+        pub(crate) const fn of(flavour: EngineFlavour) -> Self {
+            Self {
+                flavour,
+                refusals: Vec::new(),
+                slept: 0.0,
+            }
+        }
+    }
+
+    impl PureCtx for Bare {
+        fn flavour(&self) -> EngineFlavour {
+            self.flavour
+        }
+
+        fn refuse(&mut self, text: String) {
+            self.refusals.push(text);
+        }
+
+        fn sleep(&mut self, seconds: f32) {
+            self.slept += seconds;
+        }
+    }
+
+    /// Second Life.
+    pub(crate) const fn sl() -> Bare {
+        Bare::of(EngineFlavour::SecondLife)
+    }
+
+    /// OpenSim's YEngine (the library is shared with XEngine).
+    pub(crate) const fn os() -> Bare {
+        Bare::of(EngineFlavour::YEngine)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -55,9 +150,7 @@ mod tests {
 
     use super::*;
     use crate::value::{Element, Value};
-    use crate::vm::{
-        CallerId, Host, Memory, Peers, ScriptCtx, ScriptData, Speech, Stack, Tick, Whereabouts,
-    };
+    use crate::vm::{CallerId, Host, Memory, Peers, ScriptData, Speech, Stack, Tick, Whereabouts};
 
     /// A host for calls that never reach it: the dispatch reports stubs
     /// through `Called::stubbed`, and only the VM tells the host.
@@ -88,6 +181,10 @@ mod tests {
                 region: String::new(),
                 position: crate::value::ZERO_VECTOR,
             }
+        }
+
+        fn random_bits(&mut self, _caller: CallerId) -> u32 {
+            0
         }
     }
 

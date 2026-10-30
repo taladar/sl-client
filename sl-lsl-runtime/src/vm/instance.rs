@@ -725,7 +725,9 @@ impl Machine<'_> {
             Instr::CallBuiltin(id) => {
                 let descriptor = id.descriptor();
                 let args = pop_n(stack, descriptor.args.len())?;
-                *used = used.saturating_add(BUILTIN_CALL_COST);
+                *used = used
+                    .saturating_add(BUILTIN_CALL_COST)
+                    .saturating_add(cost::call(id, &args));
                 let mut ctx = ScriptCtx::new(
                     self.caller,
                     self.now,

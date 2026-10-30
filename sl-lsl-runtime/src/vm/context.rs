@@ -259,6 +259,14 @@ impl<'host> ScriptCtx<'host> {
         self.memory.profiled()
     }
 
+    /// A random number in `0..bound` from the region's seeded source; `0` for
+    /// a bound of zero. The draw is reduced by Lemire's multiply-and-shift,
+    /// whose bias over 32 bits is below anything a script can count.
+    pub fn random_below(&mut self, bound: u32) -> u32 {
+        let draw = u64::from(self.host.random_bits(self.caller));
+        u32::try_from(draw.saturating_mul(u64::from(bound)) >> 32).unwrap_or(0)
+    }
+
     /// Refuse the call's arguments with `text`, worded for the
     /// [`Self::flavour`]: the engine says it on `DEBUG_CHANNEL` once the
     /// slice is over, through the same flood limit as a run-time error. The

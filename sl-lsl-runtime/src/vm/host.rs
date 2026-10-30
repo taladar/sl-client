@@ -61,4 +61,11 @@ pub trait Host {
     /// Where the script `caller` is, for the words of its error lines and
     /// the object its flood is counted against.
     fn whereabouts(&self, caller: CallerId) -> Whereabouts;
+
+    /// A random number for `caller`, every value of the 32 bits equally
+    /// likely (`llListRandomize`'s shuffle). It comes from the region's
+    /// seeded source, never from the machine, so two runs of a scenario from
+    /// one seed draw the same numbers (`roadmap/context/lsl.md`, the
+    /// determinism rule).
+    fn random_bits(&mut self, caller: CallerId) -> u32;
 }

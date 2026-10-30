@@ -185,11 +185,10 @@ default {{ state_entry() {{
 #[test]
 fn every_rounding_point_of_float_rounding_is_where_aditi_has_it() -> Result<(), String> {
     // The probe with each `llList2Float(xs, i)` replaced by the literal it
-    // reads (a float in a local is the same float). Three rows are left out
-    // because they cannot be read back without a library function the
-    // runtime does not have yet, and hold by construction: a library
-    // function's result (`library-return`) is a `Value` and a list element
-    // (`list-element`, `list-append`) an `Element`, whose floats are `f32`s.
+    // reads (a float in a local is the same float). One row is left out
+    // because it cannot be read back without `llSqrt`, which the runtime
+    // does not have yet, and holds by construction: a library function's
+    // result (`library-return`) is a `Value`, whose floats are `f32`s.
     let source = format!(
         r#"string ID = "math/float-rounding";
 {HELPERS}
@@ -240,6 +239,12 @@ default
         point("library-argument", s);
         s = -(A * B) + R;
         point("negation", s);
+        s = llList2Float([A * B], 0) - R;
+        point("list-element", s);
+        list l = [];
+        l += A * B;
+        s = llList2Float(l, 0) - R;
+        point("list-append", s);
         vector v = <A * B, 0.0, 0.0>;
         s = v.x - R;
         point("vector-component", s);
@@ -321,13 +326,9 @@ default
     let transcript = include_str!("../../../probes/results/aditi/math/float-rounding.txt");
     let aditi: Vec<String> = transcript_lines(transcript, &["input", "point"])
         .into_iter()
-        .filter(|line| {
-            !["library-return", "list-element", "list-append"]
-                .iter()
-                .any(|name| line.contains(&format!(" name={name} ")))
-        })
+        .filter(|line| !line.contains(" name=library-return "))
         .collect();
-    assert_eq!(aditi.len(), 33);
+    assert_eq!(aditi.len(), 35);
     let ours = transcript_lines(&ours.join("\n"), &["input", "point"]);
     assert_eq!(ours, aditi);
     Ok(())
