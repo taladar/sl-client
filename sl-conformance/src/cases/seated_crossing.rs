@@ -840,8 +840,7 @@ async fn drive(ctx: &mut TestContext, guard: &mut DeleteOnDrop) -> Result<(), Te
         .region_handle()
         .ok_or_else(|| TestFailure::Assertion("login established no region handle".to_owned()))?;
     // The child circuits have to exist before the crossing, as on foot.
-    let found: Neighbourhood =
-        watch_neighbours(first, agent, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
+    let found: Neighbourhood = watch_neighbours(first, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
     found.record("neighbours_", Some(home), ctx.metrics());
     let own = found.own.clone().ok_or_else(|| {
         TestFailure::Assertion("our own avatar never appeared in the object stream".to_owned())

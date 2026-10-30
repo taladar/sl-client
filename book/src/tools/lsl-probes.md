@@ -48,7 +48,8 @@ A probe's id is its path below `probes/` without the extension
 | `unordered` | the records whose order among a run of their own kind is not defined, comma-separated: a comparison takes such a run as a set |
 | `bare` | prims that hold no script, comma-separated as `<label>@<east>` or `<label>@<east>/<up>` in metres from prim A — the targets a sensor or a ray is to find; they are rezzed in the order listed, after the script's own prim |
 | `target` | the compile target the script is uploaded for: `mono` (the default) or `lsl2`, Second Life's LSO with its 16 KB; OpenSim ignores the upload's target and compiles every script for the engine its first line picks |
-| `stats` | `active-scripts`: the runner notes the region's active-script count, from the `SimStats` the grid sends the owner's viewer, each time it changes while the probe runs |
+| `deadline` | the seconds the probe may run before its transcript is written as incomplete, for one that needs longer than the runner's three minutes |
+| `stats` | region statistics the runner notes, from the `SimStats` the grid sends the owner's viewer, each time one changes while the probe runs, comma-separated: `active-scripts` (the active-script count, `active_scripts`), `scripts-run` (the percentage of scripts that ran in the last frame, `scripts_run`), `script-time` (a frame's milliseconds spent on scripts, `script_ms`), `time-dilation` (how far the region's time keeps up with real time, `time_dilation`) |
 | `object` | the object the script travels in: the runner makes a cube of that name above prim A, saves the scripts that name it in it, running, takes it into the owner's Trash and drops the item into the script's `prim`, before any notecard-reading or other script of the probe is saved; the probe rezzes it. A rezzed object is no probe prim, so its lines are not kept: have it say them on a channel to a script that prints them |
 | `library` | the library the script is written against: `sl` (the default) or `opensim`, Second Life's plus OpenSim's `os*`, `ls*` and `mod*` functions and their constants; the corpus test compiles every script against Second Life's library, and lets a script for OpenSim name what OpenSim adds. The runner uploads it to every grid all the same: Second Life's compile error is its measurement there |
 
@@ -371,10 +372,11 @@ script can read; every touch says the surface it sent, `surface=none` or
 the probe's owner-say lines from its prims, and every `DEBUG_CHANNEL` message
 they send as a `# debug-channel:` note (`# debug-channel by=other:` for what the
 other avatar is sent; an owner-say line that is not a probe line as
-`# owner-say:`), until `end` or three minutes, then derezzes the prims
+`# owner-say:`), until `end` or three minutes (the header's `deadline`, if it
+has one), then derezzes the prims
 to the Trash — and so it does when the grid refuses one of a probe's rezzes,
 with the prims already rezzed, before the run fails. For a probe whose header
-asks (`stats`), it notes the region's active-script count as `# sim-stats`
+asks (`stats`), it notes each statistic asked for as `# sim-stats <key>=…`
 whenever it changes. It also notes what the grid sent the two viewers meanwhile,
 about the avatars: a permission question from the probe's prims (`# question`,
 the mask, the object's name, how the owner's name was put), a dialog from them

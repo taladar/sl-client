@@ -66,7 +66,7 @@ use sl_client_tokio::{
     Vector, WearableType, XferListing,
 };
 use sl_lsl_runtime::probe::{
-    Action, By, COMPILE_ERROR_NOTE, Drive, Fetch, Line, PREFIX, ResultFile, Stimulus, Target,
+    Action, By, COMPILE_ERROR_NOTE, Drive, Fetch, Line, PREFIX, ResultFile, Stat, Stimulus, Target,
     TouchSurface,
 };
 
@@ -101,8 +101,8 @@ const SETTLE_IDLE: Duration = Duration::from_secs(5);
 const STEP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a probe may run before its transcript is written as
-/// incomplete. The longest probe in the corpus, `http/outbound`, runs about
-/// a minute and a half.
+/// incomplete, unless its header asks for longer (`deadline`). The longest
+/// probe without one, `http/outbound`, runs about a minute and a half.
 pub const PROBE_DEADLINE: Duration = Duration::from_secs(180);
 
 /// How long the case keeps listening after a probe's `end`, for a second
@@ -394,11 +394,10 @@ struct Transcript {
     owner_moved: Option<Vector>,
     /// Where it last put the other avatar, likewise.
     other_moved: Option<Vector>,
-    /// Whether the probe asked for the region's active-script count
-    /// (`stats: active-scripts`).
-    notes_active_scripts: bool,
-    /// The active-script count last noted.
-    active_scripts: Option<f32>,
+    /// The region statistics the probe asked to have noted (`stats`).
+    noted_stats: Vec<Stat>,
+    /// The value of each last noted.
+    stat_values: HashMap<Stat, f32>,
     /// Each avatar's L$ balance as the grid last told it (by role), so that
     /// a note can say how a balance changed and never what it is.
     balances: HashMap<&'static str, u64>,
@@ -696,17 +695,25 @@ impl Transcript {
     /// record name of a probe line it kept.
     fn take(&mut self, id: &str, prims: &HashSet<ObjectKey>, event: &Event) -> Option<String> {
         match event {
-            Event::SimStats(stats) if self.notes_active_scripts => {
-                let count = stats
-                    .stats
-                    .iter()
-                    .find(|(stat, _)| *stat == SimStatId::ActiveScripts)
-                    .map(|(_, value)| *value);
-                if count.is_some() && count != self.active_scripts {
-                    self.active_scripts = count;
-                    if let Some(count) = count {
+            Event::SimStats(stats) if !self.noted_stats.is_empty() => {
+                for noted in self.noted_stats.clone() {
+                    let id = match noted {
+                        Stat::ActiveScripts => SimStatId::ActiveScripts,
+                        Stat::ScriptsRun => SimStatId::PercentScriptsRun,
+                        Stat::ScriptTime => SimStatId::ScriptTimeMs,
+                        Stat::TimeDilation => SimStatId::TimeDilation,
+                    };
+                    let Some(value) = stats
+                        .stats
+                        .iter()
+                        .find(|(stat, _)| *stat == id)
+                        .map(|(_, value)| *value)
+                    else {
+                        continue;
+                    };
+                    if self.stat_values.insert(noted, value) != Some(value) {
                         self.body
-                            .push(format!("# sim-stats active_scripts={count}"));
+                            .push(format!("# sim-stats {}={value}", noted.key()));
                     }
                 }
                 return None;
@@ -1273,7 +1280,7 @@ async fn run_probe(
     }
     let keys: HashSet<ObjectKey> = prims.values().map(|object| object.full_id).collect();
     let mut transcript = Transcript::new(avatars.cast.clone());
-    transcript.notes_active_scripts = probe.notes_active_scripts();
+    transcript.noted_stats = probe.noted_stats();
     if probe.drives().contains(&Drive::Pay) {
         // What each avatar holds before anything is paid, so that the notes
         // can say how a payment changed it. The answers come while the
@@ -1346,7 +1353,7 @@ async fn run_probe(
     }
 
     if planted {
-        let mut deadline = after(PROBE_DEADLINE);
+        let mut deadline = after(probe.deadline().unwrap_or(PROBE_DEADLINE));
         let mut answered = 0_usize;
         while collect(
             avatars.session,

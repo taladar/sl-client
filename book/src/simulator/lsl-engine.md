@@ -306,14 +306,28 @@ scripts-run percentage.
   loop body cost it one per cent. So a back-edge is charged 513, a call 626, and
   a script runs 260 million a second (`SCRIPT_INSTRUCTIONS_PER_SECOND`): an
   empty loop at the 500 000 iterations a second aditi runs it at. The doc
-  comments carry the measurements. A slice may overshoot its budget by the one
-  instruction that crosses it and never more. Size-proportional charges wait for
-  the functions that need them and a measurement of each (roadmap
-  `server-lsl-call-cost-sizes`).
+  comments carry the measurements.
+- **Size-proportional charges** (`vm/cost.rs`). Joining lists or strings with
+  `+` costs what aditi measured for the length of the result, through the
+  measured points joined by straight lines and on along the last one's slope:
+  a new list 186 µs before it holds anything and some 16 µs an element after,
+  a string 11 µs and some 0.19 µs a character (`LIST_JOIN`, `STRING_JOIN`).
+  `llGetListLength` is flat there, as the flat call cost charges it. A test
+  runs the probes' own loops in the VM and holds every charge to its aditi
+  transcript within 5 %. The library's size-dependent functions get their
+  charges from the same table as they are written (book: gridspec `lsl.md`,
+  § *What a call costs*).
+- **Overdraft.** A slice stops at the instruction that crosses its budget, and
+  that one may cost more than was left — a join of a long list costs millions.
+  What it overdrew comes out of the instance's next shares, and the region's
+  budget alike, so a script sits out the ticks its operation would still be
+  running for, and doing its work in large pieces never makes it faster.
 - **Budgets.** `EngineConfig::for_step(step)` derives the per-script share
   from `SCRIPT_INSTRUCTIONS_PER_SECOND` and the region's from
   `REGION_SCRIPT_SHARES` shares, so the numbers hold whatever step the
-  heartbeat picks.
+  heartbeat picks. 130 shares is aditi's: 128 busy scripts each kept the rate
+  of one, 256 ran at half (book: gridspec `lsl.md`, § *How many scripts a
+  region runs*).
 - **Sleeping** (`llSleep`, and the table's forced delay after any call that
   has one) is `wake = now + ceil(seconds / step)`, the seconds rounded to
   whole microseconds first so `0.2` as an `f32` — a hair above a fifth — is

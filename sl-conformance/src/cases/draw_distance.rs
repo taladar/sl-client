@@ -131,14 +131,11 @@ impl GridTest for DrawDistance {
             let grid = ctx.grid();
             let session = ctx.primary();
             session.wait_for_region(REGION_TIMEOUT).await?;
-            let agent = session
-                .agent_id()
-                .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
             let home = session.region_handle().ok_or_else(|| {
                 TestFailure::Assertion("login established no region handle".to_owned())
             })?;
 
-            let found = watch_neighbours(session, agent, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
+            let found = watch_neighbours(session, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
             let held: Vec<RegionHandle> = found
                 .neighbours
                 .iter()

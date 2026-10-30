@@ -14,6 +14,7 @@ use crate::library::{self, Event};
 use crate::num::ticks_for;
 use crate::value::{Element, Value};
 use crate::vm::context::{Peers, Request, ScriptCtx, ScriptData, Tick};
+use crate::vm::cost;
 use crate::vm::detected::{Detected, MAX_DETECTED, is_detection_event};
 use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::flavour::EngineFlavour;
@@ -357,6 +358,10 @@ pub struct Instance {
     /// What the library may read and write: the detected block, the timer
     /// and the start parameter.
     data: ScriptData,
+    /// Instructions charged past the share of a tick already served — one
+    /// operation that cost more than was left, a join of a long list — and
+    /// owed out of the shares of the ticks that follow.
+    overdraft: u32,
 }
 
 /// The body a [`BodyRef`] names.
@@ -589,7 +594,9 @@ impl Machine<'_> {
             Instr::Binary(op) => {
                 let left = pop(stack)?;
                 let right = pop(stack)?;
-                stack.push(crate::binary(op, left, right)?);
+                let value = crate::binary(op, left, right)?;
+                *used = used.saturating_add(cost::operator(op, &value));
+                stack.push(value);
             }
             Instr::Prefix(op) => {
                 let operand = pop(stack)?;
@@ -743,9 +750,29 @@ impl Instance {
             pending_state: None,
             wake: Tick::default(),
             data: ScriptData::default(),
+            overdraft: 0,
         };
         instance.reset();
         instance
+    }
+
+    /// Pay what earlier ticks overdrew out of this tick's `share`, returning
+    /// what is left of it to run on. A script that overdrew more than a
+    /// share sits the tick out, as it would on the grid, where the operation
+    /// that overdrew is still running.
+    pub(crate) const fn repay(&mut self, share: u32) -> u32 {
+        let paid = if self.overdraft < share {
+            self.overdraft
+        } else {
+            share
+        };
+        self.overdraft = self.overdraft.saturating_sub(paid);
+        share.saturating_sub(paid)
+    }
+
+    /// Owe `instructions` charged past this tick's share, out of the next.
+    pub(crate) const fn overdraw(&mut self, instructions: u32) {
+        self.overdraft = self.overdraft.saturating_add(instructions);
     }
 
     /// The compiled script.

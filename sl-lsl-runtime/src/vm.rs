@@ -29,6 +29,7 @@
 //! not depend on the machine it runs on.
 
 mod context;
+mod cost;
 mod detected;
 mod engine;
 mod fault;

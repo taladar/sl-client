@@ -117,6 +117,48 @@ impl Target {
     }
 }
 
+/// A region statistic a probe asks the runner to note (its header's
+/// `stats`), from the `SimStats` the grid sends the owner's viewer once a
+/// second. Each is noted as `# sim-stats <key>=<value>` whenever it changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Stat {
+    /// `active-scripts`: how many scripts the region counts as running.
+    ActiveScripts,
+    /// `scripts-run`: the percentage of the region's scripts that ran in the
+    /// last frame, the statistics bar's *scripts run*.
+    ScriptsRun,
+    /// `script-time`: the milliseconds of a frame the region spent running
+    /// scripts.
+    ScriptTime,
+    /// `time-dilation`: how far the region's time keeps up with real time,
+    /// 1 when it does.
+    TimeDilation,
+}
+
+impl Stat {
+    /// The statistic a header names.
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "active-scripts" => Some(Self::ActiveScripts),
+            "scripts-run" => Some(Self::ScriptsRun),
+            "script-time" => Some(Self::ScriptTime),
+            "time-dilation" => Some(Self::TimeDilation),
+            _ => None,
+        }
+    }
+
+    /// The key a note of it carries.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::ActiveScripts => "active_scripts",
+            Self::ScriptsRun => "scripts_run",
+            Self::ScriptTime => "script_ms",
+            Self::TimeDilation => "time_dilation",
+        }
+    }
+}
+
 /// The library a probe script is written against (its header's `library`).
 ///
 /// The corpus compiles every script against Second Life's library, the only
@@ -207,10 +249,13 @@ pub struct Header {
     /// `target`: the compile target the script is uploaded for, `mono` (the
     /// default) or `lsl2` ([`Target`]).
     pub target: Target,
-    /// `stats: active-scripts`: the runner notes the region's active-script
-    /// count (the `SimStats` the grid sends the owner's viewer) each time it
-    /// changes while the probe runs.
-    pub active_scripts: bool,
+    /// `stats`: the region statistics the runner notes each time one
+    /// changes while the probe runs, comma-separated ([`Stat`]).
+    pub stats: Vec<Stat>,
+    /// `deadline`: the seconds the probe may run before its transcript is
+    /// written as incomplete, for a probe that needs longer than the
+    /// runner's default.
+    pub deadline: Option<u32>,
     /// `library`: the library the script is written against, `sl` (the
     /// default) or `opensim` ([`Library`]).
     pub library: Library,
@@ -302,6 +347,7 @@ impl Header {
                 "stats",
                 "library",
                 "object",
+                "deadline",
             ]
             .contains(key)
             {
@@ -364,11 +410,24 @@ impl Header {
             .map(|value| Target::parse(value).ok_or_else(|| invalid("target", value)))
             .transpose()?
             .unwrap_or_default();
-        let active_scripts = match pairs.get("stats") {
-            None => false,
-            Some(&"active-scripts") => true,
-            Some(value) => return Err(invalid("stats", value)),
+        let stats = match pairs.get("stats") {
+            None => Vec::new(),
+            Some(value) => list(value)
+                .iter()
+                .map(|name| Stat::parse(name))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| invalid("stats", value))?,
         };
+        let deadline = pairs
+            .get("deadline")
+            .map(|value| {
+                value
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|seconds| *seconds > 0)
+                    .ok_or_else(|| invalid("deadline", value))
+            })
+            .transpose()?;
         let library = pairs
             .get("library")
             .map(|value| Library::parse(value).ok_or_else(|| invalid("library", value)))
@@ -393,7 +452,8 @@ impl Header {
                 .unwrap_or_default(),
             bare,
             target,
-            active_scripts,
+            stats,
+            deadline,
             library,
             object: pairs.get("object").map(|name| (*name).to_owned()),
         })
@@ -1099,7 +1159,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        Action, BarePrim, By, Drive, Fetch, Header, HeaderError, Library, Line, ResultFile,
+        Action, BarePrim, By, Drive, Fetch, Header, HeaderError, Library, Line, ResultFile, Stat,
         Stimulus, Target, TouchSurface,
     };
 
@@ -1108,8 +1168,8 @@ mod tests {
         let header = Header::parse(
             "// probe: errors/runtime-errors\n// script: Div int\n// prim: B\n\
              // order: 3\n// distance: 50\n// height: 99\n// drive: none\n\
-             // skip-on: opensim-xengine, fake-sl\n// target: lsl2\n// stats: active-scripts\n\
-             // library: opensim\n// object: Rezzee\n//\n// probe: not/this\n",
+             // skip-on: opensim-xengine, fake-sl\n// target: lsl2\n// stats: active-scripts, script-time\n\
+             // library: opensim\n// object: Rezzee\n// deadline: 300\n//\n// probe: not/this\n",
         )?;
         assert_eq!(
             header,
@@ -1126,7 +1186,8 @@ mod tests {
                 unordered: Vec::new(),
                 bare: Vec::new(),
                 target: Target::Lsl2,
-                active_scripts: true,
+                stats: vec![Stat::ActiveScripts, Stat::ScriptTime],
+                deadline: Some(300),
                 library: Library::OpenSim,
                 object: Some("Rezzee".to_owned()),
             }

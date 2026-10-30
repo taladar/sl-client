@@ -108,6 +108,11 @@ pub struct Session {
     /// each region, root and neighbours alike: the ground as this avatar was
     /// last told it.
     ground: std::collections::HashMap<(RegionHandle, u32, u32), sl_client_tokio::TerrainPatch>,
+    /// What [`Session::wait_for`] heard of the neighbours since
+    /// [`crate::crossing::watch_neighbours`] last took it, so a case that
+    /// waited for a region handshake first still sees an announcement that
+    /// beat the handshake.
+    neighbour_log: crate::crossing::NeighbourLog,
     /// Inbound events from the run loop, after a forwarder has drained them off
     /// the run loop's bounded channel into this unbounded one. A case typically
     /// waits on one session at a time, leaving the others' event channels unread;
@@ -378,13 +383,50 @@ impl Session {
     where
         P: FnMut(&Event) -> Option<T>,
     {
+        self.wait_noting(timeout, |event, _news| predicate(event))
+            .await
+    }
+
+    /// Await the next news of a neighbour — an announcement, a seed, or a
+    /// neighbour's first object — up to `timeout`; what it was waits in the
+    /// session's neighbour log for [`crate::crossing::watch_neighbours`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::wait_for`].
+    pub async fn wait_for_neighbour_news(&mut self, timeout: Duration) -> Result<(), TestFailure> {
+        self.wait_noting(timeout, |_event, news| news.then_some(()))
+            .await
+    }
+
+    /// What the session has heard of its neighbours since the last call,
+    /// timed from `origin`; the log starts over.
+    pub(crate) fn take_neighbourhood(
+        &mut self,
+        origin: std::time::Instant,
+    ) -> crate::crossing::Neighbourhood {
+        std::mem::take(&mut self.neighbour_log).since(origin)
+    }
+
+    /// [`Session::wait_for`], with the predicate also told whether the event
+    /// was news of a neighbour.
+    async fn wait_noting<T, P>(
+        &mut self,
+        timeout: Duration,
+        mut predicate: P,
+    ) -> Result<T, TestFailure>
+    where
+        P: FnMut(&Event, bool) -> Option<T>,
+    {
         // Split the disjoint field borrows so the drain loop can keep the cached
         // region identity current while it reads events.
+        let agent = self.agent_id;
         let events = &mut self.events;
         let region_handle = &mut self.region_handle;
         let circuit_id = &mut self.circuit_id;
         let handshakes = &mut self.handshakes;
         let ground = &mut self.ground;
+        let neighbour_log = &mut self.neighbour_log;
         let wait = async {
             loop {
                 match events.recv().await {
@@ -419,7 +461,8 @@ impl Session {
                                 patch.as_ref().clone(),
                             );
                         }
-                        if let Some(value) = predicate(&event) {
+                        let news = neighbour_log.note(agent, &event);
+                        if let Some(value) = predicate(&event, news) {
                             return Ok(value);
                         }
                         if let Event::Disconnected(reason) = &event {
@@ -1174,6 +1217,7 @@ fn spawn_session(mut client: Client, spec: LoginSpec<'_>) -> Session {
         circuit_id,
         handshakes: std::collections::HashMap::new(),
         ground: std::collections::HashMap::new(),
+        neighbour_log: crate::crossing::NeighbourLog::default(),
         events: events_rx,
         commands: command_tx,
         diagnostics,

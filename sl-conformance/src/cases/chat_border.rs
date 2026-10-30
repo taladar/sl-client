@@ -973,7 +973,7 @@ async fn stand_live(
     let home = a
         .region_handle()
         .ok_or_else(|| TestFailure::Assertion("avatar A is in no region".to_owned()))?;
-    let found = watch_neighbours(a, a_id, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
+    let found = watch_neighbours(a, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
     let own = found.own.clone().ok_or_else(|| {
         TestFailure::Assertion("avatar A never appeared in the object stream".to_owned())
     })?;
@@ -1023,7 +1023,7 @@ async fn stand_fake(
     a_id: AgentKey,
     control: &FakeControl,
 ) -> Result<(Spot, Spot, Edge), TestFailure> {
-    let found = watch_neighbours(a, a_id, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
+    let found = watch_neighbours(a, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
     let b_at = place(
         b,
         &Vector {

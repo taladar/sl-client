@@ -110,5 +110,13 @@ functions*). What the flavours must differ in:
   `start`; `llList2ListSlice` / `llListSortStrided` give `[]` for a stride
   index past the stride; `llComputeHash` and `llHMAC` take the six digest
   names in any case and answer `""` to any other.
-- **Cost.** What each call costs as its argument grows is in
-  [[server-lsl-call-cost-sizes]].
+- **Cost.** Each function whose work grows with its argument is charged
+  its measured cost on top of the flat call: the per-size times are in book
+  `gridspec/lsl.md` § *What a call costs* (aditi transcripts
+  `probes/results/aditi/vm/call-cost-*.txt`), and `sl-lsl-runtime`'s
+  `vm/cost.rs` has the shape to put them in — a `SizeCost` of measured
+  points per function, as `LIST_JOIN` and `STRING_JOIN` are for `+`
+  ([[server-lsl-call-cost-sizes]]). On Second Life every string function
+  grows with the string, `llStringLength` and `llGetSubString` included.
+  Extend `joins_and_flat_calls_cost_what_they_cost_on_aditi` (in
+  `vm/tests.rs`) to each function as it lands.

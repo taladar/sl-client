@@ -44,12 +44,17 @@ pub const SCRIPT_INSTRUCTIONS_PER_SECOND: u64 = 260_000_000;
 /// wait for the next — the region-wide budget, as a multiple of the
 /// per-script one.
 ///
-/// On aditi (2026-09-28) two busy scripts in one prim each kept the rate one
-/// runs at alone, so a single script is held by its own share, not by the
-/// region's; how many shares a region has before its scripts slow down was
-/// not measured, and sixteen is a decision, not a copy (roadmap
-/// `server-lsl-call-cost-sizes` is to measure it).
-pub const REGION_SCRIPT_SHARES: u64 = 16;
+/// Measured on aditi (Mauve, 2026-10-29, probe `vm/region-budget`): 1, 16,
+/// 64 and 128 busy scripts, each an empty loop of its own, every one of them
+/// keeps the rate one runs at alone (469 680, 476 508, 478 536 and 477 162
+/// iterations a second); 256 run at half that (241 793), the region's total
+/// staying at 61.9 million — 130 one-script shares. An earlier run the same
+/// evening read 134 (64.7 million against 481 455). The region's script time
+/// rose with the scripts to 23.9 ms, a whole frame at 45 frames a second, and
+/// `llGetTime` kept pace with real time throughout: a script sees its rate
+/// fall, not its clock slow. Mauve runs some 2 000 mostly idle scripts of
+/// its own, so a quiet region may have a little more.
+pub const REGION_SCRIPT_SHARES: u64 = 130;
 
 /// A region's scheduling parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +64,7 @@ pub struct EngineConfig {
     /// Instructions one script may run per tick.
     pub script_budget: u32,
     /// Instructions the region's scripts may run per tick together.
-    pub region_budget: u32,
+    pub region_budget: u64,
     /// Which queued touch, collision or `changed` a new one merges into.
     pub coalescing: Coalescing,
     /// Which grid's engine the region imitates where they differ: the words
@@ -82,8 +87,8 @@ impl EngineConfig {
             .max(1);
         let script_budget = u32::try_from(per_script).unwrap_or(u32::MAX);
         let region_budget =
-            u32::try_from(per_script.saturating_mul(u128::from(REGION_SCRIPT_SHARES)))
-                .unwrap_or(u32::MAX);
+            u64::try_from(per_script.saturating_mul(u128::from(REGION_SCRIPT_SHARES)))
+                .unwrap_or(u64::MAX);
         Self {
             step,
             script_budget,
@@ -119,7 +124,10 @@ pub struct TickReport {
 /// tick served last, so when the region is over budget every script runs
 /// slower rather than some not at all. An instance may run several bodies in
 /// one tick — a handler, then the next queued event's — while its share
-/// lasts.
+/// lasts. One operation that costs more than is left of the share (a join of
+/// a long list) runs to the end, and what it overdrew comes out of the
+/// instance's next shares, so a script never runs faster for doing its work
+/// in large pieces.
 #[derive(Debug, Clone)]
 pub struct Engine {
     /// The scheduling parameters.
@@ -359,19 +367,26 @@ impl Engine {
             }
             report.served = report.served.saturating_add(1);
             self.last_served = Some(id);
-            let mut script_left = self.config.script_budget;
+            // What the script overdrew last time is still running: it comes
+            // out of this tick's share and the region's alike.
+            let mut script_left = instance.repay(self.config.script_budget);
+            region_left = region_left.saturating_sub(u64::from(
+                self.config.script_budget.saturating_sub(script_left),
+            ));
             while script_left > 0 && region_left > 0 && instance.is_runnable(now) {
                 let slice = instance.run_slice_among(
                     id,
                     now,
                     self.config.step,
-                    script_left.min(region_left),
+                    u32::try_from(region_left)
+                        .map_or(script_left, |region| script_left.min(region)),
                     host,
                     Peers::of(&self.instances, self.config.flavour),
                 );
                 self.report(id, &slice, host);
+                instance.overdraw(slice.used.saturating_sub(script_left));
                 script_left = script_left.saturating_sub(slice.used);
-                region_left = region_left.saturating_sub(slice.used);
+                region_left = region_left.saturating_sub(u64::from(slice.used));
                 report.used = report.used.saturating_add(u64::from(slice.used));
                 // Every body runs at least one instruction, so a slice that
                 // charged nothing had nothing to run.

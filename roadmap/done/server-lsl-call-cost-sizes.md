@@ -2,7 +2,7 @@
 id: server-lsl-call-cost-sizes
 title: Measure size-proportional call costs and the region's script budget on aditi
 topic: server
-status: ready
+status: done
 origin: server-lsl-vm-execution review (2026-09-28)
 points: 3
 refs: [server-lsl-vm-execution, server-lsl-lib-strings-lists,
@@ -64,3 +64,37 @@ empty loop is tabled in `book/src/gridspec/lsl.md` § *What a call costs*.
 `llStringLength`, `llGetSubString` and `llOrd` grow with the string (about
 0.65 µs a character). Fit the
 slopes from those transcripts. The region's budget half is still open.
+
+## Done (2026-10-29)
+
+- **Size-proportional charges.** `sl-lsl-runtime/src/vm/cost.rs`: a
+  `SizeCost` is a cost's measured points joined by straight lines, flat
+  before the first and on along the last slope after it, converted to
+  instructions at `SCRIPT_INSTRUCTIONS_PER_SECOND`. Of the measured
+  operations only `+` exists yet: `list + list` and `string + string` are
+  charged by the length of the result (`LIST_JOIN`, `STRING_JOIN`, fitted
+  from the committed aditi transcripts). `llGetListLength` is flat on aditi
+  (2.43–2.50 µs at every size) and the flat call cost charges it 2.42 µs.
+  `joins_and_flat_calls_cost_what_they_cost_on_aditi` runs the probes' own
+  loops in the VM at all four sizes and holds each charge to its transcript
+  within 5 %. The functions themselves are still unwritten; their charges
+  go with them ([[server-lsl-lib-strings-lists]] says how).
+- **Overdraft.** A list join of 500 elements costs two million
+  instructions, more than a tick's share, and the engine used to let a
+  slice overrun its share unpaid — so a script doing big joins ran faster
+  than one doing small ones. What a slice overdraws now comes out of the
+  instance's next shares and the region's budget.
+- **The region's budget.** New probe `vm/region-budget` (a leader and a
+  `Worker` object it rezzes 1, 16, 64, 128 and 256 copies of) on aditi: 128
+  busy scripts each keep the one-script rate, 256 run at half, the total
+  flat at 61.9 M iterations a second — 130 shares (134 in an earlier run).
+  `REGION_SCRIPT_SHARES` is 130, and `EngineConfig::region_budget` is a
+  `u64`, since 130 shares of a step longer than about 0.13 s no longer fit
+  a `u32`. Script time reaches 23.9 ms, a frame at 45 fps; `llGetTime`
+  keeps pace with real time while the region's time dilation dips to 0.77.
+  Book: gridspec `lsl.md` § *How many scripts a region runs*.
+- **Runner.** The probe header's `stats` takes a list (`active-scripts`,
+  `scripts-run`, `script-time`, `time-dilation`), and a new `deadline`
+  key lets a probe run past three minutes (`vm/region-budget` asks for
+  five). Under XEngine the 256 stage still does not finish in five
+  minutes; its transcript is committed as incomplete.

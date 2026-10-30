@@ -153,11 +153,8 @@ async fn live_neighbours(ctx: &mut TestContext) -> Result<(), TestFailure> {
     let grid = ctx.grid();
     let session = ctx.primary();
     session.wait_for_region(REGION_TIMEOUT).await?;
-    let agent = session
-        .agent_id()
-        .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
     let home = session.region_handle();
-    let found = watch_neighbours(session, agent, LIVE_WINDOW, LIVE_QUIET).await?;
+    let found = watch_neighbours(session, LIVE_WINDOW, LIVE_QUIET).await?;
     found.record("neighbours_", home, ctx.metrics());
     if found.neighbours.is_empty() {
         ctx.mark_partial("the region the avatar stands in announced no neighbours");

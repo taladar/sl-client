@@ -1,0 +1,52 @@
+grid: opensim-yengine
+date: 2026-10-29
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# sim-stats active_scripts=0
+# sim-stats scripts_run=0
+# sim-stats script_ms=0
+# sim-stats time_dilation=1
+# object "Worker" scripts=1
+# chat type=say from="Object" length=14 text="Script running"
+PROBE vm/region-budget rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+# sim-stats active_scripts=2
+# sim-stats active_scripts=1
+PROBE vm/region-budget rec=stage scripts=1 rezzed=1 reported=1 slowest=28548380 fastest=28548380 mean=28548380 total=28548380 real_slowest=28550481 real_mean=28550481 dilation=1.000000
+# sim-stats active_scripts=17
+PROBE vm/region-budget rec=stage scripts=16 rezzed=16 reported=16 slowest=3645883 fastest=4571300 mean=3932049 total=62912789 real_slowest=3645834 real_mean=3932154 dilation=1.000000
+# sim-stats active_scripts=46
+# sim-stats active_scripts=65
+# sim-stats active_scripts=29
+PROBE vm/region-budget rec=stage scripts=64 rezzed=64 reported=64 slowest=921925 fastest=2058980 mean=1214680 total=77739512 real_slowest=921898 real_mean=1214680 dilation=1.000000
+# sim-stats active_scripts=5
+# sim-stats active_scripts=34
+# sim-stats active_scripts=64
+# sim-stats active_scripts=93
+# sim-stats active_scripts=122
+# sim-stats active_scripts=129
+# sim-stats active_scripts=115
+# sim-stats active_scripts=45
+# sim-stats active_scripts=11
+PROBE vm/region-budget rec=stage scripts=128 rezzed=128 reported=128 slowest=479609 fastest=1397480 mean=728889 total=93297761 real_slowest=479602 real_mean=728887 dilation=1.000000
+# sim-stats active_scripts=23
+# sim-stats active_scripts=52
+# sim-stats active_scripts=80
+# sim-stats active_scripts=109
+# sim-stats active_scripts=138
+# sim-stats active_scripts=167
+# sim-stats active_scripts=196
+# sim-stats active_scripts=225
+# sim-stats active_scripts=255
+# sim-stats active_scripts=257
+# sim-stats active_scripts=243
+# sim-stats active_scripts=149
+# sim-stats active_scripts=147
+# sim-stats active_scripts=87
+# sim-stats active_scripts=27
+# sim-stats active_scripts=1
+PROBE vm/region-budget rec=stage scripts=256 rezzed=256 reported=229 slowest=236690 fastest=1065520 mean=471959 total=108078618 real_slowest=236627 real_mean=471958 dilation=1.000000
+PROBE vm/region-budget rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"

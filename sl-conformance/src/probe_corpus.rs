@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use sl_lsl_runtime::probe::compare::{Tolerance, compare};
-use sl_lsl_runtime::probe::{Drive, GRIDS, Header, ResultFile};
+use sl_lsl_runtime::probe::{Drive, GRIDS, Header, ResultFile, Stat};
 
 /// Why the corpus or a result file could not be read.
 #[derive(Debug, thiserror::Error)]
@@ -123,13 +123,27 @@ impl Probe {
         prims
     }
 
-    /// Whether a script asks for the region's active-script count to be
-    /// noted (`stats: active-scripts`).
+    /// The longest `deadline` its scripts ask for, if any does.
     #[must_use]
-    pub fn notes_active_scripts(&self) -> bool {
+    pub fn deadline(&self) -> Option<std::time::Duration> {
         self.scripts
             .iter()
-            .any(|script| script.header.active_scripts)
+            .filter_map(|script| script.header.deadline)
+            .max()
+            .map(|seconds| std::time::Duration::from_secs(u64::from(seconds)))
+    }
+
+    /// The region statistics its scripts ask to have noted (`stats`), each
+    /// once, in the order first asked for.
+    #[must_use]
+    pub fn noted_stats(&self) -> Vec<Stat> {
+        let mut noted = Vec::new();
+        for stat in self.scripts.iter().flat_map(|script| &script.header.stats) {
+            if !noted.contains(stat) {
+                noted.push(*stat);
+            }
+        }
+        noted
     }
 
     /// What a comparison of two of its runs lets differ.

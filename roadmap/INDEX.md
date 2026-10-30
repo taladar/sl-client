@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 135 |
-| ready | 335 |
+| ready | 334 |
 | blocked | 53 |
 | in-progress | 18 |
 | bugs | 39 |
-| done | 1450 |
+| done | 1451 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2083** |
@@ -356,7 +356,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-in-experience`](ideas/gridspec-lsl-in-experience.md) — LSL
   behaviour on Second Life for a script saved into an experience
 
-## ready (335)
+## ready (334)
 
 ### protocol
 
@@ -1139,8 +1139,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
-- [`server-lsl-call-cost-sizes`](ready/server-lsl-call-cost-sizes.md) — Measure
-  size-proportional call costs and the region's script budget on aditi
 - [`server-lsl-forced-delays-per-flavour`](ready/server-lsl-forced-delays-per-flavour.md)
   — Charge each grid flavour's measured forced delays and throttles, not the
   keyword file's (blocked by `gridspec-lsl-throttles` (done))
@@ -1491,7 +1489,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1450)
+## done (1451)
 
 ### protocol
 
@@ -4508,6 +4506,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   them
 - [`server-lsl-architecture`](done/server-lsl-architecture.md) — LSL engine
   architecture — execution model, crate layout, scheduling
+- [`server-lsl-call-cost-sizes`](done/server-lsl-call-cost-sizes.md) — Measure
+  size-proportional call costs and the region's script budget on aditi
 - [`server-lsl-compile-error-detail`](done/server-lsl-compile-error-detail.md) —
   Compile errors that say what is wrong, not only Linden's bare message
 - [`server-lsl-compiler-ir`](done/server-lsl-compiler-ir.md) — Lower the LSL

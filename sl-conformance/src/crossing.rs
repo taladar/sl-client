@@ -38,13 +38,15 @@ const STEER_INTERVAL: Duration = Duration::from_millis(250);
 pub struct Neighbour {
     /// The announcement.
     pub info: NeighborInfo,
-    /// Seconds from the start of the watch to the announcement.
+    /// Seconds from the start of the watch to the announcement; negative for
+    /// one the session heard before the watch began.
     pub announced: f64,
     /// Seconds from the start of the watch to its seed capability, when one
-    /// came.
+    /// came (negative as for `announced`).
     pub seeded: Option<f64>,
     /// Seconds from the start of the watch to the first object stamped with
-    /// its handle, when one came: the child circuit is carrying the region.
+    /// its handle, when one came: the child circuit is carrying the region
+    /// (negative as for `announced`).
     pub streamed: Option<f64>,
 }
 
@@ -145,81 +147,136 @@ pub fn slot_offset(here: RegionHandle, there: RegionHandle) -> (i64, i64) {
 /// our own avatar, until nothing new has been announced for `quiet` or
 /// `window` has passed.
 ///
+/// What the session heard of them before the watch began counts too, at a
+/// negative time: a grid may announce a neighbour on its event queue before
+/// the region handshake a case waited for first, and that wait passes over
+/// every event it was not waiting for, so the session logs them as they pass.
+///
 /// # Errors
 ///
 /// Propagates [`Session::wait_for`] failures other than its timeout.
 pub async fn watch_neighbours(
     session: &mut Session,
-    agent: AgentKey,
     window: Duration,
     quiet: Duration,
 ) -> Result<Neighbourhood, TestFailure> {
     let started = Instant::now();
-    let mut found = Neighbourhood::default();
     let mut last_news = Instant::now();
     loop {
         let remaining = window.saturating_sub(started.elapsed());
         let idle = quiet.saturating_sub(last_news.elapsed());
         let wait = remaining.min(idle);
         if wait.is_zero() {
-            return Ok(found);
+            break;
         }
-        let news = session
-            .wait_for(wait, |event| {
-                note_neighbour_event(&mut found, agent, started, event)
-            })
-            .await;
-        match news {
+        match session.wait_for_neighbour_news(wait).await {
             Ok(()) => last_news = Instant::now(),
-            Err(TestFailure::Timeout(_)) => return Ok(found),
+            Err(TestFailure::Timeout(_)) => break,
             Err(other) => return Err(other),
+        }
+    }
+    Ok(session.take_neighbourhood(started))
+}
+
+/// What a session has heard of its neighbours since it last handed them to
+/// [`watch_neighbours`]: each announcement with when its seed and first
+/// object came, and our own avatar as last seen.
+///
+/// [`Session::wait_for`] folds every event it drains into this, whatever the
+/// case was waiting for, so that no wait passes over an announcement.
+#[derive(Debug, Default)]
+pub(crate) struct NeighbourLog {
+    /// The neighbours, in the order they were announced.
+    neighbours: Vec<Logged>,
+    /// Our own avatar, when the object stream showed it.
+    own: Option<OwnAvatar>,
+}
+
+/// One neighbour in a [`NeighbourLog`], with the instants rather than offsets.
+#[derive(Debug)]
+struct Logged {
+    /// The announcement.
+    info: NeighborInfo,
+    /// When it was announced.
+    announced: Instant,
+    /// When its seed capability came.
+    seeded: Option<Instant>,
+    /// When its first object came.
+    streamed: Option<Instant>,
+}
+
+impl NeighbourLog {
+    /// Folds one event into the log, returning whether it was news about a
+    /// neighbour (an announcement, a seed, or a neighbour's first object).
+    /// `agent` picks out our own avatar's object.
+    pub(crate) fn note(&mut self, agent: Option<AgentKey>, event: &Event) -> bool {
+        let now = Instant::now();
+        match event {
+            Event::NeighborDiscovered(info) => {
+                self.neighbours.push(Logged {
+                    info: info.clone(),
+                    announced: now,
+                    seeded: None,
+                    streamed: None,
+                });
+                true
+            }
+            Event::NeighborSeed { sim, .. } => {
+                let Some(neighbour) = self
+                    .neighbours
+                    .iter_mut()
+                    .find(|neighbour| neighbour.info.sim == *sim && neighbour.seeded.is_none())
+                else {
+                    return false;
+                };
+                neighbour.seeded = Some(now);
+                true
+            }
+            Event::ObjectAdded(object) | Event::ObjectUpdated(object) => {
+                if agent.is_some_and(|agent| object.full_id.uuid() == agent.uuid()) {
+                    self.own = Some(OwnAvatar {
+                        id: object.scoped_id(),
+                        region_handle: object.region_handle,
+                        position: object.motion.position.clone(),
+                    });
+                    return false;
+                }
+                let Some(neighbour) = self.neighbours.iter_mut().find(|neighbour| {
+                    neighbour.info.region_handle == object.region_handle
+                        && neighbour.streamed.is_none()
+                }) else {
+                    return false;
+                };
+                neighbour.streamed = Some(now);
+                true
+            }
+            _other => false,
+        }
+    }
+
+    /// The log as a [`Neighbourhood`] timed from `origin`.
+    pub(crate) fn since(self, origin: Instant) -> Neighbourhood {
+        Neighbourhood {
+            neighbours: self
+                .neighbours
+                .into_iter()
+                .map(|logged| Neighbour {
+                    info: logged.info,
+                    announced: seconds_from(origin, logged.announced),
+                    seeded: logged.seeded.map(|at| seconds_from(origin, at)),
+                    streamed: logged.streamed.map(|at| seconds_from(origin, at)),
+                })
+                .collect(),
+            own: self.own,
         }
     }
 }
 
-/// Folds one event into `found`, returning `Some` when it was news about a
-/// neighbour (an announcement, a seed, or a neighbour's first object).
-fn note_neighbour_event(
-    found: &mut Neighbourhood,
-    agent: AgentKey,
-    started: Instant,
-    event: &Event,
-) -> Option<()> {
-    let now = started.elapsed().as_secs_f64();
-    match event {
-        Event::NeighborDiscovered(info) => {
-            found.neighbours.push(Neighbour {
-                info: info.clone(),
-                announced: now,
-                seeded: None,
-                streamed: None,
-            });
-            Some(())
-        }
-        Event::NeighborSeed { sim, .. } => {
-            let neighbour = found
-                .neighbours
-                .iter_mut()
-                .find(|neighbour| neighbour.info.sim == *sim && neighbour.seeded.is_none())?;
-            neighbour.seeded = Some(now);
-            Some(())
-        }
-        Event::ObjectAdded(object) | Event::ObjectUpdated(object) => {
-            if object.full_id.uuid() == agent.uuid() {
-                found.own = Some(OwnAvatar {
-                    id: object.scoped_id(),
-                    region_handle: object.region_handle,
-                    position: object.motion.position.clone(),
-                });
-                return None;
-            }
-            let neighbour = found.neighbours.iter_mut().find(|neighbour| {
-                neighbour.info.region_handle == object.region_handle && neighbour.streamed.is_none()
-            })?;
-            neighbour.streamed = Some(now);
-            Some(())
-        }
-        _other => None,
+/// Seconds from `origin` to `at`, negative when `at` came first.
+fn seconds_from(origin: Instant, at: Instant) -> f64 {
+    match at.checked_duration_since(origin) {
+        Some(after) => after.as_secs_f64(),
+        None => -origin.duration_since(at).as_secs_f64(),
     }
 }
 

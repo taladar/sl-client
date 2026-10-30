@@ -133,7 +133,7 @@ impl GridTest for RegionCrossing {
             // The child circuit has to exist before the crossing, or the
             // hand-over is a different path entirely (a fresh circuit to an
             // unconnected region, which *does* reset the world).
-            let found = watch_neighbours(session, agent, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
+            let found = watch_neighbours(session, NEIGHBOUR_WINDOW, NEIGHBOUR_QUIET).await?;
 
             let (out, back) = match &control {
                 Some(control) => {

@@ -199,6 +199,8 @@ fn a_runaway_loop_uses_its_budget_and_the_tick_still_completes() -> Result<(), S
     let reports = run(&mut engine, &mut host, 4);
     // The neighbour runs one iteration per tick, the loop notwithstanding.
     assert_eq!(host.from(B), vec![(1, "0"), (2, "1"), (3, "2")]);
+    let mut spent = 0_u32;
+    let mut shares = 0_u32;
     for report in &reports {
         assert_eq!(
             outcomes(report, A).last(),
@@ -212,11 +214,13 @@ fn a_runaway_loop_uses_its_budget_and_the_tick_still_completes() -> Result<(), S
             .filter(|(who, _)| *who == A)
             .map(|(_, slice)| slice.used)
             .sum();
-        // Spent to the last instruction, and past it by at most one
-        // back-edge.
+        spent = spent.saturating_add(used);
+        shares = shares.saturating_add(budget);
+        // Spent to the last instruction of every share so far, and past it
+        // by at most the one back-edge the next tick pays back.
         assert!(
-            (budget..=budget.saturating_add(BACKWARD_JUMP_COST)).contains(&used),
-            "tick {:?} used {used} of {budget}",
+            (shares..=shares.saturating_add(BACKWARD_JUMP_COST)).contains(&spent),
+            "tick {:?} used {spent} of {shares} in all",
             report.tick
         );
     }
@@ -589,7 +593,7 @@ fn an_over_budget_region_serves_its_scripts_in_turn() -> Result<(), String> {
     let config = EngineConfig::for_step(STEP);
     // Room for one script's share per tick, and three busy scripts.
     let mut engine = Engine::new(EngineConfig {
-        region_budget: config.script_budget,
+        region_budget: u64::from(config.script_budget),
         ..config
     });
     let mut host = Recorder::default();
@@ -606,9 +610,12 @@ fn an_over_budget_region_serves_its_scripts_in_turn() -> Result<(), String> {
     assert_eq!(served, vec![A, B, c, A, B, c]);
     for report in &reports {
         assert_eq!((report.runnable, report.served), (3, 1));
+        // The region's budget, give or take the one back-edge a script
+        // overran its share by last time it ran and pays back now.
         let budget = u64::from(config.script_budget);
+        let slack = u64::from(BACKWARD_JUMP_COST);
         assert!(
-            (budget..=budget.saturating_add(u64::from(BACKWARD_JUMP_COST))).contains(&report.used),
+            (budget.saturating_sub(slack)..=budget.saturating_add(slack)).contains(&report.used),
             "used {} of {budget}",
             report.used
         );
@@ -1616,4 +1623,160 @@ fn a_script_listening_on_debug_channel_hears_a_fault_and_the_region_ticks_on() -
             .reads_running(EngineFlavour::SecondLife)
     );
     Ok(())
+}
+
+/// A region whose budgets never run out, for counting what a script charges.
+fn unbounded() -> Engine {
+    Engine::new(EngineConfig {
+        script_budget: u32::MAX,
+        region_budget: u64::MAX,
+        ..EngineConfig::for_step(STEP)
+    })
+}
+
+/// The instructions `source` charges to run its `state_entry` to the end.
+fn charged(source: &str) -> Result<u64, String> {
+    let mut engine = unbounded();
+    let mut host = Recorder::default();
+    let _none = engine.add(A, program(source)?);
+    let reports = run(&mut engine, &mut host, 2);
+    Ok(reports.iter().map(|report| report.used).sum())
+}
+
+/// The per-call cost above an empty loop of the same shape, in microseconds,
+/// of each `(function, size)` an aditi `vm/call-cost-*` transcript holds:
+/// one call's period less one empty iteration's at the same size.
+fn measured_costs(transcript: &str) -> Vec<(String, u64, f64)> {
+    let field = |line: &str, name: &str| -> Option<String> {
+        line.split(' ')
+            .find_map(|word| word.strip_prefix(name)?.strip_prefix('='))
+            .map(ToOwned::to_owned)
+    };
+    let rates: Vec<(String, u64, f64)> = transcript
+        .lines()
+        .filter(|line| line.contains(" rec=rate "))
+        .filter_map(|line| {
+            let calls: f64 = field(line, "calls")?.parse().ok()?;
+            let seconds: f64 = field(line, "seconds")?.parse().ok()?;
+            Some((
+                field(line, "fn")?,
+                field(line, "size")?.parse().ok()?,
+                seconds / calls * 1e6,
+            ))
+        })
+        .collect();
+    rates
+        .iter()
+        .filter(|(function, ..)| function != "none")
+        .filter_map(|(function, size, period)| {
+            let empty = rates
+                .iter()
+                .find(|(other, at, _)| other == "none" && at == size)?
+                .2;
+            Some((function.clone(), *size, period - empty))
+        })
+        .collect()
+}
+
+/// A script that runs `body` `count` times in a loop, with a global list
+/// `L` of `size` integers, `P = [-1]`, and a global string `S` of `size`
+/// characters, all written out as initialisers so filling them costs no
+/// joins.
+fn call_cost_script(size: u64, count: u32, body: &str) -> String {
+    let elements: Vec<String> = (0..size).map(|element| element.to_string()).collect();
+    let text: String = "ab,"
+        .chars()
+        .cycle()
+        .take(usize::try_from(size).unwrap_or(0))
+        .collect();
+    format!(
+        "list L = [{}]; list P = [-1]; list r; string S = \"{text}\"; string s; integer n;
+        default {{ state_entry() {{
+            integer j;
+            for (j = 0; j < {count}; ++j) {{ {body} }}
+        }} }}",
+        elements.join(", ")
+    )
+}
+
+#[test]
+fn joins_and_flat_calls_cost_what_they_cost_on_aditi() -> Result<(), String> {
+    const CALLS: u32 = 10;
+    let lists = measured_costs(include_str!(
+        "../../probes/results/aditi/vm/call-cost-lists.txt"
+    ));
+    let strings = measured_costs(include_str!(
+        "../../probes/results/aditi/vm/call-cost-strings.txt"
+    ));
+    let bodies = [
+        ("llGetListLength", "n = llGetListLength(L);"),
+        ("list-plus", "r = L + P;"),
+        ("string-plus", "s = S + \"x\";"),
+    ];
+    let mut checked = 0_u32;
+    for (function, size, aditi) in lists.iter().chain(&strings) {
+        let Some((_, body)) = bodies.iter().find(|(name, _)| name == function) else {
+            continue;
+        };
+        let with = charged(&call_cost_script(*size, CALLS, body))?;
+        let without = charged(&call_cost_script(*size, CALLS, ""))?;
+        let per_call = f64::from(u32::try_from(with.saturating_sub(without)).unwrap_or(u32::MAX))
+            / f64::from(CALLS);
+        let per_microsecond = u32::try_from(SCRIPT_INSTRUCTIONS_PER_SECOND / 1_000_000)
+            .map_err(|error| error.to_string())?;
+        let microseconds = per_call / f64::from(per_microsecond);
+        assert!(
+            (microseconds - aditi).abs() <= aditi * 0.05,
+            "{function} at {size}: charged {microseconds:.2} µs, aditi {aditi:.2} µs"
+        );
+        checked = checked.saturating_add(1);
+    }
+    // Four sizes of each.
+    assert_eq!(checked, 12);
+    Ok(())
+}
+
+#[test]
+fn a_join_dearer_than_a_share_sits_its_script_out_until_it_is_paid_for() -> Result<(), String> {
+    let step = Duration::from_millis(1);
+    let config = EngineConfig::for_step(step);
+    let mut engine = Engine::new(config);
+    let mut host = Recorder::default();
+    let source = call_cost_script(500, 1, "r = L + P; print(\"joined\");");
+    let _none = engine.add(A, program(&source)?);
+    let join = super::cost::LIST_JOIN.instructions(501);
+    let share = config.script_budget;
+    assert!(
+        join > share.saturating_mul(4),
+        "the join must outlast shares"
+    );
+    let _reports = run(&mut engine, &mut host, u64::from(join / share + 4));
+    let printed = host.from(A);
+    let [(tick, "joined")] = printed.as_slice() else {
+        return Err(format!("printed {printed:?}"));
+    };
+    // The tick the join is paid off in, or the one after it when the loop's
+    // own instructions tip it over.
+    let paid = u64::from(join.div_ceil(share));
+    assert!(
+        (paid..=paid.saturating_add(1)).contains(tick),
+        "joined at tick {tick}, paid off at {paid}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_regions_budget_is_its_shares_whatever_the_step() {
+    for step in [
+        Duration::from_millis(1),
+        Duration::from_millis(22),
+        Duration::from_secs(1),
+    ] {
+        let config = EngineConfig::for_step(step);
+        assert_eq!(
+            config.region_budget,
+            u64::from(config.script_budget).saturating_mul(REGION_SCRIPT_SHARES),
+            "step {step:?}"
+        );
+    }
 }

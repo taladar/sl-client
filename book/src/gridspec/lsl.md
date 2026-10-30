@@ -2214,6 +2214,35 @@ linearly between 100 and 500 elements); the hashes cost a flat 200–380 µs
 before their per-character part. OpenSim is 10 to 1000 times cheaper
 throughout, and its list copies are constant under YEngine at about 7 µs.
 
+### How many scripts a region runs
+
+`vm/region-budget` (2026-10-29) rezzes 1, 16, 64, 128 and 256 copies of an
+object whose script runs an empty loop for five seconds on a word from the
+probe, all at once, and collects each one's rate, in iterations a second of
+its `llGetTime` and of real time (`llGetTimestamp`). The runner notes the
+region's statistics meanwhile. Mean rate per script, and the total:
+
+| scripts | Second Life | OpenSim YEngine | OpenSim XEngine |
+| --- | --- | --- | --- |
+| 1 | 469 680 | 28 548 380 | 436 880 |
+| 16 | 476 508 (7.6 M) | 3 932 049 (63 M) | 372 509, 11 of 16 reported |
+| 64 | 478 536 (30.6 M) | 1 214 680 (78 M) | 336 977, 28 of 64 |
+| 128 | 477 162 (61.1 M) | 728 889 (93 M) | 284 475, 45 of 128 |
+| 256 | 241 793 (61.9 M) | 471 959 (108 M), 229 of 256 | not reached in five minutes |
+
+On Second Life every script keeps the rate one runs at alone up to 128 of
+them, and 256 share what 128 used: the region runs about 130 scripts' worth
+(134 in a run an hour earlier, 64.7 M against 481 455), on top of the 2 000
+mostly idle scripts Mauve holds. The region's script time rises with them to
+23.9 ms, one frame at 45 frames a second, and with 256 its scripts-run
+percentage falls to about half (53 at the lowest). The two clocks agree
+throughout (their ratio 0.99 to 1.002) while the region's time dilation dips
+to 0.77: a script in a crowded region sees its loop slow, never its clock.
+OpenSim divides its engine's threads among the busy scripts instead, so a
+script's rate falls as soon as there are more of them than threads while the
+total grows slowly; under XEngine fewer than half the workers report past
+sixteen, and the probe's five minutes run out while it rezzes the 256.
+
 ## Task inventory, giving, rezzing and notecards
 
 Measured on 2026-10-27 by the probes `inventory/listing`,
