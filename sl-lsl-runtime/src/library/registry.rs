@@ -3,8 +3,8 @@
 //! registration will not compile unless its signature is the table's.
 
 use crate::library::{
-    comms, control, detection, encoding, json_text, linkset, lists, math, money_permissions,
-    rotations, strings, usage,
+    comms, control, detection, encoding, experiences, json_text, linkset, lists, math,
+    money_permissions, rotations, strings, usage,
 };
 
 crate::registry! {
@@ -160,6 +160,20 @@ crate::registry! {
         LlGiveMoney => money_permissions::ll_give_money,
         LlTransferLindenDollars => money_permissions::ll_transfer_linden_dollars,
         LlSetPayPrice => money_permissions::ll_set_pay_price,
+        LlRequestExperiencePermissions => experiences::ll_request_experience_permissions,
+        LlAgentInExperience => experiences::ll_agent_in_experience,
+        LlGetExperienceDetails => experiences::ll_get_experience_details,
+        LlGetExperienceErrorMessage => experiences::ll_get_experience_error_message,
+        LlCreateKeyValue => experiences::ll_create_key_value,
+        LlReadKeyValue => experiences::ll_read_key_value,
+        LlUpdateKeyValue => experiences::ll_update_key_value,
+        LlDeleteKeyValue => experiences::ll_delete_key_value,
+        LlKeyCountKeyValue => experiences::ll_key_count_key_value,
+        LlKeysKeyValue => experiences::ll_keys_key_value,
+        LlDataSizeKeyValue => experiences::ll_data_size_key_value,
+        LlSitOnLink => experiences::ll_sit_on_link,
+        LlClearExperiencePermissions => experiences::ll_clear_experience_permissions,
+        LlGetExperienceList => experiences::ll_get_experience_list,
     }
     stubbed {}
 }

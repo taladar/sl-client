@@ -10,6 +10,7 @@
 //! [`Engine::answer`](crate::vm::Engine::answer), and a viewer's revocation
 //! through [`Engine::revoke`](crate::vm::Engine::revoke).
 
+use crate::vm::experiences::ExperienceQuestion;
 use crate::vm::flavour::EngineFlavour;
 
 /// `PERMISSION_DEBIT`: take the owner's money.
@@ -24,6 +25,8 @@ pub const PERMISSION_ATTACH: i32 = 0x20;
 pub const PERMISSION_TRACK_CAMERA: i32 = 0x400;
 /// `PERMISSION_CONTROL_CAMERA`.
 pub const PERMISSION_CONTROL_CAMERA: i32 = 0x800;
+/// `PERMISSION_TELEPORT`.
+pub const PERMISSION_TELEPORT: i32 = 0x1000;
 /// `PERMISSION_OVERRIDE_ANIMATIONS`.
 pub const PERMISSION_OVERRIDE_ANIMATIONS: i32 = 0x8000;
 
@@ -70,6 +73,10 @@ pub struct Permissions {
     mask: i32,
     /// The question put and not yet answered.
     asked: Option<Question>,
+    /// The experience question put and not yet answered
+    /// (`llRequestExperiencePermissions`), kept apart from [`Self::asked`]:
+    /// its answer comes through its own door.
+    asked_experience: Option<ExperienceQuestion>,
 }
 
 impl Permissions {
@@ -132,6 +139,36 @@ impl Permissions {
         self.asked = None;
         self.granter = Some(agent.to_owned());
         self.mask = granted;
+        true
+    }
+
+    /// The experience question waiting for an answer, if one is.
+    #[must_use]
+    pub const fn asked_experience(&self) -> Option<&ExperienceQuestion> {
+        self.asked_experience.as_ref()
+    }
+
+    /// `question` is put; it replaces one still waiting, since a script holds
+    /// permissions of one avatar at a time (unmeasured — the wiki).
+    pub(crate) fn ask_experience(&mut self, question: ExperienceQuestion) {
+        self.asked_experience = Some(question);
+    }
+
+    /// `agent` answered the experience question put to it: `false`, with
+    /// nothing changed, when none is waiting for `agent`. A grant holds the
+    /// question's mask for `agent`, in place of whatever was held; a denial
+    /// changes nothing held.
+    pub(crate) fn answer_experience(&mut self, agent: &str, granted: bool) -> bool {
+        let Some(question) = self
+            .asked_experience
+            .take_if(|question| question.agent.eq_ignore_ascii_case(agent))
+        else {
+            return false;
+        };
+        if granted {
+            self.granter = Some(question.agent);
+            self.mask = question.mask;
+        }
         true
     }
 

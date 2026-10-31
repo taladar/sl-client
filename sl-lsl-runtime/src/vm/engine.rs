@@ -14,6 +14,7 @@ use crate::value::Value;
 use crate::vm::comms::Heard;
 use crate::vm::context::{Peers, Raised, Tick};
 use crate::vm::detected::Detected;
+use crate::vm::experiences::ExperienceError;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::{
@@ -395,6 +396,49 @@ impl Engine {
         )
     }
 
+    /// The avatar `agent` answered the experience question the instance `id`
+    /// put to it: [`Ok`] raises `experience_permissions(agent)`, the grant
+    /// holding [`EXPERIENCE_PERMISSIONS`] for `agent`; an error raises
+    /// `experience_permissions_denied(agent, reason)` — the host's
+    /// [`ExperienceError::NotPermitted`] for a refusal or a block,
+    /// [`ExperienceError::RequestTimedOut`] for a question nobody answered.
+    /// [`None`] when there is no such instance or it is not waiting for
+    /// `agent`'s answer. The host keeps the answer for the experience; this
+    /// is only the one script's share of it.
+    ///
+    /// [`EXPERIENCE_PERMISSIONS`]: crate::vm::EXPERIENCE_PERMISSIONS
+    ///
+    /// # Errors
+    ///
+    /// None in practice: both events take a key, and an integer.
+    pub fn answer_experience(
+        &mut self,
+        id: CallerId,
+        agent: &str,
+        answer: Result<(), ExperienceError>,
+    ) -> Result<Option<Posted>, PostError> {
+        let answered = self.instances.get_mut(&id).is_some_and(|instance| {
+            instance
+                .permissions_mut()
+                .answer_experience(agent, answer.is_ok())
+        });
+        if !answered {
+            return Ok(None);
+        }
+        match answer {
+            Ok(()) => self.post(
+                id,
+                lifecycle("experience_permissions"),
+                vec![Value::Key(agent.to_owned())],
+            ),
+            Err(reason) => self.post(
+                id,
+                lifecycle("experience_permissions_denied"),
+                vec![Value::Key(agent.to_owned()), Value::Integer(reason.code())],
+            ),
+        }
+    }
+
     /// The avatar `agent`'s viewer revoked `bits` of what it granted the
     /// instance `id` (`RevokePermissions`; the host applies one naming the
     /// region to every script, one naming an object to that object's). The
@@ -545,6 +589,21 @@ impl Engine {
                 Raised::Permissions(mask) => (
                     lifecycle("run_time_permissions"),
                     vec![Value::Integer(*mask)],
+                    vec![id],
+                ),
+                Raised::Dataserver { id: handle, data } => (
+                    lifecycle("dataserver"),
+                    vec![Value::Key(handle.clone()), Value::String(data.clone())],
+                    vec![id],
+                ),
+                Raised::ExperienceGranted(agent) => (
+                    lifecycle("experience_permissions"),
+                    vec![Value::Key(agent.clone())],
+                    vec![id],
+                ),
+                Raised::ExperienceDenied { agent, reason } => (
+                    lifecycle("experience_permissions_denied"),
+                    vec![Value::Key(agent.clone()), Value::Integer(reason.code())],
                     vec![id],
                 ),
                 Raised::Transaction(result) => (

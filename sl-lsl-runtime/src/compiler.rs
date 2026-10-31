@@ -154,8 +154,10 @@ pub enum Dialect {
     /// `return` (the value is the type's default); it has no
     /// `llClearExperiencePermissions` or `llGetExperienceList`, which Second
     /// Life still compiles though it serves no document listing them, and no
-    /// linkset data store — none of its functions, constants or its event;
-    /// and its `JSON_APPEND` is the string `"-1"`.
+    /// linkset data store — none of its functions, constants or its event —
+    /// and no experiences — none of the experience functions, their result
+    /// constants or the two events; and its `JSON_APPEND` is the string
+    /// `"-1"`.
     OpenSim,
 }
 
@@ -175,27 +177,43 @@ impl Dialect {
     pub fn has_builtin(self, name: &str) -> bool {
         match self {
             Self::SecondLife => true,
-            Self::OpenSim => !OPENSIM_UNDEFINED.contains(&name) && !is_linkset_data(name),
+            Self::OpenSim => {
+                !OPENSIM_UNDEFINED.contains(&name)
+                    && !is_linkset_data(name)
+                    && !OPENSIM_NO_EXPERIENCE.contains(&name)
+            }
         }
     }
 
     /// Whether this compiler knows the library constant `name`: OpenSim has
-    /// none of the `LINKSETDATA_*` ones.
+    /// none of the `LINKSETDATA_*` ones, and none of the experience errors
+    /// (`XP_ERROR_*`) or of `llSitOnLink`'s results — its
+    /// `LSL_Constants.cs` names none of them.
     #[must_use]
     pub fn has_constant(self, name: &str) -> bool {
         match self {
             Self::SecondLife => true,
-            Self::OpenSim => !name.starts_with("LINKSETDATA_"),
+            Self::OpenSim => {
+                !name.starts_with("LINKSETDATA_")
+                    && !name.starts_with("XP_ERROR_")
+                    && !OPENSIM_NO_SIT_RESULTS.contains(&name)
+            }
         }
     }
 
     /// Whether this compiler knows the event `name`: OpenSim has no
-    /// `linkset_data`.
+    /// `linkset_data`, `experience_permissions` or
+    /// `experience_permissions_denied` (YEngine names only the second, which
+    /// it reaches first in `experience/no-experience`; XEngine's parser stops
+    /// at whichever comes first, `experience/unserved`).
     #[must_use]
     pub fn has_event(self, name: &str) -> bool {
         match self {
             Self::SecondLife => true,
-            Self::OpenSim => name != "linkset_data",
+            Self::OpenSim => !matches!(
+                name,
+                "linkset_data" | "experience_permissions" | "experience_permissions_denied"
+            ),
         }
     }
 
@@ -216,6 +234,40 @@ impl Dialect {
 /// The library functions OpenSim's engines refuse as undefined, both measured
 /// on the local OpenSim 0.9.2.1 under YEngine and XEngine (2026-10-30).
 const OPENSIM_UNDEFINED: &[&str] = &["llClearExperiencePermissions", "llGetExperienceList"];
+
+/// The experience functions OpenSim's engines refuse, beside the two of
+/// [`OPENSIM_UNDEFINED`]: `experience/no-experience` and
+/// `experience/sit-on-link` compile under neither (YEngine:
+/// `undefined constant/function/variable llAgentInExperience(key)` and each
+/// of the others; XEngine: CS0103 for `llSitOnLink`, 2026-10-25 and
+/// 2026-10-27).
+const OPENSIM_NO_EXPERIENCE: &[&str] = &[
+    "llRequestExperiencePermissions",
+    "llAgentInExperience",
+    "llGetExperienceDetails",
+    "llGetExperienceErrorMessage",
+    "llCreateKeyValue",
+    "llReadKeyValue",
+    "llUpdateKeyValue",
+    "llDeleteKeyValue",
+    "llKeyCountKeyValue",
+    "llKeysKeyValue",
+    "llDataSizeKeyValue",
+    "llSitOnLink",
+];
+
+/// `llSitOnLink`'s results, which OpenSim, having no `llSitOnLink`, has none
+/// of.
+const OPENSIM_NO_SIT_RESULTS: &[&str] = &[
+    "SIT_OK",
+    "SIT_NOT_EXPERIENCE",
+    "SIT_NO_EXPERIENCE_PERMISSION",
+    "SIT_NO_SIT_TARGET",
+    "SIT_INVALID_AGENT",
+    "SIT_INVALID_LINK",
+    "SIT_NO_ACCESS",
+    "SIT_INVALID_OBJECT",
+];
 
 /// Whether `name` is one of the linkset data functions, which OpenSim's
 /// engines refuse: `data/linkset-data` compiles under neither (YEngine:

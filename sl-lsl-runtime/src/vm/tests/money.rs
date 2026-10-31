@@ -58,9 +58,9 @@ fn prim_named(name: Option<&str>) -> u64 {
 }
 
 /// A probe region and the runner driving it.
-struct Runner {
+pub(super) struct Runner {
     /// The region.
-    region: Region,
+    pub(super) region: Region,
     /// The flavour imitated.
     flavour: EngineFlavour,
     /// The script a touch goes to.
@@ -73,7 +73,7 @@ struct Runner {
     now: u64,
     /// What the runner noted, in its transcript's words: each question, each
     /// pay-button answer, each alert.
-    notes: Vec<String>,
+    pub(super) notes: Vec<String>,
     /// How many of the host's questions have been noted.
     asked: usize,
     /// A `PROBE` record that sets a script's start parameter when printed,
@@ -83,7 +83,7 @@ struct Runner {
 
 impl Runner {
     /// An empty region imitating `flavour`, with the test's economy.
-    fn new(flavour: EngineFlavour) -> Self {
+    pub(super) fn new(flavour: EngineFlavour) -> Self {
         let mut region = Region::new(flavour);
         let balance = if flavour.is_opensim() {
             i64::MAX / 4
@@ -108,7 +108,13 @@ impl Runner {
 
     /// Add `source` as `name`, the script `id` in prim `prim`; the first
     /// added is the one touched.
-    fn add(&mut self, id: CallerId, name: &str, prim: u64, source: &str) -> Result<(), String> {
+    pub(super) fn add(
+        &mut self,
+        id: CallerId,
+        name: &str,
+        prim: u64,
+        source: &str,
+    ) -> Result<(), String> {
         if self.lead == CallerId(0) {
             self.lead = id;
         }
@@ -116,7 +122,7 @@ impl Runner {
     }
 
     /// Run until a script prints `end`, or `ticks` ticks.
-    fn run(&mut self, ticks: u64) -> Result<(), String> {
+    pub(super) fn run(&mut self, ticks: u64) -> Result<(), String> {
         for _ in 0..ticks {
             self.now = self.now.saturating_add(1);
             self.region.host.now = self.now;
@@ -339,7 +345,7 @@ impl Runner {
 
 /// The notes of `transcript` this runner makes too: each question, each
 /// pay-button answer and each alert, in order.
-fn noted(transcript: &str) -> Vec<String> {
+pub(super) fn noted(transcript: &str) -> Vec<String> {
     transcript
         .lines()
         .filter(|line| {

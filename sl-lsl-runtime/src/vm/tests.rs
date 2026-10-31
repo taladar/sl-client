@@ -18,6 +18,7 @@ use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
 
 mod comms;
+mod experiences;
 mod json;
 mod linkset;
 mod math;
@@ -88,6 +89,24 @@ struct Recorder {
     accounts: std::collections::BTreeMap<String, i64>,
     /// Each prim's pay layout, by number.
     pay_prices: std::collections::BTreeMap<u64, PayPrice>,
+    /// The experience each script was compiled into; none when not listed.
+    experiences: std::collections::BTreeMap<CallerId, ScriptExperience>,
+    /// The experiences the grid knows, by key; an id not listed is no
+    /// experience's.
+    catalogue: std::collections::BTreeMap<String, ExperienceDetails>,
+    /// The ids the region has looked up: an id answers empty until it is
+    /// here, and is here once asked.
+    looked_up: std::collections::BTreeSet<String>,
+    /// `(agent, experience)` an avatar allowed (`true`) or blocked.
+    admissions: std::collections::BTreeMap<(String, String), bool>,
+    /// `(tick, caller, question)` per experience question put.
+    experience_questions: Vec<(u64, CallerId, ExperienceQuestion)>,
+    /// Each experience's key-value store, by key.
+    key_values: std::collections::BTreeMap<String, KeyValueStore>,
+    /// Whether the region's key-value store is off.
+    store_disabled: bool,
+    /// `(caller, agent, link)` per avatar seated by `llSitOnLink`.
+    sat: Vec<(CallerId, String, i32)>,
 }
 
 /// The owner of every object a [`Recorder`] has, unless it says otherwise.
@@ -264,9 +283,65 @@ impl Host for Recorder {
         let prim = self.prim_of(caller);
         let _old = self.pay_prices.insert(prim, layout);
     }
+
+    fn experience(&self, caller: CallerId) -> Option<ScriptExperience> {
+        self.experiences.get(&caller).cloned()
+    }
+
+    fn experience_details(&mut self, _caller: CallerId, id: &str) -> Option<ExperienceDetails> {
+        if self.looked_up.insert(id.to_owned()) && !self.catalogue.contains_key(id) {
+            return None;
+        }
+        Some(
+            self.catalogue
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| ExperienceDetails::invalid(id)),
+        )
+    }
+
+    fn admission(&self, agent: &str, experience: &str) -> Admission {
+        self.admission_of(agent, experience)
+    }
+
+    fn ask_experience(&mut self, caller: CallerId, question: &ExperienceQuestion) -> bool {
+        if self.away.contains(&question.agent) {
+            return false;
+        }
+        self.experience_questions
+            .push((self.now, caller, question.clone()));
+        true
+    }
+
+    fn key_value_store(&mut self, experience: &str) -> Result<&mut KeyValueStore, ExperienceError> {
+        if self.store_disabled {
+            return Err(ExperienceError::StoreDisabled);
+        }
+        Ok(self.key_values.entry(experience.to_owned()).or_default())
+    }
+
+    fn sit_on_link(&mut self, caller: CallerId, agent: &str, link: i32) -> Result<(), SitRefusal> {
+        if self.away.contains(agent) {
+            return Err(SitRefusal::InvalidAgent);
+        }
+        self.sat.push((caller, agent.to_owned(), link));
+        Ok(())
+    }
 }
 
 impl Recorder {
+    /// What `agent` answered `experience`.
+    fn admission_of(&self, agent: &str, experience: &str) -> Admission {
+        match self
+            .admissions
+            .get(&(agent.to_owned(), experience.to_owned()))
+        {
+            Some(true) => Admission::Allowed,
+            Some(false) => Admission::Blocked,
+            None => Admission::Undecided,
+        }
+    }
+
     /// The prim `caller` is in.
     fn prim_of(&self, caller: CallerId) -> u64 {
         self.prims.get(&caller).copied().unwrap_or(caller.0)

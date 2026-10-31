@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 133 |
-| ready | 332 |
+| ideas | 132 |
+| ready | 331 |
 | blocked | 52 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1462 |
+| done | 1464 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2091** |
 
-## ideas (133)
+## ideas (132)
 
 ### protocol
 
@@ -280,10 +280,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Library tranche — the detected block, sensors and raycasts (blocked by
   `server-lsl-state-and-events` (done), `server-world-ecs-store`,
   `server-world-touch-and-grab`, `gridspec-lsl-detection-sensors` (done))
-- [`server-lsl-lib-experience`](ideas/server-lsl-lib-experience.md) — Library
-  tranche — experiences and the experience key-value store (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-lib-money-permissions` (done),
-  `gridspec-lsl-experience` (done))
 - [`server-lsl-lib-http-url`](ideas/server-lsl-lib-http-url.md) — Library
   tranche — outbound HTTP and in-world URLs (blocked by
   `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
@@ -342,7 +338,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (332)
+## ready (331)
 
 ### protocol
 
@@ -1136,9 +1132,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-aditi-test-land`](ready/gridspec-aditi-test-land.md) — Decide how
   we get land and estate rights on aditi for the land, estate and terraform
   measurements
-- [`gridspec-lsl-unserved-experience-probe-steps`](ready/gridspec-lsl-unserved-experience-probe-steps.md)
-  — Probe llClearExperiencePermissions and llGetExperienceList outside an
-  experience
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
@@ -1476,7 +1469,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1462)
+## done (1464)
 
 ### protocol
 
@@ -4511,6 +4504,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
   (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`
   (done), `gridspec-lsl-comms` (done))
+- [`server-lsl-lib-experience`](done/server-lsl-lib-experience.md) — Library
+  tranche — experiences and the experience key-value store (blocked by
+  `server-lsl-vm-execution` (done), `server-lsl-lib-money-permissions` (done),
+  `gridspec-lsl-experience` (done))
 - [`server-lsl-lib-json-linkset-data`](done/server-lsl-lib-json-linkset-data.md)
   — Library tranche — llJson* and the linkset data store (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
@@ -4677,6 +4674,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-time-timers`](done/gridspec-lsl-time-timers.md) — LSL time,
   timers and sleep on each grid (blocked by
   `gridspec-lsl-live-differential-runner` (done))
+- [`gridspec-lsl-unserved-experience-probe-steps`](done/gridspec-lsl-unserved-experience-probe-steps.md)
+  — Probe llClearExperiencePermissions and llGetExperienceList outside an
+  experience
 - [`gridspec-marketplace`](done/gridspec-marketplace.md) — Marketplace direct
   delivery on each grid
 - [`gridspec-materials`](done/gridspec-materials.md) — Legacy and PBR material

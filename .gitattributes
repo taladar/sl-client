@@ -36,6 +36,11 @@ sl-lsl-runtime/probes/inventory/listing/probe.lsl skipchecks=lsl:::lslint;;;meas
 # llXorBase64Strings, which lslint rejects; calling it is the measurement.
 sl-lsl-runtime/probes/throttle/delays.lsl skipchecks=lsl:::lslint;;;times[[space]]the[[space]]deprecated[[space]]llXorBase64Strings
 
+# The experience/unserved probe measures what Second Life answers
+# llClearExperiencePermissions and llGetExperienceList, which lslint rejects as
+# deprecated; calling them is the measurement.
+sl-lsl-runtime/probes/experience/unserved.lsl skipchecks=lsl:::lslint;;;measures[[space]]the[[space]]deprecated[[space]]experience[[space]]functions
+
 # The cargo-about license template is a whitespace-significant plain-text
 # template (its output format is machine-parsed by the About floater), not an
 # HTML/glimmer document: prettier's glimmer formatter reflows and breaks the

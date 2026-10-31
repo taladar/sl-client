@@ -28,6 +28,7 @@ pub mod detection;
 pub mod dispatch;
 mod dotnet;
 pub mod encoding;
+pub mod experiences;
 mod generated;
 pub mod json_text;
 pub mod linkset;
@@ -156,9 +157,10 @@ mod tests {
     use super::*;
     use crate::value::{Element, Value};
     use crate::vm::{
-        CallerId, Dialog, Host, InstantMessage, Links, LinksetData, LinksetId, LoadUrl,
-        MapDestination, Memory, MoneyRefusal, PayPrice, Payment, Peers, Question, ScriptData,
-        Speech, Stack, Tick, Whereabouts,
+        Admission, CallerId, Dialog, ExperienceDetails, ExperienceError, ExperienceQuestion, Host,
+        InstantMessage, KeyValueStore, Links, LinksetData, LinksetId, LoadUrl, MapDestination,
+        Memory, MoneyRefusal, PayPrice, Payment, Peers, Question, ScriptData, ScriptExperience,
+        SitRefusal, Speech, Stack, Tick, Whereabouts,
     };
 
     /// A host for calls that never reach it: the dispatch reports stubs
@@ -252,6 +254,42 @@ mod tests {
         }
 
         fn set_pay_price(&mut self, _caller: CallerId, _layout: PayPrice) {}
+
+        fn experience(&self, _caller: CallerId) -> Option<ScriptExperience> {
+            None
+        }
+
+        fn experience_details(
+            &mut self,
+            _caller: CallerId,
+            _id: &str,
+        ) -> Option<ExperienceDetails> {
+            None
+        }
+
+        fn admission(&self, _agent: &str, _experience: &str) -> Admission {
+            Admission::Undecided
+        }
+
+        fn ask_experience(&mut self, _caller: CallerId, _question: &ExperienceQuestion) -> bool {
+            false
+        }
+
+        fn key_value_store(
+            &mut self,
+            _experience: &str,
+        ) -> Result<&mut KeyValueStore, ExperienceError> {
+            Err(ExperienceError::StoreDisabled)
+        }
+
+        fn sit_on_link(
+            &mut self,
+            _caller: CallerId,
+            _agent: &str,
+            _link: i32,
+        ) -> Result<(), SitRefusal> {
+            Err(SitRefusal::InvalidAgent)
+        }
     }
 
     #[test]

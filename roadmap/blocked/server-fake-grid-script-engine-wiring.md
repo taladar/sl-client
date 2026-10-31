@@ -199,3 +199,37 @@ Six more `Host` methods, and three `Engine` entry points the grid calls:
   viewer raises `money` with the amount, and the payer's balance and the
   economy event stream agree (the viewer has no pay dialog yet,
   `viewer-money-economy-ui`, so a conformance case's session pays).
+
+## From server-lsl-lib-experience (2026-10-31)
+
+Six more `Host` methods and one `Engine` entry point:
+
+- **`experience`** → the experience the upload named (`UpdateScriptTask`'s
+  experience, kept on the inventory item; none until an upload names one),
+  with its standing where the object is: the catalogue's state (disabled,
+  suspended, no such experience), the region's experience settings and the
+  parcel's allowed and blocked experiences. The OpenSim flavour answers
+  `None` (its dialect compiles none of the functions).
+- **`experience_details`** → `sl_fake_grid::experiences::catalogue`, with a
+  per-region set of ids looked up: an id not yet seen answers `None` once,
+  then its record or `ExperienceDetails::invalid`.
+- **`admission`** → the agent's experience preferences
+  (the session's serving store, `experiences.agent_permissions()`: allowed,
+  blocked, neither).
+- **`ask_experience`** → `send_script_question` with `experience_id` set and
+  the question's mask; the viewer's `ScriptAnswerYes` for a question with an
+  experience records the agent allowed (`set_experience_preference`) and goes
+  to `Engine::answer_experience(id, agent, Ok(()))`, a refusal or a block to
+  `Err(ExperienceError::NotPermitted)` (a block recorded too), and a question
+  unanswered after five minutes to `Err(ExperienceError::RequestTimedOut)`.
+- **`key_value_store`** → one `vm::KeyValueStore` per experience, owned by
+  the grid beside the catalogue so two objects of one experience share it and
+  a take, a rez and a restart keep it.
+- **`sit_on_link`** → the sit-target search down the linkset from the prim
+  named, parcel access and the attachment refusal, with the world's sit
+  (`server-world-sit-and-attach`).
+- **The acceptance leg left from the tranche**: a script in a scenario
+  experience requests permission, the viewer shows the experience card
+  (`e2e_script_permissions` already holds the card's reading), and a second
+  script of the experience finds itself permitted; a key written by one
+  object is read by another of the experience and not by one outside it.

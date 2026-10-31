@@ -1,0 +1,12 @@
+grid: opensim-yengine
+date: 2026-10-31
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: unknown (no start record)
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+complete: no
+
+# chat type=say from="Object" length=14 text="Script running"
+# compile error in "Probe": "(69,15) Error: undefined constant/function/variable llGetExperienceList(key)"
+# compile error in "Probe": "(87,4) Error: undefined constant/function/variable llClearExperiencePermissions(key)"
+# compile error in "Probe": "(184,4) Error: unknown event handler experience_permissions_denied(key,integer)"

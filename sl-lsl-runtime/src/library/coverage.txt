@@ -154,3 +154,17 @@ implemented llGetPermissionsKey
 implemented llGiveMoney
 implemented llTransferLindenDollars
 implemented llSetPayPrice
+implemented llRequestExperiencePermissions
+implemented llAgentInExperience
+implemented llGetExperienceDetails
+implemented llGetExperienceErrorMessage
+implemented llCreateKeyValue
+implemented llReadKeyValue
+implemented llUpdateKeyValue
+implemented llDeleteKeyValue
+implemented llKeyCountKeyValue
+implemented llKeysKeyValue
+implemented llDataSizeKeyValue
+implemented llSitOnLink
+implemented llClearExperiencePermissions
+implemented llGetExperienceList

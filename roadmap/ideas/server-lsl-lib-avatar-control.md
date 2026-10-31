@@ -111,3 +111,17 @@ drops bits. Left for this tranche:
   the grant (`llRequestPermissions` of `NULL_KEY` or 0, a new granter, a
   question without `TAKE_CONTROLS`, an answer without it) — the host's
   `left_state`-style release of what `llTakeControls` took.
+
+## From server-lsl-lib-experience (2026-10-31)
+
+`llSitOnLink` is implemented there (`library::experiences`): the experience,
+the agent's admission and the link are the runtime's, and the sit itself is
+`Host::sit_on_link`, answered with a `SitRefusal`. Left for this tranche:
+
+- **`llTeleportAgent` and `llTeleportAgentGlobalCoords`** reach a granting
+  non-owner on Second Life only in an experience (`experience/powers`: outside
+  one only the owner moves; OpenSim moves a granting non-owner too). The gate
+  is `Host::experience` and `Host::admission`.
+- **`llAttachToAvatarTemp`** of a non-owner is the other experience-only
+  power (unmeasured; [[gridspec-lsl-in-experience]]).
+- The `experience/powers` replay, which this tranche left out.

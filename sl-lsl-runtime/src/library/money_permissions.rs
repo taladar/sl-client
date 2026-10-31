@@ -190,27 +190,6 @@ pub fn ll_give_money(
     Ok(0)
 }
 
-/// A fresh key for a transfer's handle, from the region's seeded source: a
-/// version 4 UUID, as each grid mints one.
-fn fresh_key(ctx: &mut ScriptCtx<'_>) -> String {
-    let words = [
-        ctx.random_bits(),
-        ctx.random_bits(),
-        ctx.random_bits(),
-        ctx.random_bits(),
-    ];
-    let [a, b, c, d] = words;
-    let version = (b & 0xffff_0fff) | 0x0000_4000;
-    let variant = (c & 0x3fff_ffff) | 0x8000_0000;
-    format!(
-        "{a:08x}-{:04x}-{:04x}-{:04x}-{:04x}{d:08x}",
-        version >> 16,
-        version & 0xffff,
-        variant >> 16,
-        variant & 0xffff,
-    )
-}
-
 /// `llTransferLindenDollars`: pay `destination` `amount` L$ from the owner's
 /// account; a handle, always, which the `transaction_result` that follows
 /// names — `TRUE` with the payee and the amount, or `FALSE` with why not.
@@ -234,7 +213,7 @@ pub fn ll_transfer_linden_dollars(
     destination: Key,
     amount: i32,
 ) -> Result<Key, CallError> {
-    let handle = fresh_key(ctx);
+    let handle = ctx.fresh_key();
     let opensim = ctx.flavour().is_opensim();
     let permitted = ctx.permissions().holds(PERMISSION_DEBIT);
     let refused = if opensim && amount <= 0 {

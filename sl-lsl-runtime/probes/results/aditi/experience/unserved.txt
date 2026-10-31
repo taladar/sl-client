@@ -1,0 +1,36 @@
+grid: aditi
+date: 2026-10-31
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Mauve
+engine: Mono
+settings: Linden Lab's; a resident cannot set them
+
+# animations avatar=other playing=""
+PROBE experience/unserved rec=start region="Mauve" channel="Luau" version="2026-07-24.30110090421"
+PROBE experience/unserved rec=list step=1 of=owner length=0 types="" items=""
+# animations avatar=owner playing=""
+PROBE experience/unserved rec=list step=2 of=none length=0 types="" items=""
+PROBE experience/unserved rec=clear step=3 of=owner
+PROBE experience/unserved rec=cleared step=3 perms=0 granter=none
+PROBE experience/unserved rec=after step=3 perms=0 granter=none
+PROBE experience/unserved rec=clear step=4 of=none
+PROBE experience/unserved rec=cleared step=4 perms=0 granter=none
+PROBE experience/unserved rec=after step=4 perms=0 granter=none
+PROBE experience/unserved rec=waiting drive=answer grant=4112
+# question permissions=4112 object="Object" owner="<first> <last>" experience=none
+# answer grant=4112
+PROBE experience/unserved rec=run-time-permissions step=5 answer=4112
+PROBE experience/unserved rec=held step=5 perms=4112 granter=owner
+PROBE experience/unserved rec=clear step=6 of=owner
+PROBE experience/unserved rec=cleared step=6 perms=4112 granter=owner
+PROBE experience/unserved rec=after step=6 perms=4112 granter=owner
+PROBE experience/unserved rec=list step=7 of=owner length=0 types="" items=""
+PROBE experience/unserved rec=waiting drive=touch by=other
+# touch by=other active_group=none surface=none
+PROBE experience/unserved rec=touch step=7 by=other
+PROBE experience/unserved rec=list step=8 of=other length=0 types="" items=""
+PROBE experience/unserved rec=clear step=8 of=other
+PROBE experience/unserved rec=cleared step=8 perms=4112 granter=owner
+PROBE experience/unserved rec=after step=8 perms=4112 granter=owner
+PROBE experience/unserved rec=end-held step=9 perms=4112 granter=owner
+PROBE experience/unserved rec=end

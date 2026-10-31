@@ -31,6 +31,9 @@
 //!   holds, who made it and the question waiting for an answer.
 //! - [`economy`] — what a script pays and is paid: the payments it hands the
 //!   host, and the prim's pay layout.
+//! - [`experiences`] — what a script in an experience asks of an avatar once
+//!   for the experience, and the key-value store the experience keeps on the
+//!   grid.
 //! - [`RuntimeError`] / [`Fault`] — what stops a script. An error stops the
 //!   one script and never panics the region; the engine says it on
 //!   [`DEBUG_CHANNEL`] in the words of the grid it imitates
@@ -46,6 +49,7 @@ mod cost;
 mod detected;
 pub mod economy;
 mod engine;
+pub mod experiences;
 mod fault;
 mod flavour;
 mod host;
@@ -72,6 +76,10 @@ pub use economy::{
 pub use engine::{
     Engine, EngineConfig, REGION_SCRIPT_SHARES, SCRIPT_INSTRUCTIONS_PER_SECOND, ScriptUsage,
     TickReport,
+};
+pub use experiences::{
+    Admission, EXPERIENCE_PERMISSIONS, ExperienceDetails, ExperienceError, ExperienceQuestion,
+    KeyValueStore, ScriptExperience, SitRefusal,
 };
 pub use fault::{Fault, RuntimeError};
 pub use flavour::EngineFlavour;

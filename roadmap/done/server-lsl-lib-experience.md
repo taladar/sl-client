@@ -2,7 +2,7 @@
 id: server-lsl-lib-experience
 title: Library tranche — experiences and the experience key-value store
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-lsl-lib-money-permissions,
   gridspec-lsl-experience]
@@ -77,3 +77,55 @@ Measured from a script in no experience (`book/src/gridspec/lsl.md`
   for every agent and link, before checking either, and sits nobody; it
   does not compile on OpenSim (`gridspec-lsl-refreshed-table-probe-steps`,
   2026-10-27).
+
+## Done (2026-10-31)
+
+All fourteen experience functions are implemented in `sl-lsl-runtime`
+(`library::experiences`, the model in `vm::experiences`), with the
+`experience_permissions`, `experience_permissions_denied` and key-value
+`dataserver` events: `llRequestExperiencePermissions`,
+`llAgentInExperience`, `llGetExperienceDetails`,
+`llGetExperienceErrorMessage`, the seven key-value calls, `llSitOnLink`,
+`llClearExperiencePermissions` and `llGetExperienceList`; coverage is 165
+implemented of 524. OpenSim's dialect now refuses all fourteen, their
+`XP_ERROR_*` and `SIT_*` constants and both events, as both engines did.
+
+- **The experience is the grid's.** `Host::experience` (the script's
+  experience and whether it may run here), `Host::admission` (an avatar's
+  allowed / blocked / neither, one record for every script of the
+  experience), `Host::experience_details` (the catalogue, `None` while an id
+  is still being looked up), `Host::ask_experience` (the question, with the
+  experience), `Host::key_value_store` (a `vm::KeyValueStore` per experience)
+  and `Host::sit_on_link`. The script keeps only its share: the grant, held
+  in its `Permissions` with the experience question beside the ordinary one,
+  answered through `Engine::answer_experience` and lost on a reset like any
+  grant.
+- **What is measured** is a script in no experience (aditi): denied with 5 at
+  once, `"0,5"` from every key-value call (answered after the slice, in call
+  order — the probe's `unordered` set), `SIT_NOT_EXPERIENCE` before agent or
+  link, the error texts and `unknown error id`, a public experience's details
+  in aditi's order and an unseen id empty then invalid, and the two unserved
+  functions as nothing and an empty list (measured for this task,
+  [[gridspec-lsl-unserved-experience-probe-steps]]).
+- **What is documented, not measured**, is everything a script *in* an
+  experience is answered: LL's library-table tooltips and wiki pages, each
+  rule marked in `vm::experiences`; [[gridspec-lsl-in-experience]] lists
+  them to confirm once an avatar can save into an experience.
+
+**Proof** (`vm/tests/experiences.rs`): `experience/no-experience`,
+`experience/sit-on-link` (the sit target and who sits rigged, as the
+avatar-control tranche's) and `experience/unserved` replayed against all
+three transcripts — every `PROBE` line, question and `DEBUG_CHANNEL` line on
+Second Life, a refused compile on both OpenSim engines; and unit tests of the
+model for the acceptance: one grant for the experience permits its next
+script unasked, a block, a timeout, a closed parcel and no experience each
+deny with their reason, and a key written by one object is read by another
+of the experience and not by one outside it.
+
+**Not done here**: `llTeleportAgent`'s and `llAttachToAvatarTemp`'s
+experience-only reach, and the `experience/powers` replay, are
+[[server-lsl-lib-avatar-control]]'s (teleporting and attaching are that
+tranche's; the gate it needs is `Host::experience` and `Host::admission`).
+The viewer leg of the acceptance needs the fake grid to run scripts —
+[[server-fake-grid-script-engine-wiring]], which now lists each new `Host`
+method's wiring.

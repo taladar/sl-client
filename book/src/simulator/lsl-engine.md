@@ -190,9 +190,13 @@ the two were measured to disagree (the `script-compile` census,
 [Grid Behaviour → LSL](../gridspec/lsl.md#compiling)): `Dialect::OpenSim`
 is YEngine, which compiles a
 function that can end without a `return` (the lowering's fall-off `return`
-of the type's default then runs) and knows neither
-`llClearExperiencePermissions` nor `llGetExperienceList`. Which of the rest
-of the library OpenSim lacks is unmeasured, so the rest compiles. The fake
+of the type's default then runs), and knows neither the linkset data store
+nor experiences: none of the `llLinksetData*` functions, `LINKSETDATA_*`
+constants or the `linkset_data` event, and none of the fourteen experience
+functions (`llClearExperiencePermissions` and `llGetExperienceList` among
+them), the `XP_ERROR_*` constants, `llSitOnLink`'s `SIT_*` results or the two
+`experience_permissions*` events. Which of the rest of the library OpenSim
+lacks is unmeasured, so the rest compiles. The fake
 grid compiles every script upload this way (`sl_fake_grid::script_compile`).
 
 The `Program` (module `bytecode`) holds the globals, a literal pool, one
@@ -708,6 +712,28 @@ from the sketch above:
   button list a script passes *in place*, so for its dialect the compiler
   writes the padding back to a list variable passed to the call
   (`Instr::PadPayButtons`).
+- **An experience is the grid's; the script holds only its share.** Which
+  experience a script was compiled into and whether it may run here
+  (`Host::experience`, a `ScriptExperience`), what each avatar has answered it
+  (`Host::admission`: allowed, blocked or neither — one record for every script
+  of the experience), the experience catalogue (`Host::experience_details`,
+  `None` while the region has yet to look an id up, as aditi answered an unseen
+  id empty and then invalid) and its key-value store (`Host::key_value_store`, a
+  `vm::KeyValueStore` the grid keeps per experience) are all the host's.
+  `library::experiences` holds the fourteen functions. A request of an avatar
+  that allowed the experience is granted at once (`experience_permissions`, the
+  grant holding the six experience permissions for that avatar), of one that
+  blocked it denied, and of anyone else put as an `ExperienceQuestion` through
+  `Host::ask_experience`; the host records the answer for the experience and
+  reports it to the script that asked through `Engine::answer_experience`. A
+  key-value call returns a fresh handle and raises `dataserver` with the store's
+  answer once the slice is over. A script in **no** experience — the only kind
+  aditi was measured with (`experience/*`) — is denied with reason 5, answered
+  `"0,5"` by every key-value call and `SIT_NOT_EXPERIENCE` by `llSitOnLink`
+  before anything else is checked; `llClearExperiencePermissions` and
+  `llGetExperienceList` do nothing and list nothing. What a script *in* an
+  experience is answered is Linden Lab's documentation, unmeasured, and the
+  module says so rule by rule (`gridspec-lsl-in-experience`).
 
 **`ScriptCtx`, not `&mut Vm`.** A library function sees the calling
 instance through a narrow context — which script is calling, the current
@@ -742,7 +768,10 @@ whom `llMapDestination` opens a map for outside a touch) and `links`. The
 permissions and money tranche added `owner`, `seated_on`, `ask_permissions`
 (`false` for an avatar not in the region, which OpenSim answers with
 `run_time_permissions(0)`), `give_money`, `transfer_money` and
-`set_pay_price`.
+`set_pay_price`. The experiences tranche added `experience`,
+`experience_details`, `admission`, `ask_experience`, `key_value_store` and
+`sit_on_link` (the sit target search and parcel access, answered with a
+`SitRefusal`).
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:

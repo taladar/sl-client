@@ -3,6 +3,10 @@
 use crate::library::BuiltinId;
 use crate::vm::comms::{Dialog, InstantMessage, Links, LoadUrl, MapDestination};
 use crate::vm::economy::{MoneyRefusal, PayPrice, Payment};
+use crate::vm::experiences::{
+    Admission, ExperienceDetails, ExperienceError, ExperienceQuestion, KeyValueStore,
+    ScriptExperience, SitRefusal,
+};
 use crate::vm::linkset_data::{LinksetData, LinksetId};
 use crate::vm::permissions::Question;
 use crate::vm::report::{Speech, Whereabouts};
@@ -154,4 +158,52 @@ pub trait Host {
     /// `layout` — the prim's, so a reset leaves it. A viewer's
     /// `RequestPayPrice` is answered [`PayPrice::reply`].
     fn set_pay_price(&mut self, caller: CallerId, layout: PayPrice);
+
+    /// The experience the script `caller` was compiled into (the upload's
+    /// experience, kept on its inventory item), and whether it may run where
+    /// the script is; [`None`] for a script compiled into none — every
+    /// script, until an upload names one. A host for an OpenSim region, whose
+    /// engines compile none of the experience functions, answers [`None`].
+    fn experience(&self, caller: CallerId) -> Option<ScriptExperience>;
+
+    /// What `llGetExperienceDetails` reads of the experience `id`, or
+    /// [`None`] while the region has yet to look it up: Second Life answers
+    /// an id it has not seen with an empty list, and a second later with the
+    /// record — [`ExperienceDetails::invalid`] when no experience has the id
+    /// (`experience/no-experience`). The host keeps what it has looked up.
+    fn experience_details(&mut self, caller: CallerId, id: &str) -> Option<ExperienceDetails>;
+
+    /// What `agent` has answered the experience `experience`: allowed,
+    /// blocked or neither — the grid's record, the same for every script of
+    /// the experience, wherever it is.
+    fn admission(&self, agent: &str, experience: &str) -> Admission;
+
+    /// `llRequestExperiencePermissions` of an avatar that has not answered
+    /// the experience: put `question` to its viewer as a `ScriptQuestion`
+    /// naming the experience. `false` when the avatar is not in the region,
+    /// which puts nothing. The host records the answer for the experience —
+    /// allowed or blocked, for every later request — and reports it through
+    /// [`Engine::answer_experience`](crate::vm::Engine::answer_experience),
+    /// as it reports [`ExperienceError::RequestTimedOut`] for a question
+    /// nobody answered in five minutes.
+    fn ask_experience(&mut self, caller: CallerId, question: &ExperienceQuestion) -> bool;
+
+    /// The key-value store of the experience `experience`, kept by the grid
+    /// for the experience: every object in it shares one, and it outlives
+    /// them. [`ExperienceError::StoreDisabled`] when the region's store is
+    /// off.
+    ///
+    /// # Errors
+    ///
+    /// The error a key-value call answers when the store cannot be reached.
+    fn key_value_store(&mut self, experience: &str) -> Result<&mut KeyValueStore, ExperienceError>;
+
+    /// `llSitOnLink`: sit `agent`, who has allowed the script's experience,
+    /// on the sit target of the prim `link` of the object `caller` is in, or
+    /// when that is taken on the next free one down the linkset.
+    ///
+    /// # Errors
+    ///
+    /// [`SitRefusal`] when nobody sits.
+    fn sit_on_link(&mut self, caller: CallerId, agent: &str, link: i32) -> Result<(), SitRefusal>;
 }

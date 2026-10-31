@@ -579,8 +579,9 @@ own client.
 ## Experiences and the key-value store
 
 Measured on 2026-10-25 by the probes `experience/no-experience` and
-`experience/powers` (and on 2026-10-27 by `experience/sit-on-link`), with
-the same two avatars, on the same grids. Every
+`experience/powers` (on 2026-10-27 by `experience/sit-on-link`, and on
+2026-10-31 by `experience/unserved`), with the same two avatars, on the same
+grids. Every
 script here was saved into **no experience**: none of our avatars owns,
 administers or contributes to one, and saving a script into an experience
 needs one of the three (creating an experience needs a Premium account —
@@ -605,6 +606,8 @@ experience-only reach of `llTeleportAgent` are unmeasured.
 | `llSitOnLink`, the owner on every link number a single prim answers to (0, `LINK_THIS`, 1, `LINK_ROOT`, `LINK_SET`, `LINK_ALL_OTHERS`, `LINK_ALL_CHILDREN`) and on link 2, which is no prim; with no sit target and with one | **−1**, `SIT_NOT_EXPERIENCE`, every time; nobody sits, nothing reaches either viewer, no `DEBUG_CHANNEL` complaint | does not compile: YEngine `undefined constant/function/variable llSitOnLink(key,integer)`, XEngine ``CS0103: The name `llSitOnLink' does not exist in the current context`` | no scripts |
 | `llSitOnLink` of `NULL_KEY`, a key no avatar has, the prim's own key, or the other avatar | −1 as well: the missing experience is checked **before** the agent and the link, so `SIT_INVALID_AGENT` and `SIT_INVALID_LINK` are never reached | — | no scripts |
 | the seven key-value calls (`llCreateKeyValue`, `llReadKeyValue`, `llUpdateKeyValue`, `llDeleteKeyValue`, `llKeyCountKeyValue`, `llKeysKeyValue`, `llDataSizeKeyValue`) | each returns a request key, and the `dataserver` answers each `"0,5"` within a second, **not in the order called** | — | no scripts |
+| `llGetExperienceList` of the owner, `NULL_KEY` and the other avatar, before and after the owner granted an ordinary `PERMISSION_TRIGGER_ANIMATION \| PERMISSION_TELEPORT` | an empty list, every time | does not compile: YEngine `undefined constant/function/variable llGetExperienceList(key)`; XEngine's parser stops at the first `experience_permissions*` handler, `syntax error` | no scripts |
+| `llClearExperiencePermissions` of the owner, `NULL_KEY` and the other avatar | nothing: no event within three seconds, no `DEBUG_CHANNEL` complaint, and the owner's ordinary grant of 4112 is still held after it | does not compile: YEngine `undefined constant/function/variable llClearExperiencePermissions(key)` | no scripts |
 
 ### Teleporting an agent and a temporary attachment
 

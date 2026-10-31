@@ -8,6 +8,7 @@ use crate::num::ticks_for;
 use crate::vm::comms::{LinkMessage, Listens};
 use crate::vm::detected::Detected;
 use crate::vm::economy::TransactionResult;
+use crate::vm::experiences::{ExperienceError, ExperienceQuestion};
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::Instance;
@@ -30,6 +31,23 @@ pub enum Raised {
     Permissions(i32),
     /// `transaction_result` in the calling script.
     Transaction(TransactionResult),
+    /// `dataserver(id, data)` in the calling script: a key-value call's
+    /// answer.
+    Dataserver {
+        /// The handle the call returned.
+        id: String,
+        /// The answer.
+        data: String,
+    },
+    /// `experience_permissions(agent)` in the calling script.
+    ExperienceGranted(String),
+    /// `experience_permissions_denied(agent, reason)` in the calling script.
+    ExperienceDenied {
+        /// The avatar asked.
+        agent: String,
+        /// Why, an `XP_ERROR_*` code.
+        reason: ExperienceError,
+    },
 }
 use crate::vm::memory::{Memory, Stack};
 
@@ -366,6 +384,60 @@ impl<'host> ScriptCtx<'host> {
         let flavour = self.flavour();
         self.data.permissions.ask(question, flavour);
         true
+    }
+
+    /// Put the experience `question` to its avatar through the host; whether
+    /// it was put — `false` when the avatar is not in the region. A question
+    /// put waits for
+    /// [`Engine::answer_experience`](crate::vm::Engine::answer_experience).
+    pub fn ask_experience(&mut self, question: ExperienceQuestion) -> bool {
+        if !self.host.ask_experience(self.caller, &question) {
+            return false;
+        }
+        self.data.permissions.ask_experience(question);
+        true
+    }
+
+    /// `agent` holds `mask` for the script at once, the experience it is in
+    /// allowed before; `experience_permissions(agent)` follows once the slice
+    /// is over.
+    pub fn grant_experience(&mut self, agent: String, mask: i32) {
+        self.data.permissions.grant(Some(agent.clone()), mask);
+        self.data.raised.push(Raised::ExperienceGranted(agent));
+    }
+
+    /// Raise `experience_permissions_denied(agent, reason)` in the script
+    /// once the slice is over, holding what it holds.
+    pub fn deny_experience(&mut self, agent: String, reason: ExperienceError) {
+        self.data
+            .raised
+            .push(Raised::ExperienceDenied { agent, reason });
+    }
+
+    /// Raise `dataserver(id, data)` in the script once the slice is over.
+    pub fn raise_dataserver(&mut self, id: String, data: String) {
+        self.data.raised.push(Raised::Dataserver { id, data });
+    }
+
+    /// A fresh key for a request's handle, from the region's seeded source: a
+    /// version 4 UUID, as each grid mints one.
+    pub fn fresh_key(&mut self) -> String {
+        let words = [
+            self.random_bits(),
+            self.random_bits(),
+            self.random_bits(),
+            self.random_bits(),
+        ];
+        let [a, b, c, d] = words;
+        let version = (b & 0xffff_0fff) | 0x0000_4000;
+        let variant = (c & 0x3fff_ffff) | 0x8000_0000;
+        format!(
+            "{a:08x}-{:04x}-{:04x}-{:04x}-{:04x}{d:08x}",
+            version >> 16,
+            version & 0xffff,
+            variant >> 16,
+            variant & 0xffff,
+        )
     }
 
     /// Raise `transaction_result` in the script once the slice is over.
