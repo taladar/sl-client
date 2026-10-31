@@ -17,6 +17,7 @@ use sl_types::chat::ChatVolume;
 use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
 
+mod math;
 mod memory;
 mod precision;
 mod strings;

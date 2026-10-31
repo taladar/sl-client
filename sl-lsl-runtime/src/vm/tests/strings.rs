@@ -18,7 +18,7 @@ use super::*;
 /// `source` with what it reads of the world written in: `llOwnerSay` as
 /// `print`, `llGetEnv(…)` and `llGetRegionName()` as `""`, and
 /// `llGetScriptName()` as `script`.
-fn offline(source: &str, script: &str) -> String {
+pub(super) fn offline(source: &str, script: &str) -> String {
     let mut text = source
         .replace("llOwnerSay(", "print(")
         .replace("llGetRegionName()", "\"\"")
@@ -38,7 +38,7 @@ fn offline(source: &str, script: &str) -> String {
 /// Run `source` under `flavour` for up to `ticks` ticks, or until it printed
 /// its `end` record; the engine, for what it said and told, and every
 /// `PROBE` line printed.
-fn replay(
+pub(super) fn replay(
     source: &str,
     flavour: EngineFlavour,
     ticks: u64,
@@ -63,7 +63,7 @@ fn replay(
 }
 
 /// The `PROBE` lines of a transcript.
-fn probe_lines(transcript: &str) -> Vec<String> {
+pub(super) fn probe_lines(transcript: &str) -> Vec<String> {
     transcript
         .lines()
         .filter(|line| line.starts_with("PROBE "))
@@ -87,7 +87,7 @@ fn name_of(line: &str) -> (String, String) {
 /// Hold `ours` to `theirs` line by line, but for the `start` record and the
 /// `(rec, case)` pairs in `deviations`, which must each differ — a
 /// deviation that has come to agree is no deviation, and should go.
-fn hold(ours: &[String], theirs: &[String], deviations: &[(&str, &str)]) {
+pub(super) fn hold(ours: &[String], theirs: &[String], deviations: &[(&str, &str)]) {
     let named = |line: &String| {
         let (rec, case) = name_of(line);
         rec != "start"

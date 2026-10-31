@@ -635,6 +635,14 @@ from the sketch above:
   list function is charged what aditi measured it to cost at its argument's
   length (`vm::cost`, from `vm/call-cost-*`): on Second Life every string
   function grows with the string, `llStringLength` included.
+- **Second Life's rotation functions are Linden's `llmath` in float.**
+  `library::rotations` ports the published C++ (`normVec`, `normalize`,
+  `getAngleAxis`, `getMatrix3`, `orthogonalize`, `getEulerAngles`,
+  `shortestArc`) with every operation rounded to a float, fitted bit for bit
+  to `math/rotation-bits` on aditi; the scalar functions (`llSqrt`, `llSin`,
+  …) are the double result rounded once, with PyOptimizer's corners and the
+  x87's reduction of an integral angle. OpenSim's are `LSL_Api.cs`'s formulas
+  in double, rounded to the value model's float as they are stored.
 
 **`ScriptCtx`, not `&mut Vm`.** A library function sees the calling
 instance through a narrow context — which script is calling, the current
@@ -660,7 +668,8 @@ which the engine speaks a script's error lines (a `Speech`: channel, text, and
 how far avatars and scripts hear it); `owner_say`, which tells the owner alone
 what YEngine reports that way; `whereabouts`, which names the prim and
 script those lines name; and `random_bits`, the region's seeded draw
-`llListRandomize` shuffles by — and each library tranche adds its own methods.
+`llListRandomize` shuffles by and `llFrand` scales — and each library tranche
+adds its own methods.
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:

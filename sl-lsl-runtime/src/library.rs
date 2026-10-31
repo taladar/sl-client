@@ -32,6 +32,7 @@ pub mod lists;
 pub mod math;
 mod range;
 mod registry;
+pub mod rotations;
 pub mod strings;
 pub mod table;
 mod text;

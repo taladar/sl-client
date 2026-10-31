@@ -85,6 +85,14 @@ pub enum Exception {
     /// `System.OverflowException` from `Convert.ToInt32`: `llList2Integer` of
     /// a float past the integer's range, or NaN.
     Overflow,
+    /// `System.OverflowException` from integer arithmetic: `Math.DivRem` of
+    /// the least `long` by -1, where OpenSim's `llModPow` overflows the
+    /// double to that `long` and is given a modulus of -1.
+    ArithmeticOverflow,
+    /// `System.DivideByZeroException`: `llModPow` with a modulus of 0, whose
+    /// `Math.DivRem` divides by it (`errors/math` case 10 on both OpenSim
+    /// engines).
+    DivideByZero,
 }
 
 impl Exception {
@@ -93,7 +101,8 @@ impl Exception {
     pub const fn class(self) -> &'static str {
         match self {
             Self::IndexOutOfRange => "IndexOutOfRangeException",
-            Self::Overflow => "OverflowException",
+            Self::Overflow | Self::ArithmeticOverflow => "OverflowException",
+            Self::DivideByZero => "DivideByZeroException",
         }
     }
 
@@ -103,6 +112,8 @@ impl Exception {
         match self {
             Self::IndexOutOfRange => "Index was outside the bounds of the array.",
             Self::Overflow => "Value was either too large or too small for an Int32.",
+            Self::ArithmeticOverflow => "Arithmetic operation resulted in an overflow.",
+            Self::DivideByZero => "Attempted to divide by zero.",
         }
     }
 }

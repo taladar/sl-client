@@ -2,12 +2,41 @@
 //! deliberate stubs. Add a function here when it is written; the
 //! registration will not compile unless its signature is the table's.
 
-use crate::library::{control, detection, encoding, lists, math, strings, usage};
+use crate::library::{control, detection, encoding, lists, math, rotations, strings, usage};
 
 crate::registry! {
     implemented {
         LlAbs => math::ll_abs,
         LlFabs => math::ll_fabs,
+        LlFloor => math::ll_floor,
+        LlCeil => math::ll_ceil,
+        LlRound => math::ll_round,
+        LlSqrt => math::ll_sqrt,
+        LlPow => math::ll_pow,
+        LlLog => math::ll_log,
+        LlLog10 => math::ll_log10,
+        LlSin => math::ll_sin,
+        LlCos => math::ll_cos,
+        LlTan => math::ll_tan,
+        LlAsin => math::ll_asin,
+        LlAcos => math::ll_acos,
+        LlAtan2 => math::ll_atan2,
+        LlModPow => math::ll_mod_pow,
+        LlFrand => math::ll_frand,
+        LlVecMag => rotations::ll_vec_mag,
+        LlVecDist => rotations::ll_vec_dist,
+        LlVecNorm => rotations::ll_vec_norm,
+        LlEuler2Rot => rotations::ll_euler2_rot,
+        LlRot2Euler => rotations::ll_rot2_euler,
+        LlAxisAngle2Rot => rotations::ll_axis_angle2_rot,
+        LlRot2Axis => rotations::ll_rot2_axis,
+        LlRot2Angle => rotations::ll_rot2_angle,
+        LlAngleBetween => rotations::ll_angle_between,
+        LlRot2Fwd => rotations::ll_rot2_fwd,
+        LlRot2Left => rotations::ll_rot2_left,
+        LlRot2Up => rotations::ll_rot2_up,
+        LlRotBetween => rotations::ll_rot_between,
+        LlAxes2Rot => rotations::ll_axes2_rot,
         LlLinear2sRGB => math::ll_linear2s_rgb,
         LlsRGB2Linear => math::ll_s_rgb2_linear,
         LlGetListLength => lists::ll_get_list_length,

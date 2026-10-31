@@ -267,6 +267,11 @@ impl<'host> ScriptCtx<'host> {
         u32::try_from(draw.saturating_mul(u64::from(bound)) >> 32).unwrap_or(0)
     }
 
+    /// 32 random bits from the region's seeded source (`llFrand`).
+    pub fn random_bits(&mut self) -> u32 {
+        self.host.random_bits(self.caller)
+    }
+
     /// Refuse the call's arguments with `text`, worded for the
     /// [`Self::flavour`]: the engine says it on `DEBUG_CHANNEL` once the
     /// slice is over, through the same flood limit as a run-time error. The

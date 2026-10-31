@@ -2,11 +2,12 @@
 id: server-lsl-lib-math-rotations
 title: Library tranche — maths, vectors and rotations
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-lsl-library-surface-table,
   gridspec-lsl-strings-math]
-refs: [server-lsl-value-model, server-world-determinism-contract]
+refs: [server-lsl-value-model, server-world-determinism-contract,
+  server-lsl-lib-physics-vehicles]
 ---
 
 Context: [context/lsl.md](../context/lsl.md).
@@ -107,3 +108,60 @@ grids for unit input. Where the flavours differ:
 - The library helpers here
   compute the double result of the float argument and round it once
   (`math/rotation-bits`' `library` rows).
+
+## Done (2026-10-31)
+
+All 29 new functions of the tranche are implemented in `sl-lsl-runtime`
+(`library/math.rs` for the numbers, `library/rotations.rs` for vectors and
+rotations), each answering as the region's flavour does; `llFabs` now clears a
+negative zero's sign on OpenSim. Coverage is 112 implemented of 524.
+`llRotLookAt` returns nothing and only turns the prim, so it has no maths
+half to write here; it is left to [[server-lsl-lib-physics-vehicles]], which
+already lists it beside `llLookAt` and `llStopLookAt`.
+
+**Second Life.** The numbers are PyOptimizer's — the double result of the
+float argument rounded once, `llRound` as `floor(x + 0.5)` in float, the
+x87's reduction of an integral angle for the trigonometry, `llTan(1e30)`
+handed back, `llLog(0)` 0, `llModPow` unsigned and exact — and hold to
+`math/rotation-bits`' scalar rows bit for bit. The rotation functions are
+**not** PyOptimizer's: fitting them to `math/rotation-bits`' library rows (the
+exact bits of every function for seven input pairs, already on aditi) showed
+Second Life runs Linden's `llmath` in float arithmetic, every operation
+rounded. Ported from the 2007 C++ (`normVec`, `getAngleAxis`, `getMatrix3`,
+`orthogonalize`, `getEulerAngles`, `shortestArc`) with the later guard in
+`normalize`, `llVecMag`, `llVecNorm`, `llRot2Axis`, `llRot2Angle`, `llRot2Fwd`
+(and so `Left`/`Up`), `llAxisAngle2Rot`, `llRotBetween` and `llAngleBetween`
+match all seven pairs, `llRot2Euler` five (the other two one unit in the last
+place off). Where Second Life's library differs from the published code: an
+axis-angle rotation is not renormalised (in `llAxisAngle2Rot` and in
+`shortestArc`'s turn), an axis too short to normalise turns by nothing, a zero
+axis from `getAngleAxis` is the zero vector, and `llRot2Euler` gives no
+negative zero. `llEuler2Rot` matches no arrangement of Linden's code tried and
+keeps PyOptimizer's double form (within three units in the last place on every
+pair); `llAxes2Rot`, not bit-measured, keeps PyOptimizer's too. `llFrand` draws
+24 bits from the region's seeded `Host::random_bits` and truncates toward zero,
+so it never reaches its magnitude.
+
+**OpenSim.** `LSL_Api.cs`'s formulas in double, rounded to the value model's
+float as they are stored: `llRound` half away from zero, `llLog(0)` `-Infinity`,
+`llModPow` through `Math.Pow` and x86's `(long)` (a double past the range is
+`long.MinValue`) with `DivideByZeroException` for a modulus of 0 (and
+`OverflowException` for −1 when the power overflows), `llRot2Euler`'s 0.4999
+pole test, `llRotBetween` through `acos`, `llAxes2Rot` never normalised, and a
+zero rotation made the identity as `LSL_Rotation` makes it.
+
+**Proof.** `vm/tests/math.rs` replays the probes' own scripts in the VM:
+`math/functions` on all three grids (the `llFrand` lines compared without their
+draws), `math/rotations` on all three, and the library cases of `errors/math`
+(8, 10, 11, 12, 13, 15) on all three, with YEngine telling the owner and XEngine
+saying on `DEBUG_CHANNEL` what `llModPow(2, 3, 0)` throws. Named deviations: on
+aditi two Euler round trips (`<30°, 45°, 60°>` and `<10°, −90°, 20°>`), a digit
+apart because they rest on `llEuler2Rot`'s last bits; on OpenSim only the value
+model — results past the float range, digits in the sixth decimal a float
+rounds away, negative zero printed without its sign, and the operators
+`vector * rotation` and `vector / rotation`, which are Second Life's on every
+flavour. `library::rotations` holds the rotation functions to aditi's bits;
+`library::math` the scalar rows and the corners; a rotation round trip over a
+grid of angles holds to 1e-5 rad; `llFrand` reproduces across two runs of one
+seed; and `math/float-rounding`'s `library-return` row is in the precision
+replay.

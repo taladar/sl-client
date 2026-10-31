@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 137 |
+| ideas | 136 |
 | ready | 332 |
 | blocked | 53 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1457 |
+| done | 1458 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2091** |
 
-## ideas (137)
+## ideas (136)
 
 ### protocol
 
@@ -300,10 +300,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Library tranche — parcel, region, estate and environment queries (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
   `gridspec-lsl-land-region-env` (done))
-- [`server-lsl-lib-math-rotations`](ideas/server-lsl-lib-math-rotations.md) —
-  Library tranche — maths, vectors and rotations (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
-  `gridspec-lsl-strings-math` (done))
 - [`server-lsl-lib-money-permissions`](ideas/server-lsl-lib-money-permissions.md)
   — Library tranche — script permissions, money and payment (blocked by
   `server-lsl-vm-execution` (done), `protocol-sim-script-messages`,
@@ -1304,7 +1300,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Charge each grid flavour's measured forced delays and throttles, not the
   keyword file's (blocked by `gridspec-lsl-throttles` (done),
   `server-lsl-lib-comms`, `server-lsl-lib-http-url`,
-  `server-lsl-lib-task-inventory`, `server-lsl-lib-math-rotations`,
+  `server-lsl-lib-task-inventory`, `server-lsl-lib-math-rotations` (done),
   `server-lsl-lib-land-region-env`, `server-lsl-lib-prim-state`,
   `server-fake-grid-script-engine-wiring`)
 - [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
@@ -1494,7 +1490,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1457)
+## done (1458)
 
 ### protocol
 
@@ -4523,6 +4519,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `server-lsl-value-model` (done))
 - [`server-lsl-float-expression-precision`](done/server-lsl-float-expression-precision.md)
   — Round a float expression once, where Mono stores it, not at every operator
+- [`server-lsl-lib-math-rotations`](done/server-lsl-lib-math-rotations.md) —
+  Library tranche — maths, vectors and rotations (blocked by
+  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
+  `gridspec-lsl-strings-math` (done))
 - [`server-lsl-lib-strings-lists`](done/server-lsl-lib-strings-lists.md) —
   Library tranche — strings, lists, encoding and hashing (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
