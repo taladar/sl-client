@@ -24,6 +24,7 @@ mod linkset;
 mod math;
 mod memory;
 mod money;
+mod persistence;
 mod precision;
 mod strings;
 

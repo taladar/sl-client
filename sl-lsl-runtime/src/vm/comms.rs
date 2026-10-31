@@ -89,13 +89,13 @@ pub struct Heard {
 
 /// One listen a script holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Listen {
+pub(super) struct Listen {
     /// What `llListen` answered.
-    handle: i32,
+    pub(super) handle: i32,
     /// What it hears.
-    filter: ListenFilter,
+    pub(super) filter: ListenFilter,
     /// Whether it is on (`llListenControl`).
-    active: bool,
+    pub(super) active: bool,
 }
 
 /// The listens of one script, in the order it opened them. A state change
@@ -103,7 +103,7 @@ struct Listen {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Listens {
     /// The listens.
-    listens: Vec<Listen>,
+    pub(super) listens: Vec<Listen>,
 }
 
 /// Why `llListen` opened nothing: the script holds as many as Second Life

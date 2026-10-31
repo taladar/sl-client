@@ -50,6 +50,7 @@ use crate::value::Value;
 use crate::value::memory::{Holder, Literals, MEMORY_LIMIT, YENGINE_HEAP, global_cost, value_cost};
 use crate::vm::fault::RuntimeError;
 use crate::vm::flavour::EngineFlavour;
+use crate::vm::persistence::SavedMemory;
 
 /// Mono: what the code of any script costs, before its bodies and
 /// instructions — the fitted constant of the code model (module docs).
@@ -214,6 +215,42 @@ impl Memory {
         };
         memory.peak = memory.heap(Stack::default());
         memory
+    }
+
+    /// The accounting of `program` in `flavour` holding `globals`, with the
+    /// limit, the low-water mark and the profile `saved` kept: a script
+    /// brought back from its saved state. What the globals hold is counted
+    /// again rather than saved, so it is the grid's measure of them now.
+    pub(crate) fn restored(
+        program: &Program,
+        flavour: EngineFlavour,
+        globals: &[Value],
+        saved: SavedMemory,
+    ) -> Self {
+        let mut memory = Self::new(program, flavour);
+        for (slot, value) in memory.globals.iter_mut().zip(globals) {
+            *slot = value_cost(value, memory.model, Holder::Global, &memory.literals);
+        }
+        memory.held = memory
+            .globals
+            .iter()
+            .fold(0_u32, |sum, cost| sum.saturating_add(*cost));
+        memory.limit = saved.limit;
+        memory.peak = saved.peak;
+        memory.profiling = saved.profiling;
+        memory.profiled = saved.profiled;
+        memory
+    }
+
+    /// What of the accounting a saved script keeps: the limit, the low-water
+    /// mark and the profile.
+    pub(crate) const fn saved(&self) -> SavedMemory {
+        SavedMemory {
+            limit: self.limit,
+            peak: self.peak,
+            profiling: self.profiling,
+            profiled: self.profiled,
+        }
     }
 
     /// The accounting of a script with no code and no globals, on Second

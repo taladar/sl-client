@@ -34,6 +34,9 @@
 //! - [`experiences`] — what a script in an experience asks of an avatar once
 //!   for the experience, and the key-value store the experience keeps on the
 //!   grid.
+//! - [`persistence`] — a script's running state saved as plain data
+//!   ([`SavedScript`]) when its object is taken or its region goes down, and
+//!   brought back when it is rezzed or the region is up again.
 //! - [`RuntimeError`] / [`Fault`] — what stops a script. An error stops the
 //!   one script and never panics the region; the engine says it on
 //!   [`DEBUG_CHANNEL`] in the words of the grid it imitates
@@ -57,6 +60,7 @@ mod instance;
 pub mod linkset_data;
 pub mod memory;
 pub mod permissions;
+pub mod persistence;
 mod report;
 #[cfg(test)]
 mod tests;
@@ -92,6 +96,9 @@ pub use linkset_data::{Answer, LinksetAction, LinksetChange, LinksetData, Linkse
 #[cfg(test)]
 pub(crate) use memory::{Memory, Stack};
 pub use permissions::{Permissions, Question};
+pub use persistence::{
+    CHANGED_REGION_START, DecodeError, OPENSIM_CHANGED_POSITION, RestoreError, SavedScript,
+};
 pub use report::{
     DEBUG_CHANNEL, FLOOD_LINES, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, Speech, Whereabouts,
 };

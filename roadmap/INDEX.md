@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 132 |
+| ideas | 131 |
 | ready | 331 |
 | blocked | 52 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1464 |
+| done | 1465 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2091** |
 
-## ideas (132)
+## ideas (131)
 
 ### protocol
 
@@ -311,10 +311,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   LSO-targeted script in LSO's 16 KB, as Second Life does
 - [`server-lsl-luau-compiler`](ideas/server-lsl-luau-compiler.md) — Compile the
   Luau target as Second Life does
-- [`server-lsl-script-persistence`](ideas/server-lsl-script-persistence.md) —
-  Script state that survives a take, a rez and a region restart (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done),
-  `gridspec-lsl-persistence` (done))
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -1469,7 +1465,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1464)
+## done (1465)
 
 ### protocol
 
@@ -4540,6 +4536,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-runtime-errors`](done/server-lsl-runtime-errors.md) — Run-time
   errors where a resident can see them (blocked by `server-lsl-vm-execution`
   (done))
+- [`server-lsl-script-persistence`](done/server-lsl-script-persistence.md) —
+  Script state that survives a take, a rez and a region restart (blocked by
+  `server-lsl-vm-execution` (done), `server-lsl-state-and-events` (done),
+  `gridspec-lsl-persistence` (done))
 - [`server-lsl-state-and-events`](done/server-lsl-state-and-events.md) — The
   event and state machine — 35 events and the rules around them (blocked by
   `server-lsl-vm-execution` (done))

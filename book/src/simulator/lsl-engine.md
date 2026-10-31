@@ -547,6 +547,61 @@ A table test posts every event of the table but the two transitions, with a
 sample value per parameter, to a handler compiled for it, and checks the
 handler printed exactly those values.
 
+### As built: persistence
+
+`server-lsl-script-persistence`. A script's running state belongs to its
+object, not to the region: taken into inventory and rezzed again, or caught
+by a restart, a script carries on where it was (`gridspec/lsl.md` §
+Persistence has the measurements). `vm::persistence::SavedScript` is all of
+it as plain data — the globals, the state, the run flag and a run-time
+error's hold, the queued events with their detected blocks, the body in
+progress down to its program counter, call frames and operand stack, a
+requested state change, the timer, the listens, the permissions and the
+questions waiting, the start parameter and what of the memory accounting is
+the script's own (its limit, Mono's low-water mark, the profile). It holds
+no program and no tick:
+
+- **No program.** The compiled script is the inventory item's, handed back
+  on the restore, which checks the saved state against it. A global of
+  another type, a state, function or handler the program lacks, a program
+  counter past its body or a queued event its state cannot handle is a
+  `RestoreError`, never a script running off its code. A script is not
+  brought back under another engine either: its memory accounting is in
+  that engine's measure.
+- **No tick.** A sleep and a timer are saved as the time left of them, so a
+  saved script comes back in a region whose clock reads anything, and the
+  time it was away is the host's to say.
+
+`SavedScript::encode` writes it in a compact form of this crate's own — a
+mark, a version, then the fields in order, floats by their bits so a NaN a
+script holds comes back as it was — and `decode` reads it back, refusing
+another form, another version, a short read or bytes past the end. It is
+**not** OpenSim's `ScriptState` XML: that form is OpenSim's engines'
+internals, and the recommendation of the task was a form of our own, with
+OpenSim's readable later, lossily, if a cross-grid object ever needs it.
+
+What a grid does with the saved state is the engine's, per flavour:
+
+| entry point | Second Life | YEngine | XEngine |
+| --- | --- | --- | --- |
+| `Engine::take(id)` | the instance leaves, saved, a sleep and all | the same, the sleep **ended** | the same (the rez resets it) |
+| `Engine::rez_saved(id, program, saved, away, start)` | everything kept; `away` counts against the sleep and the timer; the body in progress, **`on_rez` ahead of the queue**, then the queue | everything kept; `away` counts against nothing (OpenSim keeps a timer as the time left); the body in progress, the queue, **then `on_rez`** | **reset**, a stopped script running again: initialisers, `state_entry`, `on_rez` |
+| `Engine::shut_down()` | every instance leaves, saved | the same, sleeps ended | the same, **bodies in progress dropped** |
+| `Engine::start_up(scripts, down)` | everything kept, `down` counting as `away` does; `changed(CHANGED_REGION_START)` | everything kept; `changed(32768)`, then `changed(CHANGED_REGION_START)` | the same, a stopped script running again |
+
+A stopped script stays stopped through a take and a restart on Second Life
+and YEngine, so the `on_rez` or `changed` raised in it is dropped
+(`Posted::Stopped`); a deliberate `llResetScript` is how a script loses its
+state, and is the only way. No grid raises a `changed` for a rez, and none
+runs `state_entry` or `on_rez` after a restart. Second Life's restart is not
+measured — neither test avatar holds estate rights on aditi — so its row is
+the take's rule and the one constant Linden Lab documents. Two things the
+probes measured wait on functions this VM does not run yet: a script's
+`llGetTime` counts on through a take on Second Life and YEngine and starts
+again on XEngine (`server-lsl-lib-time-timers`), and the stopped script the
+probes stop with `llSetScriptState` (`server-lsl-lib-task-inventory`); the
+tests stop it as a host does.
+
 ## 4. The library: one table, typed functions, an erased dispatch
 
 About 425 `ll*` functions, written over many tasks. The failure mode is

@@ -18,7 +18,11 @@ use crate::vm::experiences::ExperienceError;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::{
-    Arrival, Coalescing, Instance, LOAD_WINDOW_SECONDS, Outcome, PostError, Posted, Slice,
+    Arrival, Coalescing, Instance, LOAD_WINDOW_SECONDS, Outcome, PostError, Posted, Slice, restore,
+    save,
+};
+use crate::vm::persistence::{
+    CHANGED_REGION_START, OPENSIM_CHANGED_POSITION, RestoreError, SavedScript,
 };
 use crate::vm::report::{
     Admission, DEBUG_CHANNEL, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, FloodGate, Speech, fault_lines,
@@ -472,6 +476,165 @@ impl Engine {
             lifecycle("money"),
             vec![Value::Key(payer.to_owned()), Value::Integer(amount)],
         )
+    }
+
+    /// The object the instance `id` is in was taken into inventory: the
+    /// instance leaves the region, and is handed back saved for the grid to
+    /// keep with the item ([`Self::rez_saved`] brings it back). [`None`] when
+    /// there is no such instance.
+    ///
+    /// What is saved is all the script holds, a sleep it is in included —
+    /// on Second Life the sleep counts on through the take and the rez, and
+    /// the handler ends after the rez, its full time asleep. YEngine ends the
+    /// sleep at the take: the handler goes on as soon as the object is
+    /// rezzed (`persistence/rerez`, 2026-10-26). XEngine resets the script on
+    /// the rez, so what it saves is never run.
+    pub fn take(&mut self, id: CallerId) -> Option<SavedScript> {
+        let instance = self.instances.remove(&id)?;
+        let mut saved = save(&instance, self.now, self.config.step);
+        if self.config.flavour == EngineFlavour::YEngine {
+            saved.wake();
+        }
+        Some(saved)
+    }
+
+    /// The object a script was taken in is rezzed again with
+    /// `start_parameter`, `away` after the take: bring `saved` back under
+    /// `id` as an instance of `program` (the inventory item's), replacing any
+    /// instance that had the id, and raise `on_rez(start_parameter)`.
+    ///
+    /// What it finds is the grid's (`persistence/rerez`, 2026-10-26):
+    ///
+    /// - **Second Life** keeps everything — the globals and the state, the
+    ///   permissions and their granter, the timer and the listens, the queued
+    ///   events, a stopped script stopped — and the time away counts against
+    ///   a sleep and the timer. A body in progress finishes first, then
+    ///   `on_rez`, then the events queued before the take.
+    /// - **YEngine** keeps the same, but the time away counts against
+    ///   nothing (OpenSim saves a timer as the time left of it, and its sleep
+    ///   ended at the take): the body in progress, the queued events, then
+    ///   `on_rez`.
+    /// - **XEngine** resets the script, a stopped one included, which runs
+    ///   again: its initialisers, `default`'s `state_entry`, then `on_rez`.
+    ///
+    /// No grid raises a `changed` for it.
+    ///
+    /// # Errors
+    ///
+    /// [`RestoreError`] when `saved` does not fit `program` or was saved
+    /// under another engine; nothing is added then.
+    pub fn rez_saved(
+        &mut self,
+        id: CallerId,
+        program: Arc<Program>,
+        saved: &SavedScript,
+        away: Duration,
+        start_parameter: i32,
+    ) -> Result<Posted, RestoreError> {
+        let flavour = self.config.flavour;
+        let mut saved = saved.clone();
+        if flavour == EngineFlavour::SecondLife {
+            saved.elapse(away);
+        }
+        let mut instance = restore(program, &saved, flavour, self.now, self.config.step)?;
+        if flavour == EngineFlavour::XEngine {
+            instance.set_running(true);
+            instance.reset();
+        }
+        instance.set_start_parameter(start_parameter);
+        let arrival = self.arrival();
+        let args = vec![Value::Integer(start_parameter)];
+        let posted = match flavour {
+            EngineFlavour::SecondLife => instance.post_first(arrival, lifecycle("on_rez"), args),
+            EngineFlavour::YEngine | EngineFlavour::XEngine => {
+                instance.post(arrival, lifecycle("on_rez"), args)
+            }
+        };
+        let _replaced = self.instances.insert(id, instance);
+        Ok(posted?)
+    }
+
+    /// The region is going down: every instance leaves it, handed back saved
+    /// under its id for the grid to keep with the region's objects
+    /// ([`Self::start_up`] brings them back).
+    ///
+    /// YEngine ends a sleep at the shutdown, and the handler goes on once the
+    /// region is back; XEngine loses the body in progress — a sleeping
+    /// handler never finishes — though the events queued behind it run
+    /// (`persistence/restart`, 2026-10-26). Second Life is not measured
+    /// (`gridspec-aditi-test-land`): it keeps the sleep as a take does.
+    pub fn shut_down(&mut self) -> Vec<(CallerId, SavedScript)> {
+        let now = self.now;
+        let step = self.config.step;
+        let flavour = self.config.flavour;
+        self.last_served = None;
+        core::mem::take(&mut self.instances)
+            .into_iter()
+            .map(|(id, instance)| {
+                let mut saved = save(&instance, now, step);
+                match flavour {
+                    EngineFlavour::SecondLife => {}
+                    EngineFlavour::YEngine => saved.wake(),
+                    EngineFlavour::XEngine => saved.abandon(),
+                }
+                (id, saved)
+            })
+            .collect()
+    }
+
+    /// The region is up again, `down` after [`Self::shut_down`]: bring every
+    /// saved script back under its id as an instance of its program, and
+    /// raise in each what tells it the region started — on OpenSim
+    /// `changed(OPENSIM_CHANGED_POSITION)` then
+    /// `changed(CHANGED_REGION_START)`, behind the events it had queued; on
+    /// Second Life `changed(CHANGED_REGION_START)` alone (not measured, and
+    /// the constant is all the reference documents). No grid runs
+    /// `state_entry` or `on_rez`.
+    ///
+    /// Both OpenSim engines keep the globals, the state, the permissions,
+    /// the timer, the listens and the queue; the time down counts against
+    /// nothing. XEngine runs a stopped script again. On Second Life the time
+    /// down counts against a sleep and the timer, as the time away of a take
+    /// does.
+    ///
+    /// # Errors
+    ///
+    /// The id and the [`RestoreError`] of the first script that does not fit
+    /// its program; no script is added then.
+    pub fn start_up(
+        &mut self,
+        scripts: Vec<(CallerId, Arc<Program>, SavedScript)>,
+        down: Duration,
+    ) -> Result<(), (CallerId, RestoreError)> {
+        let flavour = self.config.flavour;
+        let mut restored = Vec::with_capacity(scripts.len());
+        for (id, program, mut saved) in scripts {
+            if flavour == EngineFlavour::SecondLife {
+                saved.elapse(down);
+            }
+            let mut instance = restore(program, &saved, flavour, self.now, self.config.step)
+                .map_err(|error| (id, error))?;
+            if flavour == EngineFlavour::XEngine {
+                instance.set_running(true);
+            }
+            restored.push((id, instance));
+        }
+        let changes: &[i32] = match flavour {
+            EngineFlavour::SecondLife => &[CHANGED_REGION_START],
+            EngineFlavour::YEngine | EngineFlavour::XEngine => {
+                &[OPENSIM_CHANGED_POSITION, CHANGED_REGION_START]
+            }
+        };
+        let ids: Vec<CallerId> = restored.iter().map(|(id, _)| *id).collect();
+        self.instances.extend(restored);
+        for id in ids {
+            for change in changes {
+                let _posted = self
+                    .changed(id, *change)
+                    .map_err(|error| (id, RestoreError::from(error)))?;
+            }
+        }
+        Ok(())
     }
 
     /// An event posted now: in the current tick, merging by the region's

@@ -24,6 +24,10 @@ use crate::vm::host::{CallerId, Host};
 use crate::vm::memory::{Memory, Stack, frame_cost};
 use crate::vm::permissions::Permissions;
 
+mod saved;
+
+pub(crate) use saved::{restore, save};
+
 /// Instructions charged for calling a library function, on top of the one the
 /// `CallBuiltin` instruction itself costs (book chapter
 /// `simulator/lsl-engine.md`, section 3).
@@ -1141,7 +1145,28 @@ impl Instance {
         if is_detection_event(event.name) {
             return Err(PostError::Detection(event.name));
         }
-        self.enqueue(arrival, event, args, None)
+        self.enqueue(arrival, event, args, None, false)
+    }
+
+    /// [`Self::post`], the event queued ahead of every event already waiting
+    /// rather than behind them: Second Life's `on_rez` after a take, which
+    /// runs before the events the script had queued when it was taken
+    /// (`persistence/rerez`, aditi 2026-10-26). A body in progress still
+    /// finishes first.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::post`].
+    pub(crate) fn post_first(
+        &mut self,
+        arrival: Arrival,
+        event: &'static Event,
+        args: Vec<Value>,
+    ) -> Result<Posted, PostError> {
+        if is_detection_event(event.name) {
+            return Err(PostError::Detection(event.name));
+        }
+        self.enqueue(arrival, event, args, None, true)
     }
 
     /// Offer the script a detection event — a touch, a collision, a sensor
@@ -1168,17 +1193,18 @@ impl Instance {
             });
         }
         let count = Value::Integer(i32::try_from(detected.len()).unwrap_or(i32::MAX));
-        self.enqueue(arrival, event, vec![count], Some(detected))
+        self.enqueue(arrival, event, vec![count], Some(detected), false)
     }
 
     /// Check an event against its parameters and the queue's rules, and
-    /// queue it.
+    /// queue it — behind every event waiting, or with `first` ahead of them.
     fn enqueue(
         &mut self,
         arrival: Arrival,
         event: &'static Event,
         args: Vec<Value>,
         detected: Option<Vec<Detected>>,
+        first: bool,
     ) -> Result<Posted, PostError> {
         if matches!(event.name, "state_entry" | "state_exit") {
             return Err(PostError::Transition(event.name));
@@ -1254,13 +1280,18 @@ impl Instance {
         if self.queue.len() >= MAX_QUEUED {
             return Ok(Posted::QueueFull);
         }
-        self.queue.push_back(Queued {
+        let queued = Queued {
             event,
             handler,
             args,
             detected,
             posted: arrival.tick,
-        });
+        };
+        if first {
+            self.queue.push_front(queued);
+        } else {
+            self.queue.push_back(queued);
+        }
         Ok(Posted::Queued)
     }
 

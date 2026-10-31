@@ -84,3 +84,13 @@ has to reproduce per flavour, beyond what the VM does today:
   seconds on Second Life; `llGetWallclock` is Pacific time on Second Life
   and the host's zone on OpenSim; `llGetTimeOfDay` is the (UTC, or OpenSim's
   local) second of the day modulo four hours.
+
+## From server-lsl-script-persistence (2026-10-31)
+
+`vm::persistence::SavedScript` keeps a sleep and the timer as time left, but
+no script time, since `llGetTime` is this tranche's. Measured
+(`persistence/rerez`, `persistence/restart`): the script time counts on
+through a take and a rez on Second Life and YEngine (YEngine's only for the
+time it ran: 1.2 s of script time against 2 s by the clock across a take),
+and through a restart on YEngine; XEngine starts it again from 0 on the
+rez's reset and on a restart. Save it with the script when it exists.

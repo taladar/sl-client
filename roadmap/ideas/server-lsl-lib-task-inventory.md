@@ -90,3 +90,10 @@ fifty: Second Life rezzed all of them at about 6.3 a second (its 0.1 s forced
 delay reads 0.1–0.4 s a call), OpenSim at exactly 10. `llGiveInventory` to an
 avatar sleeps 2 s on Second Life and 3 s on OpenSim, where the keyword file
 says 0 ([[server-lsl-forced-delays-per-flavour]]).
+
+## From server-lsl-script-persistence (2026-10-31)
+
+The persistence probes stop their second script with `llSetScriptState`
+(`Stopped`, `FALSE`); `vm/tests/persistence.rs` stops it through the host
+(`Instance::set_running`) until this tranche runs the function — switch the
+test's script to the call then.

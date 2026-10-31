@@ -68,15 +68,15 @@ pub struct Question {
 pub struct Permissions {
     /// Who granted what is held — `llGetPermissionsKey`; [`None`] is
     /// `NULL_KEY`.
-    granter: Option<String>,
+    pub(super) granter: Option<String>,
     /// What is held — `llGetPermissions`.
-    mask: i32,
+    pub(super) mask: i32,
     /// The question put and not yet answered.
-    asked: Option<Question>,
+    pub(super) asked: Option<Question>,
     /// The experience question put and not yet answered
     /// (`llRequestExperiencePermissions`), kept apart from [`Self::asked`]:
     /// its answer comes through its own door.
-    asked_experience: Option<ExperienceQuestion>,
+    pub(super) asked_experience: Option<ExperienceQuestion>,
 }
 
 impl Permissions {

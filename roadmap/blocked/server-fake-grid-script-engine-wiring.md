@@ -233,3 +233,28 @@ Six more `Host` methods and one `Engine` entry point:
   (`e2e_script_permissions` already holds the card's reading), and a second
   script of the experience finds itself permitted; a key written by one
   object is read by another of the experience and not by one outside it.
+
+## From server-lsl-script-persistence (2026-10-31)
+
+Four `Engine` entry points with a saved script between them
+(`vm::persistence::SavedScript`, `encode` / `decode` for the bytes):
+
+- **A take** (`DeRezObject` to inventory or trash): `Engine::take(id)` for
+  each script of the object; keep `SavedScript::encode()` with the task
+  inventory item in the taken object's asset (whether the object asset XML
+  carries it, and in what element, wants the cross-check against OpenSim
+  [[test-fake-grid-served-object-asset-xml]] did for the rest of the asset;
+  OpenSim's own is its `ScriptState` XML, and ours is not that form).
+- **A rez** from inventory: `Engine::rez_saved(id, program, &saved, away,
+  start_parameter)` with the item's compiled program and the time since the
+  take from the injected clock; an item with no saved state is a fresh
+  `Engine::add` and `Engine::rez`. A `RestoreError` (a script recompiled
+  since, or saved under another flavour) falls back to a fresh start and is
+  logged, never swallowed.
+- **A region restart** (`EstateOwnerMessage` `restart`, the countdown the
+  viewer already shows): `Engine::shut_down()` at the kick, `Engine::start_up`
+  once the region takes logins again, with the time down. Prims keep their
+  keys.
+- **The acceptance leg left from the task**: a scripted object taken and
+  rezzed on the fake grid resumes with its globals and its timer, and a
+  deliberate `llResetScript` before the take is what clears them.
