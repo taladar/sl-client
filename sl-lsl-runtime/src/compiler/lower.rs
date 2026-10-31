@@ -1523,9 +1523,42 @@ impl<'source> Lowerer<'source> {
         }
         match target {
             Target::User(id) => self.emit(Instr::CallFunction(id), span),
-            Target::Builtin(id) => self.emit(Instr::CallBuiltin(id), span),
+            Target::Builtin(id) => {
+                self.emit(Instr::CallBuiltin(id), span);
+                self.pad_pay_buttons(id, args, span);
+            }
         }
         ret.map_or(Ty::Void, Ty::Value)
+    }
+
+    /// OpenSim's `llSetPayPrice` pads the very list it is given with
+    /// `PAY_HIDE` (`LSL_Api.llSetPayPrice`'s `quick_pay_buttons.Add`), so a
+    /// list variable passed to it holds the padding after the call
+    /// (`money/pay-price`, both engines): for that dialect the variable is
+    /// padded the same way once the call returns. Only a variable passed
+    /// directly is changed; OpenSim's other references to the same list are
+    /// copies here.
+    fn pad_pay_buttons(&mut self, id: BuiltinId, args: &[Expr], span: &Range<usize>) {
+        if id != BuiltinId::LlSetPayPrice || !matches!(self.dialect, Dialect::OpenSim) {
+            return;
+        }
+        let Some(Expr::Variable(name)) = args.get(1) else {
+            return;
+        };
+        let place = match self.resolve(&name.name) {
+            Some(Resolved::Local(slot, TypeName::List)) => Place::Local(slot, TypeName::List),
+            Some(Resolved::Global(slot, TypeName::List)) => Place::Global(slot, TypeName::List),
+            Some(Resolved::Local(..) | Resolved::Global(..) | Resolved::Constant(_)) | None => {
+                return;
+            }
+        };
+        let lvalue = LValue {
+            place,
+            member: None,
+        };
+        self.load(lvalue, span);
+        self.emit(Instr::PadPayButtons, span);
+        self.store(lvalue, span);
     }
 
     /// `[a, b, …]`: elements left to right, none a list or void.

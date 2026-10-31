@@ -22,6 +22,7 @@ use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::memory::{Memory, Stack, frame_cost};
+use crate::vm::permissions::Permissions;
 
 /// Instructions charged for calling a library function, on top of the one the
 /// `CallBuiltin` instruction itself costs (book chapter
@@ -814,6 +815,19 @@ impl Machine<'_> {
                     )));
                 }
             },
+            Instr::PadPayButtons => match pop(stack)? {
+                Value::List(elements) => {
+                    let padded = Value::List(library::money_permissions::pad_pay_buttons(elements));
+                    self.memory.made(&padded)?;
+                    stack.push(padded.into());
+                }
+                other => {
+                    return Err(internal(format!(
+                        "pay buttons padded of a {:?}, not a list",
+                        other.type_name()
+                    )));
+                }
+            },
             Instr::InvalidProgram => return Err(RuntimeError::InvalidProgram),
         }
         Ok(Flow::Next)
@@ -1065,11 +1079,23 @@ impl Instance {
         &self.data.listens
     }
 
+    /// What the script holds of an avatar's permissions.
+    #[must_use]
+    pub const fn permissions(&self) -> &Permissions {
+        &self.data.permissions
+    }
+
+    /// The script's permissions, for an answer or a revocation.
+    pub(crate) const fn permissions_mut(&mut self) -> &mut Permissions {
+        &mut self.data.permissions
+    }
+
     /// Reset the script: every global back to its type's default for the
     /// initialisers to run again, the call and operand stacks, the event queue
     /// and any requested state change dropped, any sleep cancelled, and the
     /// state back to `default`, whose `state_entry` runs after the
-    /// initialisers. The timer is stopped and the detected block cleared, and
+    /// initialisers. The timer is stopped, the detected block cleared, the
+    /// listens closed and every permission dropped with the question, and
     /// a script a run-time error held is released; the run flag and the
     /// start parameter are left as they are.
     pub fn reset(&mut self) {

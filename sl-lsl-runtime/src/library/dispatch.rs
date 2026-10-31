@@ -97,6 +97,15 @@ pub enum Exception {
     /// `Math.DivRem` divides by it (`errors/math` case 10 on both OpenSim
     /// engines).
     DivideByZero,
+    /// `System.InvalidCastException` from unboxing: `llSetPayPrice` reading
+    /// a float button as an integer (`LSL_Types.list.GetLSLIntegerItem`'s
+    /// `(int)o`, `money/pay-price` on both OpenSim engines).
+    InvalidCast,
+    /// `System.InvalidCastException` of `GetLSLIntegerItem` itself: an
+    /// `llSetPayPrice` button that is a vector.
+    VectorNotInteger,
+    /// The same of a rotation button.
+    RotationNotInteger,
 }
 
 impl Exception {
@@ -107,6 +116,9 @@ impl Exception {
             Self::IndexOutOfRange => "IndexOutOfRangeException",
             Self::Overflow | Self::ArithmeticOverflow => "OverflowException",
             Self::DivideByZero => "DivideByZeroException",
+            Self::InvalidCast | Self::VectorNotInteger | Self::RotationNotInteger => {
+                "InvalidCastException"
+            }
         }
     }
 
@@ -118,6 +130,9 @@ impl Exception {
             Self::Overflow => "Value was either too large or too small for an Int32.",
             Self::ArithmeticOverflow => "Arithmetic operation resulted in an overflow.",
             Self::DivideByZero => "Attempted to divide by zero.",
+            Self::InvalidCast => "Specified cast is not valid.",
+            Self::VectorNotInteger => "LSLInteger expected but Vector3 given",
+            Self::RotationNotInteger => "LSLInteger expected but Quaternion given",
         }
     }
 }

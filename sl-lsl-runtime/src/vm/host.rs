@@ -2,7 +2,9 @@
 
 use crate::library::BuiltinId;
 use crate::vm::comms::{Dialog, InstantMessage, Links, LoadUrl, MapDestination};
+use crate::vm::economy::{MoneyRefusal, PayPrice, Payment};
 use crate::vm::linkset_data::{LinksetData, LinksetId};
+use crate::vm::permissions::Question;
 use crate::vm::report::{Speech, Whereabouts};
 
 /// Which script instance is calling, as the host knows it.
@@ -119,4 +121,37 @@ pub trait Host {
     /// A host for an OpenSim region, whose engines compile none of the
     /// functions, may keep one empty store for every caller.
     fn linkset_data(&mut self, caller: CallerId) -> &mut LinksetData;
+
+    /// The key of the avatar who owns the object `caller` is in. Second Life
+    /// asks only the owner for `PERMISSION_DEBIT`.
+    fn owner(&self, caller: CallerId) -> String;
+
+    /// Whether `agent` sits on the object `caller` is in: what it asks of a
+    /// seated avatar's controls, camera and animations is granted unasked.
+    fn seated_on(&self, caller: CallerId, agent: &str) -> bool;
+
+    /// `llRequestPermissions`: put `question` to its avatar's viewer as a
+    /// `ScriptQuestion` naming the object and its owner. `false` when the
+    /// avatar is not in the region, which puts nothing. The avatar's answer
+    /// comes back through [`Engine::answer`](crate::vm::Engine::answer).
+    fn ask_permissions(&mut self, caller: CallerId, question: &Question) -> bool;
+
+    /// `llGiveMoney`: pay `payment` from the object's owner, the script
+    /// holding `PERMISSION_DEBIT`. Nothing comes back to the script, whatever
+    /// becomes of it; the balance replies are the host's.
+    fn give_money(&mut self, caller: CallerId, payment: &Payment);
+
+    /// `llTransferLindenDollars`: pay `payment` from the object's owner, the
+    /// script holding `PERMISSION_DEBIT`, and say whether the money moved —
+    /// the script's `transaction_result`.
+    ///
+    /// # Errors
+    ///
+    /// [`MoneyRefusal`] when the economy did not move it.
+    fn transfer_money(&mut self, caller: CallerId, payment: &Payment) -> Result<(), MoneyRefusal>;
+
+    /// `llSetPayPrice`: the pay layout of the prim `caller` is in is now
+    /// `layout` — the prim's, so a reset leaves it. A viewer's
+    /// `RequestPayPrice` is answered [`PayPrice::reply`].
+    fn set_pay_price(&mut self, caller: CallerId, layout: PayPrice);
 }

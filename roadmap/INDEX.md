@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 134 |
+| ideas | 133 |
 | ready | 332 |
 | blocked | 52 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1461 |
+| done | 1462 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2091** |
 
-## ideas (134)
+## ideas (133)
 
 ### protocol
 
@@ -282,7 +282,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-touch-and-grab`, `gridspec-lsl-detection-sensors` (done))
 - [`server-lsl-lib-experience`](ideas/server-lsl-lib-experience.md) — Library
   tranche — experiences and the experience key-value store (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-lib-money-permissions`,
+  `server-lsl-vm-execution` (done), `server-lsl-lib-money-permissions` (done),
   `gridspec-lsl-experience` (done))
 - [`server-lsl-lib-http-url`](ideas/server-lsl-lib-http-url.md) — Library
   tranche — outbound HTTP and in-world URLs (blocked by
@@ -292,10 +292,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Library tranche — parcel, region, estate and environment queries (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
   `gridspec-lsl-land-region-env` (done))
-- [`server-lsl-lib-money-permissions`](ideas/server-lsl-lib-money-permissions.md)
-  — Library tranche — script permissions, money and payment (blocked by
-  `server-lsl-vm-execution` (done), `protocol-sim-script-messages` (done),
-  `gridspec-lsl-money-permissions` (done))
 - [`server-lsl-lib-ossl`](ideas/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
   surface — how much, and why (blocked by `server-lsl-library-surface-table`
   (done), `gridspec-lsl-ossl` (done))
@@ -1480,7 +1476,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1461)
+## done (1462)
 
 ### protocol
 
@@ -4523,6 +4519,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Library tranche — maths, vectors and rotations (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
   `gridspec-lsl-strings-math` (done))
+- [`server-lsl-lib-money-permissions`](done/server-lsl-lib-money-permissions.md)
+  — Library tranche — script permissions, money and payment (blocked by
+  `server-lsl-vm-execution` (done), `protocol-sim-script-messages` (done),
+  `gridspec-lsl-money-permissions` (done))
 - [`server-lsl-lib-strings-lists`](done/server-lsl-lib-strings-lists.md) —
   Library tranche — strings, lists, encoding and hashing (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),

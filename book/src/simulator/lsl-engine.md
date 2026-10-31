@@ -685,6 +685,29 @@ from the sketch above:
   order of the calls — on Second Life both are queued at the call, so a link
   message sent before a burst of writes is ahead of their events in every
   queue, the sender's own included.
+- **Permissions are the script's, the question and the money the host's.**
+  `vm::Permissions` lives in the instance: the bits held, the granter and the
+  question waiting, kept by a state change and cleared by a reset, as each
+  grid keeps them on the script's inventory item. `llRequestPermissions`
+  grants the avatar-control bits of a wearer or a sitter unasked and hands
+  anything else to the host as a `Question`; the viewer's answer comes back
+  through `Engine::answer` (held as it came, more than was asked included;
+  an answer nobody asked for is nothing), a viewer's `RevokePermissions`
+  through `Engine::revoke` (no event, on any grid). Second Life's refusals —
+  `PERMISSION_DEBIT` of anyone but the owner, `PERMISSION_CONTROL_CAMERA` of
+  an avatar that neither wears nor sits on the object — are the runtime's.
+  `llGiveMoney` and `llTransferLindenDollars` check the grant, the amount
+  and the payee in each flavour's order and words and hand the host a
+  `Payment`; the economy answers a transfer with a `MoneyRefusal` or not,
+  and the runtime raises `transaction_result` once the slice is over.
+  `llSetPayPrice` hands the host the prim's `PayPrice`, which answers a
+  viewer's `RequestPayPrice` (`PayPrice::reply`: Second Life's default
+  buttons 1, 5, 10, 20; OpenSim's silence for a layout of zeros) and says
+  which payments Second Life takes (`PayPrice::takes`); the host raises
+  `money` in every script of the prim with `Engine::paid`. OpenSim pads the
+  button list a script passes *in place*, so for its dialect the compiler
+  writes the padding back to a list variable passed to the call
+  (`Instr::PadPayButtons`).
 
 **`ScriptCtx`, not `&mut Vm`.** A library function sees the calling
 instance through a narrow context — which script is calling, the current
@@ -715,7 +738,11 @@ script those lines name; `random_bits`, the region's seeded draw
 and each library tranche adds its own methods. The comms tranche added
 `say_to` (`llRegionSayTo`), `instant_message`, `dialog` (a text box too),
 `load_url`, `map_destination`, `worn_by` (the avatar an attachment is on,
-whom `llMapDestination` opens a map for outside a touch) and `links`.
+whom `llMapDestination` opens a map for outside a touch) and `links`. The
+permissions and money tranche added `owner`, `seated_on`, `ask_permissions`
+(`false` for an avatar not in the region, which OpenSim answers with
+`run_time_permissions(0)`), `give_money`, `transfer_money` and
+`set_pay_price`.
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:

@@ -18,14 +18,14 @@ use sl_types::lsl::Vector;
 use super::strings::{offline, probe_lines};
 use super::*;
 
-/// The probes' owner.
-const OWNER: &str = "0a0a0a0a-0000-4000-8000-000000000001";
+/// The probes' owner, the owner of every object.
+const OWNER: &str = super::OWNER;
 
 /// The other avatar.
-const OTHER: &str = "0b0b0b0b-0000-4000-8000-000000000002";
+pub(super) const OTHER: &str = "0b0b0b0b-0000-4000-8000-000000000002";
 
 /// The name an avatar's key stands for, as `llKey2Name` gives it.
-fn name_of(agent: &str) -> &'static str {
+pub(super) fn name_of(agent: &str) -> &'static str {
     match agent {
         OWNER => "Probe Owner",
         OTHER => "Probe Other",
@@ -60,7 +60,7 @@ fn rigged(source: &str, script: &str, prim: u64) -> String {
 /// A region of prims, each with its scripts, that routes what they say.
 pub(super) struct Region {
     /// The scripts.
-    engine: Engine,
+    pub(super) engine: Engine,
     /// What they did.
     pub(super) host: Recorder,
     /// Every script, in the order added.
@@ -200,12 +200,12 @@ impl Region {
     }
 
     /// Whether a script has printed its probe's `end` record.
-    fn ended(&self) -> bool {
+    pub(super) fn ended(&self) -> bool {
         self.lines().iter().any(|line| line.contains(" rec=end"))
     }
 
     /// The `DEBUG_CHANNEL` lines said, in order.
-    fn debug_lines(&self) -> Vec<String> {
+    pub(super) fn debug_lines(&self) -> Vec<String> {
         self.host
             .said
             .iter()
@@ -223,7 +223,7 @@ fn rec_of(line: &str) -> String {
 /// `lines` with the start record left out and every run of lines whose
 /// `rec` is in `unordered` sorted — the probe's header says the grid may
 /// print those in any order.
-fn canonical(lines: &[String], unordered: &[&str]) -> Vec<String> {
+pub(super) fn canonical(lines: &[String], unordered: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     let mut run: Vec<String> = Vec::new();
     for line in lines {
@@ -258,7 +258,7 @@ fn apart(lines: &[String], unordered: &[&str]) -> (Vec<String>, Vec<String>) {
 }
 
 /// The value of `key="…"` in a runner's `#` note.
-fn note_field(note: &str, key: &str) -> Option<String> {
+pub(super) fn note_field(note: &str, key: &str) -> Option<String> {
     let start = note.find(&format!(" {key}=\""))?;
     let rest = note.get(start.saturating_add(key.len()).saturating_add(3)..)?;
     let mut value = String::new();
@@ -299,7 +299,7 @@ fn noted_dialogs(transcript: &str) -> Vec<(bool, String, String, String)> {
 }
 
 /// The `DEBUG_CHANNEL` lines a transcript's runner noted, in order.
-fn noted_debug(transcript: &str) -> Vec<String> {
+pub(super) fn noted_debug(transcript: &str) -> Vec<String> {
     transcript
         .lines()
         .filter(|line| line.starts_with("# debug-channel:"))

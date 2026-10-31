@@ -2,7 +2,7 @@
 id: server-lsl-lib-money-permissions
 title: Library tranche — script permissions, money and payment
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, protocol-sim-script-messages,
   gridspec-lsl-money-permissions]
@@ -91,3 +91,63 @@ model per flavour. The points the library has to get right:
   defaults on Second Life; a non-integer button is hidden on Second Life and
   throws on OpenSim; a layout of zeros gets no reply on OpenSim; the layout
   survives a reset.
+
+## Done (2026-10-31)
+
+All six functions of the tranche are implemented in `sl-lsl-runtime`
+(`library::money_permissions`), with the `run_time_permissions`, `money` and
+`transaction_result` events: `llRequestPermissions`, `llGetPermissions`,
+`llGetPermissionsKey`, `llGiveMoney`, `llTransferLindenDollars` and
+`llSetPayPrice`; coverage is 151 implemented of 524.
+
+- **The grant is the script's** (`vm::Permissions`): kept by a state change,
+  cleared by a reset. The avatar-control bits of a wearer or a sitter are
+  granted unasked; anything else is a `Question` the host puts
+  (`Host::ask_permissions`), answered through `Engine::answer` as it came
+  (more than was asked included; an answer nobody asked for is nothing).
+  OpenSim names the asked avatar the granter at once with nothing held,
+  releases on a mask of 0 or `NULL_KEY`, and refuses an absent avatar with
+  `run_time_permissions(0)`; Second Life puts nothing for a mask of 0 and
+  refuses, in its words, `PERMISSION_DEBIT` of a non-owner and
+  `PERMISSION_CONTROL_CAMERA` of an avatar that neither wears nor sits on the
+  object. A viewer's revocation is `Engine::revoke`: the bits named, the
+  granter only with every bit, no event.
+- **Money**: each function checks the grant, the amount and the payee in its
+  flavour's order and words, and hands the host a `Payment`
+  (`give_money`, `transfer_money`); the economy answers a transfer with a
+  `MoneyRefusal` or not, and `transaction_result` follows the slice, its data
+  `"<payee>, <amount>"` on Second Life and `"<payee>,<amount>"` on OpenSim.
+  The handle is a fresh key from the region's seeded draw.
+- **Pay layouts**: `llSetPayPrice` hands the host the prim's `PayPrice`, with
+  Second Life's hidden missing and non-integer buttons and defaults for an
+  empty list, and OpenSim's padding, string buttons read as `(integer)`, the
+  `InvalidCastException` at a float, vector or rotation (two new
+  `Exception`s), and a child prim ignored. `PayPrice::reply` is what a
+  `RequestPayPrice` is answered, `PayPrice::takes` which payments Second Life
+  takes, and `Engine::paid` raises `money`. OpenSim pads the very list the
+  script passed, so its dialect's compiler writes the padding back to a list
+  variable passed to the call (`Instr::PadPayButtons`).
+
+**Proof** (`vm/tests/money.rs`): `avatar/permissions`, `money/debit`,
+`money/pay-price` and `money/pay` replayed against all three transcripts in
+the comms routing region, with a runner that touches, answers, pays and asks
+for pay buttons as each `waiting` record asks: every `PROBE` line, every
+question, pay-button answer and alert the runner noted, every
+`DEBUG_CHANNEL` line, YEngine's owner report and XEngine's exception line,
+and what reached the economy. One deviation is named and is not this
+tranche's: `avatar/permissions`' three complaints of the unpermitted
+`llTakeControls`, `llStartAnimation` and `llSetCameraParams`, functions
+rigged out of the probe and left to [[server-lsl-lib-avatar-control]]. The
+pay-price probe's description, which carries a mark across a reset, is
+carried by the start parameter instead; `llRemoveInventory` is the region
+removing the script. `money/lapse` (controls, attaching, dropping, a
+teleport, a re-rez) is not replayed; its rows are a unit test, with the
+seated and worn grants, the absent avatar, the transfer's handle and result,
+the in-place padding and the acceptance's vendor and unpermitted
+`llGiveMoney`.
+
+**Not done here**: the viewer leg of the acceptance (a vendor paid from the
+viewer, the payer's balance and the economy event stream agreeing) needs the
+fake grid to run scripts — [[server-fake-grid-script-engine-wiring]], which
+now lists each new `Host` method's wiring; the viewer has no pay dialog
+(`viewer-money-economy-ui`).

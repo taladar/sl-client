@@ -22,6 +22,7 @@ mod json;
 mod linkset;
 mod math;
 mod memory;
+mod money;
 mod precision;
 mod strings;
 
@@ -70,7 +71,27 @@ struct Recorder {
     prims: std::collections::BTreeMap<CallerId, u64>,
     /// Each prim's key, by number; one fixed key when not listed.
     prim_keys: std::collections::BTreeMap<u64, String>,
+    /// The owner of every script's object.
+    owner: Option<String>,
+    /// The avatar sitting on each script's object; none when not listed.
+    seated: std::collections::BTreeMap<CallerId, String>,
+    /// The avatars not in the region; every other key is.
+    away: std::collections::BTreeSet<String>,
+    /// `(tick, caller, question)` per permission question put.
+    questions: Vec<(u64, CallerId, Question)>,
+    /// `(tick, caller, payment)` per `llGiveMoney` handed over.
+    given: Vec<(u64, CallerId, Payment)>,
+    /// `(tick, caller, payment)` per `llTransferLindenDollars` that moved.
+    transferred: Vec<(u64, CallerId, Payment)>,
+    /// The balance of every avatar with an account, by key; a transfer to
+    /// any other key names nobody.
+    accounts: std::collections::BTreeMap<String, i64>,
+    /// Each prim's pay layout, by number.
+    pay_prices: std::collections::BTreeMap<u64, PayPrice>,
 }
+
+/// The owner of every object a [`Recorder`] has, unless it says otherwise.
+const OWNER: &str = "0a0a0a0a-0000-4000-8000-000000000001";
 
 impl Host for Recorder {
     fn print(&mut self, caller: CallerId, text: &str) {
@@ -195,6 +216,53 @@ impl Host for Recorder {
     fn linkset_data(&mut self, caller: CallerId) -> &mut LinksetData {
         let linkset = self.linkset(caller).0;
         self.stores.entry(linkset).or_default()
+    }
+
+    fn owner(&self, _caller: CallerId) -> String {
+        self.owner.clone().unwrap_or_else(|| OWNER.to_owned())
+    }
+
+    fn seated_on(&self, caller: CallerId, agent: &str) -> bool {
+        self.seated
+            .get(&caller)
+            .is_some_and(|sitter| sitter.eq_ignore_ascii_case(agent))
+    }
+
+    fn ask_permissions(&mut self, caller: CallerId, question: &Question) -> bool {
+        if self.away.contains(&question.agent) {
+            return false;
+        }
+        self.questions.push((self.now, caller, question.clone()));
+        true
+    }
+
+    fn give_money(&mut self, caller: CallerId, payment: &Payment) {
+        self.given.push((self.now, caller, payment.clone()));
+    }
+
+    fn transfer_money(&mut self, caller: CallerId, payment: &Payment) -> Result<(), MoneyRefusal> {
+        if !self.accounts.contains_key(&payment.to) {
+            return Err(MoneyRefusal::NoSuchEntity);
+        }
+        let owner = self.owner(caller);
+        let held = self.accounts.get(&owner).copied().unwrap_or(0);
+        let amount = i64::from(payment.amount);
+        if held < amount {
+            return Err(MoneyRefusal::InsufficientFunds);
+        }
+        if let Some(balance) = self.accounts.get_mut(&owner) {
+            *balance = balance.saturating_sub(amount);
+        }
+        if let Some(balance) = self.accounts.get_mut(&payment.to) {
+            *balance = balance.saturating_add(amount);
+        }
+        self.transferred.push((self.now, caller, payment.clone()));
+        Ok(())
+    }
+
+    fn set_pay_price(&mut self, caller: CallerId, layout: PayPrice) {
+        let prim = self.prim_of(caller);
+        let _old = self.pay_prices.insert(prim, layout);
     }
 }
 

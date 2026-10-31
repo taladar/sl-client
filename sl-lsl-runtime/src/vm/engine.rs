@@ -365,6 +365,71 @@ impl Engine {
         )
     }
 
+    /// The avatar `agent` answered the permission question the instance `id`
+    /// put to it with `granted` — a viewer's `ScriptAnswerYes`, whose mask is
+    /// held as it came, more than was asked included — and
+    /// `run_time_permissions(granted)` is raised. [`None`] when there is no
+    /// such instance or it is not waiting for `agent`'s answer: an answer
+    /// nobody asked for is nothing.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `run_time_permissions` takes one integer.
+    pub fn answer(
+        &mut self,
+        id: CallerId,
+        agent: &str,
+        granted: i32,
+    ) -> Result<Option<Posted>, PostError> {
+        let answered = self
+            .instances
+            .get_mut(&id)
+            .is_some_and(|instance| instance.permissions_mut().answer(agent, granted));
+        if !answered {
+            return Ok(None);
+        }
+        self.post(
+            id,
+            lifecycle("run_time_permissions"),
+            vec![Value::Integer(granted)],
+        )
+    }
+
+    /// The avatar `agent`'s viewer revoked `bits` of what it granted the
+    /// instance `id` (`RevokePermissions`; the host applies one naming the
+    /// region to every script, one naming an object to that object's). The
+    /// bits go, the granter stays unless every bit went; no event is raised,
+    /// on any grid. A grant `agent` did not make is left alone. The host
+    /// revokes the same way what a lapse drops: `PERMISSION_TAKE_CONTROLS`
+    /// when the object is dropped, `PERMISSION_TAKE_CONTROLS` and
+    /// `PERMISSION_CONTROL_CAMERA` when its sitter stands.
+    pub fn revoke(&mut self, id: CallerId, agent: &str, bits: i32) {
+        if let Some(instance) = self.instances.get_mut(&id) {
+            instance.permissions_mut().revoke(agent, bits);
+        }
+    }
+
+    /// `payer` paid the prim the instance `id` is in `amount` L$, and the
+    /// grid took it: raise `money(payer, amount)`. The host offers every
+    /// script of the prim the payment; one whose state has no `money` handler
+    /// hears nothing, and the payment stands all the same.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `money` takes a key and an integer.
+    pub fn paid(
+        &mut self,
+        id: CallerId,
+        payer: &str,
+        amount: i32,
+    ) -> Result<Option<Posted>, PostError> {
+        self.post(
+            id,
+            lifecycle("money"),
+            vec![Value::Key(payer.to_owned()), Value::Integer(amount)],
+        )
+    }
+
     /// An event posted now: in the current tick, merging by the region's
     /// policy.
     const fn arrival(&self) -> Arrival {
@@ -432,9 +497,10 @@ impl Engine {
 
     /// Post what `slice` of the instance `id` raised, in the order of its
     /// calls: `linkset_data` for each change of the linkset's store in every
-    /// script of the linkset, and `link_message(sender, num, text, id)` for
+    /// script of the linkset, `link_message(sender, num, text, id)` for
     /// each link message in every script it reaches
-    /// ([`Links::reached`](crate::vm::Links::reached)). `instance` itself
+    /// ([`Links::reached`](crate::vm::Links::reached)), and its own
+    /// `run_time_permissions` and `transaction_result`. `instance` itself
     /// gets its share too, unless the slice ended in a reset, which emptied
     /// its queue: on Second Life an event is queued at the call, so a reset
     /// after it in the same event drops it (`data/linkset-data`'s
@@ -475,6 +541,20 @@ impl Engine {
                         Value::Key(message.id.clone()),
                     ],
                     links.reached(message.target, flavour),
+                ),
+                Raised::Permissions(mask) => (
+                    lifecycle("run_time_permissions"),
+                    vec![Value::Integer(*mask)],
+                    vec![id],
+                ),
+                Raised::Transaction(result) => (
+                    lifecycle("transaction_result"),
+                    vec![
+                        Value::Key(result.id.clone()),
+                        Value::Integer(i32::from(result.success)),
+                        Value::String(result.data.clone()),
+                    ],
+                    vec![id],
                 ),
             };
             for to in reached {
@@ -586,8 +666,8 @@ impl Engine {
 }
 
 /// One of the events the engine raises itself (a timer, a change, a rez, a
-/// change of the linkset's data store, a line heard, a link message), from
-/// the library table.
+/// change of the linkset's data store, a line heard, a link message, an
+/// answer, a payment, a transfer's result), from the library table.
 fn lifecycle(name: &'static str) -> &'static Event {
     /// A stand-in that can never match a handler, should the table ever lose
     /// the event — the build's own table test catches that first.

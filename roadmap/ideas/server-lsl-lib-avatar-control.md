@@ -92,3 +92,22 @@ stands.
 keeps taken controls — the new state's `control` runs on a press and the
 grid sends the viewer no `ScriptControlChange` — and keeps the permissions
 and their key, on every grid.
+
+## From server-lsl-lib-money-permissions (2026-10-31)
+
+The grant is in the runtime: `ScriptCtx::permissions()` (`holds`, `granter`)
+is the gate each function here checks, and `Engine::revoke` the way a lapse
+drops bits. Left for this tranche:
+
+- **The unpermitted complaints**, Second Life only, each on `DEBUG_CHANNEL`
+  through `ScriptCtx::refuse` — the three texts are
+  `AVATAR_CONTROL_COMPLAINTS` in `sl-lsl-runtime/src/vm/tests/money.rs`,
+  whose `avatar/permissions` replay rigs `llTakeControls`,
+  `llStartAnimation`, `llSetCameraParams` and `llGetCameraPos` out of the
+  probe and leaves those lines out of the comparison. Implement them, drop
+  the rigging and compare every line.
+- **`llReleaseControls`** drops `PERMISSION_TAKE_CONTROLS` (book § When a
+  grant lapses). OpenSim also releases the controls taken when it releases
+  the grant (`llRequestPermissions` of `NULL_KEY` or 0, a new granter, a
+  question without `TAKE_CONTROLS`, an answer without it) — the host's
+  `left_state`-style release of what `llTakeControls` took.

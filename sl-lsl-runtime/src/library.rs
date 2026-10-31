@@ -33,6 +33,7 @@ pub mod json_text;
 pub mod linkset;
 pub mod lists;
 pub mod math;
+pub mod money_permissions;
 mod range;
 mod registry;
 pub mod rotations;
@@ -156,7 +157,8 @@ mod tests {
     use crate::value::{Element, Value};
     use crate::vm::{
         CallerId, Dialog, Host, InstantMessage, Links, LinksetData, LinksetId, LoadUrl,
-        MapDestination, Memory, Peers, ScriptData, Speech, Stack, Tick, Whereabouts,
+        MapDestination, Memory, MoneyRefusal, PayPrice, Payment, Peers, Question, ScriptData,
+        Speech, Stack, Tick, Whereabouts,
     };
 
     /// A host for calls that never reach it: the dispatch reports stubs
@@ -226,6 +228,30 @@ mod tests {
         fn linkset_data(&mut self, _caller: CallerId) -> &mut LinksetData {
             &mut self.store
         }
+
+        fn owner(&self, _caller: CallerId) -> String {
+            String::new()
+        }
+
+        fn seated_on(&self, _caller: CallerId, _agent: &str) -> bool {
+            false
+        }
+
+        fn ask_permissions(&mut self, _caller: CallerId, _question: &Question) -> bool {
+            false
+        }
+
+        fn give_money(&mut self, _caller: CallerId, _payment: &Payment) {}
+
+        fn transfer_money(
+            &mut self,
+            _caller: CallerId,
+            _payment: &Payment,
+        ) -> Result<(), MoneyRefusal> {
+            Err(MoneyRefusal::NoSuchEntity)
+        }
+
+        fn set_pay_price(&mut self, _caller: CallerId, _layout: PayPrice) {}
     }
 
     #[test]

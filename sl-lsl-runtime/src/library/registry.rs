@@ -3,7 +3,8 @@
 //! registration will not compile unless its signature is the table's.
 
 use crate::library::{
-    comms, control, detection, encoding, json_text, linkset, lists, math, rotations, strings, usage,
+    comms, control, detection, encoding, json_text, linkset, lists, math, money_permissions,
+    rotations, strings, usage,
 };
 
 crate::registry! {
@@ -153,6 +154,12 @@ crate::registry! {
         LlLoadURL => comms::ll_load_url,
         LlMapDestination => comms::ll_map_destination,
         LlMessageLinked => comms::ll_message_linked,
+        LlRequestPermissions => money_permissions::ll_request_permissions,
+        LlGetPermissions => money_permissions::ll_get_permissions,
+        LlGetPermissionsKey => money_permissions::ll_get_permissions_key,
+        LlGiveMoney => money_permissions::ll_give_money,
+        LlTransferLindenDollars => money_permissions::ll_transfer_linden_dollars,
+        LlSetPayPrice => money_permissions::ll_set_pay_price,
     }
     stubbed {}
 }

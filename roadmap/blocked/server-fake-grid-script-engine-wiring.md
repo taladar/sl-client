@@ -163,3 +163,39 @@ fake grid implements none of them yet. Wiring it:
   fixture script shown in the Bevy viewer answers back into the script's
   `listen` (`e2e_script_dialog` already holds the card's reply on both
   flavours; what is missing is a script on the other end).
+
+## From server-lsl-lib-money-permissions (2026-10-31)
+
+Six more `Host` methods, and three `Engine` entry points the grid calls:
+
+- **`ask_permissions`** → `SimSession::send_script_question` to the asked
+  avatar's session, the object's name and the owner's legacy name filled in;
+  `false` when the avatar is not in the region. The client's
+  `ScriptAnswerYes` (`ServerEvent::ScriptPermissionAnswer`) goes to
+  `Engine::answer(id, agent, granted)` for the script it names, and
+  `RevokePermissions` (`ServerEvent::RevokeScriptPermissions`) to
+  `Engine::revoke` for every script of the object, or of the region when the
+  viewer names it. `owner` and `seated_on` answer from the world.
+- **Lapses the grid raises**: a drop revokes `PERMISSION_TAKE_CONTROLS`, a
+  sitter standing `PERMISSION_TAKE_CONTROLS | PERMISSION_CONTROL_CAMERA`
+  (both through `Engine::revoke`, granter the agent); XEngine resets a
+  script on a re-rez, YEngine and Second Life keep it
+  ([[server-lsl-script-persistence]]).
+- **`give_money` / `transfer_money`** → the economy: the owner pays the
+  payee, transaction type `5009`, the object's name as the item, the two
+  balance replies; a transfer the economy refuses is a `MoneyRefusal` (no
+  account, or on Second Life insufficient funds with the failed balance reply
+  to the owner). OpenSim's stock module moves nothing and refuses nothing
+  but a missing account.
+- **`set_pay_price`** keeps the prim's `PayPrice`; a `RequestPayPrice` is
+  answered `PayPrice::reply(flavour)` through `send_pay_price_reply` (none
+  at all for OpenSim's zeros). A `MoneyTransferRequest` of type `5008` to an
+  object (`ServerEvent::MoneyTransferRequested`) is judged by
+  `PayPrice::takes` on Second Life — taken, dropped silently, or refused with
+  `PAYMENT_STOPPED` as an alert to the payer — and a taken one is moved
+  (type `5008`) and raised with `Engine::paid` in every script of the prim;
+  OpenSim's stock module takes none.
+- **The acceptance leg left from the tranche**: a vendor prim paid from the
+  viewer raises `money` with the amount, and the payer's balance and the
+  economy event stream agree (the viewer has no pay dialog yet,
+  `viewer-money-economy-ui`, so a conformance case's session pays).

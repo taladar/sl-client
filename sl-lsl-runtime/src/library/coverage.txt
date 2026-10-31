@@ -148,3 +148,9 @@ implemented llTextBox
 implemented llLoadURL
 implemented llMapDestination
 implemented llMessageLinked
+implemented llRequestPermissions
+implemented llGetPermissions
+implemented llGetPermissionsKey
+implemented llGiveMoney
+implemented llTransferLindenDollars
+implemented llSetPayPrice

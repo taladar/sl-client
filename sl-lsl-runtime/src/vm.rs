@@ -27,6 +27,10 @@
 //! - [`linkset_data`] — the key/value store a linkset owns, which the host
 //!   keeps and lends to the library, and the `linkset_data` event a change
 //!   raises in every script of the linkset.
+//! - [`permissions`] — what a script may do to an avatar: the grant it
+//!   holds, who made it and the question waiting for an answer.
+//! - [`economy`] — what a script pays and is paid: the payments it hands the
+//!   host, and the prim's pay layout.
 //! - [`RuntimeError`] / [`Fault`] — what stops a script. An error stops the
 //!   one script and never panics the region; the engine says it on
 //!   [`DEBUG_CHANNEL`] in the words of the grid it imitates
@@ -40,6 +44,7 @@ pub mod comms;
 mod context;
 mod cost;
 mod detected;
+pub mod economy;
 mod engine;
 mod fault;
 mod flavour;
@@ -47,6 +52,7 @@ mod host;
 mod instance;
 pub mod linkset_data;
 pub mod memory;
+pub mod permissions;
 mod report;
 #[cfg(test)]
 mod tests;
@@ -59,6 +65,10 @@ pub use comms::{
 pub(crate) use context::{Peers, ScriptData};
 pub use context::{Raised, ScriptCtx, Tick};
 pub use detected::{DETECTION_EVENTS, Detected, MAX_DETECTED, Touch, is_detection_event};
+pub use economy::{
+    MoneyRefusal, PAY_DEFAULT, PAY_HIDE, PAYMENT_STOPPED, PayPrice, Payment, PaymentAdmission,
+    SECOND_LIFE_DEFAULT_BUTTONS, TransactionResult,
+};
 pub use engine::{
     Engine, EngineConfig, REGION_SCRIPT_SHARES, SCRIPT_INSTRUCTIONS_PER_SECOND, ScriptUsage,
     TickReport,
@@ -73,6 +83,7 @@ pub use instance::{
 pub use linkset_data::{Answer, LinksetAction, LinksetChange, LinksetData, LinksetId};
 #[cfg(test)]
 pub(crate) use memory::{Memory, Stack};
+pub use permissions::{Permissions, Question};
 pub use report::{
     DEBUG_CHANNEL, FLOOD_LINES, FLOOD_NOTICE, FLOOD_QUIET_SECONDS, Speech, Whereabouts,
 };

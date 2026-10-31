@@ -7,21 +7,29 @@ use core::time::Duration;
 use crate::num::ticks_for;
 use crate::vm::comms::{LinkMessage, Listens};
 use crate::vm::detected::Detected;
+use crate::vm::economy::TransactionResult;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::Instance;
 use crate::vm::linkset_data::{Answer, LinksetChange, LinksetData};
+use crate::vm::permissions::{Permissions, Question};
 
-/// An event a library call raised in the scripts of its linkset, which the
-/// engine posts once the call's slice is over — in the order of the calls,
-/// since on Second Life each is queued at its call (a link message sent
-/// before a write is ahead of the write's `linkset_data` in every queue).
+/// An event a library call raised in the scripts of its linkset or in its
+/// own, which the engine posts once the call's slice is over — in the order
+/// of the calls, since on Second Life each is queued at its call (a link
+/// message sent before a write is ahead of the write's `linkset_data` in
+/// every queue).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Raised {
     /// `linkset_data`, in every script of the linkset.
     Linkset(LinksetChange),
     /// `link_message`, in every script the message reaches.
     Linked(LinkMessage),
+    /// `run_time_permissions(mask)` in the calling script: a grant made
+    /// without a question, or OpenSim's release and refusal.
+    Permissions(i32),
+    /// `transaction_result` in the calling script.
+    Transaction(TransactionResult),
 }
 use crate::vm::memory::{Memory, Stack};
 
@@ -70,6 +78,9 @@ pub(crate) struct ScriptData {
     /// The script's listens (`llListen`), which a state change and a reset
     /// drop.
     pub(crate) listens: Listens,
+    /// The script's permissions, which a state change keeps and a reset
+    /// clears.
+    pub(crate) permissions: Permissions,
 }
 
 /// A control-flow effect a library function asks the VM for. The VM acts on
@@ -323,6 +334,43 @@ impl<'host> ScriptCtx<'host> {
     /// in a reset, which empties its queue.
     pub fn send_linked(&mut self, message: LinkMessage) {
         self.data.raised.push(Raised::Linked(message));
+    }
+
+    /// What the script holds of an avatar's permissions.
+    #[must_use]
+    pub const fn permissions(&self) -> &Permissions {
+        &self.data.permissions
+    }
+
+    /// `agent` holds `mask` for the script at once, no question put — an
+    /// implicit grant, or with no agent and nothing held, OpenSim's release.
+    /// `run_time_permissions(mask)` follows once the slice is over.
+    pub fn grant_permissions(&mut self, agent: Option<String>, mask: i32) {
+        self.data.permissions.grant(agent, mask);
+        self.raise_permissions(mask);
+    }
+
+    /// Raise `run_time_permissions(mask)` in the script once the slice is
+    /// over, holding what it holds.
+    pub fn raise_permissions(&mut self, mask: i32) {
+        self.data.raised.push(Raised::Permissions(mask));
+    }
+
+    /// Put `question` to its avatar through the host; whether it was put —
+    /// `false` when the avatar is not in the region. A question put waits for
+    /// [`Engine::answer`](crate::vm::Engine::answer).
+    pub fn ask_permissions(&mut self, question: Question) -> bool {
+        if !self.host.ask_permissions(self.caller, &question) {
+            return false;
+        }
+        let flavour = self.flavour();
+        self.data.permissions.ask(question, flavour);
+        true
+    }
+
+    /// Raise `transaction_result` in the script once the slice is over.
+    pub fn raise_transaction(&mut self, result: TransactionResult) {
+        self.data.raised.push(Raised::Transaction(result));
     }
 
     /// Refuse the call's arguments with `text`, worded for the
