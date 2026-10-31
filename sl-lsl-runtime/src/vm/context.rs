@@ -9,6 +9,7 @@ use crate::vm::detected::Detected;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::Instance;
+use crate::vm::linkset_data::{Answer, LinksetChange, LinksetData};
 use crate::vm::memory::{Memory, Stack};
 
 /// A heartbeat tick of the region: the unit every script-visible time is
@@ -49,6 +50,10 @@ pub(crate) struct ScriptData {
     /// What library calls said refusing their arguments, worded for the
     /// flavour, waiting for the engine to say them on `DEBUG_CHANNEL`.
     pub(crate) refusals: Vec<String>,
+    /// What library calls changed in the linkset's data store, in order,
+    /// waiting for the engine to raise `linkset_data` for each in every
+    /// script of the linkset.
+    pub(crate) linkset: Vec<LinksetChange>,
 }
 
 /// A control-flow effect a library function asks the VM for. The VM acts on
@@ -270,6 +275,26 @@ impl<'host> ScriptCtx<'host> {
     /// 32 random bits from the region's seeded source (`llFrand`).
     pub fn random_bits(&mut self) -> u32 {
         self.host.random_bits(self.caller)
+    }
+
+    /// The caller's linkset data store, to read.
+    pub fn linkset_data(&mut self) -> &LinksetData {
+        self.host.linkset_data(self.caller)
+    }
+
+    /// Change the caller's linkset data store with `change` and answer what
+    /// it answered; the change it made, if any, raises `linkset_data` in
+    /// every script of the linkset once the slice is over — the caller's own
+    /// too, unless the slice ends in a reset, which empties its queue.
+    pub fn change_linkset_data<T>(
+        &mut self,
+        change: impl FnOnce(&mut LinksetData) -> Answer<T>,
+    ) -> T {
+        let answer = change(self.host.linkset_data(self.caller));
+        if let Some(made) = answer.change {
+            self.data.linkset.push(made);
+        }
+        answer.value
     }
 
     /// Refuse the call's arguments with `text`, worded for the

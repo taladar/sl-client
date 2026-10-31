@@ -386,9 +386,10 @@ impl<'source> Lowerer<'source> {
     /// or event (both are keywords of Linden's grammar), and a library
     /// function's name only for a local.
     fn check_definable(&mut self, name: &Ident, place: DefinedIn) {
-        let what = if library::constant(&name.name).is_some() {
+        let what = if self.constant(&name.name).is_some() {
             Some("constant")
-        } else if library::event(&name.name).is_some() {
+        } else if library::event(&name.name).is_some_and(|event| self.dialect.has_event(event.name))
+        {
             Some("event")
         } else {
             None
@@ -544,7 +545,9 @@ impl<'source> Lowerer<'source> {
     /// parameters are exactly its signature — a grammar rule in Linden's
     /// compiler, so a mismatch is a syntax error.
     fn check_event(&mut self, handler: &EventHandler) -> Option<&'static library::Event> {
-        let Some(event) = library::event(&handler.name.name) else {
+        let known =
+            library::event(&handler.name.name).filter(|event| self.dialect.has_event(event.name));
+        let Some(event) = known else {
             let hint = did_you_mean(
                 &handler.name.name,
                 library::EVENTS.iter().map(|event| event.name),
@@ -1217,7 +1220,18 @@ impl<'source> Lowerer<'source> {
                 .map(|global| global.ty)?;
             return Some(Resolved::Global(*slot, ty));
         }
-        library::constant(name).map(|constant| Resolved::Constant(constant.value))
+        self.constant(name).map(Resolved::Constant)
+    }
+
+    /// The library constant `name`'s value, if this dialect's compiler knows
+    /// it, as this dialect gives it.
+    fn constant(&self, name: &str) -> Option<ConstantValue> {
+        if !self.dialect.has_constant(name) {
+            return None;
+        }
+        self.dialect
+            .constant_override(name)
+            .or_else(|| library::constant(name).map(|constant| constant.value))
     }
 
     /// A variable reference.

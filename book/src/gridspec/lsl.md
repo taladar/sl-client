@@ -829,7 +829,7 @@ at the `linkset_data` event), so its tables are Second Life's alone.
 | `1.0e20`, `-0.0` | `100000002004087734272.000000`, `-0.000000` (single precision) | `100000000000000000000.000000`, `0.000000` | no scripts |
 | `(float)"1e39"` (infinity on Second Life) | **`inf`**, `-inf`: not JSON | the number written out in full: OpenSim's floats are doubles | no scripts |
 | `"true"`, `"false"`, `"null"`, `JSON_TRUE`, `JSON_FALSE`, `JSON_NULL` | `true`, `false`, `null` | the same | no scripts |
-| a string starting with `[` or `{` | inserted as it is, even when it is no JSON (`{bad`, `[1,]`) | the same | no scripts |
+| a string starting with `[` or `{` | inserted as it is when it also ends with the matching `]` or `}`, even when it is no JSON (`[1,]`); `{bad` is a string | inserted as it is whatever follows (`{bad`) | no scripts |
 | — with spaces round it (`" [2] "`) | trimmed and inserted (`[2]`) | a string, spaces kept | no scripts |
 | `"\"q\""` | **`"q"`**: a quoted string is taken as a JSON string | the string escaped, `"\"q\""` | no scripts |
 | `" 7 "`, `"7"`, `"1e3"`, `"-0"` | strings; `" 7 "` trimmed to `"7"` | strings, spaces kept | no scripts |
@@ -867,8 +867,8 @@ cannot read with the whole text as one string.
 | `["a" "b"]` | `b` | the text | no scripts |
 | `[truth]` | `truth` | the text | no scripts |
 | `{'a':1}` | `JSON_INVALID` | **`a`, 1**: single quotes accepted | no scripts |
-| `["A\n\/\"\\"]` | **not decoded**: one string, from the opening quote to the end of the text | decoded: `A`, a newline, `/`, `"`, `\` | no scripts |
-| `["😀"]` | `ud83dude00`: the backslashes dropped | the emoji | no scripts |
+| `["A\n\/\"\\"]` | **one string, from the opening quote to the end of the text**: a string ends at the first `"` not preceded by `\`, so the closing quote after the escaped backslash does not end it, and it runs on, `]` and all | decoded: `A`, a newline, `/`, `"`, `\` | no scripts |
+| `["😀"]` | `ud83dude00`: the one-letter escapes (`\b \t \n \f \r`) are decoded and any other escaped character is itself, so `\u` is `u` | the emoji | no scripts |
 | `["\ud83d"]` (a lone half) | `ud83d` | a lone surrogate, which `llEscapeURL` then answers with the text of an exception | no scripts |
 | `[12345678901234567890,2147483648,1.5e300,-1e400]` | integers **2147483647** twice, floats `Infinity`, `-Infinity` | the text | no scripts |
 | a key repeated (`{"a":1,"a":2}`) | both pairs | **the last only** | no scripts |

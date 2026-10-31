@@ -1,6 +1,7 @@
 //! The boundary between a running script and the world it runs in.
 
 use crate::library::BuiltinId;
+use crate::vm::linkset_data::{LinksetData, LinksetId};
 use crate::vm::report::{Speech, Whereabouts};
 
 /// Which script instance is calling, as the host knows it.
@@ -68,4 +69,16 @@ pub trait Host {
     /// one seed draw the same numbers (`roadmap/context/lsl.md`, the
     /// determinism rule).
     fn random_bits(&mut self, caller: CallerId) -> u32;
+
+    /// The linkset the script `caller` is in. Two scripts share a linkset
+    /// data store, and both get the `linkset_data` event of a change to it,
+    /// exactly when the host answers the same id for them.
+    fn linkset(&self, caller: CallerId) -> LinksetId;
+
+    /// The linkset data store of the linkset `caller` is in
+    /// (`llLinksetDataWrite` and its family). It is the linkset's, kept by
+    /// the host: it survives the script's reset and travels with the object.
+    /// A host for an OpenSim region, whose engines compile none of the
+    /// functions, may keep one empty store for every caller.
+    fn linkset_data(&mut self, caller: CallerId) -> &mut LinksetData;
 }

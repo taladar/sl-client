@@ -20,6 +20,7 @@ use crate::vm::detected::{Detected, MAX_DETECTED, is_detection_event};
 use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
+use crate::vm::linkset_data::LinksetChange;
 use crate::vm::memory::{Memory, Stack, frame_cost};
 
 /// Instructions charged for calling a library function, on top of the one the
@@ -185,6 +186,10 @@ pub struct Slice {
     /// (`Could not find script 'Nope'.`), in order, for the engine to say on
     /// `DEBUG_CHANNEL`.
     pub refusals: Vec<String>,
+    /// What library calls of the slice changed in the linkset's data store,
+    /// in order, for the engine to raise `linkset_data` for in every script
+    /// of the linkset.
+    pub linkset: Vec<LinksetChange>,
 }
 
 /// What became of a posted event.
@@ -1290,6 +1295,7 @@ impl Instance {
             outcome,
             used,
             refusals: core::mem::take(&mut self.data.refusals),
+            linkset: core::mem::take(&mut self.data.linkset),
         }
     }
 
@@ -1348,10 +1354,14 @@ impl Instance {
                 }
                 Ok(Flow::Reset) => {
                     // A reset drops the library's state; what the call
-                    // refused before it is still said.
+                    // refused before it is still said, and what it changed
+                    // in the linkset's store still raises its event in the
+                    // linkset's other scripts.
                     let refusals = core::mem::take(&mut self.data.refusals);
+                    let linkset = core::mem::take(&mut self.data.linkset);
                     self.reset();
                     self.data.refusals = refusals;
+                    self.data.linkset = linkset;
                     Outcome::Reset
                 }
                 Err(error) => self.fault(error, at, peers.flavour()),

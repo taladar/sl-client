@@ -643,6 +643,34 @@ from the sketch above:
   …) are the double result rounded once, with PyOptimizer's corners and the
   x87's reduction of an integral angle. OpenSim's are `LSL_Api.cs`'s formulas
   in double, rounded to the value model's float as they are stored.
+- **The two grids' JSON share nothing but the names.** `library::json_text`
+  dispatches each `llJson*` call to `second_life` — PyOptimizer's
+  `lsljson.py` scanner, which keeps the text a script gave it and rewrites
+  only the level it writes to, adjusted where aditi answered otherwise
+  (where a string ends, which numbers have a needless zero) and with an
+  `llJsonSetValue` PyOptimizer never wrote, held to LL's own test script —
+  or to `opensim`, a port of the LitJson reader and writer OpenSim builds a
+  tree with and writes anew. OpenSim's `JSON_APPEND` is a string, which is the
+  compiler's to know (`Dialect::constant_override`), not the library's. The
+  port's corners, held to OpenSim's own `LSL_Api` run under Mono with the
+  shipped DLLs: a number is written in .NET Framework's 15-digit `G` form with
+  `.0` appended when it has no point (`-100.0`, `Infinity.0`), but read back
+  by `llJsonGetValue` as `0.0#####`; a number that overflows a double reads as
+  0 and one past a `long` fails the whole read; only one token after a
+  document is looked at (`[1] x` is refused, `[1] 2` reads `[1]`); single
+  quotes and comments are accepted; an empty path in `llJsonSetValue` sets
+  index 0 and cuts the first and last characters (`[1,2]` becomes `5,2`); and
+  a value is a number when `float.TryParse` says so (`1,000` is 1000).
+- **The linkset data store is the host's, its rules the runtime's.** A
+  `vm::LinksetData` is a plain value — budget, passwords, return codes, key
+  order, the regular-expression search — that the host keeps one of per
+  linkset and lends to a call (`Host::linkset_data`); `Host::linkset` says
+  which linkset a script is in. A call that changes the store records the
+  change on the instance, and the engine raises `linkset_data` for it in
+  every script of the linkset once the slice is over — as Second Life queues
+  it at the call, except that a reset later in the same event drops the
+  writer's own. OpenSim has no store, and its dialect compiles none of the
+  functions, constants or the event.
 
 **`ScriptCtx`, not `&mut Vm`.** A library function sees the calling
 instance through a narrow context — which script is calling, the current
@@ -667,9 +695,10 @@ notice that a stubbed function answered with its type's default; `say`, through
 which the engine speaks a script's error lines (a `Speech`: channel, text, and
 how far avatars and scripts hear it); `owner_say`, which tells the owner alone
 what YEngine reports that way; `whereabouts`, which names the prim and
-script those lines name; and `random_bits`, the region's seeded draw
-`llListRandomize` shuffles by and `llFrand` scales — and each library tranche
-adds its own methods.
+script those lines name; `random_bits`, the region's seeded draw
+`llListRandomize` shuffles by and `llFrand` scales; and `linkset` and
+`linkset_data`, the linkset a script is in and that linkset's data store —
+and each library tranche adds its own methods.
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:

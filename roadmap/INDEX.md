@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 136 |
+| ideas | 135 |
 | ready | 332 |
 | blocked | 53 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1458 |
+| done | 1459 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2091** |
 
-## ideas (136)
+## ideas (135)
 
 ### protocol
 
@@ -292,10 +292,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   tranche — outbound HTTP and in-world URLs (blocked by
   `server-lsl-vm-execution` (done), `server-world-determinism-contract`,
   `gridspec-lsl-http-url` (done))
-- [`server-lsl-lib-json-linkset-data`](ideas/server-lsl-lib-json-linkset-data.md)
-  — Library tranche — llJson* and the linkset data store (blocked by
-  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
-  `gridspec-lsl-json-linkset-data` (done))
 - [`server-lsl-lib-land-region-env`](ideas/server-lsl-lib-land-region-env.md) —
   Library tranche — parcel, region, estate and environment queries (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
@@ -1490,7 +1486,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1458)
+## done (1459)
 
 ### protocol
 
@@ -4519,6 +4515,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `server-lsl-value-model` (done))
 - [`server-lsl-float-expression-precision`](done/server-lsl-float-expression-precision.md)
   — Round a float expression once, where Mono stores it, not at every operator
+- [`server-lsl-lib-json-linkset-data`](done/server-lsl-lib-json-linkset-data.md)
+  — Library tranche — llJson* and the linkset data store (blocked by
+  `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),
+  `gridspec-lsl-json-linkset-data` (done))
 - [`server-lsl-lib-math-rotations`](done/server-lsl-lib-math-rotations.md) —
   Library tranche — maths, vectors and rotations (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),

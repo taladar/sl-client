@@ -17,6 +17,8 @@ use sl_types::chat::ChatVolume;
 use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
 
+mod json;
+mod linkset;
 mod math;
 mod memory;
 mod precision;
@@ -46,6 +48,10 @@ struct Recorder {
     told: Vec<(u64, CallerId, String)>,
     /// The state of the xorshift the random draws come from.
     draws: u32,
+    /// The linkset each script is in; linkset 0 when not listed.
+    linksets: std::collections::BTreeMap<CallerId, u64>,
+    /// Each linkset's data store.
+    stores: std::collections::BTreeMap<u64, LinksetData>,
 }
 
 impl Host for Recorder {
@@ -111,6 +117,15 @@ impl Host for Recorder {
         self.draws = state;
         state
     }
+
+    fn linkset(&self, caller: CallerId) -> LinksetId {
+        LinksetId(self.linksets.get(&caller).copied().unwrap_or(0))
+    }
+
+    fn linkset_data(&mut self, caller: CallerId) -> &mut LinksetData {
+        let linkset = self.linkset(caller).0;
+        self.stores.entry(linkset).or_default()
+    }
 }
 
 impl Recorder {
@@ -150,6 +165,27 @@ fn program(source: &str) -> Result<Arc<crate::bytecode::Program>, String> {
             .collect::<Vec<_>>()
             .join("\n")
     })
+}
+
+/// A compiled script, shared, as the grid `flavour` imitates compiles it.
+fn program_for(
+    source: &str,
+    flavour: EngineFlavour,
+) -> Result<Arc<crate::bytecode::Program>, String> {
+    let dialect = if flavour.is_opensim() {
+        crate::Dialect::OpenSim
+    } else {
+        crate::Dialect::SecondLife
+    };
+    crate::compile_for(source, dialect)
+        .map(Arc::new)
+        .map_err(|errors| {
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
 }
 
 /// A region with the default budgets for [`STEP`].

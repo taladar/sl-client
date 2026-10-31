@@ -101,4 +101,8 @@ another test holds to tailslide's signatures).
 
 The oracles are LSL PyOptimizer's `lslopt/lslbasefuncs.py` and its
 `unit_tests/expr.suite` expected outputs, which were measured against Second
-Life; each test names the one it quotes.
+Life — and for the JSON functions its `lslopt/lsljson.py` and
+`unit_tests/json.py`, LL's own test script; each test names the one it quotes.
+OpenSim's answers are ported from its `LSL_Api.cs` and, for JSON, the LitJson
+in OpenSim's fork of libopenmetaverse. The probes under `probes/`, replayed in
+the VM against what each grid printed, hold both.

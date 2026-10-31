@@ -21,6 +21,9 @@
 //!   calling script, as a library function sees it.
 //! - [`memory`] — a script's memory as its grid counts it: what the memory
 //!   functions answer and where the script runs out.
+//! - [`linkset_data`] — the key/value store a linkset owns, which the host
+//!   keeps and lends to the library, and the `linkset_data` event a change
+//!   raises in every script of the linkset.
 //! - [`RuntimeError`] / [`Fault`] — what stops a script. An error stops the
 //!   one script and never panics the region; the engine says it on
 //!   [`DEBUG_CHANNEL`] in the words of the grid it imitates
@@ -38,6 +41,7 @@ mod fault;
 mod flavour;
 mod host;
 mod instance;
+pub mod linkset_data;
 pub mod memory;
 mod report;
 #[cfg(test)]
@@ -58,6 +62,7 @@ pub use instance::{
     Arrival, BACKWARD_JUMP_COST, BUILTIN_CALL_COST, Coalescing, Instance, LOAD_WINDOW_SECONDS,
     MAX_CALL_DEPTH, MAX_QUEUED, OPENSIM_SCRIPT_MEMORY, Outcome, PostError, Posted, Slice,
 };
+pub use linkset_data::{Answer, LinksetAction, LinksetChange, LinksetData, LinksetId};
 #[cfg(test)]
 pub(crate) use memory::{Memory, Stack};
 pub use report::{

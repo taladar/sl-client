@@ -2,7 +2,7 @@
 id: server-lsl-lib-json-linkset-data
 title: Library tranche — llJson* and the linkset data store
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-lsl-library-surface-table,
   gridspec-lsl-json-linkset-data]
@@ -88,3 +88,64 @@ implementation:
   comma-separated; a protected pair's value hidden) and the key order
   (code points) are in the table. The store survives `llResetScript`, is
   shared by every script in the linkset and invisible to another object.
+
+## Done (2026-10-31)
+
+All 18 functions are implemented in `sl-lsl-runtime`, each answering as the
+region's flavour does; coverage is 130 implemented of 524.
+
+**JSON** (`library/json_text.rs`, dispatching per flavour).
+
+- **Second Life** (`json_text/second_life.rs`) is PyOptimizer's `lsljson.py`
+  scanner and `llJsonGetValue` walk, adjusted to aditi: a string ends at the
+  first `"` not preceded by `\` (which is why `["A\n\/\"\\"]` reads as one
+  string to the end of the text — escapes *are* decoded, only the one-letter
+  ones, any other escaped character being itself; the measured note above
+  that it "does not decode escapes" was a misreading, corrected in the book),
+  a number may not start with a needless zero, a word ends at `:` too, and
+  `llJson2List` is lenient in an array (the end of the text closes it, a value
+  without a comma replaces the one before). `llJsonSetValue`, which
+  PyOptimizer never implemented, is written from the probe's rows and LL's
+  own test script: the levels the path goes through are rewritten compact
+  around members kept as written, what is not a container where the path
+  goes on is replaced by what the path makes. LL's test script (PyOptimizer's
+  `unit_tests/json.py`) is ported whole as unit tests; its one disagreement,
+  `1.0e+1` as a number, is named (today's grid takes no `+` exponent, per
+  PyOptimizer).
+- **OpenSim** (`json_text/opensim.rs`) ports `LSL_Api.cs` and the LitJson of
+  OpenSim's libopenmetaverse fork (now cloned at
+  `~/devel/3rdparty/libopenmetaverse-opensim`), its corners checked against
+  OpenSim's own `LSL_Api` run under Mono with the shipped DLLs; the book's
+  engine chapter lists them.
+- **The dialect**: OpenSim's `JSON_APPEND` is the string `"-1"`
+  (`Dialect::constant_override`), and OpenSim compiles none of the linkset
+  data functions, constants or the `linkset_data` event.
+- **OpenSim's string search ignores the sentinels** (`Text::find_as_grid`,
+  .NET's culture-sensitive `IndexOf` for U+FDD0 … U+FDEF), so
+  `llSubStringIndex` and the parsers answer `data/json`'s `sentinel-search`
+  rows as OpenSim does.
+
+**Linkset data** (`vm/linkset_data.rs`, `library/linkset.rs`). The store is a
+plain value the host keeps per linkset (`Host::linkset`,
+`Host::linkset_data`); one password comparison explains every protected row.
+A change raises `linkset_data` in every script of the linkset once the slice
+is over, the writer's own dropped when the slice ends in a reset — on aditi
+the event is queued at the call, so the writer's queue held 63 events and its
+own link message, and a reset in the same event lost the writer's.
+
+**Proof.** `vm/tests/json.rs` replays `data/json` on all three grids. Named
+OpenSim deviations: the value model's floats (`list2json floats`), a lone or
+half surrogate a Rust string cannot hold (`lone-surrogate`, and the probe's
+own per-character print of an emoji in `list2json strings` and
+`json2list surrogates`), and `shared-list` — OpenSim adds `0` to the caller's
+own empty specifier list, a .NET reference there; lists are values in this VM,
+so that is not imitated. `vm/tests/linkset.rs` runs the probe's three scripts
+in two linksets, with the test carrying their link messages and chat (no comms
+library yet): every Leader and Stranger record matches aditi but
+`fill-events` (64 here, because no link message reaches the Leader's queue),
+and the Watcher's 25 events before the fill match; after it, what the Watcher
+sees is timing (`vary: got`). A second test holds the event's reach and the
+reset rule.
+
+**Not done**: the store travelling with a take and a re-rez is the host's
+(the fake grid's wiring, [[server-fake-grid-script-engine-wiring]]).

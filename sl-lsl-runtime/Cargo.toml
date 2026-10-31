@@ -23,6 +23,7 @@ ignored = ["md-5"]
 [dependencies]
 hmac = { workspace = true }
 md-5 = { workspace = true }
+regex = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
 sl-lsl = { workspace = true }

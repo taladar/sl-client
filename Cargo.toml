@@ -129,6 +129,7 @@ parking_lot = { version = "0.12.5" }
 pollster = { version = "0.4.0" }
 pretty_assertions = { version = "1.4.1" }
 reqwest = { version = "0.12.15", default-features = false }
+regex = { version = "1.13.1" }
 roxmltree = { version = "0.20.0" }
 rustyline = { version = "17.0.2" }
 serde = { version = "1.0.229" }

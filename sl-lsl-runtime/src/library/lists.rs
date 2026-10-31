@@ -1383,7 +1383,7 @@ fn parse_string(
             .iter()
             .filter_map(|(delimiter, kept)| {
                 source
-                    .find(delimiter.units(), from)
+                    .find_as_grid(delimiter.units(), from)
                     .map(|at| (at, delimiter, *kept))
             })
             .min_by_key(|(at, ..)| *at);

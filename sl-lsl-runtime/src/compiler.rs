@@ -37,6 +37,7 @@ use core::fmt;
 use core::ops::Range;
 
 use crate::bytecode::{Position, Program, Source};
+use crate::library::ConstantValue;
 
 /// What a compile error says, as one of the messages Linden's compiler uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -150,9 +151,11 @@ pub enum Dialect {
     SecondLife,
     /// OpenSim's YEngine, its default engine and the one a fake grid that
     /// imitates OpenSim runs. It compiles a function that can end without a
-    /// `return` (the value is the type's default), and it has no
+    /// `return` (the value is the type's default); it has no
     /// `llClearExperiencePermissions` or `llGetExperienceList`, which Second
-    /// Life still compiles though it serves no document listing them.
+    /// Life still compiles though it serves no document listing them, and no
+    /// linkset data store — none of its functions, constants or its event;
+    /// and its `JSON_APPEND` is the string `"-1"`.
     OpenSim,
 }
 
@@ -172,7 +175,40 @@ impl Dialect {
     pub fn has_builtin(self, name: &str) -> bool {
         match self {
             Self::SecondLife => true,
-            Self::OpenSim => !OPENSIM_UNDEFINED.contains(&name),
+            Self::OpenSim => !OPENSIM_UNDEFINED.contains(&name) && !is_linkset_data(name),
+        }
+    }
+
+    /// Whether this compiler knows the library constant `name`: OpenSim has
+    /// none of the `LINKSETDATA_*` ones.
+    #[must_use]
+    pub fn has_constant(self, name: &str) -> bool {
+        match self {
+            Self::SecondLife => true,
+            Self::OpenSim => !name.starts_with("LINKSETDATA_"),
+        }
+    }
+
+    /// Whether this compiler knows the event `name`: OpenSim has no
+    /// `linkset_data`.
+    #[must_use]
+    pub fn has_event(self, name: &str) -> bool {
+        match self {
+            Self::SecondLife => true,
+            Self::OpenSim => name != "linkset_data",
+        }
+    }
+
+    /// The value this compiler gives the library constant `name` where it is
+    /// not the table's: OpenSim's `JSON_APPEND` is the string `"-1"`
+    /// (`ScriptBaseClass.JSON_APPEND`), Second Life's the integer -1, so a
+    /// specifier list holding it reads as a key there (`data/json`'s
+    /// `b-append` and `append` records).
+    #[must_use]
+    pub fn constant_override(self, name: &str) -> Option<ConstantValue> {
+        match (self, name) {
+            (Self::OpenSim, "JSON_APPEND") => Some(ConstantValue::String("-1")),
+            _ => None,
         }
     }
 }
@@ -180,6 +216,15 @@ impl Dialect {
 /// The library functions OpenSim's engines refuse as undefined, both measured
 /// on the local OpenSim 0.9.2.1 under YEngine and XEngine (2026-10-30).
 const OPENSIM_UNDEFINED: &[&str] = &["llClearExperiencePermissions", "llGetExperienceList"];
+
+/// Whether `name` is one of the linkset data functions, which OpenSim's
+/// engines refuse: `data/linkset-data` compiles under neither (YEngine:
+/// `undefined constant/function/variable llLinksetDataAvailable()`; XEngine:
+/// a syntax error at the `linkset_data` event, 2026-10-26), and OpenSim's
+/// sources name none of the functions, the constants or the event.
+fn is_linkset_data(name: &str) -> bool {
+    name.starts_with("llLinksetData")
+}
 
 /// Compile LSL `source` as Second Life does.
 ///

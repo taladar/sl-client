@@ -153,7 +153,7 @@ pub fn ll_sub_string_index<C: PureCtx>(
     let text = Text::new(flavour, &text);
     let pattern = Text::new(flavour, &pattern);
     Ok(text
-        .find(pattern.units(), 0)
+        .find_as_grid(pattern.units(), 0)
         .map_or(-1, |at| i32::try_from(at).unwrap_or(i32::MAX)))
 }
 

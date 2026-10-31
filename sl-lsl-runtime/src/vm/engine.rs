@@ -393,6 +393,49 @@ impl Engine {
         }
     }
 
+    /// Raise `linkset_data` for each change `slice` of the instance `id`
+    /// made to its linkset's store, in order, in every script of the linkset
+    /// — `instance` itself too, unless the slice ended in a reset, which
+    /// emptied its queue: on Second Life the event is queued at the call, so
+    /// a reset after it in the same event drops it (`data/linkset-data`'s
+    /// `after-script-reset`).
+    fn raise_linkset_data(
+        &mut self,
+        id: CallerId,
+        instance: &mut Instance,
+        slice: &Slice,
+        host: &dyn Host,
+    ) {
+        if slice.linkset.is_empty() {
+            return;
+        }
+        let linkset = host.linkset(id);
+        let others: Vec<CallerId> = self
+            .instances
+            .keys()
+            .copied()
+            .filter(|other| host.linkset(*other) == linkset)
+            .collect();
+        let arrival = self.arrival();
+        let event = lifecycle("linkset_data");
+        let own = !matches!(slice.outcome, Outcome::Reset);
+        for change in &slice.linkset {
+            let args = vec![
+                Value::Integer(change.action.code()),
+                Value::String(change.name.clone()),
+                Value::String(change.value.clone()),
+            ];
+            if own {
+                let _posted = instance.post(arrival, event, args.clone());
+            }
+            for other in &others {
+                if let Some(peer) = self.instances.get_mut(other) {
+                    let _posted = peer.post(arrival, event, args.clone());
+                }
+            }
+        }
+    }
+
     /// Advance one tick and run the region's scripts in it.
     pub fn tick(&mut self, host: &mut dyn Host) -> TickReport {
         self.now = self.now.after(1);
@@ -454,6 +497,7 @@ impl Engine {
                     Peers::of(&self.instances, self.config.flavour),
                 );
                 self.report(id, &slice, host);
+                self.raise_linkset_data(id, &mut instance, &slice, host);
                 instance.charge(slice.used);
                 instance.overdraw(slice.used.saturating_sub(script_left));
                 script_left = script_left.saturating_sub(slice.used);
@@ -488,7 +532,8 @@ impl Engine {
     }
 }
 
-/// One of the events the engine raises itself, from the library table.
+/// One of the events the engine raises itself (a timer, a change, a rez, a
+/// change of the linkset's data store), from the library table.
 fn lifecycle(name: &'static str) -> &'static Event {
     /// A stand-in that can never match a handler, should the table ever lose
     /// the event — the build's own table test catches that first.

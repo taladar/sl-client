@@ -45,7 +45,7 @@ pub(super) fn replay(
 ) -> Result<(Recorder, Vec<String>), String> {
     let mut engine = engine_as(flavour);
     let mut host = Recorder::default();
-    let _none = engine.add(A, program(source)?);
+    let _none = engine.add(A, program_for(source, flavour)?);
     for _ in 0..ticks {
         let _reports = run(&mut engine, &mut host, 1);
         if host.texts(A).iter().any(|line| line.contains(" rec=end")) {

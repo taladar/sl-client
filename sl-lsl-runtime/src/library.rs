@@ -28,6 +28,8 @@ pub mod dispatch;
 mod dotnet;
 pub mod encoding;
 mod generated;
+pub mod json_text;
+pub mod linkset;
 pub mod lists;
 pub mod math;
 mod range;
@@ -151,11 +153,18 @@ mod tests {
 
     use super::*;
     use crate::value::{Element, Value};
-    use crate::vm::{CallerId, Host, Memory, Peers, ScriptData, Speech, Stack, Tick, Whereabouts};
+    use crate::vm::{
+        CallerId, Host, LinksetData, LinksetId, Memory, Peers, ScriptData, Speech, Stack, Tick,
+        Whereabouts,
+    };
 
     /// A host for calls that never reach it: the dispatch reports stubs
     /// through `Called::stubbed`, and only the VM tells the host.
-    struct Unreached;
+    #[derive(Default)]
+    struct Unreached {
+        /// The one linkset's store, never written by these tests.
+        store: LinksetData,
+    }
 
     impl Host for Unreached {
         fn print(&mut self, _caller: CallerId, _text: &str) {}
@@ -186,6 +195,14 @@ mod tests {
 
         fn random_bits(&mut self, _caller: CallerId) -> u32 {
             0
+        }
+
+        fn linkset(&self, _caller: CallerId) -> LinksetId {
+            LinksetId(0)
+        }
+
+        fn linkset_data(&mut self, _caller: CallerId) -> &mut LinksetData {
+            &mut self.store
         }
     }
 
@@ -403,7 +420,7 @@ mod tests {
 
     #[test]
     fn calls_are_checked_against_the_table() {
-        let mut host = Unreached;
+        let mut host = Unreached::default();
         let mut data = ScriptData::default();
         let mut memory = Memory::bare();
         let mut ctx = ScriptCtx::new(
@@ -471,7 +488,7 @@ mod tests {
 
     #[test]
     fn a_stub_checks_its_arguments_and_returns_the_default() {
-        let mut host = Unreached;
+        let mut host = Unreached::default();
         let mut data = ScriptData::default();
         let mut memory = Memory::bare();
         let mut ctx = ScriptCtx::new(

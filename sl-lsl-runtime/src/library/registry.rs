@@ -2,7 +2,9 @@
 //! deliberate stubs. Add a function here when it is written; the
 //! registration will not compile unless its signature is the table's.
 
-use crate::library::{control, detection, encoding, lists, math, rotations, strings, usage};
+use crate::library::{
+    control, detection, encoding, json_text, linkset, lists, math, rotations, strings, usage,
+};
 
 crate::registry! {
     implemented {
@@ -118,6 +120,24 @@ crate::registry! {
         LlSetMemoryLimit => usage::ll_set_memory_limit,
         LlScriptProfiler => usage::ll_script_profiler,
         LlGetSPMaxMemory => usage::ll_get_sp_max_memory,
+        LlList2Json => json_text::ll_list2_json,
+        LlJson2List => json_text::ll_json2_list,
+        LlJsonGetValue => json_text::ll_json_get_value,
+        LlJsonValueType => json_text::ll_json_value_type,
+        LlJsonSetValue => json_text::ll_json_set_value,
+        LlLinksetDataAvailable => linkset::ll_linkset_data_available,
+        LlLinksetDataCountKeys => linkset::ll_linkset_data_count_keys,
+        LlLinksetDataRead => linkset::ll_linkset_data_read,
+        LlLinksetDataReadProtected => linkset::ll_linkset_data_read_protected,
+        LlLinksetDataWrite => linkset::ll_linkset_data_write,
+        LlLinksetDataWriteProtected => linkset::ll_linkset_data_write_protected,
+        LlLinksetDataDelete => linkset::ll_linkset_data_delete,
+        LlLinksetDataDeleteProtected => linkset::ll_linkset_data_delete_protected,
+        LlLinksetDataReset => linkset::ll_linkset_data_reset,
+        LlLinksetDataListKeys => linkset::ll_linkset_data_list_keys,
+        LlLinksetDataFindKeys => linkset::ll_linkset_data_find_keys,
+        LlLinksetDataCountFound => linkset::ll_linkset_data_count_found,
+        LlLinksetDataDeleteFound => linkset::ll_linkset_data_delete_found,
     }
     stubbed {}
 }
