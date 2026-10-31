@@ -30,8 +30,7 @@
 use std::time::Instant;
 
 use sl_proto::{
-    AgentKey, AnyMessage, Object, ObjectKey, Permissions, RegionLocalObjectId, ServerEvent,
-    SimSession, prim_flags,
+    AgentKey, Object, Permissions, RegionLocalObjectId, ServerEvent, SimSession, prim_flags,
 };
 use sl_types::key::OwnerKey;
 use sl_types::lsl::{Rotation, Vector};
@@ -58,13 +57,7 @@ pub(crate) fn answer_grab(
     now: Instant,
 ) -> Option<Vec<RegionChange>> {
     let (object, pull) = match event {
-        ServerEvent::ClientMessage(message) => match message.as_ref() {
-            AnyMessage::ObjectGrabUpdate(update) => (
-                ObjectKey::from(update.object_data.object_id),
-                Pull::To(&update.object_data.grab_position),
-            ),
-            _ => return None,
-        },
+        ServerEvent::ObjectGrabMoved(update) => (update.object_id, Pull::To(&update.grab_position)),
         ServerEvent::SpinObjectUpdate {
             object_id,
             rotation,

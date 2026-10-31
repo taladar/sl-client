@@ -74,7 +74,8 @@ What is missing is the middle:
 - `ObjectGrab` / `ObjectGrabUpdate` / `ObjectDeGrab`, `ScriptDialogReply`
   and `MoneyTransferRequest` are not decoded by `SimSession` — they fall
   through to the raw `ServerEvent::ClientMessage`. So a touch cannot
-  reach a script.
+  reach a script. (Since 2026-10-31 all five arrive as typed
+  `ServerEvent`s: [[protocol-sim-script-messages]].)
 - A script upload is accepted and the completion answers
   `compiled: Some(true)` unconditionally, with the comment "a real grid
   would run the compiler". (Since 2026-10-30 the fake grid compiles every

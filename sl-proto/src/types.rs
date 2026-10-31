@@ -493,7 +493,9 @@ pub use directory::{
     LandSearchType, PlacesResult,
 };
 pub use display_name::{DisplayNameUpdate, SetDisplayNameReply};
-pub use economy::{EconomyData, LandImpact, MoneyBalance, MoneyTransaction, MoneyTransactionType};
+pub use economy::{
+    EconomyData, LandImpact, MoneyBalance, MoneyTransaction, MoneyTransactionType, TransactionFlags,
+};
 pub use editing::{
     AddPrimParams, ClickAction, DeRezDestination, Material, Maturity, NotecardRez, ObjectBuyItem,
     ObjectFlagSettings, ObjectTransform, PermissionField, PrimShape, ProductType, RestoreItem,

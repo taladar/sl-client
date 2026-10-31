@@ -49,12 +49,11 @@ mod test {
         AgentKey, AttachmentMode, AttachmentPoint, Camera, ChatSessionKind, ClassifiedCategory,
         ClassifiedKey, ClassifiedUpdate, ControlFlags, Event, FriendKey, GridCoordinates, GroupKey,
         InterestsUpdate, InventoryKey, LandStatExtended, LandStatItem, LandStatReportType,
-        LandStatScore, LindenAmount, LoginParams, LureId, Maturity, MoneyTransactionType,
-        MuteFlags, MuteType, ObjectExtraParams, ObjectKey, OwnerKey, ParcelObjectOwner,
-        ParcelObjectOwnersPart, PickKey, PickUpdate, PrimShapeParams, ProductType, ProfileUpdate,
-        QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionTerrainComposition,
-        RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession, TextureKey,
-        parse_event_queue_response,
+        LandStatScore, LindenAmount, LoginParams, LureId, Maturity, MuteFlags, MuteType, ObjectKey,
+        OwnerKey, ParcelObjectOwner, ParcelObjectOwnersPart, PickKey, PickUpdate, ProductType,
+        ProfileUpdate, QueryId, RegionHandle, RegionIdentity, RegionLocalObjectId,
+        RegionTerrainComposition, RezAttachment, ScopedObjectId, ServerEvent, Session, SimSession,
+        TextureKey, parse_event_queue_response,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_types::map::RegionCoordinates;
@@ -356,79 +355,6 @@ mod test {
         }
     }
 
-    /// A rezzed box the simulator can push so the client's object cache knows
-    /// `local_id` (the edit methods that consult the cache need it).
-    fn box_prim(local_id: u32, full_id: u128) -> sl_proto::Object {
-        let zero = Vector {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        };
-        sl_proto::Object {
-            region_handle: RegionHandle(0),
-            local_id: RegionLocalObjectId(local_id),
-            circuit: sl_proto::CircuitId::default(),
-            full_id: ObjectKey::from(uuid::Uuid::from_u128(full_id)),
-            parent_id: RegionLocalObjectId(0),
-            pcode: sl_proto::pcode::PRIMITIVE,
-            state: 0,
-            crc: 7,
-            material: 3,
-            click_action: 0,
-            update_flags: 0,
-            scale: Vector {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-            },
-            motion: sl_proto::ObjectMotion {
-                position: Vector {
-                    x: 128.0,
-                    y: 128.0,
-                    z: 25.0,
-                },
-                velocity: zero.clone(),
-                acceleration: zero.clone(),
-                rotation: Rotation {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                    s: 1.0,
-                },
-                angular_velocity: zero.clone(),
-                collision_plane: None,
-            },
-            owner_id: own_agent(),
-            sound: uuid::Uuid::nil(),
-            gain: 0.0,
-            sound_flags: 0,
-            sound_radius: 0.0,
-            text: String::new(),
-            text_color: [0, 0, 0, 0],
-            name_value: String::new(),
-            media_url: None,
-            texture_entry: Vec::new(),
-            texture_anim: Vec::new(),
-            texture_animation: None,
-            shape: PrimShapeParams {
-                path_curve: 16,
-                profile_curve: 1,
-                path_scale_x: 100,
-                path_scale_y: 100,
-                ..PrimShapeParams::default()
-            },
-            particle_system: Vec::new(),
-            particles: None,
-            data: Vec::new(),
-            extra_params: Vec::new(),
-            extra: ObjectExtraParams::default(),
-            properties: None,
-            joint_type: 0,
-            joint_pivot: zero.clone(),
-            joint_axis_or_anchor: zero,
-        }
-    }
-
     /// The agent id the [`success`] login fixture grants.
     fn own_agent() -> uuid::Uuid {
         uuid::Uuid::from_u128(1)
@@ -445,12 +371,6 @@ mod test {
     const RAW_FORWARDED: &[&str] = &[
         // groups
         "SetGroupContribution",
-        // object handling (the edits themselves are typed since
-        // `test-fake-grid-edit-surfaces`; what is left is the grab, which moves
-        // an object without changing what the region holds of it)
-        "ObjectGrab",
-        "ObjectDeGrab",
-        "ObjectGrabUpdate",
         // profile / picks / classifieds
         "AvatarPropertiesRequest",
         "AvatarPropertiesUpdate",
@@ -465,7 +385,6 @@ mod test {
         "ClassifiedGodDelete",
         // money
         "MoneyBalanceRequest",
-        "MoneyTransferRequest",
         // mutes
         "MuteListRequest",
         "UpdateMuteListEntry",
@@ -480,8 +399,6 @@ mod test {
 
     /// The raw-forwarded messages the matching family test sends, in order.
     const GROUP_FAMILY: &[&str] = &["SetGroupContribution"];
-    /// The raw-forwarded messages the matching family test sends, in order.
-    const OBJECT_FAMILY: &[&str] = &["ObjectGrab", "ObjectDeGrab", "ObjectGrabUpdate"];
     /// The raw-forwarded messages the matching family test sends, in order.
     const PROFILE_FAMILY: &[&str] = &[
         "AvatarPropertiesRequest",
@@ -499,7 +416,6 @@ mod test {
     /// The raw-forwarded messages the matching family test sends, in order.
     const MONEY_AND_MUTE_FAMILY: &[&str] = &[
         "MoneyBalanceRequest",
-        "MoneyTransferRequest",
         "MuteListRequest",
         "UpdateMuteListEntry",
         "RemoveMuteListEntry",
@@ -524,7 +440,6 @@ mod test {
         let mut families_unique = Vec::new();
         let families: Vec<&str> = [
             GROUP_FAMILY,
-            OBJECT_FAMILY,
             PROFILE_FAMILY,
             MONEY_AND_MUTE_FAMILY,
             AGENT_FAMILY,
@@ -561,48 +476,6 @@ mod test {
         };
         assert_eq!(contribution.data.group_id, group.uuid());
         assert_eq!(contribution.data.contribution, 512);
-        Ok(())
-    }
-
-    #[test]
-    fn object_grabs_forward_verbatim() -> Result<(), TestError> {
-        let now = Instant::now();
-        let (mut client, mut sim) = setup(now)?;
-        let circuit = client.root_circuit_id().ok_or("no circuit")?;
-        let one = ScopedObjectId::new(circuit, RegionLocalObjectId(1));
-        let object = ObjectKey::from(uuid::Uuid::from_u128(0x0B1));
-
-        // A grab names an object the client has seen; rez it first.
-        sim.send_object_update(&[box_prim(1, 0x0B1)], 0xFFFF, now)?;
-        pump(&mut client, &mut sim, now)?;
-        drain_client(&mut client);
-        drain_server(&mut sim);
-
-        let position = Vector {
-            x: 128.0,
-            y: 64.0,
-            z: 25.5,
-        };
-        client.touch_object(one, None, now)?;
-        client.grab_object_update(
-            object,
-            Vector {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            position,
-            10,
-            None,
-            now,
-        )?;
-
-        let relayed = assert_family(&mut client, &mut sim, now, OBJECT_FAMILY)?;
-        let AnyMessage::ObjectGrabUpdate(grab) = find(&relayed, "ObjectGrabUpdate")? else {
-            return Err("expected an ObjectGrabUpdate".into());
-        };
-        assert_eq!(grab.object_data.object_id, object.uuid());
-        assert_eq!(grab.object_data.time_since_last, 10);
         Ok(())
     }
 
@@ -680,13 +553,6 @@ mod test {
         let target = uuid::Uuid::from_u128(0x9001);
 
         client.request_money_balance(now)?;
-        client.send_money_transfer(
-            uuid::Uuid::from_u128(0xABCD),
-            LindenAmount(250),
-            MoneyTransactionType::PayObject,
-            "tip",
-            now,
-        )?;
         client.request_mute_list(now)?;
         client.mute(
             target,
@@ -698,12 +564,11 @@ mod test {
         client.unmute(target, "Bad Actor", now)?;
 
         let relayed = assert_family(&mut client, &mut sim, now, MONEY_AND_MUTE_FAMILY)?;
-        let AnyMessage::MoneyTransferRequest(transfer) = find(&relayed, "MoneyTransferRequest")?
-        else {
-            return Err("expected a MoneyTransferRequest".into());
+        let AnyMessage::UpdateMuteListEntry(entry) = find(&relayed, "UpdateMuteListEntry")? else {
+            return Err("expected an UpdateMuteListEntry".into());
         };
-        assert_eq!(transfer.money_data.amount, 250);
-        assert_eq!(trimmed(&transfer.money_data.description), b"tip");
+        assert_eq!(entry.mute_data.mute_id, target);
+        assert_eq!(trimmed(&entry.mute_data.mute_name), b"Bad Actor");
         Ok(())
     }
 

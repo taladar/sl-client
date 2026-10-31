@@ -2,7 +2,7 @@
 id: server-world-touch-and-grab
 title: Touch routing — a click on a prim reaches nothing
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [protocol-sim-script-messages]

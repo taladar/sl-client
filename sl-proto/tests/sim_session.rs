@@ -57,6 +57,10 @@ mod test {
         chatterbox_invitation_to_llsd,
     };
     use sl_proto::{
+        Direction, LoadUrlRequest, MoneyTransactionType, MoneyTransferOrder, ObjectGrabMoved,
+        ObjectGrabbed, ObjectReleased, ScriptTeleportRequest, SurfaceInfo, TransactionFlags,
+    };
+    use sl_proto::{
         FlatPatches, LayerEncoding, LayerPacking, TerrainLayerBatch, TerrainStream, WindFeed,
     };
     use sl_proto::{
@@ -8027,6 +8031,192 @@ mod test {
             Some(254),
             "the reply is cut to what its label field carries"
         );
+        Ok(())
+    }
+
+    /// A held button arrives typed: the press, a drag step and the release
+    /// surface as [`ServerEvent::ObjectGrabbed`], [`ServerEvent::ObjectGrabMoved`]
+    /// and [`ServerEvent::ObjectReleased`] in the order sent, each with every
+    /// surface block the client put on it (the `uv` / `st` back out of the
+    /// vectors the wire packs them in) and the drag's step time in
+    /// milliseconds; none of them reaches the catch-all.
+    #[test]
+    fn grabs_surface_typed_with_their_surfaces() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+        let one = ScopedObjectId::new(circuit, RegionLocalObjectId(1));
+        let object = ObjectKey::from(uuid::Uuid::from_u128(0x0B1));
+        let vector = |x: f32, y: f32, z: f32| Vector { x, y, z };
+        sim.send_object_update(
+            &[box_prim(1, 0x0B1, vector(128.0, 64.0, 25.0))],
+            0xFFFF,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        drain_client(&mut client);
+        drain_server(&mut sim);
+
+        let surface = SurfaceInfo {
+            uv: [0.25, 0.75],
+            st: [0.5, 0.125],
+            face_index: 3,
+            position: vector(128.5, 64.0, 25.25),
+            normal: vector(1.0, 0.0, 0.0),
+            binormal: vector(0.0, 0.0, 1.0),
+        };
+        let offset = vector(0.5, 0.0, 0.25);
+        client.grab_object(one, offset.clone(), Some(&surface), now)?;
+        client.grab_object_update(
+            object,
+            offset.clone(),
+            vector(130.0, 64.0, 25.0),
+            40,
+            Some(&surface),
+            now,
+        )?;
+        client.degrab_object(one, None, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        let held: Vec<&ServerEvent> = server_events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ServerEvent::ObjectGrabbed(_)
+                        | ServerEvent::ObjectGrabMoved(_)
+                        | ServerEvent::ObjectReleased(_)
+                        | ServerEvent::ClientMessage(_)
+                )
+            })
+            .collect();
+        assert_eq!(
+            held,
+            vec![
+                &ServerEvent::ObjectGrabbed(Box::new(ObjectGrabbed {
+                    local_id: RegionLocalObjectId(1),
+                    grab_offset: offset.clone(),
+                    surfaces: vec![surface.clone()],
+                })),
+                &ServerEvent::ObjectGrabMoved(Box::new(ObjectGrabMoved {
+                    object_id: object,
+                    grab_offset_initial: offset,
+                    grab_position: vector(130.0, 64.0, 25.0),
+                    time_since_last: Duration::from_millis(40),
+                    surfaces: vec![surface],
+                })),
+                &ServerEvent::ObjectReleased(Box::new(ObjectReleased {
+                    local_id: RegionLocalObjectId(1),
+                    surfaces: Vec::new(),
+                })),
+            ]
+        );
+        Ok(())
+    }
+
+    /// A payment arrives typed as [`ServerEvent::MoneyTransferRequested`]
+    /// with every field the client put on it, the agent as its source.
+    #[test]
+    fn money_transfer_request_surfaces_typed() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        let agent = client.agent_id().ok_or("no agent")?;
+        let dest = uuid::Uuid::from_u128(0xABCD);
+
+        client.send_money_transfer(
+            dest,
+            LindenAmount(250),
+            MoneyTransactionType::PayObject,
+            "tip",
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        let order = server_events
+            .iter()
+            .find_map(|event| match event {
+                ServerEvent::MoneyTransferRequested(order) => Some(order.as_ref()),
+                _ => None,
+            })
+            .ok_or("expected a MoneyTransferRequested")?;
+        assert_eq!(
+            order,
+            &MoneyTransferOrder {
+                source_id: agent.uuid(),
+                dest_id: dest,
+                flags: TransactionFlags::NONE,
+                amount: 250,
+                aggregate_perm_next_owner: 0,
+                aggregate_perm_inventory: 0,
+                kind: MoneyTransactionType::PayObject,
+                description: "tip".to_owned(),
+            }
+        );
+        assert!(
+            !server_events
+                .iter()
+                .any(|event| matches!(event, ServerEvent::ClientMessage(_))),
+            "a payment no longer reaches the catch-all: {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// `llLoadURL` and `llMapDestination` round-trip: the simulator's
+    /// `send_load_url` and `send_script_teleport_request` surface on the
+    /// client as the requests they were built from — a group owner kept as a
+    /// group, a request naming no region kept as naming none.
+    #[test]
+    fn load_url_and_script_teleport_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        let object = ObjectKey::from(uuid::Uuid::from_u128(0x10AD));
+        for owner in [
+            OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0x0E1))),
+            OwnerKey::Group(GroupKey::from(uuid::Uuid::from_u128(0x6E1))),
+        ] {
+            let request = LoadUrlRequest {
+                object_name: "Kiosk".to_owned(),
+                object_id: object,
+                owner,
+                message: "Visit the shop".to_owned(),
+                url: url::Url::parse("https://example.com/shop?item=1")?,
+            };
+            sim.send_load_url(&request, now)?;
+            pump(&mut client, &mut sim, now)?;
+            let received = drain_client(&mut client)
+                .into_iter()
+                .find_map(|event| match event {
+                    Event::LoadUrl(load) => Some(*load),
+                    _ => None,
+                })
+                .ok_or("expected a LoadUrl client event")?;
+            assert_eq!(received, request);
+        }
+
+        for region_name in [region("Default Region"), None] {
+            let request = ScriptTeleportRequest {
+                object_name: "Signpost".to_owned(),
+                region_name,
+                position: RegionCoordinates::new(128.0, 64.5, 22.0),
+                look_at: Direction::new(0.0, 1.0, 0.0),
+                flags: 0,
+            };
+            sim.send_script_teleport_request(&request, now)?;
+            pump(&mut client, &mut sim, now)?;
+            let received = drain_client(&mut client)
+                .into_iter()
+                .find_map(|event| match event {
+                    Event::ScriptTeleport(teleport) => Some(*teleport),
+                    _ => None,
+                })
+                .ok_or("expected a ScriptTeleport client event")?;
+            assert_eq!(received, request);
+        }
         Ok(())
     }
 

@@ -25,7 +25,7 @@ mod test {
     use sl_e2e::{BodyError, Need, Stage, StageBuilder};
     use sl_fake_grid::fixtures::scenarios;
     use sl_fake_grid::{ImitatedGrid, RegionConfig};
-    use sl_proto::{AgentKey, AnyMessage, ObjectKey, RegionLocalObjectId, ServerEvent, prim_flags};
+    use sl_proto::{AgentKey, ObjectKey, RegionLocalObjectId, ServerEvent, prim_flags};
     use sl_viewer_driver::Viewer;
 
     /// A failed stage, or a test that could not set one up.
@@ -316,10 +316,8 @@ mod test {
                 let grabbed = tokio::time::timeout(WAIT, async {
                     loop {
                         match heard.recv().await {
-                            Ok(ServerEvent::ClientMessage(message)) => {
-                                if let AnyMessage::ObjectGrab(grab) = *message
-                                    && grab.object_data.local_id == TOUCH_BOX_LOCAL_ID
-                                {
+                            Ok(ServerEvent::ObjectGrabbed(grab)) => {
+                                if grab.local_id == RegionLocalObjectId(TOUCH_BOX_LOCAL_ID) {
                                     return Ok(());
                                 }
                             }
@@ -370,27 +368,25 @@ mod test {
                         let mut said = Vec::new();
                         loop {
                             match heard.recv().await {
-                                Ok(ServerEvent::ClientMessage(message)) => match *message {
-                                    AnyMessage::ObjectGrab(grab)
-                                        if grab.object_data.local_id == TOUCH_BOX_LOCAL_ID =>
-                                    {
-                                        let at = grab
-                                            .surface_info
-                                            .first()
-                                            .map(|surface| surface.position.clone());
-                                        said.push(("grab", at));
-                                    }
-                                    AnyMessage::ObjectGrabUpdate(_update) => {
-                                        said.push(("update", None));
-                                    }
-                                    AnyMessage::ObjectDeGrab(degrab)
-                                        if degrab.object_data.local_id == TOUCH_BOX_LOCAL_ID =>
-                                    {
-                                        said.push(("degrab", None));
-                                        return Ok(said);
-                                    }
-                                    _other => {}
-                                },
+                                Ok(ServerEvent::ObjectGrabbed(grab))
+                                    if grab.local_id == RegionLocalObjectId(TOUCH_BOX_LOCAL_ID) =>
+                                {
+                                    let at = grab
+                                        .surfaces
+                                        .first()
+                                        .map(|surface| surface.position.clone());
+                                    said.push(("grab", at));
+                                }
+                                Ok(ServerEvent::ObjectGrabMoved(_update)) => {
+                                    said.push(("update", None));
+                                }
+                                Ok(ServerEvent::ObjectReleased(release))
+                                    if release.local_id
+                                        == RegionLocalObjectId(TOUCH_BOX_LOCAL_ID) =>
+                                {
+                                    said.push(("degrab", None));
+                                    return Ok(said);
+                                }
                                 Ok(_other) => {}
                                 Err(error) => return Err(error),
                             }

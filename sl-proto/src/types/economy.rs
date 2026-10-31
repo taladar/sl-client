@@ -95,6 +95,38 @@ impl MoneyTransactionType {
     }
 }
 
+/// The `Flags` byte of a `MoneyTransferRequest` (`lltransactionflags.h`): which
+/// of the transfer's parties are groups rather than agents, and whether it is a
+/// group's simultaneous land contribution. The reference viewer sets
+/// [`DEST_GROUP`](Self::DEST_GROUP) when it pays a group; a bit this type does
+/// not name is kept verbatim.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TransactionFlags(pub u8);
+
+impl TransactionFlags {
+    /// No flag set: an agent pays an agent or an object.
+    pub const NONE: Self = Self(0);
+    /// The source of the funds is a group (`TRANSACTION_FLAG_SOURCE_GROUP`).
+    pub const SOURCE_GROUP: Self = Self(1);
+    /// The destination of the funds is a group (`TRANSACTION_FLAG_DEST_GROUP`).
+    pub const DEST_GROUP: Self = Self(2);
+    /// The owner of the thing paid for is a group
+    /// (`TRANSACTION_FLAG_OWNER_GROUP`).
+    pub const OWNER_GROUP: Self = Self(4);
+    /// A group's simultaneous land contribution
+    /// (`TRANSACTION_FLAG_SIMULTANEOUS_CONTRIBUTION`).
+    pub const SIMULTANEOUS_CONTRIBUTION: Self = Self(8);
+    /// The removal of a simultaneous land contribution
+    /// (`TRANSACTION_FLAG_SIMULTANEOUS_CONTRIBUTION_REMOVAL`).
+    pub const SIMULTANEOUS_CONTRIBUTION_REMOVAL: Self = Self(16);
+
+    /// Whether every bit of `other` is set here.
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
+
 /// A Land Impact amount: the resource cost a single object contributes to a
 /// region or parcel's object budget, and the unit that budget is denominated in.
 ///

@@ -219,21 +219,22 @@ use crate::types::{
     GroupRoleUpdateType, GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder,
     InventoryItem, InventoryItemMove, InventoryType, Kick, LandBrushAction, LandBrushRadius,
     LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType, LayerEncoding,
-    LayerPacking, MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-    Material, MeanCollision, MovementMode, NavMeshStatus, NewInventoryItem, NewInventoryLink,
-    NotecardRez, Object, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-    ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ObjectTransform,
-    OpenRegionInfo, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory,
-    ParcelDetails, ParcelInfo, ParcelObjectOwner, ParcelReturnType, ParcelUpdate, PermissionField,
-    PlacesResult, PlayingAnimation, Postcard, PrimShape, PrimShapeParams, ProposalVoteId,
-    RegionHandshakeReplyFlags, RegionIdentity, RegionLimits, RegionStats, Reliability,
-    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptDialog, ScriptPermissionRequest, ScriptPermissions, ServerError,
-    SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, SoundFlags, SoundPreload,
-    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType,
+    LayerPacking, LoadUrlRequest, MapBlockBatch, MapItem, MapItemType, MapLayer, MapRegionInfo,
+    MapRequestFlags, Material, MeanCollision, MoneyTransactionType, MovementMode, NavMeshStatus,
+    NewInventoryItem, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
+    ObjectFlagSettings, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily,
+    ObjectTransform, OpenRegionInfo, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
+    ParcelCategory, ParcelDetails, ParcelInfo, ParcelObjectOwner, ParcelReturnType, ParcelUpdate,
+    PermissionField, PlacesResult, PlayingAnimation, Postcard, PrimShape, PrimShapeParams,
+    ProposalVoteId, RegionHandshakeReplyFlags, RegionIdentity, RegionLimits, RegionStats,
+    Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptDialog, ScriptPermissionRequest,
+    ScriptPermissions, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimWideDeleteFlags,
+    SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryItem,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType,
+    TerrainPatch, TextureEntry, Throttle, TransactionFlags, TransferStatus, Transmit,
+    UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
+    WearableType,
 };
 use crate::types::{Event, EventId, InventoryListing};
 use sl_wire::AbuseReport;
@@ -275,6 +276,10 @@ use sl_wire::messages::{
     LayerDataLayerIDBlock, ObjectUpdate, ObjectUpdateCompressed,
     ObjectUpdateCompressedObjectDataBlock, ObjectUpdateCompressedRegionDataBlock,
     ObjectUpdateRegionDataBlock, ParcelOverlay, ParcelOverlayParcelDataBlock,
+};
+use sl_wire::messages::{
+    LoadURL, LoadURLDataBlock, ScriptTeleportRequest as ScriptTeleportRequestMessage,
+    ScriptTeleportRequestDataBlock, ScriptTeleportRequestOptionsBlock,
 };
 use sl_wire::messages::{
     TransferInfo, TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
@@ -389,6 +394,98 @@ pub struct ScriptDialogAnswer {
     pub button_index: i32,
     /// The button's label, or the text typed into a text box.
     pub button_label: String,
+}
+
+/// The press of a held button on a prim (`ObjectGrab`), as the simulator has
+/// it: what [`ServerEvent::ObjectGrabbed`] carries. A touch starts with it, and
+/// so does a drag.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ObjectGrabbed {
+    /// The prim pressed on (a child of a link set names itself, not its root).
+    pub local_id: RegionLocalObjectId,
+    /// The grab's offset from the prim's centre, in region axes.
+    pub grab_offset: Vector,
+    /// Where on the prim the press landed — one block per pick, in the order
+    /// sent. The reference viewer sends one, or none when it has no pick;
+    /// OpenSim hands a script the first (`llDetectedTouch*`).
+    pub surfaces: Vec<SurfaceInfo>,
+}
+
+/// One step of a drag (`ObjectGrabUpdate`), as the simulator has it: what
+/// [`ServerEvent::ObjectGrabMoved`] carries.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ObjectGrabMoved {
+    /// The prim held — by its full id, unlike the press and release.
+    pub object_id: ObjectKey,
+    /// The grab's offset from the prim's centre when the press began.
+    pub grab_offset_initial: Vector,
+    /// Where the cursor now puts the grab, in region-local metres.
+    pub grab_position: Vector,
+    /// The time since the previous step (the reference viewer's milliseconds).
+    pub time_since_last: Duration,
+    /// Where on the prim the drag now is — see [`ObjectGrabbed::surfaces`].
+    pub surfaces: Vec<SurfaceInfo>,
+}
+
+/// The release of a held button (`ObjectDeGrab`), as the simulator has it:
+/// what [`ServerEvent::ObjectReleased`] carries.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ObjectReleased {
+    /// The prim released.
+    pub local_id: RegionLocalObjectId,
+    /// Where on the prim the release landed — see [`ObjectGrabbed::surfaces`].
+    pub surfaces: Vec<SurfaceInfo>,
+}
+
+/// A client's ask to move L$ (`MoneyTransferRequest`) — paying an agent, a
+/// group or an object — as the simulator has it: what
+/// [`ServerEvent::MoneyTransferRequested`] carries. Nothing is checked beyond
+/// the session: whether the source is the agent itself (OpenSim drops the
+/// request when it is not), whether the amount is positive and whether it is
+/// covered is the money module's to decide.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MoneyTransferOrder {
+    /// Whose L$ move — the agent, or a group when
+    /// [`TransactionFlags::SOURCE_GROUP`] is set.
+    pub source_id: Uuid,
+    /// Where they go — an agent, an object, or a group when
+    /// [`TransactionFlags::DEST_GROUP`] is set.
+    pub dest_id: Uuid,
+    /// Which parties are groups.
+    pub flags: TransactionFlags,
+    /// The amount as the client said it: the wire's signed 32 bits, so a
+    /// negative or zero ask reaches the money module to be refused.
+    pub amount: i32,
+    /// The next-owner permissions of the thing bought, aggregated
+    /// (`AggregatePermNextOwner`); zero for a plain payment.
+    pub aggregate_perm_next_owner: u8,
+    /// The permissions of the contents of the thing bought, aggregated
+    /// (`AggregatePermInventory`); zero for a plain payment.
+    pub aggregate_perm_inventory: u8,
+    /// The kind of transfer (`TransactionType`).
+    pub kind: MoneyTransactionType,
+    /// The annotation — an item's name for a purchase.
+    pub description: String,
+}
+
+/// Decodes the `SurfaceInfo` blocks of a grab message: the three grab messages
+/// carry field-identical blocks of three different generated types. The `uv`
+/// and `st` coordinates are the `x` and `y` of the vector the wire packs them
+/// in.
+macro_rules! surfaces_from_wire {
+    ($blocks:expr) => {
+        $blocks
+            .iter()
+            .map(|block| SurfaceInfo {
+                uv: [block.uv_coord.x, block.uv_coord.y],
+                st: [block.st_coord.x, block.st_coord.y],
+                face_index: block.face_index,
+                position: block.position.clone(),
+                normal: block.normal.clone(),
+                binormal: block.binormal.clone(),
+            })
+            .collect()
+    };
 }
 
 /// How long a `TransferRequest` waits for the driver to serve or refuse it
@@ -1509,6 +1606,16 @@ pub enum ServerEvent {
         /// The object queried.
         object_id: ObjectKey,
     },
+    /// The client pressed a button on a prim (`ObjectGrab`): a touch, or the
+    /// start of a drag.
+    ObjectGrabbed(Box<ObjectGrabbed>),
+    /// The client dragged a held prim a step (`ObjectGrabUpdate`).
+    ObjectGrabMoved(Box<ObjectGrabMoved>),
+    /// The client released a held prim (`ObjectDeGrab`).
+    ObjectReleased(Box<ObjectReleased>),
+    /// The client asked to move L$ (`MoneyTransferRequest`): a payment to an
+    /// agent, a group or an object.
+    MoneyTransferRequested(Box<MoneyTransferOrder>),
     /// The client began an interactive object spin (`ObjectSpinStart`).
     SpinObjectStart {
         /// The object being spun.
@@ -6281,6 +6388,82 @@ impl SimSession {
                 .map(|owner_id| ScriptDialogOwnerDataBlock { owner_id })
                 .into_iter()
                 .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `LoadURL` offering the agent a web page (`llLoadURL`): the
+    /// object, its owner, the message and the URL. Surfaces on the client as
+    /// [`Event::LoadUrl`](crate::Event::LoadUrl); nothing answers it — the
+    /// viewer opens the page or not. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode (a field past its 255 bytes).
+    pub fn send_load_url(&mut self, request: &LoadUrlRequest, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let (owner_id, owner_is_group) = match request.owner {
+            OwnerKey::Agent(agent) => (agent.uuid(), false),
+            OwnerKey::Group(group) => (group.uuid(), true),
+        };
+        let message = AnyMessage::LoadURL(LoadURL {
+            data: LoadURLDataBlock {
+                object_name: with_nul(&request.object_name),
+                object_id: request.object_id.uuid(),
+                owner_id,
+                owner_is_group,
+                message: with_nul(&request.message),
+                url: with_nul(request.url.as_str()),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ScriptTeleportRequest` opening the agent's world map at a
+    /// place (`llMapDestination`): the object's name, the region, the position
+    /// and the look-at, with the request's flags as its one options block.
+    /// Surfaces on the client as
+    /// [`Event::ScriptTeleport`](crate::Event::ScriptTeleport); nothing
+    /// answers it — the agent teleports from the map or not. A request with no
+    /// region names none (an empty name). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode (a name past its 255 bytes).
+    pub fn send_script_teleport_request(
+        &mut self,
+        request: &ScriptTeleportRequest,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let position = &request.position;
+        let look_at = &request.look_at;
+        let message = AnyMessage::ScriptTeleportRequest(ScriptTeleportRequestMessage {
+            data: ScriptTeleportRequestDataBlock {
+                object_name: with_nul(&request.object_name),
+                sim_name: with_nul(&sl_wire::region_name_to_wire(request.region_name.as_ref())),
+                sim_position: Vector {
+                    x: position.x(),
+                    y: position.y(),
+                    z: position.z(),
+                },
+                look_at: Vector {
+                    x: look_at.x(),
+                    y: look_at.y(),
+                    z: look_at.z(),
+                },
+            },
+            options: vec![ScriptTeleportRequestOptionsBlock {
+                flags: request.flags,
+            }],
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -12047,6 +12230,48 @@ impl SimSession {
                         request_flags: request.object_data.request_flags,
                         object_id: ObjectKey::from(request.object_data.object_id),
                     });
+            }
+            AnyMessage::ObjectGrab(grab) => {
+                self.events
+                    .push_back(ServerEvent::ObjectGrabbed(Box::new(ObjectGrabbed {
+                        local_id: RegionLocalObjectId(grab.object_data.local_id),
+                        grab_offset: grab.object_data.grab_offset.clone(),
+                        surfaces: surfaces_from_wire!(grab.surface_info),
+                    })));
+            }
+            AnyMessage::ObjectGrabUpdate(update) => {
+                let data = &update.object_data;
+                self.events
+                    .push_back(ServerEvent::ObjectGrabMoved(Box::new(ObjectGrabMoved {
+                        object_id: ObjectKey::from(data.object_id),
+                        grab_offset_initial: data.grab_offset_initial.clone(),
+                        grab_position: data.grab_position.clone(),
+                        time_since_last: Duration::from_millis(u64::from(data.time_since_last)),
+                        surfaces: surfaces_from_wire!(update.surface_info),
+                    })));
+            }
+            AnyMessage::ObjectDeGrab(degrab) => {
+                self.events
+                    .push_back(ServerEvent::ObjectReleased(Box::new(ObjectReleased {
+                        local_id: RegionLocalObjectId(degrab.object_data.local_id),
+                        surfaces: surfaces_from_wire!(degrab.surface_info),
+                    })));
+            }
+            AnyMessage::MoneyTransferRequest(request) => {
+                let data = &request.money_data;
+                self.events
+                    .push_back(ServerEvent::MoneyTransferRequested(Box::new(
+                        MoneyTransferOrder {
+                            source_id: data.source_id,
+                            dest_id: data.dest_id,
+                            flags: TransactionFlags(data.flags),
+                            amount: data.amount,
+                            aggregate_perm_next_owner: data.aggregate_perm_next_owner,
+                            aggregate_perm_inventory: data.aggregate_perm_inventory,
+                            kind: MoneyTransactionType::from_i32(data.transaction_type),
+                            description: trimmed_string(&data.description),
+                        },
+                    )));
             }
             AnyMessage::ObjectSpinStart(spin) => {
                 self.events.push_back(ServerEvent::SpinObjectStart {

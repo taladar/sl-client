@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 135 |
 | ready | 332 |
-| blocked | 53 |
+| blocked | 52 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1459 |
+| done | 1460 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2091** |
@@ -278,8 +278,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-sit-and-attach`, `gridspec-lsl-avatar-control` (done))
 - [`server-lsl-lib-comms`](ideas/server-lsl-lib-comms.md) — Library tranche —
   chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
-  (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`,
-  `gridspec-lsl-comms` (done))
+  (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`
+  (done), `gridspec-lsl-comms` (done))
 - [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
   — Library tranche — the detected block, sensors and raycasts (blocked by
   `server-lsl-state-and-events` (done), `server-world-ecs-store`,
@@ -298,7 +298,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-land-region-env` (done))
 - [`server-lsl-lib-money-permissions`](ideas/server-lsl-lib-money-permissions.md)
   — Library tranche — script permissions, money and payment (blocked by
-  `server-lsl-vm-execution` (done), `protocol-sim-script-messages`,
+  `server-lsl-vm-execution` (done), `protocol-sim-script-messages` (done),
   `gridspec-lsl-money-permissions` (done))
 - [`server-lsl-lib-ossl`](ideas/server-lsl-lib-ossl.md) — Scope the OSSL (os*)
   surface — how much, and why (blocked by `server-lsl-library-surface-table`
@@ -370,8 +370,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Fetching inventory items by id (FetchInventory2's request half)
 - [`protocol-sim-profile-messages`](ready/protocol-sim-profile-messages.md) —
   SimSession — decode profile requests and send profile replies
-- [`protocol-sim-script-messages`](ready/protocol-sim-script-messages.md) — The
-  simulator-side script messages SimSession neither sends nor decodes
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -1137,6 +1135,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   store for the region, in place of a Vec of objects
 - [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
   heartbeat — the fake grid has no simulation loop at all
+- [`server-world-touch-and-grab`](ready/server-world-touch-and-grab.md) — Touch
+  routing — a click on a prim reaches nothing (blocked by
+  `protocol-sim-script-messages` (done))
 
 ### gridspec
 
@@ -1149,7 +1150,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (53)
+## blocked (52)
 
 ### viewer
 
@@ -1318,9 +1319,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-world-sit-and-attach`](blocked/server-world-sit-and-attach.md) —
   Sitting and attaching as world state a script can read (blocked by
   `server-world-ecs-store`, `gridspec-attachments` (done))
-- [`server-world-touch-and-grab`](blocked/server-world-touch-and-grab.md) —
-  Touch routing — a click on a prim reaches nothing (blocked by
-  `protocol-sim-script-messages`)
 - [`server-world-update-scheduling`](blocked/server-world-update-scheduling.md)
   — Batch world changes into per-tick update bursts (blocked by
   `server-world-heartbeat`, `server-world-ecs-store`, `gridspec-circuit` (done),
@@ -1486,7 +1484,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1459)
+## done (1460)
 
 ### protocol
 
@@ -1765,6 +1763,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   server channels — grid info, map tiles, helper URIs
 - [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
   at full fidelity
+- [`protocol-sim-script-messages`](done/protocol-sim-script-messages.md) — The
+  simulator-side script messages SimSession neither sends nor decodes
 - [`protocol-sim-terrain-raw-flows`](done/protocol-sim-terrain-raw-flows.md) —
   Server-side terrain RAW download/upload — InitiateDownload + Xfer pull
 - [`protocol-sim-udp-flows`](done/protocol-sim-udp-flows.md) — Server-side state

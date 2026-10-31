@@ -175,9 +175,10 @@ pub use sim_inventory::SimInventoryTree;
 pub use sim_new_file::{NewFilePolicy, UploadPrices};
 pub use sim_session::{
     AgentPresence, AgentUpdateInfo, ArrivalPlacement, CapsUploadMetadata, CoarseRounding,
-    FlowMirrorStatus, KeptMessage, ObjectMediaState, PARCEL_OVERLAY_CHUNK_BYTES, RegionTelemetry,
-    RejectionReason, SESSION_FLOW_COVERAGE, ScriptDialogAnswer, ServerEvent, SimChatSession,
-    SimChatSessionKind, SimParcel, SimSession, SitTransform, TerrainStream, TransferRequestSource,
+    FlowMirrorStatus, KeptMessage, MoneyTransferOrder, ObjectGrabMoved, ObjectGrabbed,
+    ObjectMediaState, ObjectReleased, PARCEL_OVERLAY_CHUNK_BYTES, RegionTelemetry, RejectionReason,
+    SESSION_FLOW_COVERAGE, ScriptDialogAnswer, ServerEvent, SimChatSession, SimChatSessionKind,
+    SimParcel, SimSession, SitTransform, TerrainStream, TransferRequestSource,
     UpdatedInventoryItem, UserRightsEntry, WindFeed, coarse_location, teleport_strings,
 };
 pub use sim_voice::{
@@ -259,16 +260,16 @@ pub use types::{
     TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TeleportFlags,
     TerraformArea, TerrainLayerBatch, TerrainLayerType, TerrainPatch, TerrainPatchHeader, Texture,
     TextureAnimation, TextureEntry, TextureFace, Throttle, ThrottleBuilder, ThrottleError,
-    ThumbnailTarget, TransferStatus, Transmit, TriggeredSound, UI_SOUND_ALERT, UI_SOUND_CLICK,
-    UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN, UI_SOUND_MONEY_UP,
-    UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT, UI_SOUND_TYPING,
-    UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType, UpdateGroupInfoParams,
-    UploadClass, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
-    Wearable, WearableType, XferListing, attachment_state_from_point, avatar_texture,
-    azimuth_altitude_to_rotation, build_postcard_request, build_thumbnail_upload_request,
-    expected_upload_cost, global_to_handle, grid_to_handle, group_powers, handle_to_global,
-    handle_to_grid, hexdump, packages_from_llsd, parse_postcard_request,
-    parse_thumbnail_upload_request, particle_pattern, pcode, prim_flags,
+    ThumbnailTarget, TransactionFlags, TransferStatus, Transmit, TriggeredSound, UI_SOUND_ALERT,
+    UI_SOUND_CLICK, UI_SOUND_IM_OR_OFFER, UI_SOUND_INVALID_OP, UI_SOUND_MONEY_DOWN,
+    UI_SOUND_MONEY_UP, UI_SOUND_NEARBY_CHAT, UI_SOUND_SNAPSHOT, UI_SOUND_TELEPORT_OUT,
+    UI_SOUND_TYPING, UI_SOUND_WINDOW_CLOSE, UI_SOUND_WINDOW_OPEN, UpdatableAssetType,
+    UpdateGroupInfoParams, UploadClass, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    WaterSettings, Wearable, WearableType, XferListing, attachment_state_from_point,
+    avatar_texture, azimuth_altitude_to_rotation, build_postcard_request,
+    build_thumbnail_upload_request, expected_upload_cost, global_to_handle, grid_to_handle,
+    group_powers, handle_to_global, handle_to_grid, hexdump, packages_from_llsd,
+    parse_postcard_request, parse_thumbnail_upload_request, particle_pattern, pcode, prim_flags,
     rotation_to_azimuth_altitude, saved_item_rebinding, texture_anim_mode, uploaded_inventory_item,
 };
 pub use types::{
