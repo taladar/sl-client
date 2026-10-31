@@ -20,9 +20,10 @@ use crate::vm::memory::HOST_MEMORY_CAP;
 /// (`vm::memory`) and the grid's own garbage.
 const WANDER: i64 = 300;
 
-/// A probe script made runnable here: the calls it makes that this runtime
-/// does not have yet turned into `print`s, and its closing link message to
-/// its controller dropped.
+/// A probe script made runnable here: its `llOwnerSay` lines, and the
+/// `llSetObjectDesc` this runtime does not have yet, turned into `print`s for
+/// the test to read, and its closing link message to its controller, which
+/// has no script here, dropped.
 fn runnable(source: &str) -> String {
     source
         .lines()

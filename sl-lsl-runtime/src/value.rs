@@ -172,7 +172,7 @@ impl From<Element> for Value {
 /// Whether `text` has the shape of a UUID: 36 characters, hex digits in
 /// either case, dashes after the 8th, 12th, 16th and 20th. The validity test
 /// of a key in a condition (PyOptimizer's `key_re`).
-fn is_uuid(text: &str) -> bool {
+pub(crate) fn is_uuid(text: &str) -> bool {
     text.len() == 36
         && text.char_indices().all(|(index, character)| {
             if matches!(index, 8 | 13 | 18 | 23) {

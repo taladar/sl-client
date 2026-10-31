@@ -671,6 +671,20 @@ from the sketch above:
   it at the call, except that a reset later in the same event drops the
   writer's own. OpenSim has no store, and its dialect compiles none of the
   functions, constants or the event.
+- **Talking is checked and cut by the runtime, routed by the host.**
+  `library::comms` holds every say function, `llInstantMessage`, `llDialog`,
+  `llTextBox`, `llLoadURL`, `llMapDestination` and `llMessageLinked`, each
+  refusing and cutting as its flavour measured (`comms/*`): a line to 1024
+  bytes on Second Life and 1023 on OpenSim, a dialog's limits and words, the
+  empty list's `OK` or `Ok`. What it hands the host is finished — a `Speech`,
+  a `Dialog`, an `InstantMessage` — and the host only says who is in reach.
+  A link message is resolved from the linkset the host describes
+  (`Host::links`, every prim with its link number and scripts) by the
+  flavour's rule (OpenSim takes `LINK_ROOT` for a lone prim, Second Life does
+  not), and posted, like a store change, once the slice is over but in the
+  order of the calls — on Second Life both are queued at the call, so a link
+  message sent before a burst of writes is ahead of their events in every
+  queue, the sender's own included.
 
 **`ScriptCtx`, not `&mut Vm`.** A library function sees the calling
 instance through a narrow context — which script is calling, the current
@@ -698,7 +712,10 @@ what YEngine reports that way; `whereabouts`, which names the prim and
 script those lines name; `random_bits`, the region's seeded draw
 `llListRandomize` shuffles by and `llFrand` scales; and `linkset` and
 `linkset_data`, the linkset a script is in and that linkset's data store —
-and each library tranche adds its own methods.
+and each library tranche adds its own methods. The comms tranche added
+`say_to` (`llRegionSayTo`), `instant_message`, `dialog` (a text box too),
+`load_url`, `map_destination`, `worn_by` (the avatar an attachment is on,
+whom `llMapDestination` opens a map for outside a touch) and `links`.
 The methods the first tranches need — chat and listens, identity, position,
 hover text, and the seeded randomness and clock the determinism rule requires —
 are enough to fix its shape:
@@ -755,11 +772,25 @@ pub trait Host {
 ```
 
 `ChatVolume`, `ListenFilter`, `ListenHandle`, `ListenState` and
-`ObjectIdentity` are the runtime's own types. Listens live on the host
-side because which listener hears a message is a question of positions
-and ranges, which is the world's (`server-world-chat-routing`). Time
-*within* a script — `llGetTime`, timers, sleeps — is counted in ticks by
-the runtime and never asks the host.
+`ObjectIdentity` are the runtime's own types. Time *within* a script —
+`llGetTime`, timers, sleeps — is counted in ticks by the runtime and never
+asks the host.
+
+**As built, listens are the instance's, not the host's.** The sketch put
+them on the host because which listener hears a line is a question of
+positions and ranges, which is the world's (`server-world-chat-routing`).
+That question stays the host's, but it is only half of hearing: whether a
+script's filters admit the line, the handles, the per-script limit (65 and
+an error on Second Life, 64 and a silent `-1` on OpenSim) and the drop at a
+state change and a reset are the script's own, and the same on every host.
+So `vm::Listens` lives in the instance; the host decides who is in earshot —
+by range, the whole region, one `llRegionSayTo` target, never the speaking
+prim itself — and offers each such script the line with
+`Engine::hear(id, &Heard)`, which raises `listen` once for every active
+listen that admits it. The fake grid's own listen registry
+(`chat::Listens`) stays the consumer-side registry it is for agents and
+tests; the engine wiring offers its region's lines to scripts through
+`Engine::hear`.
 
 ## Out of scope
 

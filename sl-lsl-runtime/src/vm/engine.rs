@@ -11,7 +11,8 @@ use crate::bytecode::Program;
 use crate::library::{Event, event};
 use crate::num::ticks_for;
 use crate::value::Value;
-use crate::vm::context::{Peers, Tick};
+use crate::vm::comms::Heard;
+use crate::vm::context::{Peers, Raised, Tick};
 use crate::vm::detected::Detected;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
@@ -295,6 +296,42 @@ impl Engine {
             .transpose()
     }
 
+    /// Offer the instance `id` a line `heard` in earshot of it: it raises
+    /// `listen(channel, name, speaker, message)` once for each of its active
+    /// listens that admits the line, and nothing when none does. [`None`]
+    /// when there is no such instance; otherwise what became of each event
+    /// raised, in the order of the listens.
+    ///
+    /// Who is in earshot is the host's to decide — the ranges, a region-say's
+    /// whole region, a `llRegionSayTo`'s one target, and never the speaking
+    /// prim's own scripts.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: `listen` takes an integer, two strings and a key.
+    pub fn hear(&mut self, id: CallerId, heard: &Heard) -> Result<Option<Vec<Posted>>, PostError> {
+        let Some(admitting) = self
+            .instances
+            .get(&id)
+            .map(|instance| instance.listens().admitting(heard))
+        else {
+            return Ok(None);
+        };
+        let args = vec![
+            Value::Integer(heard.channel),
+            Value::String(heard.name.clone()),
+            Value::Key(heard.speaker.clone()),
+            Value::String(heard.message.clone()),
+        ];
+        let mut posted = Vec::with_capacity(admitting);
+        for _ in 0..admitting {
+            if let Some(outcome) = self.post(id, lifecycle("listen"), args.clone())? {
+                posted.push(outcome);
+            }
+        }
+        Ok(Some(posted))
+    }
+
     /// Raise `changed(change)` in the instance `id` — the one function every
     /// raiser calls (an inventory change, a link, a colour, a scale, an owner,
     /// a region crossing, a teleport, …), with the `CHANGED_*` bits of what
@@ -393,43 +430,59 @@ impl Engine {
         }
     }
 
-    /// Raise `linkset_data` for each change `slice` of the instance `id`
-    /// made to its linkset's store, in order, in every script of the linkset
-    /// — `instance` itself too, unless the slice ended in a reset, which
-    /// emptied its queue: on Second Life the event is queued at the call, so
-    /// a reset after it in the same event drops it (`data/linkset-data`'s
+    /// Post what `slice` of the instance `id` raised, in the order of its
+    /// calls: `linkset_data` for each change of the linkset's store in every
+    /// script of the linkset, and `link_message(sender, num, text, id)` for
+    /// each link message in every script it reaches
+    /// ([`Links::reached`](crate::vm::Links::reached)). `instance` itself
+    /// gets its share too, unless the slice ended in a reset, which emptied
+    /// its queue: on Second Life an event is queued at the call, so a reset
+    /// after it in the same event drops it (`data/linkset-data`'s
     /// `after-script-reset`).
-    fn raise_linkset_data(
-        &mut self,
-        id: CallerId,
-        instance: &mut Instance,
-        slice: &Slice,
-        host: &dyn Host,
-    ) {
-        if slice.linkset.is_empty() {
+    fn raise(&mut self, id: CallerId, instance: &mut Instance, slice: &Slice, host: &dyn Host) {
+        if slice.raised.is_empty() {
             return;
         }
-        let linkset = host.linkset(id);
-        let others: Vec<CallerId> = self
-            .instances
-            .keys()
-            .copied()
-            .filter(|other| host.linkset(*other) == linkset)
-            .collect();
-        let arrival = self.arrival();
-        let event = lifecycle("linkset_data");
         let own = !matches!(slice.outcome, Outcome::Reset);
-        for change in &slice.linkset {
-            let args = vec![
-                Value::Integer(change.action.code()),
-                Value::String(change.name.clone()),
-                Value::String(change.value.clone()),
-            ];
-            if own {
-                let _posted = instance.post(arrival, event, args.clone());
-            }
-            for other in &others {
-                if let Some(peer) = self.instances.get_mut(other) {
+        let arrival = self.arrival();
+        let flavour = self.config.flavour;
+        let linkset = host.linkset(id);
+        let links = host.links(id);
+        for raised in &slice.raised {
+            let (event, args, reached) = match raised {
+                Raised::Linkset(change) => (
+                    lifecycle("linkset_data"),
+                    vec![
+                        Value::Integer(change.action.code()),
+                        Value::String(change.name.clone()),
+                        Value::String(change.value.clone()),
+                    ],
+                    core::iter::once(id)
+                        .chain(
+                            self.instances
+                                .keys()
+                                .copied()
+                                .filter(|other| host.linkset(*other) == linkset),
+                        )
+                        .collect::<Vec<_>>(),
+                ),
+                Raised::Linked(message) => (
+                    lifecycle("link_message"),
+                    vec![
+                        Value::Integer(links.this),
+                        Value::Integer(message.num),
+                        Value::String(message.text.clone()),
+                        Value::Key(message.id.clone()),
+                    ],
+                    links.reached(message.target, flavour),
+                ),
+            };
+            for to in reached {
+                if to == id {
+                    if own {
+                        let _posted = instance.post(arrival, event, args.clone());
+                    }
+                } else if let Some(peer) = self.instances.get_mut(&to) {
                     let _posted = peer.post(arrival, event, args.clone());
                 }
             }
@@ -497,7 +550,7 @@ impl Engine {
                     Peers::of(&self.instances, self.config.flavour),
                 );
                 self.report(id, &slice, host);
-                self.raise_linkset_data(id, &mut instance, &slice, host);
+                self.raise(id, &mut instance, &slice, host);
                 instance.charge(slice.used);
                 instance.overdraw(slice.used.saturating_sub(script_left));
                 script_left = script_left.saturating_sub(slice.used);
@@ -533,7 +586,8 @@ impl Engine {
 }
 
 /// One of the events the engine raises itself (a timer, a change, a rez, a
-/// change of the linkset's data store), from the library table.
+/// change of the linkset's data store, a line heard, a link message), from
+/// the library table.
 fn lifecycle(name: &'static str) -> &'static Event {
     /// A stand-in that can never match a handler, should the table ever lose
     /// the event — the build's own table test catches that first.

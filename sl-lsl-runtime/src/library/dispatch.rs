@@ -62,6 +62,10 @@ pub enum CallError {
     /// Error`).
     #[error(transparent)]
     Value(#[from] ValueError),
+    /// `llListen` past the listens a script may hold on Second Life: the
+    /// run-time error `Too Many Listens`, which stops the script.
+    #[error("too many listens")]
+    TooManyListens,
     /// The function threw, as OpenSim's library does where Second Life's
     /// answers (book chapter `gridspec/lsl.md`, § *Indices and strides out of
     /// range*): a run-time error of the script, told in each engine's words.

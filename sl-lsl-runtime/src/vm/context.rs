@@ -5,11 +5,24 @@ use std::collections::BTreeMap;
 use core::time::Duration;
 
 use crate::num::ticks_for;
+use crate::vm::comms::{LinkMessage, Listens};
 use crate::vm::detected::Detected;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::instance::Instance;
 use crate::vm::linkset_data::{Answer, LinksetChange, LinksetData};
+
+/// An event a library call raised in the scripts of its linkset, which the
+/// engine posts once the call's slice is over — in the order of the calls,
+/// since on Second Life each is queued at its call (a link message sent
+/// before a write is ahead of the write's `linkset_data` in every queue).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Raised {
+    /// `linkset_data`, in every script of the linkset.
+    Linkset(LinksetChange),
+    /// `link_message`, in every script the message reaches.
+    Linked(LinkMessage),
+}
 use crate::vm::memory::{Memory, Stack};
 
 /// A heartbeat tick of the region: the unit every script-visible time is
@@ -50,10 +63,13 @@ pub(crate) struct ScriptData {
     /// What library calls said refusing their arguments, worded for the
     /// flavour, waiting for the engine to say them on `DEBUG_CHANNEL`.
     pub(crate) refusals: Vec<String>,
-    /// What library calls changed in the linkset's data store, in order,
-    /// waiting for the engine to raise `linkset_data` for each in every
-    /// script of the linkset.
-    pub(crate) linkset: Vec<LinksetChange>,
+    /// What library calls raised in other scripts — a change of the
+    /// linkset's data store, a link message — in the order of the calls,
+    /// waiting for the engine to post it once the slice is over.
+    pub(crate) raised: Vec<Raised>,
+    /// The script's listens (`llListen`), which a state change and a reset
+    /// drop.
+    pub(crate) listens: Listens,
 }
 
 /// A control-flow effect a library function asks the VM for. The VM acts on
@@ -292,9 +308,21 @@ impl<'host> ScriptCtx<'host> {
     ) -> T {
         let answer = change(self.host.linkset_data(self.caller));
         if let Some(made) = answer.change {
-            self.data.linkset.push(made);
+            self.data.raised.push(Raised::Linkset(made));
         }
         answer.value
+    }
+
+    /// The script's listens, to open, close or turn on and off.
+    pub const fn listens(&mut self) -> &mut Listens {
+        &mut self.data.listens
+    }
+
+    /// Send a link message; the engine delivers it to every script `message`
+    /// reaches once the slice is over — the sender too, unless the slice ends
+    /// in a reset, which empties its queue.
+    pub fn send_linked(&mut self, message: LinkMessage) {
+        self.data.raised.push(Raised::Linked(message));
     }
 
     /// Refuse the call's arguments with `text`, worded for the

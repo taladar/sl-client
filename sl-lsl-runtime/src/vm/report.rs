@@ -174,6 +174,7 @@ fn opensim_error(flavour: EngineFlavour, error: &RuntimeError) -> Option<String>
         (
             _,
             other @ (RuntimeError::InvalidProgram
+            | RuntimeError::TooManyListens
             | RuntimeError::HostMemory
             | RuntimeError::Unimplemented(_)
             | RuntimeError::Internal(_)),

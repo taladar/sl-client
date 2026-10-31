@@ -2,7 +2,7 @@
 id: server-lsl-lib-comms
 title: Library tranche — chat, listens, dialogs and link messages
 topic: server
-status: ideas
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 blocked_by: [server-lsl-vm-execution, server-world-chat-routing,
   protocol-sim-script-messages, gridspec-lsl-comms]
@@ -117,3 +117,58 @@ sleeps a script 2 s before its twelfth `llSay` / `llShout` on channel 0
 within a second. `llInstantMessage` sleeps 2 s and `llDialog` 1 s on both;
 `llTextBox` sleeps 1 s on OpenSim only (0 on Second Life). The delays
 themselves belong to [[server-lsl-forced-delays-per-flavour]].
+
+## Done (2026-10-31)
+
+All 15 functions of the tranche are implemented in `sl-lsl-runtime`, each
+checking and cutting as the region's flavour does: `llWhisper`, `llSay`,
+`llShout`, `llRegionSay`, `llRegionSayTo`, `llOwnerSay`, `llInstantMessage`,
+`llListen`, `llListenRemove`, `llListenControl`, `llDialog`, `llTextBox`,
+`llLoadURL`, `llMapDestination` and `llMessageLinked`; coverage is 145
+implemented of 524.
+
+- **Listens are the instance's** (`vm::comms::Listens`), not the host's as the
+  book's first sketch had them: handles are the lowest free number; a repeat
+  filter answers the same handle (on OpenSim, any active listen that would
+  hear the new filter's fields, as `GetListeners` decides); the limit is 65
+  and the run-time error `Too Many Listens` on Second Life, 64 and `-1` on
+  OpenSim; a state change and a reset drop them. The host decides who is in
+  earshot and calls `Engine::hear`, which raises `listen` once per admitting
+  active listen (one per listen as OpenSim does; not measured on Second Life).
+- **What the host is handed is finished**: a `Speech` cut to 1024 bytes
+  (Second Life) or 1023 (OpenSim, `StringToBytesNoTerm`), `llRegionSayTo`'s
+  target with nobody, a non-key and the caller's own prim dropped, a `Dialog`
+  with each grid's refusals in its words (OpenSim showing an empty or long
+  message, cut to 511 bytes, labels cut to 23, an integer button as text),
+  an `InstantMessage` cut to 1023 bytes, `llLoadURL`'s URL checked as
+  OpenSim's `new Uri` does (Second Life unmeasured, passed on).
+  `llMapDestination` goes to the toucher, or outside a touch to the wearer
+  (`Host::worn_by`).
+- **Link messages** are resolved from `Host::links` by the flavour's rule and
+  posted with store changes in **one ordered list** of what a slice raised
+  (`vm::Raised`): on Second Life both are queued at the call, so the Leader's
+  own "filling" message is ahead of the fill's `linkset_data` events in its
+  queue. That fixed the linkset probe's one deviation: `fill-events` is 63, as
+  on aditi.
+
+**Proof** (`vm/tests/comms.rs`): the probes run in a small test region that
+routes chat by range and puts dialogs to two answering avatars —
+`comms/listen-limit`, `comms/link-messages`, `comms/object-chat`,
+`comms/dialog` and `comms/textbox`, every `PROBE` line plus each dialog put
+and each `DEBUG_CHANNEL` line the runner noted, on all three grids, with no
+named deviation. `link-messages`' `got` lines are compared as a set: on aditi
+the Receiver ran while the Sender was still in its handler. `data/linkset-data`
+now runs on the real link messages and chat. Unit tests hold the acceptance's
+conversation of two scripts on channel 7, a state change dropping every
+listen (one opened in `state_exit` included), `LINK_THIS` reaching the
+sender unless it resets, and the say, instant-message, map and URL rules.
+`comms/instant-message` (timed with `llGetTime`) and `comms/owner-away`
+(`llGetAgentSize`, `llGetObjectDetails`, a teleport) are not replayed; their
+rows are unit tests or the host's.
+
+**Not done here**: the offline `script-dialog` / `script-permissions` cases
+are [[test-fake-grid-lsl-offline-cases]]'s, and the viewer-dialog leg of the
+acceptance is [[server-fake-grid-script-engine-wiring]]'s — both need the
+fake grid to run scripts. The forced delays stay the keyword file's
+(`llTextBox` 0 on Second Life, OpenSim's error second, its channel-0
+throttle): [[server-lsl-forced-delays-per-flavour]].

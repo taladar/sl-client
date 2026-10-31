@@ -14,13 +14,13 @@ use crate::library::{self, Event};
 use crate::num::ticks_for;
 use crate::operand::{self, Operand};
 use crate::value::{Element, Value};
-use crate::vm::context::{Peers, Request, ScriptCtx, ScriptData, Tick};
+use crate::vm::comms::Listens;
+use crate::vm::context::{Peers, Raised, Request, ScriptCtx, ScriptData, Tick};
 use crate::vm::cost;
 use crate::vm::detected::{Detected, MAX_DETECTED, is_detection_event};
 use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
-use crate::vm::linkset_data::LinksetChange;
 use crate::vm::memory::{Memory, Stack, frame_cost};
 
 /// Instructions charged for calling a library function, on top of the one the
@@ -186,10 +186,10 @@ pub struct Slice {
     /// (`Could not find script 'Nope'.`), in order, for the engine to say on
     /// `DEBUG_CHANNEL`.
     pub refusals: Vec<String>,
-    /// What library calls of the slice changed in the linkset's data store,
-    /// in order, for the engine to raise `linkset_data` for in every script
-    /// of the linkset.
-    pub linkset: Vec<LinksetChange>,
+    /// What library calls of the slice raised in other scripts — changes of
+    /// the linkset's data store, link messages — in the order of the calls,
+    /// for the engine to post.
+    pub raised: Vec<Raised>,
 }
 
 /// What became of a posted event.
@@ -1058,6 +1058,13 @@ impl Instance {
         }
     }
 
+    /// The script's listens: what lines it hears
+    /// ([`Engine::hear`](crate::vm::Engine::hear)).
+    #[must_use]
+    pub const fn listens(&self) -> &Listens {
+        &self.data.listens
+    }
+
     /// Reset the script: every global back to its type's default for the
     /// initialisers to run again, the call and operand stacks, the event queue
     /// and any requested state change dropped, any sleep cancelled, and the
@@ -1295,7 +1302,7 @@ impl Instance {
             outcome,
             used,
             refusals: core::mem::take(&mut self.data.refusals),
-            linkset: core::mem::take(&mut self.data.linkset),
+            raised: core::mem::take(&mut self.data.raised),
         }
     }
 
@@ -1355,13 +1362,13 @@ impl Instance {
                 Ok(Flow::Reset) => {
                     // A reset drops the library's state; what the call
                     // refused before it is still said, and what it changed
-                    // in the linkset's store still raises its event in the
-                    // linkset's other scripts.
+                    // in the linkset's store and the link messages it sent
+                    // still reach the linkset's other scripts.
                     let refusals = core::mem::take(&mut self.data.refusals);
-                    let linkset = core::mem::take(&mut self.data.linkset);
+                    let raised = core::mem::take(&mut self.data.raised);
                     self.reset();
                     self.data.refusals = refusals;
-                    self.data.linkset = linkset;
+                    self.data.raised = raised;
                     Outcome::Reset
                 }
                 Err(error) => self.fault(error, at, peers.flavour()),
@@ -1463,11 +1470,13 @@ impl Instance {
         is_started
     }
 
-    /// Move to `target`: the queue is discarded, the host drops what the old
-    /// state held (listens, taken controls), and `state_entry` is next.
+    /// Move to `target`: the queue and the listens are discarded, the host
+    /// drops what else the old state held (taken controls), and `state_entry`
+    /// is next.
     fn switch_to(&mut self, target: StateId, caller: CallerId, host: &mut dyn Host) -> Outcome {
         self.state = target;
         self.queue.clear();
+        self.data.listens.clear();
         host.left_state(caller);
         let _entered = self.start_transition_handler(target, "state_entry", Phase::Entry);
         Outcome::StateChanged(target)

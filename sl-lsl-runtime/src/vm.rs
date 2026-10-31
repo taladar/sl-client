@@ -21,6 +21,9 @@
 //!   calling script, as a library function sees it.
 //! - [`memory`] — a script's memory as its grid counts it: what the memory
 //!   functions answer and where the script runs out.
+//! - [`comms`] — how scripts talk: a script's listens and the lines it
+//!   hears, the dialogs, instant messages and prompts it hands the host, and
+//!   who a link message reaches.
 //! - [`linkset_data`] — the key/value store a linkset owns, which the host
 //!   keeps and lends to the library, and the `linkset_data` event a change
 //!   raises in every script of the linkset.
@@ -33,6 +36,7 @@
 //! instructions, never in elapsed time: a script's observable behaviour must
 //! not depend on the machine it runs on.
 
+pub mod comms;
 mod context;
 mod cost;
 mod detected;
@@ -47,9 +51,13 @@ mod report;
 #[cfg(test)]
 mod tests;
 
+pub use comms::{
+    Dialog, Heard, InstantMessage, LinkMessage, LinkedPrim, Links, ListenFilter, Listens, LoadUrl,
+    MapDestination, OPENSIM_LISTENS, SECOND_LIFE_LISTENS, TEXT_BOX_BUTTON, TooManyListens,
+};
 #[cfg(test)]
 pub(crate) use context::{Peers, ScriptData};
-pub use context::{ScriptCtx, Tick};
+pub use context::{Raised, ScriptCtx, Tick};
 pub use detected::{DETECTION_EVENTS, Detected, MAX_DETECTED, Touch, is_detection_event};
 pub use engine::{
     Engine, EngineConfig, REGION_SCRIPT_SHARES, SCRIPT_INSTRUCTIONS_PER_SECOND, ScriptUsage,

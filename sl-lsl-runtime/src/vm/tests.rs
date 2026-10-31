@@ -17,6 +17,7 @@ use sl_types::chat::ChatVolume;
 use crate::library::{BuiltinId, Event, event};
 use crate::value::Value;
 
+mod comms;
 mod json;
 mod linkset;
 mod math;
@@ -52,6 +53,23 @@ struct Recorder {
     linksets: std::collections::BTreeMap<CallerId, u64>,
     /// Each linkset's data store.
     stores: std::collections::BTreeMap<u64, LinksetData>,
+    /// `(tick, caller, target, channel, text)` per `llRegionSayTo`.
+    said_to: Vec<(u64, CallerId, String, i32, String)>,
+    /// `(tick, caller, message)` per instant message.
+    messages: Vec<(u64, CallerId, InstantMessage)>,
+    /// `(tick, caller, dialog)` per dialog or text box put.
+    dialogs: Vec<(u64, CallerId, Dialog)>,
+    /// `(caller, offer)` per `llLoadURL`.
+    offers: Vec<(CallerId, LoadUrl)>,
+    /// `(caller, destination)` per `llMapDestination`.
+    destinations: Vec<(CallerId, MapDestination)>,
+    /// The avatar wearing each script's object; none when not listed.
+    worn: std::collections::BTreeMap<CallerId, String>,
+    /// The prim each script is in, by number; a prim of its own (its id)
+    /// when not listed. Every prim is linked to nothing.
+    prims: std::collections::BTreeMap<CallerId, u64>,
+    /// Each prim's key, by number; one fixed key when not listed.
+    prim_keys: std::collections::BTreeMap<u64, String>,
 }
 
 impl Host for Recorder {
@@ -79,6 +97,54 @@ impl Host for Recorder {
         self.told.push((self.now, caller, text.to_owned()));
     }
 
+    fn say_to(&mut self, caller: CallerId, target: &str, channel: i32, text: &str) {
+        self.said_to.push((
+            self.now,
+            caller,
+            target.to_owned(),
+            channel,
+            text.to_owned(),
+        ));
+    }
+
+    fn instant_message(&mut self, caller: CallerId, message: &InstantMessage) {
+        self.messages.push((self.now, caller, message.clone()));
+    }
+
+    fn dialog(&mut self, caller: CallerId, dialog: &Dialog) {
+        self.dialogs.push((self.now, caller, dialog.clone()));
+    }
+
+    fn load_url(&mut self, caller: CallerId, offer: &LoadUrl) {
+        self.offers.push((caller, offer.clone()));
+    }
+
+    fn map_destination(&mut self, caller: CallerId, destination: &MapDestination) {
+        self.destinations.push((caller, destination.clone()));
+    }
+
+    fn worn_by(&self, caller: CallerId) -> Option<String> {
+        self.worn.get(&caller).cloned()
+    }
+
+    fn links(&self, caller: CallerId) -> Links {
+        let prim = self.prim_of(caller);
+        let mut scripts: Vec<CallerId> = self
+            .prims
+            .iter()
+            .filter(|(_, in_prim)| **in_prim == prim)
+            .map(|(id, _)| *id)
+            .collect();
+        if !scripts.contains(&caller) {
+            scripts.push(caller);
+        }
+        scripts.sort();
+        Links {
+            this: 0,
+            prims: vec![LinkedPrim { link: 0, scripts }],
+        }
+    }
+
     fn whereabouts(&self, caller: CallerId) -> Whereabouts {
         Whereabouts {
             object: self
@@ -86,7 +152,11 @@ impl Host for Recorder {
                 .get(&caller)
                 .cloned()
                 .unwrap_or_else(|| "object-a".to_owned()),
-            prim: "fab01e52-3517-4545-be1b-4cbf6d8ace3b".to_owned(),
+            prim: self
+                .prim_keys
+                .get(&self.prim_of(caller))
+                .cloned()
+                .unwrap_or_else(|| "fab01e52-3517-4545-be1b-4cbf6d8ace3b".to_owned()),
             name: "Faulty prim".to_owned(),
             script: self
                 .scripts
@@ -129,6 +199,11 @@ impl Host for Recorder {
 }
 
 impl Recorder {
+    /// The prim `caller` is in.
+    fn prim_of(&self, caller: CallerId) -> u64 {
+        self.prims.get(&caller).copied().unwrap_or(caller.0)
+    }
+
     /// What `caller` printed, with the tick of each.
     fn from(&self, caller: CallerId) -> Vec<(u64, &str)> {
         self.printed
@@ -726,7 +801,7 @@ fn a_call_to_a_function_nobody_wrote_stops_the_script() -> Result<(), String> {
     let mut host = Recorder::default();
     let _none = engine.add(
         A,
-        program("default { state_entry() { llSay(0, \"hi\"); } }")?,
+        program("default { state_entry() { llSetText(\"hi\", <1, 1, 1>, 1.0); } }")?,
     );
     let reports = run(&mut engine, &mut host, 1);
     assert!(matches!(
@@ -734,7 +809,7 @@ fn a_call_to_a_function_nobody_wrote_stops_the_script() -> Result<(), String> {
         Some([
             Outcome::Finished,
             Outcome::Faulted(Fault {
-                error: RuntimeError::Unimplemented(BuiltinId::LlSay),
+                error: RuntimeError::Unimplemented(BuiltinId::LlSetText),
                 ..
             })
         ])

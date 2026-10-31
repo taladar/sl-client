@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 135 |
+| ideas | 134 |
 | ready | 332 |
 | blocked | 52 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1460 |
+| done | 1461 |
 | deferred | 29 |
 | wont-do | 24 |
 | **total** | **2091** |
 
-## ideas (135)
+## ideas (134)
 
 ### protocol
 
@@ -276,10 +276,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Library tranche — avatars, animation, sitting, controls and camera (blocked by
   `server-lsl-vm-execution` (done), `server-world-agent-movement`,
   `server-world-sit-and-attach`, `gridspec-lsl-avatar-control` (done))
-- [`server-lsl-lib-comms`](ideas/server-lsl-lib-comms.md) — Library tranche —
-  chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
-  (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`
-  (done), `gridspec-lsl-comms` (done))
 - [`server-lsl-lib-detection-sensors`](ideas/server-lsl-lib-detection-sensors.md)
   — Library tranche — the detected block, sensors and raycasts (blocked by
   `server-lsl-state-and-events` (done), `server-world-ecs-store`,
@@ -1296,7 +1292,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-lsl-forced-delays-per-flavour`](blocked/server-lsl-forced-delays-per-flavour.md)
   — Charge each grid flavour's measured forced delays and throttles, not the
   keyword file's (blocked by `gridspec-lsl-throttles` (done),
-  `server-lsl-lib-comms`, `server-lsl-lib-http-url`,
+  `server-lsl-lib-comms` (done), `server-lsl-lib-http-url`,
   `server-lsl-lib-task-inventory`, `server-lsl-lib-math-rotations` (done),
   `server-lsl-lib-land-region-env`, `server-lsl-lib-prim-state`,
   `server-fake-grid-script-engine-wiring`)
@@ -1484,7 +1480,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1460)
+## done (1461)
 
 ### protocol
 
@@ -4515,6 +4511,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `server-lsl-value-model` (done))
 - [`server-lsl-float-expression-precision`](done/server-lsl-float-expression-precision.md)
   — Round a float expression once, where Mono stores it, not at every operator
+- [`server-lsl-lib-comms`](done/server-lsl-lib-comms.md) — Library tranche —
+  chat, listens, dialogs and link messages (blocked by `server-lsl-vm-execution`
+  (done), `server-world-chat-routing` (done), `protocol-sim-script-messages`
+  (done), `gridspec-lsl-comms` (done))
 - [`server-lsl-lib-json-linkset-data`](done/server-lsl-lib-json-linkset-data.md)
   — Library tranche — llJson* and the linkset data store (blocked by
   `server-lsl-vm-execution` (done), `server-lsl-library-surface-table` (done),

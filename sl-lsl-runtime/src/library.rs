@@ -22,6 +22,7 @@
 //! [`status`], and a test prints the counts and fails if a function falls
 //! back from the committed baseline (`library/coverage.txt`).
 
+pub mod comms;
 pub mod control;
 pub mod detection;
 pub mod dispatch;
@@ -154,8 +155,8 @@ mod tests {
     use super::*;
     use crate::value::{Element, Value};
     use crate::vm::{
-        CallerId, Host, LinksetData, LinksetId, Memory, Peers, ScriptData, Speech, Stack, Tick,
-        Whereabouts,
+        CallerId, Dialog, Host, InstantMessage, Links, LinksetData, LinksetId, LoadUrl,
+        MapDestination, Memory, Peers, ScriptData, Speech, Stack, Tick, Whereabouts,
     };
 
     /// A host for calls that never reach it: the dispatch reports stubs
@@ -180,6 +181,27 @@ mod tests {
         fn say(&mut self, _caller: CallerId, _speech: &Speech) {}
 
         fn owner_say(&mut self, _caller: CallerId, _text: &str) {}
+
+        fn say_to(&mut self, _caller: CallerId, _target: &str, _channel: i32, _text: &str) {}
+
+        fn instant_message(&mut self, _caller: CallerId, _message: &InstantMessage) {}
+
+        fn dialog(&mut self, _caller: CallerId, _dialog: &Dialog) {}
+
+        fn load_url(&mut self, _caller: CallerId, _offer: &LoadUrl) {}
+
+        fn map_destination(&mut self, _caller: CallerId, _destination: &MapDestination) {}
+
+        fn worn_by(&self, _caller: CallerId) -> Option<String> {
+            None
+        }
+
+        fn links(&self, _caller: CallerId) -> Links {
+            Links {
+                this: 0,
+                prims: Vec::new(),
+            }
+        }
 
         fn whereabouts(&self, _caller: CallerId) -> Whereabouts {
             Whereabouts {
@@ -468,8 +490,8 @@ mod tests {
             })
         );
         assert_eq!(
-            call(BuiltinId::LlSay, &mut ctx, vec![]),
-            Err(CallError::Missing(BuiltinId::LlSay))
+            call(BuiltinId::LlGetPos, &mut ctx, vec![]),
+            Err(CallError::Missing(BuiltinId::LlGetPos))
         );
     }
 

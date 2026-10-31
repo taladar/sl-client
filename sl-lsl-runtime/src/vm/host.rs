@@ -1,6 +1,7 @@
 //! The boundary between a running script and the world it runs in.
 
 use crate::library::BuiltinId;
+use crate::vm::comms::{Dialog, InstantMessage, Links, LoadUrl, MapDestination};
 use crate::vm::linkset_data::{LinksetData, LinksetId};
 use crate::vm::report::{Speech, Whereabouts};
 
@@ -35,9 +36,9 @@ pub trait Host {
     fn stubbed(&mut self, caller: CallerId, id: BuiltinId);
 
     /// The script left a state: whatever the host holds for it that a state
-    /// change releases goes now — its listens (`llListen`) and the controls
-    /// it took (`llTakeControls`). Called after the old state's `state_exit`
-    /// and before the new one's `state_entry`.
+    /// change releases goes now — the controls it took (`llTakeControls`).
+    /// Its listens are the instance's own and are already gone. Called after
+    /// the old state's `state_exit` and before the new one's `state_entry`.
     fn left_state(&mut self, caller: CallerId);
 
     /// The script called `name` in the same prim as `caller` — the one
@@ -48,15 +49,52 @@ pub trait Host {
     /// The script's object says `speech`. The host hands it to the region's
     /// chat fan-out: the avatars within [`Speech::to_avatars`] get it as
     /// chat from the object (on `DEBUG_CHANNEL`, as the viewer's debug
-    /// chat), and the `listen`s within [`Speech::to_scripts`] get it as an
-    /// event. The runtime says a run-time error and a library call's refusal
-    /// this way, already worded and flood-limited.
+    /// chat), and the scripts within [`Speech::to_scripts`] are offered it
+    /// ([`Engine::hear`](crate::vm::Engine::hear)) — all but the scripts of
+    /// the speaking prim itself, which never hears its own line. The runtime
+    /// says a run-time error and a library call's refusal this way, already
+    /// worded and flood-limited, and `llWhisper`, `llSay`, `llShout` and
+    /// `llRegionSay` already cut.
     fn say(&mut self, caller: CallerId, speech: &Speech);
 
+    /// `llRegionSayTo`: the script's object says `text` on `channel` to
+    /// `target` alone, wherever in the region it is. An avatar on channel 0
+    /// gets it as chat from the object; on another channel the scripts of the
+    /// objects it wears are offered it; a prim's scripts are offered it on
+    /// any channel. The runtime has dropped a target that is no key,
+    /// `NULL_KEY` and the caller's own prim, and cut the text.
+    fn say_to(&mut self, caller: CallerId, target: &str, channel: i32, text: &str);
+
+    /// `llInstantMessage`: send `message` to its avatar, wherever it is —
+    /// another region included, which `llOwnerSay` does not reach. A key that
+    /// is nobody's is nothing, without complaint.
+    fn instant_message(&mut self, caller: CallerId, message: &InstantMessage);
+
+    /// `llDialog` and `llTextBox`: put `dialog` to its avatar, when the
+    /// avatar is in the region. The reply is a line the avatar says on the
+    /// dialog's channel, which the host offers the scripts in earshot as it
+    /// does any line, under the avatar's key and name.
+    fn dialog(&mut self, caller: CallerId, dialog: &Dialog);
+
+    /// `llLoadURL`: offer the page to its avatar, when it is in the region.
+    fn load_url(&mut self, caller: CallerId, offer: &LoadUrl);
+
+    /// `llMapDestination`: open its avatar's world map at the place.
+    fn map_destination(&mut self, caller: CallerId, destination: &MapDestination);
+
+    /// The avatar wearing the object `caller` is in, or [`None`] when it is
+    /// not an attachment (`llMapDestination` outside a touch).
+    fn worn_by(&self, caller: CallerId) -> Option<String>;
+
+    /// The linkset `caller` is in, prim by prim with the scripts in each, for
+    /// `llMessageLinked`.
+    fn links(&self, caller: CallerId) -> Links;
+
     /// The script's object tells its owner `text` and nobody else, wherever
-    /// in the region the owner is — `llOwnerSay`'s reach. The runtime tells an
-    /// owner this way what YEngine reports to the owner alone (an exhausted
-    /// heap).
+    /// in the region the owner is — `llOwnerSay`'s reach; an owner in
+    /// another region gets nothing. The runtime tells an owner this way what
+    /// YEngine reports to the owner alone (an exhausted heap), and
+    /// `llOwnerSay`'s text, already cut.
     fn owner_say(&mut self, caller: CallerId, text: &str);
 
     /// Where the script `caller` is, for the words of its error lines and

@@ -132,3 +132,34 @@ no `Program`: nothing runs it. Once the engine is wired:
   they upload (`*_heard`, `*_after_running`), which is why it is live-only
   today; its tests hold the fake grid's compile answers meanwhile. Once
   scripts run, add it to `OFFLINE_CASES` for both flavours.
+
+## From server-lsl-lib-comms (2026-10-31)
+
+The comms tranche is in the runtime, behind seven new `Host` methods; the
+fake grid implements none of them yet. Wiring it:
+
+- **Chat.** `Host::say` hands a finished `Speech` (text already cut per
+  flavour); route it through `chat::Line` and the region's fan-out to avatars
+  as today, and offer it to every script in earshot with
+  `Engine::hear(id, &Heard)` — never to the speaking prim's own scripts.
+  Every line said in the region (an avatar's typed line and a dialog reply
+  too) takes that path. `chat::Listens` stays the agents' and tests'
+  registry; script listens are the instances' (`Instance::listens`).
+- **`say_to`** (`llRegionSayTo`): an avatar on channel 0 gets
+  `ChatFromSimulator` of the directed type; on another channel the scripts of
+  its attachments are offered it (OpenSim drops it for a child agent); a
+  prim's scripts are offered it on any channel. That is the directed type
+  `server-world-chat-routing` left unmodelled.
+- **`dialog`** → `SimSession::send_script_dialog` to the avatar's session,
+  object and owner names filled in; **`load_url`** and **`map_destination`**
+  → `send_load_url` / `send_script_teleport_request`;
+  **`instant_message`** → an `ImprovedInstantMessage` of `IM_FROM_TASK`, the
+  owner as sender and the prim's key as the id, delivered wherever the avatar
+  is (another region's session too).
+- **`owner_say`** reaches the owner only in the region; **`worn_by`** is the
+  attachment's wearer; **`links`** is the linkset's prims in link order with
+  each prim's scripts (a lone prim is link 0).
+- **The acceptance leg left from the comms tranche**: an `llDialog` from a
+  fixture script shown in the Bevy viewer answers back into the script's
+  `listen` (`e2e_script_dialog` already holds the card's reply on both
+  flavours; what is missing is a script on the other end).

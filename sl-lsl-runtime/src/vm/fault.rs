@@ -54,6 +54,10 @@ pub enum RuntimeError {
         /// What it threw.
         exception: Exception,
     },
+    /// Second Life's script opened one listen more than it may hold
+    /// ([`SECOND_LIFE_LISTENS`](crate::vm::SECOND_LIFE_LISTENS)).
+    #[error("Too Many Listens")]
+    TooManyListens,
     /// A library function this runtime has neither implemented nor stubbed.
     #[error("{} is not implemented by this grid", .0.descriptor().name)]
     Unimplemented(BuiltinId),
@@ -79,6 +83,7 @@ impl From<CallError> for RuntimeError {
     fn from(error: CallError) -> Self {
         match error {
             CallError::Missing(id) => Self::Unimplemented(id),
+            CallError::TooManyListens => Self::TooManyListens,
             CallError::Value(value) => value.into(),
             CallError::Exception { id, exception } => Self::Exception {
                 function: id,

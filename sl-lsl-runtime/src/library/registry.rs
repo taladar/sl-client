@@ -3,7 +3,7 @@
 //! registration will not compile unless its signature is the table's.
 
 use crate::library::{
-    control, detection, encoding, json_text, linkset, lists, math, rotations, strings, usage,
+    comms, control, detection, encoding, json_text, linkset, lists, math, rotations, strings, usage,
 };
 
 crate::registry! {
@@ -138,6 +138,21 @@ crate::registry! {
         LlLinksetDataFindKeys => linkset::ll_linkset_data_find_keys,
         LlLinksetDataCountFound => linkset::ll_linkset_data_count_found,
         LlLinksetDataDeleteFound => linkset::ll_linkset_data_delete_found,
+        LlWhisper => comms::ll_whisper,
+        LlSay => comms::ll_say,
+        LlShout => comms::ll_shout,
+        LlRegionSay => comms::ll_region_say,
+        LlRegionSayTo => comms::ll_region_say_to,
+        LlOwnerSay => comms::ll_owner_say,
+        LlInstantMessage => comms::ll_instant_message,
+        LlListen => comms::ll_listen,
+        LlListenRemove => comms::ll_listen_remove,
+        LlListenControl => comms::ll_listen_control,
+        LlDialog => comms::ll_dialog,
+        LlTextBox => comms::ll_text_box,
+        LlLoadURL => comms::ll_load_url,
+        LlMapDestination => comms::ll_map_destination,
+        LlMessageLinked => comms::ll_message_linked,
     }
     stubbed {}
 }
