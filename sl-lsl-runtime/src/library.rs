@@ -56,6 +56,7 @@ pub use table::{
     constant, event, overloads,
 };
 
+use crate::value::Element;
 use crate::vm::{EngineFlavour, ScriptCtx};
 
 /// What a library function that touches nothing of the world sees of its
@@ -77,6 +78,15 @@ pub trait PureCtx {
 
     /// Suspend the script for `seconds` once the call returns.
     fn sleep(&mut self, seconds: f32);
+
+    /// The list object handed as argument `argument` now holds `list`: the
+    /// function changed it in place, as some of OpenSim's library does
+    /// (`vm::objects`).
+    fn write_back(&mut self, argument: usize, list: Vec<Element>);
+
+    /// The list the function returns is the very object handed as argument
+    /// `argument`, as some of OpenSim's library hands it back.
+    fn return_argument(&mut self, argument: usize);
 }
 
 impl PureCtx for ScriptCtx<'_> {
@@ -91,12 +101,21 @@ impl PureCtx for ScriptCtx<'_> {
     fn sleep(&mut self, seconds: f32) {
         ScriptCtx::sleep(self, seconds);
     }
+
+    fn write_back(&mut self, argument: usize, list: Vec<Element>) {
+        ScriptCtx::write_back(self, argument, list);
+    }
+
+    fn return_argument(&mut self, argument: usize) {
+        ScriptCtx::return_argument(self, argument);
+    }
 }
 
 /// A context for calling the pure tranches outside a VM.
 #[cfg(test)]
 pub(crate) mod bare {
     use super::PureCtx;
+    use crate::value::Element;
     use crate::vm::EngineFlavour;
 
     /// A flavour and the refusals said under it.
@@ -108,6 +127,10 @@ pub(crate) mod bare {
         pub(crate) refusals: Vec<String>,
         /// The seconds the calls asked to sleep, in all.
         pub(crate) slept: f32,
+        /// The argument the last call changed in place, and to what.
+        pub(crate) written_back: Option<(usize, Vec<Element>)>,
+        /// The argument whose own list the last call returned.
+        pub(crate) returned: Option<usize>,
     }
 
     impl Bare {
@@ -117,6 +140,8 @@ pub(crate) mod bare {
                 flavour,
                 refusals: Vec::new(),
                 slept: 0.0,
+                written_back: None,
+                returned: None,
             }
         }
     }
@@ -132,6 +157,14 @@ pub(crate) mod bare {
 
         fn sleep(&mut self, seconds: f32) {
             self.slept += seconds;
+        }
+
+        fn write_back(&mut self, argument: usize, list: Vec<Element>) {
+            self.written_back = Some((argument, list));
+        }
+
+        fn return_argument(&mut self, argument: usize) {
+            self.returned = Some(argument);
         }
     }
 
@@ -160,7 +193,7 @@ mod tests {
     use sl_types::lsl::{Rotation, Vector};
 
     use super::*;
-    use crate::value::{Element, Value};
+    use crate::value::Value;
     use crate::vm::{
         Admission, CallerId, Dialog, ExperienceDetails, ExperienceError, ExperienceQuestion, Host,
         InstantMessage, KeyValueStore, Links, LinksetData, LinksetId, LoadUrl, MapDestination,

@@ -252,10 +252,10 @@ pub fn ll_transfer_linden_dollars(
 }
 
 /// OpenSim's padding of `llSetPayPrice`'s button list: one of fewer than four
-/// elements gains [`PAY_HIDE`]s up to five. OpenSim pads the very list the
-/// script passed, so the compiler pads a list variable passed to it the same
-/// way after the call (`money/pay-price`: `[1, 2]` reads `[1, 2, -1, -1, -1]`
-/// after).
+/// elements gains [`PAY_HIDE`]s up to five. OpenSim pads the very list object
+/// the script passed, so every variable holding it reads the padding after
+/// the call (`money/pay-price`: `[1, 2]` reads `[1, 2, -1, -1, -1]` after;
+/// `vm/list-identity`).
 #[must_use]
 pub(crate) fn pad_pay_buttons(mut buttons: Vec<Element>) -> Vec<Element> {
     if buttons.len() < 4 {
@@ -303,6 +303,7 @@ pub fn ll_set_pay_price(
             return Ok(());
         }
         let padded = pad_pay_buttons(buttons);
+        ctx.write_back(1, padded.clone());
         for (amount, button) in amounts.iter_mut().zip(&padded) {
             *amount = opensim_button(button).map_err(|exception| CallError::Exception {
                 id: BuiltinId::LlSetPayPrice,

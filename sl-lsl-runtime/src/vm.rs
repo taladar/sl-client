@@ -62,6 +62,7 @@ mod host;
 mod instance;
 pub mod linkset_data;
 pub mod memory;
+pub(crate) mod objects;
 pub mod ossl;
 pub mod permissions;
 pub mod persistence;

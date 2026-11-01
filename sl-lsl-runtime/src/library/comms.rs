@@ -382,6 +382,11 @@ fn opensim_dialog(
         ctx.refuse("llDialog: First parameter must be a key".to_owned());
         return None;
     }
+    if buttons.is_empty() {
+        // OpenSim adds the button to the list object it was handed
+        // (`vm/list-identity`'s `dialog`).
+        ctx.write_back(2, vec![Element::String("Ok".to_owned())]);
+    }
     if buttons.len() > MAX_BUTTONS {
         ctx.refuse("llDialog: No more than 12 buttons can be shown".to_owned());
         return None;

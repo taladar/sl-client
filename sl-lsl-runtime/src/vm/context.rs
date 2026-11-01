@@ -213,10 +213,13 @@ pub struct ScriptCtx<'host> {
     memory: &'host mut Memory,
     /// What the script's call stack holds as the call is made.
     stack: Stack,
-    /// The list a function changed its first argument to, as OpenSim's
-    /// library changes the list object it is handed (`osListSortInPlace`);
-    /// the compiler stores it back into the variable that was passed.
-    written_back: Option<Vec<Element>>,
+    /// The argument a function changed in place and what it holds now, as
+    /// OpenSim's library changes the list object it is handed
+    /// ([`crate::vm::objects`]).
+    written_back: Option<(usize, Vec<Element>)>,
+    /// The argument whose own list the function returned, as OpenSim's
+    /// library hands back the very object it was given in some cases.
+    returned: Option<usize>,
 }
 
 impl<'host> ScriptCtx<'host> {
@@ -241,6 +244,7 @@ impl<'host> ScriptCtx<'host> {
             memory,
             stack,
             written_back: None,
+            returned: None,
         }
     }
 
@@ -535,15 +539,28 @@ impl<'host> ScriptCtx<'host> {
         self.request.take()
     }
 
-    /// Hands the caller's list variable `list` in place of what was passed:
-    /// the function changed the list object itself.
-    pub(crate) fn write_back(&mut self, list: Vec<Element>) {
-        self.written_back = Some(list);
+    /// The list object handed as argument `argument` now holds `list`: the
+    /// function changed it in place, and every variable holding it reads
+    /// `list` after the call — even one that ends in an error.
+    pub(crate) fn write_back(&mut self, argument: usize, list: Vec<Element>) {
+        self.written_back = Some((argument, list));
     }
 
-    /// The list the function changed its first argument to, if it did.
-    pub(crate) const fn take_written_back(&mut self) -> Option<Vec<Element>> {
+    /// The argument the function changed in place and what it holds now, if
+    /// it changed one.
+    pub(crate) const fn take_written_back(&mut self) -> Option<(usize, Vec<Element>)> {
         self.written_back.take()
+    }
+
+    /// The list the function returns is the very object handed as argument
+    /// `argument`, not a copy of it.
+    pub(crate) const fn return_argument(&mut self, argument: usize) {
+        self.returned = Some(argument);
+    }
+
+    /// The argument whose own list the function returned, if it did.
+    pub(crate) const fn take_returned(&mut self) -> Option<usize> {
+        self.returned.take()
     }
 }
 

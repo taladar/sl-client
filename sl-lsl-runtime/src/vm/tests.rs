@@ -19,6 +19,7 @@ use crate::value::Value;
 
 mod comms;
 mod experiences;
+mod identity;
 mod json;
 mod linkset;
 mod math;

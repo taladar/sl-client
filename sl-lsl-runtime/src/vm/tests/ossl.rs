@@ -720,16 +720,6 @@ const STRINGS: [(&str, &str); 3] = [
     ),
 ];
 
-/// The sorts where OpenSim's lists being shared objects shows: a copy of
-/// the sorted list, the original of a sorted copy, and the caller's list
-/// after a function sorted its parameter all read sorted there, and unsorted
-/// here, where a list is a value (`server-lsl-opensim-shared-lists`).
-const SHARED_LISTS: [(&str, &str); 3] = [
-    ("sort", "copied-copy"),
-    ("sort", "copy-sorted-original"),
-    ("sort", "parameter-after"),
-];
-
 /// What YEngine told the owner of each script the two refused searches
 /// stopped, as the transcript has it after the item's key and but for where
 /// the prim is: the exception a line at a time, and that a reset is needed —
@@ -781,7 +771,7 @@ fn strings_search_and_sort_as_each_engine_did() -> Result<(), String> {
         super::strings::hold(
             &canonical(&region.lines(), &["answer"]),
             &canonical(&probe_lines(transcript), &["answer"]),
-            &SHARED_LISTS,
+            &[],
         );
         let told: Vec<String> = region
             .host

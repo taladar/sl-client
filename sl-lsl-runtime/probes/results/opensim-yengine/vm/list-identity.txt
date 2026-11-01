@@ -1,0 +1,76 @@
+grid: opensim-yengine
+date: 2026-11-01
+runner: sl-conformance lsl-probes (rezzed, uploaded and read by our client)
+region: Default Region
+engine: YEngine
+settings: OpenSimDefaults.ini: [YEngine] MinTimerInterval=0.1; [XEngine] MinTimerInterval unset (LSL_Api default 0.5); ScriptDelayFactor=1.0, SensorMaxRange=96, SensorMaxResults=16, UseLlCastRayV3=false (defaults) on both; [YEngine] ScriptHeapSize=1024 KiB, ScriptStackSize=2048 KiB (defaults); OpenSim.ini [Network] OutboundDisallowForUserScriptsExcept=127.0.0.1:9000 (the simulator itself), [ScriptsHttpRequestModule] and llHTTPRequest limits at their defaults
+
+# chat type=say from="Object" length=14 text="Script running"
+PROBE vm/list-identity rec=start region="Default Region" channel="OpenSim" version="OpenSim 0.9.2.1 Yeti Dev   36f6d16 (Unix/Mono)"
+PROBE vm/list-identity rec=list case=json-set name=passed value="0" types=1
+PROBE vm/list-identity rec=list case=json-set-full name=passed value="7" types=1
+PROBE vm/list-identity rec=list case=json-get name=passed value="0" types=1
+PROBE vm/list-identity rec=list case=json-get-array name=passed value="" types=
+PROBE vm/list-identity rec=list case=json-get-blank name=passed value="" types=
+PROBE vm/list-identity rec=list case=json-type name=passed value="0" types=1
+# dialog object="Object" owner="<first> <last>" channel=7 message_length=16 message="vm/list-identity" buttons="Ok" count=1
+PROBE vm/list-identity rec=list case=dialog name=passed value="Ok" types=3
+# debug-channel: from="Object" text="llDialog: First parameter must be a key"
+PROBE vm/list-identity rec=list case=dialog-bad-key name=passed value="" types=
+PROBE vm/list-identity rec=list case=pay name=passed value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=pay-full name=passed value="1, 2, 3, 4" types=1111
+PROBE vm/list-identity rec=list case=assign name=passed value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=assign name=other value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=assign-other name=original value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=assign-other name=passed value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=assign-json name=other value="0" types=1
+# dialog object="Object" owner="<first> <last>" channel=7 message_length=16 message="vm/list-identity" buttons="Ok" count=1
+PROBE vm/list-identity rec=list case=assign-dialog name=other value="Ok" types=3
+PROBE vm/list-identity rec=list case=parameter name=caller value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=returned name=original value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=returned name=result value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=cast name=original value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=chain name=other value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=to-global name=global value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=from-global name=global value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=rebound name=other value="1" types=1
+PROBE vm/list-identity rec=list case=expression name=original value="1" types=1
+PROBE vm/list-identity rec=list case=list2list-wrapped name=source value="1, 2, 3, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=list2list-wrapped name=result value="1, 2, 3, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=list2list-whole name=source value="1, 2, 3" types=111
+PROBE vm/list-identity rec=list case=insert-empty name=source value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=insert-empty-negative name=source value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=insert-empty-after name=source value="1" types=1
+PROBE vm/list-identity rec=list case=insert-front name=source value="1" types=1
+PROBE vm/list-identity rec=list case=replace-whole name=source value="1, -1, -1, -1, -1" types=11111
+PROBE vm/list-identity rec=list case=replace-front name=source value="1" types=1
+PROBE vm/list-identity rec=list case=plus-integer name=left value="1" types=1
+PROBE vm/list-identity rec=list case=plus-integer name=result value="1, 2" types=11
+PROBE vm/list-identity rec=list case=plus-float name=left value="1" types=1
+PROBE vm/list-identity rec=list case=plus-float name=result value="1, 2.500000" types=12
+PROBE vm/list-identity rec=list case=plus-string name=left value="1" types=1
+PROBE vm/list-identity rec=list case=plus-string name=result value="1, x" types=13
+PROBE vm/list-identity rec=list case=plus-key name=left value="1" types=1
+PROBE vm/list-identity rec=list case=plus-key name=result value="1, x" types=13
+PROBE vm/list-identity rec=list case=plus-vector name=left value="1" types=1
+PROBE vm/list-identity rec=list case=plus-vector name=result value="1, <1.000000, 2.000000, 3.000000>" types=15
+PROBE vm/list-identity rec=list case=plus-rotation name=left value="1" types=1
+PROBE vm/list-identity rec=list case=plus-rotation name=result value="1, <0.000000, 0.000000, 0.000000, 1.000000>" types=16
+PROBE vm/list-identity rec=list case=plus-list name=left value="1" types=1
+PROBE vm/list-identity rec=list case=plus-list name=result value="1, 2" types=11
+PROBE vm/list-identity rec=list case=prepend-integer name=right value="1" types=1
+PROBE vm/list-identity rec=list case=prepend-integer name=result value="2, 1" types=11
+PROBE vm/list-identity rec=list case=prepend-string name=right value="1" types=1
+PROBE vm/list-identity rec=list case=prepend-string name=result value="x, 1" types=31
+PROBE vm/list-identity rec=list case=plus-variable name=left value="1" types=1
+PROBE vm/list-identity rec=list case=plus-variable name=result value="1, 2" types=11
+PROBE vm/list-identity rec=list case=plus-assign name=other value="1" types=1
+PROBE vm/list-identity rec=list case=plus-parameter name=caller value="1" types=1
+PROBE vm/list-identity rec=list case=plus-global name=global value="1" types=1
+PROBE vm/list-identity rec=list case=plus-global name=result value="1, 2" types=11
+PROBE vm/list-identity rec=list case=plus-twice name=left value="1" types=1
+PROBE vm/list-identity rec=list case=plus-twice name=result value="1, 2, 3" types=111
+PROBE vm/list-identity rec=list case=plus-result-later name=left value="1" types=1
+PROBE vm/list-identity rec=end
+# chat by=other type=say from="Object" length=14 text="Script running"
+# debug-channel by=other: from="Object" text="llDialog: First parameter must be a key"

@@ -595,7 +595,10 @@ impl Engine {
                 match flavour {
                     EngineFlavour::SecondLife => {}
                     EngineFlavour::YEngine => saved.wake(),
-                    EngineFlavour::XEngine => saved.abandon(),
+                    EngineFlavour::XEngine => {
+                        saved.abandon();
+                        saved.separate_lists();
+                    }
                 }
                 (id, saved)
             })

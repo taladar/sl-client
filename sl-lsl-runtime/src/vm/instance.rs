@@ -22,6 +22,7 @@ use crate::vm::fault::{Fault, RuntimeError};
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::host::{CallerId, Host};
 use crate::vm::memory::{Memory, Stack, frame_cost};
+use crate::vm::objects::{self, ListId, ListObjects};
 use crate::vm::ossl::{self, Admitted};
 use crate::vm::permissions::Permissions;
 use crate::vm::report::Warning;
@@ -304,6 +305,9 @@ struct Frame {
     pc: u32,
     /// The body's parameters and locals.
     locals: Vec<Value>,
+    /// The list object each local holds, where lists are objects
+    /// ([`crate::vm::objects`]).
+    objects: Vec<Option<ListId>>,
     /// What each local, as stored, holds toward running out
     /// ([`Memory::local_cost`]); a parameter counts nothing until it is
     /// stored to, holding what its caller holds.
@@ -384,6 +388,9 @@ pub struct Instance {
     program: Arc<Program>,
     /// One value per [`Program::globals`] entry.
     globals: Vec<Value>,
+    /// The list objects the script holds, and which each global holds, where
+    /// lists are objects ([`crate::vm::objects`]).
+    objects: ListObjects,
     /// The current state.
     state: StateId,
     /// The run flag (`SetScriptRunning`, the contents' Running checkbox).
@@ -468,6 +475,7 @@ fn new_frame(
         body,
         pc: 0,
         costs: vec![0; locals.len()],
+        objects: vec![None; locals.len()],
         locals,
         cost: frame_cost(code, flavour),
     })
@@ -516,6 +524,23 @@ fn pop_n(stack: &mut Vec<Operand>, count: usize) -> Result<Vec<Value>, RuntimeEr
         .split_off(at)
         .into_iter()
         .map(Operand::round)
+        .collect())
+}
+
+/// The top `count` operands, deepest first, each rounded, with the list
+/// object each hands on.
+fn pop_n_held(
+    stack: &mut Vec<Operand>,
+    count: usize,
+) -> Result<Vec<(Value, Option<ListId>)>, RuntimeError> {
+    let at = stack
+        .len()
+        .checked_sub(count)
+        .ok_or_else(|| internal("operand stack underflow"))?;
+    Ok(stack
+        .split_off(at)
+        .into_iter()
+        .map(objects::split)
         .collect())
 }
 
@@ -578,6 +603,8 @@ struct Machine<'run> {
     program: &'run Program,
     /// The globals.
     globals: &'run mut [Value],
+    /// The script's list objects.
+    objects: &'run mut ListObjects,
     /// The body in progress.
     activity: &'run mut Activity,
     /// Where a `state` statement records its target.
@@ -630,27 +657,36 @@ impl Machine<'_> {
             }
             Instr::Dup => {
                 let top = stack
-                    .last()
-                    .cloned()
+                    .last_mut()
                     .ok_or_else(|| internal("operand stack underflow"))?;
+                self.objects.share(top);
+                let top = top.clone();
                 stack.push(top);
             }
-            Instr::LoadLocal(slot) => stack.push(
-                frame
+            Instr::LoadLocal(slot) => {
+                let at = index(slot.0);
+                let value = frame
                     .locals
-                    .get(index(slot.0))
+                    .get(at)
                     .cloned()
-                    .ok_or_else(|| internal(format!("no local {}", slot.0)))?
-                    .into(),
-            ),
+                    .ok_or_else(|| internal(format!("no local {}", slot.0)))?;
+                let object = match frame.objects.get_mut(at) {
+                    Some(held) => self.objects.of_slot(held, &value),
+                    None => None,
+                };
+                stack.push(objects::operand(value, object));
+            }
             Instr::StoreLocal(slot) => {
-                let value = pop(stack)?;
+                let (value, object) = objects::split(pop_operand(stack)?);
                 let cost = self.memory.local_cost(&value);
                 let at = index(slot.0);
                 *frame
                     .locals
                     .get_mut(at)
                     .ok_or_else(|| internal(format!("no local {}", slot.0)))? = value;
+                if let Some(held) = frame.objects.get_mut(at) {
+                    *held = object;
+                }
                 let before = held.locals;
                 if let Some(old) = frame.costs.get_mut(at) {
                     held.locals = before.saturating_sub(*old).saturating_add(cost);
@@ -658,15 +694,22 @@ impl Machine<'_> {
                 }
                 self.memory.store_local(before, *held)?;
             }
-            Instr::LoadGlobal(slot) => stack.push(
-                self.globals
-                    .get(index(slot.0))
+            Instr::LoadGlobal(slot) => {
+                let at = index(slot.0);
+                let value = self
+                    .globals
+                    .get(at)
                     .cloned()
-                    .ok_or_else(|| internal(format!("no global {}", slot.0)))?
-                    .into(),
-            ),
+                    .ok_or_else(|| internal(format!("no global {}", slot.0)))?;
+                let mut held_object = self.objects.globals.get(at).copied().flatten();
+                let object = self.objects.of_slot(&mut held_object, &value);
+                if let Some(slot_object) = self.objects.globals.get_mut(at) {
+                    *slot_object = object;
+                }
+                stack.push(objects::operand(value, object));
+            }
             Instr::StoreGlobal(slot) => {
-                let value = pop(stack)?;
+                let (value, object) = objects::split(pop_operand(stack)?);
                 let at = index(slot.0);
                 let global = self
                     .globals
@@ -674,6 +717,9 @@ impl Machine<'_> {
                     .ok_or_else(|| internal(format!("no global {}", slot.0)))?;
                 self.memory.store_global(at, &value, *held)?;
                 *global = value;
+                if let Some(slot_object) = self.objects.globals.get_mut(at) {
+                    *slot_object = object;
+                }
             }
             Instr::GetMember(component) => {
                 let aggregate = pop(stack)?;
@@ -685,8 +731,12 @@ impl Machine<'_> {
                 stack.push(set_member(aggregate, component, to)?.into());
             }
             Instr::Cast(ty) => {
-                let operand = pop_operand(stack)?;
-                let result = operand::cast(operand, ty)?;
+                let result = match pop_operand(stack)? {
+                    // A list cast to a list is the same object on OpenSim
+                    // (`vm/list-identity`'s `cast`).
+                    shared @ Operand::Shared(..) if ty == TypeName::List => shared,
+                    operand => operand::cast(operand, ty)?,
+                };
                 if let Operand::Value(value) = &result {
                     self.memory.made(value)?;
                 }
@@ -695,11 +745,27 @@ impl Machine<'_> {
             Instr::Binary(op) => {
                 let left = pop_operand(stack)?;
                 let right = pop_operand(stack)?;
+                let in_place = objects::appends_in_place(self.memory.flavour(), op, &left, &right);
                 let result = operand::binary(op, left, right)?;
                 if let Operand::Value(value) = &result {
                     *used = used.saturating_add(cost::operator(op, value));
                     self.memory.made(value)?;
                 }
+                let result = match (in_place, result) {
+                    (Some(id), Operand::Value(Value::List(elements))) => {
+                        objects::rewrite(
+                            id,
+                            &elements,
+                            (&mut *self.globals, &self.objects.globals),
+                            frames
+                                .iter_mut()
+                                .map(|frame| (&mut *frame.locals, &*frame.objects)),
+                            stack,
+                        );
+                        Operand::Shared(elements, id)
+                    }
+                    (_, result) => result,
+                };
                 stack.push(result);
             }
             Instr::Prefix(op) => {
@@ -734,22 +800,12 @@ impl Machine<'_> {
                 self.memory.made(&list)?;
                 stack.push(list.into());
             }
-            instr @ (Instr::CallBuiltin(id) | Instr::CallBuiltinWriteBack(id)) => {
+            Instr::CallBuiltin(id) => {
                 let descriptor = id.descriptor();
-                let args = pop_n(stack, descriptor.args.len())?;
-                let passed = match (instr, args.first()) {
-                    (Instr::CallBuiltinWriteBack(_), Some(Value::List(elements))) => {
-                        Some(elements.clone())
-                    }
-                    (Instr::CallBuiltinWriteBack(_), other) => {
-                        return Err(internal(format!(
-                            "{} written back to a {:?}, not a list",
-                            descriptor.name,
-                            other.map(Value::type_name)
-                        )));
-                    }
-                    _ => None,
-                };
+                let (args, arg_objects): (Vec<Value>, Vec<Option<ListId>>) =
+                    pop_n_held(stack, descriptor.args.len())?
+                        .into_iter()
+                        .unzip();
                 *used = used
                     .saturating_add(BUILTIN_CALL_COST)
                     .saturating_add(cost::call(id, &args));
@@ -763,25 +819,40 @@ impl Machine<'_> {
                     (&mut *self.memory, *held),
                 );
                 let called = match ossl::admit(descriptor, &mut ctx)? {
-                    Admitted::Run => library::call(id, &mut ctx, args)?,
-                    Admitted::Skip(value) => Called {
+                    Admitted::Run => library::call(id, &mut ctx, args),
+                    Admitted::Skip(value) => Ok(Called {
                         value,
                         stubbed: false,
-                    },
+                    }),
                 };
                 let request = ctx.take_request();
                 let written_back = ctx.take_written_back();
+                let returned = ctx.take_returned();
+                // A change the function made in place stands even when the
+                // call then fails: OpenSim pads the pay buttons before it
+                // throws at one that is not an integer.
+                if let Some((argument, list)) = written_back
+                    && let Some(Some(object)) = arg_objects.get(argument)
+                {
+                    objects::rewrite(
+                        *object,
+                        &list,
+                        (&mut *self.globals, &self.objects.globals),
+                        frames
+                            .iter_mut()
+                            .map(|frame| (&mut *frame.locals, &*frame.objects)),
+                        stack,
+                    );
+                }
+                let called = called?;
                 if called.stubbed {
                     self.host.stubbed(self.caller, id);
                 }
                 if let Some(value) = called.value {
                     self.memory.made(&value)?;
-                    stack.push(value.into());
-                }
-                if let Some(passed) = passed {
-                    let list = Value::List(written_back.unwrap_or(passed));
-                    self.memory.made(&list)?;
-                    stack.push(list.into());
+                    let object =
+                        returned.and_then(|argument| arg_objects.get(argument).copied().flatten());
+                    stack.push(objects::operand(value, object));
                 }
                 let forced = f64::from(descriptor.sleep);
                 return Ok(match request {
@@ -794,11 +865,15 @@ impl Machine<'_> {
             Instr::CallFunction(id) => {
                 let body = BodyRef::Function(id);
                 let params = body_of(program, body)?.params;
-                let args = pop_n(stack, index(params))?;
+                let (args, arg_objects): (Vec<Value>, Vec<Option<ListId>>) =
+                    pop_n_held(stack, index(params))?.into_iter().unzip();
                 if frames.len() >= MAX_CALL_DEPTH {
                     return Err(RuntimeError::StackHeapCollision);
                 }
-                let callee = new_frame(program, body, args, self.memory.flavour())?;
+                let mut callee = new_frame(program, body, args, self.memory.flavour())?;
+                for (slot, object) in callee.objects.iter_mut().zip(arg_objects) {
+                    *slot = object;
+                }
                 let deeper = Stack {
                     frames: held.frames.saturating_add(callee.cost),
                     locals: held.locals,
@@ -809,8 +884,14 @@ impl Machine<'_> {
             }
             Instr::Return => return Ok(Self::leave(frames, stack, held, None)),
             Instr::ReturnValue => {
-                let value = pop(stack)?;
-                return Ok(Self::leave(frames, stack, held, Some(value)));
+                let value = pop_operand(stack)?;
+                let (value, object) = objects::split(value);
+                return Ok(Self::leave(
+                    frames,
+                    stack,
+                    held,
+                    Some(objects::operand(value, object)),
+                ));
             }
             Instr::Jump(target) => Self::jump(frame, target, used),
             Instr::JumpIfFalse(target) => {
@@ -832,7 +913,7 @@ impl Machine<'_> {
                     BodyRef::Function(id) => program
                         .function(id)
                         .and_then(|function| function.ret)
-                        .map(Value::default_of),
+                        .map(|ty| Operand::Value(Value::default_of(ty))),
                     BodyRef::Init | BodyRef::Handler { .. } => None,
                 };
                 return Ok(Self::leave(frames, stack, held, yielded));
@@ -842,19 +923,6 @@ impl Machine<'_> {
                 other => {
                     return Err(internal(format!(
                         "print of a {:?}, not a string",
-                        other.type_name()
-                    )));
-                }
-            },
-            Instr::PadPayButtons => match pop(stack)? {
-                Value::List(elements) => {
-                    let padded = Value::List(library::money_permissions::pad_pay_buttons(elements));
-                    self.memory.made(&padded)?;
-                    stack.push(padded.into());
-                }
-                other => {
-                    return Err(internal(format!(
-                        "pay buttons padded of a {:?}, not a list",
                         other.type_name()
                     )));
                 }
@@ -880,7 +948,7 @@ impl Machine<'_> {
         frames: &mut Vec<Frame>,
         stack: &mut Vec<Operand>,
         held: &mut Stack,
-        value: Option<Value>,
+        value: Option<Operand>,
     ) -> Flow {
         if let Some(left) = frames.pop() {
             held.frames = held.frames.saturating_sub(left.cost);
@@ -894,7 +962,7 @@ impl Machine<'_> {
             return Flow::BodyDone;
         }
         if let Some(value) = value {
-            stack.push(value.into());
+            stack.push(value);
         }
         Flow::Next
     }
@@ -913,9 +981,11 @@ impl Instance {
     #[must_use]
     pub fn with_flavour(program: Arc<Program>, flavour: EngineFlavour) -> Self {
         let memory = Memory::new(&program, flavour);
+        let objects = ListObjects::new(flavour, program.globals.len());
         let mut instance = Self {
             program,
             globals: Vec::new(),
+            objects,
             state: StateId::DEFAULT,
             running: true,
             held: false,
@@ -1141,6 +1211,7 @@ impl Instance {
             .iter()
             .map(|global| Value::default_of(global.ty))
             .collect();
+        self.objects.globals = vec![None; self.globals.len()];
         self.state = StateId::DEFAULT;
         self.queue.clear();
         self.pending_state = None;
@@ -1422,6 +1493,7 @@ impl Instance {
             let mut machine = Machine {
                 program: &self.program,
                 globals: &mut self.globals,
+                objects: &mut self.objects,
                 activity,
                 pending_state: &mut self.pending_state,
                 caller,

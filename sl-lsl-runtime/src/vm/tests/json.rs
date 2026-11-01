@@ -39,14 +39,6 @@ const OPENSIM_LONE_SURROGATE: (&str, &str) = ("json2list", "lone-surrogate");
 const OPENSIM_EMOJI_HALVES: [(&str, &str); 2] =
     [("list2json", "strings"), ("json2list", "surrogates")];
 
-/// OpenSim adds `0` to a specifier list it is given that is empty — the
-/// caller's own list variable, since an LSL list is a .NET reference there
-/// (`llJsonGetValue` of a scalar, `llJsonSetValue` of an empty path). Lists
-/// are values in this VM, so the caller's list is never changed; the
-/// `shared-list` records, which count the variable's length after the call,
-/// read 0 here and 1 there.
-const OPENSIM_SHARED_LIST: (&str, &str) = ("shared-list", "");
-
 #[test]
 fn data_json_prints_what_opensim_printed() -> Result<(), String> {
     for (flavour, transcript) in [
@@ -68,7 +60,6 @@ fn data_json_prints_what_opensim_printed() -> Result<(), String> {
                 OPENSIM_LONE_SURROGATE,
                 OPENSIM_EMOJI_HALVES[0],
                 OPENSIM_EMOJI_HALVES[1],
-                OPENSIM_SHARED_LIST,
             ],
         );
     }

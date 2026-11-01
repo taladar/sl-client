@@ -30,7 +30,8 @@ use sl_lsl::ast::{BinaryOp, PrefixOp, TypeName};
 use crate::error::{Division, ValueError};
 use crate::num::to_f32;
 use crate::ops::dot_unrounded;
-use crate::value::Value;
+use crate::value::{Element, Value};
+use crate::vm::objects::ListId;
 
 /// One entry of the operand stack.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +40,9 @@ pub(crate) enum Operand {
     Value(Value),
     /// A `float` still in double precision.
     Double(f64),
+    /// A list that is one of OpenSim's shared objects, with its identity
+    /// ([`crate::vm::objects`]): what a change in place rewrites.
+    Shared(Vec<Element>, ListId),
 }
 
 impl From<Value> for Operand {
@@ -54,6 +58,7 @@ impl Operand {
         match self {
             Self::Value(value) => value,
             Self::Double(double) => Value::Float(to_f32(double)),
+            Self::Shared(elements, _) => Value::List(elements),
         }
     }
 
@@ -62,7 +67,7 @@ impl Operand {
         match self {
             Self::Value(Value::Float(float)) => Some(f64::from(*float)),
             Self::Double(double) => Some(*double),
-            Self::Value(_) => None,
+            Self::Value(_) | Self::Shared(..) => None,
         }
     }
 
@@ -73,6 +78,7 @@ impl Operand {
         match self {
             Self::Value(value) => value.is_true(),
             Self::Double(double) => *double != 0.0,
+            Self::Shared(elements, _) => !elements.is_empty(),
         }
     }
 }

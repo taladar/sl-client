@@ -150,12 +150,6 @@ pub enum Instr {
     /// already of the type the table states. Pushes the return value unless
     /// the function returns nothing.
     CallBuiltin(BuiltinId),
-    /// `l a2 … an → l'`: call a library function that returns nothing but
-    /// changes the list object it is handed, as OpenSim's
-    /// `osListSortInPlace` does; pushes the list as the call left it (as it
-    /// was when the call did not run), for the lowering to store back into
-    /// the variable that was passed.
-    CallBuiltinWriteBack(BuiltinId),
     /// `a1 … an → [r]`: call a user function, as [`Self::CallBuiltin`].
     CallFunction(FunctionId),
     /// Leave a body that yields no value: an event handler, a function
@@ -177,12 +171,6 @@ pub enum Instr {
     StateChange(StateId),
     /// `string →`: LSL's legacy `print`.
     Print,
-    /// `list → list'`: OpenSim's `llSetPayPrice` padding of its button list,
-    /// fewer than four elements padded to five with `PAY_HIDE`. OpenSim pads
-    /// the list the script passed in place, so for its dialect the lowering
-    /// loads a list variable passed to it, pads it with this and stores it
-    /// back after the call.
-    PadPayButtons,
     /// Raise the run-time error the reference raises when Mono refuses to
     /// load the body at all (`System.InvalidProgramException`). Only ever
     /// the first instruction of a body, so the body faults before it does
@@ -432,9 +420,6 @@ impl Program {
             Instr::BuildRotation => "BuildRotation".to_owned(),
             Instr::BuildList(count) => format!("BuildList {count}"),
             Instr::CallBuiltin(id) => format!("CallBuiltin {}", id.descriptor().name),
-            Instr::CallBuiltinWriteBack(id) => {
-                format!("CallBuiltinWriteBack {}", id.descriptor().name)
-            }
             Instr::CallFunction(id) => format!(
                 "CallFunction {}",
                 self.function(id)
@@ -451,7 +436,6 @@ impl Program {
                     .map_or_else(|| format!("{}?", id.0), |state| state.name.clone())
             ),
             Instr::Print => "Print".to_owned(),
-            Instr::PadPayButtons => "PadPayButtons".to_owned(),
             Instr::InvalidProgram => "InvalidProgram".to_owned(),
         }
     }

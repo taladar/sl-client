@@ -33,3 +33,15 @@ than the census allows, which then shifts every later answer.
 The census passes on a freshly started OpenSim — by waiting for v1's start
 line instead of a fixed window, or by warming XEngine first — or the cause
 is shown to be something else and noted here.
+
+## From server-lsl-opensim-shared-lists (2026-11-01)
+
+XEngine's compile is slow on a warm grid too, not only after a start:
+OpenSim's log (`[LOGHTTP] Slow handling of … POST`) timed the
+`persistence/lists` upload at 33, 39 and 34 seconds in three runs in a row —
+two on a grid that had been up and running probes for hours, the third right
+after a restart of `opensim.service` — and the same log shows uploads of 32 s
+on 2026-10-27. The
+`lsl-probes` runner waited 30 s and failed all three; it now waits up to 90 s
+for a compile (`COMPILE_TIMEOUT`). The `script-compile` census still answers
+within its own fixed windows, which this length overruns.

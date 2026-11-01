@@ -189,6 +189,50 @@ pub(crate) fn os_get<T: Clone>(items: &[T], start: i32, end: i32) -> Vec<T> {
     joined(prefix, inclusive(items, start, length.saturating_sub(1)))
 }
 
+/// Whether OpenSim's `GetSublist` of a list of `length` hands back the very
+/// list object it was called on (`return this`) rather than a new one: both
+/// indices still negative once the length is added, and the start past the
+/// end — the branch where [`os_get`] answers the whole list.
+pub(crate) fn os_get_returns_itself(length: usize, start: i32, end: i32) -> bool {
+    let length = signed(length);
+    let start = if start < 0 {
+        i64::from(start).saturating_add(length)
+    } else {
+        i64::from(start)
+    };
+    let end = if end < 0 {
+        i64::from(end).saturating_add(length)
+    } else {
+        i64::from(end)
+    };
+    start > end && end < 0 && start < 0
+}
+
+/// Whether OpenSim's `llListInsertList` hands back the very list object
+/// inserted: into an empty list at an index of 0 or less, where it returns
+/// `src` itself.
+pub(crate) const fn os_insert_returns_insert(length: usize, at: i32) -> bool {
+    length == 0 && at <= 0
+}
+
+/// Whether OpenSim's `llListReplaceList` of a list of `length` hands back
+/// the very list object put in: from 0, once a negative start has the length
+/// added, to the end or past it, where it returns `src` itself.
+pub(crate) fn os_replace_returns_insert(length: usize, start: i32, end: i32) -> bool {
+    let length = signed(length);
+    let start = if start < 0 {
+        i64::from(start).saturating_add(length)
+    } else {
+        i64::from(start)
+    };
+    let end = if end < 0 {
+        i64::from(end).saturating_add(length)
+    } else {
+        i64::from(end)
+    };
+    start == 0 && start <= end && end.saturating_add(1) >= length
+}
+
 /// OpenSim's `DeleteSublist` (`llDeleteSubList`).
 pub(crate) fn os_delete_list<T: Clone>(items: &[T], start: i32, end: i32) -> Vec<T> {
     if items.is_empty() {
@@ -305,6 +349,26 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn opensim_hands_back_the_argument_where_its_code_returns_it() {
+        // `vm/list-identity`, both engines: `llList2List([1, 2, 3], -4, -5)`
+        // is the list itself, `(…, 0, -1)` a copy.
+        assert!(os_get_returns_itself(3, -4, -5));
+        assert!(!os_get_returns_itself(3, 0, -1));
+        assert!(!os_get_returns_itself(3, -1, -2));
+        assert!(!os_get_returns_itself(3, 2, 1));
+        // Into an empty list at 0 and at -1, not at 1 or into `[5]`.
+        assert!(os_insert_returns_insert(0, 0));
+        assert!(os_insert_returns_insert(0, -1));
+        assert!(!os_insert_returns_insert(0, 1));
+        assert!(!os_insert_returns_insert(1, 0));
+        // Over the whole of `[5, 6]` from 0, not over the front of `[5, 6, 7]`.
+        assert!(os_replace_returns_insert(2, 0, 5));
+        assert!(os_replace_returns_insert(2, -2, -1));
+        assert!(!os_replace_returns_insert(3, 0, 0));
+        assert!(!os_replace_returns_insert(2, 1, 5));
+    }
 
     /// `abcdef` as a list of characters, and the answer as a string.
     fn on(f: impl Fn(&[char]) -> Vec<char>) -> String {

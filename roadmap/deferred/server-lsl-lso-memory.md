@@ -2,7 +2,7 @@
 id: server-lsl-lso-memory
 title: Run an LSO-targeted script in LSO's 16 KB, as Second Life does
 topic: server
-status: ideas
+status: deferred
 origin: server-lsl-memory-and-limits (2026-10-30)
 points: 5
 refs: [server-lsl-memory-and-limits, server-fake-grid-script-compile-on-upload]
@@ -46,3 +46,34 @@ LSL2 gives differently is `large_code` — 600 functions of 100-character
 strings, refused with 1203 errors of no position, where Mono compiles it —
 and `script-compile`'s `KNOWN_DEVIATIONS` lists it until LSO's 16 KB is
 modelled at compile time too.
+
+## Deferred (2026-11-01): exact needs LSO itself
+
+The LSO compiler and VM Linden Lab once shipped with the viewer are still in
+Firestorm's history: `indra/lscript/`, removed by `ca08bd5aba` (OPEN-292), so
+`git archive ca08bd5aba^ indra/lscript` in `~/devel/3rdparty/phoenix-firestorm`
+recovers them. They settle the per-value question the probe above was for,
+and the answer is that there are no per-value costs to measure:
+
+- `llGetFreeMemory` is `SP - HP` (`LLScriptExecuteLSL2::getFreeMemory`): the
+  stack pointer at the call less the heap's high-water mark. That is why
+  `memory/budget-lso` reads 3 550 from `state_entry` and 3 530 from inside a
+  helper with nothing allocated between: the helper's frame is on the stack.
+- The heap (`lscript_alloc.cpp`, `lsa_heap_add_data`) is a chain of blocks
+  with a 7-byte header (4-byte size, 1-byte type, 2-byte reference count),
+  allocated first fit, a block split when 11 bytes or more are left over,
+  freed blocks merged with an empty successor only during a later search.
+  `HP` only rises. A list is a block of `4 + 4n` bytes followed by a block per
+  element, so how far `HP` moves for `held += [n]` depends on where the old
+  list and the temporaries sat — the uneven "about 30" an integer.
+- The free memory a script starts with is 16 384 less its compiled image
+  (`lscript_bytecode.cpp`): the LSO emitter's byte sizes
+  (`lscript_tree.cpp`, the `LSCP_EMIT_BYTE_CODE` pass) over globals,
+  functions and states. `large_code`'s refusal is that image overflowing.
+
+So an exact model is a port of the LSO code emitter (sizes) and of the LSO
+VM (`lscript_execute.cpp`, the heap, the stack frames) running an `lsl2`
+script on the Second Life flavour, bridged to the existing library — which
+also contradicts [context/lsl.md](../context/lsl.md)'s "no LSO bytecode"
+non-goal. Deferred by the user's call rather than built as an
+approximation.

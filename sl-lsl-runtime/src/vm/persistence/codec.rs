@@ -14,6 +14,7 @@ use crate::vm::comms::{Listen, ListenFilter, Listens};
 use crate::vm::detected::{Detected, Touch};
 use crate::vm::experiences::ExperienceQuestion;
 use crate::vm::flavour::EngineFlavour;
+use crate::vm::objects::{ListId, ListObjects};
 use crate::vm::permissions::{Permissions, Question};
 
 use super::{
@@ -24,9 +25,9 @@ use super::{
 /// What every saved script starts with.
 const MARK: [u8; 4] = *b"slSS";
 
-/// The version of the form this crate writes, and the only one it reads: 2
-/// since a listen carries `osListenRegex`'s flags.
-const VERSION: u8 = 2;
+/// The version of the form this crate writes, and the only one it reads: 3
+/// since a list carries its object's identity where lists are objects.
+const VERSION: u8 = 3;
 
 /// Why bytes are not a saved script.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -66,6 +67,8 @@ pub(super) fn encode(saved: &SavedScript) -> Vec<u8> {
         EngineFlavour::XEngine => 2,
     });
     out.values(&saved.globals);
+    out.u64(saved.objects.next);
+    out.objects(&saved.objects.globals);
     out.u32(saved.state.0);
     out.bool(saved.running);
     out.bool(saved.held);
@@ -137,6 +140,9 @@ pub(super) fn decode(bytes: &[u8]) -> Result<SavedScript, DecodeError> {
         }
     };
     let globals = input.values()?;
+    let mut objects = ListObjects::new(flavour, 0);
+    objects.next = input.u64()?;
+    objects.globals = input.objects()?;
     let state = StateId(input.u32()?);
     let running = input.bool()?;
     let held = input.bool()?;
@@ -191,6 +197,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<SavedScript, DecodeError> {
     Ok(SavedScript {
         flavour,
         globals,
+        objects,
         state,
         running,
         held,
@@ -479,6 +486,7 @@ impl Writer {
             }
             self.u32(frame.pc);
             self.values(&frame.locals);
+            self.objects(&frame.objects);
             self.count(frame.costs.len());
             for cost in &frame.costs {
                 self.u32(*cost);
@@ -495,6 +503,25 @@ impl Writer {
                     self.u8(1);
                     self.u64(double.to_bits());
                 }
+                Operand::Shared(elements, id) => {
+                    self.u8(2);
+                    self.value(&Value::List(elements.clone()));
+                    self.u64(id.0);
+                }
+            }
+        }
+    }
+
+    /// The list object each of a run of slots holds.
+    fn objects(&mut self, objects: &[Option<ListId>]) {
+        self.count(objects.len());
+        for object in objects {
+            match object {
+                Some(id) => {
+                    self.bool(true);
+                    self.u64(id.0);
+                }
+                None => self.bool(false),
             }
         }
     }
@@ -748,6 +775,7 @@ impl Reader<'_> {
             };
             let pc = self.u32()?;
             let locals = self.values()?;
+            let objects = self.objects()?;
             let mut costs = Vec::new();
             for _ in 0..self.count()? {
                 costs.push(self.u32()?);
@@ -756,6 +784,7 @@ impl Reader<'_> {
                 body,
                 pc,
                 locals,
+                objects,
                 costs,
             });
         }
@@ -764,6 +793,15 @@ impl Reader<'_> {
             stack.push(match self.u8()? {
                 0 => Operand::Value(self.value()?),
                 1 => Operand::Double(f64::from_bits(self.u64()?)),
+                2 => match self.value()? {
+                    Value::List(elements) => Operand::Shared(elements, ListId(self.u64()?)),
+                    _ => {
+                        return Err(DecodeError::Tag {
+                            what: "shared list",
+                            tag: 2,
+                        });
+                    }
+                },
                 tag => {
                     return Err(DecodeError::Tag {
                         what: "operand",
@@ -777,6 +815,19 @@ impl Reader<'_> {
             frames,
             stack,
         })
+    }
+
+    /// The list object each of a run of slots holds.
+    fn objects(&mut self) -> Result<Vec<Option<ListId>>, DecodeError> {
+        let mut objects = Vec::new();
+        for _ in 0..self.count()? {
+            objects.push(if self.bool()? {
+                Some(ListId(self.u64()?))
+            } else {
+                None
+            });
+        }
+        Ok(objects)
     }
 
     /// The listens.

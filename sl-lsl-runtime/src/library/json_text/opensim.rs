@@ -1835,6 +1835,14 @@ fn find(node: &Node, specifiers: &[Element], level: usize) -> Option<Node> {
     }
 }
 
+/// Whether `llJsonGetValue` and `llJsonValueType` read `json` as the first
+/// element of `[json]`: text that is not blank and starts with neither `[`
+/// nor `{`, with no specifiers — which OpenSim makes element 0 by adding it
+/// to the specifier list it was handed.
+pub(super) fn scalar_document(json: &str, specifiers: &[Element]) -> bool {
+    specifiers.is_empty() && !json.chars().all(char::is_whitespace) && !json.starts_with(['[', '{'])
+}
+
 /// The value `llJsonGetValue` and `llJsonValueType` read: [`None`] for
 /// `JSON_INVALID`. Empty or white text, a path into `{}` or `[]`, a path
 /// into text that does not start with `[` or `{`, text LitJson cannot read
@@ -1850,7 +1858,7 @@ fn lookup(json: &str, specifiers: &[Element]) -> Option<Node> {
     let zero = [Element::Integer(0)];
     let (text, specifiers) = if json.starts_with(['[', '{']) {
         (json.to_owned(), specifiers)
-    } else if specifiers.is_empty() {
+    } else if scalar_document(json, specifiers) {
         (format!("[{json}]"), &zero[..])
     } else {
         return None;

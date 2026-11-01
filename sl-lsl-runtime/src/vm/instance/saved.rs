@@ -7,9 +7,11 @@ use core::time::Duration;
 
 use crate::bytecode::{Program, StateId};
 use crate::library;
+use crate::value::Value;
 use crate::vm::context::{ScriptData, Tick, Timer};
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::memory::{Memory, Stack, frame_cost};
+use crate::vm::objects::ListId;
 use crate::vm::persistence::{
     RestoreError, SavedActivity, SavedBody, SavedEvent, SavedFrame, SavedPhase, SavedScript,
     SavedTimer, is_of, span, ticks_in,
@@ -23,6 +25,7 @@ pub(crate) fn save(instance: &Instance, now: Tick, step: Duration) -> SavedScrip
     SavedScript {
         flavour: instance.memory.flavour(),
         globals: instance.globals.clone(),
+        objects: instance.objects.clone(),
         state: instance.state,
         running: instance.running,
         held: instance.held,
@@ -56,6 +59,7 @@ pub(crate) fn save(instance: &Instance, now: Tick, step: Duration) -> SavedScrip
                     },
                     pc: frame.pc,
                     locals: frame.locals.clone(),
+                    objects: frame.objects.clone(),
                     costs: frame.costs.clone(),
                 })
                 .collect(),
@@ -101,7 +105,8 @@ pub(crate) fn restore(
             .globals
             .iter()
             .zip(&program.globals)
-            .all(|(value, global)| is_of(value, global.ty));
+            .all(|(value, global)| is_of(value, global.ty))
+        && objects_fit(&saved.globals, &saved.objects.globals);
     if !globals_fit {
         return Err(RestoreError::Globals);
     }
@@ -127,6 +132,7 @@ pub(crate) fn restore(
     let asleep = ticks_in(saved.asleep, step);
     Ok(Instance {
         globals: saved.globals.clone(),
+        objects: saved.objects.clone(),
         state,
         running: saved.running,
         held: saved.held,
@@ -264,7 +270,8 @@ fn restored_frame(
             .locals
             .iter()
             .zip(&code.locals)
-            .all(|(value, local)| is_of(value, local.ty));
+            .all(|(value, local)| is_of(value, local.ty))
+        && objects_fit(&saved.locals, &saved.objects);
     if !fits {
         return Err(RestoreError::Frame);
     }
@@ -272,7 +279,18 @@ fn restored_frame(
         body,
         pc: saved.pc,
         locals: saved.locals.clone(),
+        objects: saved.objects.clone(),
         costs: saved.costs.clone(),
         cost: frame_cost(code, flavour),
     })
+}
+
+/// Whether `objects` are one slot per value of `values`, an object only
+/// beside a list.
+fn objects_fit(values: &[Value], objects: &[Option<ListId>]) -> bool {
+    values.len() == objects.len()
+        && values
+            .iter()
+            .zip(objects)
+            .all(|(value, object)| object.is_none() || matches!(value, Value::List(_)))
 }

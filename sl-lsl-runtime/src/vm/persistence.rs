@@ -40,6 +40,7 @@ use crate::vm::comms::Listens;
 use crate::vm::detected::Detected;
 use crate::vm::flavour::EngineFlavour;
 use crate::vm::instance::PostError;
+use crate::vm::objects::{ListId, ListObjects};
 use crate::vm::permissions::Permissions;
 
 pub use codec::DecodeError;
@@ -63,6 +64,9 @@ pub struct SavedScript {
     pub(crate) flavour: EngineFlavour,
     /// One value per global.
     pub(crate) globals: Vec<Value>,
+    /// The list objects it held and which each global holds, where lists are
+    /// objects ([`crate::vm::objects`]).
+    pub(crate) objects: ListObjects,
     /// The state it was in.
     pub(crate) state: StateId,
     /// The run flag.
@@ -141,6 +145,8 @@ pub(crate) struct SavedFrame {
     pub(crate) pc: u32,
     /// The parameters and locals.
     pub(crate) locals: Vec<Value>,
+    /// The list object each local holds.
+    pub(crate) objects: Vec<Option<ListId>>,
     /// What each local holds toward running out.
     pub(crate) costs: Vec<u32>,
 }
@@ -318,6 +324,13 @@ impl SavedScript {
         self.activity = None;
         self.pending_state = None;
         self.asleep = Duration::ZERO;
+    }
+
+    /// Give every global a list object of its own: XEngine saves a script's
+    /// globals by copying each list (`ScriptBase.GetVars`), so two globals
+    /// that held one list before a shutdown hold two equal lists after it.
+    pub(crate) fn separate_lists(&mut self) {
+        self.objects.globals.fill(None);
     }
 
     /// `time` passed while it was away: take it off the sleep and the timer.

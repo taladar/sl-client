@@ -984,8 +984,8 @@ pub fn os_string_last_index_of_range<C: PureCtx>(
 
 /// `osListSortInPlace`: `llListSort`'s OpenSim sort of the list, ascending
 /// only for an `ascending` of exactly 1, written into the list object it was
-/// handed (`ScriptCtx::write_back`) — which the compiler stores back into
-/// the variable passed, when one was.
+/// handed (`ScriptCtx::write_back`), so every variable holding that object
+/// reads it sorted.
 ///
 /// # Errors
 ///
@@ -996,7 +996,7 @@ pub fn os_list_sort_in_place(
     stride: i32,
     ascending: i32,
 ) -> Result<(), CallError> {
-    ctx.write_back(lists::os_sort(&list, stride, ascending == 1));
+    ctx.write_back(0, lists::os_sort(&list, stride, ascending == 1));
     Ok(())
 }
 

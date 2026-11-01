@@ -1495,7 +1495,8 @@ passed reads sorted afterwards, a local or a global alike. So does every
 variable holding the same object: after `list b = a;`, sorting `a` sorted
 `b`, sorting `b` sorted `a`, and a function sorting its list parameter sorted
 the caller's variable. A list built by an expression (`summed + []`) is a new
-object, and sorting it changes nothing.
+object, and sorting it changes nothing ([A list: a value or an
+object](#a-list-a-value-or-an-object) has the rest of what shares a list).
 
 The same search makes OpenSim's `llSubStringIndex` and string parsers answer
 what no search unit by unit would (`Parser`, plain LSL):
@@ -1571,6 +1572,7 @@ not in the region, since an owner-say to an absent owner is lost.
 | its script time (`llGetTime`) | counts on through the take and the rez | YEngine counts on; XEngine starts again with the reset | no scripts |
 | a second script it had stopped (`llSetScriptState(…, FALSE)`) | stays stopped: no `on_rez`, no answer to a link message, `llGetScriptState` 0 | YEngine the same; **XEngine runs it again**: its `state_entry` and `on_rez` run, it answers, `llGetScriptState` 1 | no scripts |
 | what runs on the rez | the sleeping handler's end, `on_rez(0)`, the queued link messages | YEngine the sleeping handler's end, the link messages, `on_rez(0)`; XEngine the stopped script's `state_entry` and `on_rez`, then its own `state_entry` and `on_rez(0)` | no scripts |
+| two globals holding one list (`persistence/lists`, 2026-11-01) | a list is a value: padding one after the rez leaves the other at `1` | YEngine: **still one list**, the other padded too; XEngine: both empty, reset | no scripts |
 
 `llGetStartParameter` is 0 on every grid, as for any rez from inventory, and
 no grid sends a `changed`. The prim's description (where the probe marks its
@@ -1598,6 +1600,7 @@ and tries again.
 | its script time | not measured | counts on | starts again from 0 | no scripts |
 | a second script it had stopped | not measured | stays stopped | **runs again**, and answers | no scripts |
 | what runs when the region is back | not measured | the sleeping handler's end, the link messages, `changed(32768)` — OpenSim's own `POSITION` bit — then `changed(1024)`, `CHANGED_REGION_START` | the link messages, `changed(32768)`, `changed(1024)` | no scripts |
+| two globals holding one list, and a local of the sleeping handler holding a third global's list (`persistence/lists`, 2026-11-01) | not measured (values on aditi, where nothing restarted) | **still shared**: padding one global pads the other, and padding the local after the sleep pads the global | **parted**: padding one global leaves the other at `2` — `ScriptBase.GetVars` copies each list global as it saves — and the handler is lost | no scripts |
 
 Neither engine runs `state_entry` or `on_rez` after a restart: a script learns
 of it from `CHANGED_REGION_START` alone. The prims come back with their keys
@@ -2308,6 +2311,39 @@ XEngine); it has `llChar`, `llOrd` and `llHash` (above).
 | `llComputeHash` with `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512` | the hex digest; the name is not case sensitive; `md4` or `""` give `""` | no scripts |
 | `llHMAC` | the Base64 HMAC, the same names; an unknown one `""` | no scripts |
 | `llLinear2sRGB`, `llsRGB2Linear` | the standard curves, not clamped: 2 → 1.35326, −1 → −12.92 | no scripts |
+
+### A list: a value or an object
+
+`vm/list-identity`, 2026-11-01, on all three. On Second Life a list is a
+**value**: nothing done to one variable's list shows in another. On OpenSim
+it is a .NET **object** (`LSL_Types.list`) that both engines hand on by
+reference — `b = a`, a function's parameter, its return value, a `(list)`
+cast, `b = c = […]` and a global set from a local or a local from a global
+all hold the very object — and a few things change that object in place, so
+every variable holding it reads the change. A list built anew (a literal,
+`a + []`, a library result) is a new object, and a variable given another
+list (`a = [2]`) lets go of the old one.
+
+| what changes a list in place | Second Life | OpenSim YEngine | OpenSim XEngine | fake grid |
+| --- | --- | --- | --- | --- |
+| `llSetPayPrice` with fewer than four buttons, in the root prim | nothing | the list padded to five with `PAY_HIDE` (`1, -1, -1, -1, -1`) | the same | no scripts |
+| `llDialog` with no buttons | nothing (the dialog shows `OK`) | `"Ok"` added; not for an avatar key that is no key (`First parameter must be a key`) | the same | no scripts |
+| `llJsonSetValue` with no specifiers | nothing | `0` added | the same | no scripts |
+| `llJsonGetValue`, `llJsonValueType` of JSON that is not blank and starts with neither `[` nor `{`, with no specifiers | nothing | `0` added | the same | no scripts |
+| `osListSortInPlace` | not compiled | the list sorted (`ossl/strings`) | the same | no scripts |
+| `a + 2`, `a + 2.5`, `a + "x"`, `a + (key)"x"` | a new list; the key stays a key | a new list; the key becomes a string | **`a` itself appended to** and handed back, the key as a string: `list c = a + 2;` leaves `a` reading `1, 2`, and so does every variable holding it | no scripts |
+| `a + <1, 2, 3>`, `a + <0, 0, 0, 1>`, `a + [2]`, `2 + a`, `"x" + a` | a new list | a new list | a new list | no scripts |
+
+| what hands back the list it was given | Second Life | OpenSim (both) | fake grid |
+| --- | --- | --- | --- |
+| `llList2List(l, -4, -5)` of three elements: both indices still negative once the length is added, the start past the end | a copy | **`l` itself** (`GetSublist`'s `return this`); `llList2List(l, 0, -1)` is a copy | no scripts |
+| `llListInsertList([], l, 0)` and `(…, -1)`: into an empty list at 0 or before | a copy | **`l` itself**; at 1, or into `[5]`, a new list | no scripts |
+| `llListReplaceList([5, 6], l, 0, 5)`: from 0 to the end or past it | a copy | **`l` itself**; over the front of `[5, 6, 7]`, a new list | no scripts |
+
+Nothing else in OpenSim's library changes a list it is handed or hands one
+back (an audit of `LSL_Api.cs`, `OSSL_Api.cs`, `LS_Api.cs` and `MOD_Api.cs`
+for every list parameter). No OpenSim API builds a second list object over
+another's array, so a list has one identity whichever way it changes.
 
 ### What a call costs
 

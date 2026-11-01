@@ -97,8 +97,14 @@ const SETTLE_WINDOW: Duration = Duration::from_secs(15);
 const SETTLE_IDLE: Duration = Duration::from_secs(5);
 
 /// How long each step's confirming event may take: a rez, a listing, a
-/// compile, a derez.
+/// derez.
 const STEP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a script's compile may take to be answered. XEngine compiles a
+/// script to C# and through Mono's compiler before it answers the upload,
+/// and OpenSim's log timed that upload at 33, 34 and 39 seconds for
+/// `persistence/lists` on 2026-11-01 — past [`STEP_TIMEOUT`].
+const COMPILE_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// How long a probe may run before its transcript is written as
 /// incomplete, unless its header asks for longer (`deadline`). The longest
@@ -2910,7 +2916,7 @@ async fn plant_script(
         })
         .await?;
     let compiled = session
-        .wait_for(STEP_TIMEOUT, |event| match event {
+        .wait_for(COMPILE_TIMEOUT, |event| match event {
             Event::ScriptUploaded {
                 compiled, errors, ..
             } => Some(Ok((*compiled, errors.clone()))),

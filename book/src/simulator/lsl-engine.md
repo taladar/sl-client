@@ -554,6 +554,43 @@ A table test posts every event of the table but the two transitions, with a
 sample value per parameter, to a handler compiled for it, and checks the
 handler printed exactly those values.
 
+### As built: list objects
+
+`server-lsl-opensim-shared-lists`. On Second Life a list is a value. On
+OpenSim it is a .NET object both engines hand on by reference, and some of
+the library and XEngine's `+` change it in place, so the change shows through
+every variable holding it (`gridspec/lsl.md` § A list: a value or an object).
+The value model copies a list wherever it goes, so on the OpenSim flavours
+the VM keeps an **identity** beside each list it holds (`vm::objects`):
+
+- **Where it lives.** An operand-stack entry is an `Operand::Shared` (the
+  elements and a `ListId`); a frame's locals and the instance's globals each
+  have a slot of `Option<ListId>` beside them (`Frame::objects`,
+  `ListObjects::globals`). A list nothing else holds yet — a literal, a
+  library result, a concatenation — has none. A load from a variable mints
+  one for the variable if it has none, and `Dup` mints one for a list about to
+  be held twice; a store, an argument, a return and a `(list)` cast hand the
+  identity on. On Second Life nothing is ever minted, and every list is a
+  plain value as before.
+- **A change in place** is written to every global, every frame's local and
+  every operand holding the identity (`objects::rewrite`). A library function
+  reports one through its context — `write_back(argument, list)` for the
+  argument it changed (`osListSortInPlace`, `llSetPayPrice`, `llDialog`,
+  `llJsonSetValue`, `llJsonGetValue`, `llJsonValueType`; it stands even when
+  the call then fails, as OpenSim pads before it throws) and
+  `return_argument(argument)` when what it returns is the argument's own
+  object (`llList2List`, `llListInsertList`, `llListReplaceList` in their
+  edge cases). XEngine's `list + string`, `+ integer`, `+ float` and `+ key`
+  change the left operand and hand it back (`objects::appends_in_place`).
+- **Not a store.** A change in place charges no memory: YEngine counts a list
+  against the variable it is stored in, when it is stored, and is not told of
+  a change made in place.
+- **Saved with the script.** `SavedScript` keeps the identities (format
+  version 3). A take and a rez or a restart under YEngine keeps them; an
+  XEngine shutdown gives every global its own list again
+  (`SavedScript::separate_lists`), as `ScriptBase.GetVars` copies each list
+  global when it saves a script.
+
 ### As built: persistence
 
 `server-lsl-script-persistence`. A script's running state belongs to its
@@ -771,9 +808,8 @@ from the sketch above:
   buttons 1, 5, 10, 20; OpenSim's silence for a layout of zeros) and says
   which payments Second Life takes (`PayPrice::takes`); the host raises
   `money` in every script of the prim with `Engine::paid`. OpenSim pads the
-  button list a script passes *in place*, so for its dialect the compiler
-  writes the padding back to a list variable passed to the call
-  (`Instr::PadPayButtons`).
+  button list a script passes *in place*, which every variable holding that
+  list reads afterwards (the list objects, below).
 - **An experience is the grid's; the script holds only its share.** Which
   experience a script was compiled into and whether it may run here
   (`Host::experience`, a `ScriptExperience`), what each avatar has answered it
@@ -855,11 +891,8 @@ scope of 236` as this was written):
   does not parse. The culture-sensitive searches `osStringIndexOf`,
   `osStringLastIndexOf`, `osStringStartsWith` and `osStringEndsWith` are in
   too, on a port of the collator OpenSim's Mono runs (below), and
-  `osListSortInPlace`, whose sorted list the compiler stores back into the
-  list variable passed (`Instr::CallBuiltinWriteBack`) — into that variable
-  only: OpenSim's other references to the same list object see the sort as
-  well, which the value model's copies do not
-  (`server-lsl-opensim-shared-lists`).
+  `osListSortInPlace`, which sorts the list object it is handed — and so
+  every variable holding it (the list objects, below).
 - **Later, with the tranche of the `ll*` functions they shadow** — the NPC
   family, avatar animation, attachment, teleport and sitting functions
   (`server-lsl-lib-avatar-control`, which has the NPC fixtures to answer

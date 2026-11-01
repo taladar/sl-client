@@ -17,8 +17,8 @@ use crate::format;
 use crate::library::collation::OutOfRange;
 use crate::library::dotnet::{is_uuid, parse_double};
 use crate::library::range::{
-    os_delete_list, os_get, os_insert, os_replace, py, signed, sl_delete, sl_get, sl_get_pieces,
-    sl_insert, sl_replace,
+    os_delete_list, os_get, os_get_returns_itself, os_insert, os_insert_returns_insert, os_replace,
+    os_replace_returns_insert, py, signed, sl_delete, sl_get, sl_get_pieces, sl_insert, sl_replace,
 };
 use crate::library::text::{Text, until_nul};
 use crate::library::{BuiltinId, CallError, Exception, Key, PureCtx};
@@ -295,6 +295,9 @@ pub fn ll_list2_list<C: PureCtx>(
     end: i32,
 ) -> Result<Vec<Element>, CallError> {
     Ok(if ctx.flavour().is_opensim() {
+        if os_get_returns_itself(list.len(), start, end) {
+            ctx.return_argument(0);
+        }
         os_get(&list, start, end)
     } else {
         sl_get(&list, start, end)
@@ -335,6 +338,9 @@ pub fn ll_list_insert_list<C: PureCtx>(
     index: i32,
 ) -> Result<Vec<Element>, CallError> {
     Ok(if ctx.flavour().is_opensim() {
+        if os_insert_returns_insert(list.len(), index) {
+            ctx.return_argument(1);
+        }
         os_insert(&list, &insert, index)
     } else {
         sl_insert(&list, &insert, index)
@@ -356,6 +362,9 @@ pub fn ll_list_replace_list<C: PureCtx>(
     end: i32,
 ) -> Result<Vec<Element>, CallError> {
     Ok(if ctx.flavour().is_opensim() {
+        if os_replace_returns_insert(list.len(), start, end) {
+            ctx.return_argument(1);
+        }
         os_replace(&list, &insert, start, end)
     } else {
         sl_replace(&list, &insert, start, end)

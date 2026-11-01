@@ -95,6 +95,7 @@ pub fn ll_json_get_value<C: PureCtx>(
     specifiers: Vec<Element>,
 ) -> Result<String, CallError> {
     Ok(if ctx.flavour().is_opensim() {
+        opensim_scalar_specifier(ctx, &json, &specifiers);
         opensim::get_value(&json, &specifiers)
     } else {
         second_life::get_value(&json, &specifiers)
@@ -113,6 +114,7 @@ pub fn ll_json_value_type<C: PureCtx>(
     specifiers: Vec<Element>,
 ) -> Result<String, CallError> {
     Ok(if ctx.flavour().is_opensim() {
+        opensim_scalar_specifier(ctx, &json, &specifiers);
         opensim::value_type(&json, &specifiers)
     } else {
         second_life::value_type(&json, &specifiers)
@@ -134,10 +136,27 @@ pub fn ll_json_set_value<C: PureCtx>(
     value: String,
 ) -> Result<String, CallError> {
     Ok(if ctx.flavour().is_opensim() {
+        if specifiers.is_empty() {
+            // OpenSim addresses the whole document as element 0, added to
+            // the specifier list object it was handed (`vm/list-identity`'s
+            // `json-set`).
+            ctx.write_back(1, vec![Element::Integer(0)]);
+        }
         opensim::set_value(&json, &specifiers, &value)
     } else {
         second_life::set_value(&json, &specifiers, &value)
     })
+}
+
+/// OpenSim's `llJsonGetValue` and `llJsonValueType` of a scalar document:
+/// JSON that is not blank and starts with neither `[` nor `{` is read as an
+/// array of it, and empty specifiers become element 0 — added to the
+/// specifier list object the call was handed (`vm/list-identity`'s
+/// `json-get` and `json-type`).
+fn opensim_scalar_specifier<C: PureCtx>(ctx: &mut C, json: &str, specifiers: &[Element]) {
+    if opensim::scalar_document(json, specifiers) {
+        ctx.write_back(1, vec![Element::Integer(0)]);
+    }
 }
 
 #[cfg(test)]
