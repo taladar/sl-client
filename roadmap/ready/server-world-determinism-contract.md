@@ -2,7 +2,7 @@
 id: server-world-determinism-contract
 title: Keep the fake grid reproducible once it runs scripts
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 5
 blocked_by: [server-world-heartbeat]

@@ -171,6 +171,21 @@ keeps only the prefix it ran. That happens for a client-initiated hop as
 much as for a scripted one. A script that has already finished hands over
 nothing, which is what leaves a destination region's own timeline alone.
 
+## The region heartbeat
+
+A timeline belongs to an avatar; the **heartbeat** belongs to the region.
+Every region ticks from the moment the grid starts, with or without anybody
+in it, advancing its clock by exactly one step a tick
+(`heartbeat::DEFAULT_STEP`, 100 ms) and sending the region's `SimStats` to
+every root agent in it when they are due, with the time dilation its ticks
+kept. `RegionConfig::heartbeat` picks the step, and
+`HeartbeatConfig::stepped` a region that ticks only when a test says so:
+
+```rust,ignore
+let tick = grid.advance_one_tick("Fake Region").await?;
+assert_eq!(tick.number, 1);
+```
+
 ## Which grid this one is
 
 The fake grid exists to fail a viewer the way a real grid would, and there are

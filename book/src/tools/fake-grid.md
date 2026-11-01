@@ -99,6 +99,45 @@ reason.
 Both `SimHook` and `SimEventHook` take that instant as a parameter — a
 hook that sends never has to reach for a clock of its own.
 
+## The region heartbeat
+
+Every region has a loop of its own (`sl_fake_grid::heartbeat`), started
+with the grid and ticking whether or not anybody is standing in it. It is
+where the work that belongs to the region rather than to a session runs:
+today the region's `SimStats`, and later the script slice, movement and
+physics, each between the clock and the statistics as it is built.
+
+- **The tick is the clock.** Each tick advances the region clock by
+  exactly one step, never by the time measured since the last one, so a
+  region's elapsed time is `ticks × step` on every machine.
+- **The step is a decision, not the reference's.** A live simulator steps
+  physics at 45 frames a second; the fake grid's `DEFAULT_STEP` is 100 ms,
+  because a grid in every test of a suite ticking at 45 Hz is many
+  wake-ups for nothing, and 100 ms is still finer than anything the grid
+  reports on a cadence. `RegionConfig::heartbeat` takes a
+  `HeartbeatConfig`: `running(step)` for a coarser or a finer clock,
+  `stepped(step)` for one that never ticks by itself. A zero step is
+  refused when the grid starts (`Error::ZeroHeartbeatStep`).
+- **A test steps it.** `FakeGrid::advance_one_tick(region)` runs one tick
+  and returns the `Tick` — its number, the region clock, and the
+  statistics it sent, if they were due — so a case says "run three ticks"
+  and asserts instead of sleeping. `FakeGrid::ticks(region)` watches them.
+- **The statistics are the region's.** A session no longer sends
+  `SimStats` on a timer of its own (`RegionTelemetry::stats_interval` is
+  `None`): the heartbeat sends them to every root agent in the region at
+  once, every statistics interval of the imitated grid rounded up to
+  whole steps, through `SimSession::send_region_stats`. Their time
+  dilation is the steps' simulated time over the grid clock's elapsed time
+  since the last statistics, held to `0..=1` (`TimeDilation`), and the
+  simulator and physics frame rates are the imitated grid's, scaled by it.
+  A tick that comes due while the last is still running is skipped, so a
+  region that falls behind runs fewer ticks, which its dilation then says.
+  A stepped region always keeps up: its clock is the test's.
+- **The lock order holds.** A tick serialises on the heartbeat's own lock,
+  which no session path takes; it never holds the region's world while it
+  sends, reads the session table and lets it go, and locks the sessions one
+  at a time in session order — so two runs send in the same order.
+
 ## As a library
 
 ```rust,ignore

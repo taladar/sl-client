@@ -2264,7 +2264,9 @@ impl ArrivalPolicy {
             z: 0.0,
         };
         sl_proto::RegionTelemetry {
-            stats_interval: self.stats_interval,
+            // The region's heartbeat sends them, every root agent in the region
+            // at once, with the dilation its ticks kept ([`crate::heartbeat`]).
+            stats_interval: None,
             stats: sl_proto::RegionStats {
                 grid_coordinates: identity.grid_coordinates,
                 region_flags: identity.region_flags,

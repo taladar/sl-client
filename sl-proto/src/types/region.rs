@@ -491,6 +491,39 @@ impl RegionStats {
     }
 }
 
+/// How much of real time a region's simulation kept up with: `1.0` when every
+/// step of its clock took no longer than the step itself, less when the
+/// simulator fell behind and its world ran slow.
+///
+/// The [`SimStatId::TimeDilation`] statistic, and the factor a simulator's
+/// frame rates are reported scaled by. Always in `0.0..=1.0`: a simulator
+/// that runs ahead of real time waits for it rather than reporting more than
+/// one.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+pub struct TimeDilation(f32);
+
+impl TimeDilation {
+    /// A region that kept up.
+    pub const NORMAL: Self = Self(1.0);
+
+    /// The dilation of a region whose clock advanced by `simulated` while
+    /// `elapsed` passed: their ratio, held to `0.0..=1.0`. No time passed is a
+    /// region that kept up.
+    #[must_use]
+    pub fn from_ratio(simulated: std::time::Duration, elapsed: std::time::Duration) -> Self {
+        if elapsed.is_zero() || simulated >= elapsed {
+            return Self::NORMAL;
+        }
+        Self(simulated.as_secs_f32() / elapsed.as_secs_f32())
+    }
+
+    /// The factor itself.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+}
+
 /// The simulator's world time and sun state, parsed from a
 /// `SimulatorViewerTimeMessage`.
 ///

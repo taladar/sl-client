@@ -5841,7 +5841,7 @@ mod test {
         };
         sim.set_region_telemetry(
             Some(RegionTelemetry {
-                stats_interval: Duration::from_secs(2),
+                stats_interval: Some(Duration::from_secs(2)),
                 stats: sl_proto::RegionStats {
                     grid_coordinates: sl_proto::GridCoordinates::new(1000, 1000),
                     region_flags: sl_proto::RegionFlags::from_bits(6),
@@ -5900,6 +5900,96 @@ mod test {
         Ok(())
     }
 
+    /// Telemetry with no stats interval sends no `SimStats` on its own; the
+    /// region's loop sends each one, its dilation stated and the two frame
+    /// rates scaled by it — and a child circuit is sent none of them.
+    #[test]
+    fn region_stats_sent_by_the_loop_carry_its_dilation() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+        let zero = sl_proto::Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        sim.set_region_telemetry(
+            Some(RegionTelemetry {
+                stats_interval: None,
+                stats: sl_proto::RegionStats {
+                    grid_coordinates: sl_proto::GridCoordinates::new(1000, 1000),
+                    region_flags: sl_proto::RegionFlags::from_bits(6),
+                    object_capacity: 15_000,
+                    region_flags_extended: Some(sl_proto::RegionFlags::from_bits(6)),
+                    stats: vec![
+                        (sl_proto::SimStatId::TimeDilation, 1.0),
+                        (sl_proto::SimStatId::SimFps, 44.0),
+                        (sl_proto::SimStatId::PhysicsFps, 44.0),
+                        (sl_proto::SimStatId::AgentUpdatesPerSecond, 3.0),
+                    ],
+                },
+                time_interval: Duration::from_secs(3600),
+                time: sl_proto::SimulatorTime {
+                    usec_since_start: 0,
+                    sec_per_day: 14_400,
+                    sec_per_year: 158_400,
+                    sun_direction: zero.clone(),
+                    sun_phase: 1.0,
+                    sun_ang_velocity: zero,
+                },
+                coarse_interval: None,
+                coarse_rounding: sl_proto::CoarseRounding::Nearest,
+            }),
+            now,
+        );
+
+        let mut timed = 0_u32;
+        for second in 1..=10_u64 {
+            let step = after(now, second.saturating_mul(1_000))?;
+            sim.handle_timeout(step);
+            client.handle_timeout(step);
+            pump(&mut client, &mut sim, step)?;
+            for event in drain_client(&mut client) {
+                if matches!(event, Event::SimStats(_)) {
+                    timed = timed.saturating_add(1);
+                }
+            }
+        }
+        assert_eq!(
+            timed, 0,
+            "the session sent statistics on a timer of its own"
+        );
+
+        let step = after(now, 11_000)?;
+        let dilation =
+            sl_proto::TimeDilation::from_ratio(Duration::from_millis(500), Duration::from_secs(1));
+        assert!(sim.send_region_stats(dilation, step)?);
+        pump(&mut client, &mut sim, step)?;
+        let sent: Vec<_> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::SimStats(stats) => Some(stats.stats),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            sent,
+            vec![vec![
+                (sl_proto::SimStatId::TimeDilation, 0.5),
+                (sl_proto::SimStatId::SimFps, 22.0),
+                (sl_proto::SimStatId::PhysicsFps, 22.0),
+                (sl_proto::SimStatId::AgentUpdatesPerSecond, 3.0),
+            ]]
+        );
+
+        sim.make_child_agent();
+        assert!(
+            !sim.send_region_stats(sl_proto::TimeDilation::NORMAL, step)?,
+            "a child circuit carries no region telemetry"
+        );
+        Ok(())
+    }
+
     /// A simulator given a coarse interval lists the other avatars it was
     /// told of and then the agent itself, where it arrived, with `You` on
     /// that last entry — and each entry cut down to whole metres and a
@@ -5931,7 +6021,7 @@ mod test {
         };
         sim.set_region_telemetry(
             Some(RegionTelemetry {
-                stats_interval: Duration::from_secs(3600),
+                stats_interval: Some(Duration::from_secs(3600)),
                 stats: sl_proto::RegionStats {
                     grid_coordinates: sl_proto::GridCoordinates::new(1000, 1000),
                     region_flags: sl_proto::RegionFlags::from_bits(6),

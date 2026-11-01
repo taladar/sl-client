@@ -232,7 +232,7 @@ use crate::types::{
     ScriptPermissions, ScriptTeleportRequest, ServerError, SetDisplayNameReply, SimWideDeleteFlags,
     SimulatorTime, SoundFlags, SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryItem,
     TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType,
-    TerrainPatch, TextureEntry, Throttle, TransactionFlags, TransferStatus, Transmit,
+    TerrainPatch, TextureEntry, Throttle, TimeDilation, TransactionFlags, TransferStatus, Transmit,
     UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, Wearable,
     WearableType,
 };
@@ -779,8 +779,10 @@ pub struct WindFeed {
 /// ([`SimSession::set_region_telemetry`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RegionTelemetry {
-    /// How far apart the `SimStats` messages are.
-    pub stats_interval: Duration,
+    /// How far apart the `SimStats` messages are, or `None` when the session
+    /// sends none on its own: a simulator with a loop of its own sends each
+    /// one as its loop decides, through [`SimSession::send_region_stats`].
+    pub stats_interval: Option<Duration>,
     /// The statistics every one of them carries.
     pub stats: RegionStats,
     /// How far apart the `SimulatorViewerTimeMessage`s are.
@@ -4816,9 +4818,9 @@ impl SimSession {
         self.telemetry = telemetry.map(|telemetry| {
             let first = root.then(|| deadline(now, TELEMETRY_FIRST_DELAY));
             Box::new(ArmedTelemetry {
+                stats_due: first.filter(|_| telemetry.stats_interval.is_some()),
                 telemetry,
                 since: now,
-                stats_due: first,
                 time_due: first,
                 coarse_due: first,
             })
@@ -8527,6 +8529,47 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends the region's statistics ([`SimSession::set_region_telemetry`]) now,
+    /// as a simulator's own loop does when its stats are due, and says whether
+    /// it did.
+    ///
+    /// The statistics are the telemetry's, with
+    /// [`SimStatId::TimeDilation`](crate::SimStatId::TimeDilation) stated as
+    /// `dilation` and the two frame rates — the simulator's and its physics' —
+    /// scaled by it, which is what a simulator that fell behind reports. Sent
+    /// only to a **root** agent, as the timed ones are: a session with no
+    /// telemetry, a child circuit and a circuit not yet open are sent nothing,
+    /// and that is not an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns a wire error if the message fails to encode (more than 255
+    /// statistics).
+    pub fn send_region_stats(
+        &mut self,
+        dilation: TimeDilation,
+        now: Instant,
+    ) -> Result<bool, Error> {
+        if !matches!(self.agent_presence, AgentPresence::Root) || self.client_addr.is_none() {
+            return Ok(false);
+        }
+        let Some(armed) = self.telemetry.as_ref() else {
+            return Ok(false);
+        };
+        let mut stats = armed.telemetry.stats.clone();
+        for (id, value) in &mut stats.stats {
+            match id {
+                crate::SimStatId::TimeDilation => *value = dilation.get(),
+                crate::SimStatId::SimFps | crate::SimStatId::PhysicsFps => {
+                    *value *= dilation.get();
+                }
+                _ => {}
+            }
+        }
+        self.send_sim_stats(&stats, now)?;
+        Ok(true)
+    }
+
     /// Sends a `SimulatorViewerTimeMessage` carrying the simulator's world clock
     /// and sun state (the inverse of the client's
     /// [`Event::SimulatorTime`](crate::Event::SimulatorTime)), so the client can
@@ -11672,7 +11715,7 @@ impl SimSession {
                 self.send_agent_movement_complete(now)?;
                 if let Some(armed) = self.telemetry.as_mut() {
                     let first = Some(deadline(now, TELEMETRY_FIRST_DELAY));
-                    armed.stats_due = first;
+                    armed.stats_due = first.filter(|_| armed.telemetry.stats_interval.is_some());
                     armed.time_due = first;
                     armed.coarse_due = first;
                 }
@@ -14321,8 +14364,10 @@ impl SimSession {
         let Some(mut armed) = self.telemetry.take() else {
             return;
         };
-        if armed.stats_due.is_some_and(|due| now >= due) {
-            armed.stats_due = Some(deadline(now, armed.telemetry.stats_interval));
+        if let Some(interval) = armed.telemetry.stats_interval
+            && armed.stats_due.is_some_and(|due| now >= due)
+        {
+            armed.stats_due = Some(deadline(now, interval));
             if let Err(error) = self.send_sim_stats(&armed.telemetry.stats, now) {
                 tracing::warn!(%error, "failed to send the region's statistics");
             }

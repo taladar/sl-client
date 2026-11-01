@@ -563,7 +563,7 @@ pub use parcel::{
 pub use pathfinding::{NavMeshBuildStatus, NavMeshStatus};
 pub use region::{
     DEFAULT_TERRAIN_DETAIL_TEXTURES, RegionChatSettings, RegionCombatSettings, RegionIdentity,
-    RegionLimits, RegionStats, RegionTerrainComposition, SimStatId, SimulatorTime,
+    RegionLimits, RegionStats, RegionTerrainComposition, SimStatId, SimulatorTime, TimeDilation,
 };
 pub use report::Postcard;
 pub use script::{

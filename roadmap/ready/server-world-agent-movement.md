@@ -2,7 +2,7 @@
 id: server-world-agent-movement
 title: The agent never moves — AgentUpdate is decoded and ignored
 topic: server
-status: blocked
+status: ready
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 blocked_by: [server-world-heartbeat, gridspec-neighbours-crossing,

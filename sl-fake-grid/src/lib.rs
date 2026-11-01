@@ -21,6 +21,7 @@ pub mod gifts;
 pub mod god_powers;
 mod grabs;
 pub mod groups;
+pub mod heartbeat;
 mod http_answer;
 mod http_service;
 pub mod imitates;
@@ -69,6 +70,7 @@ pub use fixtures::{
 };
 pub use gifts::{AwayGift, GiftAnnouncement, GiftAnswers, GiftPolicy, OfferId};
 pub use groups::{GroupConfig, GroupsPolicy, InvitationForm, StockRoles};
+pub use heartbeat::{DEFAULT_STEP, HeartbeatConfig, HeartbeatMode, Tick, TickStats};
 pub use imitates::{
     AbsentTile, ChildSale, ContentsAudience, ContentsPolicy, CopiedSerial, DerezKill, DotName,
     EditEcho, EditPolicy, EmptyCells, EnvironmentChangeReply, EstatePolicy, GroupObjectTrash,

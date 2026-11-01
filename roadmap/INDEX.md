@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 129 |
-| ready | 331 |
-| blocked | 52 |
+| ready | 332 |
+| blocked | 50 |
 | in-progress | 18 |
 | bugs | 42 |
-| done | 1469 |
+| done | 1470 |
 | deferred | 30 |
 | wont-do | 24 |
 | **total** | **2095** |
@@ -329,7 +329,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-lsl-opensim-function-set`](ideas/gridspec-lsl-opensim-function-set.md)
   — Measure which library functions OpenSim's engines compile
 
-## ready (331)
+## ready (332)
 
 ### protocol
 
@@ -1110,10 +1110,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-fake-grid-terraform`](ready/server-fake-grid-terraform.md) — Fake
   grid — terraforming, undo and bake (blocked by `gridspec-terrain-editing`
   (done))
+- [`server-world-agent-movement`](ready/server-world-agent-movement.md) — The
+  agent never moves — AgentUpdate is decoded and ignored (blocked by
+  `server-world-heartbeat` (done), `gridspec-neighbours-crossing` (done),
+  `gridspec-agent-movement` (done))
+- [`server-world-determinism-contract`](ready/server-world-determinism-contract.md)
+  — Keep the fake grid reproducible once it runs scripts (blocked by
+  `server-world-heartbeat` (done))
 - [`server-world-ecs-store`](ready/server-world-ecs-store.md) — An ECS scene
   store for the region, in place of a Vec of objects
-- [`server-world-heartbeat`](ready/server-world-heartbeat.md) — A region
-  heartbeat — the fake grid has no simulation loop at all
 - [`server-world-touch-and-grab`](ready/server-world-touch-and-grab.md) — Touch
   routing — a click on a prim reaches nothing (blocked by
   `protocol-sim-script-messages` (done))
@@ -1126,7 +1131,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`gridspec-sl-mfa-challenge`](ready/gridspec-sl-mfa-challenge.md) — Record
   Second Life's MFA challenge and whether a remembered mfa_hash gets past it
 
-## blocked (52)
+## blocked (50)
 
 ### viewer
 
@@ -1261,7 +1266,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `gridspec-profiles` (done), `protocol-sim-profile-messages`)
 - [`server-fake-grid-script-engine-wiring`](blocked/server-fake-grid-script-engine-wiring.md)
   — Wire the script engine into the fake grid (blocked by
-  `server-lsl-vm-execution` (done), `server-world-heartbeat`,
+  `server-lsl-vm-execution` (done), `server-world-heartbeat` (done),
   `server-world-ecs-store`)
 - [`server-fake-grid-scripted-avatars`](blocked/server-fake-grid-scripted-avatars.md)
   — Scripted avatars — a client that grants, pays, sits and answers (blocked by
@@ -1276,19 +1281,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-lsl-lib-task-inventory`, `server-lsl-lib-math-rotations` (done),
   `server-lsl-lib-land-region-env`, `server-lsl-lib-prim-state`,
   `server-fake-grid-script-engine-wiring`)
-- [`server-world-agent-movement`](blocked/server-world-agent-movement.md) — The
-  agent never moves — AgentUpdate is decoded and ignored (blocked by
-  `server-world-heartbeat`, `gridspec-neighbours-crossing` (done),
-  `gridspec-agent-movement` (done))
 - [`server-world-changed-raisers`](blocked/server-world-changed-raisers.md) —
   Raise changed() from every grid-side cause, with the right bit (blocked by
   `server-fake-grid-script-engine-wiring`, `gridspec-lsl-events` (done))
 - [`server-world-collision-and-physics`](blocked/server-world-collision-and-physics.md)
   — Enough physics for the collision, target and volume-detect events (blocked
-  by `server-world-heartbeat`, `server-world-ecs-store`)
-- [`server-world-determinism-contract`](blocked/server-world-determinism-contract.md)
-  — Keep the fake grid reproducible once it runs scripts (blocked by
-  `server-world-heartbeat`)
+  by `server-world-heartbeat` (done), `server-world-ecs-store`)
 - [`server-world-link-sets`](blocked/server-world-link-sets.md) — A real
   link-set model — link numbers, root and children (blocked by
   `server-world-ecs-store`, `gridspec-object-link-delink` (done))
@@ -1297,8 +1295,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `server-world-ecs-store`, `gridspec-attachments` (done))
 - [`server-world-update-scheduling`](blocked/server-world-update-scheduling.md)
   — Batch world changes into per-tick update bursts (blocked by
-  `server-world-heartbeat`, `server-world-ecs-store`, `gridspec-circuit` (done),
-  `gridspec-object-update-stream` (done))
+  `server-world-heartbeat` (done), `server-world-ecs-store`, `gridspec-circuit`
+  (done), `gridspec-object-update-stream` (done))
 
 ### gridspec
 
@@ -1463,7 +1461,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1469)
+## done (1470)
 
 ### protocol
 
@@ -4558,6 +4556,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`server-world-chat-routing`](done/server-world-chat-routing.md) — The fake
   grid hears local chat and drops it
+- [`server-world-heartbeat`](done/server-world-heartbeat.md) — A region
+  heartbeat — the fake grid has no simulation loop at all
 
 ### gridspec
 

@@ -30,6 +30,7 @@ use crate::bakes::BakePolicy;
 use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump};
 use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
+use crate::heartbeat::{HeartbeatConfig, Tick};
 use crate::imitates::ImitatedGrid;
 use crate::inventory::{InventoryAnnouncement, LegacyUdpInventory, UploadAnnouncements};
 use crate::map_tiles::MapTileStore;
@@ -123,6 +124,10 @@ pub struct RegionConfig {
     /// Life's Full Regions share one product name over a range of land impact
     /// and agent limits. `None` for the product's own on the imitated grid.
     pub capacity: Option<crate::imitates::RegionCapacity>,
+    /// How the region's clock ticks ([`crate::heartbeat`]): every
+    /// [`DEFAULT_STEP`](crate::heartbeat::DEFAULT_STEP) by itself unless a test
+    /// asks for a coarser clock, a finer one, or one it steps by hand.
+    pub heartbeat: HeartbeatConfig,
 }
 
 impl RegionConfig {
@@ -180,6 +185,7 @@ impl Default for RegionConfig {
             simulator_version: None,
             product: ProductType::FullRegion,
             capacity: None,
+            heartbeat: HeartbeatConfig::default(),
         }
     }
 }
@@ -227,6 +233,9 @@ pub(crate) struct RegionEntry {
     /// Publishes every change a session makes to [`world`](Self::world), so
     /// the region's *other* sessions can stream it to their viewers.
     pub(crate) changes: broadcast::Sender<crate::world::RegionUpdate>,
+    /// The region's own clock and the loop that ticks it
+    /// ([`crate::heartbeat`]).
+    pub(crate) heartbeat: crate::heartbeat::Heartbeat,
 }
 
 impl RegionEntry {
@@ -2182,6 +2191,7 @@ impl FakeGridBuilder {
             return Err(Error::NoRegions);
         }
         check_duplicates(&self.accounts, &self.regions)?;
+        check_heartbeats(&self.regions)?;
         let minter = self.minter.clone();
         for account in &self.accounts {
             if let Some(region) = &account.start_region
@@ -2256,12 +2266,18 @@ impl FakeGridBuilder {
                 fixtures.region_info = self.imitates.region_info_policy();
                 let world = Arc::new(parking_lot::Mutex::new(fixtures));
                 let (changes, _) = broadcast::channel(REGION_CHANGES_CHANNEL_CAPACITY);
+                let heartbeat = crate::heartbeat::Heartbeat::new(
+                    config.heartbeat,
+                    self.imitates.arrival_policy().stats_interval,
+                    (self.clock)(),
+                );
                 RegionEntry {
                     config,
                     region_id,
                     scenario,
                     world,
                     changes,
+                    heartbeat,
                 }
             })
             .collect::<Vec<RegionEntry>>();
@@ -2465,6 +2481,10 @@ impl FakeGridBuilder {
                 crate::http_service::Host::Assets,
             ));
         }
+        // Every region ticks from the start, with or without anybody in it.
+        for index in 0..core.regions.len() {
+            tokio::spawn(crate::heartbeat::run_heartbeat(Arc::clone(&core), index));
+        }
         Ok(FakeGrid { core })
     }
 }
@@ -2479,6 +2499,19 @@ const LOGINS_CHANNEL_CAPACITY: usize = 32;
 /// The watchers only ever fall behind a burst of rezzes, and this is deeper
 /// than any burst a fixture makes.
 const REGION_CHANGES_CHANNEL_CAPACITY: usize = 256;
+
+/// Rejects a region whose clock would never advance: a zero step.
+fn check_heartbeats(regions: &[RegionConfig]) -> Result<(), Error> {
+    match regions
+        .iter()
+        .find(|region| region.heartbeat.step.is_zero())
+    {
+        Some(region) => Err(Error::ZeroHeartbeatStep {
+            region: region.name.clone(),
+        }),
+        None => Ok(()),
+    }
+}
 
 /// Rejects duplicate account and region names.
 fn check_duplicates(accounts: &[AccountConfig], regions: &[RegionConfig]) -> Result<(), Error> {
@@ -2832,6 +2865,50 @@ impl FakeGrid {
             })
             .await;
         Ok(destination)
+    }
+
+    /// Runs one tick of the region called `region` ([`crate::heartbeat`]) and
+    /// says what it did — how a test moves a
+    /// [stepped](crate::heartbeat::HeartbeatMode::Stepped) region's clock.
+    ///
+    /// A running region can be ticked this way too; the tick is one more of
+    /// its own, in order with the rest.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownRegion`] when the grid has no region by that name.
+    pub async fn advance_one_tick(&self, region: &str) -> Result<Tick, Error> {
+        let index = self.region_index(region)?;
+        crate::heartbeat::beat(&self.core, index)
+            .await
+            .ok_or_else(|| Error::UnknownRegion {
+                region: region.to_owned(),
+            })
+    }
+
+    /// Watches the ticks of the region called `region`: the receiver holds
+    /// the latest, and is told of every one after.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownRegion`] when the grid has no region by that name.
+    pub fn ticks(&self, region: &str) -> Result<watch::Receiver<Tick>, Error> {
+        let index = self.region_index(region)?;
+        self.core
+            .region(index)
+            .map(|entry| entry.heartbeat.subscribe())
+            .ok_or_else(|| Error::UnknownRegion {
+                region: region.to_owned(),
+            })
+    }
+
+    /// The index of the region called `region`.
+    fn region_index(&self, region: &str) -> Result<usize, Error> {
+        self.core
+            .region_by_name(region)
+            .ok_or_else(|| Error::UnknownRegion {
+                region: region.to_owned(),
+            })
     }
 
     /// Shuts the grid down: the accept loop, every session pump, and every

@@ -247,13 +247,16 @@ names.
 product, data centre, CPU class and billable factor, the second handshake down
 a child circuit, the `HealthMessage` and the `AgentStateUpdate`, and the
 region's periodic telemetry — `SimSession::set_region_telemetry`, which sends
-a root agent `SimStats` and the time message at the two intervals given and
-stops when the agent becomes a child. Both flavours now open an arrival with
-the `AgentDataUpdate` the live grids send, and answer a request for another.
+a root agent the time message at the interval given and stops when the agent
+becomes a child. The `SimStats` go out on the region's own clock instead
+(`server-world-heartbeat`): every root agent in the region at once, at the
+flavour's interval rounded up to whole heartbeat steps. Both flavours now open
+an arrival with the `AgentDataUpdate` the live grids send, and answer a
+request for another.
 
-The statistics are an idle region's (time dilation 1, each grid's own frame
-rate, the rest zero) and the sun does not move: a region clock that things
-happen on is `server-world-heartbeat`.
+The statistics are an idle region's (each grid's own frame rate, the rest
+zero) with the time dilation the heartbeat measured and the frame rates scaled
+by it; the sun does not move.
 
 A region configured as a Homestead or an Openspace keeps that product's name
 on either flavour; only the stock Full Region takes the flavour's.

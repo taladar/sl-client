@@ -19,6 +19,13 @@ pub enum Error {
     /// The builder was asked to start a grid with no regions.
     #[error("a fake grid needs at least one region")]
     NoRegions,
+    /// A region's heartbeat was given a zero step, which would never advance
+    /// its clock ([`HeartbeatConfig::step`](crate::heartbeat::HeartbeatConfig::step)).
+    #[error("region {region:?} has a heartbeat step of zero")]
+    ZeroHeartbeatStep {
+        /// The region's name.
+        region: String,
+    },
     /// The builder was given a duplicate account or region name.
     #[error("duplicate {kind} {name:?}")]
     Duplicate {

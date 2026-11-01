@@ -2,7 +2,7 @@
 id: server-world-heartbeat
 title: A region heartbeat — the fake grid has no simulation loop at all
 topic: server
-status: ready
+status: done
 origin: LSL-on-the-fake-grid audit (2026-09-20)
 points: 8
 refs: [server-world-determinism-contract, server-world-update-scheduling,
@@ -61,3 +61,40 @@ Acceptance: a region with no client connected still ticks; a test can
 advance the tick deterministically and observe a `SimStats` per tick with
 a plausible dilation; and the existing offline conformance cases pass
 with the heartbeat running.
+
+## As built (2026-11-01)
+
+`sl_fake_grid::heartbeat`: one task per region, spawned when the grid starts
+and ticking with nobody in it. A tick serialises on the heartbeat's own pulse
+lock (no session path takes it), advances the region clock by exactly one
+step, and, every statistics interval of the imitated grid rounded up to whole
+steps, sends `SimStats` to every root agent in the region in session order —
+the session table read and released first, then each session locked in turn,
+never the region's world. The per-session `SimStats` timer is gone from the
+fake grid (`RegionTelemetry::stats_interval: Option<Duration>`, `None` there);
+`SimSession::send_region_stats(TimeDilation, now)` states the dilation and
+scales the simulator and physics frame rates by it, root agents only.
+
+- The step: `DEFAULT_STEP` = 100 ms, on `RegionConfig::heartbeat`
+  (`HeartbeatConfig::running(step)` / `stepped(step)`); a zero step is
+  `Error::ZeroHeartbeatStep` at start.
+- Dilation (`sl_proto::TimeDilation`, held to `0..=1`): ticks × step over the
+  grid clock's elapsed time since the last statistics; a tick due while the
+  last still runs is skipped (`MissedTickBehavior::Skip`), so falling behind
+  shows. A stepped region reports 1.0.
+- `FakeGrid::advance_one_tick(region) -> Tick` (number, region time, the
+  statistics sent) and `FakeGrid::ticks(region)` (a `watch` of the latest).
+- Tests: `sl-fake-grid/tests/heartbeat.rs` (an empty region ticks; a stepped
+  region sends nothing until ticked, then one `SimStats` per tick with
+  dilation 1; zero step and unknown region refused), the sl-proto
+  `region_stats_sent_by_the_loop_carry_its_dilation`, and the existing
+  offline conformance cases and fake-grid suites with the heartbeat running.
+
+Steps 2–4 of the tick (the script slice, movement and physics, collecting the
+tick's changes for an update scheduler) slot in between the clock and the
+statistics as [[server-fake-grid-script-engine-wiring]],
+[[server-world-agent-movement]], [[server-world-collision-and-physics]] and
+[[server-world-update-scheduling]] build them; each already lists this task
+as its blocker. `SimulatorViewerTimeMessage` and `CoarseLocationUpdate` stay
+on the session's timer until a region clock has something of its own to say
+in them (the sun still does not move).
