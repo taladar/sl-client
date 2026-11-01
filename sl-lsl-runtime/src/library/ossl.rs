@@ -19,9 +19,10 @@ use sl_types::lsl::{Rotation, Vector};
 
 use crate::cast::element_to_string;
 use crate::format;
+use crate::library::collation::{self, Case, OutOfRange};
 use crate::library::dotnet::is_uuid;
 use crate::library::text::Text;
-use crate::library::{CallError, Exception, Key, PureCtx, ThreatLevel};
+use crate::library::{CallError, Exception, Key, PureCtx, ThreatLevel, lists};
 use crate::value::Element;
 use crate::vm::comms::ListenFilter;
 use crate::vm::ossl::warn;
@@ -776,6 +777,227 @@ pub fn os_string_replace<C: PureCtx>(
         return Ok(String::new());
     }
     Ok(text.replace(&old, &new))
+}
+
+/// .NET's UTF-16 code units of `text`, which the culture-sensitive search
+/// works on.
+fn utf16(text: &str) -> Vec<u16> {
+    text.encode_utf16().collect()
+}
+
+/// The case mode an OSSL search's `ignorecase` argument picks: any value
+/// but 0 ignores case.
+const fn case_of(ignore_case: i32) -> Case {
+    if ignore_case == 0 {
+        Case::Sensitive
+    } else {
+        Case::Ignored
+    }
+}
+
+/// OpenSim's start and count for a ranged search: nothing from a start at
+/// or past the end; a negative start is 0; a count that is not positive, or
+/// reaches past the end, is the rest of the string.
+fn clamped_range(total: i32, start: i32, count: i32) -> Option<(i32, i32)> {
+    if start >= total {
+        return None;
+    }
+    let start = start.max(0);
+    let left = total.saturating_sub(start);
+    let count = if count <= 0 || count > left {
+        left
+    } else {
+        count
+    };
+    Some((start, count))
+}
+
+/// A search's answer, or the exception .NET threw for its range.
+fn searched(
+    id: crate::library::BuiltinId,
+    found: Result<i32, OutOfRange>,
+) -> Result<i32, CallError> {
+    found.map_err(|OutOfRange| CallError::Exception {
+        id,
+        exception: Exception::CountOutOfRange,
+    })
+}
+
+/// `osStringStartsWith`: whether `text` starts with `value` as the en-US
+/// culture compares (`library::collation`), folding case unless
+/// `ignore_case` is 0; 0 when either is empty.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn os_string_starts_with<C: PureCtx>(
+    _ctx: &mut C,
+    text: String,
+    value: String,
+    ignore_case: i32,
+) -> Result<i32, CallError> {
+    if text.is_empty() || value.is_empty() {
+        return Ok(0);
+    }
+    Ok(i32::from(collation::starts_with(
+        &utf16(&text),
+        &utf16(&value),
+        case_of(ignore_case),
+    )))
+}
+
+/// `osStringEndsWith`: [`os_string_starts_with`] at the end.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn os_string_ends_with<C: PureCtx>(
+    _ctx: &mut C,
+    text: String,
+    value: String,
+    ignore_case: i32,
+) -> Result<i32, CallError> {
+    if text.is_empty() || value.is_empty() {
+        return Ok(0);
+    }
+    Ok(i32::from(collation::ends_with(
+        &utf16(&text),
+        &utf16(&value),
+        case_of(ignore_case),
+    )))
+}
+
+/// `osStringIndexOf`: where `value` first starts in `text` as the en-US
+/// culture compares, in UTF-16 units; -1 when either is empty.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn os_string_index_of<C: PureCtx>(
+    _ctx: &mut C,
+    text: String,
+    value: String,
+    ignore_case: i32,
+) -> Result<i32, CallError> {
+    if text.is_empty() || value.is_empty() {
+        return Ok(-1);
+    }
+    let text = utf16(&text);
+    let length = i32::try_from(text.len()).unwrap_or(i32::MAX);
+    searched(
+        crate::library::BuiltinId::OsStringIndexOf2,
+        collation::index_of(&text, &utf16(&value), 0, length, case_of(ignore_case)),
+    )
+}
+
+/// `osStringIndexOf(src, value, start, count, ignorecase)`: the search
+/// within `count` units from `start`, both clamped to the string
+/// (`clamped_range`); -1 from a start at or past its end.
+///
+/// # Errors
+///
+/// None that OpenSim's clamping lets through; the signature is the
+/// library's.
+pub fn os_string_index_of_range<C: PureCtx>(
+    _ctx: &mut C,
+    text: String,
+    value: String,
+    start: i32,
+    count: i32,
+    ignore_case: i32,
+) -> Result<i32, CallError> {
+    if text.is_empty() || value.is_empty() {
+        return Ok(-1);
+    }
+    let text = utf16(&text);
+    let total = i32::try_from(text.len()).unwrap_or(i32::MAX);
+    let Some((start, count)) = clamped_range(total, start, count) else {
+        return Ok(-1);
+    };
+    searched(
+        crate::library::BuiltinId::OsStringIndexOf,
+        collation::index_of(&text, &utf16(&value), start, count, case_of(ignore_case)),
+    )
+}
+
+/// `osStringLastIndexOf`: where `value` last starts in `text` as the en-US
+/// culture compares; -1 when either is empty.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn os_string_last_index_of<C: PureCtx>(
+    _ctx: &mut C,
+    text: String,
+    value: String,
+    ignore_case: i32,
+) -> Result<i32, CallError> {
+    if text.is_empty() || value.is_empty() {
+        return Ok(-1);
+    }
+    let text = utf16(&text);
+    let length = i32::try_from(text.len()).unwrap_or(i32::MAX);
+    searched(
+        crate::library::BuiltinId::OsStringLastIndexOf2,
+        collation::last_index_of(
+            &text,
+            &utf16(&value),
+            length.saturating_sub(1),
+            length,
+            case_of(ignore_case),
+        ),
+    )
+}
+
+/// `osStringLastIndexOf(src, value, start, count, ignorecase)`: OpenSim
+/// clamps `start` and `count` as for a forward search (`clamped_range`)
+/// and hands them to `String.LastIndexOf`, which reads the start as where
+/// its search **ends** and counts back from there — so `count` units back
+/// from `start` must fit, which they do only from a start at or past the
+/// middle of the string (`ossl/strings`).
+///
+/// # Errors
+///
+/// [`Exception::CountOutOfRange`] where they do not: from a start of 0 in
+/// any string longer than one unit.
+pub fn os_string_last_index_of_range<C: PureCtx>(
+    _ctx: &mut C,
+    text: String,
+    value: String,
+    start: i32,
+    count: i32,
+    ignore_case: i32,
+) -> Result<i32, CallError> {
+    if text.is_empty() || value.is_empty() {
+        return Ok(-1);
+    }
+    let text = utf16(&text);
+    let total = i32::try_from(text.len()).unwrap_or(i32::MAX);
+    let Some((start, count)) = clamped_range(total, start, count) else {
+        return Ok(-1);
+    };
+    searched(
+        crate::library::BuiltinId::OsStringLastIndexOf,
+        collation::last_index_of(&text, &utf16(&value), start, count, case_of(ignore_case)),
+    )
+}
+
+/// `osListSortInPlace`: `llListSort`'s OpenSim sort of the list, ascending
+/// only for an `ascending` of exactly 1, written into the list object it was
+/// handed (`ScriptCtx::write_back`) — which the compiler stores back into
+/// the variable passed, when one was.
+///
+/// # Errors
+///
+/// None; the signature is the library's.
+pub fn os_list_sort_in_place(
+    ctx: &mut ScriptCtx<'_>,
+    list: Vec<Element>,
+    stride: i32,
+    ascending: i32,
+) -> Result<(), CallError> {
+    ctx.write_back(lists::os_sort(&list, stride, ascending == 1));
+    Ok(())
 }
 
 /// `osSHA256`: the SHA-256 of the text's UTF-8 bytes, in lower-case hex.

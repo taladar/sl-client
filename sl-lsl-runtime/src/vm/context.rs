@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use core::time::Duration;
 
 use crate::num::ticks_for;
+use crate::value::Element;
 use crate::vm::comms::{LinkMessage, Listens};
 use crate::vm::detected::Detected;
 use crate::vm::economy::TransactionResult;
@@ -212,6 +213,10 @@ pub struct ScriptCtx<'host> {
     memory: &'host mut Memory,
     /// What the script's call stack holds as the call is made.
     stack: Stack,
+    /// The list a function changed its first argument to, as OpenSim's
+    /// library changes the list object it is handed (`osListSortInPlace`);
+    /// the compiler stores it back into the variable that was passed.
+    written_back: Option<Vec<Element>>,
 }
 
 impl<'host> ScriptCtx<'host> {
@@ -235,6 +240,7 @@ impl<'host> ScriptCtx<'host> {
             request: None,
             memory,
             stack,
+            written_back: None,
         }
     }
 
@@ -527,6 +533,17 @@ impl<'host> ScriptCtx<'host> {
     /// The effect requested, taken once by the VM.
     pub(crate) const fn take_request(&mut self) -> Option<Request> {
         self.request.take()
+    }
+
+    /// Hands the caller's list variable `list` in place of what was passed:
+    /// the function changed the list object itself.
+    pub(crate) fn write_back(&mut self, list: Vec<Element>) {
+        self.written_back = Some(list);
+    }
+
+    /// The list the function changed its first argument to, if it did.
+    pub(crate) const fn take_written_back(&mut self) -> Option<Vec<Element>> {
+        self.written_back.take()
     }
 }
 

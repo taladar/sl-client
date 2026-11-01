@@ -152,8 +152,11 @@ pub fn ll_sub_string_index<C: PureCtx>(
     }
     let text = Text::new(flavour, &text);
     let pattern = Text::new(flavour, &pattern);
+    // A search from the start never runs past the end.
     Ok(text
         .find_as_grid(pattern.units(), 0)
+        .ok()
+        .flatten()
         .map_or(-1, |at| i32::try_from(at).unwrap_or(i32::MAX)))
 }
 

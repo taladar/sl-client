@@ -1534,10 +1534,16 @@ impl<'source> Lowerer<'source> {
         }
         match target {
             Target::User(id) => self.emit(Instr::CallFunction(id), span),
-            Target::Builtin(id) => {
-                self.emit(Instr::CallBuiltin(id), span);
-                self.pad_pay_buttons(id, args, span);
-            }
+            Target::Builtin(id) => match self.sorted_in_place(id, args) {
+                Some(variable) => {
+                    self.emit(Instr::CallBuiltinWriteBack(id), span);
+                    self.store(variable, span);
+                }
+                None => {
+                    self.emit(Instr::CallBuiltin(id), span);
+                    self.pad_pay_buttons(id, args, span);
+                }
+            },
         }
         ret.map_or(Ty::Void, Ty::Value)
     }
@@ -1603,23 +1609,43 @@ impl<'source> Lowerer<'source> {
         if id != BuiltinId::LlSetPayPrice || !matches!(self.dialect, Dialect::OpenSim) {
             return;
         }
-        let Some(Expr::Variable(name)) = args.get(1) else {
+        let Some(lvalue) = args.get(1).and_then(|arg| self.list_variable(arg)) else {
             return;
+        };
+        self.load(lvalue, span);
+        self.emit(Instr::PadPayButtons, span);
+        self.store(lvalue, span);
+    }
+
+    /// OpenSim's `osListSortInPlace` sorts the list object it is given
+    /// (`LSL_Types.list.SortInPlace`), so a list variable passed to it holds
+    /// the sorted list after the call (`ossl/strings`, both engines): the
+    /// variable that was passed, when the first argument is one. As for
+    /// [`Self::pad_pay_buttons`], OpenSim's other references to the same
+    /// list are copies here.
+    fn sorted_in_place(&self, id: BuiltinId, args: &[Expr]) -> Option<LValue> {
+        if id != BuiltinId::OsListSortInPlace || !matches!(self.dialect, Dialect::OpenSim) {
+            return None;
+        }
+        args.first().and_then(|arg| self.list_variable(arg))
+    }
+
+    /// The list variable `arg` names, if it is a bare variable of type list.
+    fn list_variable(&self, arg: &Expr) -> Option<LValue> {
+        let Expr::Variable(name) = arg else {
+            return None;
         };
         let place = match self.resolve(&name.name) {
             Some(Resolved::Local(slot, TypeName::List)) => Place::Local(slot, TypeName::List),
             Some(Resolved::Global(slot, TypeName::List)) => Place::Global(slot, TypeName::List),
             Some(Resolved::Local(..) | Resolved::Global(..) | Resolved::Constant(_)) | None => {
-                return;
+                return None;
             }
         };
-        let lvalue = LValue {
+        Some(LValue {
             place,
             member: None,
-        };
-        self.load(lvalue, span);
-        self.emit(Instr::PadPayButtons, span);
-        self.store(lvalue, span);
+        })
     }
 
     /// `[a, b, …]`: elements left to right, none a list or void.

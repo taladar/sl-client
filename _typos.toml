@@ -34,6 +34,10 @@ extend-exclude = [
   "sl-lsl-runtime/opensim/ScriptSyntax.xml",
   "sl-lsl-runtime/opensim/osslDefaultEnable.ini",
   "sl-lsl-runtime/opensim/LICENSE-OpenSim.txt",
+  # Mono's en-US collation data and the searches it answered, written by
+  # sl-lsl-runtime/mono/dump_collation.cs: hex code units, not words.
+  "sl-lsl-runtime/mono/culture-en-us.txt",
+  "sl-lsl-runtime/mono/collation-cases.txt",
 ]
 
 [default]
@@ -56,6 +60,10 @@ extend-ignore-re = [
   # misspelling included: the engine imitates the words a script's error line
   # carries, so they are cited exactly, not corrected.
   "All unsafe OSSL funtions disabled",
+  # A percent-encoded string (an `llUnescapeURL` argument in a probe, built
+  # so the source stays ASCII: `caf%C3%A9` is `café`) is one word to a
+  # reader; the tokenizer would cut a fragment such as `caf` out of it.
+  "[A-Za-z0-9]*(%[0-9A-Fa-f]{2})+[A-Za-z0-9%]*",
 ]
 
 [default.extend-words]

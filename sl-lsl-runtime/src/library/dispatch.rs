@@ -126,6 +126,16 @@ pub enum Exception {
     /// expression (`osMatchString`, `osReplaceString`). .NET's own message
     /// names what the parser tripped on; this one says only that it did.
     InvalidPattern,
+    /// `System.ArgumentOutOfRangeException` from `String.LastIndexOf` with a
+    /// count reaching back past the string's start: `osStringLastIndexOf`
+    /// from a start before the middle of the string (`ossl/strings` on both
+    /// OpenSim engines). Mono's message is two lines, the second naming the
+    /// parameter.
+    CountOutOfRange,
+    /// `System.ArgumentOutOfRangeException` from `String.IndexOf` with a
+    /// start past the string's end: OpenSim's `llParseString2List` going on
+    /// after a delimiter that matched an expansion at the end (`ae` in `æ`).
+    StartIndexOutOfRange,
 }
 
 impl Exception {
@@ -141,6 +151,7 @@ impl Exception {
             }
             Self::FormatIndex | Self::FormatInvalid => "FormatException",
             Self::InvalidPattern => "ArgumentException",
+            Self::CountOutOfRange | Self::StartIndexOutOfRange => "ArgumentOutOfRangeException",
         }
     }
 
@@ -161,6 +172,14 @@ impl Exception {
             }
             Self::FormatInvalid => "Input string was not in a correct format.",
             Self::InvalidPattern => "The pattern is not a regular expression.",
+            Self::CountOutOfRange => {
+                "Count must be positive and count must refer to a location within the \
+                 string/array/collection.\nParameter name: count"
+            }
+            Self::StartIndexOutOfRange => {
+                "Index was out of range. Must be non-negative and less than the size of the \
+                 collection.\nParameter name: startIndex"
+            }
         }
     }
 }

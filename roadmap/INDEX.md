@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 52 |
 | in-progress | 18 |
 | bugs | 41 |
-| done | 1466 |
+| done | 1467 |
 | deferred | 29 |
 | wont-do | 24 |
-| **total** | **2093** |
+| **total** | **2094** |
 
 ## ideas (132)
 
@@ -310,8 +310,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   LSO-targeted script in LSO's 16 KB, as Second Life does
 - [`server-lsl-luau-compiler`](ideas/server-lsl-luau-compiler.md) — Compile the
   Luau target as Second Life does
-- [`server-lsl-ossl-culture-strings`](ideas/server-lsl-ossl-culture-strings.md)
-  — OSSL's culture-sensitive string search and in-place list sort
+- [`server-lsl-opensim-shared-lists`](ideas/server-lsl-opensim-shared-lists.md)
+  — OpenSim's lists are shared objects — a change in place shows through every
+  copy
 - [`server-map-service`](ideas/server-map-service.md) — Map service — tiles and
   map items
 - [`server-message-routing`](ideas/server-message-routing.md) — Global message
@@ -1466,7 +1467,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-unbounded-waits-in-test-harnesses`](bugs/test-unbounded-waits-in-test-harnesses.md)
   — Test harnesses still hold waits that nothing bounds
 
-## done (1466)
+## done (1467)
 
 ### protocol
 
@@ -4537,6 +4538,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `gridspec-lsl-memory-limits` (done))
 - [`server-lsl-memory-sizes`](done/server-lsl-memory-sizes.md) — Measure Second
   Life's per-value memory costs and rotation arithmetic on aditi
+- [`server-lsl-ossl-culture-strings`](done/server-lsl-ossl-culture-strings.md) —
+  OSSL's culture-sensitive string search and in-place list sort
 - [`server-lsl-runtime-errors`](done/server-lsl-runtime-errors.md) — Run-time
   errors where a resident can see them (blocked by `server-lsl-vm-execution`
   (done))

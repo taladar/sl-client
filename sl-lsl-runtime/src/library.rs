@@ -22,6 +22,7 @@
 //! [`status`], and a test prints the counts and fails if a function falls
 //! back from the committed baseline (`library/coverage.txt`).
 
+pub(crate) mod collation;
 pub mod comms;
 pub mod control;
 pub mod detection;

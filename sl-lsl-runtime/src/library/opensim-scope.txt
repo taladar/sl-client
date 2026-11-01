@@ -38,6 +38,7 @@ in osGetTerrainHeight
 in osIsNotValidNumber
 in osIsUUID
 in osListenRegex
+in osListSortInPlace
 in osMatchString
 in osMax
 in osMessageObject
@@ -46,16 +47,20 @@ in osMovePen
 in osRegexIsMatch
 in osReplaceString
 in osRound
-in osSHA256
 in osSetFontName
 in osSetFontSize
 in osSetPenCap
 in osSetPenColor
 in osSetPenColour
 in osSetPenSize
+in osSHA256
 in osSlerp
+in osStringEndsWith
+in osStringIndexOf
+in osStringLastIndexOf
 in osStringRemove
 in osStringReplace
+in osStringStartsWith
 in osStringSubString
 in osSunGetParam
 in osTerrainGetHeight
@@ -220,11 +225,6 @@ later server-lsl-lib-physics-vehicles osVolumeDetect
 later server-lsl-lib-http-url osRequestSecureURL
 later server-lsl-lib-http-url osRequestURL
 later server-lsl-lib-http-url osSetContentType
-later server-lsl-ossl-culture-strings osListSortInPlace
-later server-lsl-ossl-culture-strings osStringEndsWith
-later server-lsl-ossl-culture-strings osStringIndexOf
-later server-lsl-ossl-culture-strings osStringLastIndexOf
-later server-lsl-ossl-culture-strings osStringStartsWith
 later server-fake-grid-dynamic-textures osGetDrawStringSize
 later server-fake-grid-dynamic-textures osSetDynamicTextureData
 later server-fake-grid-dynamic-textures osSetDynamicTextureDataBlend

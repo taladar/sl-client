@@ -105,7 +105,8 @@ sl-lsl-runtime/keywords_lsl_default.xml skipchecks=xml;;;vendored[[space]]upstre
 # The OSSL probes call the os*, ls* and mod* functions only OpenSim has, which
 # lslint (Second Life's library only) rejects as undeclared; the probe corpus
 # test compiles them instead, admitting what their `library: opensim` header
-# names. The leader and listeners of ossl/errors are plain LSL and stay linted.
+# names. The leader and listeners of ossl/errors, and the leader and parser of
+# ossl/strings, are plain LSL and stay linted.
 sl-lsl-runtime/probes/ossl/available.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
 sl-lsl-runtime/probes/ossl/errors/threat.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
 sl-lsl-runtime/probes/ossl/errors/listed.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
@@ -115,6 +116,7 @@ sl-lsl-runtime/probes/ossl/errors/deprecated.lsl skipchecks=lsl:::lslint;;;calls
 sl-lsl-runtime/probes/ossl/errors/shout.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
 sl-lsl-runtime/probes/ossl/errors/lightshare.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
 sl-lsl-runtime/probes/ossl/errors/mod.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
+sl-lsl-runtime/probes/ossl/strings/strings.lsl skipchecks=lsl:::lslint;;;calls[[space]]OpenSim-only[[space]]functions
 
 # A probe's notecards are test data whose whitespace is the measurement (a
 # line with spaces at both ends, a last line with no newline after it): unset
@@ -131,3 +133,7 @@ sl-lsl-runtime/probes/**/*.notecard -whitespace
 sl-lsl-runtime/opensim/ScriptSyntax.xml skipchecks=xml;;;vendored[[space]]upstream[[space]]content -whitespace
 sl-lsl-runtime/opensim/osslDefaultEnable.ini -whitespace
 sl-lsl-runtime/opensim/LICENSE-OpenSim.txt -whitespace
+
+# Mono's collation table (sl-lsl-runtime/mono/README.md), copied out of
+# mscorlib.dll byte for byte: binary data the script engine includes as it is.
+sl-lsl-runtime/mono/collation.core.bin binary

@@ -150,6 +150,12 @@ pub enum Instr {
     /// already of the type the table states. Pushes the return value unless
     /// the function returns nothing.
     CallBuiltin(BuiltinId),
+    /// `l a2 … an → l'`: call a library function that returns nothing but
+    /// changes the list object it is handed, as OpenSim's
+    /// `osListSortInPlace` does; pushes the list as the call left it (as it
+    /// was when the call did not run), for the lowering to store back into
+    /// the variable that was passed.
+    CallBuiltinWriteBack(BuiltinId),
     /// `a1 … an → [r]`: call a user function, as [`Self::CallBuiltin`].
     CallFunction(FunctionId),
     /// Leave a body that yields no value: an event handler, a function
@@ -426,6 +432,9 @@ impl Program {
             Instr::BuildRotation => "BuildRotation".to_owned(),
             Instr::BuildList(count) => format!("BuildList {count}"),
             Instr::CallBuiltin(id) => format!("CallBuiltin {}", id.descriptor().name),
+            Instr::CallBuiltinWriteBack(id) => {
+                format!("CallBuiltinWriteBack {}", id.descriptor().name)
+            }
             Instr::CallFunction(id) => format!(
                 "CallFunction {}",
                 self.function(id)

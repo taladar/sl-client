@@ -14,6 +14,7 @@ use sl_types::lsl::{Rotation, Vector};
 
 use crate::cast::element_to_string;
 use crate::format;
+use crate::library::collation::OutOfRange;
 use crate::library::dotnet::{is_uuid, parse_double};
 use crate::library::range::{
     os_delete_list, os_get, os_insert, os_replace, py, signed, sl_delete, sl_get, sl_get_pieces,
@@ -865,7 +866,7 @@ fn os_compare(left: &Element, right: &Element) -> core::cmp::Ordering {
 /// no multiple of it; a list of one type sorted outright; otherwise its
 /// pivot sort, which only ever exchanges elements of the pivot's type, so
 /// the places keep their types.
-fn os_sort(list: &[Element], stride: i32, ascending: bool) -> Vec<Element> {
+pub(crate) fn os_sort(list: &[Element], stride: i32, ascending: bool) -> Vec<Element> {
     let mut items = list.to_vec();
     let width = usize::try_from(stride.max(1)).unwrap_or(1);
     if items.len() <= width || !items.len().is_multiple_of(width) {
@@ -1352,15 +1353,22 @@ const SL_PARSE_LIMIT: usize = 8;
 /// over a later one (`["b", "bc"]` on `abcabc` gives `[a, ca, c]`); empty
 /// separators and spacers are ignored, and empty pieces kept only by
 /// `keep_nulls`. Second Life uses only the first eight of each list.
+///
+/// OpenSim's loop (`LSL_Api.ParseString`) searches with the grid's search
+/// (`Text::find_as_grid`): a delimiter found nowhere from one place is not
+/// looked for again, one found only at the very end (a delimiter of
+/// ignorable units) is no match, and the search goes on a delimiter's
+/// length after where it matched — which, where the match was an expansion
+/// (`ae` in `æ`), can be past the end, where .NET throws.
 fn parse_string(
     flavour: EngineFlavour,
     text: &str,
     separators: &[Element],
     spacers: &[Element],
     keep_nulls: bool,
-) -> Vec<Element> {
+) -> Result<Vec<Element>, OutOfRange> {
     if text.is_empty() && keep_nulls {
-        return vec![Element::String(String::new())];
+        return Ok(vec![Element::String(String::new())]);
     }
     let limit = if flavour.is_opensim() {
         usize::MAX
@@ -1378,15 +1386,21 @@ fn parse_string(
         .collect();
     let mut out = Vec::new();
     let mut from = 0_usize;
+    let mut alive = vec![true; delimiters.len()];
     loop {
-        let earliest = delimiters
-            .iter()
-            .filter_map(|(delimiter, kept)| {
-                source
-                    .find_as_grid(delimiter.units(), from)
-                    .map(|at| (at, delimiter, *kept))
-            })
-            .min_by_key(|(at, ..)| *at);
+        let mut earliest: Option<(usize, &Text, bool)> = None;
+        for ((delimiter, kept), alive) in delimiters.iter().zip(alive.iter_mut()) {
+            if !*alive {
+                continue;
+            }
+            match source.find_as_grid(delimiter.units(), from)? {
+                None => *alive = false,
+                Some(at) if at < earliest.map_or(source.len(), |(earliest_at, ..)| earliest_at) => {
+                    earliest = Some((at, delimiter, *kept));
+                }
+                Some(_) => {}
+            }
+        }
         let end = earliest.map_or(source.len(), |(at, ..)| at);
         let piece = source.units().get(from..end).unwrap_or_default();
         if keep_nulls || !piece.is_empty() {
@@ -1400,27 +1414,32 @@ fn parse_string(
         }
         from = at.saturating_add(delimiter.len());
     }
-    out
+    Ok(out)
+}
+
+/// The exception OpenSim's parser throws when its search starts past the
+/// end (`String.IndexOf(value, startIndex)`).
+const fn parse_error(id: BuiltinId) -> impl Fn(OutOfRange) -> CallError {
+    move |OutOfRange| CallError::Exception {
+        id,
+        exception: Exception::StartIndexOutOfRange,
+    }
 }
 
 /// `llParseString2List`: see `parse_string`; empty pieces dropped.
 ///
 /// # Errors
 ///
-/// None; the signature is the library's.
+/// [`Exception::StartIndexOutOfRange`] where OpenSim's search runs past the
+/// end.
 pub fn ll_parse_string2_list<C: PureCtx>(
     ctx: &mut C,
     text: String,
     separators: Vec<Element>,
     spacers: Vec<Element>,
 ) -> Result<Vec<Element>, CallError> {
-    Ok(parse_string(
-        ctx.flavour(),
-        &text,
-        &separators,
-        &spacers,
-        false,
-    ))
+    parse_string(ctx.flavour(), &text, &separators, &spacers, false)
+        .map_err(parse_error(BuiltinId::LlParseString2List))
 }
 
 /// `llParseStringKeepNulls`: see `parse_string`; empty pieces kept, and the
@@ -1428,20 +1447,16 @@ pub fn ll_parse_string2_list<C: PureCtx>(
 ///
 /// # Errors
 ///
-/// None; the signature is the library's.
+/// [`Exception::StartIndexOutOfRange`] where OpenSim's search runs past the
+/// end.
 pub fn ll_parse_string_keep_nulls<C: PureCtx>(
     ctx: &mut C,
     text: String,
     separators: Vec<Element>,
     spacers: Vec<Element>,
 ) -> Result<Vec<Element>, CallError> {
-    Ok(parse_string(
-        ctx.flavour(),
-        &text,
-        &separators,
-        &spacers,
-        true,
-    ))
+    parse_string(ctx.flavour(), &text, &separators, &spacers, true)
+        .map_err(parse_error(BuiltinId::LlParseStringKeepNulls))
 }
 
 #[cfg(test)]

@@ -734,9 +734,22 @@ impl Machine<'_> {
                 self.memory.made(&list)?;
                 stack.push(list.into());
             }
-            Instr::CallBuiltin(id) => {
+            instr @ (Instr::CallBuiltin(id) | Instr::CallBuiltinWriteBack(id)) => {
                 let descriptor = id.descriptor();
                 let args = pop_n(stack, descriptor.args.len())?;
+                let passed = match (instr, args.first()) {
+                    (Instr::CallBuiltinWriteBack(_), Some(Value::List(elements))) => {
+                        Some(elements.clone())
+                    }
+                    (Instr::CallBuiltinWriteBack(_), other) => {
+                        return Err(internal(format!(
+                            "{} written back to a {:?}, not a list",
+                            descriptor.name,
+                            other.map(Value::type_name)
+                        )));
+                    }
+                    _ => None,
+                };
                 *used = used
                     .saturating_add(BUILTIN_CALL_COST)
                     .saturating_add(cost::call(id, &args));
@@ -757,12 +770,18 @@ impl Machine<'_> {
                     },
                 };
                 let request = ctx.take_request();
+                let written_back = ctx.take_written_back();
                 if called.stubbed {
                     self.host.stubbed(self.caller, id);
                 }
                 if let Some(value) = called.value {
                     self.memory.made(&value)?;
                     stack.push(value.into());
+                }
+                if let Some(passed) = passed {
+                    let list = Value::List(written_back.unwrap_or(passed));
+                    self.memory.made(&list)?;
+                    stack.push(list.into());
                 }
                 let forced = f64::from(descriptor.sleep);
                 return Ok(match request {

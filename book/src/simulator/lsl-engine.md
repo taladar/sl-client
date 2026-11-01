@@ -833,7 +833,7 @@ avatars and scripts alike) and sleep the script a second, as `OSSLShoutError`
 does; LightShare and MOD switched off shout and answer nothing.
 
 **The scope** is a line per function in `library/opensim-scope.txt`, which the
-coverage test holds the registry to (`55 implemented / 171 planned / 10 out of
+coverage test holds the registry to (`60 implemented / 166 planned / 10 out of
 scope of 236` as this was written):
 
 - **In, now** — everything that touches nothing the fake grid lacks: the
@@ -852,7 +852,14 @@ scope of 236` as this was written):
   `modSendCommand` (a fresh key no module answers, the fake grid running none).
   The patterns are the `regex` crate's, which .NET's agree with but for its
   backreferences and lookaround: a pattern using those is refused as one that
-  does not parse.
+  does not parse. The culture-sensitive searches `osStringIndexOf`,
+  `osStringLastIndexOf`, `osStringStartsWith` and `osStringEndsWith` are in
+  too, on a port of the collator OpenSim's Mono runs (below), and
+  `osListSortInPlace`, whose sorted list the compiler stores back into the
+  list variable passed (`Instr::CallBuiltinWriteBack`) — into that variable
+  only: OpenSim's other references to the same list object see the sort as
+  well, which the value model's copies do not
+  (`server-lsl-opensim-shared-lists`).
 - **Later, with the tranche of the `ll*` functions they shadow** — the NPC
   family, avatar animation, attachment, teleport and sitting functions
   (`server-lsl-lib-avatar-control`, which has the NPC fixtures to answer
@@ -862,10 +869,8 @@ scope of 236` as this was written):
   (`server-lsl-lib-time-timers`); notecards, inventory and the rezzing object
   (`server-lsl-lib-task-inventory`); prim parameters, links, particles and
   sounds (`server-lsl-lib-prim-state`); inertia and object teleports
-  (`server-lsl-lib-physics-vehicles`); URLs (`server-lsl-lib-http-url`). Two
-  new tasks take the rest: .NET's culture-sensitive string search and the
-  in-place list sort (`server-lsl-ossl-culture-strings`), and the dynamic
-  textures every OpenSim sign is drawn with
+  (`server-lsl-lib-physics-vehicles`); URLs (`server-lsl-lib-http-url`). A
+  task of its own takes the dynamic textures every OpenSim sign is drawn with
   (`server-fake-grid-dynamic-textures`).
 - **Out** — `osConsoleCommand` (the region console, which the fake grid has
   not got: `console`); `osGetSimulatorMemory*` (the host process's memory,
@@ -874,6 +879,30 @@ scope of 236` as this was written):
   gatekeeper and login URIs, the custom grid info, an agent's country
   (`grid-services`). Each is still compiled and gated, so a script calling
   one is denied, or fails, exactly where OpenSim's would.
+
+**.NET's culture-sensitive search, ported.** OpenSim runs on Mono, and every
+`String.IndexOf(string)` with no comparison named — `llSubStringIndex`, the
+delimiters of the string parsers — and every `CurrentCulture` search of the
+OSSL functions goes through Mono's managed collator under en-US, not a
+search unit by unit: it reads `æ` as `ae` and `ﬁ` as `fi`, ignores what its
+table weighs nothing (U+0000, the noncharacters that hold the `JSON_*`
+sentinels, unassigned code points), folds a combining accent into its letter,
+lowers both sides by en-US's own map when case is ignored — and has bugs of
+its own a script can see (`"xæ"` does not contain `"ae"`, though `"æon"`
+starts with `"aeon"`: an ASCII-only first pass rules the match out by length
+before the collator sees the `æ`; and a split whose delimiter matched an
+expansion at the end of the string throws on its next search).
+`library::collation` is a port of the collator's search paths, line for line,
+reading Mono's own table
+(`sl-lsl-runtime/mono/`, copied out of `mscorlib.dll`) and en-US's lower-case
+map, unassigned code points and contractions as `dump_collation.cs` read them
+off the running Mono; the 3000 searches that program recorded, with every
+answer .NET gave, are replayed by the tests, and a 200 000-case set matched
+when it was written. Only what en-US reaches is ported: its tailoring is the
+invariant one — 35 one-unit expansions, no contraction of several units or to
+a sort key, no diacritic remapping, no French accent order — so the collator's
+paths for those are left out (the dumper refuses to write tables for a culture
+that has them).
 
 The served `LSLSyntax` document stays OpenSim's own for the OpenSim flavour
 (`sl_fake_grid::script_syntax`), every function listed whatever the region

@@ -39,18 +39,22 @@ fn local_opensim() -> Simulator {
 
 /// The three grids' transcripts of the probe `ossl/<name>`.
 fn transcripts(name: &str) -> [(EngineFlavour, &'static str); 3] {
-    let files = if name == "available" {
-        [
+    let files = match name {
+        "available" => [
             include_str!("../../../probes/results/aditi/ossl/available.txt"),
             include_str!("../../../probes/results/opensim-yengine/ossl/available.txt"),
             include_str!("../../../probes/results/opensim-xengine/ossl/available.txt"),
-        ]
-    } else {
-        [
+        ],
+        "strings" => [
+            include_str!("../../../probes/results/aditi/ossl/strings.txt"),
+            include_str!("../../../probes/results/opensim-yengine/ossl/strings.txt"),
+            include_str!("../../../probes/results/opensim-xengine/ossl/strings.txt"),
+        ],
+        _ => [
             include_str!("../../../probes/results/aditi/ossl/errors.txt"),
             include_str!("../../../probes/results/opensim-yengine/ossl/errors.txt"),
             include_str!("../../../probes/results/opensim-xengine/ossl/errors.txt"),
-        ]
+        ],
     };
     let [aditi, yengine, xengine] = files;
     [
@@ -696,6 +700,142 @@ default
             "osMessageObject() cannot send messages to objects with invalid UUIDs".to_owned(),
         ]
     );
+    Ok(())
+}
+
+/// The `ossl/strings` scripts in their saving order: the script's name and
+/// its source, all in prim A.
+const STRINGS: [(&str, &str); 3] = [
+    (
+        "Strings",
+        include_str!("../../../probes/ossl/strings/strings.lsl"),
+    ),
+    (
+        "Parser",
+        include_str!("../../../probes/ossl/strings/parser.lsl"),
+    ),
+    (
+        "Leader",
+        include_str!("../../../probes/ossl/strings/leader.lsl"),
+    ),
+];
+
+/// The sorts where OpenSim's lists being shared objects shows: a copy of
+/// the sorted list, the original of a sorted copy, and the caller's list
+/// after a function sorted its parameter all read sorted there, and unsorted
+/// here, where a list is a value (`server-lsl-opensim-shared-lists`).
+const SHARED_LISTS: [(&str, &str); 3] = [
+    ("sort", "copied-copy"),
+    ("sort", "copy-sorted-original"),
+    ("sort", "parameter-after"),
+];
+
+/// What YEngine told the owner of each script the two refused searches
+/// stopped, as the transcript has it after the item's key and but for where
+/// the prim is: the exception a line at a time, and that a reset is needed —
+/// the stack trace after those is not told.
+const YENGINE_TOLD: [[&str; 3]; 2] = [
+    [
+        "ArgumentOutOfRangeException: Count must be positive and count must refer to a \
+         location within the string/array/collection.",
+        "Parameter name: count",
+        "Script must be Reset to re-enable.",
+    ],
+    [
+        "ArgumentOutOfRangeException: Index was out of range. Must be non-negative and less \
+         than the size of the collection.",
+        "Parameter name: startIndex",
+        "Script must be Reset to re-enable.",
+    ],
+];
+
+#[test]
+fn strings_search_and_sort_as_each_engine_did() -> Result<(), String> {
+    for (flavour, transcript) in transcripts("strings") {
+        let mut region = Region::new(flavour);
+        let mut refused = None;
+        for (index, (name, source)) in STRINGS.into_iter().enumerate() {
+            let id = CallerId(u64::try_from(index).unwrap_or(0).saturating_add(1));
+            if let Err(error) = region.add(id, name, 1, source) {
+                refused.get_or_insert((name, error));
+            }
+        }
+        if !flavour.is_opensim() {
+            // Aditi stopped at the first script it could not compile.
+            assert!(transcript.contains("# compile error in \"Strings\""));
+            assert!(
+                matches!(refused, Some(("Strings", _))),
+                "Second Life compiled ossl/strings: {refused:?}"
+            );
+            continue;
+        }
+        if let Some(refused) = refused {
+            return Err(format!("{flavour:?} refused {refused:?}"));
+        }
+        for _ in 0..2_000 {
+            region.tick()?;
+            if region.ended() {
+                break;
+            }
+        }
+        super::strings::hold(
+            &canonical(&region.lines(), &["answer"]),
+            &canonical(&probe_lines(transcript), &["answer"]),
+            &SHARED_LISTS,
+        );
+        let told: Vec<String> = region
+            .host
+            .told
+            .iter()
+            .map(|(_, _, text)| text.clone())
+            .collect();
+        let said = region.debug_lines();
+        if flavour == EngineFlavour::YEngine {
+            assert!(said.is_empty(), "YEngine said {said:?}");
+            let [
+                first,
+                count,
+                count_parameter,
+                _strings_prim,
+                count_reset,
+                second,
+                index,
+                index_parameter,
+                _parser_prim,
+                index_reset,
+            ] = told.as_slice()
+            else {
+                return Err(format!("YEngine told {told:?}"));
+            };
+            for header in [first, second] {
+                assert!(header.starts_with("[YEngine]: Exception while running "));
+            }
+            assert_eq!(
+                [
+                    [count.as_str(), count_parameter, count_reset],
+                    [index.as_str(), index_parameter, index_reset],
+                ],
+                YENGINE_TOLD
+            );
+            for line in YENGINE_TOLD.iter().flatten() {
+                assert!(
+                    transcript.contains(&format!("# owner-say: from=\"Object\" text=\"{line}\"")),
+                    "{line}"
+                );
+            }
+        } else {
+            assert!(told.is_empty(), "XEngine told {told:?}");
+            let noted = noted_debug(transcript);
+            assert_eq!(said.len(), 2, "XEngine said {said:?}");
+            for (ours, theirs) in said.iter().zip(&noted) {
+                // The grid's line goes on with the stack trace.
+                assert!(
+                    theirs.starts_with(&format!("{ours}\n  at ")),
+                    "{ours:?} against {theirs:?}"
+                );
+            }
+        }
+    }
     Ok(())
 }
 

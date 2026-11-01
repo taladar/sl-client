@@ -1436,6 +1436,87 @@ owner alone; the grid here does not run that way. The source also reads
 `ESTATE_MANAGER` as a manager who is **not** the estate owner, and
 `ESTATE_OWNER` as the owner alone, which is why the stock lines name both.
 
+### String search and the in-place sort
+
+Measured on 2026-11-01 by the probe `ossl/strings`, on both OpenSim engines,
+which answered every record alike. OSSL's four string searches are .NET's
+culture-sensitive ones — `osStringIndexOf` and `osStringLastIndexOf` with
+`StringComparison.CurrentCulture` (or `…IgnoreCase` for a non-zero last
+argument), `osStringStartsWith` and `osStringEndsWith` with the en-US culture —
+and so is OpenSim's `llSubStringIndex` (`String.IndexOf(string)`) and the
+delimiter search of its two parsers. On the Mono OpenSim runs that is Mono's
+collator under en-US, not a comparison unit by unit. Every non-ASCII string
+was built with `llUnescapeURL`; the indices are UTF-16 units. Each function
+answers `-1` (a search) or `0` (a test) at once when either string is empty.
+
+| the search | case-sensitive | ignoring case |
+| --- | --- | --- |
+| `Hello World` for `world` | not found | `6` |
+| `café` for `cafe`, and `cafe` for `café` | not found: an accent is a difference | the same |
+| `cafe` + U+0301 for `café`, and back | found at `0`, a prefix and a suffix: a combining accent is its letter's | the same |
+| `ÉCOLE` for `école`, `Σ` for `σ`, `При` for `при`, `İ` for `i` | not found | found |
+| `Σ` for `ς`, `ı` for `I` | not found | not found: en-US lowers `Σ` to `σ` only, and `I` to `i` |
+| `æon` for `aeon`, and back; `ﬁle` for `file`, and back | found at `0`: an expansion reads as its letters | the same |
+| `Ǆ` for `DZ` | found at `0`, a prefix, no suffix: `Ǆ` reads as `DŽ` | the same |
+| `æ` for `a` | found at `0`, a prefix, no suffix | the same |
+| `affix` for `ﬀ` | `1` | `1` |
+| `Strasse` for `straße` | not found | `0`: `ß` reads as `ss` |
+| `Straße` for `STRASSE` | not found | not found: the expansion is the target's, not the source's |
+| `ẞ` for `ß` | not found | not found, though en-US lowers `ẞ` to `ß` |
+| `a` + U+FDD0 + `b` for `ab`, and back; `a` + U+0000 + `b` for `ab` | found at `0`: a noncharacter and U+0000 weigh nothing | the same |
+| `abc` for U+FDD0 alone | `IndexOf` `0`, `LastIndexOf` `2`, a prefix, no suffix | the same |
+| `a` + U+00AD + `b` for `ab`, `co-op` for `coop` | not found: the soft hyphen and `-` weigh something | the same |
+| `x😀y` for `😀`; `😀😀` for `😀` | `1`; `0` and last `2` | the same |
+| `Ａ` for `A`; `あ` for `ア`; `ｱ` for `ア`; `かあ` for `かー`; `かか` for `かゝ` | not found: width, script and the kana marks differ | the same |
+
+`osStringIndexOf(src, value, start, count, …)` clamps as OpenSim's source
+does — `-1` from a start at or past the end, a negative start read as `0`,
+a count that is not positive or reaches past the end read as the rest — and
+searches that range (`abcabcabc` for `bc`: from `2` for `3` not found, from
+`-5` for `4` at `1`). `osStringLastIndexOf(src, value, start, count, …)`
+clamps the same way and hands both to `String.LastIndexOf`, which reads the
+start as where its search **ends** and counts back from it: from `5` for `2`
+in `abcabcabc` it finds `4`, from `4` for `0` (the rest, `5`) it finds `1`.
+From a start before the middle of the string the count reaches back past its
+beginning, and .NET throws: `osStringLastIndexOf("abcabc", "b", 0, 0, FALSE)`
+raised `ArgumentOutOfRangeException: Count must be positive and count must
+refer to a location within the string/array/collection.` and `Parameter name:
+count`, reported as each engine reports a library exception — YEngine told the
+owner, a line at a time, and stopped the script (it read as running and
+answered no ping); XEngine said it on `DEBUG_CHANNEL`, wrapped in a
+`TargetInvocationException`, and ran on.
+
+`osListSortInPlace(list, stride, ascending)` sorts as OpenSim's `llListSort`
+does — places keep their types, keys become strings, a stride that does not
+divide the list (or is not shorter than it) leaves it alone, a stride of `0`
+is `1`, and only an `ascending` of exactly `1` sorts ascending (`2` sorts
+descending) — but into the **list object** it is handed. The variable
+passed reads sorted afterwards, a local or a global alike. So does every
+variable holding the same object: after `list b = a;`, sorting `a` sorted
+`b`, sorting `b` sorted `a`, and a function sorting its list parameter sorted
+the caller's variable. A list built by an expression (`summed + []`) is a new
+object, and sorting it changes nothing.
+
+The same search makes OpenSim's `llSubStringIndex` and string parsers answer
+what no search unit by unit would (`Parser`, plain LSL):
+
+| the call | OpenSim (both engines) |
+| --- | --- |
+| `llSubStringIndex("æon", "aeon")`; `("xaeon", "æ")` | `0`; `1` |
+| `llSubStringIndex("xæon", "aeon")`; `("xæ", "ae")` | `-1` and `-1`: Mono first searches unit by unit while every unit it looks at is ASCII, and a target as long as the string can only start at `0`, where `x` is no `a` — it answers without reaching the `æ` |
+| `llSubStringIndex("cafe" + U+0301, "e")`; `("Straße", "ss")`; `("ABC", "b")` | `3`; `4`; `-1` |
+| `llParseString2List("aæb", ["ae"], [])` | `["a"]`: the search goes on a delimiter's length (2) after the match, past the `b` |
+| `llParseStringKeepNulls("æxæy", ["ae"], [])` | `["", "", ""]` |
+| `llParseString2List("1æ2", [], ["ae"])` | `["1", "ae"]`: the spacer as written, and the `2` stepped over |
+| `llParseStringKeepNulls("abc", [JSON_INVALID], [])` | four empty strings: the delimiter is found at every place, and at the very end is no match |
+| `llParseString2List("cafe" + U+0301 + " café x", ["café"], [])` | `[U+0301 + " ", " x"]`: the delimiter's four units end before the accent the match took in |
+| `llParseString2List("aæb", ["æ", "ae"], [])` | `["a", "b"]`: the first delimiter wins |
+| `llParseString2List("æ", ["ae"], [])` | throws: the next search would start at `2`, past the end — `ArgumentOutOfRangeException: Index was out of range. Must be non-negative and less than the size of the collection.` and `Parameter name: startIndex`, reported as above |
+
+Second Life compiles none of the OSSL calls (`Strings` refused,
+`(53, 57) : ERROR : Name not defined within scope`, and the probe stopped
+there).
+
 ### The syntax document
 
 OpenSim serves its `bin/ScriptSyntax.xml` as the `LSLSyntax` capability

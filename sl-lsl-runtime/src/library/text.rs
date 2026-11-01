@@ -7,6 +7,7 @@
 //! U+FFFD (book chapter `gridspec/lsl.md`, § Strings, `strings/unicode`).
 //! Every function that indexes, counts or cuts text goes through [`Text`].
 
+use crate::library::collation::{self, Case, OutOfRange};
 use crate::vm::EngineFlavour;
 
 /// A string as a sequence of its grid's units.
@@ -65,45 +66,45 @@ impl Text {
     }
 
     /// [`Self::find`] as the grid's string search finds: on Second Life the
-    /// same, on OpenSim .NET's culture-sensitive `String.IndexOf`, which
-    /// `llSubStringIndex` and the string parsers call.
+    /// same, on OpenSim .NET's culture-sensitive `String.IndexOf(value,
+    /// startIndex)`, which `llSubStringIndex` and the string parsers call —
+    /// Mono's en-US collator ([`collation`]), which reads `æ` as `ae`,
+    /// ignores the units its table gives no weight (the noncharacters
+    /// U+FDD0 … U+FDEF that hold the `JSON_*` sentinels among them, so
+    /// `llSubStringIndex("abc", JSON_INVALID)` is 0) and folds a combining
+    /// accent into the letter before it.
     ///
-    /// That search **ignores** the characters its collation gives no weight —
-    /// among them the noncharacters U+FDD0 … U+FDEF, which hold the `JSON_*`
-    /// sentinels — in the pattern and in the text alike. So a pattern of
-    /// nothing else is found at `from` whenever `from` is inside the text
-    /// (`llSubStringIndex("abc", JSON_INVALID)` is 0, and
-    /// `llParseStringKeepNulls("abc", [JSON_INVALID], [])` splits before
-    /// every character, dropping it: `data/json`'s `sentinel-search` records),
-    /// and never at its end. Which other characters .NET ignores is Mono's
-    /// collation table and not modelled; the block is the one measured.
-    pub(crate) fn find_as_grid(&self, pattern: &[u32], from: usize) -> Option<usize> {
+    /// # Errors
+    ///
+    /// [`OutOfRange`] on OpenSim for a `from` past the end, where .NET
+    /// throws.
+    pub(crate) fn find_as_grid(
+        &self,
+        pattern: &[u32],
+        from: usize,
+    ) -> Result<Option<usize>, OutOfRange> {
         if !self.utf16 {
-            return self.find(pattern, from);
+            return Ok(self.find(pattern, from));
         }
-        let wanted: Vec<u32> = pattern
+        let units: Vec<u16> = self
+            .units
             .iter()
-            .copied()
-            .filter(|unit| !is_ignorable(*unit))
+            .filter_map(|unit| u16::try_from(*unit).ok())
             .collect();
-        if wanted.is_empty() {
-            if pattern.is_empty() {
-                return self.find(pattern, from);
-            }
-            return (from < self.units.len()).then_some(from);
-        }
-        (from..self.units.len()).find(|start| {
-            let mut rest = self
-                .units
-                .get(*start..)
-                .unwrap_or_default()
-                .iter()
-                .filter(|unit| !is_ignorable(**unit));
-            self.units
-                .get(*start)
-                .is_some_and(|first| !is_ignorable(*first))
-                && wanted.iter().all(|unit| rest.next() == Some(unit))
-        })
+        let pattern: Vec<u16> = pattern
+            .iter()
+            .filter_map(|unit| u16::try_from(*unit).ok())
+            .collect();
+        let length = i32::try_from(units.len()).unwrap_or(i32::MAX);
+        let from = i32::try_from(from).unwrap_or(i32::MAX);
+        collation::index_of(
+            &units,
+            &pattern,
+            from,
+            length.saturating_sub(from),
+            Case::Sensitive,
+        )
+        .map(|found| usize::try_from(found).ok())
     }
 
     /// The last index before `before` where `pattern` starts and ends at or
@@ -114,12 +115,6 @@ impl Text {
             .windows(pattern.len().max(1))
             .rposition(|window| window == pattern)
     }
-}
-
-/// Whether .NET's culture-sensitive comparison ignores the UTF-16 unit
-/// `unit`: the noncharacters U+FDD0 … U+FDEF (see [`Text::find_as_grid`]).
-const fn is_ignorable(unit: u32) -> bool {
-    matches!(unit, 0xFDD0..=0xFDEF)
 }
 
 /// Units as a string; see [`Text::string`].
@@ -177,24 +172,26 @@ mod tests {
         assert_eq!(text.rfind(&a, 0), None);
     }
 
-    /// OpenSim's search skips the sentinels in pattern and text; Second
-    /// Life's does not (`data/json`'s `sentinel-search`).
+    /// OpenSim's search skips the sentinels in pattern and text, even at
+    /// the very end, and refuses a start past it; Second Life's does
+    /// neither (`data/json`'s `sentinel-search`).
     #[test]
     fn opensims_search_ignores_the_sentinels() {
         let invalid = [0xFDD0_u32];
         let sl = Text::new(EngineFlavour::SecondLife, "abc");
         let os = Text::new(EngineFlavour::YEngine, "abc");
-        assert_eq!(sl.find_as_grid(&invalid, 0), None);
-        assert_eq!(os.find_as_grid(&invalid, 0), Some(0));
-        assert_eq!(os.find_as_grid(&invalid, 2), Some(2));
-        assert_eq!(os.find_as_grid(&invalid, 3), None);
+        assert_eq!(sl.find_as_grid(&invalid, 0), Ok(None));
+        assert_eq!(os.find_as_grid(&invalid, 0), Ok(Some(0)));
+        assert_eq!(os.find_as_grid(&invalid, 2), Ok(Some(2)));
+        assert_eq!(os.find_as_grid(&invalid, 3), Ok(Some(3)));
+        assert_eq!(os.find_as_grid(&invalid, 4), Err(OutOfRange));
         let marked = Text::new(EngineFlavour::YEngine, "x\u{FDD0}bc");
         let b = [u32::from('b')];
-        assert_eq!(marked.find_as_grid(&b, 0), marked.find(&b, 0));
+        assert_eq!(marked.find_as_grid(&b, 0), Ok(marked.find(&b, 0)));
         let spaced = Text::new(EngineFlavour::YEngine, "a\u{FDD0}b");
         let ab = [u32::from('a'), 0xFDD1, u32::from('b')];
-        assert_eq!(spaced.find_as_grid(&ab, 0), Some(0));
+        assert_eq!(spaced.find_as_grid(&ab, 0), Ok(Some(0)));
         let after = Text::new(EngineFlavour::SecondLife, "a\u{FDD0}");
-        assert_eq!(after.find_as_grid(&invalid, 0), Some(1));
+        assert_eq!(after.find_as_grid(&invalid, 0), Ok(Some(1)));
     }
 }

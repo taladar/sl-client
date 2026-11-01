@@ -199,7 +199,9 @@ fn opensim_error(flavour: EngineFlavour, error: &RuntimeError) -> Option<String>
 /// for a fault reported that way rather than on `DEBUG_CHANNEL`: YEngine's
 /// `OutOfHeapException` (`memory/collision`, 2026-10-26) and an exception
 /// out of a library function (`errors/bounds`, 2026-10-27) — the item, the
-/// exception, where, and that a reset is needed. YEngine sends the engine's
+/// exception, where, and that a reset is needed. An exception whose message
+/// has several lines is told a line at a time (`ossl/strings`'
+/// `ArgumentOutOfRangeException`, 2026-11-01). YEngine sends the engine's
 /// stack trace after them, a line a frame of its own C#, which is left out.
 #[must_use]
 pub(crate) fn owner_lines(flavour: EngineFlavour, fault: &Fault, at: &Whereabouts) -> Vec<String> {
@@ -207,20 +209,21 @@ pub(crate) fn owner_lines(flavour: EngineFlavour, fault: &Fault, at: &Whereabout
         (
             EngineFlavour::YEngine,
             error @ (RuntimeError::OutOfHeap { .. } | RuntimeError::Exception { .. }),
-        ) => vec![
-            format!("[YEngine]: Exception while running {}", at.item),
-            error.to_string(),
-            format!(
-                "Prim: <{}>, Script: <{}>, Location: {} <{},{},{}>",
-                at.name,
-                at.script,
-                at.region,
-                whole_metres(at.position.x),
-                whole_metres(at.position.y),
-                whole_metres(at.position.z),
-            ),
-            "Script must be Reset to re-enable.".to_owned(),
-        ],
+        ) => core::iter::once(format!("[YEngine]: Exception while running {}", at.item))
+            .chain(error.to_string().lines().map(str::to_owned))
+            .chain([
+                format!(
+                    "Prim: <{}>, Script: <{}>, Location: {} <{},{},{}>",
+                    at.name,
+                    at.script,
+                    at.region,
+                    whole_metres(at.position.x),
+                    whole_metres(at.position.y),
+                    whole_metres(at.position.z),
+                ),
+                "Script must be Reset to re-enable.".to_owned(),
+            ])
+            .collect(),
         _ => Vec::new(),
     }
 }
